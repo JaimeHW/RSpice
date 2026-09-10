@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod annotation;
+
 use crate::state::{
     Cell, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
     ConfigurationSetCatalog, ConfigurationSetDefinition, GlobalNetPromotionPolicy, Library,

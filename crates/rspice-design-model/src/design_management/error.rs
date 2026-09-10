@@ -161,6 +161,11 @@ pub enum DesignManagementError {
         expected: String,
         actual: String,
     },
+    #[error("reference annotation for '{cell_view_key}' cannot be applied: {reason}")]
+    InvalidAnnotationProjection {
+        cell_view_key: String,
+        reason: String,
+    },
     #[error("annotation journal sequence is {actual}; expected {expected}")]
     InvalidAnnotationSequence { expected: u64, actual: u64 },
     #[error("annotation object authority contains a redirect cycle at {0}")]

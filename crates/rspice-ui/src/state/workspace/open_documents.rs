@@ -493,12 +493,59 @@ impl ProjectWorkspace {
             }
         }
 
-        if let Some(active_variant) = self.design_management.variants().active() {
-            let resolved = self
-                .design_management
-                .variants()
-                .resolve(active_variant.id())?;
+        let active_variant = self
+            .design_management
+            .variants()
+            .active()
+            .map(|variant| self.design_management.variants().resolve(variant.id()))
+            .transpose()?;
+        if let Some(resolved) = &active_variant {
             let mut do_not_populate = HashSet::new();
+            for component in &projected.components {
+                if matches!(
+                    resolved.override_for(cell_view_key, component.id)?,
+                    Some(crate::state::VariantObjectOverride::DoNotPopulate { .. })
+                ) {
+                    do_not_populate.insert(component.id);
+                }
+            }
+            projected
+                .components
+                .retain(|component| !do_not_populate.contains(&component.id));
+            projected
+                .connections
+                .retain(|connection| !do_not_populate.contains(&connection.component_id));
+        }
+
+        // Old project files can retain an approved journal before its names
+        // were written into the buffers. Resolve all original component names
+        // together so swaps and structural references retain their targets.
+        // Annotation describes the authored device; substitutions below can
+        // turn that primitive into a cell with a different emitted prefix.
+        let mut names = BTreeMap::new();
+        for component in &projected.components {
+            if let Some(mapping) = self
+                .design_management
+                .annotation()
+                .effective_mapping_for(cell_view_key, component.id)?
+                && component.name != mapping.new_reference
+            {
+                names.insert(component.id, mapping.new_reference.clone());
+            }
+        }
+        if !names.is_empty() {
+            projected.components =
+                projected
+                    .prepare_component_renames(&names)
+                    .map_err(|reason| {
+                        crate::state::DesignManagementError::InvalidAnnotationProjection {
+                            cell_view_key: cell_view_key.to_owned(),
+                            reason,
+                        }
+                    })?;
+        }
+
+        if let Some(resolved) = &active_variant {
             for component in &mut projected.components {
                 let Some(override_value) = resolved.override_for(cell_view_key, component.id)?
                 else {
@@ -506,7 +553,7 @@ impl ProjectWorkspace {
                 };
                 match override_value {
                     crate::state::VariantObjectOverride::DoNotPopulate { .. } => {
-                        do_not_populate.insert(component.id);
+                        // Removed before reference preparation.
                     }
                     crate::state::VariantObjectOverride::Substitute { replacement } => {
                         let prior = component.library_cell.take();
@@ -542,24 +589,6 @@ impl ProjectWorkspace {
                         }
                     }
                 }
-            }
-            if !do_not_populate.is_empty() {
-                projected
-                    .components
-                    .retain(|component| !do_not_populate.contains(&component.id));
-                projected
-                    .connections
-                    .retain(|connection| !do_not_populate.contains(&connection.component_id));
-            }
-        }
-
-        for component in &mut projected.components {
-            if let Some(mapping) = self
-                .design_management
-                .annotation()
-                .effective_mapping_for(cell_view_key, component.id)?
-            {
-                component.name.clone_from(&mapping.new_reference);
             }
         }
         projected.recalculate_runtime_state();
@@ -1909,6 +1938,12 @@ mod tests {
         let mut schematic = SchematicState::default();
         let substituted = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
         let omitted = schematic.add_component(ComponentType::Capacitor, Point::new(20, 10));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == substituted)
+            .unwrap()
+            .name = "R42".to_owned();
         let variant = workspace
             .design_management
             .variants_mut()
