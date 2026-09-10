@@ -22,6 +22,7 @@ pub(crate) trait DenseScalar:
     fn magnitude(self) -> Value;
     fn finite(self) -> bool;
     fn scale_down(self, scale: Value) -> Self;
+    fn scale_binary(self, exponent: i32) -> Self;
     fn quotient(self, divisor: Self) -> Self;
 }
 
@@ -34,6 +35,9 @@ impl DenseScalar for Value {
     }
     fn scale_down(self, scale: Value) -> Self {
         self / scale
+    }
+    fn scale_binary(self, exponent: i32) -> Self {
+        libm::scalbn(self, exponent)
     }
     fn quotient(self, divisor: Self) -> Self {
         self / divisor
@@ -49,6 +53,12 @@ impl DenseScalar for crate::Complex64 {
     }
     fn scale_down(self, scale: Value) -> Self {
         self / scale
+    }
+    fn scale_binary(self, exponent: i32) -> Self {
+        Self::new(
+            libm::scalbn(self.re, exponent),
+            libm::scalbn(self.im, exponent),
+        )
     }
     fn quotient(self, divisor: Self) -> Self {
         // Complex's generic division squares its denominator and can lose
@@ -78,27 +88,40 @@ pub(crate) fn solve_small_dense<T: DenseScalar, const N: usize>(
     rhs: &[T; N],
     dim: usize,
 ) -> Option<[T; N]> {
+    solve_small_dense_many(matrix, &rhs.map(|value| [value]), dim)
+        .map(|solution| solution.map(|row| row[0]))
+}
+
+/// Solve multiple RHS columns with one elimination; validate every solution.
+pub(crate) fn solve_small_dense_many<T: DenseScalar, const N: usize, const R: usize>(
+    matrix: &[[T; N]; N],
+    rhs: &[[T; R]; N],
+    dim: usize,
+) -> Option<[[T; R]; N]> {
     if dim > N {
         return None;
     }
     let mut a = *matrix;
     let mut b = *rhs;
-    let mut row_scale = [0.0; N];
     for row in 0..dim {
-        if !b[row].finite() || a[row][..dim].iter().any(|v| !v.finite()) {
+        if b[row].iter().any(|v| !v.finite()) || a[row][..dim].iter().any(|v| !v.finite()) {
             return None;
         }
         let scale = a[row][..dim]
             .iter()
-            .fold(b[row].magnitude(), |s, v| s.max(v.magnitude()));
+            .fold(0.0_f64, |s, v| s.max(v.magnitude()));
         if scale == 0.0 {
             return None;
         }
-        row_scale[row] = scale;
         for entry in &mut a[row][..dim] {
             *entry = entry.scale_down(scale);
         }
-        b[row] = b[row].scale_down(scale);
+        for entry in &mut b[row] {
+            *entry = entry.scale_down(scale);
+            if !entry.finite() {
+                return None;
+            }
+        }
     }
     for pivot in 0..dim {
         let mut best = pivot;
@@ -125,38 +148,67 @@ pub(crate) fn solve_small_dense<T: DenseScalar, const N: usize>(
             for col in (pivot + 1)..dim {
                 target[col] -= factor * pivot_row[col];
             }
-            b[row] -= factor * b[pivot];
+            let (prior_rhs, later_rhs) = b.split_at_mut(row);
+            for (entry, &pivot_entry) in later_rhs[0].iter_mut().zip(&prior_rhs[pivot]) {
+                *entry -= factor * pivot_entry;
+            }
         }
     }
-    let mut solution = [T::default(); N];
+    let mut solution = [[T::default(); R]; N];
     for row in (0..dim).rev() {
-        let mut residual = b[row];
-        for col in (row + 1)..dim {
-            residual -= a[row][col] * solution[col];
-        }
-        solution[row] = residual.quotient(a[row][row]);
-        if !solution[row].finite() {
-            return None;
+        for column in 0..R {
+            let mut residual = b[row][column];
+            for col in (row + 1)..dim {
+                residual -= a[row][col] * solution[col][column];
+            }
+            solution[row][column] = residual.quotient(a[row][row]);
+            if !solution[row][column].finite() {
+                return None;
+            }
         }
     }
-    // Validate in the original equation order, with normalized x so neither
-    // the residual nor its absolute-sum denominator needs an overflowing dot.
-    let x_scale = solution[..dim]
-        .iter()
-        .fold(1.0_f64, |s, v| s.max(v.magnitude()));
+    // Certify original equations using binary-scaled products. A common
+    // floating row/x normalization can erase a small coefficient whose large
+    // solution still makes a significant contribution to the residual.
     let tolerance = 64.0 * Value::EPSILON * dim.max(1) as Value;
-    for row in 0..dim {
-        let mut residual = rhs[row].scale_down(row_scale[row]).scale_down(x_scale);
-        let mut bound = residual.magnitude();
-        for col in 0..dim {
-            let coefficient = matrix[row][col].scale_down(row_scale[row]);
-            let x = solution[col].scale_down(x_scale);
-            residual -= coefficient * x;
-            // For complex component-max magnitudes, |a*b| <= 2*|a|*|b|.
-            bound += 2.0 * coefficient.magnitude() * x.magnitude();
-        }
-        if !residual.finite() || residual.magnitude() > tolerance * bound {
-            return None;
+    for column in 0..R {
+        for row in 0..dim {
+            let rhs_magnitude = rhs[row][column].magnitude();
+            let mut exponent = if rhs_magnitude > 0.0 {
+                libm::ilogb(rhs_magnitude)
+            } else {
+                i32::MIN
+            };
+            for col in 0..dim {
+                let a = matrix[row][col].magnitude();
+                let x = solution[col][column].magnitude();
+                if a > 0.0 && x > 0.0 {
+                    exponent = exponent.max(libm::ilogb(a) + libm::ilogb(x));
+                }
+            }
+            if exponent == i32::MIN {
+                continue;
+            }
+            let mut residual = rhs[row][column].scale_binary(-exponent);
+            let mut bound = residual.magnitude();
+            for col in 0..dim {
+                let a = matrix[row][col];
+                let x = solution[col][column];
+                if a.magnitude() == 0.0 || x.magnitude() == 0.0 {
+                    continue;
+                }
+                let a_exp = libm::ilogb(a.magnitude());
+                let x_exp = libm::ilogb(x.magnitude());
+                let a = a.scale_binary(-a_exp);
+                let x = x.scale_binary(-x_exp);
+                let shift = a_exp + x_exp - exponent;
+                residual -= (a * x).scale_binary(shift);
+                // Component-max complex magnitudes need the factor of two.
+                bound += libm::scalbn(2.0 * a.magnitude() * x.magnitude(), shift);
+            }
+            if !residual.finite() || residual.magnitude() > tolerance * bound {
+                return None;
+            }
         }
     }
     Some(solution)
@@ -603,6 +655,39 @@ mod tests {
             assert_eq!(solution[0], rhs[0]);
             assert!((solution[1].im / (drive / pivot) + 1.0).abs() < 1e-14);
             assert_eq!(solution[1].re, 0.0);
+        }
+    }
+
+    #[test]
+    fn small_dense_multiple_rhs_preserve_independent_solution_scales() {
+        let matrix = [[2e-200, 1e-200], [1e200, -3e200]];
+        let rhs = [
+            [1e-200, 0.0, -6e-200, 1e-300],
+            [11e200, 0.0, 18e200, 11e100],
+        ];
+        let expected = [[2.0, 0.0, 0.0, 2e-100], [-3.0, 0.0, -6.0, -3e-100]];
+        let actual = solve_small_dense_many(&matrix, &rhs, 2).unwrap();
+        for (row, reference) in actual.iter().zip(expected) {
+            for (&value, expected) in row.iter().zip(reference) {
+                if expected == 0.0 {
+                    assert!(value.abs() < 1e-13);
+                } else {
+                    assert!((value / expected - 1.0).abs() < 1e-13);
+                }
+            }
+        }
+        let independent = solve_small_dense_many(&[[1.0]], &[[1e300, 1e-300]], 1).unwrap();
+        assert_eq!(independent, [[1e300, 1e-300]]);
+        let mixed_rows =
+            solve_small_dense_many(&[[1.0, 0.0], [0.0, 1.0]], &[[1e300], [1e-300]], 2).unwrap();
+        assert_eq!(mixed_rows, [[1e300], [1e-300]]);
+        // Row equilibration loses the 1e-300 coupling. Its actual product
+        // with x[1]=1e300 is significant, so the original residual must fail.
+        assert!(solve_small_dense(&[[1e300, 1e-300], [0.0, 1.0]], &[1.0, 1e300], 2).is_none());
+        for column in 0..4 {
+            let mut invalid = rhs;
+            invalid[0][column] = Value::NAN;
+            assert!(solve_small_dense_many(&matrix, &invalid, 2).is_none());
         }
     }
 

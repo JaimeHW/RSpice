@@ -2722,3 +2722,48 @@ fn private_bjt_ac_reduction_errors_instead_of_dropping_invalid_charge() {
         "{error}"
     );
 }
+
+#[test]
+fn private_bjt_transient_small_instances_preserve_rc_response() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for parameter in ["M", "AREA"] {
+                let mut reference = None;
+                for scale in [1.0, 1e-20, 1e-200] {
+                    let deck = Netlist::parse(&format!("Private BJT ramp\nVB b 0 PWL(0 0 50n {})\nQ1 0 b 0 mm {parameter}={scale}\n.model mm {kind}(IS=0 RB=5k RBM=1k CJE=1p CJC=2p MJE=0 MJC=0)\n.end\n",p*0.001)).unwrap();
+                    let tran = engine.run_tran(&deck, 50e-9, 0.05e-9).unwrap();
+                    assert!(tran.time.len() > 3);
+                    assert_eq!(*tran.time.last().unwrap(), 50e-9);
+                    let currents = tran.try_branch_current_waveform_named("VB").unwrap();
+                    if scale == 1.0 {
+                        reference = Some((tran.time.clone(), currents.to_vec()));
+                    }
+                    let (reference_time, reference_current) = reference.as_ref().unwrap();
+                    assert_eq!(&tran.time, reference_time);
+                    for ((&time, &current), &unit_current) in
+                        tran.time.iter().zip(currents).zip(reference_current)
+                    {
+                        // R=5k/scale and C=3p*scale: tau=15ns, independent
+                        // of instance size. Ramp slope is +/-20,000 V/s.
+                        let expected = if dialect == SpiceDialect::Ngspice {
+                            p * 6e-8 * (-time / 15e-9).exp_m1()
+                        } else {
+                            // Isolate multiplicity/area scaling from Xyce's
+                            // separate startup-history qualification.
+                            unit_current
+                        };
+                        let actual = current / scale;
+                        assert!(
+                            (actual - expected).abs() < 6e-12,
+                            "{dialect:?} {kind} {parameter}={scale:e} t={time:e}: {actual:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
