@@ -3,6 +3,123 @@
 use super::*;
 
 impl VoltageSources {
+    pub(super) fn regular_periodic_derivative(
+        spec: &crate::netlist::SourceSpec,
+        period: Value,
+        order: usize,
+        context: Option<TransientSourceContext>,
+        pwl: Option<&crate::device::pwl_file::PwlWaveform>,
+    ) -> bool {
+        Self::periodic_waveform(spec, period, context, pwl, true)
+            && (order <= 1
+                || Self::constant_waveform_over_orbit(spec, period, context, pwl)
+                || Self::higher_time_derivative(spec, 0.0, order, context).is_some())
+    }
+
+    /// Higher derivatives requested by hidden algebraic charge/flux constraints.
+    /// Keep complex powers scaled until the final real component is selected.
+    pub(super) fn higher_time_derivative(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        order: usize,
+        context: Option<TransientSourceContext>,
+    ) -> Option<Value> {
+        use crate::netlist::SourceSpec;
+        use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
+        if Self::constant_waveform_over_orbit(spec, time, context, None) {
+            return Some(0.0);
+        }
+        fn multiply(a: [S; 2], b: [S; 2]) -> Option<[S; 2]> {
+            Some([
+                S::sum_products_div(
+                    [[a[0], b[0]], [a[1].negated(), b[1]]].into_iter(),
+                    S::new(1.0),
+                )
+                .ok()?,
+                S::sum_products_div([[a[0], b[1]], [a[1], b[0]]].into_iter(), S::new(1.0)).ok()?,
+            ])
+        }
+        let tone = |amplitude: Value,
+                    omega: Value,
+                    phase: Value,
+                    damping: Value,
+                    elapsed: Value,
+                    component: usize| {
+            if amplitude == 0.0 || elapsed < 0.0 {
+                return Some(0.0);
+            }
+            let decay = (-damping * elapsed).exp();
+            if decay == 0.0 || !decay.is_finite() {
+                return None;
+            }
+            let angle = omega * elapsed + phase;
+            let mut result = [S::new(angle.cos()), S::new(angle.sin())];
+            let mut factor = [S::new(-damping), S::new(omega)];
+            let mut power = order;
+            while power != 0 {
+                if power & 1 != 0 {
+                    result = multiply(result, factor)?;
+                }
+                power >>= 1;
+                if power != 0 {
+                    factor = multiply(factor, factor)?;
+                }
+            }
+            let scaled = result[component]
+                .multiply(S::new(amplitude))
+                .multiply(S::new(decay));
+            let value = scaled.binary64();
+            (value.is_finite() && (value != 0.0 || scaled.is_zero())).then_some(value)
+        };
+        match spec {
+            SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. } => Some(0.0),
+            SourceSpec::Distortion { inner, .. } => {
+                Self::higher_time_derivative(inner, time, order, context)
+            }
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::higher_time_derivative(transient, time, order, context)
+            }
+            SourceSpec::Sin {
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+                ..
+            } => tone(
+                *amplitude,
+                std::f64::consts::TAU * Self::resolve_sin_frequency(*frequency, context),
+                *phase,
+                *damping,
+                time - delay,
+                1,
+            ),
+            SourceSpec::RfPort { inner, port } => {
+                let base = Self::higher_time_derivative(inner, time, order, context)?;
+                let drive = match port.drive_tone() {
+                    Some((amplitude, frequency, phase)) => tone(
+                        amplitude,
+                        std::f64::consts::TAU * frequency,
+                        phase,
+                        0.0,
+                        time,
+                        0,
+                    )?,
+                    None => 0.0,
+                };
+                rspice_veriloga_runtime::arithmetic::sum_products(
+                    [(base, 1.0), (drive, 1.0)].into_iter(),
+                )
+                .ok()
+            }
+            // Discontinuous derivatives cannot be replaced by zero between
+            // knots; doing so would lose an impulse in a constrained state.
+            _ => None,
+        }
+    }
+
     /// Detect unresolved analysis defaults through the same parameter
     /// resolvers used by evaluation. Compare parameters, never sampled
     /// waveform values (which could alias at the chosen times).
@@ -591,6 +708,44 @@ impl VoltageSources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn higher_source_derivatives_preserve_scaling_and_rf_quadrature() {
+        let sources =
+            super::super::tests::current_source_with_waveform("SIN(0 1e-300 1e200 0 0 90)");
+        let second = sources.time_derivative_at(0, 0.0, 2).unwrap();
+        let expected = -std::f64::consts::TAU.powi(2) * 1e100;
+        assert!((second / expected - 1.0).abs() < 2e-15);
+        assert!(sources.time_derivative_at(0, 0.0, 4).is_none());
+        let rf = crate::netlist::SourceSpec::RfPort {
+            inner: Box::new(crate::netlist::SourceSpec::Pulse {
+                v1: 0.2,
+                v2: 0.2,
+                delay: 0.0,
+                rise: 0.1,
+                fall: 0.1,
+                width: 0.2,
+                period: 1.0,
+                pulse_count: 0.0,
+                width_defaults_to_zero: false,
+            }),
+            port: crate::netlist::SourceRfPort {
+                portnum: 1,
+                z0: 50.0,
+                power: Some(1e-3),
+                frequency: Some(2.0),
+                phase: Some(0.0),
+                reference_plane: None,
+            },
+        };
+        assert_eq!(
+            VoltageSources::higher_time_derivative(&rf, 0.0, 3, None),
+            Some(0.0)
+        );
+        let second = VoltageSources::higher_time_derivative(&rf, 0.0, 2, None).unwrap();
+        let expected = -(0.2_f64).sqrt() * (2.0 * std::f64::consts::TAU).powi(2);
+        assert!((second / expected - 1.0).abs() < 2e-15);
+    }
 
     #[test]
     fn analytic_current_slopes_match_interior_waveform_differences_in_both_dialects() {

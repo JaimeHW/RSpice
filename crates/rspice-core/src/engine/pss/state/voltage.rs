@@ -5,6 +5,11 @@ use std::collections::BTreeMap;
 
 use num_bigint::{BigInt, BigUint, Sign};
 
+mod descriptor;
+pub(super) use descriptor::PssDescriptor;
+
+const FORM_TERM_WORDS: usize = std::mem::size_of::<(ForestValue, Value)>().div_ceil(8);
+
 #[derive(Debug, Clone, Default)]
 struct VoltageRow {
     nodes: BTreeMap<usize, BigInt>,
@@ -121,7 +126,7 @@ impl VoltageRow {
                 sum.saturating_add(
                     usize::try_from(value.bits().div_ceil(64))
                         .unwrap_or(usize::MAX)
-                        .saturating_add(8),
+                        .saturating_add(16),
                 )
             })
     }
@@ -250,7 +255,7 @@ impl PssVoltageConstraintBuilder {
                 .saturating_add(1);
             let words = usize::try_from(bits.div_ceil(64))
                 .unwrap_or(usize::MAX)
-                .saturating_add(8);
+                .saturating_add(16);
             self.check_cost(coefficients.saturating_mul(words).saturating_mul(3))?;
             let factor = row.nodes.remove(&node).unwrap();
             let scale = &base.nodes[&node];
@@ -293,20 +298,31 @@ impl PssVoltageConstraintBuilder {
         if value != ForestValue::Zero {
             row.values.insert(value, integer_coefficient(1.0)?);
         }
+        Ok(self.admit(row, 1, abort)?.is_none())
+    }
+
+    /// Eliminate known pivots, then retain a pivot in the requested variable
+    /// block. A remaining row belongs to the complementary constraint space.
+    fn admit(
+        &mut self,
+        mut row: VoltageRow,
+        first_pivot: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<VoltageRow>, SimulationError> {
         row.normalize(abort)?;
         self.reduce(&mut row, abort)?;
         let Some((&pivot, _)) = row
             .nodes
-            .iter()
+            .range(first_pivot..)
             .max_by(|a, b| a.1.magnitude().cmp(b.1.magnitude()))
         else {
-            return Ok(false);
+            return Ok(Some(row));
         };
         self.retained_words = self.retained_words.saturating_add(row.words());
         self.check_cost(0)?;
         self.pivots[pivot] = Some(self.rows.len());
         self.rows.push((pivot, row));
-        Ok(true)
+        Ok(None)
     }
 
     pub(super) fn port(
@@ -380,7 +396,7 @@ impl PssVoltageConstraintBuilder {
         let mut words = circuit.num_nodes().saturating_mul(3);
         for node in 1..=circuit.num_nodes() {
             let row = self.port_row(node, 0, abort)?;
-            words = words.saturating_add(row.values.len().saturating_mul(2));
+            words = words.saturating_add(row.values.len().saturating_mul(FORM_TERM_WORDS));
             self.check_cost(words)?;
             node_forms.push(row.form()?);
         }
@@ -529,6 +545,9 @@ impl InitialChargeRates {
                             .unwrap_or(Value::NAN)
                     }
                     ForestValue::Zero | ForestValue::State(_) => 0.0,
+                    ForestValue::CurrentState(_) | ForestValue::SourceDerivative { .. } => {
+                        Value::NAN
+                    }
                 });
                 if !rate.is_finite() {
                     let name = match value {
@@ -536,7 +555,10 @@ impl InitialChargeRates {
                         ForestValue::BehavioralSource(index) => {
                             &circuit.behavioral_sources.voltage_sources[index].name
                         }
-                        ForestValue::Zero | ForestValue::State(_) => return Err(precision_error()),
+                        ForestValue::Zero
+                        | ForestValue::State(_)
+                        | ForestValue::CurrentState(_)
+                        | ForestValue::SourceDerivative { .. } => return Err(precision_error()),
                     };
                     return Err(SimulationError::Circuit(format!(
                         "PSS initial displacement current requires a finite analytic outgoing derivative for source {name} at t=0"

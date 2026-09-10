@@ -1779,17 +1779,16 @@ impl Capacitors {
         }
     }
 
-    /// Add Norton Jacobians and physical current residuals to a system that
-    /// already describes Newton corrections for the remaining devices.
-    pub(crate) fn stamp_transient_norton_correction(
+    /// Share the Norton incidence and Jacobian with traversals that remove
+    /// analytically prescribed charge before forming numerical differences.
+    pub(crate) fn stamp_norton_correction_with_current(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
-        iterate: &[Value],
         dt: Value,
         coeff: &CompanionCoefficients,
+        current: impl Fn(usize) -> Value,
     ) {
-        let voltage = |node| if node == 0 { 0.0 } else { iterate[node - 1] };
         for (index, stamp) in self.stamps.iter().enumerate() {
             if self.ic_branch_indices[index].is_some()
                 || self.value_expression(index).is_some()
@@ -1797,14 +1796,7 @@ impl Capacitors {
             {
                 continue;
             }
-            let current = coeff.capacitor_current(
-                self.capacitances[index],
-                dt,
-                voltage(stamp.pp.row) - voltage(stamp.nn.row),
-                self.v_prev[index],
-                self.v_prev_prev[index],
-                self.i_prev[index],
-            );
+            let current = current(index);
             stamp.stamp_direct(matrix, coeff.capacitor_geq(self.capacitances[index], dt));
             if stamp.pp.row != 0 {
                 rhs[stamp.pp.row - 1] -= current;

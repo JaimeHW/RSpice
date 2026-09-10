@@ -34,6 +34,22 @@ fn root(parents: &mut [usize], mut node: usize) -> usize {
 }
 
 impl PssCurrentBasis {
+    pub(super) fn from_descriptor(circuit: &CircuitData, representatives: Vec<usize>) -> Self {
+        let mut winding_by_branch = vec![usize::MAX; circuit.num_branches() + 1];
+        for (index, &branch) in circuit.inductors.branch_indices.iter().enumerate() {
+            winding_by_branch[branch] = index;
+        }
+        Self {
+            representatives,
+            components: Vec::new(),
+            tree: Vec::new(),
+            incident: Vec::new(),
+            winding_by_branch,
+            has_mutual: !circuit.coupled_inductor_pairs.is_empty(),
+            source_ports: Vec::new(),
+        }
+    }
+
     pub(super) fn new(circuit: &CircuitData) -> Self {
         let count = circuit.inductors.len();
         let nodes = circuit.num_nodes() + 1;

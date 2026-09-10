@@ -12,6 +12,203 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6;
 
 #[test]
+fn coupled_descriptor_controlled_cutsets_preserve_mutual_flux_and_forcing() {
+    let deck = Netlist::parse("Controlled current cutsets\nV1 in 0 SIN(0.7 1 1 0 0 37)\nRin in 0 4\nG1 0 a in 0 2\nL1 a b 0.2\nR1 b 0 3\nF1 0 c V1 3\nL2 c d 0.8\nR2 d 0 5\nK1 L1 L2 0.25\nH1 out 0 L1 2\nCout out 0 0.2\n.end\n").unwrap();
+    let point = Engine::default()
+        .run_pss_operating_point_with_abort(
+            &deck,
+            PssConfig::new(1.0)
+                .with_points_per_period(128)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(point.shooting_state_basis().is_empty());
+    let result = &point.analysis().result;
+    let node = |name: &str| {
+        result
+            .node_names
+            .iter()
+            .position(|entry| entry.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let branch = |name: &str| {
+        result
+            .branch_names
+            .iter()
+            .position(|entry| entry.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    for (index, &time) in result.time.iter().enumerate() {
+        let omega = std::f64::consts::TAU;
+        let phase = omega * time + 37_f64.to_radians();
+        let v = 0.7 + phase.sin();
+        let slope = omega * phase.cos();
+        for (name, expected) in [
+            ("a", 6.0 * v + 0.325 * slope),
+            ("c", -3.75 * v - 0.4 * slope),
+            ("out", 4.0 * v),
+        ] {
+            let actual = result.waveforms[node(name)].values[index];
+            assert!(
+                (actual - expected).abs() < 2e-10,
+                "{name}, t={time}: {actual} != {expected}"
+            );
+        }
+        for (name, expected) in [("L1", 2.0 * v), ("L2", -0.75 * v), ("H1", -0.8 * slope)] {
+            let actual = result.branch_waveforms[branch(name)].values[index];
+            assert!(
+                (actual - expected).abs() < 2e-10,
+                "{name}, t={time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn coupled_descriptor_orbit_preserves_physical_ic_branch_currents() {
+    let deck = Netlist::parse("Coupled IC orbit\nV1 in 0 SIN(0 1 1)\nR1 in 0 4\nCin in 0 0.3 IC=0\nH1 out 0 V1 2\nCout out 0 0.2 IC=0\n.end\n").unwrap();
+    let engine = Engine::new(
+        SimulationConfig::default().with_spice_dialect(rspice_core::config::SpiceDialect::Xyce),
+    );
+    let point = engine
+        .run_pss_operating_point_with_abort(
+            &deck,
+            PssConfig::new(1.0)
+                .with_points_per_period(128)
+                .with_tstab_periods(0),
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(point.shooting_state_basis().is_empty());
+    let result = &point.analysis().result;
+    let branch = |name: &str| {
+        result
+            .branch_names
+            .iter()
+            .position(|entry| entry.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    for (index, &time) in result.time.iter().enumerate() {
+        let omega = std::f64::consts::TAU;
+        let phase = omega * time;
+        let source_current = -phase.sin() / 4.0 - 0.3 * omega * phase.cos();
+        let output_current = 0.2 * (omega * phase.cos() / 2.0 - 0.6 * omega.powi(2) * phase.sin());
+        assert!(
+            (result.branch_waveforms[branch("V1")].values[index] - source_current).abs() < 2e-10
+        );
+        assert!(
+            (result.branch_waveforms[branch("H1")].values[index] - output_current).abs() < 2e-9
+        );
+        assert!(
+            (result.branch_waveforms[branch("H1")].values[index]
+                + result.branch_waveforms[branch("Cout")].values[index])
+                .abs()
+                < 2e-12
+        );
+    }
+}
+
+#[test]
+fn coupled_descriptor_orbits_preserve_physical_modes_and_currents() {
+    let omega = std::f64::consts::TAU;
+    for case in 0..5 {
+        let devices = match case {
+            0 => "R1 in 0 4\nH1 out 0 V1 0",
+            1 => "R1 in 0 4\nH1 out 0 V1 2",
+            2 => "R1 in 0 4\nCin in 0 0.3\nH1 out 0 V1 2",
+            3 => "L1 in mid 0.1\nR1 mid 0 1\nH1 out 0 L1 2",
+            _ => "R1 in mid 1\nR2 mid 0 1\nE1 out 0 mid 0 2",
+        };
+        let deck = Netlist::parse(&format!(
+            "Coupled descriptor orbit\nV1 in 0 SIN(0.7 1 1 0 0 37)\n{devices}\nCout out 0 0.2\n.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(1024)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("case {case}: {error}"));
+        assert_eq!(
+            point.shooting_state_basis(),
+            if case == 3 { &["L:L1"][..] } else { &[][..] }
+        );
+        assert_eq!(
+            point.analysis().floquet_multipliers.len(),
+            usize::from(case == 3)
+        );
+        if case == 3 {
+            assert!((point.analysis().floquet_multipliers[0].re - (-10.0_f64).exp()).abs() < 2e-7);
+        }
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(if case == 4 { "E1" } else { "H1" }))
+            .unwrap();
+        let mut voltage_error = 0.0_f64;
+        let mut current_error = 0.0_f64;
+        for (index, &time) in result.time.iter().enumerate() {
+            let phase = omega * time + 37_f64.to_radians();
+            let v = 0.7 + phase.sin();
+            let slope = omega * phase.cos();
+            let acceleration = -omega * omega * phase.sin();
+            let (expected, rate) = match case {
+                0 => (0.0, 0.0),
+                1 => (-v / 2.0, -slope / 2.0),
+                2 => (-v / 2.0 - 0.6 * slope, -slope / 2.0 - 0.6 * acceleration),
+                3 => {
+                    let lag = omega * 0.1;
+                    let current = 0.7 + (phase.sin() - lag * phase.cos()) / (1.0 + lag * lag);
+                    (2.0 * current, 2.0 * (v - current) / 0.1)
+                }
+                _ => (v, slope),
+            };
+            voltage_error =
+                voltage_error.max((result.waveforms[output].values[index] - expected).abs());
+            current_error = current_error
+                .max((result.branch_waveforms[branch].values[index] + 0.2 * rate).abs());
+        }
+        assert!(
+            voltage_error < 3e-5,
+            "case {case}, voltage error {voltage_error:e}"
+        );
+        assert!(
+            current_error < 2e-4,
+            "case {case}, current error {current_error:e}"
+        );
+        if case == 3 {
+            let pac = engine
+                .run_pac_from_pss_with_abort(
+                    &deck,
+                    PacConfig::new()
+                        .with_fundamental(1.0)
+                        .with_sweep(0.25, 0.25, 1)
+                        .with_sweep_type(PacSweepType::Linear)
+                        .with_sidebands(0, 0)
+                        .with_input_source("V1")
+                        .with_output_node("out"),
+                    &point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let expected = num_complex::Complex64::new(2.0, 0.0)
+                / num_complex::Complex64::new(1.0, omega * 0.025);
+            assert!((pac.result.conversion_matrix.get(0, 0, 0).unwrap() - expected).norm() < 2e-12);
+        }
+    }
+}
+
+#[test]
 fn vcvs_charge_constraints_preserve_the_free_rc_mode() {
     for gain in [0.0, 2.0, -0.25] {
         for prescribed in [false, true] {

@@ -208,6 +208,43 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn pss_coupled_descriptor_current_control_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::PssConfig;
+        let deck = rspice_core::Netlist::parse("Coupled charge in WASM\nV1 in 0 SIN(0 1 1)\nR1 in 0 4\nCin in 0 0.3\nH1 out 0 V1 2\nCout out 0 0.2\n.end\n").unwrap();
+        let point = rspice_core::Engine::default()
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(128)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(point.shooting_state_basis().is_empty());
+        assert!(point.analysis().floquet_multipliers.is_empty());
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("H1"))
+            .unwrap();
+        let omega = std::f64::consts::TAU;
+        for (index, &time) in result.time.iter().enumerate() {
+            let phase = omega * time;
+            let voltage = -phase.sin() / 2.0 - 0.6 * omega * phase.cos();
+            let current = 0.2 * (omega * phase.cos() / 2.0 - 0.6 * omega.powi(2) * phase.sin());
+            assert!((result.waveforms[output].values[index] - voltage).abs() < 2e-10);
+            assert!((result.branch_waveforms[branch].values[index] - current).abs() < 2e-9);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn pss_vcvs_dependent_charge_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::PssConfig;

@@ -6,7 +6,9 @@ use crate::numerics::integration::TwoTerminalChargeHistory;
 mod current;
 use current::PssCurrentBasis;
 mod voltage;
-use voltage::{InitialChargeRates, PssVoltageConstraintBuilder, PssVoltageConstraints};
+use voltage::{
+    InitialChargeRates, PssDescriptor, PssVoltageConstraintBuilder, PssVoltageConstraints,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum VoltageBranch {
@@ -30,8 +32,94 @@ enum VoltageBranch {
 enum ForestValue {
     Zero,
     State(usize),
+    CurrentState(usize),
+    SourceDerivative {
+        index: usize,
+        order: usize,
+        current: bool,
+    },
     Source(usize),
     BehavioralSource(usize),
+}
+
+impl ForestValue {
+    fn source(self) -> Option<(bool, usize, usize)> {
+        match self {
+            Self::Source(index) => Some((false, index, 0)),
+            Self::SourceDerivative {
+                index,
+                order,
+                current,
+            } => Some((current, index, order)),
+            _ => None,
+        }
+    }
+
+    fn differentiated(self) -> Result<Self, SimulationError> {
+        let Some((current, index, order)) = self.source() else {
+            return Err(SimulationError::Circuit(
+                "PSS descriptor attempted to differentiate a free state as forcing".to_owned(),
+            ));
+        };
+        Ok(Self::SourceDerivative {
+            index,
+            order: order.checked_add(1).ok_or_else(|| {
+                SimulationError::Circuit("PSS source derivative order overflow".to_owned())
+            })?,
+            current,
+        })
+    }
+
+    fn forcing(
+        self,
+        circuit: &CircuitData,
+        time: Value,
+        extra_order: usize,
+    ) -> Result<Value, SimulationError> {
+        let Some((current, index, order)) = self.source() else {
+            return Err(SimulationError::Circuit(
+                "PSS descriptor forcing is not an independent source".to_owned(),
+            ));
+        };
+        let order = order.checked_add(extra_order).ok_or_else(|| {
+            SimulationError::Circuit("PSS source derivative order overflow".to_owned())
+        })?;
+        let (name, value) = if current {
+            (
+                &circuit.current_sources.names[index],
+                circuit
+                    .current_sources
+                    .time_derivative_at(index, time, order),
+            )
+        } else {
+            (
+                &circuit.voltage_sources.names[index],
+                circuit
+                    .voltage_sources
+                    .time_derivative_at(index, time, order),
+            )
+        };
+        value.filter(|value| value.is_finite()).ok_or_else(|| SimulationError::Circuit(format!(
+            "PSS coupled state constraint requires a finite analytic derivative of order {order} for source {name} at t={time:e}"
+        )))
+    }
+
+    fn evaluate(
+        self,
+        circuit: &mut CircuitData,
+        state: &[Value],
+        voltage_count: usize,
+    ) -> Result<Value, SimulationError> {
+        match self {
+            Self::Zero => Ok(0.0),
+            Self::State(index) => Ok(state[index]),
+            Self::CurrentState(index) => Ok(state[voltage_count + index]),
+            Self::Source(_) | Self::SourceDerivative { .. } => self.forcing(circuit, 0.0, 0),
+            Self::BehavioralSource(index) => circuit.behavioral_sources.voltage_sources[index]
+                .evaluate(&[], 0.0)
+                .map_err(|error| SimulationError::Circuit(error.to_string())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +144,7 @@ pub(super) struct PssStateBasis {
     forest: Vec<ForestEdge>,
     voltage_constraints: Option<PssVoltageConstraints>,
     currents: PssCurrentBasis,
+    descriptor: Option<PssDescriptor>,
 }
 
 impl PssStateBasis {
@@ -64,6 +153,9 @@ impl PssStateBasis {
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
+        if PssDescriptor::applies(circuit) {
+            return PssDescriptor::build(circuit, limits, abort);
+        }
         let node_count = circuit.num_nodes() + 1;
         let mut voltage_constraints = if circuit.vcvs.is_empty() {
             None
@@ -234,6 +326,7 @@ impl PssStateBasis {
                 .map(|constraints| constraints.finish(circuit, abort))
                 .transpose()?,
             currents: PssCurrentBasis::new(circuit),
+            descriptor: None,
         })
     }
 
@@ -313,6 +406,8 @@ pub(in crate::engine) struct PssCircuit {
     initial_charge_rates: Option<InitialChargeRates>,
     current_source_rates: Vec<Value>,
     current_source_offsets: [Vec<Value>; 3],
+    charge_source_rates: Vec<Value>,
+    charge_source_offsets: [Vec<Value>; 3],
     current_source_times: [Value; 2],
 }
 
@@ -349,12 +444,25 @@ impl PssCircuit {
         let basis = PssStateBasis::new(&circuit, limits, abort)?;
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
-        let current_source_rates = if basis.currents.has_prescribed_currents() {
+        let current_source_rates = if basis.descriptor.as_ref().map_or_else(
+            || basis.currents.has_prescribed_currents(),
+            |descriptor| descriptor.has_prescribed_currents(&circuit),
+        ) {
             vec![0.0; circuit.inductors.len()]
         } else {
             Vec::new()
         };
         let current_source_offsets = std::array::from_fn(|_| vec![0.0; current_source_rates.len()]);
+        let charge_source_rates = if basis
+            .descriptor
+            .as_ref()
+            .is_some_and(PssDescriptor::has_prescribed_charge)
+        {
+            vec![0.0; circuit.capacitors.len()]
+        } else {
+            Vec::new()
+        };
+        let charge_source_offsets = std::array::from_fn(|_| vec![0.0; charge_source_rates.len()]);
         let diode_history = TwoTerminalChargeHistory::from_biases(
             circuit
                 .diodes
@@ -391,6 +499,8 @@ impl PssCircuit {
             initial_charge_rates: None,
             current_source_rates,
             current_source_offsets,
+            charge_source_rates,
+            charge_source_offsets,
             current_source_times: [0.0; 2],
         })
     }
@@ -432,42 +542,34 @@ impl PssCircuit {
     }
 
     pub(super) fn set_state(&mut self, state: &[Value]) -> Result<(), SimulationError> {
-        self.current_source_times = [0.0; 2];
         assert_eq!(
             state.len(),
             self.state_dimension(),
             "PSS shooting-state shape must match its basis"
         );
-        self.solution_scratch.fill(0.0);
+        if self.basis.descriptor.is_none() {
+            self.solution_scratch.fill(0.0);
+        }
+        if let Some(descriptor) = &self.basis.descriptor {
+            descriptor.solve(
+                &mut self.circuit,
+                state,
+                self.basis.voltage_branches.len(),
+                &mut self.solution_scratch,
+            )?;
+        }
         if let Some(constraints) = &self.basis.voltage_constraints {
-            constraints.solve(&mut self.solution_scratch, |value| match value {
-                ForestValue::Zero => Ok(0.0),
-                ForestValue::State(index) => Ok(state[index]),
-                ForestValue::Source(index) => {
-                    Ok(self.circuit.voltage_sources.transient_value_at(index, 0.0))
-                }
-                ForestValue::BehavioralSource(index) => {
-                    self.circuit.behavioral_sources.voltage_sources[index]
-                        .evaluate(&[], 0.0)
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))
-                }
+            constraints.solve(&mut self.solution_scratch, |value| {
+                value.evaluate(&mut self.circuit, state, self.basis.voltage_branches.len())
             })?;
         }
         for edge in &self.basis.forest {
-            let value = match edge.value {
-                ForestValue::Zero => 0.0,
-                ForestValue::State(index) => state[index],
-                ForestValue::Source(index) => {
-                    self.circuit.voltage_sources.transient_value_at(index, 0.0)
-                }
-                ForestValue::BehavioralSource(index) => {
-                    self.circuit.behavioral_sources.voltage_sources[index]
-                        .evaluate(&[], 0.0)
-                        .map_err(|error| SimulationError::Circuit(error.to_string()))?
-                }
-            };
+            let value =
+                edge.value
+                    .evaluate(&mut self.circuit, state, self.basis.voltage_branches.len())?;
             self.solution_scratch[edge.to] = self.solution_scratch[edge.from] + edge.sign * value;
         }
+        self.current_source_times = [0.0; 2];
         let circuit = &mut self.circuit;
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
             let voltage = self.solution_scratch[stamp.pp.row] - self.solution_scratch[stamp.nn.row];
@@ -483,16 +585,23 @@ impl PssCircuit {
                     - self.solution_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
-        self.basis.currents.source_balance(
-            &circuit.current_sources,
-            &mut self.current_balance,
-            false,
-        )?;
-        self.basis.currents.set_state(
-            &state[self.basis.voltage_branches.len()..],
-            &mut circuit.inductors.i_prev,
-            &mut self.current_balance,
-        );
+        if self.basis.descriptor.is_some() {
+            for (index, &branch) in circuit.inductors.branch_indices.iter().enumerate() {
+                circuit.inductors.i_prev[index] =
+                    self.solution_scratch[circuit.num_nodes() + branch];
+            }
+        } else {
+            self.basis.currents.source_balance(
+                &circuit.current_sources,
+                &mut self.current_balance,
+                false,
+            )?;
+            self.basis.currents.set_state(
+                &state[self.basis.voltage_branches.len()..],
+                &mut circuit.inductors.i_prev,
+                &mut self.current_balance,
+            );
+        }
         for index in 0..circuit.inductors.len() {
             let current = circuit.inductors.i_prev[index];
             circuit.inductors.i_prev_prev[index] = current;
@@ -542,6 +651,28 @@ impl PssCircuit {
         let mut solution = vec![0.0; self.matrix_size()];
         solution[..self.solution_scratch.len() - 1].copy_from_slice(&self.solution_scratch[1..]);
         solution
+    }
+
+    pub(super) fn descriptor_initial_solution(
+        &mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let Some(descriptor) = &self.basis.descriptor else {
+            return Ok(None);
+        };
+        let state = self.extract_state();
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let mut solution = vec![0.0; self.solution_scratch.len()];
+        descriptor.solve(
+            &mut self.circuit,
+            &state,
+            self.basis.voltage_branches.len(),
+            &mut solution,
+        )?;
+        self.solution_scratch.copy_from_slice(&solution);
+        Ok(Some(solution[1..].to_vec()))
     }
 
     /// An exact initialization constraint carries displacement current while
@@ -781,7 +912,7 @@ impl PssCircuit {
     }
 
     pub(super) fn initialize_prescribed_currents(&mut self) -> Result<(), SimulationError> {
-        if !self.current_source_rates.is_empty() {
+        if !self.current_source_rates.is_empty() || self.basis.descriptor.is_some() {
             self.set_state(&self.extract_state())?;
         }
         Ok(())
@@ -791,6 +922,9 @@ impl PssCircuit {
         &self,
         period: Value,
     ) -> Result<(), SimulationError> {
+        if let Some(descriptor) = &self.basis.descriptor {
+            return descriptor.ensure_regular_forcing(&self.circuit, period);
+        }
         self.basis
             .currents
             .ensure_regular_forcing(&self.circuit.current_sources, period)
@@ -802,14 +936,24 @@ impl PssCircuit {
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
         if !self.current_source_rates.is_empty() {
-            self.basis.currents.source_companion(
-                &self.circuit.current_sources,
-                &mut self.current_balance,
-                &mut self.current_source_rates,
-                &mut self.current_source_offsets,
-                self.current_source_times,
-                step,
-            )?;
+            if let Some(descriptor) = &self.basis.descriptor {
+                descriptor.source_companion(
+                    &self.circuit,
+                    &mut self.current_source_rates,
+                    &mut self.current_source_offsets,
+                    self.current_source_times,
+                    step,
+                )?;
+            } else {
+                self.basis.currents.source_companion(
+                    &self.circuit.current_sources,
+                    &mut self.current_balance,
+                    &mut self.current_source_rates,
+                    &mut self.current_source_offsets,
+                    self.current_source_times,
+                    step,
+                )?;
+            }
             self.basis.currents.add_flux_rhs(
                 &self.circuit,
                 |index| {
@@ -841,27 +985,166 @@ impl PssCircuit {
         let caps = &self.circuit.capacitors;
         let voltage = |values: &[Value], node| if node == 0 { 0.0 } else { values[node - 1] };
         for (index, stamp) in caps.stamps.iter().enumerate() {
-            self.capacitor_trial_currents[index] =
-                if let Some(branch) = caps.ic_branch_indices[index] {
-                    let row = self.circuit.num_nodes() + branch - 1;
-                    iterate[row] + correction[row]
-                } else {
-                    let present = step.coeff.capacitor_current(
-                        caps.capacitances[index],
-                        step.dt,
-                        voltage(iterate, stamp.pp.row) - voltage(iterate, stamp.nn.row),
-                        caps.v_prev[index],
-                        caps.v_prev_prev[index],
-                        caps.i_prev[index],
-                    );
-                    step.coeff
-                        .capacitor_geq(caps.capacitances[index], step.dt)
-                        .mul_add(
-                            voltage(correction, stamp.pp.row) - voltage(correction, stamp.nn.row),
-                            present,
-                        )
-                };
+            self.capacitor_trial_currents[index] = if let Some(branch) =
+                caps.ic_branch_indices[index]
+                && self.charge_source_rates.is_empty()
+            {
+                let row = self.circuit.num_nodes() + branch - 1;
+                iterate[row] + correction[row]
+            } else {
+                let present = self.capacitor_companion_current(
+                    index,
+                    voltage(iterate, stamp.pp.row) - voltage(iterate, stamp.nn.row),
+                    step,
+                );
+                step.coeff
+                    .capacitor_geq(caps.capacitances[index], step.dt)
+                    .mul_add(
+                        voltage(correction, stamp.pp.row) - voltage(correction, stamp.nn.row),
+                        present,
+                    )
+            };
         }
+    }
+
+    fn capacitor_companion_current(
+        &self,
+        index: usize,
+        present: Value,
+        step: PssCompanionStep<'_>,
+    ) -> Value {
+        let caps = &self.circuit.capacitors;
+        let samples = [present, caps.v_prev[index], caps.v_prev_prev[index]];
+        let free = if self.charge_source_rates.is_empty() {
+            samples
+        } else {
+            std::array::from_fn(|history| {
+                samples[history] - self.charge_source_offsets[history][index]
+            })
+        };
+        let current = step.coeff.capacitor_current(
+            caps.capacitances[index],
+            step.dt,
+            free[0],
+            free[1],
+            free[2],
+            caps.i_prev[index],
+        );
+        if self.charge_source_rates.is_empty() {
+            current
+        } else {
+            caps.capacitances[index].mul_add(self.charge_source_rates[index], current)
+        }
+    }
+
+    pub(super) fn stamp_capacitor_correction(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        iterate: &[Value],
+        step: PssCompanionStep<'_>,
+    ) {
+        let voltage = |node| if node == 0 { 0.0 } else { iterate[node - 1] };
+        self.circuit
+            .capacitors
+            .stamp_norton_correction_with_current(matrix, rhs, step.dt, step.coeff, |index| {
+                let stamp = &self.circuit.capacitors.stamps[index];
+                self.capacitor_companion_current(
+                    index,
+                    voltage(stamp.pp.row) - voltage(stamp.nn.row),
+                    step,
+                )
+            });
+        if !self.charge_source_rates.is_empty() {
+            for (index, branch) in self.circuit.capacitors.ic_branch_indices.iter().enumerate() {
+                if let Some(branch) = branch {
+                    let row = self.num_nodes() + branch - 1;
+                    let diagonal = matrix.get_index(row, row).unwrap();
+                    let scale = matrix.values_mut()[diagonal.offset()];
+                    let stamp = &self.circuit.capacitors.stamps[index];
+                    rhs[row] = scale
+                        * (self.capacitor_companion_current(
+                            index,
+                            voltage(stamp.pp.row) - voltage(stamp.nn.row),
+                            step,
+                        ) - iterate[row]);
+                }
+            }
+        }
+    }
+
+    pub(super) fn stamp_charge_forcing(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        step: PssCompanionStep<'_>,
+        norton: bool,
+    ) -> Result<(), SimulationError> {
+        if self.charge_source_rates.is_empty() {
+            return Ok(());
+        }
+        self.basis.descriptor.as_ref().unwrap().charge_companion(
+            &self.circuit,
+            &mut self.charge_source_rates,
+            &mut self.charge_source_offsets,
+            self.current_source_times,
+            step,
+        )?;
+        for (index, stamp) in self.circuit.capacitors.stamps.iter().enumerate() {
+            let cap = self.circuit.capacitors.capacitances[index];
+            let difference = step.coeff.capacitor_current(
+                cap,
+                step.dt,
+                self.charge_source_offsets[0][index],
+                self.charge_source_offsets[1][index],
+                self.charge_source_offsets[2][index],
+                0.0,
+            );
+            let correction = cap.mul_add(self.charge_source_rates[index], -difference);
+            if !correction.is_finite() {
+                return Err(SimulationError::Circuit(
+                    "PSS prescribed charge correction is non-finite".to_owned(),
+                ));
+            }
+            if let Some(branch) = self.circuit.capacitors.ic_branch_indices[index] {
+                if !norton {
+                    let row = self.num_nodes() + branch - 1;
+                    let diagonal = matrix.get_index(row, row).unwrap();
+                    let scale = matrix.values_mut()[diagonal.offset()];
+                    rhs[row] += scale * correction;
+                }
+            } else if norton {
+                if stamp.pp.row != 0 {
+                    rhs[stamp.pp.row - 1] -= correction;
+                }
+                if stamp.nn.row != 0 {
+                    rhs[stamp.nn.row - 1] += correction;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn capacitor_current_residuals<'a>(
+        &'a self,
+        solution: &'a [Value],
+    ) -> impl Iterator<Item = (Value, Value)> + 'a {
+        let nodes = self.num_nodes();
+        self.circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, branch)| {
+                branch
+                    .filter(|_| !self.charge_source_rates.is_empty())
+                    .map(|branch| {
+                        (
+                            solution[nodes + branch - 1],
+                            self.capacitor_trial_currents[index],
+                        )
+                    })
+            })
     }
 
     pub(super) fn capture_inductor_trial_offsets(
@@ -952,11 +1235,13 @@ impl PssCircuit {
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
         let offset = self.basis.voltage_branches.len();
+        let projection = self.basis.descriptor.as_ref().map_or_else(
+            || self.basis.currents.projection(index),
+            |descriptor| descriptor.projection(&self.circuit, index),
+        );
         Some((
             self.inductors.names[index].clone(),
-            self.basis
-                .currents
-                .projection(index)
+            projection
                 .into_iter()
                 .map(|(state, weight)| (state + offset, weight))
                 .collect(),

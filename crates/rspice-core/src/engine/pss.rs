@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 83;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 84;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2240,7 +2240,7 @@ impl Engine {
         // construction, so stale or structurally tampered states fail closed.
         // No fresh DC solve is performed on this path.
         self.ensure_dc_paths_to_ground(&circuit)?;
-        let dc_solution = match dc_seed {
+        let initial_solution = match dc_seed {
             Some(seed) => {
                 seed.validate_for_circuit(&circuit)?;
                 if abort.is_aborted() {
@@ -2250,21 +2250,33 @@ impl Engine {
                 self.ensure_solved_dc_paths_to_ground(&mut circuit, &mut matrix, &solution)?;
                 solution
             }
-            None => {
-                self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
-            }
+            None => match circuit.descriptor_initial_solution(abort)? {
+                Some(solution) => solution,
+                None => self.solve_dc_operating_point_with_abort(
+                    netlist,
+                    &mut circuit,
+                    &mut matrix,
+                    abort,
+                )?,
+            },
         };
 
-        // Initialize capacitor/inductor state from DC
-        self.pss_initialize_reactive_state(&mut circuit, &dc_solution);
+        // A closed linear descriptor supplies a consistent instantaneous seed
+        // even when OP-only IC clamps would duplicate ideal source equations.
+        self.pss_initialize_reactive_state(&mut circuit, &initial_solution);
         circuit.initialize_prescribed_currents()?;
 
         // ==================================================================
         // Phase 1: Stabilization (tstab)
         // ==================================================================
         let period = config.period();
-        let (stabilized_waveform, current_state) =
-            self.pss_run_stabilization(&mut circuit, &mut matrix, &dc_solution, &config, abort)?;
+        let (stabilized_waveform, current_state) = self.pss_run_stabilization(
+            &mut circuit,
+            &mut matrix,
+            &initial_solution,
+            &config,
+            abort,
+        )?;
 
         // ==================================================================
         // Phase 2: Period Detection (for autonomous oscillators)
@@ -3015,6 +3027,10 @@ impl Engine {
         circuit: &mut PssCircuit,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.ensure_matrix_unknowns(circuit.matrix_size())?;
+        if let Some(solution) = circuit.descriptor_initial_solution(abort)? {
+            return Ok(solution);
+        }
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
         initial.add_initial_constraints(abort)?;
@@ -3656,13 +3672,7 @@ impl Engine {
                 // Charge/flux differences then supply reactive corrections
                 // without cancelling absolute companion values.
                 matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
-                circuit.capacitors.stamp_transient_norton_correction(
-                    matrix,
-                    &mut proposal,
-                    &new_solution,
-                    step.dt,
-                    step.coeff,
-                );
+                circuit.stamp_capacitor_correction(matrix, &mut proposal, &new_solution, step);
                 circuit.stabilize_inductor_correction_rhs(
                     &mut proposal,
                     &new_solution,
@@ -3819,7 +3829,16 @@ impl Engine {
         step: PssCompanionStep<'_>,
     ) -> bool {
         if !step.initialization {
-            return self.residual_convergence_met(circuit, matrix, solution, rhs);
+            return circuit
+                .capacitor_current_residuals(solution)
+                .all(|(actual, expected)| {
+                    actual.is_finite()
+                        && expected.is_finite()
+                        && (actual - expected).abs()
+                            <= self.current_abstol()
+                                + self.residual_reltol() * actual.abs().max(expected.abs())
+                })
+                && self.residual_convergence_met(circuit, matrix, solution, rhs);
         }
         let nodes = circuit.num_nodes();
         matrix
@@ -3887,6 +3906,7 @@ impl Engine {
             // which were already loaded above. Add only Norton companions.
             pss.capacitors
                 .stamp_transient_norton_companions(matrix, rhs, step.dt, step.coeff);
+            pss.stamp_charge_forcing(matrix, rhs, step, true)?;
         }
         Ok(())
     }
@@ -4076,6 +4096,7 @@ impl Engine {
         .map_err(SimulationError::Circuit)?;
         if !initialization {
             pss.stamp_prescribed_current_correction(rhs, step)?;
+            pss.stamp_charge_forcing(matrix, rhs, step, false)?;
         } else {
             pss.stamp_initial_charge_constraints(matrix, rhs, linearize_at, physical_probe)?;
         }
@@ -4970,7 +4991,7 @@ mod tests {
     fn vcvs_initial_charge_rates_obey_the_matrix_unknown_limit() {
         for control in ["", "E1 out 0 in 0 2\nC2 out 0 0.2\n"] {
             let netlist = Netlist::parse(&format!(
-                "PSS initialization limit\nI1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\n{control}.end\n"
+                "PSS initialization limit\nI1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\nD1 in 0 DM\n.model DM D(IS=0)\n{control}.end\n"
             )).unwrap();
             let mut circuit =
                 PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();

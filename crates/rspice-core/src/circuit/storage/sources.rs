@@ -1014,6 +1014,47 @@ impl VoltageSources {
         }
     }
 
+    pub(crate) fn time_derivative_at(
+        &self,
+        index: usize,
+        time: Value,
+        order: usize,
+    ) -> Option<Value> {
+        match order {
+            0 => Some(self.transient_value_at(index, time)),
+            1 => Some(self.right_derivative_at_time(index, time)),
+            _ => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                if Self::constant_waveform_over_orbit(
+                    spec,
+                    time,
+                    self.transient_context,
+                    self.pwl_waveforms[index].as_deref(),
+                ) {
+                    Some(0.0)
+                } else {
+                    Self::higher_time_derivative(spec, time, order, self.transient_context)
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn has_regular_periodic_derivative(
+        &self,
+        index: usize,
+        period: Value,
+        order: usize,
+    ) -> bool {
+        self.source_specs[index].as_ref().is_none_or(|spec| {
+            Self::regular_periodic_derivative(
+                spec,
+                period,
+                order,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            )
+        })
+    }
+
     /// Outgoing slope under the same defaults and PWL snapshot as the voltage.
     pub(crate) fn right_derivative_at_time(&self, index: usize, time: Value) -> Value {
         self.source_specs[index].as_ref().map_or(0.0, |spec| {
@@ -1922,6 +1963,52 @@ impl CurrentSources {
         (0..self.names.len())
             .map(|index| self.value_at_time(index, time))
             .collect()
+    }
+
+    pub(crate) fn time_derivative_at(
+        &self,
+        index: usize,
+        time: Value,
+        order: usize,
+    ) -> Option<Value> {
+        match order {
+            0 => Some(self.value_at_time(index, time)),
+            1 => Some(self.right_derivative_at_time(index, time)),
+            _ => self.source_specs[index].as_ref().map_or(Some(0.0), |spec| {
+                if VoltageSources::constant_waveform_over_orbit(
+                    spec,
+                    time,
+                    self.transient_context,
+                    self.pwl_waveforms[index].as_deref(),
+                ) {
+                    Some(0.0)
+                } else {
+                    VoltageSources::higher_time_derivative(
+                        spec,
+                        time,
+                        order,
+                        self.transient_context,
+                    )
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn has_regular_periodic_derivative(
+        &self,
+        index: usize,
+        period: Value,
+        order: usize,
+    ) -> bool {
+        self.source_specs[index].as_ref().is_none_or(|spec| {
+            VoltageSources::regular_periodic_derivative(
+                spec,
+                period,
+                order,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            )
+        })
     }
 
     /// Analytic outgoing time derivative under the same waveform defaults
