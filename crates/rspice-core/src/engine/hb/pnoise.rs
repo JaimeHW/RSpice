@@ -16,7 +16,8 @@ use crate::analysis::HbSolverState;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::analysis::harmonic_balance::{
-    HbConfig, PeriodicAcExcitation, PeriodicNoiseSource, PeriodicSidebandWindow,
+    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource,
+    PeriodicSidebandWindow,
 };
 #[cfg(test)]
 use crate::circuit::ResistorValues;
@@ -789,6 +790,57 @@ impl Engine {
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
             });
+
+            if let Some((coefficient, 2.0, exponent)) = circuit.resistors.flicker[i]
+                && coefficient != 0.0
+            {
+                // AF=2 models a resistance fluctuation multiplied by SIGNED
+                // current. Use the exact voltage spectrum and fold DC G^2
+                // into the scaled coefficient, avoiding an intermediate
+                // current square (or a rectified waveform/FFT).
+                let density = checked_scaled_positive_product(
+                    &[
+                        coefficient,
+                        circuit.resistors.conductances[i],
+                        circuit.resistors.conductances[i],
+                    ],
+                    &format!("pnoise resistor '{name}' flicker coefficient"),
+                )?;
+                let node_pos = Self::hb_node_to_solver_index(np, num_nodes);
+                let node_neg = Self::hb_node_to_solver_index(nn, num_nodes);
+                let mut modulation = Vec::new();
+                modulation
+                    .try_reserve_exact(op_harmonics + 1)
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "pnoise resistor '{name}' modulation allocation failed: {error}"
+                        ))
+                    })?;
+                for harmonic in 0..=op_harmonics {
+                    let voltage = |node: usize| {
+                        if node >= num_nodes {
+                            Ok(Complex64::default())
+                        } else {
+                            state.x.get(node).and_then(|row| row.get(harmonic)).copied().ok_or_else(|| {
+                                SimulationError::Circuit(format!("pnoise resistor '{name}' lacks node {node} harmonic {harmonic}"))
+                            })
+                        }
+                    };
+                    modulation.push(voltage(node_pos)? - voltage(node_neg)?);
+                }
+                sources.push(PeriodicNoiseSource {
+                    name: format!("{name} flicker"),
+                    node_pos,
+                    node_neg,
+                    psd: vec![Complex64::default()],
+                    binary_scale_exponent: density.exponent,
+                    flicker: Some(PeriodicFlickerNoise {
+                        coefficient: density.mantissa,
+                        exponent,
+                        modulation,
+                    }),
+                });
+            }
         }
 
         for i in 0..circuit.resistor_branches.len() {
@@ -832,6 +884,54 @@ impl Engine {
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
             });
+            if let Some((coefficient, 2.0, exponent)) = circuit.resistor_branches.flicker[i]
+                && coefficient != 0.0
+            {
+                let branch = circuit.resistor_branches.branch_indices[i]
+                    .checked_sub(1)
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "pnoise resistor '{name}' has an invalid branch ordinal"
+                        ))
+                    })?;
+                if branch_names.get(branch) != Some(name) {
+                    return Err(SimulationError::Circuit(format!(
+                        "pnoise resistor '{name}' has misaligned branch-current metadata"
+                    )));
+                }
+                let current = state.mna_branch_currents.get(branch).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "pnoise resistor '{name}' lacks its periodic branch current"
+                    ))
+                })?;
+                let mut modulation = Vec::new();
+                modulation
+                    .try_reserve_exact(current.len())
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "pnoise resistor '{name}' modulation allocation failed: {error}"
+                        ))
+                    })?;
+                modulation.extend_from_slice(current);
+                sources.push(PeriodicNoiseSource {
+                    name: format!("{name} flicker"),
+                    node_pos: Self::hb_node_to_solver_index(
+                        circuit.resistor_branches.node_pos[i],
+                        num_nodes,
+                    ),
+                    node_neg: Self::hb_node_to_solver_index(
+                        circuit.resistor_branches.node_neg[i],
+                        num_nodes,
+                    ),
+                    psd: vec![Complex64::default()],
+                    binary_scale_exponent: 0,
+                    flicker: Some(PeriodicFlickerNoise {
+                        coefficient,
+                        exponent,
+                        modulation,
+                    }),
+                });
+            }
         }
 
         // Cyclostationary device sources from the converged waveforms.

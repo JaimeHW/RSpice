@@ -565,6 +565,45 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn signed_resistor_flicker_folding_in_wasm() {
+        for branch_form in [false, true] {
+            let option = if branch_form {
+                ".options device zeroresistancetol=2000\n"
+            } else {
+                ""
+            };
+            let deck = rspice_core::Netlist::parse(&format!(
+                "signed resistor flicker\ni1 0 out SIN(0 1m 1k)\nr1 out 0 rm 1k\n.model rm R(KF=1e-12 AF=2 EF=1)\n{option}.end\n"
+            )).unwrap();
+            let result = rspice_core::Engine::default()
+                .run_pnoise_with_abort(
+                    &deck,
+                    1000.0,
+                    &[250.0],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let flicker = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            let expected = 0.25e-12 * (1.0 / 750.0 + 1.0 / 1250.0);
+            assert!((flicker / expected - 1.0).abs() < 2e-12);
+            assert!(
+                (result.output_noise[0] / (expected + 4.0 * 1.380649e-23 * 300.15 * 1000.0) - 1.0)
+                    .abs()
+                    < 2e-12
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn mos_nlev3_channel_noise_at_zero_vds_in_wasm() {
         let mut config = rspice_core::engine::SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;

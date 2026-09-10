@@ -334,6 +334,8 @@ const ENVELOPE_LINEAR_SUBSET: &str = "the exact envelope initializer supports on
      voltage/current sources";
 const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a nonzero flicker coefficient needs cyclostationary \
      colored-noise folding rather than a DC-bias substitution";
+const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
+     need qualified cyclostationary amplitude spectra";
 
 /// The declaration table.
 ///
@@ -349,7 +351,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Inapplicable,
             dynamic_state: Inapplicable,
             small_signal: Complete,
-            noise: Restricted(CYCLOSTATIONARY_FLICKER),
+            noise: Restricted(RESISTOR_CYCLOSTATIONARY_FLICKER),
             pss_state: Restricted(
                 "a resistor without an accepted thermal-state temperature; the Xyce LEVEL=2 \
                  thermal resistor state is not advanced by the shooting period map",
@@ -360,7 +362,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Inapplicable,
             dynamic_state: Inapplicable,
             small_signal: Complete,
-            noise: Restricted(CYCLOSTATIONARY_FLICKER),
+            noise: Restricted(RESISTOR_CYCLOSTATIONARY_FLICKER),
             pss_state: Complete,
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1425,9 +1427,9 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
 
 /// Instances whose colored-noise control needs cyclostationary folding.
 ///
-/// The low-level periodic solver has an exact stationary colored-source
-/// contract; these controls modulate with the periodic device current and need
-/// cyclostationary correlation rather than a DC-bias substitution.
+/// The low-level solver folds signed periodic amplitudes of stationary colored
+/// sources. Device adapters must qualify those spectra; only AF=2 resistor
+/// current spectra are currently available without nonlinear reconstruction.
 pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Vec<CapabilityGap> {
     use PeriodicCapability::NoiseSources as Cap;
     use PeriodicDeviceFamily as F;
@@ -1440,6 +1442,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
             }
             if let Some((coefficient, af, ef)) = flicker
                 && *coefficient != 0.0
+                && *af != 2.0
             {
                 let name = circuit
                     .resistors
@@ -1463,6 +1466,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
             }
             if let Some((coefficient, af, ef)) = flicker
                 && *coefficient != 0.0
+                && *af != 2.0
             {
                 let name = circuit
                     .resistor_branches

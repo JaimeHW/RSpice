@@ -142,6 +142,52 @@ fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_con
 }
 
 #[test]
+fn pnoise_resistor_flicker_retains_signed_current_modulation() {
+    let offsets = [250.0_f64, 1250.0];
+    for branch_form in [false, true] {
+        for (dc_current, multiplicity) in
+            [(0.0_f64, 1.0_f64), (0.0002, 1.0), (0.0, 5.0), (0.0002, 5.0)]
+        {
+            let option = if branch_form {
+                ".options device zeroresistancetol=2000\n"
+            } else {
+                ""
+            };
+            let netlist = Netlist::parse(&format!(
+                "signed resistor flicker\ni1 0 out SIN({dc_current} 1m 1k)\nr1 out 0 rm 1k AC=2k M={multiplicity}\n.model rm R (KF=1e-12 AF=2 EF=1)\n{option}.end\n"
+            )).unwrap();
+            for sidebands in [0, 2] {
+                let result = Engine::new(SimulationConfig::default())
+                    .run_pnoise(&netlist, 1000.0, &offsets, "out", None, None, sidebands)
+                    .expect("AF=2 resistor flicker has exact signed periodic modulation");
+                let flicker = &result
+                    .contributors
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                    .expect("authored flicker contributor")
+                    .1;
+                for (index, &frequency) in offsets.iter().enumerate() {
+                    // Fluctuating resistance times the signed bias current:
+                    // the sinusoid translates noise to f +/- f0; rectifying
+                    // it would invent a low-frequency 1/f contribution.
+                    let expected = 1e-12 * 4e6 / multiplicity.powi(3)
+                        * (dc_current * dc_current / frequency
+                            + 0.25e-6
+                                * (1.0 / (frequency - 1000.0).abs() + 1.0 / (frequency + 1000.0)));
+                    assert!(
+                        (flicker[index] / expected - 1.0).abs() < 2e-12,
+                        "branch={branch_form}, DC={dc_current}, K={sidebands}, f={frequency}: {} vs {expected}",
+                        flicker[index]
+                    );
+                    let total = expected + 4.0 * K_B * T_REF * 2000.0 / multiplicity;
+                    assert!((result.output_noise[index] / total - 1.0).abs() < 2e-12);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
     let cases = [
         (
@@ -719,8 +765,9 @@ rout out 0 1k
 fn retained_hb_pnoise_matches_the_same_exact_periodic_noise_problem() {
     let deck = "\
 * retained-HB periodic-noise parity
-vin in 0 dc 0
-r1 in mid 10k
+vin in 0 SIN(.2 1 1meg)
+r1 in mid rm 10k
+.model rm R(KF=1e-12 AF=2 EF=1)
 r2 mid 0 10k
 c1 mid 0 1n
 .end
@@ -752,6 +799,13 @@ c1 mid 0 1n
     assert_eq!(retained.frequencies, reference.frequencies);
     assert_eq!(retained.output_noise.len(), offsets.len());
     assert_eq!(retained.contributors.len(), reference.contributors.len());
+    assert!(
+        retained
+            .contributors
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("r1 flicker")
+                && values.iter().all(|&v| v > 0.0))
+    );
     for (actual, expected) in retained.output_noise.iter().zip(&reference.output_noise) {
         assert!(
             (actual - expected).abs() <= 1e-12 * expected.abs().max(1e-300),
