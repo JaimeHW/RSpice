@@ -38,7 +38,10 @@
 //! * **equation value programs** — the equation's expression. Derivative
 //!   programs reuse ownership established by the value program when their
 //!   repeated or pruned primal reads already name slots of that expression.
-//! * **reactive derivative programs**, **noise-source programs** and the
+//! * **noise PSD and exponent programs** — the executed operands of the
+//!   matching structural noise process. Body copies resolve through the HIR
+//!   correspondence before their state sites are paired.
+//! * **reactive derivative programs**, **noise injection gain programs** and the
 //!   **`zi` definition operand programs** — no canonical root. A reactive
 //!   Jacobian is lowered from a MIR rebuilt around the extracted charge, so
 //!   there is no expression to pair it against. Those programs are still
@@ -73,7 +76,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::canonical_ir::{
-    CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, ExprId, HirModel, MirModel,
+    CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, ExprId, HirExprKind,
+    HirModel, MirModel,
 };
 use crate::codegen::state_slots::{
     CanonicalStateSiteScan, carries_state, pair_canonical_state_slots,
@@ -196,6 +200,9 @@ impl Pass {
 /// runs, not a second implementation of it.
 #[derive(Default)]
 pub(crate) struct StateSlotMapping {
+    /// Noise operands are evaluated by metadata programs, not ordinary
+    /// assignment or equation programs that substitute the noise primal zero.
+    noise_metadata_sites: HashSet<ExprId>,
     /// Bytecode programs walked, in every pass.
     pub(crate) programs: usize,
     /// Of those, the ones carrying at least one state instruction.
@@ -233,6 +240,7 @@ impl StateSlotMapping {
         let mut scans: HashMap<ExprId, CanonicalStateSiteScan> = HashMap::new();
 
         mapping.walk_parameters(model, mir, &layout, &mut scans);
+        mapping.walk_noise_sources(model, hir, mir, &layout, &mut scans);
         mapping.pair_assignment_pass(
             &layout,
             &statements,
@@ -394,6 +402,10 @@ impl StateSlotMapping {
             }
         };
 
+        let ordinary_scan = (matches!(pass, Pass::EquationPrimal | Pass::EquationDerivative)
+            && !self.noise_metadata_sites.is_empty())
+        .then(|| scan.without_sites(&self.noise_metadata_sites));
+        let scan = ordinary_scan.as_ref().unwrap_or(scan);
         let mut paired = true;
         for operator in CanonicalStateOperator::ALL {
             // Differentiation may reorder, repeat or remove primal reads.
@@ -584,8 +596,88 @@ impl StateSlotMapping {
         }
     }
 
-    /// The passes with no canonical root: reactive derivatives, noise sources
-    /// and `zi` definition operands.
+    /// Pair raw noise metadata with its syntactic process, independently of
+    /// which circuit equations receive that process's injections.
+    fn walk_noise_sources(
+        &mut self,
+        model: &CompiledModel,
+        hir: &HirModel,
+        mir: &MirModel,
+        layout: &CanonicalStateLayout,
+        scans: &mut HashMap<ExprId, CanonicalStateSiteScan>,
+    ) {
+        let mut roots = HashMap::new();
+        if !model.noise_sources.is_empty() {
+            for expression in &hir.expressions {
+                let HirExprKind::NoiseSource {
+                    process_id,
+                    source,
+                    operands,
+                    ..
+                } = &expression.kind
+                else {
+                    continue;
+                };
+                if !matches!(source.as_str(), "White" | "Flicker") {
+                    continue;
+                }
+                let Some(&power) = operands.first() else {
+                    continue;
+                };
+                let executed = |id| hir.executed_correspondence.executed(id).unwrap_or(id);
+                let pair = (executed(power), operands.get(1).copied().map(executed));
+                if let Some(previous) = roots.insert(*process_id as usize, pair)
+                    && previous != pair
+                {
+                    self.mismatches.push(format!(
+                        "noise process {process_id} has conflicting canonical metadata roots"
+                    ));
+                }
+            }
+        }
+        for (index, source) in model.noise_sources.iter().enumerate() {
+            let root = roots.get(&source.process_id);
+            let programs =
+                std::iter::once(("psd", &source.psd_program, root.map(|&(power, _)| power))).chain(
+                    source.exponent_program.as_ref().map(|program| {
+                        (
+                            "exponent",
+                            program,
+                            root.and_then(|&(_, exponent)| exponent),
+                        )
+                    }),
+                );
+            for (field, program, root) in programs {
+                let label = format!("noise[{index}].{field}");
+                if let Some(root) = root {
+                    if let std::collections::hash_map::Entry::Vacant(entry) = scans.entry(root)
+                        && let Ok(scan) = CanonicalStateSiteScan::for_expression(mir, root)
+                    {
+                        entry.insert(scan);
+                    }
+                    if let Some(scan) = scans.get(&root) {
+                        for operator in CanonicalStateOperator::ALL {
+                            self.noise_metadata_sites.extend(scan.sites(operator));
+                        }
+                    }
+                    self.pair_rooted_program(
+                        mir,
+                        layout,
+                        scans,
+                        Pass::NoiseSource,
+                        &label,
+                        root,
+                        program,
+                    );
+                } else {
+                    self.note_unrooted_program(Pass::NoiseSource, &label, program);
+                }
+            }
+        }
+    }
+
+    /// The passes with no canonical root: reactive derivatives, noise routing
+    /// gains and `zi` definition operands.
     ///
     /// Walked so their slots enter [`Self::allocated`]. They contribute nothing
     /// to the map, so a slot only they address is unreached and refuses the
@@ -603,18 +695,6 @@ impl StateSlotMapping {
         }
 
         for (index, source) in model.noise_sources.iter().enumerate() {
-            self.note_unrooted_program(
-                Pass::NoiseSource,
-                &format!("noise[{index}].psd"),
-                &source.psd_program,
-            );
-            if let Some(program) = &source.exponent_program {
-                self.note_unrooted_program(
-                    Pass::NoiseSource,
-                    &format!("noise[{index}].exponent"),
-                    program,
-                );
-            }
             for (position, injection) in source.injections.iter().enumerate() {
                 self.note_unrooted_program(
                     Pass::NoiseSource,
@@ -691,7 +771,9 @@ impl StateSlotMapping {
             let sites = statements
                 .sites()
                 .iter()
-                .filter(|site| site.kind == operator)
+                .filter(|site| {
+                    site.kind == operator && !self.noise_metadata_sites.contains(&site.operator)
+                })
                 .map(|site| site.operator)
                 .collect::<Vec<_>>();
             let mut slots = emitted

@@ -2682,6 +2682,70 @@ fn ac_intermediate_range_survives_indexed_assignments_and_multiplicity() {
 }
 
 #[test]
+fn noise_only_integrator_metadata_uses_its_canonical_state_sites() {
+    for (index, body) in [
+        r#"analog I(p,n)<+V(p,n)
+    +white_noise(1.0+ddt(V(p,n)),"white")
+    +flicker_noise(2.0+idt(V(p,n),3.0),3.0+ddt(2.0*V(p,n)),"flicker");"#,
+        r#"analog begin
+    w=white_noise(1.0+ddt(V(p,n)),"white");
+    f=flicker_noise(2.0+idt(V(p,n),3.0),3.0+ddt(2.0*V(p,n)),"flicker");
+    I(p,n)<+V(p,n)+w+f;
+end"#,
+        r#"analog I(p,n)<+ddt(V(p,n))
+    +white_noise(1.0+ddt(V(p,n)),"white")
+    +flicker_noise(2.0+idt(V(p,n),3.0),3.0+ddt(2.0*V(p,n)),"flicker");"#,
+        r#"analog begin
+    w=white_noise(1.0+ddt(V(p,n)),"white");
+    f=flicker_noise(2.0+idt(V(p,n),3.0),3.0+ddt(2.0*V(p,n)),"flicker");
+    q=ddt(V(p,n));
+    I(p,n)<+q+w+f;
+end"#,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fixture = compile(&format!(
+            "module noise_only_state(p,n); inout p,n; electrical p,n; real w,f,q; {body} endmodule"
+        ));
+        let layout = rspice_veriloga::canonical_ir::CanonicalStateLayout::from_hir(
+            &fixture.canonical_ir.hir,
+        );
+        let integral = layout
+            .sites()
+            .iter()
+            .find(|site| site.kind == rspice_veriloga::canonical_ir::CanonicalStateOperator::Idt)
+            .unwrap();
+        assert!(fixture.noise_sources[1].psd_program.instructions.iter().any(|instruction| {
+            matches!(instruction, rspice_veriloga::codegen::Instruction::IdtState(slot) if *slot == integral.slot as usize)
+        }));
+        let mut device = fixture.device("NOISE", &[1, 0]);
+        device.try_set_analysis_type(3).unwrap();
+        for frequency in [0.0, 1.0, 1e6] {
+            let processes = device
+                .try_noise_processes_at_frequency(&[2.0], frequency)
+                .unwrap();
+            assert_eq!(processes.len(), 2);
+            assert_eq!(processes[0].psd, 1.0);
+            assert_eq!(processes[0].exponent, None);
+            assert_eq!(processes[1].psd, 5.0);
+            assert_eq!(processes[1].exponent, Some(3.0));
+        }
+        device.try_set_analysis_type(0).unwrap();
+        device.update_voltages(&[2.0]);
+        device.try_evaluate().unwrap();
+        device.try_advance_state().unwrap();
+        device.try_set_analysis_type(2).unwrap();
+        device.set_timestep(0.25);
+        device.update_voltages(&[4.0]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            if index < 2 { 4.0 } else { 8.0 }
+        );
+    }
+}
+
+#[test]
 fn noise_powers_freeze_dynamic_values_without_touching_history() {
     for (dynamic, dc_value) in [
         ("ddt(V(p,n))", 0.0),

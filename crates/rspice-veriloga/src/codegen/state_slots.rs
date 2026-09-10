@@ -153,6 +153,18 @@ impl CanonicalStateSiteScan {
         &self.by_operator[operator.index()]
     }
 
+    pub(crate) fn without_sites(&self, excluded: &std::collections::HashSet<ExprId>) -> Self {
+        Self {
+            by_operator: std::array::from_fn(|index| {
+                self.by_operator[index]
+                    .iter()
+                    .copied()
+                    .filter(|site| !excluded.contains(site))
+                    .collect()
+            }),
+        }
+    }
+
     fn push(&mut self, operator: CanonicalStateOperator, expr_id: ExprId) {
         self.by_operator[operator.index()].push(expr_id);
     }
