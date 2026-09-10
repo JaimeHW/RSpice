@@ -10104,8 +10104,16 @@ mod tests {
                 vec!["S", "TH", "CX", "CI", "BX", "BI", "EI"],
             ),
             ("s 0 cx 0 0 bi 0", vec!["S", "0", "CX", "0", "0", "BI", "0"]),
+            (
+                "s 0:1 cx 0:2 0 bi 0",
+                vec!["S", "0:1", "CX", "0:2", "0", "BI", "0"],
+            ),
+            (
+                "s 1-2 cx 3/4 0 bi 0",
+                vec!["S", "1-2", "CX", "3/4", "0", "BI", "0"],
+            ),
         ] {
-            for tail in ["2 OFF M=3", "-2", "AREA=2 IC=0.6,1"] {
+            for tail in ["2 OFF M=3", "2", "-2", "AREA=2 IC=0.6,1"] {
                 let netlist = Netlist::parse(&format!(
                     "BJT optional connections\nQ1 c b e {connections} BC337-25 {tail}\n.model BC337-25 NPN\n.end\n"
                 )).unwrap();

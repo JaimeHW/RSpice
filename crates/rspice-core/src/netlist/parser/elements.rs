@@ -4304,7 +4304,27 @@ pub(super) fn parse_bjt(
                 // only if a further bare model label follows the numeric run.
                 let mut offset = 0;
                 while matches!(stream.peek_n(offset).kind, TokenKind::Number(_)) {
+                    // A numeric-leading label may span touching tokens,
+                    // e.g. 0:1 or 1-2. Look past the same complete label that
+                    // expect_node consumes, while respecting field boundaries.
+                    let mut end = stream.peek_n(offset).span.end;
                     offset += 1;
+                    while stream.peek_n(offset).span.start == end
+                        && !matches!(
+                            stream.peek_n(offset).kind,
+                            TokenKind::Newline
+                                | TokenKind::Eof
+                                | TokenKind::Equals
+                                | TokenKind::Comma
+                                | TokenKind::LParen
+                                | TokenKind::RParen
+                                | TokenKind::Expression(_)
+                                | TokenKind::StringLit(_)
+                        )
+                    {
+                        end = stream.peek_n(offset).span.end;
+                        offset += 1;
+                    }
                 }
                 let TokenKind::Ident(next) = &stream.peek_n(offset).kind else {
                     break;

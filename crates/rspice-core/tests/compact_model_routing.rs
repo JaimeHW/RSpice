@@ -392,6 +392,13 @@ mod xyce_vbic_generated {
             spice_dialect: SpiceDialect::Xyce,
             ..Default::default()
         });
+        let exposed_name = |index| {
+            if index == 1 {
+                "0:1".to_string()
+            } else {
+                format!("exposed_{index}")
+            }
+        };
         let optional = [
             ("dt", 20.0),
             ("cx", 1.4),
@@ -408,7 +415,7 @@ mod xyce_vbic_generated {
                 let deck = |exposed: bool| {
                     let connections = if exposed {
                         (0..count)
-                            .map(|index| format!(" exposed_{index}"))
+                            .map(|index| format!(" {}", exposed_name(index)))
                             .collect::<String>()
                     } else {
                         String::new()
@@ -419,7 +426,7 @@ mod xyce_vbic_generated {
                     );
                     for (index, (name, value)) in optional[..count].iter().enumerate() {
                         let node = if exposed {
-                            format!("exposed_{index}")
+                            exposed_name(index)
                         } else {
                             format!("Q1.__{name}.internal")
                         };
