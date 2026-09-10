@@ -745,15 +745,7 @@ impl<'a> NetlistGenerator<'a> {
         parameter_lines: &[String],
     ) -> String {
         self.reset_generation_state();
-
-        if !self.validate_instance_parameters() {
-            self.generate_header();
-            self.lines.push(
-                "* Generation stopped: correct the reported parameter text errors.".to_owned(),
-            );
-            self.lines.push(".end".to_owned());
-            return self.lines.join("\n");
-        }
+        let valid_parameters = self.validate_instance_parameters();
 
         // Phase 1: Adopt the design's one connectivity extraction — geometry,
         // interface ports, labels, typed bus members and ground, already
@@ -762,6 +754,13 @@ impl<'a> NetlistGenerator<'a> {
 
         // Phase 3: Generate header
         self.generate_header();
+        if !valid_parameters {
+            self.lines.push(
+                "* Generation stopped: correct the reported parameter text errors.".to_owned(),
+            );
+            self.lines.push(".end".to_owned());
+            return self.lines.join("\n");
+        }
 
         // Phase 3b: Emit typed project parameters before any instance or
         // subcircuit can reference them.

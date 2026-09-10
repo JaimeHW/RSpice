@@ -634,6 +634,10 @@ mod tests {
             let mut generator = NetlistGenerator::new(&schematic);
             let deck = generator.generate();
             assert!(
+                !generator.nets().is_empty(),
+                "connectivity remains available for diagnosis"
+            );
+            assert!(
                 generator
                     .errors()
                     .iter()
