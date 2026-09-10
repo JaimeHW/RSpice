@@ -316,7 +316,7 @@ Advanced analyses, all flat under `analysis/`:
 | Process corners | `corner.rs` |
 | Periodic steady state (shooting) | `pss/`, `engine/pss.rs` |
 | Harmonic balance | `harmonic_balance/`, `engine/hb/` |
-| Periodic noise (pnoise) | `pnoise/`, `engine/pss_noise.rs` |
+| Periodic noise (pnoise) | `engine/hb/pnoise.rs`, `engine/pss_noise.rs`; spectral results in `pnoise/` |
 | Periodic AC (PAC) | `pac/` |
 | Periodic transfer function (PXF) | `pxf.rs` |
 | Stability (STB) loop-gain | `stb.rs`, `engine/stb.rs` |
@@ -528,6 +528,20 @@ offset-frequency sweep.
 | `INPUT` | Source for input-referred noise | none |
 | `MAXSIDEBAND` | Folded sideband bound `-n..=n` | 6 |
 | `FROM` | `PSS` or `HB` | nearest preceding |
+
+Rust callers use `Engine::run_pnoise` for driven conversion noise and
+`Engine::run_pnoise_oscillator` for autonomous phase noise. The
+`run_pnoise_from_pss_with_abort`, `run_pnoise_from_hb_with_abort`, and
+`run_pnoise_oscillator_from_pss_with_abort` variants consume an existing
+authenticated orbit. `PnoiseCard` is the typed authored request; PSS/PSTB
+expose the shared `FloquetSpectrumEvidence` stability contract.
+
+The unused prototype `analysis::pnoise::{PnoiseSolver, PnoiseState,
+FloquetAnalyzer}` and its configuration, mode and transfer helper types have
+been removed. Its waveform/Jacobian inputs had no public initialization path,
+and its phase response estimated charge from voltage and period. Use the
+engine entry points above; the spectral result types used by result documents
+remain available in `analysis::pnoise`.
 
 **`.ENVELOPE`**, harmonic-balance envelope continuation. It attaches to the
 nearest preceding `.HB` and exposes only what the continuation executes.

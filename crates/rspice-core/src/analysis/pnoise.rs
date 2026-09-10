@@ -1,35 +1,16 @@
-//! Phase Noise (PNoise) Analysis Module
+//! Phase-noise spectral result types shared with result documents and frontends.
 //!
-//! This module provides phase noise analysis for periodic circuits.
-//! PNoise measures the spectral purity of oscillators by quantifying noise power
-//! at offset frequencies from the carrier.
+//! Circuit-derived noise is evaluated by the engine using the physical device
+//! equations and an authenticated periodic operating point. Driven conversion
+//! noise uses [`crate::Engine::run_pnoise`]; oscillator phase noise uses
+//! [`crate::Engine::run_pnoise_oscillator`]. Their retained-state variants reuse
+//! a previously solved PSS or HB orbit. Authored `.PNOISE` cards use
+//! [`crate::netlist::PnoiseCard`].
 //!
-//! # Overview
-//!
-//! Phase noise analysis is critical for RF/MW design, particularly for:
-//! - Voltage-Controlled Oscillators (VCOs)
-//! - Phase-Locked Loops (PLLs)
-//! - Crystal oscillators
-//! - RF synthesizers
-//!
-//! # Algorithm
-//!
-//! 1. **Periodic steady-state**: Start from PSS or HB solution
-//! 2. **Floquet analysis**: Compute time-varying transfer functions
-//! 3. **Noise projection**: Project device noise onto amplitude/phase
-//! 4. **Spectral integration**: Compute phase noise spectral density
-//!
-//! # Output Format
-//!
-//! Results are typically expressed in dBc/Hz (decibels relative to carrier
-//! per Hz bandwidth) at various offset frequencies from the carrier.
+//! Floquet stability evidence is shared by PSS and PSTB through
+//! [`crate::analysis::FloquetSpectrumEvidence`]. This module does not contain
+//! a separate waveform-based approximation of the phase response or charge.
 
-mod config;
-mod floquet;
 mod result;
-mod solver;
 
-pub use config::{NoiseOutputNode, PnoiseConfig, PnoiseConfigError, PnoiseSideband, PnoiseSweep};
-pub use floquet::{FloquetAnalyzer, FloquetMode, TransferFunction};
 pub use result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};
-pub use solver::{PnoiseError, PnoiseSolver, PnoiseState};

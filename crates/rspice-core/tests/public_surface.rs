@@ -1,6 +1,6 @@
 //! The crate's public surface may shrink, never grow.
 //!
-//! `rspice-core` exports 4,257 public item statements. Its five frontends —
+//! `rspice-core` exports 4,964 public item statements. Its five frontends —
 //! the CLI, the GUI, the Python and WASM bindings, and the conformance suite —
 //! name roughly two hundred distinct paths between them. The rest is internal
 //! machinery that happens to be spelled `pub`.
@@ -725,7 +725,13 @@ use rspice_core::analysis::harmonic_balance::{
 // NoisePhysicalConstants now lives in the constants leaf, removing the
 // device-to-analysis dependency. Preserve analysis::noise::NoisePhysicalConstants
 // for existing frontend consumers; the type and values are unchanged.
-const MAX_PUBLIC_ITEMS: usize = 5028;
+// 2026-09-10, -64 net (5,028 -> 4,964): remove 67 statements from the
+// unused phase-noise solver, Floquet approximation and configuration APIs.
+// Account for three existing UI interface-alias statements that landed
+// after the last ratchet: InterfaceNodeAliases, its resolve method, and
+// collect_requested_interface_node_aliases_with_abort. The core-only imported
+// thermal-voltage constant is now private and adds no public statement.
+const MAX_PUBLIC_ITEMS: usize = 4964;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

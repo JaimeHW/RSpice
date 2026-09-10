@@ -28,11 +28,6 @@ pub enum FrequencyGridError {
     UnrepresentableSpacing,
     /// No frequency points were requested.
     EmptySweep,
-    /// An explicitly authored frequency was not finite and strictly positive.
-    InvalidExplicitFrequency {
-        /// Zero-based position in the authored list.
-        index: usize,
-    },
     /// A logarithmic span and point density implied more points than `usize` can hold.
     PointCountOverflow,
     /// The grid's backing allocation could not be reserved.
@@ -69,10 +64,6 @@ impl std::fmt::Display for FrequencyGridError {
             Self::EmptySweep => {
                 formatter.write_str("frequency sweep must contain at least one point")
             }
-            Self::InvalidExplicitFrequency { index } => write!(
-                formatter,
-                "explicit frequency at index {index} must be positive and finite"
-            ),
             Self::PointCountOverflow => {
                 formatter.write_str("frequency-grid point count exceeds addressable limits")
             }
@@ -219,32 +210,6 @@ pub(crate) fn generate_frequency_grid(
     Ok(frequencies)
 }
 
-/// Validate and copy an explicitly authored frequency list.
-pub(crate) fn copy_explicit_frequency_grid(
-    authored: &[Value],
-    abort: &dyn AbortSignal,
-) -> Result<Vec<Value>, FrequencyGridError> {
-    ensure_not_aborted(abort)?;
-    if authored.is_empty() {
-        return Err(FrequencyGridError::EmptySweep);
-    }
-    let mut frequencies = Vec::new();
-    frequencies
-        .try_reserve_exact(authored.len())
-        .map_err(|_| FrequencyGridError::Allocation {
-            requested: authored.len(),
-        })?;
-    for (index, &frequency) in authored.iter().enumerate() {
-        poll_abort(abort, index)?;
-        if !frequency.is_finite() || frequency <= 0.0 {
-            return Err(FrequencyGridError::InvalidExplicitFrequency { index });
-        }
-        frequencies.push(frequency);
-    }
-    ensure_not_aborted(abort)?;
-    Ok(frequencies)
-}
-
 const ABORT_POLL_STRIDE: usize = 256;
 
 #[inline]
@@ -374,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_and_explicit_grids_are_cancellable() {
+    fn generated_grids_are_cancellable_before_and_during_construction() {
         assert_eq!(
             generate_frequency_grid(
                 1.0,
@@ -387,10 +352,9 @@ mod tests {
             ),
             Err(FrequencyGridError::Aborted)
         );
-        let authored = vec![1.0; 300];
         let abort = CountingAbort::new(1);
         assert_eq!(
-            copy_explicit_frequency_grid(&authored, &abort),
+            generate_frequency_grid(1.0, 2.0, 300, FrequencyGridScale::Linear, false, 1, &abort),
             Err(FrequencyGridError::Aborted)
         );
     }

@@ -615,9 +615,9 @@ pub struct NoiseSource {
     pub bsim3_flicker: Option<std::sync::Arc<Bsim3FlickerNoise>>,
 }
 
-/// Shared KF * |I|^AF / f^EF evaluation, including a retained coefficient scale.
+/// KF * |I|^AF / f^EF evaluation, including a retained coefficient scale.
 /// Callers choose their zero-frequency convention before using this function.
-pub(crate) fn flicker_density(
+fn flicker_density(
     coefficient: Value,
     binary_scale: i32,
     current: Value,
@@ -1780,6 +1780,9 @@ mod mechanism_tests {
             (1e-200, 1e-38, -10.0, 1.0, 1.0, 1e180),
             (1e200, 1e-200, 2.0, 1.0, 1.0, 1e-200),
             (1e-200, 1e200, 2.0, 1.0, 1.0, 1e200),
+            (1e308, 2.0, 1.0, 1e308, 1.0, 2.0),
+            (1e-300, 1e-30, 1.0, 1e-200, 1.0, 1e-130),
+            (1.0, 1e-200, -2.0, 1e200, 1.0, 1e200),
             (1.0, 1e200, 2.0, 1e200, 2.0, 1.0),
             (1e-200, 1e-200, 1.0, 1e-200, 1.0, 1e-200),
             (1e200, 1e200, 1.0, 1e200, 1.0, 1e200),

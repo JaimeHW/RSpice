@@ -10,7 +10,7 @@
 //! - Follows industry-standard SPICE simulator practices
 
 use crate::Value;
-pub use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 
 //=============================================================================
 // Numerical Tolerances
