@@ -12,7 +12,6 @@ use crate::state::{
 
 mod source_bindings;
 mod validation;
-pub(crate) use source_bindings::saved_output_references;
 pub use source_bindings::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
 
 /// Durable outcome of applying one immutable saved-output contract to an

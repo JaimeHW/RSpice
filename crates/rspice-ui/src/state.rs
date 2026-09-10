@@ -152,7 +152,6 @@ pub(crate) use simulation::ConvergenceEncoder;
 pub use simulation::ConvergenceFailureClass;
 pub(crate) use simulation::DcTraceView;
 pub(crate) use simulation::RunHistoryRevision;
-pub(crate) use simulation::saved_output_references;
 pub use simulation::{
     AnalysisAvailability, AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload,
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain, AnalysisType,
@@ -194,6 +193,7 @@ pub use simulation::{
     DcCurveSelection, DcSweepDirection, DcSweepEvidence, DcSweepFamily, DcSweepQuantity,
 };
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
+pub(crate) use workspace::saved_output_references;
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,

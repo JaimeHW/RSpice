@@ -1,10 +1,10 @@
 //! Exact source identities captured before authored waveforms are adopted.
 //! Missing references stay missing even if an output later uses that label.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use super::*;
-use crate::analysis::calculator::{ast::CalculatorExpr, parser::Parser};
+use crate::state::workspace::saved_output_references;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,50 +135,4 @@ pub(super) fn deserialize_bindings<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<SavedOutputSourceBindings>, D::Error> {
     serde::Deserialize::deserialize(deserializer).map(Some)
-}
-
-/// A shared reference grammar for preparation and persisted receipt validation.
-/// Keys preserve literal node punctuation and numeric spellings.
-pub(crate) fn saved_output_references(
-    kind: SavedOutputKind,
-    expression: &str,
-) -> Result<Option<BTreeSet<String>>, String> {
-    let mut references = BTreeSet::new();
-    match kind {
-        SavedOutputKind::RawVoltageOrCurrent => {
-            let expression = expression.trim();
-            crate::state::workspace::validate_raw_probe(expression)?;
-            let (function, arguments) = expression.split_once('(').expect("validated probe");
-            for argument in arguments[..arguments.len() - 1].split(',') {
-                references.insert(
-                    format!("{}({})", function.trim(), argument.trim()).to_ascii_lowercase(),
-                );
-            }
-        }
-        SavedOutputKind::DerivedExpression => {
-            let parsed = Parser::new(expression)
-                .try_parse()
-                .map_err(|error| error.to_string())?;
-            let mut pending = vec![&parsed];
-            while let Some(expr) = pending.pop() {
-                match expr {
-                    CalculatorExpr::WaveformRef { signal, dataset } => {
-                        if dataset.is_some() {
-                            return Err("saved outputs require sources from their owning analysis"
-                                .to_owned());
-                        }
-                        references.insert(signal.to_ascii_lowercase());
-                    }
-                    CalculatorExpr::BinaryOp { left, right, .. } => {
-                        pending.extend([left.as_ref(), right.as_ref()])
-                    }
-                    CalculatorExpr::UnaryOp { operand, .. } => pending.push(operand),
-                    CalculatorExpr::FunctionCall { args, .. } => pending.extend(args),
-                    CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
-                }
-            }
-        }
-        _ => return Ok(None),
-    }
-    Ok(Some(references))
 }

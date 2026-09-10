@@ -7,7 +7,7 @@
 //! data with no dependency on `ProjectWorkspace` itself,
 //! so they live beside it rather than inside it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use super::DesignVariableQuantity;
 
+use crate::analysis::calculator::{ast::CalculatorExpr, parser::Parser};
 use crate::product::{AnalysisInstanceId, ObjectRevision, SavedOutputId};
 use crate::state::ProbeTarget;
 
@@ -485,8 +486,54 @@ fn validate_saved_output_expression(kind: SavedOutputKind, expression: &str) -> 
     }
 }
 
+/// A shared reference grammar for preparation and persisted receipt validation.
+/// Keys preserve literal node punctuation and numeric spellings.
+pub(crate) fn saved_output_references(
+    kind: SavedOutputKind,
+    expression: &str,
+) -> Result<Option<BTreeSet<String>>, String> {
+    let mut references = BTreeSet::new();
+    match kind {
+        SavedOutputKind::RawVoltageOrCurrent => {
+            let expression = expression.trim();
+            validate_raw_probe(expression)?;
+            let (function, arguments) = expression.split_once('(').expect("validated probe");
+            for argument in arguments[..arguments.len() - 1].split(',') {
+                references.insert(
+                    format!("{}({})", function.trim(), argument.trim()).to_ascii_lowercase(),
+                );
+            }
+        }
+        SavedOutputKind::DerivedExpression => {
+            let parsed = Parser::new(expression)
+                .try_parse()
+                .map_err(|error| error.to_string())?;
+            let mut pending = vec![&parsed];
+            while let Some(expr) = pending.pop() {
+                match expr {
+                    CalculatorExpr::WaveformRef { signal, dataset } => {
+                        if dataset.is_some() {
+                            return Err("saved outputs require sources from their owning analysis"
+                                .to_owned());
+                        }
+                        references.insert(signal.to_ascii_lowercase());
+                    }
+                    CalculatorExpr::BinaryOp { left, right, .. } => {
+                        pending.extend([left.as_ref(), right.as_ref()])
+                    }
+                    CalculatorExpr::UnaryOp { operand, .. } => pending.push(operand),
+                    CalculatorExpr::FunctionCall { args, .. } => pending.extend(args),
+                    CalculatorExpr::Number(_) | CalculatorExpr::Constant(_) => {}
+                }
+            }
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(references))
+}
+
 fn parse_calculator_expression(expression: &str) -> Result<(), String> {
-    crate::analysis::calculator::parser::Parser::new(expression)
+    Parser::new(expression)
         .try_parse()
         .map(|_| ())
         .map_err(|error| format!("expression is invalid: {error}"))

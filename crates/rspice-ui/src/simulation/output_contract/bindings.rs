@@ -35,9 +35,14 @@ impl PreparedSavedOutput {
             .iter()
             .filter_map(|signal| {
                 let (current, node) = probe_identity(signal);
-                (!current).then(|| {
-                    crate::state::ProbeTarget::engine_alias(node).unwrap_or_else(|| node.to_owned())
-                })
+                if current {
+                    None
+                } else {
+                    Some(
+                        crate::state::ProbeTarget::engine_alias(node)
+                            .unwrap_or_else(|| node.to_owned()),
+                    )
+                }
             })
             .collect();
         let aliases = rspice_core::netlist::collect_requested_interface_node_aliases_with_abort(
