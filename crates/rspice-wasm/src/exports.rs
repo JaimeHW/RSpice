@@ -544,7 +544,7 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn private_bjt_nonlinear_transient_scaling_in_wasm() {
+    fn bjt_nonlinear_transient_scaling_in_wasm() {
         let mut config = rspice_core::engine::SimulationConfig::default()
             .with_spice_dialect(rspice_core::engine::SpiceDialect::Xyce);
         config.convergence_config.gmin_target = 0.0;
@@ -557,25 +557,34 @@ mod wasm_tests {
         config.transient_nonlinear_reltol = Some(1e-9);
         config.transient_nonlinear_rhstol = Some(1e-220);
         let engine = rspice_core::Engine::new(config);
-        let run = |m| {
-            let deck = rspice_core::Netlist::parse(&format!("Private BJT nonlinear scaling\nVC c 0 1\nVB b 0 PWL(0 .5 50n .7)\nQ1 c b 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 RB=5k RBM=1k CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap();
+        let run = |m, private| {
+            let base = if private { "b" } else { "bi" };
+            let resistance = if private {
+                String::new()
+            } else {
+                format!("RB b bi {}\n", 5e3 / m)
+            };
+            let model = if private { "RB=5k RBM=1k" } else { "" };
+            let deck = rspice_core::Netlist::parse(&format!("Private BJT nonlinear scaling\nVC c 0 1\nVB b 0 PWL(0 .5 50n .7)\n{resistance}Q1 c {base} 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 {model} CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap();
             engine
                 .run_tran_with_abort(&deck, 100e-9, 0.05e-9, &rspice_core::abort_signal::NoAbort)
                 .unwrap()
         };
-        let reference = run(1.0);
+        let reference = run(1.0, false);
         for scale in [1e-20, 1e-200] {
-            let actual = run(scale);
-            assert_eq!(actual.time, reference.time);
-            for branch in ["VB", "VC"] {
-                let a = actual.try_branch_current_waveform_named(branch).unwrap();
-                let b = reference.try_branch_current_waveform_named(branch).unwrap();
-                for ((&t, &a), &b) in actual.time.iter().zip(a).zip(b) {
-                    assert!(
-                        (a / scale - b).abs() < 1e-11,
-                        "{branch} M={scale:e} t={t:e}: {:e} vs {b:e}",
-                        a / scale
-                    );
+            for private in [false, true] {
+                let actual = run(scale, private);
+                assert_eq!(actual.time, reference.time);
+                for branch in ["VB", "VC"] {
+                    let a = actual.try_branch_current_waveform_named(branch).unwrap();
+                    let b = reference.try_branch_current_waveform_named(branch).unwrap();
+                    for ((&t, &a), &b) in actual.time.iter().zip(a).zip(b) {
+                        assert!(
+                            (a / scale - b).abs() < 1e-11,
+                            "{branch} M={scale:e} t={t:e}: {:e} vs {b:e}",
+                            a / scale
+                        );
+                    }
                 }
             }
         }

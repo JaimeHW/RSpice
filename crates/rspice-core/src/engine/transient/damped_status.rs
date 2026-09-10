@@ -356,9 +356,12 @@ impl XyceTransientDampedStatus {
             .initial_residual_l2_norm
             .get_or_insert(sample.residual_l2_norm);
 
-        // Xyce checks this before forming either convergence rate.  Preserve
-        // the current value as the previous norm for the next candidate.
-        if sample.residual_l2_norm < Value::EPSILON {
+        // Preserve Xyce's exact-zero fast path, but a nonzero current residual
+        // below epsilon also needs a converged update. Otherwise small devices
+        // can accept a predictor-sized voltage error regardless of tolerances.
+        if sample.residual_l2_norm < Value::EPSILON
+            && (sample.residual_l2_norm == 0.0 || sample.weighted_update_norm <= delta_x_tolerance)
+        {
             self.previous_residual_l2_norm = Some(sample.residual_l2_norm);
             return XyceDampedDecision::Accepted {
                 test: 1,
@@ -536,10 +539,23 @@ mod tests {
     }
 
     #[test]
-    fn norm_too_small_accepts_before_rate_tests() {
-        let mut status = XyceTransientDampedStatus::new(20);
+    fn tiny_residual_requires_a_converged_update() {
+        for residual in [Value::EPSILON * 0.5, 1e-100, 1e-300] {
+            let mut status = XyceTransientDampedStatus::new(20);
+            assert_eq!(
+                status.evaluate(sample(1, residual, residual, 1.0), 0.33, 1e-320),
+                XyceDampedDecision::Continue
+            );
+            assert_eq!(
+                status.evaluate(sample(2, residual, residual, 0.1), 0.33, 1e-320),
+                XyceDampedDecision::Accepted {
+                    test: 1,
+                    return_code: 1
+                }
+            );
+        }
         assert_eq!(
-            status.evaluate(sample(1, 1.0, Value::EPSILON * 0.5, 1.0), 0.33, 1.0e-2),
+            XyceTransientDampedStatus::new(20).evaluate(sample(1, 0.0, 0.0, 1.0), 0.33, 1e-320),
             XyceDampedDecision::Accepted {
                 test: 1,
                 return_code: 1,

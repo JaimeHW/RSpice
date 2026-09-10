@@ -2766,40 +2766,50 @@ fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
     config.transient_nonlinear_abstol = Some(1e-12);
     config.transient_nonlinear_reltol = Some(1e-9);
     config.transient_nonlinear_rhstol = Some(1e-220);
-    let engine = Engine::new(config);
-    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
-        let sources = format!(
-            "Private nonlinear BJT\nVC c 0 {polarity}\nVB b 0 PWL(0 {} 50n {})\n",
-            polarity * 0.5,
-            polarity * 0.7
-        );
-        // With no Early or high-injection effects, RB remains 5k even
-        // though RBM<RB selects a private base. Diffusion and depletion
-        // charge still depend nonlinearly on the evolving private voltage.
-        let model = "IS=1e-14 BF=100 CJE=1p CJC=2p TF=1n";
-        // Use the independently resolved unit RC/transistor circuit for every
-        // scale, so its outer MNA current weights do not change with the
-        // private instance being qualified.
-        let explicit = Netlist::parse(&format!(
-            "{sources}RB b bi 5k\nQ1 c bi 0 mm\n.model mm {kind}({model})\n.end\n"
-        ))
-        .unwrap();
-        let expected = engine.run_tran(&explicit, 100e-9, 0.05e-9).unwrap();
-        for scale in [1.0, 1e-20, 1e-200] {
-            let private = Netlist::parse(&format!(
-                "{sources}Q1 c b 0 mm M={scale}\n.model mm {kind}({model} RB=5k RBM=1k)\n.end\n"
+    for nox in [false, true] {
+        config.transient_nonlinear_nox = Some(nox);
+        let engine = Engine::new(config.clone());
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let sources = format!(
+                "Private nonlinear BJT\nVC c 0 {polarity}\nVB b 0 PWL(0 {} 50n {})\n",
+                polarity * 0.5,
+                polarity * 0.7
+            );
+            // With no Early or high-injection effects, RB remains 5k even
+            // though RBM<RB selects a private base. Diffusion and depletion
+            // charge still depend nonlinearly on the evolving private voltage.
+            let model = "IS=1e-14 BF=100 CJE=1p CJC=2p TF=1n";
+            // Use the independently resolved unit RC/transistor circuit for every
+            // scale, so its outer MNA current weights do not change with the
+            // private instance being qualified.
+            let explicit = Netlist::parse(&format!(
+                "{sources}RB b bi 5k\nQ1 c bi 0 mm\n.model mm {kind}({model})\n.end\n"
             ))
             .unwrap();
-            let actual = engine.run_tran(&private, 100e-9, 0.05e-9).unwrap();
-            assert_eq!(actual.time, expected.time);
-            for branch in ["VB", "VC"] {
-                let a = actual.try_branch_current_waveform_named(branch).unwrap();
-                let b = expected.try_branch_current_waveform_named(branch).unwrap();
-                for ((&time, &a), &b) in actual.time.iter().zip(a).zip(b) {
-                    assert!(
-                        (a / scale - b).abs() < 1e-11,
-                        "{kind} M={scale:e} {branch} t={time:e}: {a:e} vs {b:e}"
-                    );
+            let expected = engine.run_tran(&explicit, 100e-9, 0.05e-9).unwrap();
+            for scale in [1.0, 1e-20, 1e-200] {
+                let private = Netlist::parse(&format!(
+                    "{sources}Q1 c b 0 mm M={scale}\n.model mm {kind}({model} RB=5k RBM=1k)\n.end\n"
+                ))
+                .unwrap();
+                let resistance = 5e3 / scale;
+                let scaled_explicit = Netlist::parse(&format!(
+                    "{sources}RB b bi {resistance}\nQ1 c bi 0 mm M={scale}\n.model mm {kind}({model})\n.end\n"
+                ))
+                .unwrap();
+                for (form, deck) in [("private", &private), ("explicit", &scaled_explicit)] {
+                    let actual = engine.run_tran(deck, 100e-9, 0.05e-9).unwrap();
+                    assert_eq!(actual.time, expected.time);
+                    for branch in ["VB", "VC"] {
+                        let a = actual.try_branch_current_waveform_named(branch).unwrap();
+                        let b = expected.try_branch_current_waveform_named(branch).unwrap();
+                        for ((&time, &a), &b) in actual.time.iter().zip(a).zip(b) {
+                            assert!(
+                                (a / scale - b).abs() < 1e-11,
+                                "NOX={nox} {form} {kind} M={scale:e} {branch} t={time:e}: {a:e} vs {b:e}"
+                            );
+                        }
+                    }
                 }
             }
         }

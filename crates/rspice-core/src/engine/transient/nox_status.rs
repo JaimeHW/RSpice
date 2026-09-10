@@ -97,7 +97,17 @@ impl XyceTransientNoxStatus {
         let initial_norm = *self
             .initial_residual_l2_norm
             .get_or_insert(sample.residual_l2_norm);
-        if sample.residual_l2_norm < Value::EPSILON {
+        // A nonzero current residual can be small only because the circuit
+        // is small. Unlike Xyce's absolute-epsilon shortcut, require its
+        // voltage/current update to converge too. Exact zero retains the
+        // fast path for a solved linear system or unchanged operating point.
+        if sample.residual_l2_norm < Value::EPSILON
+            && (sample.residual_l2_norm == 0.0
+                || (sample.iteration > 0
+                    && sample
+                        .weighted_update_norm
+                        .is_some_and(|norm| norm < delta_x_tolerance)))
+        {
             self.previous_residual_l2_norm = Some(sample.residual_l2_norm);
             return XyceNoxDecision::Accepted {
                 test: 1,
@@ -242,6 +252,35 @@ mod tests {
             weighted_update_norm,
             device_converged: true,
         }
+    }
+
+    #[test]
+    fn tiny_residual_requires_a_converged_update() {
+        for residual in [Value::EPSILON * 0.5, 1e-100, 1e-300] {
+            let mut status = XyceTransientNoxStatus::new(20);
+            assert_eq!(
+                status.evaluate(sample(0, residual, residual, None), 0.33, 1e-320),
+                XyceNoxDecision::Continue
+            );
+            assert_eq!(
+                status.evaluate(sample(1, residual, residual, Some(1.0)), 0.33, 1e-320),
+                XyceNoxDecision::Continue
+            );
+            assert_eq!(
+                status.evaluate(sample(2, residual, residual, Some(0.1)), 0.33, 1e-320),
+                XyceNoxDecision::Accepted {
+                    test: 1,
+                    return_code: 1
+                }
+            );
+        }
+        assert_eq!(
+            XyceTransientNoxStatus::new(20).evaluate(sample(0, 0.0, 0.0, None), 0.33, 1e-320),
+            XyceNoxDecision::Accepted {
+                test: 1,
+                return_code: 1
+            }
+        );
     }
 
     #[test]
