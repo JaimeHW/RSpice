@@ -427,6 +427,7 @@ impl LibraryCellInstance {
 /// any finite, strictly positive value, so half a unit device is a legitimate
 /// request and is deliberately not rounded to a whole count here.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
 pub struct InstanceMultiplicity(f64);
 
 impl InstanceMultiplicity {
@@ -471,7 +472,27 @@ impl<'de> Deserialize<'de> for InstanceMultiplicity {
     where
         D: Deserializer<'de>,
     {
-        Self::new(f64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+        // Earlier RON writers emitted the tuple-newtype wrapper, while the
+        // reader expected a scalar. Accept those saved values as well as the
+        // canonical scalar used by JSON and new RON documents.
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct LegacyNamed {
+            #[serde(rename = "InstanceMultiplicity")]
+            value: f64,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Persisted {
+            Scalar(f64),
+            Legacy((f64,)),
+            Named(LegacyNamed),
+        }
+        let value = match Persisted::deserialize(deserializer)? {
+            Persisted::Scalar(value) | Persisted::Legacy((value,)) => value,
+            Persisted::Named(LegacyNamed { value }) => value,
+        };
+        Self::new(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1545,6 +1566,54 @@ mod tests {
         let decoded: Component =
             serde_json::from_str(&serde_json::to_string(&component).unwrap()).unwrap();
         assert_eq!(decoded, component);
+    }
+
+    #[test]
+    fn typed_multiplicity_round_trips_ron_and_reads_legacy_wrappers_without_losing_validation() {
+        for value in [0.5, 3.0, 3.125, 1e100] {
+            let multiplicity = InstanceMultiplicity::new(value).unwrap();
+            let encoded = ron::ser::to_string(&multiplicity).unwrap();
+            assert!(!encoded.starts_with('('));
+            assert_eq!(
+                ron::from_str::<InstanceMultiplicity>(&encoded).unwrap(),
+                multiplicity
+            );
+            assert_eq!(
+                ron::from_str::<InstanceMultiplicity>(&format!("({encoded})")).unwrap(),
+                multiplicity
+            );
+            assert_eq!(
+                ron::from_str::<InstanceMultiplicity>(&format!("InstanceMultiplicity({encoded})"))
+                    .unwrap(),
+                multiplicity
+            );
+        }
+        for invalid in [
+            "0.0",
+            "-1.0",
+            "inf",
+            "NaN",
+            "(0.0)",
+            "(-1.0)",
+            "(inf)",
+            "(NaN)",
+            "()",
+            "(1.0,2.0)",
+            "OtherMultiplicity(3.0)",
+        ] {
+            assert!(
+                ron::from_str::<InstanceMultiplicity>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        component.params = "m=2 note='a  b'".to_owned();
+        component.multiplicity = Some(InstanceMultiplicity::new(3.0).unwrap());
+        let encoded = ron::ser::to_string(&component).unwrap();
+        assert!(encoded.contains("multiplicity:Some(3.0)"), "{encoded}");
+        assert_eq!(ron::from_str::<Component>(&encoded).unwrap(), component);
+        let legacy = encoded.replace("multiplicity:Some(3.0)", "multiplicity:Some((3.0))");
+        assert_eq!(ron::from_str::<Component>(&legacy).unwrap(), component);
     }
 
     #[test]
