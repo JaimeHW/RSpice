@@ -735,7 +735,7 @@ pub(super) fn command_popup(
         .layout(Layout::top_down_justified(Align::LEFT))
         .align(egui::RectAlign::BOTTOM_START)
         .width(widest)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_min_width(widest);
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -743,50 +743,57 @@ pub(super) fn command_popup(
                 card_note(ui, empty_note);
                 return;
             }
-            for (index, choice) in choices.iter().enumerate() {
-                let height = t.metrics.ctl_h.max(24.0);
-                let (row, row_response) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), height),
-                    if choice.unavailable.is_some() {
-                        Sense::hover()
-                    } else {
-                        Sense::click()
-                    },
-                );
-                let row_response = match choice.unavailable {
-                    Some(reason) => row_response.on_hover_text(reason),
-                    None => row_response,
-                };
-                row_response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        ui.is_enabled() && choice.unavailable.is_none(),
-                        &choice.label,
-                    )
+            // Keep touch-sized trigger controls touch-sized in their menu,
+            // and let long menus scroll within the host viewport.
+            let height = t.metrics.ctl_h.max(24.0).max(response.rect.height());
+            egui::ScrollArea::vertical()
+                .id_salt(("command-options", id_salt))
+                .max_height((ui.ctx().content_rect().height() - 24.0).max(height))
+                .show(ui, |ui| {
+                    for (index, choice) in choices.iter().enumerate() {
+                        let (row, row_response) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), height),
+                            if choice.unavailable.is_some() {
+                                Sense::hover()
+                            } else {
+                                Sense::click()
+                            },
+                        );
+                        let row_response = match choice.unavailable {
+                            Some(reason) => row_response.on_hover_text(reason),
+                            None => row_response,
+                        };
+                        row_response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled() && choice.unavailable.is_none(),
+                                &choice.label,
+                            )
+                        });
+                        if row_response.hovered() {
+                            ui.painter().rect_filled(row, t.radius, c.bg_hover);
+                        }
+                        ui.painter().text(
+                            egui::pos2(row.left() + 8.0, row.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            &choice.label,
+                            theme::sans(tokens::FS_0, FontWeight::Regular),
+                            if choice.unavailable.is_some() {
+                                c.text_faint
+                            } else {
+                                c.text
+                            },
+                        );
+                        theme::paint_focus_ring(ui, &row_response, row);
+                        if choice.unavailable.is_none()
+                            && row_response
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                        {
+                            picked = Some(index);
+                        }
+                    }
                 });
-                if row_response.hovered() {
-                    ui.painter().rect_filled(row, t.radius, c.bg_hover);
-                }
-                ui.painter().text(
-                    egui::pos2(row.left() + 8.0, row.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    &choice.label,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    if choice.unavailable.is_some() {
-                        c.text_faint
-                    } else {
-                        c.text
-                    },
-                );
-                theme::paint_focus_ring(ui, &row_response, row);
-                if choice.unavailable.is_none()
-                    && row_response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                {
-                    picked = Some(index);
-                }
-            }
         });
     if picked.is_some() {
         egui::Popup::close_id(ui.ctx(), popup_id);

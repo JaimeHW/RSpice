@@ -29,6 +29,10 @@ use super::page_kit::{
     ledger_head, receipts_card, rule_row,
 };
 
+mod toolbar;
+#[cfg(test)]
+mod toolbar_tests;
+
 /// Rows shown before the point table truncates. A composed run space can be
 /// large; a table that listed all of it would be a scrolling wall rather than a
 /// check on the composition. An excluded point is drawn wherever it falls: the
@@ -69,7 +73,7 @@ const AXIS_CARD_SLOT_H: f32 = 130.0;
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let frame = RunSetFrame::resolve(app);
 
-    toolbar(ui, app, &frame.validation);
+    toolbar::show(ui, app, &frame.validation);
     if !frame.validation.errors.is_empty() || !frame.validation.warnings.is_empty() {
         issue_summary(ui, app, &frame.validation);
     }
@@ -160,81 +164,6 @@ impl RunSetFrame {
             workload,
             validation,
         }
-    }
-}
-
-// ------------------------------------------------------------------ toolbar
-
-/// The transaction commands, above the space they act on.
-fn toolbar(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
-    let t = Tokens::get(ui.ctx());
-    let addable = app.state.sim_setup.run_set.addable_kinds();
-    let can_undo = !app.state.sim_setup.run_set.history.is_empty();
-    let can_redo = !app.state.sim_setup.run_set.future.is_empty();
-    let revision = app.state.sim_setup.run_set.revision;
-    let mut action: Option<RunSetAction> = None;
-
-    let width = ui.available_width();
-    egui::Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, t.color.border))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(CARD_PAD_X as i8, 7))
-        .show(ui, |ui| {
-            ui.set_width(width - CARD_PAD_X * 2.0 - 2.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                // The leading glyph was U+FF0B, which the bundled faces do not
-                // carry: the page's first control opened with a replacement
-                // box. The plus is painted as a vector by the button's own
-                // icon slot, where no font has to have it.
-                let choices = addable
-                    .iter()
-                    .map(|kind| super::page_kit::PopupChoice {
-                        label: kind.default_name().to_owned(),
-                        unavailable: kind.execution_blocker(),
-                    })
-                    .collect::<Vec<_>>();
-                if let Some(index) = super::page_kit::command_popup(
-                    ui,
-                    "run-set.add-dimension",
-                    Button::new("Add dimension").icon(Icon::Add),
-                    "Every axis the executor binds is already declared.",
-                    &choices,
-                ) && let Some(kind) = addable.get(index)
-                {
-                    action = Some(RunSetAction::AddDimension(*kind));
-                }
-                if Button::new("Undo").enabled(can_undo).show(ui).clicked() {
-                    action = Some(RunSetAction::Undo);
-                }
-                if Button::new("Redo").enabled(can_redo).show(ui).clicked() {
-                    action = Some(RunSetAction::Redo);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if Button::new("Validate and preview")
-                        .accent()
-                        .icon(Icon::Grid)
-                        .show(ui)
-                        .clicked()
-                    {
-                        action = Some(RunSetAction::Preview);
-                    }
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "working revision {revision} · {}",
-                            validation.status.as_str()
-                        ))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                    );
-                });
-            });
-        });
-
-    if let Some(action) = action {
-        commit(app, action);
     }
 }
 
