@@ -78,6 +78,11 @@ pub struct SavedOutputReceipt {
     pub contract_digest: ContentDigest,
     pub name: String,
     pub source_expression: String,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::state::ComplexExpressionPolicy::is_legacy"
+    )]
+    pub complex_policy: crate::state::ComplexExpressionPolicy,
     pub output_kind: SavedOutputKind,
     pub save_policy: SavedOutputPolicy,
     pub stored_precision: SavedOutputPrecision,

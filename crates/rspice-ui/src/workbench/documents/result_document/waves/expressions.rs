@@ -7,6 +7,7 @@
 //! trace the engineer asked for.
 
 use super::*;
+use crate::state::ComplexExpressionPolicy;
 
 /// Palette color for the i-th trace slot of a strip (waveforms, then
 /// expressions).
@@ -320,6 +321,7 @@ pub(super) fn expr_editor_row(
                             version: expression_version(
                                 state.simulation.data_version,
                                 sample_selection.as_ref(),
+                                ComplexExpressionPolicy::Rectangular,
                             ),
                             series: Ok(series),
                         },
@@ -353,6 +355,22 @@ pub(super) fn evaluate_expression(
     text: &str,
     selection: Option<&SourceSampleSelection>,
 ) -> WaveformSeriesResult {
+    evaluate_expression_with_policy(
+        simulation,
+        analysis_index,
+        text,
+        selection,
+        ComplexExpressionPolicy::Rectangular,
+    )
+}
+
+fn evaluate_expression_with_policy(
+    simulation: &SimulationState,
+    analysis_index: usize,
+    text: &str,
+    selection: Option<&SourceSampleSelection>,
+    complex_policy: ComplexExpressionPolicy,
+) -> WaveformSeriesResult {
     let Some(run) = simulation.active_run() else {
         return Err("analysis no longer exists".to_owned());
     };
@@ -363,80 +381,68 @@ pub(super) fn evaluate_expression(
         selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id
     });
 
-    let ctx = calculator::WaveformsContext::new(&analysis.waveforms);
+    let ctx = calculator::WaveformsContext::with_policy(&analysis.waveforms, complex_policy);
     let expr = match calculator::parser::try_parse(text) {
         Ok(expr) => expr,
         Err(error) => return Err(format!("parse error: {error}")),
     };
-    match calculator::evaluator::evaluate(&expr, &ctx) {
-        Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
-            let (x, y) = match selection {
-                None => (x, y),
-                Some(selection)
-                    if x.len() == y.len()
-                        && selection
-                            .source_indices
-                            .last()
-                            .is_none_or(|index| *index < x.len()) =>
-                {
-                    (
-                        selection
-                            .source_indices
-                            .iter()
-                            .map(|index| x[*index])
-                            .collect(),
-                        selection
-                            .source_indices
-                            .iter()
-                            .map(|index| y[*index])
-                            .collect(),
-                    )
-                }
-                Some(_) => {
-                    return Err(
-                        "expression sample count does not match the retained family manifest"
-                            .to_owned(),
-                    );
-                }
-            };
-            Ok((x.into(), y.into()))
+    let value = calculator::evaluator::evaluate(&expr, &ctx).map_err(|error| error.to_string())?;
+    let scalar_axis = analysis.waveforms.first().and_then(|waveform| {
+        let x = waveform.x.as_slice();
+        if selection.is_some() {
+            Some(x.to_vec())
+        } else {
+            x.first()
+                .zip(x.last())
+                .map(|(&first, &last)| vec![first, last])
         }
-        Ok(calculator::CalcValue::Waveform(..)) => Err("expression produced no samples".to_owned()),
-        Ok(calculator::CalcValue::Scalar(value)) => {
-            if let Some(selection) = selection {
-                let selected_x = analysis.waveforms.first().and_then(|waveform| {
-                    selected_series_pair(&waveform.x, &waveform.y, Some(selection)).map(|(x, _)| x)
-                });
-                return match selected_x {
-                    Some(x) if !x.is_empty() => {
-                        let y = vec![value; x.len()];
-                        Ok((x, y.into()))
-                    }
-                    _ => Err("scalar result with no selected X rows".to_owned()),
-                };
-            }
-            let span = analysis.waveforms.first().and_then(|waveform| {
-                let (x, _) = selected_series_pair(&waveform.x, &waveform.y, selection)?;
-                (x.len() >= 2).then(|| (x[0], x[x.len() - 1]))
-            });
-            match span {
-                Some((x0, x1)) => Ok((vec![x0, x1].into(), vec![value, value].into())),
-                None => Err("scalar result with no x span".to_owned()),
-            }
-        }
-        Err(error) => Err(error.to_string()),
+    });
+    let mut result = calculator::evaluated_waveform(value, text, scalar_axis.as_deref())?;
+    if result.x.is_empty() {
+        return Err("expression produced no samples".to_owned());
     }
+    if let Some(selection) = selection {
+        if selection
+            .source_indices
+            .iter()
+            .any(|index| *index >= result.x.len())
+        {
+            return Err(
+                "expression sample count does not match the retained family manifest".to_owned(),
+            );
+        }
+        let selected = |values: &SharedWaveformValues| -> SharedWaveformValues {
+            selection
+                .source_indices
+                .iter()
+                .map(|index| values[*index])
+                .collect::<Vec<_>>()
+                .into()
+        };
+        result.x = selected(&result.x);
+        result.y = selected(&result.y);
+        if let Some(complex) = &mut result.complex {
+            complex.real = selected(&complex.real);
+            complex.imag = selected(&complex.imag);
+        }
+    }
+    Ok(result)
 }
-
 pub(super) fn expression_version(
     data_version: u64,
     selection: Option<&SourceSampleSelection>,
+    complex_policy: ComplexExpressionPolicy,
 ) -> u64 {
     data_version
         ^ selection
             .map(SourceSampleSelection::fingerprint)
             .unwrap_or_default()
             .rotate_left(23)
+        ^ if complex_policy.is_legacy() {
+            0
+        } else {
+            0x5093_00da_9d16_5c37
+        }
 }
 
 /// One expression trace resolved for plotting.
@@ -472,9 +478,13 @@ pub(super) fn resolve_strip_exprs(
     }
 
     let sample_selection = state.ui.results.sample_selection.clone();
-    let version = expression_version(state.simulation.data_version, sample_selection.as_ref());
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
+        let version = expression_version(
+            state.simulation.data_version,
+            sample_selection.as_ref(),
+            expr.complex_policy,
+        );
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
             .ui
@@ -483,11 +493,12 @@ pub(super) fn resolve_strip_exprs(
             .get(&key)
             .is_some_and(|s| s.version == version);
         if !fresh {
-            let series = evaluate_expression(
+            let series = evaluate_expression_with_policy(
                 &state.simulation,
                 model.analysis_index,
                 &expr.text,
                 sample_selection.as_ref(),
+                expr.complex_policy,
             );
             if let Err(error) = &series {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
@@ -510,13 +521,15 @@ pub(super) fn resolve_strip_exprs(
             .analysis_expr_cache
             .get(&key)
             .and_then(|cached| {
-                cached
-                    .series
-                    .as_ref()
-                    .ok()
-                    .map(|(x, y)| (Arc::clone(x), Arc::clone(y)))
+                cached.series.as_ref().ok().map(|series| {
+                    (
+                        Arc::clone(&series.x),
+                        Arc::clone(&series.y),
+                        series.complex.is_some(),
+                    )
+                })
             });
-        let Some((x, y)) = cached else {
+        let Some((x, y, complex)) = cached else {
             continue;
         };
         let Some(projections) = projected_selected_family_series(&x, &y, sample_selection.as_ref())
@@ -528,8 +541,9 @@ pub(super) fn resolve_strip_exprs(
             continue;
         };
         let base_color = expr_color(tokens, expr_palette_slot(model, slot));
-        let base_cache_key = expr_cache_key(model.analysis_key, &expr.text);
-        let base_label = elide(&expr.text, 24);
+        let base_cache_key =
+            (expr_cache_key(model.analysis_key, &expr.text) ^ version.rotate_left(7)) | (1 << 63);
+        let base_label = expression_label(&expr, complex);
         for projection in projections {
             let family_style = projection.group.map(|group| group.style);
             let cache_key = base_cache_key
@@ -545,9 +559,7 @@ pub(super) fn resolve_strip_exprs(
                 .ui
                 .results
                 .derived
-                .shape_or(cache_key ^ version.rotate_left(7), || {
-                    SweepShape::of(&projection.x)
-                });
+                .shape_or(cache_key, || SweepShape::of(&projection.x));
             // Cached beside the shape, under the same identity: the pane's
             // automatic fit wants an expression's bounds on every frame, and
             // resolving a strip happens twice per frame, so scanning for them
@@ -556,9 +568,7 @@ pub(super) fn resolve_strip_exprs(
                 .ui
                 .results
                 .derived
-                .range_or(cache_key ^ version.rotate_left(7), || {
-                    super::super::finite_extremes(&projection.y)
-                });
+                .range_or(cache_key, || super::super::finite_extremes(&projection.y));
             resolved.push(ResolvedExpr {
                 x: projection.x,
                 shape,
@@ -584,6 +594,106 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     (analysis, text).hash(&mut hasher);
     hasher.finish() | (1 << 63)
+}
+
+pub(super) fn expression_label(expr: &ExprTrace, complex: bool) -> String {
+    if expr.complex_policy.is_legacy() {
+        format!("legacy magnitude · {}", elide(&expr.text, 24))
+    } else if complex {
+        format!("mag({})", elide(&expr.text, 24))
+    } else {
+        elide(&expr.text, 24)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::WaveformData;
+
+    #[test]
+    fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
+        let mut state = AppState::default();
+        state.simulation.start_run().add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
+                .with_waveforms(vec![
+                    WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                        .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
+                    WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                        .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
+                ]),
+        );
+        state.simulation.complete_run();
+        state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+        let digest = state
+            .simulation
+            .active_run()
+            .unwrap()
+            .dataset_content_digest();
+        let policy = state.ui.preferences.result_presentation_policy();
+        let models = cached_models(
+            &state.simulation,
+            &mut state.ui.results,
+            policy.complex_number_display(),
+            &Tokens::default(),
+        );
+        let model = &models[0];
+        let legacy: ExprTrace =
+            serde_json::from_str(r#"{"text":"V(a)-V(b)","visible":true}"#).unwrap();
+        assert!(legacy.complex_policy.is_legacy());
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("complex_policy")
+                .is_none()
+        );
+        state
+            .ui
+            .results
+            .analysis_exprs
+            .insert(model.analysis_key, vec![legacy]);
+        state
+            .ui
+            .results
+            .sync_expression_projection(model.analysis_key, 0);
+        let old = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
+        assert!(old[0].label.starts_with("legacy magnitude"));
+        assert!(
+            state
+                .ui
+                .results
+                .add_expression_trace(
+                    &state.simulation,
+                    model.analysis_key,
+                    "V(a)-V(b)".to_owned()
+                )
+                .unwrap()
+        );
+        let current = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        assert_eq!(current[0].y.as_slice(), &[2.0; 2]);
+        assert_eq!(current[0].label, "mag(V(a)-V(b))");
+        assert_ne!(old[0].cache_key, current[0].cache_key);
+        assert_eq!(
+            state
+                .simulation
+                .active_run()
+                .unwrap()
+                .dataset_content_digest(),
+            digest
+        );
+        assert!(
+            !state
+                .ui
+                .results
+                .add_expression_trace(
+                    &state.simulation,
+                    model.analysis_key,
+                    "V(a)-V(b)".to_owned()
+                )
+                .unwrap()
+        );
+    }
 }
 
 /// Flip a source waveform's quick-view visibility without mutating result data.

@@ -815,6 +815,7 @@ mod tests {
             analysis_key,
             vec![ExprTrace {
                 text: "V(out)/V(in)".to_string(),
+                complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
                 visible: true,
             }],
         );

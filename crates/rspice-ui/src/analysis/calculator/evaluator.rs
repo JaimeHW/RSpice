@@ -4,23 +4,7 @@
 //! Handles vector arithmetic logic.
 
 use super::ast::{BinaryOp, CalculatorConstant, CalculatorExpr, UnaryOp};
-use super::functions::FunctionRegistry;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum CalcValue {
-    Scalar(f64),
-    /// Waveform data (x, y)
-    Waveform(Vec<f64>, Vec<f64>),
-}
-
-impl CalcValue {
-    pub fn create_waveform(x: Vec<f64>, y: Vec<f64>) -> Self {
-        // Enforce same length
-        debug_assert_eq!(x.len(), y.len());
-        Self::Waveform(x, y)
-    }
-}
+pub use super::value::{CalcValue, RealValue};
 
 /// Interface for retrieving simulation data
 pub trait EvaluationContext {
@@ -29,6 +13,16 @@ pub trait EvaluationContext {
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError>;
+
+    /// A direct magnitude projection can read a historical magnitude-only
+    /// source without claiming its phase is known.
+    fn get_magnitude(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<CalcValue, EvaluationError> {
+        super::complex_functions::dispatch("mag", vec![self.get_waveform(signal, dataset)?])
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +37,7 @@ pub enum EvaluationError {
     TypeMismatch(String),
     MathError(String),
     WaveformMismatch(String),
+    PhaseUnavailable(String),
 }
 
 impl std::fmt::Display for EvaluationError {
@@ -64,6 +59,10 @@ impl std::fmt::Display for EvaluationError {
             Self::TypeMismatch(msg) => write!(f, "Type mismatch: {}", msg),
             Self::MathError(msg) => write!(f, "Math error: {}", msg),
             Self::WaveformMismatch(reason) => write!(f, "Cannot combine waveforms: {reason}"),
+            Self::PhaseUnavailable(signal) => write!(
+                f,
+                "Phase is not retained for {signal}; use mag() or dB() explicitly, or rerun to retain complex components"
+            ),
         }
     }
 }
@@ -74,8 +73,8 @@ pub fn evaluate(
     expr: &CalculatorExpr,
     ctx: &impl EvaluationContext,
 ) -> Result<CalcValue, EvaluationError> {
-    match expr {
-        CalculatorExpr::Number(val) => Ok(CalcValue::Scalar(*val)),
+    let value = match expr {
+        CalculatorExpr::Number(val) => Ok(CalcValue::Real(RealValue::Scalar(*val))),
 
         CalculatorExpr::Constant(c) => match c {
             // These should probably be handled by context or expanded earlier if they depend on context
@@ -102,22 +101,40 @@ pub fn evaluate(
         }
 
         CalculatorExpr::FunctionCall { name, args } => {
+            if matches!(
+                name.to_ascii_lowercase().as_str(),
+                "mag" | "magnitude" | "abs" | "db"
+            ) && let [CalculatorExpr::WaveformRef { signal, dataset }] = args.as_slice()
+            {
+                return if name.eq_ignore_ascii_case("db") {
+                    let value = match ctx.get_waveform(signal, dataset.as_deref()) {
+                        Err(EvaluationError::PhaseUnavailable(_)) => {
+                            ctx.get_magnitude(signal, dataset.as_deref())?
+                        }
+                        value => value?,
+                    };
+                    super::complex_functions::dispatch("db", vec![value])?.checked()
+                } else {
+                    ctx.get_magnitude(signal, dataset.as_deref())?.checked()
+                };
+            }
             let mut arg_values = Vec::with_capacity(args.len());
             for arg in args {
                 arg_values.push(evaluate(arg, ctx)?);
             }
-            FunctionRegistry::dispatch(name, arg_values)
+            super::complex_functions::dispatch(name, arg_values)
         }
-    }
+    };
+    value?.checked()
 }
 
-fn neg_value(val: CalcValue) -> Result<CalcValue, EvaluationError> {
-    match val {
-        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(-s)),
-        CalcValue::Waveform(x, y) => {
-            let new_y = y.into_iter().map(|v| -v).collect();
-            Ok(CalcValue::Waveform(x, new_y))
-        }
+fn neg_value(value: CalcValue) -> Result<CalcValue, EvaluationError> {
+    match value {
+        CalcValue::Real(value) => neg_real_value(value).map(CalcValue::Real),
+        CalcValue::Complex(value) => Ok(CalcValue::Complex(super::complex_functions::map_complex(
+            value,
+            |value| -value,
+        ))),
     }
 }
 
@@ -126,31 +143,54 @@ fn apply_binary_op(
     left: CalcValue,
     right: CalcValue,
 ) -> Result<CalcValue, EvaluationError> {
+    match (left, right) {
+        (CalcValue::Real(left), CalcValue::Real(right)) => {
+            apply_real_binary_op(op, left, right).map(CalcValue::Real)
+        }
+        (left, right) => super::complex_ops::binary(op, left.into_complex(), right.into_complex())
+            .map(CalcValue::Complex),
+    }
+}
+fn neg_real_value(val: RealValue) -> Result<RealValue, EvaluationError> {
+    match val {
+        RealValue::Scalar(s) => Ok(RealValue::Scalar(-s)),
+        RealValue::Waveform(x, y) => {
+            let new_y = y.into_iter().map(|v| -v).collect();
+            Ok(RealValue::Waveform(x, new_y))
+        }
+    }
+}
+
+fn apply_real_binary_op(
+    op: BinaryOp,
+    left: RealValue,
+    right: RealValue,
+) -> Result<RealValue, EvaluationError> {
     for value in [&left, &right] {
-        if let CalcValue::Waveform(x, y) = value {
+        if let RealValue::Waveform(x, y) = value {
             super::interpolation::validate_samples(x, y)
                 .map_err(|error| EvaluationError::WaveformMismatch(error.to_string()))?;
         }
     }
     match (left, right) {
-        (CalcValue::Scalar(l), CalcValue::Scalar(r)) => {
-            Ok(CalcValue::Scalar(apply_op_scalar(op, l, r)))
+        (RealValue::Scalar(l), RealValue::Scalar(r)) => {
+            Ok(RealValue::Scalar(apply_op_scalar(op, l, r)))
         }
-        (CalcValue::Scalar(l), CalcValue::Waveform(rx, ry)) => {
+        (RealValue::Scalar(l), RealValue::Waveform(rx, ry)) => {
             let new_y = ry
                 .into_iter()
                 .map(|r_val| apply_op_scalar(op, l, r_val))
                 .collect();
-            Ok(CalcValue::create_waveform(rx, new_y))
+            Ok(RealValue::create_waveform(rx, new_y))
         }
-        (CalcValue::Waveform(lx, ly), CalcValue::Scalar(r)) => {
+        (RealValue::Waveform(lx, ly), RealValue::Scalar(r)) => {
             let new_y = ly
                 .into_iter()
                 .map(|l_val| apply_op_scalar(op, l_val, r))
                 .collect();
-            Ok(CalcValue::create_waveform(lx, new_y))
+            Ok(RealValue::create_waveform(lx, new_y))
         }
-        (CalcValue::Waveform(lx, ly), CalcValue::Waveform(rx, ry)) => {
+        (RealValue::Waveform(lx, ly), RealValue::Waveform(rx, ry)) => {
             // Equal complete axes permit pointwise operations, including
             // repeated coordinates and matching sweep branches. Unequal axes
             // require an unambiguous interpolation domain.
@@ -168,30 +208,34 @@ fn apply_binary_op(
                 .map(|(l, r)| apply_op_scalar(op, *l, *r))
                 .collect();
 
-            Ok(CalcValue::create_waveform(out_x, new_y))
+            Ok(RealValue::create_waveform(out_x, new_y))
         }
     }
 }
 
 fn apply_op_scalar(op: BinaryOp, l: f64, r: f64) -> f64 {
+    if !l.is_finite() || !r.is_finite() {
+        return f64::NAN;
+    }
     match op {
         BinaryOp::Add => l + r,
         BinaryOp::Sub => l - r,
         BinaryOp::Mul => l * r,
-        BinaryOp::Div => l / r, // Div by zero handled by returning Inf/NaN which is spec compliant
+        BinaryOp::Div => l / r, // Undefined samples remain gaps; checked scalars report an error.
         BinaryOp::Pow => l.powf(r),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::RealValue as CalcValue;
     use super::*;
 
     fn difference(
         left: (&[f64], &[f64]),
         right: (&[f64], &[f64]),
     ) -> Result<CalcValue, EvaluationError> {
-        apply_binary_op(
+        apply_real_binary_op(
             BinaryOp::Sub,
             CalcValue::Waveform(left.0.to_vec(), left.1.to_vec()),
             CalcValue::Waveform(right.0.to_vec(), right.1.to_vec()),
@@ -259,8 +303,10 @@ mod tests {
                 CalcValue::Scalar(2.0),
                 CalcValue::Waveform(vec![0.0, 1.0], vec![1.0, 2.0]),
             ] {
-                assert!(apply_binary_op(BinaryOp::Add, malformed.clone(), other.clone()).is_err());
-                assert!(apply_binary_op(BinaryOp::Add, other, malformed.clone()).is_err());
+                assert!(
+                    apply_real_binary_op(BinaryOp::Add, malformed.clone(), other.clone()).is_err()
+                );
+                assert!(apply_real_binary_op(BinaryOp::Add, other, malformed.clone()).is_err());
             }
         }
     }

@@ -13,8 +13,9 @@ use crate::simulation::output_contract::SavedOutputPreflightReport;
 use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    CaptureGroup, CaptureGroupMembership, SavedOutput, SavedOutputCompatibility, SavedOutputPolicy,
-    SavedOutputPrecision, SavedOutputStreaming, UNGROUPED_NAME,
+    CaptureGroup, CaptureGroupMembership, ComplexExpressionPolicy, SavedOutput,
+    SavedOutputCompatibility, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+    UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
@@ -866,6 +867,33 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     }),
                     None,
                 );
+                if output.kind == crate::state::SavedOutputKind::DerivedExpression {
+                    field_pair(
+                        ui,
+                        ("Signal arithmetic", &mut |ui: &mut Ui, width: f32| {
+                            if let Some(index) = select(
+                                ui,
+                                "simulation.outputs.complex-policy",
+                                "Signal arithmetic",
+                                output.complex_policy.label(),
+                                &ComplexExpressionPolicy::ALL
+                                    .map(|policy| policy.label().to_owned()),
+                                width,
+                            ) {
+                                edit.set(Some(OutputEdit::ComplexPolicy(
+                                    ComplexExpressionPolicy::ALL[index],
+                                )));
+                            }
+                        }),
+                        None,
+                    );
+                    if output.complex_policy.is_legacy() {
+                        card_note(
+                            ui,
+                            "This expression uses the magnitudes of complex source signals. Select rectangular arithmetic to include phase in future evaluations. Existing retained results stay unchanged.",
+                        );
+                    }
+                }
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                     for action in EditorHandoff::ALL {
@@ -1242,6 +1270,7 @@ const CAPTURE_BY_RULE: &str = "By rule";
 /// single slot, and so the receipt wording lives next to the change it
 /// describes.
 enum OutputEdit {
+    ComplexPolicy(ComplexExpressionPolicy),
     Scope(SavedOutputCompatibility),
     Policy(SavedOutputPolicy),
     Precision(SavedOutputPrecision),
@@ -1251,6 +1280,7 @@ enum OutputEdit {
 impl OutputEdit {
     fn apply(self, target: &mut SavedOutput) {
         match self {
+            Self::ComplexPolicy(policy) => target.complex_policy = policy,
             Self::Scope(scope) => target.compatible_analyses = scope,
             Self::Policy(policy) => target.save_policy = policy,
             Self::Precision(precision) => target.stored_precision = precision,
@@ -1260,6 +1290,9 @@ impl OutputEdit {
 
     fn detail(&self, name: &str, scopes: &[(String, SavedOutputCompatibility)]) -> String {
         match self {
+            Self::ComplexPolicy(policy) => {
+                format!("Set saved output {name} to {}.", policy.label())
+            }
             Self::Scope(scope) => format!(
                 "Scoped saved output {name} to {}.",
                 scope_label(scope, scopes)

@@ -168,6 +168,7 @@ pub(super) struct Context<'a> {
     pub waveforms: &'a [WaveformData],
     pub family: Option<(&'a dc_family::Sources<'a>, usize)>,
     pub axis: Option<&'a WaveformData>,
+    pub complex_policy: crate::state::ComplexExpressionPolicy,
 }
 
 impl<'a> Context<'a> {
@@ -193,6 +194,18 @@ impl<'a> Context<'a> {
 }
 
 impl calculator::EvaluationContext for Context<'_> {
+    fn get_magnitude(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<CalcValue, calculator::EvaluationError> {
+        let source = match self.resolve(signal) {
+            Ok(probe::Source::Waveform(waveform)) => Some(waveform),
+            _ => None,
+        };
+        calculator::magnitude_value(self.get_waveform(signal, dataset), source)
+    }
+
     fn get_waveform(
         &self,
         signal: &str,
@@ -216,9 +229,7 @@ impl calculator::EvaluationContext for Context<'_> {
                 .axis
                 .map(|wave| CalcValue::create_waveform(wave.x.to_vec(), vec![0.0; wave.x.len()]))
                 .ok_or_else(absent),
-            probe::Source::Waveform(wave) => {
-                Ok(CalcValue::create_waveform(wave.x.to_vec(), wave.y.to_vec()))
-            }
+            probe::Source::Waveform(wave) => calculator::waveform_value(wave, self.complex_policy),
         }
     }
 }
@@ -240,6 +251,7 @@ pub(super) fn resolve(
         waveforms: source,
         family: None,
         axis,
+        complex_policy: contract.complex_policy,
     };
     match contract.kind {
         SavedOutputKind::RawVoltageOrCurrent => probe::resolve_bound_raw_probe(

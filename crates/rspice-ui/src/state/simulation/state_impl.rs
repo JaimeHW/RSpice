@@ -1171,6 +1171,7 @@ mod tests {
             contract_digest: crate::product::ContentDigest::from_bytes([0x7a; 32]),
             name: "output_voltage".to_owned(),
             source_expression: "V(out)".to_owned(),
+            complex_policy: crate::state::ComplexExpressionPolicy::LegacyMagnitude,
             output_kind: crate::state::SavedOutputKind::RawVoltageOrCurrent,
             save_policy: crate::state::SavedOutputPolicy::OnDemandFromRetainedState,
             stored_precision: crate::state::SavedOutputPrecision::FullSourcePrecision,

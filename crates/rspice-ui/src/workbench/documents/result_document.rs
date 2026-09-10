@@ -261,8 +261,7 @@ pub(crate) type AxisExtent = (f64, f64);
 /// The X and Y intervals one plot last drew.
 pub(crate) type DrawnAxes = (AxisExtent, AxisExtent);
 
-pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
-pub type WaveformSeriesResult = Result<WaveformSeries, String>;
+pub type WaveformSeriesResult = Result<crate::state::WaveformData, String>;
 type WindowStatsKey = (u64, u64, u64, usize);
 type WindowStats = Result<
     crate::analysis::measurements::IntervalStatistics,
@@ -3162,12 +3161,17 @@ impl ResultsState {
             .resolve(run)
             .ok_or_else(|| "The selected result analysis is no longer retained.".to_owned())?;
         let traces = self.analysis_exprs.entry(key).or_default();
-        if traces.iter().any(|trace| trace.text == text) {
+        if let Some(trace) = traces.iter_mut().find(|trace| trace.text == text) {
+            // Explicitly re-evaluating a historical expression adopts the
+            // current interpretation. Merely opening the document does not.
+            let upgraded = trace.complex_policy.is_legacy();
+            trace.complex_policy = crate::state::ComplexExpressionPolicy::Rectangular;
             self.sync_expression_projection(key, analysis_index);
-            return Ok(false);
+            return Ok(upgraded);
         }
         traces.push(ExprTrace {
             text,
+            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         });
         self.sync_expression_projection(key, analysis_index);

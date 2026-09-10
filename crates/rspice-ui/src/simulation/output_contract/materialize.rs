@@ -348,6 +348,7 @@ pub(crate) fn materialize_deferred_saved_output(
         kind: receipt.output_kind,
         name: receipt.name,
         source_expression: receipt.source_expression,
+        complex_policy: receipt.complex_policy,
         policy: receipt.save_policy,
         precision: receipt.stored_precision,
         streaming: receipt.streaming,

@@ -1244,6 +1244,7 @@ mod tests {
             key,
             vec![result_document::ExprTrace {
                 text: "V(out)*2".to_owned(),
+                complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
                 visible: true,
             }],
         );

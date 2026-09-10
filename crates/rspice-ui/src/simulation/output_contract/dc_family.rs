@@ -90,6 +90,7 @@ impl<'a> Sources<'a> {
                 waveforms: &[],
                 family: Some((self, member)),
                 axis: self.axes.get(&member).copied(),
+                complex_policy: contract.complex_policy,
             };
             let result = match contract.kind {
                 SavedOutputKind::RawVoltageOrCurrent => probe::resolve_bound_raw_probe(

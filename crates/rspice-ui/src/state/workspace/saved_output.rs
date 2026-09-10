@@ -193,6 +193,32 @@ impl SavedOutputStreaming {
     }
 }
 
+/// Interpretation of complex source signals in an authored expression.
+/// Missing fields preserve historical magnitude arithmetic. New expressions
+/// opt into rectangular arithmetic; reopening a recipe never changes it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComplexExpressionPolicy {
+    #[default]
+    LegacyMagnitude,
+    Rectangular,
+}
+
+impl ComplexExpressionPolicy {
+    pub const ALL: [Self; 2] = [Self::Rectangular, Self::LegacyMagnitude];
+
+    pub const fn is_legacy(&self) -> bool {
+        matches!(self, Self::LegacyMagnitude)
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LegacyMagnitude => "Legacy · magnitude arithmetic",
+            Self::Rectangular => "Complex · rectangular arithmetic",
+        }
+    }
+}
+
 /// Persisted waveform/data contract owned by the simulation plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +230,8 @@ pub struct SavedOutput {
     pub kind: SavedOutputKind,
     pub name: String,
     pub source_expression: String,
+    #[serde(skip_serializing_if = "ComplexExpressionPolicy::is_legacy")]
+    pub complex_policy: ComplexExpressionPolicy,
     pub compatible_analyses: SavedOutputCompatibility,
     pub save_policy: SavedOutputPolicy,
     pub stored_precision: SavedOutputPrecision,
@@ -228,6 +256,11 @@ impl SavedOutput {
             kind,
             name: name.into(),
             source_expression: source_expression.into(),
+            complex_policy: if kind == SavedOutputKind::DerivedExpression {
+                ComplexExpressionPolicy::Rectangular
+            } else {
+                ComplexExpressionPolicy::LegacyMagnitude
+            },
             compatible_analyses,
             save_policy,
             stored_precision,
@@ -250,6 +283,9 @@ impl SavedOutput {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.kind != SavedOutputKind::DerivedExpression && !self.complex_policy.is_legacy() {
+            return Err("complex expression policy applies only to derived expressions".to_owned());
+        }
         validate_bounded_text("name", &self.name, 256, false)?;
         validate_bounded_text(
             "source or expression",
@@ -327,6 +363,8 @@ impl<'de> Deserialize<'de> for SavedOutput {
             kind: SavedOutputKind,
             name: String,
             source_expression: String,
+            #[serde(default)]
+            complex_policy: ComplexExpressionPolicy,
             compatible_analyses: SavedOutputCompatibility,
             save_policy: SavedOutputPolicy,
             stored_precision: SavedOutputPrecision,
@@ -334,7 +372,7 @@ impl<'de> Deserialize<'de> for SavedOutput {
         }
 
         let wire = Wire::deserialize(deserializer)?;
-        let identity = serde_json::to_vec(&(
+        let mut identity = serde_json::to_vec(&(
             wire.kind,
             &wire.name,
             &wire.source_expression,
@@ -344,6 +382,9 @@ impl<'de> Deserialize<'de> for SavedOutput {
             wire.streaming,
         ))
         .map_err(D::Error::custom)?;
+        if !wire.complex_policy.is_legacy() {
+            identity.extend_from_slice(b"\0complex-policy/rectangular-v1");
+        }
         let id = deserialize_or_migrate_identity::<SavedOutputId, D::Error>(
             wire.id,
             LEGACY_SAVED_OUTPUT_ID_NAMESPACE,
@@ -358,6 +399,7 @@ impl<'de> Deserialize<'de> for SavedOutput {
             kind: wire.kind,
             name: wire.name,
             source_expression: wire.source_expression,
+            complex_policy: wire.complex_policy,
             compatible_analyses: wire.compatible_analyses,
             save_policy: wire.save_policy,
             stored_precision: wire.stored_precision,
@@ -662,6 +704,36 @@ pub(super) fn validate_bounded_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn complex_policy_preserves_legacy_wire_format_and_identity() {
+        let raw = raw_output("V(out)").unwrap();
+        let mut json = serde_json::to_value(&raw).unwrap();
+        json["kind"] = "derived_expression".into();
+        json.as_object_mut().unwrap().remove("id");
+        assert!(json.get("complex_policy").is_none());
+        let first: SavedOutput = serde_json::from_value(json.clone()).unwrap();
+        let second: SavedOutput = serde_json::from_value(json.clone()).unwrap();
+        assert!(first.complex_policy.is_legacy());
+        assert_eq!(first.id, second.id);
+        assert!(
+            serde_json::to_value(&first)
+                .unwrap()
+                .get("complex_policy")
+                .is_none()
+        );
+        json["complex_policy"] = "rectangular".into();
+        let current: SavedOutput = serde_json::from_value(json.clone()).unwrap();
+        assert_ne!(
+            first.id, current.id,
+            "different recipes cannot migrate to one identity"
+        );
+        assert_eq!(current.complex_policy, ComplexExpressionPolicy::Rectangular);
+        for invalid in [serde_json::Value::Null, "future_interpretation".into()] {
+            json["complex_policy"] = invalid;
+            assert!(serde_json::from_value::<SavedOutput>(json.clone()).is_err());
+        }
+    }
 
     fn raw_output(expression: &str) -> Result<SavedOutput, String> {
         SavedOutput::new(

@@ -174,6 +174,11 @@ pub struct WavePanePresentationKey {
 pub struct ExprTrace {
     /// The calculator expression as typed ("V(out)/V(in)").
     pub text: String,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::state::ComplexExpressionPolicy::is_legacy"
+    )]
+    pub complex_policy: crate::state::ComplexExpressionPolicy,
     /// Legend-chip visibility.
     #[serde(default = "default_visible")]
     pub visible: bool,

@@ -302,7 +302,7 @@ impl std::error::Error for InterpolationError {}
 
 /// Pointwise operations can keep a repeated or branching axis, but cannot
 /// accept malformed storage or nonfinite coordinates.
-pub(super) fn validate_samples(x: &[f64], y: &[f64]) -> Result<(), InterpolationError> {
+pub(super) fn validate_samples<T>(x: &[f64], y: &[T]) -> Result<(), InterpolationError> {
     if x.len() != y.len() {
         return Err(InterpolationError::LengthMismatch);
     }

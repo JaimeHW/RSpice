@@ -1994,8 +1994,23 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             .get(&model.analysis_key)
                             .cloned()
                             .unwrap_or_default();
-                        let expr_labels: Vec<String> =
-                            strip_exprs.iter().map(|e| elide(&e.text, 24)).collect();
+                        let expr_labels: Vec<String> = strip_exprs
+                            .iter()
+                            .map(|expr| {
+                                let complex = state
+                                    .ui
+                                    .results
+                                    .analysis_expr_cache
+                                    .get(&(model.analysis_key, expr.text.clone()))
+                                    .is_some_and(|cached| {
+                                        cached
+                                            .series
+                                            .as_ref()
+                                            .is_ok_and(|wave| wave.complex.is_some())
+                                    });
+                                expression_label(expr, complex)
+                            })
+                            .collect();
                         let legend: Vec<LegendChip<'_>> = strip_exprs
                             .iter()
                             .enumerate()

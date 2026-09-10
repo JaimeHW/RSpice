@@ -1289,19 +1289,17 @@ pub(super) fn evaluate_scalar_measurement(
         .map_err(|error| format!("Parse error: {error}"))?;
     let context = calculator::WaveformsContext::new(&analysis.waveforms);
     let value = match calculator::evaluator::evaluate(&parsed, &context)
+        .and_then(calculator::CalcValue::into_real)
         .map_err(|error| error.to_string())?
     {
-        calculator::CalcValue::Scalar(value) => value,
-        calculator::CalcValue::Waveform(_, _) => {
+        calculator::RealValue::Scalar(value) => value,
+        calculator::RealValue::Waveform(..) => {
             return Err(
                 "The expression produces a trace; reduce it with avg(), rms(), or another scalar function"
                     .to_owned(),
             );
         }
     };
-    if !value.is_finite() {
-        return Err("The measurement result is not finite".to_owned());
-    }
     Ok((run.dataset_id, analysis.id, value))
 }
 

@@ -111,6 +111,7 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
         first_key,
         vec![ExprTrace {
             text: "V(a) * 2".to_owned(),
+            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         }],
     );

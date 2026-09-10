@@ -27,14 +27,12 @@
 //!
 //! # Scope
 //!
-//! Everything here is real-valued, because [`CalcValue`] carries a real
-//! `(x, y)` pair and nothing else. Complex/AC operators — `mag`, `phase`,
-//! `re`, `im` — are deliberately absent: there is no complex datum in the
-//! calculator's value model to take a magnitude of, and inventing one from
-//! the magnitude series a strip already holds would answer a different
-//! question than the one asked.
+//! This library implements real-valued operations. Complex-aware dispatch
+//! routes rectangular inputs to their own arithmetic and explicit projections;
+//! it calls these kernels only when an operation has defined real semantics.
 
-use super::evaluator::{CalcValue, EvaluationError};
+use super::evaluator::EvaluationError;
+use super::value::RealValue as CalcValue;
 use std::f64::consts::PI;
 
 /// Registry of built-in functions

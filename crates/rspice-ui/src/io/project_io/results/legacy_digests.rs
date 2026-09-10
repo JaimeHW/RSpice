@@ -515,6 +515,15 @@ pub(super) fn validate_v21_to_v23_result_digests(
     )
 }
 
+pub(super) fn validate_v24_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    validate_versioned_result_digests(
+        run,
+        24,
+        AnalysisResult::legacy_v13_result_data_digest,
+        SimulationRun::legacy_v13_dataset_content_digest,
+    )
+}
+
 fn validate_versioned_result_digests(
     run: &ProjectSimulationRun,
     schema: u32,

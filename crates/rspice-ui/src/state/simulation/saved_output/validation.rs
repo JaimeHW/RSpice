@@ -34,6 +34,13 @@ impl AnalysisResult {
         let mut digests = HashSet::new();
         let mut raw_dc_axis: Option<&[f64]> = None;
         for receipt in &self.saved_output_receipts {
+            if receipt.output_kind != SavedOutputKind::DerivedExpression
+                && !receipt.complex_policy.is_legacy()
+            {
+                return Err(
+                    "complex expression policy applies only to derived-output receipts".to_owned(),
+                );
+            }
             if let Some(bindings) = &receipt.source_bindings {
                 bindings.validate(receipt, self)?;
             }

@@ -49,9 +49,9 @@ pub(crate) use materialize::{
 };
 
 pub use saved_output::{
-    OutputSelectionMode, SavedOutput, SavedOutputCompatibility, SavedOutputDisplayIntent,
-    SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy, SavedOutputPrecision,
-    SavedOutputStreaming,
+    ComplexExpressionPolicy, OutputSelectionMode, SavedOutput, SavedOutputCompatibility,
+    SavedOutputDisplayIntent, SavedOutputKind, SavedOutputOrigin, SavedOutputPolicy,
+    SavedOutputPrecision, SavedOutputStreaming,
 };
 use saved_output::{
     deserialize_or_migrate_identity, missing_identity_sentinel, parse_design_quantity,

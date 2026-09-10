@@ -36,6 +36,12 @@ struct FunctionEntry {
 
 const MATH_FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry {
+        label: "complex(re, im)",
+        hint: "rectangular complex value",
+        insert: "complex(, )",
+        caret_back: 3,
+    },
+    FunctionEntry {
         label: "abs(x)",
         hint: "absolute value",
         insert: "abs()",
@@ -75,6 +81,42 @@ const MATH_FUNCTIONS: &[FunctionEntry] = &[
 
 const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry {
+        label: "mag(x)",
+        hint: "complex magnitude",
+        insert: "mag()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "real(x)",
+        hint: "real component",
+        insert: "real()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "imag(x)",
+        hint: "imaginary component",
+        insert: "imag()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "phase(x)",
+        hint: "phase in degrees; undefined at zero",
+        insert: "phase()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "phase_rad(x)",
+        hint: "phase in radians",
+        insert: "phase_rad()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "conj(x)",
+        hint: "complex conjugate",
+        insert: "conj()",
+        caret_back: 1,
+    },
+    FunctionEntry {
         label: "dB(x)",
         hint: "20·log₁₀|x|",
         insert: "dB()",
@@ -100,7 +142,7 @@ const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
     },
     FunctionEntry {
         label: "unwrap(x)",
-        hint: "continuous phase",
+        hint: "continuous phase in degrees",
         insert: "unwrap()",
         caret_back: 1,
     },
@@ -211,12 +253,7 @@ const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
     },
 ];
 
-/// Stated where the functions are listed, because its absence is otherwise
-/// read as an oversight. The calculator's value model carries a real
-/// `(x, y)` pair, so there is no complex datum for `mag`/`phase`/`re`/`im`
-/// to operate on; AC magnitude and phase are read from the strip that
-/// retains them.
-const REAL_ONLY_NOTICE: &str = "real series only — no mag/phase/re/im yet";
+const FUNCTION_CONVENTIONS: &str = "phase() and unwrap() use degrees; phase_rad() uses radians";
 
 impl FunctionCategory {
     fn entries(self) -> &'static [FunctionEntry] {
@@ -291,12 +328,17 @@ impl CalculatorPanel {
                     .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                     .color(color),
             );
-            if let Some(Ok(_)) = &self.outcome {
+            if self.outcome.as_ref().is_some_and(|outcome| {
+                outcome
+                    .as_ref()
+                    .is_ok_and(|result| result.exact_text().is_some())
+            }) {
                 readout = readout.sense(egui::Sense::click());
             }
             let response = ui.add(readout);
-            if let Some(Ok(result)) = &self.outcome {
-                let exact = result.exact_text();
+            if let Some(Ok(result)) = &self.outcome
+                && let Some(exact) = result.exact_text()
+            {
                 let what = if result.exact_is_last_sample {
                     "last sample"
                 } else {
@@ -477,7 +519,7 @@ impl CalculatorPanel {
                 }
             });
 
-        pane_footer(ui, REAL_ONLY_NOTICE);
+        pane_footer(ui, FUNCTION_CONVENTIONS);
     }
 
     // -----------------------------------------------------------------
@@ -680,7 +722,7 @@ fn char_to_byte(text: &str, at: usize) -> usize {
 mod tests {
     use super::*;
     use crate::analysis::calculator::EvaluationError;
-    use crate::analysis::calculator::functions::FunctionRegistry;
+    use crate::analysis::calculator::{WaveformsContext, ast::CalculatorExpr, evaluator};
 
     /// Every function this pane advertises must be one the evaluator can
     /// actually run.
@@ -703,7 +745,10 @@ mod tests {
                 // deliberately wrong argument list still proves the name
                 // resolves, because only an unknown name reports itself as
                 // unknown.
-                let outcome = FunctionRegistry::dispatch(name, Vec::new());
+                let outcome = evaluator::evaluate(
+                    &CalculatorExpr::func(name, Vec::new()),
+                    &WaveformsContext::new(&[]),
+                );
                 assert!(
                     !matches!(outcome, Err(EvaluationError::UnknownFunction(_))),
                     "the {} pane offers {} but the evaluator has no {name}",

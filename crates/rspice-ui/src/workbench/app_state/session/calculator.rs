@@ -6,7 +6,9 @@
 //! `workbench::tools::calculator_tool`, which reaches down here for the
 //! model and hangs its egui half off this type as a second inherent impl.
 
-use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
+use crate::analysis::calculator::{
+    CalcValue, ComplexValue, RealValue, SimulationContext, evaluator, parser,
+};
 use crate::state::SimulationState;
 use crate::ui::plot::fmt_si_significant;
 
@@ -14,8 +16,7 @@ use crate::ui::plot::fmt_si_significant;
 ///
 /// Five was not enough to tell two nearby operating points apart, which is
 /// most of what a calculator over simulation results is asked to do. Eight
-/// is the point past which a `f64`'s decimal digits stop meaning anything a
-/// reader can act on — the exact value is one click away for the rest.
+/// keeps the readout compact; the full retained precision is one click away.
 const READOUT_DIGITS: usize = 8;
 
 /// A successful evaluation: the rounded readout, and the exact number behind
@@ -30,6 +31,8 @@ pub(in crate::workbench) struct CalcResult {
     pub(in crate::workbench) readout: String,
     /// The exact value the readout rounds.
     pub(in crate::workbench) exact: f64,
+    /// Present for a complex result, so exact copying retains both components.
+    pub(in crate::workbench) exact_imaginary: Option<f64>,
     /// Whether `exact` is the whole result or the last sample of a series,
     /// so the copy affordance can say which it is handing over.
     pub(in crate::workbench) exact_is_last_sample: bool,
@@ -38,8 +41,40 @@ pub(in crate::workbench) struct CalcResult {
 impl CalcResult {
     /// Scientific notation carrying enough digits to round-trip the `f64`,
     /// matching how the Results workspace spells an exact retained value.
-    pub(in crate::workbench) fn exact_text(&self) -> String {
-        format!("{:.17e}", self.exact)
+    pub(in crate::workbench) fn exact_text(&self) -> Option<String> {
+        if !self.exact.is_finite() || self.exact_imaginary.is_some_and(|value| !value.is_finite()) {
+            return None;
+        }
+        Some(match self.exact_imaginary {
+            Some(imaginary) => format!("complex({:.17e},{imaginary:.17e})", self.exact),
+            None => format!("{:.17e}", self.exact),
+        })
+    }
+
+    fn complex(value: num_complex::Complex64, samples: Option<usize>) -> Self {
+        let number = if !value.re.is_finite() || !value.im.is_finite() {
+            "unavailable".to_owned()
+        } else {
+            format!(
+                "{} {} j{}",
+                fmt_si_significant(value.re, "", READOUT_DIGITS),
+                if value.im.is_sign_negative() {
+                    "−"
+                } else {
+                    "+"
+                },
+                fmt_si_significant(value.im.abs(), "", READOUT_DIGITS)
+            )
+        };
+        Self {
+            readout: samples.map_or_else(
+                || format!("= {number}"),
+                |count| format!("= complex waveform · {count} pts · last {number}"),
+            ),
+            exact: value.re,
+            exact_imaginary: Some(value.im),
+            exact_is_last_sample: samples.is_some(),
+        }
     }
 }
 
@@ -103,22 +138,38 @@ impl CalculatorPanel {
         };
         let ctx = SimulationContext::new(simulation);
         self.outcome = Some(match evaluator::evaluate(&expr, &ctx) {
-            Ok(CalcValue::Scalar(value)) => Ok(CalcResult {
+            Ok(CalcValue::Real(RealValue::Scalar(value))) => Ok(CalcResult {
                 readout: format!("= {}", fmt_si_significant(value, "", READOUT_DIGITS)),
                 exact: value,
+                exact_imaginary: None,
                 exact_is_last_sample: false,
             }),
-            Ok(CalcValue::Waveform(x, y)) => {
+            Ok(CalcValue::Real(RealValue::Waveform(x, y))) => {
                 let last = y.last().copied().unwrap_or(f64::NAN);
                 Ok(CalcResult {
                     readout: format!(
                         "= waveform · {} pts · last {}",
                         x.len(),
-                        fmt_si_significant(last, "", READOUT_DIGITS)
+                        if last.is_finite() {
+                            fmt_si_significant(last, "", READOUT_DIGITS)
+                        } else {
+                            "unavailable".to_owned()
+                        }
                     ),
                     exact: last,
+                    exact_imaginary: None,
                     exact_is_last_sample: true,
                 })
+            }
+            Ok(CalcValue::Complex(ComplexValue::Scalar(value))) => {
+                Ok(CalcResult::complex(value, None))
+            }
+            Ok(CalcValue::Complex(ComplexValue::Waveform(x, y))) => {
+                let last = y
+                    .last()
+                    .copied()
+                    .unwrap_or(num_complex::Complex64::new(f64::NAN, f64::NAN));
+                Ok(CalcResult::complex(last, Some(x.len())))
             }
             Err(error) => Err(error.to_string()),
         });
@@ -142,6 +193,27 @@ impl CalculatorPanel {
 mod tests {
     use super::*;
     use crate::state::WaveformData;
+
+    #[test]
+    fn complex_copy_round_trips_both_components_and_invalid_samples_are_not_copyable() {
+        let simulation = simulation_with_a_ramp();
+        let mut panel = CalculatorPanel::new();
+        panel.expression = "complex(1/3,-1/7)".to_owned();
+        panel.evaluate(&simulation);
+        let original = panel.outcome.as_ref().unwrap().as_ref().unwrap().clone();
+        panel.expression = original.exact_text().unwrap();
+        panel.evaluate(&simulation);
+        let copied = panel.outcome.as_ref().unwrap().as_ref().unwrap();
+        assert_eq!(copied.exact, original.exact);
+        assert_eq!(copied.exact_imaginary, original.exact_imaginary);
+        for text in ["1/(V(out)-2)", "complex(1,1)/(V(out)-2)"] {
+            panel.expression = text.to_owned();
+            panel.evaluate(&simulation);
+            let result = panel.outcome.as_ref().unwrap().as_ref().unwrap();
+            assert!(result.readout.ends_with("unavailable"));
+            assert!(result.exact_text().is_none());
+        }
+    }
 
     fn simulation_with_a_ramp() -> SimulationState {
         let mut simulation = SimulationState::default();
@@ -215,12 +287,16 @@ mod tests {
         assert!(!result.exact_is_last_sample);
         assert_eq!(result.exact, 1.0 / 3.0);
         assert_eq!(
-            result.exact_text().parse::<f64>().expect("parses back"),
+            result
+                .exact_text()
+                .unwrap()
+                .parse::<f64>()
+                .expect("parses back"),
             1.0 / 3.0,
             "the copied text must round-trip the f64 the readout rounded"
         );
         assert_ne!(
-            result.exact_text(),
+            result.exact_text().unwrap(),
             result.readout,
             "the readout is rounded; the copy is not"
         );
@@ -242,7 +318,11 @@ mod tests {
             "last sample of the ramp over three"
         );
         assert_eq!(
-            result.exact_text().parse::<f64>().expect("parses back"),
+            result
+                .exact_text()
+                .unwrap()
+                .parse::<f64>()
+                .expect("parses back"),
             2.0 / 3.0
         );
     }

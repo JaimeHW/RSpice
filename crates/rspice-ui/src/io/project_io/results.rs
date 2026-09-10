@@ -161,6 +161,31 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION
+            && self
+                .runs
+                .iter()
+                .flat_map(|run| &run.analyses)
+                .flat_map(|analysis| &analysis.saved_output_receipts)
+                .any(|receipt| !receipt.complex_policy.is_legacy())
+        {
+            return Err(
+                "result schemas before v25 cannot contain rectangular expression policies"
+                    .to_owned(),
+            );
+        }
+        if source_schema == BOUND_OUTPUT_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                legacy_digests::validate_v24_result_digests(run)?;
+            }
+            // Authenticate first. Preserve all samples and legacy policies;
+            // only their current canonical content identity is resealed.
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < BOUND_OUTPUT_RESULTS_SCHEMA_VERSION
             && self
                 .runs

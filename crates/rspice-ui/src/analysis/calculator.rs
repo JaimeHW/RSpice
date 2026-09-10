@@ -9,12 +9,111 @@
 //! - Automatic interpolation for mismatched time bases
 
 pub(crate) mod ast;
+mod complex_functions;
+mod complex_ops;
 pub(crate) mod evaluator;
 pub(crate) mod functions;
 pub(crate) mod interpolation;
 pub(crate) mod parser;
+mod value;
 
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
+pub use value::{ComplexValue, RealValue};
+
+/// Preserve rectangular evidence when constructing a physical signal input.
+pub(crate) fn waveform_value(
+    waveform: &WaveformData,
+    policy: ComplexExpressionPolicy,
+) -> Result<CalcValue, EvaluationError> {
+    let invalid = |error: interpolation::InterpolationError| {
+        EvaluationError::WaveformMismatch(error.to_string())
+    };
+    interpolation::validate_samples(&waveform.x, &waveform.y).map_err(invalid)?;
+    if let Some(complex) = &waveform.complex
+        && !policy.is_legacy()
+    {
+        interpolation::validate_samples(&waveform.x, &complex.real).map_err(invalid)?;
+        interpolation::validate_samples(&waveform.x, &complex.imag).map_err(invalid)?;
+        let y = complex
+            .real
+            .iter()
+            .zip(complex.imag.iter())
+            .map(|(&real, &imag)| value::hole(num_complex::Complex64::new(real, imag)))
+            .collect();
+        Ok(CalcValue::Complex(ComplexValue::Waveform(
+            waveform.x.to_vec(),
+            y,
+        )))
+    } else {
+        if !policy.is_legacy() && waveform.name.starts_with('|') && waveform.name.ends_with('|') {
+            return Err(EvaluationError::PhaseUnavailable(waveform.name.clone()));
+        }
+        Ok(CalcValue::create_waveform(
+            waveform.x.to_vec(),
+            waveform.y.to_vec(),
+        ))
+    }
+}
+
+pub(crate) fn magnitude_value(
+    value: Result<CalcValue, EvaluationError>,
+    source: Option<&WaveformData>,
+) -> Result<CalcValue, EvaluationError> {
+    let value = match value {
+        Err(EvaluationError::PhaseUnavailable(_)) if source.is_some() => {
+            waveform_value(source.unwrap(), ComplexExpressionPolicy::LegacyMagnitude)
+        }
+        value => value,
+    }?;
+    complex_functions::dispatch("mag", vec![value])
+}
+
+fn reject_unbound_dataset(dataset: Option<&str>) -> Result<(), EvaluationError> {
+    if let Some(dataset) = dataset {
+        return Err(EvaluationError::IdentifierNotFound(format!(
+            "dataset '{dataset}' is not bound in this evaluation context"
+        )));
+    }
+    Ok(())
+}
+
+/// Retain expression output in the same rectangular form used by solved AC
+/// signals. Magnitude is a display column, never a replacement for components.
+pub(crate) fn evaluated_waveform(
+    value: CalcValue,
+    name: &str,
+    scalar_axis: Option<&[f64]>,
+) -> Result<WaveformData, String> {
+    let axis = || {
+        scalar_axis
+            .filter(|axis| !axis.is_empty())
+            .map(<[f64]>::to_vec)
+            .ok_or_else(|| "scalar expression has no retained axis".to_owned())
+    };
+    match value {
+        CalcValue::Real(RealValue::Scalar(value)) => {
+            let x = axis()?;
+            let y = vec![value; x.len()];
+            Ok(WaveformData::new(name, x, y, "#f5b700"))
+        }
+        CalcValue::Real(RealValue::Waveform(x, y)) => Ok(WaveformData::new(name, x, y, "#f5b700")),
+        CalcValue::Complex(value) => {
+            let (x, y) = match value {
+                ComplexValue::Scalar(value) => {
+                    let x = axis()?;
+                    let y = vec![value; x.len()];
+                    (x, y)
+                }
+                ComplexValue::Waveform(x, y) => (x, y),
+            };
+            let magnitude: Vec<_> = y.iter().map(|value| value.re.hypot(value.im)).collect();
+            let (real, imag): (Vec<_>, Vec<_>) =
+                y.into_iter().map(|value| (value.re, value.im)).unzip();
+            Ok(WaveformData::new(name, x, magnitude, "#f5b700")
+                .with_complex_components(name, real, imag))
+        }
+    }
+}
 
 // =============================================================================
 // Simulation Context Adapter
@@ -23,7 +122,7 @@ pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
 // Bridges SimulationState waveforms to the calculator EvaluationContext trait.
 // This allows expressions like "V(out) * 2" to resolve V(out) from simulation.
 
-use crate::state::{SimulationState, WaveformData};
+use crate::state::{ComplexExpressionPolicy, SimulationState, WaveformData};
 
 /// Evaluation context backed by simulation results.
 ///
@@ -39,20 +138,16 @@ use crate::state::{SimulationState, WaveformData};
 pub struct SimulationContext<'a> {
     /// Reference to simulation state containing waveforms
     simulation: &'a SimulationState,
+    complex_policy: ComplexExpressionPolicy,
 }
 
 impl<'a> SimulationContext<'a> {
     /// Create a new evaluation context from simulation state
     pub fn new(simulation: &'a SimulationState) -> Self {
-        Self { simulation }
-    }
-
-    /// Convert WaveformData to CalcValue format
-    fn waveform_to_calc_value(wf: &WaveformData) -> CalcValue {
-        // Convert x/y vectors from Value (f64) to Vec<f64>
-        let x: Vec<f64> = wf.x.to_vec();
-        let y: Vec<f64> = wf.y.to_vec();
-        CalcValue::create_waveform(x, y)
+        Self {
+            simulation,
+            complex_policy: ComplexExpressionPolicy::Rectangular,
+        }
     }
 
     /// Find a waveform by signal name with flexible matching
@@ -71,12 +166,23 @@ impl<'a> SimulationContext<'a> {
 /// own analysis instead of the live (active-analysis) waveform set.
 pub struct WaveformsContext<'a> {
     waveforms: &'a [WaveformData],
+    complex_policy: ComplexExpressionPolicy,
 }
 
 impl<'a> WaveformsContext<'a> {
     /// Wrap an analysis' waveforms.
     pub fn new(waveforms: &'a [WaveformData]) -> Self {
-        Self { waveforms }
+        Self::with_policy(waveforms, ComplexExpressionPolicy::Rectangular)
+    }
+
+    pub fn with_policy(
+        waveforms: &'a [WaveformData],
+        complex_policy: ComplexExpressionPolicy,
+    ) -> Self {
+        Self {
+            waveforms,
+            complex_policy,
+        }
     }
 }
 
@@ -167,12 +273,23 @@ fn bare_wrapped_signal_name(name: &str) -> Option<&str> {
 }
 
 impl<'a> EvaluationContext for WaveformsContext<'a> {
+    fn get_magnitude(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<CalcValue, EvaluationError> {
+        magnitude_value(
+            self.get_waveform(signal, dataset),
+            find_in(self.waveforms, signal),
+        )
+    }
+
     fn get_waveform(
         &self,
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
-        let _ = dataset;
+        reject_unbound_dataset(dataset)?;
         match signal.to_uppercase().as_str() {
             "TIME" | "T" | "FREQ" | "FREQUENCY" => {
                 if let Some(wf) = self.waveforms.first() {
@@ -190,22 +307,30 @@ impl<'a> EvaluationContext for WaveformsContext<'a> {
             return value;
         }
         match find_in(self.waveforms, signal) {
-            Some(wf) => Ok(SimulationContext::waveform_to_calc_value(wf)),
+            Some(wf) => waveform_value(wf, self.complex_policy),
             None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
         }
     }
 }
 
 impl<'a> EvaluationContext for SimulationContext<'a> {
+    fn get_magnitude(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<CalcValue, EvaluationError> {
+        magnitude_value(
+            self.get_waveform(signal, dataset),
+            self.find_waveform(signal),
+        )
+    }
+
     fn get_waveform(
         &self,
         signal: &str,
         dataset: Option<&str>,
     ) -> Result<CalcValue, EvaluationError> {
-        // Handle dataset selection (for multi-run results)
-        // For now, we use the active waveforms in simulation state
-        // Future: support dataset like "run1:V(out)" or selecting from runs
-        let _ = dataset; // Reserved for future multi-run support
+        reject_unbound_dataset(dataset)?;
 
         // Handle special constants
         match signal.to_uppercase().as_str() {
@@ -240,7 +365,7 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
 
         // Find the waveform by signal name
         match self.find_waveform(signal) {
-            Some(wf) => Ok(Self::waveform_to_calc_value(wf)),
+            Some(wf) => waveform_value(wf, self.complex_policy),
             None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
         }
     }
@@ -254,12 +379,80 @@ impl<'a> EvaluationContext for SimulationContext<'a> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn complex_missing_phase_allows_only_explicit_magnitude_projections() {
+        let simulation = SimulationState {
+            waveforms: vec![waveform("|V(out)|", 2.0)],
+            ..Default::default()
+        };
+        let live = SimulationContext::new(&simulation);
+        let retained = WaveformsContext::new(&simulation.waveforms);
+        for context in [&live as &dyn EvaluationContext, &retained] {
+            assert!(matches!(
+                context.get_waveform("V(out)", None),
+                Err(EvaluationError::PhaseUnavailable(_))
+            ));
+            assert_eq!(
+                context.get_magnitude("V(out)", None).unwrap(),
+                expected(2.0)
+            );
+            assert!(context.get_magnitude("V(out)", Some("other-run")).is_err());
+        }
+        for text in [
+            "mag(V(out))",
+            "abs(V(out))",
+            "magnitude(V(out))",
+            "dB(V(out))",
+        ] {
+            assert!(
+                evaluator::evaluate(&parser::try_parse(text).unwrap(), &retained).is_ok(),
+                "{text}"
+            );
+        }
+        for text in [
+            "V(out)*2",
+            "real(V(out))",
+            "phase(V(out))",
+            "mag(V(out)-V(out))",
+        ] {
+            assert!(
+                evaluator::evaluate(&parser::try_parse(text).unwrap(), &retained).is_err(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn complex_components_must_match_the_retained_axis() {
+        let mut wave =
+            waveform("|V(out)|", 1.0).with_complex_components("V(out)", vec![1.0; 2], vec![0.0; 2]);
+        wave.complex.as_mut().unwrap().imag = vec![0.0].into();
+        assert!(waveform_value(&wave, ComplexExpressionPolicy::Rectangular).is_err());
+    }
+
+    #[test]
+    fn complex_and_real_arithmetic_never_turn_missing_samples_into_numbers() {
+        let wave = WaveformData::new("V(out)", vec![0.0, 1.0], vec![f64::NAN, 2.0], "#fff");
+        let waves = [wave];
+        let context = WaveformsContext::new(&waves);
+        for text in ["V(out)^0", "complex(V(out),0)^0"] {
+            let value = evaluator::evaluate(&parser::try_parse(text).unwrap(), &context).unwrap();
+            match value {
+                CalcValue::Real(RealValue::Waveform(_, values)) => assert!(values[0].is_nan()),
+                CalcValue::Complex(ComplexValue::Waveform(_, values)) => {
+                    assert!(values[0].re.is_nan() && values[0].im.is_nan())
+                }
+                _ => panic!("expected a waveform"),
+            }
+        }
+    }
+
     fn waveform(name: &str, value: f64) -> WaveformData {
         WaveformData::new(name, vec![0.0, 1.0], vec![value, value], "#ffffff")
     }
 
     fn expected(value: f64) -> CalcValue {
-        CalcValue::Waveform(vec![0.0, 1.0], vec![value, value])
+        CalcValue::create_waveform(vec![0.0, 1.0], vec![value, value])
     }
 
     #[test]
@@ -277,7 +470,8 @@ mod tests {
     #[test]
     fn per_analysis_context_resolves_case_insensitive_wrappers_from_bare_names() {
         let waveforms = vec![waveform("|v(OUT)|", 3.75), waveform("i(VdD)", 5.0)];
-        let context = WaveformsContext::new(&waveforms);
+        let context =
+            WaveformsContext::with_policy(&waveforms, ComplexExpressionPolicy::LegacyMagnitude);
 
         assert_eq!(context.get_waveform("out", None).unwrap(), expected(3.75));
         assert_eq!(context.get_waveform("vdd", None).unwrap(), expected(5.0));
@@ -309,7 +503,7 @@ mod tests {
     fn live_and_retained_calculators_bind_scopes_without_crossing_quantity_namespaces() {
         let simulation = SimulationState {
             waveforms: vec![
-                waveform("|V(X1.out)|", 2.0),
+                waveform("V(X1.out)", 2.0),
                 waveform("I(X1.out)", 3.0),
                 waveform("V(X1:out)", 4.0),
                 waveform("V(out)", 5.0),
@@ -339,4 +533,29 @@ mod tests {
             }
         }
     }
+}
+#[test]
+fn complex_physical_difference_uses_retained_phase_in_both_contexts() {
+    let waves = vec![
+        WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+            .with_unit("V")
+            .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
+        WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+            .with_unit("V")
+            .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
+    ];
+    let simulation = SimulationState {
+        waveforms: waves,
+        ..Default::default()
+    };
+    let expression = parser::try_parse("abs(V(a)-V(b))").unwrap();
+    let expected = CalcValue::create_waveform(vec![1.0, 2.0], vec![2.0; 2]);
+    assert_eq!(
+        evaluator::evaluate(&expression, &SimulationContext::new(&simulation)).unwrap(),
+        expected
+    );
+    assert_eq!(
+        evaluator::evaluate(&expression, &WaveformsContext::new(&simulation.waveforms)).unwrap(),
+        expected
+    );
 }

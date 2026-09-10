@@ -1203,6 +1203,7 @@ mod tests {
             0,
             vec![crate::workbench::documents::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
+                complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
                 visible: true,
             }],
         );

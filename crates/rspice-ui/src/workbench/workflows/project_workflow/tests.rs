@@ -1254,6 +1254,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
         loaded.result_presentation.expression_groups[0].traces,
         vec![crate::workbench::documents::result_document::ExprTrace {
             text: "V(out) * 2".to_owned(),
+            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         }]
     );

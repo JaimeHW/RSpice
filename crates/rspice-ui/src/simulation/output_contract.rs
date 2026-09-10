@@ -35,6 +35,8 @@ use probe::resolve_raw_probe;
 #[cfg(test)]
 mod binding_tests;
 #[cfg(test)]
+mod complex_tests;
+#[cfg(test)]
 mod dc_family_tests;
 #[cfg(test)]
 mod durable_binding_tests;
@@ -176,6 +178,7 @@ pub(in crate::simulation) struct PreparedSavedOutput {
     kind: SavedOutputKind,
     name: String,
     source_expression: String,
+    complex_policy: crate::state::ComplexExpressionPolicy,
     policy: SavedOutputPolicy,
     precision: SavedOutputPrecision,
     streaming: SavedOutputStreaming,
@@ -258,6 +261,7 @@ impl PreparedSavedOutput {
             kind: output.kind,
             name: output.name.clone(),
             source_expression: output.source_expression.clone(),
+            complex_policy: output.complex_policy,
             policy: output.save_policy,
             precision: output.stored_precision,
             streaming: output.streaming,
@@ -289,6 +293,7 @@ impl PreparedSavedOutput {
             kind: self.kind,
             name: self.name.clone(),
             source_expression: self.source_expression.clone(),
+            complex_policy: self.complex_policy,
             compatible_analyses: SavedOutputCompatibility::AllCompatibleAnalyses,
             save_policy: self.policy,
             stored_precision: self.precision,
@@ -830,6 +835,7 @@ fn receipt(
         contract_digest: contract.digest,
         name: contract.name.clone(),
         source_expression: contract.source_expression.clone(),
+        complex_policy: contract.complex_policy,
         output_kind: contract.kind,
         save_policy: contract.policy,
         stored_precision: contract.precision,
@@ -852,9 +858,12 @@ fn resolve_contract_waveform(
             &contract.name,
             analysis.analysis_type.uses_complex_bode_projection(),
         ),
-        SavedOutputKind::DerivedExpression => {
-            resolve_derived_expression(&contract.source_expression, waveforms, &contract.name)
-        }
+        SavedOutputKind::DerivedExpression => resolve_derived_expression(
+            &contract.source_expression,
+            waveforms,
+            &contract.name,
+            contract.complex_policy,
+        ),
         SavedOutputKind::DeviceOperatingPointQuantity => {
             resolve_device_quantity(&contract.source_expression, analysis, &contract.name)
         }
@@ -890,11 +899,12 @@ fn resolve_derived_expression(
     expression: &str,
     waveforms: &[WaveformData],
     output_name: &str,
+    complex_policy: crate::state::ComplexExpressionPolicy,
 ) -> Result<WaveformData, String> {
     resolve_derived_with(
         expression,
         output_name,
-        &calculator::WaveformsContext::new(waveforms),
+        &calculator::WaveformsContext::with_policy(waveforms, complex_policy),
         waveforms.first(),
     )
 }
@@ -908,26 +918,14 @@ fn resolve_derived_with(
     let parsed = calculator::parser::Parser::new(expression)
         .try_parse()
         .map_err(|error| format!("expression parse failed: {error}"))?;
-    match calculator::evaluator::evaluate(&parsed, context)
-        .map_err(|error| format!("expression evaluation failed: {error}"))?
-    {
-        CalcValue::Waveform(x, y) if !x.is_empty() && x.len() == y.len() => {
-            Ok(WaveformData::new(output_name, x, y, "#f5b700"))
-        }
-        CalcValue::Waveform(..) => Err("expression produced no aligned samples".to_owned()),
-        CalcValue::Scalar(value) => {
-            let source =
-                axis_source.ok_or_else(|| "scalar expression has no retained axis".to_owned())?;
-            Ok(WaveformData::new(
-                output_name,
-                Arc::clone(&source.x),
-                vec![value; source.x.len()],
-                "#f5b700",
-            ))
-        }
-    }
+    let value = calculator::evaluator::evaluate(&parsed, context)
+        .map_err(|error| format!("expression evaluation failed: {error}"))?;
+    calculator::evaluated_waveform(
+        value,
+        output_name,
+        axis_source.map(|source| source.x.as_slice()),
+    )
 }
-
 fn resolve_device_quantity(
     expression: &str,
     analysis: &AnalysisResult,
@@ -1195,7 +1193,14 @@ fn output_contract_digest(
     } else {
         bytes.push(0);
     }
-    content_digest("rspice.prepared-saved-output/v1", &bytes)
+    // Historical contracts retain their exact digest. The new domain binds
+    // rectangular evaluation without reinterpreting an old receipt.
+    let domain = if output.complex_policy.is_legacy() {
+        "rspice.prepared-saved-output/v1"
+    } else {
+        "rspice.prepared-saved-output/rectangular-v2"
+    };
+    content_digest(domain, &bytes)
 }
 
 fn append_string(bytes: &mut Vec<u8>, value: &str) {

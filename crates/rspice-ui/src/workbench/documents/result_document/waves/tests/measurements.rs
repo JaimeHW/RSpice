@@ -66,7 +66,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     )
     .unwrap();
     assert!(
-        matches!(calculator, calculator::CalcValue::Scalar(value) if (value - full.rms).abs() < 1e-14)
+        matches!(calculator, calculator::CalcValue::Real(calculator::RealValue::Scalar(value)) if (value - full.rms).abs() < 1e-14)
     );
     let reversed = trace_interval_statistics(
         &mut state.ui.results.derived,

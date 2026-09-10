@@ -205,13 +205,13 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
         .waveforms
         .clone();
 
-    let (x, y) = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
-    assert_eq!(x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
-    assert_eq!(y.as_slice(), &[0.0; 4]);
+    let series = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
+    assert_eq!(series.x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
+    assert_eq!(series.y.as_slice(), &[0.0; 4]);
     let expression = parser::try_parse("min(V(a)-V(b))").unwrap();
     assert_eq!(
         evaluator::evaluate(&expression, &SimulationContext::new(&state.simulation)).unwrap(),
-        CalcValue::Scalar(0.0)
+        CalcValue::Real(calculator::RealValue::Scalar(0.0))
     );
     assert_eq!(
         state.simulation.active_analysis().unwrap().waveforms,

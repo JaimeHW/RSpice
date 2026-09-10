@@ -670,6 +670,7 @@ fn add_transient_expression(state: &mut AppState) {
         key,
         vec![super::super::ExprTrace {
             text: "V(n0) * 2".to_owned(),
+            complex_policy: crate::state::ComplexExpressionPolicy::Rectangular,
             visible: true,
         }],
     );
