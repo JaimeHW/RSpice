@@ -264,6 +264,17 @@ impl<'de> serde::Deserialize<'de> for AppState {
         }
         let project_id = project_workspace.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
+        // Documents skip their runtime dirty flag. The session's open tabs
+        // retain it, including inactive schematics that will be reopened later.
+        for open in &project_workspace.open_views {
+            if open.dirty
+                && let Some(schematic) = project_workspace
+                    .schematic_buffers
+                    .get_mut(&open.reference.key())
+            {
+                schematic.is_dirty = true;
+            }
+        }
         let schematic = project_workspace
             .active_context_schematic()
             .cloned()

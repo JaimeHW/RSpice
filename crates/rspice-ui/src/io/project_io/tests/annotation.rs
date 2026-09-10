@@ -404,3 +404,69 @@ fn restoration_follows_the_complete_recorded_name_lineage() {
             .is_some_and(|warning| warning.contains("Applied approved reference annotation"))
     );
 }
+
+fn annotation_session(project: &ProjectFile) -> AppState {
+    let (sim_setup, model_library_manager, _) = project
+        .execution_context
+        .clone()
+        .unwrap()
+        .into_state(project.workspace.project.id())
+        .unwrap();
+    AppState {
+        schematic: project
+            .workspace
+            .active_context_schematic()
+            .cloned()
+            .unwrap_or_default(),
+        workspace: project.workspace.clone(),
+        library_manager: project.libraries.clone(),
+        sim_setup,
+        model_library_manager,
+        ..Default::default()
+    }
+}
+
+fn restore_annotation_session(state: &AppState, ron: bool) -> AppState {
+    if ron {
+        ron::from_str(&ron::to_string(state).unwrap()).unwrap()
+    } else {
+        serde_json::from_str(&serde_json::to_string(state).unwrap()).unwrap()
+    }
+}
+
+#[test]
+fn session_retains_unsaved_schematic_flags_across_document_switches() {
+    for ron in [false, true] {
+        let mut fixture = pending_annotation();
+        fixture
+            .project
+            .workspace
+            .restore_pending_annotation(&fixture.project.libraries)
+            .unwrap();
+        let state = annotation_session(&fixture.project);
+        let mut restored = restore_annotation_session(&state, ron);
+        for reference in [&fixture.root, &fixture.child] {
+            assert!(restored.workspace.schematic_buffers[&reference.key()].is_dirty);
+            assert!(
+                restored
+                    .workspace
+                    .open_views
+                    .iter()
+                    .any(|open| open.reference == *reference && open.dirty)
+            );
+        }
+        assert!(restored.schematic.is_dirty);
+        restored
+            .workspace
+            .activate_view(fixture.root.clone(), ViewType::Schematic);
+        restored.schematic = restored
+            .workspace
+            .active_context_schematic()
+            .unwrap()
+            .clone();
+        restored.sync_active_schematic_to_workspace();
+        let repeated = restore_annotation_session(&restored, ron);
+        assert!(repeated.schematic.is_dirty);
+        assert!(repeated.workspace.open_views.iter().all(|open| open.dirty));
+    }
+}
