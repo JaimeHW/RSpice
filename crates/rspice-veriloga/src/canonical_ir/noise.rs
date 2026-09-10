@@ -554,11 +554,11 @@ fn extract_expression(
             }
             Ok(())
         }
-        HirExprKind::Call { name, args } if name == "ddt" && args.len() == 1 => {
-            // A derivative's j*omega transfer cannot be represented by a static
+        HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
+            // A frequency-dependent transfer cannot be folded into a static
             // PSD. Keep the original expression for grouped noise lowering,
             // exactly as when its noise process is read through an assignment.
-            // Grouped lowering validates routing and metadata before emission.
+            // Each backend still validates the retained operator and routing.
             Ok(())
         }
         _ => Err(unsupported("nonlinear or dynamic position")),
@@ -717,6 +717,15 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
         }
     }
     false
+}
+
+/// Linear frequency-dependent operators whose routing belongs to the grouped
+/// process plan. Both static projections must defer the same expressions.
+pub(super) fn uses_grouped_noise_transfer(name: &str, arity: usize) -> bool {
+    matches!(
+        (name, arity),
+        ("ddt", 1) | ("laplace_nd" | "laplace_np" | "laplace_zd" | "laplace_zp", 3)
+    )
 }
 
 pub(super) fn is_noise_call(name: &str) -> bool {

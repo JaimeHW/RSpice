@@ -255,6 +255,87 @@ endmodule
     assert_eq!(processes[0].injections.len(), 2);
 }
 
+#[test]
+fn direct_laplace_noise_preserves_processes_and_complex_transfer() {
+    // VAMS-2023 4.5.11 uses (1-s/root) for nonzero roots and permits
+    // null zero vectors. H(s) = (1+numerator_slope*s)/(1+s/2).
+    for (operator, coefficients, numerator_slope) in [
+        ("laplace_nd", "'{1.0,1.0},'{1.0,0.5}", 1.0),
+        ("laplace_np", "'{1.0,1.0},'{-2.0,0.0}", 1.0),
+        ("laplace_zd", "'{-1.0,0.0},'{1.0,0.5}", 1.0),
+        ("laplace_zp", "'{-1.0,0.0},'{-2.0,0.0}", 1.0),
+        ("laplace_zd", ",'{1.0,0.5}", 0.0),
+        ("laplace_zp", ",'{-2.0,0.0}", 0.0),
+    ] {
+        for contribution in ["I", "V"] {
+            for assigned in [false, true] {
+                let (assignment, input) = if assigned {
+                    ("source=white_noise(3.0,\"n\");", "source")
+                } else {
+                    ("", "white_noise(3.0,\"n\")")
+                };
+                let source = format!(
+                    "module noise_filter(p,n); inout p,n; electrical p,n; real source; analog begin {assignment} {contribution}(p,n)<+{operator}({input},{coefficients}); end endmodule"
+                );
+                let case = format!("{operator}({coefficients}) {contribution} assigned={assigned}");
+                let report = VerilogACompiler::default()
+                    .compile_runtime_with_qualifications(
+                        &source,
+                        None,
+                        rspice_veriloga::RuntimeQualificationOptions {
+                            generated_rust: true,
+                            ..rspice_veriloga::RuntimeQualificationOptions::NONE
+                        },
+                    )
+                    .unwrap_or_else(|error| panic!("{case}: {error}"));
+                assert_eq!(report.abi.noise_source_count, 1, "{case}");
+                // Retaining the filter must not silently qualify generated
+                // Rust, whose state-space realization is still unsupported.
+                assert_eq!(
+                    report
+                        .targets
+                        .get(rspice_veriloga::RuntimeTarget::GeneratedRust)
+                        .readiness,
+                    rspice_veriloga::RuntimeTargetReadiness::Rejected,
+                    "{case}"
+                );
+                assert!(report.generated_rust.is_none());
+                #[cfg(feature = "wasm-jit")]
+                rspice_veriloga::wasm_jit::compile_model_value_module(
+                    &report.model,
+                    &report.canonical_ir,
+                )
+                .unwrap_or_else(|error| panic!("{case}: {error}"));
+                let mut device =
+                    rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+                        "A1",
+                        report.model,
+                        &report.canonical_ir,
+                        &[1, 0],
+                    )
+                    .unwrap_or_else(|error| panic!("{case}: {error}"));
+                device.try_set_analysis_type(3).unwrap();
+                let sign = if contribution == "I" { -1.0 } else { 1.0 };
+                for omega in [0.0, 1.0, 10.0] {
+                    let processes = device
+                        .try_noise_processes_at_frequency(&[0.0], omega / std::f64::consts::TAU)
+                        .unwrap();
+                    assert_eq!(processes.len(), 1, "{case}");
+                    assert_eq!(processes[0].psd, 3.0, "{case}");
+                    assert_eq!(processes[0].injections.len(), 1, "{case}");
+                    let gain = processes[0].injections[0].gain;
+                    let expected_re = sign * (1.0 + 0.5 * numerator_slope * omega * omega)
+                        / (1.0 + 0.25 * omega * omega);
+                    let expected_im =
+                        sign * (numerator_slope - 0.5) * omega / (1.0 + 0.25 * omega * omega);
+                    assert!((gain.re - expected_re).abs() < 1e-13, "{case}: {gain:?}");
+                    assert!((gain.im - expected_im).abs() < 1e-13, "{case}: {gain:?}");
+                }
+            }
+        }
+    }
+}
+
 mod runtime {
     use rspice_veriloga::device::VerilogADevice;
     use std::sync::Arc;

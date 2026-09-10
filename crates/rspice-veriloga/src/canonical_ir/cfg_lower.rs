@@ -43,7 +43,7 @@ use super::hir::{
     HirExpression, HirLimiterArgument, HirModel, HirRegion, HirStatement,
 };
 use super::mir::{MirEquationKind, MirModel};
-use super::noise::{contains_noise, is_noise_call, string_literal};
+use super::noise::{contains_noise, is_noise_call, string_literal, uses_grouped_noise_transfer};
 use super::{
     BlockId, BranchId, BranchUnknownId, CanonicalNoiseSourceKind, CompilerPhase, ContributionId,
     DiagnosticSeverity, ExprId, IrDiagnostic, NodeId, ParamId, SourceSpanRef, ValueId, VariableId,
@@ -71,11 +71,9 @@ pub struct CfgModel {
     /// Final values of event-controlled procedural variables at function exit,
     /// in dense accepted-state slot order.
     pub event_state_candidates: Vec<ValueId>,
-    /// Every noise source the body writes, in the order the body writes them.
-    ///
-    /// Kept apart from `residuals` because noise contributes nothing to the
-    /// time-domain equations: these are the small-signal powers, evaluated at
-    /// whatever operating point the same body just computed.
+    /// Static source-wise projection of directly contributed noise, in source
+    /// order. Assigned reuse and frequency-dependent routing are retained in
+    /// `noise_processes` and the original CFG instead of folded into this PSD.
     pub noise: Vec<CfgNoiseSource>,
     /// Raw syntactic noise processes from every source-order body position,
     /// including assignment origins. Unlike `noise`, routing amplitude is not
@@ -1685,9 +1683,9 @@ impl<'a> CfgLowerer<'a> {
                 }
                 self.noise_conditional(contribution, condition, then_expr, else_expr, amplitude);
             }
-            HirExprKind::Call { name, args } if name == "ddt" && args.len() == 1 => {
+            HirExprKind::Call { name, args } if uses_grouped_noise_transfer(name, args.len()) => {
                 // Match the static HIR projection: grouped process lowering
-                // retains this derivative and its frequency-dependent gain.
+                // retains this operator and its frequency-dependent gain.
             }
             _ => self.unsupported_noise(span, "nonlinear or dynamic position"),
         }
