@@ -1167,7 +1167,12 @@ fn nonempty_or(value: &str, fallback: &str) -> String {
 }
 
 fn format_revision_time(timestamp_ms: u64) -> String {
-    let now = crate::time_compat::unix_time_ms();
+    if timestamp_ms == 0 {
+        return "time unavailable".to_owned();
+    }
+    let Ok(now) = crate::time_compat::checked_unix_time_ms() else {
+        return "time unavailable".to_owned();
+    };
     if timestamp_ms > now {
         return "clock skew".to_owned();
     }

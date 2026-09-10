@@ -131,10 +131,13 @@ impl ModelResolutionRecord {
             if value.is_empty()
                 || value != value.trim()
                 || value.len() > maximum
-                || value.chars().any(char::is_control)
+                || value.chars().any(|character| {
+                    character.is_control()
+                        && !(field == "audit reason" && matches!(character, '\n' | '\r' | '\t'))
+                })
             {
                 return Err(format!(
-                    "model-resolution {field} must be nonempty, trimmed, control-free, and at most {maximum} bytes"
+                    "model-resolution {field} must be nonempty, trimmed, at most {maximum} bytes, and contain no unsupported control characters"
                 ));
             }
         }
@@ -242,11 +245,8 @@ impl ModelValidationReceipt {
     ) -> Result<Self, String> {
         let engine_version = env!("CARGO_PKG_VERSION").to_owned();
         let platform = model_validation_platform().to_owned();
-        let validated_at_unix_ms = crate::time_compat::checked_unix_epoch()
-            .map_err(|error| format!("system clock cannot timestamp model validation: {error}"))?
-            .as_millis()
-            .try_into()
-            .map_err(|_| "model-validation timestamp exceeds the supported range".to_owned())?;
+        let validated_at_unix_ms = crate::time_compat::checked_unix_time_ms()
+            .map_err(|error| format!("system clock cannot timestamp model validation: {error}"))?;
         let receipt_digest = model_validation_receipt_digest(
             project_revision,
             model_execution_plan_digest,
@@ -2066,11 +2066,8 @@ impl ModelLibraryManager {
                 provider.library
             ));
         }
-        let created_at_unix_ms = crate::time_compat::checked_unix_epoch()
-            .map_err(|error| format!("system clock cannot timestamp provider decision: {error}"))?
-            .as_millis()
-            .try_into()
-            .map_err(|_| "provider-decision timestamp exceeds the supported range".to_owned())?;
+        let created_at_unix_ms = crate::time_compat::checked_unix_time_ms()
+            .map_err(|error| format!("system clock cannot timestamp provider decision: {error}"))?;
         let record = ModelResolutionRecord {
             schema_version: MODEL_RESOLUTION_RECORD_SCHEMA_VERSION,
             consumer_scope: scope,

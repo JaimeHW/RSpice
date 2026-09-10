@@ -11,7 +11,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::product::ContentDigest;
-use crate::time_compat::unix_time_ms;
+use crate::time_compat::checked_unix_time_ms;
 
 use super::{
     Bus, BusTap, Component, DesignNote, DocumentationShape, Junction, NetLabel,
@@ -552,6 +552,8 @@ impl SchematicState {
         }
         validate_project_id(project_id)?;
         validate_identity("cell/view", view_identity)?;
+        let created_unix_ms =
+            checked_unix_time_ms().map_err(ValidatedRevisionError::ClockUnavailable)?;
         let snapshot = ValidatedRevisionSnapshot::capture(accepted);
         let design_content_digest = snapshot.digest()?;
         let mut record = ValidatedSchematicRevision {
@@ -566,7 +568,7 @@ impl SchematicState {
             view_identity: view_identity.to_owned(),
             revision_note: String::new(),
             author: "RSpice accepted-baseline migration".to_owned(),
-            created_unix_ms: unix_time_ms(),
+            created_unix_ms,
             validation_receipt_digest: digest(b"accepted baseline predates validation receipts"),
             finding_counts: ValidationFindingCounts::default(),
             dependencies: Vec::new(),
@@ -583,6 +585,8 @@ impl SchematicState {
     ) -> Result<ValidatedSchematicRevisionId, ValidatedRevisionError> {
         request.validate()?;
         self.validated_revisions.validate()?;
+        let created_unix_ms =
+            checked_unix_time_ms().map_err(ValidatedRevisionError::ClockUnavailable)?;
         let snapshot = ValidatedRevisionSnapshot::capture(self);
         let design_content_digest = snapshot.digest()?;
         let mut record = ValidatedSchematicRevision {
@@ -597,7 +601,7 @@ impl SchematicState {
             view_identity: request.view_identity,
             revision_note: request.revision_note.trim().to_owned(),
             author: request.author.trim().to_owned(),
-            created_unix_ms: unix_time_ms(),
+            created_unix_ms,
             validation_receipt_digest: request.validation_receipt_digest,
             finding_counts: request.finding_counts,
             dependencies: request.dependencies,
@@ -669,6 +673,8 @@ impl SchematicState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ValidatedRevisionError {
+    #[error("validated revision could not be timestamped: {0}")]
+    ClockUnavailable(&'static str),
     #[error("validated revision journal schema {0} is unsupported")]
     UnsupportedJournalSchema(u32),
     #[error("validated revision identity must not be nil")]
@@ -838,6 +844,45 @@ mod tests {
                 "Validated compensation network",
             )],
         }
+    }
+
+    #[test]
+    fn failed_revision_clock_preserves_the_journal_and_working_design() {
+        let project_id = Uuid::new_v4();
+        let accepted = SchematicState::default();
+        let mut state = accepted.clone();
+        state.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let design = state.validated_design_content_digest().unwrap();
+        let journal = state.validated_revisions.clone();
+        let dirty = state.is_dirty;
+        for epoch in [
+            Err("clock unavailable"),
+            Ok(std::time::Duration::ZERO),
+            Ok(std::time::Duration::MAX),
+        ] {
+            crate::time_compat::with_unix_epoch(epoch, || {
+                assert!(matches!(
+                    state.seed_accepted_revision_baseline(
+                        &accepted,
+                        &project_id.to_string(),
+                        3,
+                        "user/top/schematic"
+                    ),
+                    Err(ValidatedRevisionError::ClockUnavailable(_))
+                ));
+                assert!(matches!(
+                    state.append_validated_revision(request(&state, project_id)),
+                    Err(ValidatedRevisionError::ClockUnavailable(_))
+                ));
+            });
+            assert_eq!(state.validated_revisions, journal);
+            assert_eq!(state.is_dirty, dirty);
+            assert_eq!(state.validated_design_content_digest().unwrap(), design);
+        }
+        state
+            .append_validated_revision(request(&state, project_id))
+            .unwrap();
+        assert_eq!(state.validated_revisions.records().len(), 1);
     }
 
     #[test]

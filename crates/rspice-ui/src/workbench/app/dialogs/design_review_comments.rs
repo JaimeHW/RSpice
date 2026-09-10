@@ -8,7 +8,7 @@ use egui::{Align, Context, Frame, Layout, RichText, ScrollArea, Stroke, TextEdit
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point};
-use crate::time_compat::unix_time_ms;
+use crate::time_compat::checked_unix_time_ms;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -133,6 +133,7 @@ enum ReviewAction {
     GoToAnchor(u64, Point),
     ApplyAssignment(Option<String>),
     AttachEvidence(usize),
+    Reply,
     Resolve,
     Reopen,
 }
@@ -255,12 +256,7 @@ impl RSpiceApp {
 
         match choice {
             DialogChoice::Primary => {
-                let body = self.state.dialogs.design_review_comments.reply.clone();
-                self.apply_review_mutation(DesignReviewMutation::Reply {
-                    author: CURRENT_ACTOR.to_owned(),
-                    body,
-                    created_unix_ms: unix_time_ms(),
-                });
+                self.handle_design_review_action(ReviewAction::Reply);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.design_review_comments.close();
@@ -312,12 +308,29 @@ impl RSpiceApp {
                     content_digest: Some(candidate.digest.clone()),
                 });
             }
-            ReviewAction::Resolve => {
-                let note = self.state.dialogs.design_review_comments.reply.clone();
-                self.apply_review_mutation(DesignReviewMutation::Resolve {
-                    author: CURRENT_ACTOR.to_owned(),
-                    note,
-                    created_unix_ms: unix_time_ms(),
+            ReviewAction::Reply | ReviewAction::Resolve => {
+                let created_unix_ms = match checked_unix_time_ms() {
+                    Ok(timestamp) => timestamp,
+                    Err(error) => {
+                        self.state.dialogs.design_review_comments.error =
+                            Some(format!("Review update could not be timestamped: {error}"));
+                        return;
+                    }
+                };
+                let body = self.state.dialogs.design_review_comments.reply.clone();
+                let author = CURRENT_ACTOR.to_owned();
+                self.apply_review_mutation(if matches!(action, ReviewAction::Resolve) {
+                    DesignReviewMutation::Resolve {
+                        author,
+                        note: body,
+                        created_unix_ms,
+                    }
+                } else {
+                    DesignReviewMutation::Reply {
+                        author,
+                        body,
+                        created_unix_ms,
+                    }
                 });
             }
             ReviewAction::Reopen => self.apply_review_mutation(DesignReviewMutation::Reopen),
@@ -1016,7 +1029,15 @@ fn ellipsize(value: &str, max_chars: usize) -> String {
 }
 
 fn relative_time(timestamp_ms: u64) -> String {
-    let elapsed = unix_time_ms().saturating_sub(timestamp_ms);
+    if timestamp_ms == 0 {
+        return "time unavailable".to_owned();
+    }
+    let Ok(now) = checked_unix_time_ms() else {
+        return "time unavailable".to_owned();
+    };
+    let Some(elapsed) = now.checked_sub(timestamp_ms) else {
+        return "clock skew".to_owned();
+    };
     match elapsed {
         0..=59_999 => "just now".to_owned(),
         60_000..=3_599_999 => format!("{} min ago", elapsed / 60_000),
@@ -1030,6 +1051,18 @@ mod tests {
     use super::*;
     use crate::state::DesignNote;
 
+    #[test]
+    fn review_age_reports_missing_time_and_clock_skew() {
+        crate::time_compat::with_unix_epoch(Ok(std::time::Duration::from_secs(120)), || {
+            assert_eq!(relative_time(0), "time unavailable");
+            assert_eq!(relative_time(120_001), "clock skew");
+            assert_eq!(relative_time(60_000), "1 min ago");
+        });
+        crate::time_compat::with_unix_epoch(Err("clock unavailable"), || {
+            assert_eq!(relative_time(60_000), "time unavailable");
+        });
+    }
+
     fn review_note(id: u64) -> DesignNote {
         DesignNote::new(
             id,
@@ -1038,6 +1071,54 @@ mod tests {
             "Confirm model",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn failed_review_clock_retains_the_draft_and_durable_thread() {
+        for action in [ReviewAction::Reply, ReviewAction::Resolve] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.schematic.design_notes.push(review_note(1));
+            open_design_review_comments(&mut app.state);
+            app.state.dialogs.design_review_comments.reply = "Check the bias point".to_owned();
+            let notes = app.state.schematic.design_notes.clone();
+            let dirty = app.state.schematic.is_dirty;
+            for epoch in [
+                Err("clock unavailable"),
+                Ok(std::time::Duration::ZERO),
+                Ok(std::time::Duration::MAX),
+            ] {
+                crate::time_compat::with_unix_epoch(epoch, || {
+                    app.handle_design_review_action(action.clone())
+                });
+                assert_eq!(app.state.schematic.design_notes, notes);
+                assert_eq!(app.state.schematic.is_dirty, dirty);
+                assert_eq!(
+                    app.state.dialogs.design_review_comments.reply,
+                    "Check the bias point"
+                );
+                assert!(
+                    app.state
+                        .dialogs
+                        .design_review_comments
+                        .error
+                        .as_deref()
+                        .unwrap()
+                        .contains("timestamped")
+                );
+            }
+            app.handle_design_review_action(action);
+            assert!(app.state.dialogs.design_review_comments.error.is_none());
+            assert!(app.state.dialogs.design_review_comments.reply.is_empty());
+            assert_eq!(
+                app.state.schematic.design_notes[0]
+                    .review
+                    .as_ref()
+                    .unwrap()
+                    .messages
+                    .len(),
+                1
+            );
+        }
     }
 
     #[test]
@@ -1204,7 +1285,7 @@ mod tests {
         open.assign_review(Some(CURRENT_ACTOR)).unwrap();
         let mut resolved = review_note(2);
         resolved
-            .resolve_review(CURRENT_ACTOR, "Accepted.", unix_time_ms())
+            .resolve_review(CURRENT_ACTOR, "Accepted.", checked_unix_time_ms().unwrap())
             .unwrap();
         let mut dialog = DesignReviewCommentsDialogState::default();
         assert!(note_visible(&open, &dialog, None));

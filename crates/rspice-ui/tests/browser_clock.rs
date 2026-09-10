@@ -35,22 +35,37 @@ impl Drop for RestoreWallClock {
 #[wasm_bindgen_test]
 fn wall_clock_adjustments_do_not_change_elapsed_time() {
     let _restore = RestoreWallClock(replace_date_now(1_700_000_000_123.0));
-    assert_eq!(time_compat::unix_time_ms(), 1_700_000_000_123);
+    assert_eq!(time_compat::checked_unix_time_ms(), Ok(1_700_000_000_123));
+    time_compat::with_unix_epoch(Err("injected clock failure"), || {
+        assert!(time_compat::checked_unix_time_ms().is_err());
+    });
+    assert_eq!(time_compat::checked_unix_time_ms(), Ok(1_700_000_000_123));
     let started = time_compat::Instant::now();
 
     replace_date_now(1_700_086_400_123.0);
-    assert_eq!(time_compat::unix_time_ms(), 1_700_086_400_123);
+    assert_eq!(time_compat::checked_unix_time_ms(), Ok(1_700_086_400_123));
     assert!(started.elapsed().as_secs() < 10);
 
     replace_date_now(1.0);
     let elapsed = started.elapsed();
-    assert_eq!(time_compat::unix_time_ms(), 1);
+    assert_eq!(time_compat::checked_unix_time_ms(), Ok(1));
     assert!(elapsed.as_secs() < 10);
     assert!(started.elapsed() >= elapsed);
 
-    for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
+    for invalid in [
+        -1.0,
+        1.5,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::MAX,
+    ] {
         replace_date_now(invalid);
         assert!(time_compat::checked_unix_epoch().is_err());
+        assert!(time_compat::checked_unix_time_ms().is_err());
         assert!(time_compat::unix_epoch().is_zero());
     }
+    replace_date_now(0.0);
+    assert!(time_compat::checked_unix_epoch().unwrap().is_zero());
+    assert!(time_compat::checked_unix_time_ms().is_err());
 }

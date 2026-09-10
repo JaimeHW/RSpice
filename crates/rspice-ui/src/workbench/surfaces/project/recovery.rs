@@ -208,22 +208,32 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
             Stroke::new(1.0, t.color.border),
         );
         let content = rect.shrink2(vec2(10.0, 5.0));
-        ui.painter().text(
+        let actions = Rect::from_min_max(
+            pos2((rect.right() - 180.0).max(rect.left()), rect.top() + 12.0),
+            pos2(rect.right() - 8.0, rect.bottom() - 8.0),
+        );
+        let text_painter = ui.painter().with_clip_rect(Rect::from_min_max(
+            content.min,
+            pos2((actions.left() - 8.0).max(content.left()), content.bottom()),
+        ));
+        let age = checkpoint_age(checkpoint.created_unix_ms());
+        let age_rect = text_painter.text(
             content.left_top(),
             Align2::LEFT_TOP,
-            checkpoint_age(checkpoint.created_unix_ms()),
+            &age,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         );
-        ui.painter().text(
-            pos2(content.left() + 70.0, content.top()),
+        let details_x = (content.left() + 70.0).max(age_rect.right() + 10.0);
+        text_painter.text(
+            pos2(details_x, content.top()),
             Align2::LEFT_TOP,
             checkpoint.reason().label(),
             theme::sans(tokens::FS_0, FontWeight::SemiBold),
             t.color.text,
         );
-        ui.painter().text(
-            pos2(content.left() + 70.0, content.top() + 20.0),
+        text_painter.text(
+            pos2(content.left(), content.top() + 20.0),
             Align2::LEFT_TOP,
             format!(
                 "revision {} \u{00b7} {} \u{00b7} verified",
@@ -232,10 +242,6 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
             ),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.ok,
-        );
-        let actions = Rect::from_min_max(
-            pos2((rect.right() - 180.0).max(rect.left()), rect.top() + 12.0),
-            pos2(rect.right() - 8.0, rect.bottom() - 8.0),
         );
         ui.scope_builder(
             egui::UiBuilder::new()
@@ -251,9 +257,10 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
             },
         );
         let row_label = format!(
-            "{} checkpoint, revision {}",
+            "{}, {age}, revision {}, {}, verified",
             checkpoint.reason().label(),
-            checkpoint.project_revision()
+            checkpoint.project_revision(),
+            format_bytes(checkpoint.snapshot_byte_len())
         );
         response.widget_info(|| {
             egui::WidgetInfo::selected(
@@ -407,8 +414,16 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
 }
 
 fn checkpoint_age(created_unix_ms: u64) -> String {
-    let now = crate::time_compat::unix_time_ms();
-    let seconds = now.saturating_sub(created_unix_ms) / 1_000;
+    if created_unix_ms == 0 {
+        return "time unavailable".to_owned();
+    }
+    let Ok(now) = crate::time_compat::checked_unix_time_ms() else {
+        return "time unavailable".to_owned();
+    };
+    let Some(elapsed) = now.checked_sub(created_unix_ms) else {
+        return "clock skew".to_owned();
+    };
+    let seconds = elapsed / 1_000;
     match seconds {
         0..=59 => format!("{seconds} s ago"),
         60..=3_599 => format!("{} min ago", seconds / 60),

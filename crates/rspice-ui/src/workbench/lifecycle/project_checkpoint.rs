@@ -160,6 +160,8 @@ fn prepare_checkpoint(
     state: &AppState,
     reason: ProjectCheckpointReason,
 ) -> Result<(ProjectCheckpointManifest, String), String> {
+    let created_unix_ms = crate::time_compat::checked_unix_time_ms()
+        .map_err(|error| format!("Project checkpoint could not be timestamped: {error}"))?;
     let project = crate::workbench::lifecycle::project_lifecycle::snapshot(state)
         .map_err(|error| format!("project checkpoint snapshot failed: {error}"))?;
     project
@@ -168,7 +170,6 @@ fn prepare_checkpoint(
     let serialized = crate::io::project_io::serialize_project_file(&project)
         .map_err(|error| format!("project checkpoint serialization failed: {error}"))?;
     let bytes = serialized.as_bytes();
-    let created_unix_ms = crate::time_compat::unix_time_ms();
     let project_id = project.workspace.project.id().to_string();
     let checkpoint_id = Uuid::new_v4();
     let snapshot_name = format!("{created_unix_ms}-{checkpoint_id}{SNAPSHOT_SUFFIX}");
@@ -185,6 +186,7 @@ fn prepare_checkpoint(
         snapshot_name,
     };
 
+    validate_manifest(&manifest)?;
     Ok((manifest, serialized))
 }
 
@@ -787,6 +789,26 @@ pub(crate) fn start_recovery_copy_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_clock_failure_precedes_publication() {
+        let state = AppState::default();
+        for reason in [
+            ProjectCheckpointReason::Manual,
+            ProjectCheckpointReason::TechnologyAttachment,
+        ] {
+            for epoch in [
+                Err("clock unavailable"),
+                Ok(std::time::Duration::ZERO),
+                Ok(std::time::Duration::MAX),
+            ] {
+                crate::time_compat::with_unix_epoch(epoch, || {
+                    let error = prepare_checkpoint(&state, reason).unwrap_err();
+                    assert!(error.contains("timestamped"), "{error}");
+                });
+            }
+        }
+    }
 
     #[test]
     fn manifest_rejects_noncanonical_snapshot_identity() {

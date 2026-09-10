@@ -839,9 +839,26 @@ fn source_qualified_provider_decision_removes_loser_before_engine_parse() {
             ModelConsumerScope::PrimitiveModel,
             "CONTESTED",
             &winner,
-            "Device-owner review selected the characterized foundry card.",
+            "Device-owner review selected the characterized foundry card.\r\nEvidence:\n\tReviewed characterization.",
         )
         .expect("publish source-qualified provider decision in manager candidate");
+    let restored: ModelResolutionRecord =
+        serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+    assert_eq!(restored, record);
+    manager
+        .restore_model_resolution_records(vec![restored])
+        .expect("multiline audit reasons retain their exact text on reload");
+    for control in ['\0', '\u{1b}', '\u{7f}'] {
+        let mut invalid = record.clone();
+        invalid.audit_reason = format!("Invalid {control} reason");
+        assert!(invalid.validate().is_err());
+    }
+    let mut invalid = record.clone();
+    invalid.provider_library.push_str("\nidentity");
+    assert!(
+        invalid.validate().is_err(),
+        "provider identities remain single-line"
+    );
     let plan = manager
         .seal_execution_sources()
         .expect("seal exact authenticated providers")
