@@ -21,6 +21,8 @@ mod open_documents;
 mod plan_data;
 mod project_descriptor;
 mod project_library_publication;
+mod reference_changes;
+mod reference_preparation;
 mod saved_output;
 
 // The two functions are renamed on export: bare `normalize` and
@@ -38,6 +40,8 @@ pub use hierarchy::*;
 pub use netlist_profile::NetlistExecutionProfile;
 pub use project_descriptor::*;
 pub use project_library_publication::*;
+pub(crate) use reference_changes::{PreparedReferences, ReferenceChanges};
+pub(crate) use reference_preparation::{SchematicReferenceTransaction, reference_from_key};
 pub(crate) use saved_output::{raw_probe_unit, saved_output_references, validate_raw_probe};
 // The glob is crate-private: `materialize` is `pub(super)` throughout except
 // the one binding lookup two workbench surfaces reach by path, the terminal

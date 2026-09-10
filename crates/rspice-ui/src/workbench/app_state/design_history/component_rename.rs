@@ -2,8 +2,8 @@
 //! carried with it. History owns exact affected content, never retained runs.
 
 use super::reference_preparation::{reference_from_key, validate_reference_document};
-use super::references::PreparedReferences;
 use super::*;
+use crate::state::workspace::PreparedReferences;
 use crate::state::{AnnotationState, Component, SchematicObjectKey};
 use crate::workbench::state::InlineEditAuthority;
 
@@ -209,7 +209,7 @@ impl ComponentRenameRecord {
     fn matches(&self, state: &AppState, forward: bool) -> bool {
         let expected = if forward { &self.before } else { &self.after };
         schematic_map_matches(state, expected)
-            && self.references.matches(state, forward)
+            && self.references.matches(&state.workspace, forward)
             && self.annotation.as_ref().is_none_or(|change| {
                 state.workspace.design_management.annotation()
                     == if forward {
@@ -250,7 +250,7 @@ impl ComponentRenameRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(state, key, source)?;
         }
-        self.references.prepare(state, forward)?;
+        self.references.prepare(&state.workspace, forward)?;
         self.prepare_annotation(state, forward)
     }
 
@@ -359,7 +359,7 @@ impl PreparedComponentRename {
             },
             true,
         )?;
-        self.references.publish(state);
+        self.references.publish(&mut state.workspace);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;
         if let Some(change) = &mut record.annotation {

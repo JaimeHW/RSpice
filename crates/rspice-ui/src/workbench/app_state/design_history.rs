@@ -24,12 +24,11 @@ mod annotation;
 mod compensation;
 mod component_rename;
 mod reference_preparation;
-mod references;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::state::workspace::{ReferenceChanges, SchematicReferenceTransaction};
 use compensation::{DocumentCompensation, RecordHeader};
-use references::ReferenceChanges;
 
 use crate::diagnostics::ConsoleMessage;
 use crate::product::ObjectRevision;
@@ -633,13 +632,6 @@ pub(crate) struct DesignManagementHistoryEntry {
     pub(crate) after_schematics: BTreeMap<String, SchematicState>,
     pub(crate) references: ReferenceChanges,
     pub(crate) committed_revision: ObjectRevision,
-}
-
-pub(crate) struct SchematicReferenceTransaction {
-    pub(crate) before: BTreeMap<String, SchematicState>,
-    pub(crate) after: BTreeMap<String, SchematicState>,
-    pub(crate) references: ReferenceChanges,
-    prepared_references: references::PreparedReferences,
 }
 
 pub(crate) struct HierarchyExtractionHistoryEntry {
@@ -1879,14 +1871,14 @@ impl DesignManagementRecord {
     fn after_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.design_management, &self.after)
             && schematic_map_matches(state, &self.after_schematics)
-            && self.references.matches(state, false)
+            && self.references.matches(&state.workspace, false)
             && state.workspace.project.revision() == self.undo_guard_revision
     }
 
     fn before_design_matches(&self, state: &AppState) -> bool {
         design_management_semantics_match(&state.workspace.design_management, &self.before)
             && schematic_map_matches(state, &self.before_schematics)
-            && self.references.matches(state, true)
+            && self.references.matches(&state.workspace, true)
             && self
                 .redo_guard_revision
                 .is_some_and(|revision| state.workspace.project.revision() == revision)
@@ -1911,7 +1903,7 @@ impl DesignManagementRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             reference_preparation::validate_reference_document(state, key, source)?;
         }
-        self.references.prepare(state, forward)?;
+        self.references.prepare(&state.workspace, forward)?;
         let current = &state.workspace.design_management;
         let mut prepared_catalog = current.clone();
         prepared_catalog
@@ -1952,7 +1944,7 @@ impl DesignManagementRecord {
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.before, false)?;
-        history.references.publish(state);
+        history.references.publish(&mut state.workspace);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;
@@ -1973,7 +1965,7 @@ impl DesignManagementRecord {
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &history.after, false)?;
-        history.references.publish(state);
+        history.references.publish(&mut state.workspace);
         self.before_schematics = history.before;
         self.after_schematics = history.after;
         self.references = history.changes;

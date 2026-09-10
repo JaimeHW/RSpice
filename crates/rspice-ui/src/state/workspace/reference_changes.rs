@@ -38,14 +38,14 @@ struct OutputChange {
 }
 
 #[derive(Clone)]
-pub(super) struct PreparedReferences {
+pub(crate) struct PreparedReferences {
     configurations: ConfigurationSetCatalog,
     outputs: Vec<(SimulationPlanId, SavedOutput)>,
     occurrences: Vec<(CellViewRef, DocumentOccurrence)>,
 }
 
 impl ReferenceChanges {
-    pub(super) fn reversed(mut self) -> Self {
+    pub(crate) fn reversed(mut self) -> Self {
         for change in &mut self.configurations {
             std::mem::swap(&mut change.before, &mut change.after);
         }
@@ -58,8 +58,8 @@ impl ReferenceChanges {
         self
     }
 
-    pub(super) fn between(
-        state: &AppState,
+    pub(crate) fn between(
+        workspace: &ProjectWorkspace,
         configurations: &ConfigurationSetCatalog,
         outputs: Vec<(SimulationPlanId, SavedOutput)>,
     ) -> Self {
@@ -69,7 +69,7 @@ impl ReferenceChanges {
                 .configurations()
                 .iter()
                 .filter_map(|after| {
-                    let before = state.workspace.configuration_sets.find(after.id())?;
+                    let before = workspace.configuration_sets.find(after.id())?;
                     (before.definition() != after.definition()).then(|| ConfigurationChange {
                         id: after.id(),
                         before: before.definition().clone(),
@@ -80,8 +80,7 @@ impl ReferenceChanges {
             outputs: outputs
                 .into_iter()
                 .map(|(plan, output)| {
-                    let before = state
-                        .workspace
+                    let before = workspace
                         .plan_data(plan)
                         .expect("source plan")
                         .saved_outputs
@@ -99,7 +98,7 @@ impl ReferenceChanges {
         }
     }
 
-    pub(super) fn add_instance_renames(
+    pub(crate) fn add_instance_renames(
         &mut self,
         document: &CellViewRef,
         before: &[Component],
@@ -127,7 +126,7 @@ impl ReferenceChanges {
 
     fn prepare_occurrences(
         &self,
-        state: &AppState,
+        workspace: &ProjectWorkspace,
         forward: bool,
     ) -> Result<Vec<(CellViewRef, DocumentOccurrence)>, String> {
         let mut names = BTreeMap::new();
@@ -151,7 +150,7 @@ impl ReferenceChanges {
             return Ok(Vec::new());
         }
         let mut updates = Vec::new();
-        for open in &state.workspace.open_views {
+        for open in &workspace.open_views {
             let mut occurrence = open.occurrence.clone();
             let mut parent = occurrence.root.clone();
             let mut changed = false;
@@ -178,10 +177,9 @@ impl ReferenceChanges {
         Ok(updates)
     }
 
-    pub(super) fn matches(&self, state: &AppState, forward: bool) -> bool {
+    pub(crate) fn matches(&self, workspace: &ProjectWorkspace, forward: bool) -> bool {
         self.configurations.iter().all(|change| {
-            state
-                .workspace
+            workspace
                 .configuration_sets
                 .find(change.id)
                 .is_some_and(|current| {
@@ -193,8 +191,7 @@ impl ReferenceChanges {
                         }
                 })
         }) && self.outputs.iter().all(|change| {
-            state
-                .workspace
+            workspace
                 .plan_data(change.plan)
                 .and_then(|payload| {
                     payload
@@ -214,17 +211,17 @@ impl ReferenceChanges {
     }
 
     /// Finish revision arithmetic and validation before any owner changes.
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         &self,
-        state: &AppState,
+        workspace: &ProjectWorkspace,
         forward: bool,
     ) -> Result<PreparedReferences, String> {
-        if !self.matches(state, forward) {
+        if !self.matches(workspace, forward) {
             return Err(
                 "The configuration or saved-output references changed before commit.".to_owned(),
             );
         }
-        let mut configurations = state.workspace.configuration_sets.clone();
+        let mut configurations = workspace.configuration_sets.clone();
         for change in &self.configurations {
             let revision = configurations
                 .find(change.id)
@@ -245,8 +242,7 @@ impl ReferenceChanges {
         }
         let mut outputs = Vec::with_capacity(self.outputs.len());
         for change in &self.outputs {
-            let mut output = state
-                .workspace
+            let mut output = workspace
                 .plan_data(change.plan)
                 .expect("guarded plan")
                 .saved_outputs
@@ -267,20 +263,17 @@ impl ReferenceChanges {
         Ok(PreparedReferences {
             configurations,
             outputs,
-            occurrences: self.prepare_occurrences(state, forward)?,
+            occurrences: self.prepare_occurrences(workspace, forward)?,
         })
     }
 }
 
 impl PreparedReferences {
-    pub(super) fn publish(self, state: &mut AppState) {
-        state
-            .workspace
-            .replace_document_occurrences(self.occurrences);
-        state.workspace.configuration_sets = self.configurations;
+    pub(crate) fn publish(self, workspace: &mut ProjectWorkspace) {
+        workspace.replace_document_occurrences(self.occurrences);
+        workspace.configuration_sets = self.configurations;
         for (plan, replacement) in self.outputs {
-            let target = state
-                .workspace
+            let target = workspace
                 .plan_data_mut(plan)
                 .expect("guarded plan")
                 .saved_outputs
@@ -289,6 +282,6 @@ impl PreparedReferences {
                 .expect("guarded output");
             *target = replacement;
         }
-        state.workspace.project_metadata_dirty = true;
+        workspace.project_metadata_dirty = true;
     }
 }
