@@ -134,27 +134,41 @@ pub fn measure_interval(
     } else {
         1.0
     };
-    let mut rms: f64 = 0.0;
+    let mut squares = Sum::default();
+    let mut small_rms: f64 = 0.0;
     if scale > 0.0 {
         for (xs, ys) in x.windows(2).zip(y.windows(2)) {
             let Some((left, right)) = clipped_span(xs, lo, hi) else {
                 continue;
             };
             let (u, v) = clipped_values(xs, ys, left, right);
-            let root_weight = sqrt_span(left, right) / sqrt_span(lo, hi);
+            let root_weight = || sqrt_span(left, right) / sqrt_span(lo, hi);
             let weight = fraction(left, right, lo, hi);
             let panel_mean = midpoint(u / mean_scale, v / mean_scale);
             mean.add(if weight > 0.0 {
                 panel_mean * weight
             } else {
-                (panel_mean * root_weight) * root_weight
+                (panel_mean * root_weight()) * root_weight()
             });
-            let (u, v) = (u / scale, v / scale);
+            let panel_scale = u.abs().max(v.abs());
+            if panel_scale == 0.0 {
+                continue;
+            }
+            let (u, v) = (u / panel_scale, v / panel_scale);
             // Integral of the square of a linear segment, not a trapezoid
-            // through squared samples. Accumulate square roots with hypot so
-            // a very short interval's squared weight need not be representable.
-            let panel_rms = ((u * u + u * v + v * v) / 3.0).sqrt();
-            rms = rms.hypot(panel_rms * root_weight);
+            // through squared samples. Normalize locally before squaring so a
+            // small signal beside a huge short pulse still contributes.
+            let panel_square = (u * u + u * v + v * v) / 3.0;
+            let amplitude = panel_scale / scale;
+            let energy = amplitude * amplitude * panel_square * weight;
+            if energy >= f64::MIN_POSITIVE {
+                squares.add(energy);
+            } else {
+                // Tiny energies need not be representable before taking their
+                // square root. Keep these separately from the compensated sum
+                // so ordinary dense traces do not accumulate hypot roundoff.
+                small_rms = small_rms.hypot(amplitude * panel_square.sqrt() * root_weight());
+            }
         }
     }
     Ok(IntervalStatistics {
@@ -162,7 +176,7 @@ pub fn measure_interval(
         max,
         // A mean and RMS cannot exceed the contributing signal's magnitude.
         mean: mean.value().clamp(-scale / mean_scale, scale / mean_scale) * mean_scale,
-        rms: rms.min(1.0) * scale,
+        rms: squares.value().sqrt().hypot(small_rms).min(1.0) * scale,
     })
 }
 
@@ -396,5 +410,26 @@ mod tests {
                 assert_eq!(stats.rms, tiny);
             }
         }
+    }
+
+    #[test]
+    fn a_tiny_duty_cycle_pulse_does_not_erase_the_background_rms() {
+        let stats = measure_interval(
+            &[0.0, 1e-300, 1e-300, 1e300],
+            &[1e300, 1e300, 1.0, 1.0],
+            None,
+        )
+        .unwrap();
+        // The pulse and the background each contribute one unit of mean square.
+        close(stats.rms, 2.0_f64.sqrt());
+    }
+
+    #[test]
+    fn dense_resampling_preserves_the_linear_rms() {
+        let x: Vec<_> = (0..=100_000)
+            .map(|index| f64::from(index) / 100_000.0)
+            .collect();
+        let stats = measure_interval(&x, &x, None).unwrap();
+        close(stats.rms, (1.0_f64 / 3.0).sqrt());
     }
 }
