@@ -170,10 +170,11 @@ impl VoltageRow {
     }
 
     fn form(self) -> Result<Vec<(ForestValue, Value)>, SimulationError> {
-        self.values
-            .into_iter()
-            .map(|(key, value)| Ok((key, -coefficient_ratio(&value, &self.query)?)))
-            .collect()
+        let mut form = Vec::with_capacity(self.values.len());
+        for (key, value) in self.values {
+            form.push((key, -coefficient_ratio(&value, &self.query)?));
+        }
+        Ok(form)
     }
 }
 
@@ -205,6 +206,25 @@ impl PssVoltageConstraintBuilder {
             self.retained_words.saturating_add(extra),
             self.limits.max_result_values,
         )
+    }
+
+    fn reserve_retained_words(&mut self, words: usize) -> Result<(), SimulationError> {
+        self.check_cost(words)?;
+        self.retained_words = self.retained_words.saturating_add(words);
+        Ok(())
+    }
+
+    /// Compiled mappings remain alive during subsequent elimination queries.
+    /// Account for their capacity before converting the next integer row.
+    fn compile_row(
+        &mut self,
+        row: VoltageRow,
+    ) -> Result<Vec<(ForestValue, Value)>, SimulationError> {
+        let words = row.values.len().saturating_mul(FORM_TERM_WORDS);
+        self.check_cost(words.saturating_add(row.words().saturating_mul(3)))?;
+        let form = row.form()?;
+        self.reserve_retained_words(words)?;
+        Ok(form)
     }
 
     fn add_integer<K: Ord>(terms: &mut BTreeMap<K, BigInt>, key: K, value: BigInt) {
@@ -318,8 +338,7 @@ impl PssVoltageConstraintBuilder {
         else {
             return Ok(Some(row));
         };
-        self.retained_words = self.retained_words.saturating_add(row.words());
-        self.check_cost(0)?;
+        self.reserve_retained_words(row.words())?;
         self.pivots[pivot] = Some(self.rows.len());
         self.rows.push((pivot, row));
         Ok(None)
@@ -362,7 +381,7 @@ impl PssVoltageConstraintBuilder {
 
 impl PssVoltageConstraintBuilder {
     pub(super) fn finish(
-        self,
+        mut self,
         circuit: &CircuitData,
         abort: &dyn AbortSignal,
     ) -> Result<PssVoltageConstraints, SimulationError> {
@@ -392,13 +411,13 @@ impl PssVoltageConstraintBuilder {
                 self.port(pos, neg, abort)?;
             }
         }
-        let mut node_forms = Vec::new();
         let mut words = circuit.num_nodes().saturating_mul(3);
+        self.reserve_retained_words(words)?;
+        let mut node_forms = Vec::with_capacity(circuit.num_nodes());
         for node in 1..=circuit.num_nodes() {
             let row = self.port_row(node, 0, abort)?;
             words = words.saturating_add(row.values.len().saturating_mul(FORM_TERM_WORDS));
-            self.check_cost(words)?;
-            node_forms.push(row.form()?);
+            node_forms.push(self.compile_row(row)?);
         }
         Ok(PssVoltageConstraints {
             node_forms: std::sync::Arc::new(node_forms),
@@ -409,24 +428,53 @@ impl PssVoltageConstraintBuilder {
 }
 
 impl PssVoltageConstraints {
+    fn ensure_evaluation_work(
+        &self,
+        extra_words: usize,
+        terms: usize,
+    ) -> Result<(), SimulationError> {
+        PssVoltageConstraintBuilder::ensure_words(
+            self.retained_words
+                .saturating_add(extra_words)
+                .saturating_add(terms.saturating_mul(2)),
+            self.max_values,
+        )
+    }
+
+    fn max_terms(&self) -> usize {
+        self.node_forms.iter().map(Vec::len).max().unwrap_or(0)
+    }
+
     pub(super) fn solve(
         &self,
         solution: &mut [Value],
         mut value: impl FnMut(ForestValue) -> Result<Value, SimulationError>,
     ) -> Result<(), SimulationError> {
+        let max_terms = self.max_terms();
+        self.ensure_evaluation_work(solution.len(), max_terms)?;
+        let mut terms = Vec::with_capacity(max_terms);
         for (node, form) in self.node_forms.iter().enumerate() {
-            let terms = form
-                .iter()
-                .map(|&(source, weight)| Ok((weight, value(source)?)))
-                .collect::<Result<Vec<_>, SimulationError>>()?;
-            solution[node + 1] =
-                rspice_veriloga_runtime::arithmetic::sum_products(terms.into_iter())
-                    .map_err(|_| precision_error())?;
-            if !solution[node + 1].is_finite() {
-                return Err(precision_error());
-            }
+            solution[node + 1] = evaluate_form(form, &mut terms, &mut value)?;
         }
         Ok(())
+    }
+}
+
+fn evaluate_form(
+    form: &[(ForestValue, Value)],
+    terms: &mut Vec<(Value, Value)>,
+    mut value: impl FnMut(ForestValue) -> Result<Value, SimulationError>,
+) -> Result<Value, SimulationError> {
+    terms.clear();
+    for &(source, weight) in form {
+        terms.push((weight, value(source)?));
+    }
+    let result = rspice_veriloga_runtime::arithmetic::sum_products(terms.iter().copied())
+        .map_err(|_| precision_error())?;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(precision_error())
     }
 }
 
@@ -582,6 +630,89 @@ mod tests {
     use super::*;
     use crate::abort_signal::{CountingAbort, NoAbort};
     use crate::resource::ResourceLimits;
+
+    #[test]
+    fn projection_workspace_keeps_prior_mappings_in_the_compilation_budget() {
+        let mut deck = String::from("Stacked source projections\n");
+        for index in 1..=64 {
+            let negative = if index == 1 {
+                "0".to_owned()
+            } else {
+                format!("n{}", index - 1)
+            };
+            deck.push_str(&format!("V{index} n{index} {negative} 1\n"));
+        }
+        deck.push_str(".end\n");
+        let circuit = Engine::default()
+            .build_circuit(&Netlist::parse(&deck).unwrap())
+            .unwrap();
+        let mut builder =
+            PssVoltageConstraintBuilder::new(circuit.num_nodes() + 1, ResourceLimits::default())
+                .unwrap();
+        for (index, (&positive, &negative)) in circuit
+            .voltage_sources
+            .node_pos
+            .iter()
+            .zip(&circuit.voltage_sources.node_neg)
+            .enumerate()
+        {
+            builder
+                .add(
+                    [(positive, 1.0), (negative, -1.0)],
+                    ForestValue::Source(index),
+                    &NoAbort,
+                )
+                .unwrap();
+        }
+        let mappings = builder.clone().finish(&circuit, &NoAbort).unwrap();
+        // This budget can hold both retained representations, but leaves no
+        // room for the query/conversion work while the last mapping is built.
+        builder.limits.max_result_values = builder.retained_words + mappings.retained_words;
+        assert!(matches!(
+            builder.finish(&circuit, &NoAbort),
+            Err(SimulationError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn projection_workspace_is_checked_before_evaluating_sources() {
+        let mut mappings = PssVoltageConstraints {
+            node_forms: std::sync::Arc::new(vec![
+                vec![(ForestValue::Source(0), 2.0)],
+                vec![
+                    (ForestValue::Source(1), 1e300),
+                    (ForestValue::Source(2), -1e300),
+                    (ForestValue::Source(0), 1.0),
+                ],
+            ]),
+            retained_words: 4 * FORM_TERM_WORDS + 6,
+            max_values: 4 * FORM_TERM_WORDS + 7,
+        };
+        let mut solution = [0.0, 42.0, 43.0];
+        let mut calls = 0;
+        assert!(matches!(
+            mappings.solve(&mut solution, |_| {
+                calls += 1;
+                Ok(3.0)
+            }),
+            Err(SimulationError::ResourceLimit(_))
+        ));
+        assert_eq!(calls, 0);
+        assert_eq!(solution, [0.0, 42.0, 43.0]);
+        mappings.max_values = usize::MAX;
+        mappings
+            .solve(&mut solution, |source| {
+                calls += 1;
+                Ok(if source == ForestValue::Source(0) {
+                    3.0
+                } else {
+                    1.0
+                })
+            })
+            .unwrap();
+        assert_eq!(solution, [0.0, 6.0, 3.0]);
+        assert_eq!(calls, 4, "exact summation must not re-evaluate a source");
+    }
 
     #[test]
     fn vcvs_rank_preserves_a_control_loop_below_binary64_product_precision() {

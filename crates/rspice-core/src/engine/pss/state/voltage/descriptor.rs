@@ -259,8 +259,9 @@ impl PssDescriptor {
                 voltage_branches.push(VoltageBranch::Capacitor(index));
             }
         }
-        let mut forms = Vec::new();
         let mut retained_words = size.saturating_mul(3);
+        algebraic.reserve_retained_words(retained_words)?;
+        let mut forms = Vec::with_capacity(size);
         for unknown in 1..=size {
             let row = algebraic.port_row(unknown, 0, abort)?;
             if !row.nodes.is_empty() {
@@ -271,24 +272,28 @@ impl PssDescriptor {
             }
             retained_words =
                 retained_words.saturating_add(row.values.len().saturating_mul(FORM_TERM_WORDS));
-            algebraic.check_cost(retained_words)?;
-            forms.push(row.form()?);
+            forms.push(algebraic.compile_row(row)?);
         }
-        let mut charge_forcing = Vec::new();
         retained_words = retained_words.saturating_add(circuit.capacitors.len().saturating_mul(3));
+        algebraic.reserve_retained_words(circuit.capacitors.len().saturating_mul(3))?;
+        let mut charge_forcing = Vec::with_capacity(circuit.capacitors.len());
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
             let form: Vec<_> = if circuit.capacitors.capacitances[index] == 0.0 {
                 Vec::new()
             } else {
-                algebraic
-                    .port(stamp.pp.row, stamp.nn.row, abort)?
-                    .into_iter()
-                    .filter(|(value, _)| value.source().is_some())
-                    .collect()
+                let mut row = algebraic.port_row(stamp.pp.row, stamp.nn.row, abort)?;
+                if !row.nodes.is_empty() {
+                    return Err(SimulationError::Circuit(
+                        "PSS charge forcing is outside its independent state basis".to_owned(),
+                    ));
+                }
+                // Filter before conversion so an empty forcing does not keep
+                // an unused vector allocation for discarded state terms.
+                row.values.retain(|value, _| value.source().is_some());
+                algebraic.compile_row(row)?
             };
             retained_words =
                 retained_words.saturating_add(form.len().saturating_mul(FORM_TERM_WORDS));
-            algebraic.check_cost(retained_words)?;
             charge_forcing.push(form);
         }
         Ok(PssStateBasis {
@@ -314,10 +319,8 @@ impl PssDescriptor {
         voltage_count: usize,
         solution: &mut [Value],
     ) -> Result<(), SimulationError> {
-        PssVoltageConstraintBuilder::ensure_words(
-            self.solution.retained_words.saturating_add(solution.len()),
-            self.solution.max_values,
-        )?;
+        self.solution
+            .ensure_evaluation_work(solution.len().saturating_mul(2), self.solution.max_terms())?;
         let mut trial = vec![0.0; solution.len()];
         self.solution.solve(&mut trial, |value| {
             value.evaluate(circuit, state, voltage_count)
@@ -374,7 +377,7 @@ impl PssDescriptor {
         times: [Value; 2],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
-        Self::forcing_companion(
+        self.forcing_companion(
             self.charge_forcing.iter().map(Vec::as_slice),
             circuit,
             rates,
@@ -450,7 +453,7 @@ impl PssDescriptor {
         times: [Value; 2],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
-        Self::forcing_companion(
+        self.forcing_companion(
             (0..circuit.inductors.len()).map(|index| self.winding_form(circuit, index)),
             circuit,
             rates,
@@ -461,22 +464,30 @@ impl PssDescriptor {
     }
 
     fn forcing_companion<'a>(
-        forms: impl Iterator<Item = &'a [(ForestValue, Value)]>,
+        &self,
+        forms: impl Iterator<Item = &'a [(ForestValue, Value)]> + Clone,
         circuit: &CircuitData,
         rates: &mut [Value],
         offsets: &mut [Vec<Value>; 3],
         times: [Value; 2],
         step: PssCompanionStep<'_>,
     ) -> Result<(), SimulationError> {
+        let max_terms = forms.clone().map(<[_]>::len).max().unwrap_or(0);
+        let workspace_words = offsets.iter().fold(rates.len(), |words, offsets| {
+            words.saturating_add(offsets.len())
+        });
+        self.solution
+            .ensure_evaluation_work(workspace_words, max_terms)?;
+        let mut terms = Vec::with_capacity(max_terms);
         for (index, (rate, form)) in rates.iter_mut().zip(forms).enumerate() {
-            let forcing = |time, order| -> Result<Value, SimulationError> {
-                let terms = form
-                    .iter()
-                    .filter(|(value, _)| value.source().is_some())
-                    .map(|&(value, weight)| Ok((weight, value.forcing(circuit, time, order)?)))
-                    .collect::<Result<Vec<_>, SimulationError>>()?;
-                rspice_veriloga_runtime::arithmetic::sum_products(terms.into_iter())
-                    .map_err(|_| precision_error())
+            let mut forcing = |time, order| -> Result<Value, SimulationError> {
+                evaluate_form(form, &mut terms, |value| {
+                    if value.source().is_some() {
+                        value.forcing(circuit, time, order)
+                    } else {
+                        Ok(0.0)
+                    }
+                })
             };
             let previous = if step.coeff.coeff_i_n == 0.0 {
                 0.0
