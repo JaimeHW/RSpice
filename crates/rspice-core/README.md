@@ -360,6 +360,15 @@ cancellation remains a distinct error. The dense path verifies its original
 transpose residual. Authored device/model-parameter studies use the separate
 complete-sensitivity engine APIs.
 
+Complete XSPICE studies use the code model's declared parameter types for both
+model cards and instance overrides, including deferred scalar/vector values.
+Only real scalars and real-vector entries are differentiated; integer, Boolean,
+string and complex channels are excluded. Model aliases resolve through the
+same builtin catalog used by circuit construction. Declared types take precedence
+over parameter-name heuristics, so a real parameter is not excluded because its
+name resembles a selector. Native families without descriptors retain their
+existing selector exclusions.
+
 Scalar and complete DC/AC sensitivity share one refinement driver. It compares
 quadratic derivatives at successively halved, representable coordinates and
 checks agreement between one-sided estimates when both sides can be evaluated.

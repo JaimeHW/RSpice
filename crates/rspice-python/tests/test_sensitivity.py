@@ -9,6 +9,21 @@ import rspice
 
 
 class TestSensitivity:
+    def test_xspice_sensitivity_excludes_boolean_controls(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Typed sensitivity\nV1 in 0 DC 0.2 AC 1\nA1 in out lim\n"
+            ".model lim limit(gain=3 fraction=1 out_lower_limit=0 out_upper_limit=10 limit_range=0)\n"
+            "R1 out 0 1meg\n.end\n"
+        )
+        dc = engine.run_sensitivity_dc_complete(netlist, "out", filters=["lim:*"])
+        ac = engine.run_sensitivity_ac_complete(netlist, "out", [1.0], filters=["lim:*"])
+        assert "LIM:FRACTION" not in dc.vector_names
+        assert "LIM:FRACTION" not in ac.vector_names
+        assert dc.get("LIM:GAIN").absolute == pytest.approx(0.2, abs=1e-9)
+        assert ac.get("LIM:GAIN").absolute == pytest.approx([1.0 + 0j], abs=1e-9)
+        with pytest.raises(rspice.SimulationError, match="no DC parameter matched"):
+            engine.run_sensitivity_dc_complete(netlist, "out", filters=["lim:fraction"])
+
     def test_parameter_sensitivity_refines_curvature_and_rejects_kinks(self, engine):
         for expression, nominal in [("exp(100*gain)", 1.0), ("abs(gain)", 0.0)]:
             netlist = rspice.Netlist.parse_spice(

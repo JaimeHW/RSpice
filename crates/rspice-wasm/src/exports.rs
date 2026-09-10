@@ -315,6 +315,43 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_xspice_parameter_types_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::AcSensitivityOutput;
+        let netlist = rspice_core::Netlist::parse(
+            "Typed sensitivity\nV1 in 0 DC 0.2 AC 1\nA1 in out lim\n\
+             .model lim limit(gain=3 fraction=1 out_lower_limit=0 out_upper_limit=10 limit_range=0)\n\
+             R1 out 0 1meg\n.end\n"
+        ).unwrap();
+        let engine = rspice_core::Engine::default();
+        let output = AcSensitivityOutput::Voltage {
+            positive: 2,
+            negative: None,
+        };
+        let dc = engine
+            .run_sensitivity_dc_complete_with_abort(
+                &netlist,
+                output.clone(),
+                &["lim:*".to_owned()],
+                &NoAbort,
+            )
+            .unwrap();
+        let ac = engine
+            .run_sensitivity_ac_complete_with_abort(
+                &netlist,
+                output,
+                &[1.0],
+                &["lim:*".to_owned()],
+                &NoAbort,
+            )
+            .unwrap();
+        assert!(dc.get("LIM:FRACTION").is_none());
+        assert!(ac.get("LIM:FRACTION").is_none());
+        assert!((dc.get("LIM:GAIN").unwrap().absolute - 0.2).abs() < 1e-9);
+        assert!((ac.get("LIM:GAIN").unwrap().absolute[0].re - 1.0).abs() < 1e-9);
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_refinement_and_finite_boundary_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         let engine = rspice_core::Engine::default();

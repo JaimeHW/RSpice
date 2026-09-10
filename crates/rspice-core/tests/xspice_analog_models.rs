@@ -998,6 +998,70 @@ rsmooth out_smooth 0 1meg
 }
 
 #[test]
+fn sensitivity_uses_xspice_parameter_types_for_model_and_instance_targets() {
+    use rspice_core::analysis::AcSensitivityOutput;
+    for instance_override in [false, true] {
+        let overrides = if instance_override {
+            "gain=3 fraction=1"
+        } else {
+            ""
+        };
+        let netlist = Netlist::parse(&format!(
+            "Typed sensitivity\nV1 in 0 DC 0.2 AC 1\nA1 in out lim {overrides}\n\
+             .model lim limit (gain=3 fraction=1 out_lower_limit=0 out_upper_limit=10 limit_range=0)\n\
+             R1 out 0 1meg\n.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        let node = engine
+            .build_circuit(&netlist)
+            .unwrap()
+            .get_node_by_name("out")
+            .unwrap();
+        let output = AcSensitivityOutput::Voltage {
+            positive: node,
+            negative: None,
+        };
+        let filter = if instance_override { "A1*" } else { "lim:*" };
+        let gain = if instance_override {
+            "A1_GAIN"
+        } else {
+            "lim:GAIN"
+        };
+        let dc = engine
+            .run_sensitivity_dc_complete(&netlist, output.clone(), &[filter.to_owned()])
+            .unwrap();
+        assert!(
+            dc.sensitivities
+                .iter()
+                .all(|entry| !entry.parameter.eq_ignore_ascii_case("fraction")),
+            "{dc:?}"
+        );
+        assert!((dc.get(gain).unwrap().absolute - 0.2).abs() < 1e-9);
+        let ac = engine
+            .run_sensitivity_ac_complete(&netlist, output.clone(), &[1.0], &[filter.to_owned()])
+            .unwrap();
+        assert!(
+            ac.sensitivities
+                .iter()
+                .all(|entry| !entry.parameter.eq_ignore_ascii_case("fraction")),
+            "{ac:?}"
+        );
+        assert!((ac.get(gain).unwrap().absolute[0].re - 1.0).abs() < 1e-9);
+
+        let discrete = if instance_override {
+            "A1:FRACTION"
+        } else {
+            "lim:FRACTION"
+        };
+        assert!(
+            engine
+                .run_sensitivity_dc_complete(&netlist, output, &[discrete.to_owned()])
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn climit_hard_limits_to_controlled_upper_bound_like_ngspice() {
     // ngspice climit:
     //   raw = gain * (in + in_offset)

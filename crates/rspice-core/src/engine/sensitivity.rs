@@ -1216,6 +1216,28 @@ impl Engine {
             || upper.ends_with("FLAG")
     }
 
+    fn is_continuous_sensitivity_parameter(
+        parameter: &str,
+        specs: Option<&[crate::xspice::ParamSpec]>,
+        vector: bool,
+    ) -> bool {
+        if let Some(spec) = specs.and_then(|specs| {
+            specs
+                .iter()
+                .find(|spec| spec.name.eq_ignore_ascii_case(parameter))
+        }) {
+            return spec.param_type
+                == if vector {
+                    crate::xspice::ParamType::RealVector
+                } else {
+                    crate::xspice::ParamType::Real
+                };
+        }
+        // Native device families do not yet all publish parameter descriptors.
+        // A declared code-model type always takes precedence over this fallback.
+        !Self::is_discrete_sensitivity_parameter(parameter)
+    }
+
     fn add_ac_sensitivity_target(
         targets: &mut Vec<AcSensitivityTarget>,
         seen: &mut HashSet<String>,
@@ -1333,6 +1355,15 @@ impl Engine {
         let mut targets = Vec::new();
         let mut seen = HashSet::new();
         let mut referenced_models = HashSet::new();
+        // Use the same builtin catalog as circuit construction, and only pay
+        // for it when an A-device is present. Keep resolved aliases for the
+        // model-card pass as well as direct instance parameters.
+        let xspice_registry = netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Xspice { .. }))
+            .then(crate::xspice::CodeModelRegistry::with_builtins);
+        let mut xspice_models = HashMap::new();
 
         for (element_index, element) in netlist.elements.iter().enumerate() {
             let name = element.name.clone();
@@ -1340,6 +1371,24 @@ impl Engine {
             if let Some(model) = Self::sensitivity_model_name(&element.kind) {
                 referenced_models.insert(model.to_ascii_uppercase());
             }
+            let code_model = if let ElementKind::Xspice { model, .. } = &element.kind {
+                let model_type = netlist
+                    .models
+                    .iter()
+                    .find(|definition| definition.name.eq_ignore_ascii_case(model))
+                    .map_or(model.as_str(), |definition| definition.model_type.as_str());
+                let resolved = xspice_registry
+                    .as_ref()
+                    .and_then(|registry| registry.get(model_type));
+                if let Some(resolved) = &resolved {
+                    xspice_models
+                        .insert(model.to_ascii_uppercase(), std::sync::Arc::clone(resolved));
+                }
+                resolved
+            } else {
+                None
+            };
+            let parameter_specs = code_model.as_ref().map(|model| model.parameters());
 
             let mut primary_aliases: &[&str] = &[];
             let mut add_field =
@@ -1551,7 +1600,7 @@ impl Engine {
 
             if let Some(parameters) = Self::sensitivity_instance_params(&element.kind) {
                 for (parameter_index, (parameter, nominal_value)) in parameters.iter().enumerate() {
-                    if Self::is_discrete_sensitivity_parameter(parameter)
+                    if !Self::is_continuous_sensitivity_parameter(parameter, parameter_specs, false)
                         || (primary_aliases
                             .iter()
                             .any(|alias| parameter.eq_ignore_ascii_case(alias))
@@ -1598,7 +1647,8 @@ impl Engine {
                     &format!("XSPICE instance '{name}'"),
                 )?;
                 for (parameter, nominal_value) in &resolved_scalars {
-                    if Self::is_discrete_sensitivity_parameter(parameter) {
+                    if !Self::is_continuous_sensitivity_parameter(parameter, parameter_specs, false)
+                    {
                         continue;
                     }
                     Self::add_ac_sensitivity_target(
@@ -1619,7 +1669,8 @@ impl Engine {
                 }
                 for (parameter_index, (parameter, values)) in real_vector_params.iter().enumerate()
                 {
-                    if Self::is_discrete_sensitivity_parameter(parameter) {
+                    if !Self::is_continuous_sensitivity_parameter(parameter, parameter_specs, true)
+                    {
                         continue;
                     }
                     for (entry_index, nominal_value) in values.iter().copied().enumerate() {
@@ -1653,7 +1704,8 @@ impl Engine {
                     real_vector_expr_params,
                     &format!("XSPICE instance '{name}'"),
                 )? {
-                    if Self::is_discrete_sensitivity_parameter(&parameter) {
+                    if !Self::is_continuous_sensitivity_parameter(&parameter, parameter_specs, true)
+                    {
                         continue;
                     }
                     for (entry_index, nominal_value) in values.iter().copied().enumerate() {
@@ -1689,8 +1741,11 @@ impl Engine {
             if !referenced_models.contains(&model.name.to_ascii_uppercase()) {
                 continue;
             }
+            let parameter_specs = xspice_models
+                .get(&model.name.to_ascii_uppercase())
+                .map(|code_model| code_model.parameters());
             for (parameter, nominal_value) in Self::resolved_model_scalar_params(netlist, model)? {
-                if Self::is_discrete_sensitivity_parameter(&parameter) {
+                if !Self::is_continuous_sensitivity_parameter(&parameter, parameter_specs, false) {
                     continue;
                 }
                 Self::add_ac_sensitivity_target(
@@ -1712,7 +1767,7 @@ impl Engine {
             for (parameter_index, (parameter, values)) in
                 model.real_vector_params.iter().enumerate()
             {
-                if Self::is_discrete_sensitivity_parameter(parameter) {
+                if !Self::is_continuous_sensitivity_parameter(parameter, parameter_specs, true) {
                     continue;
                 }
                 for (entry_index, nominal_value) in values.iter().copied().enumerate() {
@@ -1745,7 +1800,7 @@ impl Engine {
                 &model.real_vector_expr_params,
                 &format!("model '{}'", model.name),
             )? {
-                if Self::is_discrete_sensitivity_parameter(&parameter) {
+                if !Self::is_continuous_sensitivity_parameter(&parameter, parameter_specs, true) {
                     continue;
                 }
                 for (entry_index, nominal_value) in values.iter().copied().enumerate() {
@@ -2854,6 +2909,73 @@ pub enum SensitivityCardResult {
 mod tests {
     use super::super::super::Engine;
     use super::sensitivity_three_point;
+
+    #[test]
+    fn sensitivity_parameter_metadata_overrides_name_heuristics() {
+        use crate::xspice::ParamSpec;
+        let specs = [
+            ParamSpec::real("mode", 1.0),
+            ParamSpec::boolean("fraction", true),
+            ParamSpec::integer("span", 3),
+            ParamSpec::integer_vector("indices", vec![1]),
+            ParamSpec::real_vector("values", vec![1.0]),
+        ];
+        assert!(Engine::is_continuous_sensitivity_parameter(
+            "MODE",
+            Some(&specs),
+            false
+        ));
+        for name in ["fraction", "span", "indices"] {
+            for vector in [false, true] {
+                assert!(!Engine::is_continuous_sensitivity_parameter(
+                    name,
+                    Some(&specs),
+                    vector
+                ));
+            }
+        }
+        assert!(Engine::is_continuous_sensitivity_parameter(
+            "values",
+            Some(&specs),
+            true
+        ));
+        assert!(!Engine::is_continuous_sensitivity_parameter(
+            "values",
+            Some(&specs),
+            false
+        ));
+    }
+
+    #[test]
+    fn sensitivity_xspice_target_collection_excludes_discrete_and_nonnumeric_channels() {
+        for alias in [false, true] {
+            let model = if alias { "demo" } else { "print_param_types" };
+            let card = if alias {
+                ".model demo print_param_types(integer=3 real=2 string=123 complex=4 integer_array=[1 2] real_array=[1 2])\n"
+            } else {
+                ""
+            };
+            let netlist = Netlist::parse(&format!(
+                "Parameter types\nV1 in 0 1\nA1 [in] {model} integer=3 real=2 string=123 complex=4 integer_array=[1 2] real_array=[1 2]\n{card}.end\n"
+            )).unwrap();
+            let targets = Engine::collect_ac_sensitivity_targets(
+                &netlist,
+                crate::resource::ResourceLimits::default(),
+            )
+            .unwrap();
+            let mut names = targets
+                .iter()
+                .map(|target| target.vector_name.to_ascii_uppercase())
+                .collect::<Vec<_>>();
+            names.sort();
+            let mut expected = vec!["A1_REAL", "A1_REAL_ARRAY[0]", "A1_REAL_ARRAY[1]", "V1"];
+            if alias {
+                expected.extend(["DEMO:REAL", "DEMO:REAL_ARRAY[0]", "DEMO:REAL_ARRAY[1]"]);
+            }
+            expected.sort();
+            assert_eq!(names, expected);
+        }
+    }
     use crate::analysis::AcSensitivityOutput;
     use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
