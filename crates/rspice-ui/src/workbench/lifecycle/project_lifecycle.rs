@@ -259,6 +259,19 @@ pub(crate) enum ProjectLifecycleError {
 }
 
 pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycleError> {
+    capture_snapshot(state, SnapshotContent::Committed)
+}
+
+#[derive(Clone, Copy)]
+enum SnapshotContent {
+    Committed,
+    Current,
+}
+
+fn capture_snapshot(
+    state: &AppState,
+    content: SnapshotContent,
+) -> Result<ProjectFile, ProjectLifecycleError> {
     let mut workspace = state.workspace.clone();
     if matches!(
         workspace.active_view_type(),
@@ -270,8 +283,10 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
     }
     // A save/checkpoint retains committed content even when a native window
     // currently holds a live pointer preview in one of the runtime buffers.
-    for schematic in workspace.schematic_buffers.values_mut() {
-        schematic.cancel_operation();
+    if matches!(content, SnapshotContent::Committed) {
+        for schematic in workspace.schematic_buffers.values_mut() {
+            schematic.cancel_operation();
+        }
     }
     workspace.mark_all_clean();
     for schematic in workspace.schematic_buffers.values_mut() {
@@ -317,7 +332,9 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
 pub(crate) fn generated_netlist_input_digest(
     state: &AppState,
 ) -> Result<crate::product::ContentDigest, ProjectLifecycleError> {
-    let mut project = snapshot(state)?;
+    // Execution provenance must describe the exact live input consumed by
+    // generation, including an edit currently previewed in another window.
+    let mut project = capture_snapshot(state, SnapshotContent::Current)?;
     project.simulation_results = ProjectSimulationResults::default();
     // A receipt records validation of the existing inputs. Provider decisions
     // still participate because they select the source emitted to the engine.
@@ -400,7 +417,7 @@ pub(crate) fn refresh_registry(state: &mut AppState) -> Result<(), ProjectLifecy
 fn working_fingerprints(
     state: &AppState,
 ) -> Result<registry::DocumentFingerprints, ProjectLifecycleError> {
-    let current = snapshot(state)?;
+    let current = capture_snapshot(state, SnapshotContent::Current)?;
     registry::DocumentFingerprints::with_results_cache(
         &current,
         &state.project_lifecycle.result_fingerprints,
@@ -1332,9 +1349,9 @@ fn prepare_post_save_registry(
     scope: SaveScope,
 ) -> Result<registry::DocumentRegistry, ProjectLifecycleError> {
     #[cfg(not(target_arch = "wasm32"))]
-    let mut current = snapshot(state)?;
+    let mut current = capture_snapshot(state, SnapshotContent::Current)?;
     #[cfg(target_arch = "wasm32")]
-    let current = snapshot(state)?;
+    let current = capture_snapshot(state, SnapshotContent::Current)?;
     #[cfg(not(target_arch = "wasm32"))]
     {
         if scope == SaveScope::AllDocuments
@@ -1837,8 +1854,8 @@ pub(crate) fn begin_project_replacement(
     {
         return Err(ProjectLifecycleError::TransactionInProgress);
     }
-    let content =
-        registry::content_digest(&snapshot(state)?).map_err(ProjectLifecycleError::InvalidState)?;
+    let content = registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?)
+        .map_err(ProjectLifecycleError::InvalidState)?;
     let transaction = LifecycleTransaction::replacement(content);
     let id = transaction.id;
     state.project_lifecycle.transaction = Some(transaction);
@@ -1882,8 +1899,8 @@ pub(crate) fn validate_project_replacement(
     let expected = transaction
         .replacement_guard
         .ok_or(ProjectLifecycleError::ReplacementChanged)?;
-    let actual =
-        registry::content_digest(&snapshot(state)?).map_err(ProjectLifecycleError::InvalidState)?;
+    let actual = registry::content_digest(&capture_snapshot(state, SnapshotContent::Current)?)
+        .map_err(ProjectLifecycleError::InvalidState)?;
     if actual != expected {
         return Err(ProjectLifecycleError::ReplacementChanged);
     }

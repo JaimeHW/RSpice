@@ -296,6 +296,28 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
 }
 
 #[test]
+fn gesture_previews_remain_part_of_execution_and_replacement_guards() {
+    use crate::workbench::lifecycle::project_lifecycle::{
+        begin_project_replacement, generated_netlist_input_digest, validate_project_replacement,
+    };
+    let mut fixture = Fixture::new(false);
+    let baseline = generated_netlist_input_digest(&fixture.app.state).unwrap();
+    let replacement = begin_project_replacement(&mut fixture.app.state).unwrap();
+    fixture.drag(DragType::MoveSelection);
+    assert_ne!(
+        generated_netlist_input_digest(&fixture.app.state).unwrap(),
+        baseline
+    );
+    assert!(validate_project_replacement(&fixture.app.state, replacement).is_err());
+    fixture.app.state.cancel_schematic_drag();
+    assert_eq!(
+        generated_netlist_input_digest(&fixture.app.state).unwrap(),
+        baseline
+    );
+    assert!(validate_project_replacement(&fixture.app.state, replacement).is_ok());
+}
+
+#[test]
 fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
     let mut fixture = Fixture::new(false);
     let original = fixture.app.state.workspace.active_schematic_reference();
