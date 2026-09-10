@@ -17,6 +17,56 @@ fn annotated() -> (AnnotationState, RenumberRequest) {
 }
 
 #[test]
+fn reference_projection_accepts_recorded_lineage_and_refuses_unrelated_names() {
+    let (mut state, _) = annotated();
+    state
+        .commit_manual_reference_edit(object_key(1), "R1", "R20")
+        .unwrap()
+        .unwrap();
+    let before = state.clone();
+    for source in ["R10", "r1"] {
+        assert_eq!(
+            state
+                .projected_reference_assignments([(object_key(1), source)])
+                .unwrap()[&object_key(1)],
+            "R20"
+        );
+    }
+    assert!(
+        state
+            .projected_reference_assignments([(object_key(1), "R20"), (object_key(2), "R99")])
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        state.projected_reference_assignments([(object_key(1), "R99")]),
+        Err(DesignManagementError::StaleAnnotationReference { .. })
+    ));
+    assert!(matches!(
+        state.projected_reference_assignments([(object_key(1), "R10"), (object_key(1), "R10")]),
+        Err(DesignManagementError::DuplicateScopedSchematicObject(_))
+    ));
+    assert_eq!(state, before);
+    state
+        .remap_object_owners("work", "top", "work", "renamed")
+        .unwrap();
+    let target = SchematicObjectKey::new("work/renamed/schematic", 1).unwrap();
+    assert_eq!(
+        state
+            .projected_reference_assignments([(target.clone(), "R10")])
+            .unwrap()[&target],
+        "R20"
+    );
+    state.tombstone_objects(|object| object == &target).unwrap();
+    assert!(
+        state
+            .projected_reference_assignments([(target, "R10")])
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn manual_assignment_retains_legacy_evidence_and_allows_future_annotation() {
     let (mut state, mut request) = annotated();
     let retained = state.journal()[0].clone();

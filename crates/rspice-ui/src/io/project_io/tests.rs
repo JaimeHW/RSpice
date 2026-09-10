@@ -2483,6 +2483,7 @@ fn a_noise_mechanism_outside_the_persistable_shape_is_still_refused() {
     }
 }
 
+mod annotation;
 mod canonical_tag_round_trip;
 mod derived_identity;
 mod document_occurrence;

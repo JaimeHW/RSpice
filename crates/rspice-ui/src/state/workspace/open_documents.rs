@@ -522,17 +522,26 @@ impl ProjectWorkspace {
         // together so swaps and structural references retain their targets.
         // Annotation describes the authored device; substitutions below can
         // turn that primitive into a cell with a different emitted prefix.
-        let mut names = BTreeMap::new();
-        for component in &projected.components {
-            if let Some(mapping) = self
-                .design_management
-                .annotation()
-                .effective_mapping_for(cell_view_key, component.id)?
-                && component.name != mapping.new_reference
-            {
-                names.insert(component.id, mapping.new_reference.clone());
-            }
-        }
+        let annotation = self.design_management.annotation();
+        let names = if annotation.journal().is_empty() {
+            BTreeMap::new()
+        } else {
+            let sources = projected
+                .components
+                .iter()
+                .map(|component| {
+                    Ok((
+                        crate::state::SchematicObjectKey::new(cell_view_key, component.id)?,
+                        component.name.as_str(),
+                    ))
+                })
+                .collect::<Result<Vec<_>, crate::state::DesignManagementError>>()?;
+            annotation
+                .projected_reference_assignments(sources)?
+                .into_iter()
+                .map(|(object, name)| (object.object_id(), name))
+                .collect()
+        };
         if !names.is_empty() {
             projected.components =
                 projected

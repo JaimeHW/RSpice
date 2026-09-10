@@ -1991,6 +1991,15 @@ pub(crate) fn load_project_text(
             project.workspace.migrate_inactive_plan_data(plan.id());
         }
     }
+    let annotated = project
+        .workspace
+        .restore_pending_annotation(&project.libraries)
+        .map_err(|error| {
+            ProjectIoError::InvalidData(format!("reference annotation restoration failed: {error}"))
+        })?;
+    if annotated > 0 {
+        load_repairs.push(format!("Applied approved reference annotation to {annotated} component(s) and updated their live references."));
+    }
     project.validate()?;
     load_repairs.extend(project.validate_schematic_instance_masters());
     project.workspace_migration_warning =

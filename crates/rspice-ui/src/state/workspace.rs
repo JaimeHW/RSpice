@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod annotation_restore;
 mod capture_group;
 mod design_intent;
 mod design_projection;

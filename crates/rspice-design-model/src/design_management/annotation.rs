@@ -451,6 +451,58 @@ impl AnnotationState {
         Ok(None)
     }
 
+    /// Project only source names recorded by approved annotation history.
+    /// Resolve object redirects and scan the journal once for the whole batch;
+    /// an unrelated current name must never be overwritten during restoration.
+    pub fn projected_reference_assignments<'a>(
+        &self,
+        sources: impl IntoIterator<Item = (SchematicObjectKey, &'a str)>,
+    ) -> Result<BTreeMap<SchematicObjectKey, String>, DesignManagementError> {
+        let authorities = self.resolved_object_authorities()?;
+        let mut targets = BTreeMap::new();
+        for (object, current) in sources {
+            object.validate()?;
+            if targets
+                .insert(object.clone(), (current, false, None))
+                .is_some()
+            {
+                return Err(DesignManagementError::DuplicateScopedSchematicObject(
+                    object,
+                ));
+            }
+        }
+        for entry in &self.journal {
+            for (object, mapping) in &entry.mappings {
+                let Some(object) = resolved_authority_for(&authorities, object) else {
+                    continue;
+                };
+                let Some((current, recognized, destination)) = targets.get_mut(&object) else {
+                    continue;
+                };
+                *recognized |= current.eq_ignore_ascii_case(&mapping.old_reference)
+                    || current.eq_ignore_ascii_case(&mapping.new_reference);
+                *destination = Some(mapping.new_reference.as_str());
+            }
+        }
+        let mut assignments = BTreeMap::new();
+        for (object, (current, recognized, destination)) in targets {
+            let Some(destination) = destination else {
+                continue;
+            };
+            if !recognized {
+                return Err(DesignManagementError::StaleAnnotationReference {
+                    object,
+                    expected: destination.to_owned(),
+                    actual: current.to_owned(),
+                });
+            }
+            if current != destination {
+                assignments.insert(object, destination.to_owned());
+            }
+        }
+        Ok(assignments)
+    }
+
     pub(super) fn remap_object_owners(
         &mut self,
         source_library: &str,
