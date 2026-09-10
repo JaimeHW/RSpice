@@ -316,13 +316,11 @@ pub(in crate::simulation) fn materialize_live_saved_outputs(
         };
         for mut waveform in output.into_waveforms() {
             waveform.visible = true;
-            waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
-            if let Some(cache) = waveform.display_cache.take() {
-                waveform.x = Arc::new(cache.x.iter().map(|value| f64::from(*value)).collect());
-                waveform.y = Arc::new(cache.y.iter().map(|value| f64::from(*value)).collect());
-                waveform.rebuild_display_cache(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+            if let Ok(preview) =
+                waveform.into_bounded_preview(DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES)
+            {
+                outputs.push(preview);
             }
-            outputs.push(waveform);
         }
     }
     outputs

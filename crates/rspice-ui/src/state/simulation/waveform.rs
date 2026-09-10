@@ -141,6 +141,55 @@ impl WaveformData {
         });
     }
 
+    /// A bounded live preview consists of exact source knots. Display-cache
+    /// f32 coordinates cannot be promoted back into measurement inputs: they
+    /// can collapse distinct abscissas or erase very small signal values.
+    pub(crate) fn into_bounded_preview(mut self, maximum_samples: usize) -> Result<Self, String> {
+        let count = self.x.len();
+        if count != self.y.len()
+            || self
+                .complex
+                .as_ref()
+                .is_some_and(|value| value.real.len() != count || value.imag.len() != count)
+        {
+            return Err("preview source arrays are not aligned".to_owned());
+        }
+        let limit = maximum_samples.max(2).min(count);
+        if count > limit {
+            let indices = if let Some(complex) = &self.complex {
+                // Include extrema of both rectangular components even where
+                // their magnitude is constant. Each list shares endpoints.
+                let part = (limit / 3).max(2);
+                let mut indices = extrema_cache_indices(&self.y, part);
+                indices.extend(extrema_cache_indices(&complex.real, part));
+                indices.extend(extrema_cache_indices(&complex.imag, part));
+                indices.sort_unstable();
+                indices.dedup();
+                indices
+            } else {
+                extrema_cache_indices(&self.y, limit)
+            };
+            let selected = |values: &SharedWaveformValues| -> SharedWaveformValues {
+                indices
+                    .iter()
+                    .map(|&index| values[index])
+                    .collect::<Vec<_>>()
+                    .into()
+            };
+            self.x = selected(&self.x);
+            self.y = selected(&self.y);
+            if let Some(complex) = &mut self.complex {
+                complex.real = selected(&complex.real);
+                complex.imag = selected(&complex.imag);
+            }
+        }
+        self.rebuild_display_cache(maximum_samples);
+        if let Some(cache) = &mut self.display_cache {
+            cache.source_sample_count = count;
+        }
+        Ok(self)
+    }
+
     /// Get the X range (min, max)
     pub fn x_range(&self) -> (Value, Value) {
         let min = self.x.iter().copied().fold(Value::INFINITY, Value::min);
@@ -221,6 +270,47 @@ fn extrema_cache_indices(values: &[Value], limit: usize) -> Vec<usize> {
 #[cfg(test)]
 mod display_cache_tests {
     use super::*;
+
+    #[test]
+    fn complex_preview_retains_exact_shared_knots_and_component_extrema() {
+        let x = (0..10_000)
+            .map(|index| 1e-4 + index as f64 * 1e-18)
+            .collect::<Vec<_>>();
+        let mut real = vec![1e-120; x.len()];
+        let mut imag = vec![0.0; x.len()];
+        real[1234] = -1e-120;
+        imag[6789] = 1e-120;
+        let source = WaveformData::new("signal", x.clone(), vec![1e-120; x.len()], "#fff")
+            .with_complex_components("V(out)", real.clone(), imag.clone());
+        let preview = source.clone().into_bounded_preview(256).unwrap();
+        assert!(preview.x.len() <= 256);
+        assert!(preview.x.windows(2).all(|pair| pair[0] < pair[1]));
+        let complex = preview.complex.as_ref().unwrap();
+        assert!(complex.real.contains(&-1e-120));
+        assert!(complex.imag.contains(&1e-120));
+        for (index, &point) in preview.x.iter().enumerate() {
+            let source_index = x
+                .binary_search_by(|candidate| candidate.total_cmp(&point))
+                .unwrap();
+            assert_eq!(preview.y[index].to_bits(), source.y[source_index].to_bits());
+            assert_eq!(complex.real[index].to_bits(), real[source_index].to_bits());
+            assert_eq!(complex.imag[index].to_bits(), imag[source_index].to_bits());
+        }
+        assert_eq!(source.x.len(), 10_000);
+        assert_eq!(preview.display_cache.unwrap().source_sample_count, 10_000);
+    }
+
+    #[test]
+    fn preview_rejects_misaligned_sources_before_slicing() {
+        for malformed_complex in [false, true] {
+            let mut wave = WaveformData::new("signal", vec![0.0, 1.0], vec![0.0], "#fff");
+            if malformed_complex {
+                wave.y = vec![0.0; 2].into();
+                wave = wave.with_complex_components("V(out)", vec![0.0; 2], vec![0.0]);
+            }
+            assert!(wave.into_bounded_preview(2).is_err());
+        }
+    }
 
     #[test]
     fn cache_is_bounded_preserves_endpoints_and_narrow_extrema() {

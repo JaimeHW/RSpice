@@ -9,6 +9,76 @@ use crate::state::{ComplexExpressionPolicy, SimulationState};
 const PHASORS: &str =
     "Opposing phasors\nV1 a 0 DC 0 AC 1 0\nV2 b 0 DC 0 AC 1 180\nR1 a 0 1k\nR2 b 0 1k\n.end\n";
 
+#[test]
+fn complex_selected_samples_project_magnitude_after_rectangular_interpolation() {
+    let source = WaveformData::new("difference", vec![0.0, 1.0], vec![1.0; 2], "#fff")
+        .with_complex_components("V(out)", vec![1.0, -1.0], vec![0.0; 2]);
+    let selected = resample_selected_and_final(
+        &source,
+        TransientSelectionGrid {
+            start: 0.0,
+            step: 0.5,
+            stop: 1.0,
+        },
+    )
+    .unwrap();
+    assert_eq!(selected.x.as_slice(), &[0.0, 0.5, 1.0]);
+    assert_eq!(selected.y.as_slice(), &[1.0, 0.0, 1.0]);
+    assert_eq!(selected.complex.unwrap().real.as_slice(), &[1.0, 0.0, -1.0]);
+    assert_eq!(source.y.as_slice(), &[1.0, 1.0]);
+}
+
+#[test]
+fn complex_live_outputs_keep_aligned_components_and_full_precision_source_knots() {
+    let mut output = output(
+        SavedOutputKind::DerivedExpression,
+        "Complex preview",
+        "complex(V(out),V(out))",
+    );
+    output.streaming = SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation;
+    let contract = PreparedSavedOutput::prepare(&output, AnalysisInstanceId::new(), &ac())
+        .unwrap()
+        .unwrap();
+    let x = (0..10_000)
+        .map(|index| 1e-4 + index as f64 * 1e-18)
+        .collect::<Vec<_>>();
+    let y = (0..x.len())
+        .map(|index| 1e-120 * (index as f64 / 17.0).sin())
+        .collect::<Vec<_>>();
+    let source =
+        AnalysisResult::live_transient_partial(1, crate::state::AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![WaveformData::new("out", x.clone(), y.clone(), "#fff")]);
+    let previews = materialize_live_saved_outputs(&source, &[contract]);
+    assert_eq!(previews.len(), 1);
+    let preview = &previews[0];
+    assert!(preview.x.len() <= DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES);
+    assert!(preview.x.windows(2).all(|pair| pair[0] < pair[1]));
+    let complex = preview.complex.as_ref().unwrap();
+    assert_eq!(preview.x.len(), complex.real.len());
+    assert_eq!(preview.x.len(), complex.imag.len());
+    for (index, &point) in preview.x.iter().enumerate() {
+        let source_index = x
+            .binary_search_by(|candidate| candidate.total_cmp(&point))
+            .unwrap();
+        assert_eq!(complex.real[index], y[source_index]);
+        assert_eq!(complex.imag[index], y[source_index]);
+    }
+    assert!(calculator::waveform_value(preview, ComplexExpressionPolicy::Rectangular).is_ok());
+}
+
+#[test]
+fn complex_derived_storage_estimate_waits_for_the_evaluated_shape() {
+    let output = output(
+        SavedOutputKind::DerivedExpression,
+        "Complex output",
+        "complex(V(a),V(b))",
+    );
+    let report = preflight_saved_output(&output, [(AnalysisInstanceId::new(), &ac())]);
+    assert!(
+        matches!(report.storage_estimate(), SavedOutputStorageEstimate::Indeterminate { reason } if reason.contains("real or complex"))
+    );
+}
+
 fn history(policy: ComplexExpressionPolicy, deferred: bool) -> ProjectSimulationResults {
     let mut output = output(
         SavedOutputKind::DerivedExpression,

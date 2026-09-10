@@ -551,6 +551,15 @@ fn storage_estimate(
         if contract.policy == SavedOutputPolicy::OnDemandFromRetainedState {
             continue;
         }
+        if contract.kind == SavedOutputKind::DerivedExpression {
+            return (
+                indeterminate(format!(
+                    "'{}' storage depends on the evaluated sample domain and real or complex result",
+                    contract.name
+                )),
+                Vec::new(),
+            );
+        }
         if contract.policy == SavedOutputPolicy::FailureDiagnosticsOnly {
             return (
                 indeterminate(format!(
@@ -1127,41 +1136,27 @@ fn resample_selected_and_final(
     {
         x.push(stop);
     }
-    let y = x
-        .iter()
-        .map(|point| interpolate(&waveform.x, &waveform.y, *point))
-        .collect::<Result<Vec<_>, _>>()?;
+    let resample = |values: &[f64]| {
+        calculator::interpolation::WaveformInterpolator::new(&waveform.x, values)
+            .and_then(|source| source.resample(&x))
+            .map_err(|error| error.to_string())
+    };
+    let y = resample(&waveform.y)?;
     let mut result = WaveformData::new(&waveform.name, x.clone(), y, waveform.color.clone());
     result.unit = waveform.unit.clone();
     result.visible = waveform.visible;
     if let Some(complex) = &waveform.complex {
-        let real = x
+        let real = resample(&complex.real)?;
+        let imag = resample(&complex.imag)?;
+        result.y = real
             .iter()
-            .map(|point| interpolate(&waveform.x, &complex.real, *point))
-            .collect::<Result<Vec<_>, _>>()?;
-        let imag = x
-            .iter()
-            .map(|point| interpolate(&waveform.x, &complex.imag, *point))
-            .collect::<Result<Vec<_>, _>>()?;
+            .zip(&imag)
+            .map(|(real, imag)| real.hypot(*imag))
+            .collect::<Vec<_>>()
+            .into();
         result = result.with_complex_components(&complex.source_name, real, imag);
     }
     Ok(result)
-}
-
-fn interpolate(axis: &[f64], values: &[f64], point: f64) -> Result<f64, String> {
-    if axis.len() != values.len() || axis.is_empty() {
-        return Err("interpolation source is unaligned".to_owned());
-    }
-    match axis.binary_search_by(|candidate| candidate.total_cmp(&point)) {
-        Ok(index) => Ok(values[index]),
-        Err(0) => Ok(values[0]),
-        Err(index) if index >= axis.len() => Ok(values[values.len() - 1]),
-        Err(index) => {
-            let left = index - 1;
-            let scale = (point - axis[left]) / (axis[index] - axis[left]);
-            Ok(values[left] + scale * (values[index] - values[left]))
-        }
-    }
 }
 
 fn output_contract_digest(
