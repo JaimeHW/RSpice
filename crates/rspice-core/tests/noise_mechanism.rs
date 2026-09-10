@@ -478,3 +478,83 @@ fn invalid_mos_channel_noise_controls_fail_in_stationary_and_periodic_analyses()
         }
     }
 }
+
+#[test]
+fn mos_flicker_coefficients_outside_f64_range_preserve_in_band_noise() {
+    use rspice_core::analysis::NoiseContributionProbe;
+    use rspice_core::engine::SpiceDialect;
+    let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for nlev in 0..=3 {
+            if dialect == SpiceDialect::Xyce && nlev != 0 {
+                continue;
+            }
+            for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                for (kf, m, exponent) in [(1e308, 5.0, 10), (f64::from_bits(1), 1e-20, -10)] {
+                    let current_law = nlev < 2 || dialect == SpiceDialect::Xyce;
+                    let af = if !current_law || dialect == SpiceDialect::Xyce {
+                        exponent
+                    } else {
+                        0
+                    };
+                    let make = |port| {
+                        let supply = if port {
+                            format!("VD d 0 {}", p * 2.0)
+                        } else {
+                            format!("VDD supply 0 {}\nRL supply d 1k", p * 3.0)
+                        };
+                        Netlist::parse(&format!(
+                            "MOS coefficient range\n{supply}\nVIN g 0 DC {} AC 1\nM1 d g 0 0 mm W=2u L=1u M={m}\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF={af} EF={exponent} NLEV={nlev} GAMMA_NOISE=0)\n.options GMIN=0\n.end\n",p*1.4)).unwrap()
+                    };
+                    let frequencies = [1e4_f64, 2e4];
+                    let scalar = engine
+                        .run_noise_named_with_input_source(
+                            &make(false),
+                            "d",
+                            None,
+                            "VIN",
+                            &frequencies,
+                            300.15,
+                        )
+                        .unwrap();
+                    let port = engine
+                        .run_port_noise_correlation(
+                            &make(true),
+                            &["VD".into()],
+                            &frequencies,
+                            300.15,
+                        )
+                        .unwrap();
+                    for (i, &frequency) in frequencies.iter().enumerate() {
+                        // Reorder the independent square-law formula so the
+                        // reference never materializes the unrepresentable 1-Hz coefficient.
+                        let expected = if dialect == SpiceDialect::Xyce {
+                            (kf * (16e-6_f64).powi(af)) / frequency * m / (2e-12 * cox * cox)
+                        } else {
+                            let frequency_scaled = kf / frequency.powi(exponent);
+                            if current_law {
+                                frequency_scaled / (if nlev == 0 { 1e-12 } else { 2e-12 } * cox) * m
+                            } else {
+                                frequency_scaled * (80e-6_f64).powi(2) / (2e-12 * cox) * m
+                            }
+                        };
+                        let contribution = scalar[i]
+                            .contribution(&NoiseContributionProbe::parse("DNO(M1,FN)").unwrap())
+                            .unwrap();
+                        for actual in [port[i].current_correlation[0][0].re, contribution / 1e6] {
+                            assert!(expected.is_normal());
+                            assert!(
+                                (actual - expected).abs() < expected * 3e-11,
+                                "{dialect:?} {kind} NLEV={nlev} KF={kf:e} M={m} f={frequency}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

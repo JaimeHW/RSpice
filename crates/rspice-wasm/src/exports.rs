@@ -422,6 +422,33 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos_flicker_binary_normalization_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for (kf, m, ef) in [(1e308, 5.0, 10), (f64::from_bits(1), 1e-20, -10)] {
+                let deck=rspice_core::Netlist::parse(&format!(
+                    "MOS coefficient scale\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M={m}\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF=0 EF={ef} NLEV=0 GAMMA_NOISE=0)\n.options GMIN=0\n.end\n",p*2.0,p*1.4)).unwrap();
+                let mut config = rspice_core::engine::SimulationConfig::default();
+                config.convergence_config.gmin_target = 0.0;
+                config.convergence_config.junction_gmin_target = 0.0;
+                let result = rspice_core::Engine::new(config)
+                    .run_port_noise_correlation_with_abort(
+                        &deck,
+                        &["VD".into()],
+                        &[1e4],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap();
+                let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                let expected = (kf / 1e4_f64.powi(ef)) / (1e-12 * cox) * m;
+                assert!(
+                    (result[0].current_correlation[0][0].re - expected).abs() < expected * 3e-12
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn extreme_flicker_density_and_mos_port_noise_in_wasm() {
         use rspice_core::analysis::NoiseSource;
         for (kf, current, af, frequency, ef, expected) in [

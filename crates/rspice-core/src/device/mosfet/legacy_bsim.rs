@@ -123,12 +123,11 @@ impl LegacyBsimModel {
 
     /// BSIM1/2 use effective dimensions in metres and Cox in F/cm² in
     /// their KF law, unlike the classic MOS NLEV noise models.
-    pub(crate) fn flicker_noise_denominator(&self, width: Value, length: Value) -> Option<Value> {
+    pub(crate) fn flicker_noise_divisors(&self, width: Value, length: Value) -> Option<[Value; 4]> {
         let (delta_w, delta_l, tox) = self.geometry_parameters();
         let (width, length) = effective_dimensions(width, length, delta_w, delta_l)?;
         let cox = legacy_cox(tox);
-        let denominator = width * length * cox * cox;
-        (denominator.is_finite() && denominator > 0.0).then_some(denominator)
+        (cox.is_finite() && cox > 0.0).then_some([width, length, cox, cox])
     }
 }
 

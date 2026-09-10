@@ -40,8 +40,61 @@ pub(crate) fn scaled_exp_product(
     if ordinary {
         product
     } else {
-        scaled_exp_product_fallback(factors, divisors, exponent, exponential)
+        scaled_exp_product_fallback(factors, divisors, exponent, exponential, 0)
     }
+}
+
+/// Retain a product's binary scale when its value cannot be stored in f64.
+/// Inputs must be finite and nonzero. A normal product keeps its ordinary
+/// evaluation exactly; the normalized form also preserves subnormal precision.
+pub(crate) fn product_binary_normalization(factors: &[Value], divisors: &[Value]) -> (Value, i32) {
+    let product = scaled_exp_product(factors, divisors, 0.0);
+    if product.is_normal() {
+        return (product, 0);
+    }
+    debug_assert!(
+        factors
+            .iter()
+            .chain(divisors)
+            .all(|v| v.is_finite() && *v != 0.0)
+    );
+    let (mantissa, power) = product_binary_parts(factors, divisors);
+    (
+        mantissa,
+        power.try_into().expect("bounded device normalization"),
+    )
+}
+
+fn product_binary_parts(factors: &[Value], divisors: &[Value]) -> (Value, i64) {
+    let mut mantissa = 1.0;
+    let mut power = 0_i64;
+    for &factor in factors {
+        let e = libm::ilogb(factor);
+        mantissa *= libm::scalbn(factor, -e);
+        power += i64::from(e);
+    }
+    for &divisor in divisors {
+        let e = libm::ilogb(divisor);
+        mantissa /= libm::scalbn(divisor, -e);
+        power -= i64::from(e);
+    }
+    (mantissa, power)
+}
+
+/// Combine a separately retained binary scale before rounding the final value.
+pub(crate) fn scaled_exp_product_with_binary_scale(
+    factors: &[Value],
+    divisors: &[Value],
+    exponent: Value,
+    binary_scale: i32,
+) -> Value {
+    if binary_scale == 0 {
+        return scaled_exp_product(factors, divisors, exponent);
+    }
+    if factors.contains(&0.0) {
+        return 0.0;
+    }
+    scaled_exp_product_fallback(factors, divisors, exponent, exponent.exp(), binary_scale)
 }
 
 #[cold]
@@ -50,6 +103,7 @@ fn scaled_exp_product_fallback(
     divisors: &[crate::Value],
     exponent: crate::Value,
     exponential: crate::Value,
+    binary_scale: i32,
 ) -> crate::Value {
     if exponent.is_nan()
         || factors.iter().any(|value| !value.is_finite())
@@ -59,34 +113,25 @@ fn scaled_exp_product_fallback(
     {
         return crate::Value::NAN;
     }
-    let mut mantissa = 1.0;
-    let mut power = 0;
-    for &factor in factors {
-        let e = libm::ilogb(factor);
-        mantissa *= libm::scalbn(factor, -e);
-        power += e;
-    }
-    for &divisor in divisors {
-        let e = libm::ilogb(divisor);
-        mantissa /= libm::scalbn(divisor, -e);
-        power -= e;
-    }
+    let (mut mantissa, mut power) = product_binary_parts(factors, divisors);
+    power += i64::from(binary_scale);
     if exponential.is_normal() {
         let e = libm::ilogb(exponential);
         mantissa *= libm::scalbn(exponential, -e);
-        power += e;
+        power += i64::from(e);
     } else {
         // No finite input factor can compensate an exponent beyond this
         // bound. It also keeps conversion/reduction within the integer range.
-        let bound =
-            (factors.len() + divisors.len() + 2) as crate::Value * 1075.0 * std::f64::consts::LN_2;
+        let bound = ((factors.len() + divisors.len() + 2) as crate::Value * 1075.0
+            + Value::from(binary_scale).abs())
+            * std::f64::consts::LN_2;
         if exponent > bound {
             return crate::Value::INFINITY.copysign(mantissa);
         }
         if exponent < -bound {
             return 0.0_f64.copysign(mantissa);
         }
-        let e = (exponent * std::f64::consts::LOG2_E).round() as i32;
+        let e = (exponent * std::f64::consts::LOG2_E).round() as i64;
         // Residual of ln(2) after rounding its high part to f64. FMA and the
         // low part prevent range reduction from discarding significant bits.
         const LN_2_LOW: crate::Value = 2.319_046_813_846_299_6e-17;
@@ -95,7 +140,10 @@ fn scaled_exp_product_fallback(
         mantissa *= reduced.exp();
         power += e;
     }
-    libm::scalbn(mantissa, power)
+    libm::scalbn(
+        mantissa,
+        power.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    )
 }
 
 /// Infinity norm for residual and state vectors. Nonfinite entries yield

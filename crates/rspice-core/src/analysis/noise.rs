@@ -586,8 +586,12 @@ pub struct NoiseSource {
     pub node_pos: usize,
     /// Node where noise current is injected (-)
     pub node_neg: usize,
-    /// Spectral density parameter (R for thermal, I for shot, KF for flicker)
+    /// Spectral parameter: R for thermal, I for shot, or the flicker
+    /// coefficient before applying `parameter_exponent`.
     pub parameter: Value,
+    /// Binary scale of the flicker coefficient: KF = parameter * 2^parameter_exponent.
+    /// Zero for ordinary coefficients. Other noise types do not use this field.
+    pub parameter_exponent: i32,
     /// Flicker noise exponent (AF, typically 1.0)
     pub af: Value,
     /// Flicker frequency exponent (EF, typically 1.0)
@@ -638,6 +642,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: resistance,
+            parameter_exponent: 0,
             af: 1.0,
             ef: 1.0,
             current: 0.0,
@@ -658,6 +663,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: current.abs(),
+            parameter_exponent: 0,
             af: 1.0,
             ef: 1.0,
             current: 0.0,
@@ -698,6 +704,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: kf,
+            parameter_exponent: 0,
             af,
             ef,
             current,
@@ -719,6 +726,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: psd,
+            parameter_exponent: 0,
             af: 1.0,
             ef: 1.0,
             current: 0.0,
@@ -759,6 +767,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: scale,
+            parameter_exponent: 0,
             af: 1.0,
             ef: 1.0,
             current: 0.0,
@@ -784,6 +793,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: 0.0,
+            parameter_exponent: 0,
             af: 1.0,
             ef: model.ef,
             current: model.cd,
@@ -809,6 +819,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: 0.0,
+            parameter_exponent: 0,
             af: 1.0,
             ef: model.ef,
             current: model.cd,
@@ -841,6 +852,7 @@ impl NoiseSource {
             node_pos,
             node_neg,
             parameter: kb,
+            parameter_exponent: 0,
             af: ab, // Reuse af field for AB exponent
             ef: 1.0,
             current,
@@ -883,7 +895,8 @@ impl NoiseSource {
                     let frequency_power = frequency.powf(self.ef);
                     let numerator = self.parameter * current_power;
                     let density = numerator / frequency_power;
-                    if current_power.is_normal()
+                    if self.parameter_exponent == 0
+                        && current_power.is_normal()
                         && frequency_power.is_normal()
                         && numerator.is_normal()
                         && density.is_normal()
@@ -950,7 +963,6 @@ impl NoiseSource {
         if !self.parameter.is_finite()
             || self.parameter <= 0.0
             || !current.is_finite()
-            || current == 0.0
             || !frequency.is_finite()
             || !self.af.is_finite()
             || !self.ef.is_finite()
@@ -958,11 +970,26 @@ impl NoiseSource {
             return direct;
         }
         if current_power.is_normal() && frequency_power.is_normal() {
-            return crate::numerics::scaled_exp_product(
+            return crate::numerics::scaled_exp_product_with_binary_scale(
                 &[self.parameter, current_power],
                 &[frequency_power],
                 0.0,
+                self.parameter_exponent,
             );
+        }
+        if current == 0.0 {
+            return if self.af > 0.0 {
+                0.0
+            } else if self.af < 0.0 {
+                Value::INFINITY
+            } else {
+                crate::numerics::scaled_exp_product_with_binary_scale(
+                    &[self.parameter],
+                    &[],
+                    -self.ef * frequency.ln(),
+                    self.parameter_exponent,
+                )
+            };
         }
         let exponent = if self.af == self.ef {
             // Retain small differences between nearby bases, including an
@@ -990,7 +1017,12 @@ impl NoiseSource {
                 self.af * log_current - frequency_exponent
             }
         };
-        crate::numerics::scaled_exp_product(&[self.parameter], &[], exponent)
+        crate::numerics::scaled_exp_product_with_binary_scale(
+            &[self.parameter],
+            &[],
+            exponent,
+            self.parameter_exponent,
+        )
     }
 
     /// Evaluate a source and require finite, nonnegative PSD evidence.
@@ -1846,6 +1878,40 @@ mod mechanism_tests {
         );
         let expected = 1.248627071539086_f64;
         assert!((source.spectral_density(2.0, 300.15) - expected).abs() < expected * 2e-15);
+    }
+
+    #[test]
+    fn flicker_binary_scale_preserves_in_band_density() {
+        let high = libm::scalbn(1.0, 500);
+        let low = libm::scalbn(1.0, -500);
+        for (binary_scale, current, af, frequency, ef) in [
+            (2000, high, -2.0, high, 2.0),
+            (-2000, high, 2.0, low, 2.0),
+            (2000, 1.0, 1.0, high, 4.0),
+            (-2000, 1.0, 1.0, low, 4.0),
+            (2000, 0.0, 0.0, high, 4.0),
+        ] {
+            let mut source = NoiseSource::flicker_with_frequency_exponent(
+                "scaled".into(),
+                1,
+                0,
+                1.5,
+                af,
+                ef,
+                current,
+            );
+            source.parameter_exponent = binary_scale;
+            let actual = source.try_spectral_density(frequency, 300.15).unwrap();
+            assert!(
+                (actual - 1.5).abs() < 2e-12,
+                "scale={binary_scale} I={current:e} AF={af} f={frequency:e} EF={ef}: {actual}"
+            );
+        }
+        for (scale, expected) in [(i32::MIN, 0.0), (i32::MAX, Value::INFINITY)] {
+            let mut source = NoiseSource::flicker("limit".into(), 1, 0, 1.0, 1.0, 1.0);
+            source.parameter_exponent = scale;
+            assert_eq!(source.spectral_density(1.0, 300.15), expected);
+        }
     }
 
     #[test]

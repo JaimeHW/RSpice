@@ -26,6 +26,16 @@ pub(crate) struct MosfetOpValues {
     pub gmb: Value,
 }
 
+/// A model-selected flicker law whose coefficient need not fit in f64.
+#[derive(Debug)]
+pub(crate) struct FlickerNoiseTerms {
+    pub coefficient: Value,
+    pub binary_scale: i32,
+    pub current: Value,
+    pub af: Value,
+    pub ef: Value,
+}
+
 impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
     pub(crate) fn op_values(&self) -> MosfetOpValues {
@@ -180,7 +190,7 @@ impl Mosfet {
     }
 
     /// Flicker terms `(coefficient, current, af, ef)` for
-    /// `coefficient * |current|^af / f^ef`. Each parallel instance contributes
+    /// `coefficient * 2^binary_scale * |current|^af / f^ef`. Each parallel instance contributes
     /// independently. Ngspice levels 1/2/3 use NLEV (default 2); native MOS6
     /// extends that law because ngspice supplies no MOS6 noise callback.
     /// Xyce levels 1/2/3/6 use current^AF divided by W*Leff*Cox²*f.
@@ -190,8 +200,8 @@ impl Mosfet {
     pub(crate) fn flicker_noise_source_terms(
         &self,
         dialect: crate::config::SpiceDialect,
-    ) -> Result<Option<(Value, Value, Value, Value)>, &'static str> {
-        use crate::numerics::scaled_exp_product;
+    ) -> Result<Option<FlickerNoiseTerms>, &'static str> {
+        use crate::numerics::product_binary_normalization;
         let xyce =
             dialect == crate::config::SpiceDialect::Xyce && matches!(self.level, 1 | 2 | 3 | 6);
         let fixed_current_law = xyce || self.level == 9;
@@ -213,11 +223,11 @@ impl Mosfet {
         // Cached id enters the physical drain for every family, including
         // MOS3/9; the OP display converts those families to model polarity.
         let (coefficient, current, af, ef) = if let Some(model) = &self.legacy_bsim_model {
-            let denominator = model.flicker_noise_denominator(self.w, self.l).ok_or(
-                "legacy BSIM flicker noise requires positive effective W, L and TOX with representable normalization",
-            )?;
+            let divisors = model
+                .flicker_noise_divisors(self.w, self.l)
+                .ok_or("legacy BSIM flicker noise requires positive effective W, L and TOX")?;
             let coefficient =
-                scaled_exp_product(&[self.kf, self.multiplicity], &[denominator], 0.0);
+                product_binary_normalization(&[self.kf, self.multiplicity], &divisors);
             // B1cd/B2cd are net drain current, including the body diode.
             // The ngspice-46 noise routines accidentally use the state offset
             // as a number; use the current that the load routine stores there.
@@ -251,7 +261,7 @@ impl Mosfet {
                     [width, leff, cox, 1.0]
                 };
                 (
-                    scaled_exp_product(&[self.kf, self.multiplicity], &divisors, 0.0),
+                    product_binary_normalization(&[self.kf, self.multiplicity], &divisors),
                     (self.id - self.polarity() * self.ibd) / self.multiplicity,
                     self.af,
                     if fixed_current_law { 1.0 } else { self.ef },
@@ -267,10 +277,9 @@ impl Mosfet {
                     return Ok(None);
                 }
                 (
-                    scaled_exp_product(
+                    product_binary_normalization(
                         &[self.kf, gm, gm],
                         &[self.multiplicity, width, leff, cox],
-                        0.0,
                     ),
                     1.0,
                     1.0,
@@ -284,12 +293,19 @@ impl Mosfet {
         if !current.is_finite() {
             return Err("MOS flicker noise drain current must be finite");
         }
+        let (coefficient, binary_scale) = coefficient;
         if !coefficient.is_finite() || coefficient <= 0.0 {
             return Err("MOS flicker noise coefficient is not representable");
         }
         // Both references use exp(AF*log(max(|Id|, N_MINLOG))). This
         // preserves the authored noise source at cutoff, including AF <= 0.
-        Ok(Some((coefficient, current.abs().max(1e-38), af, ef)))
+        Ok(Some(FlickerNoiseTerms {
+            coefficient,
+            binary_scale,
+            current: current.abs().max(1e-38),
+            af,
+            ef,
+        }))
     }
 
     //=========================================================================
@@ -459,10 +475,11 @@ mod tests {
             mos.w = width;
             mos.cox = 1.0;
             mos.gm = gm;
-            let (coefficient, _, _, _) = mos
+            let terms = mos
                 .flicker_noise_source_terms(SpiceDialect::Ngspice)
                 .unwrap()
                 .unwrap();
+            let coefficient = libm::scalbn(terms.coefficient, terms.binary_scale);
             assert!(
                 (coefficient - expected).abs() < expected * 2e-15,
                 "NLEV={nlev}: {coefficient:e} vs {expected:e}"

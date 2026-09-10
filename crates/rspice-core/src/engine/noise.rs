@@ -2895,25 +2895,21 @@ impl Engine {
             let flicker = mos.flicker_noise_source_terms(dialect).map_err(|reason| {
                 SimulationError::Circuit(format!("Noise source '{}:FN': {reason}", mos.name))
             })?;
-            if let Some((coefficient, current, af, ef)) = flicker
-                && coefficient != 0.0
-                && current != 0.0
-            {
-                Self::checked_positive_noise_parameter(&format!("{}:FN", mos.name), coefficient)?;
-                noise_sources.push(
-                    NoiseSource::flicker_with_frequency_exponent(
-                        mos.name.clone(),
-                        mos.node_drain,
-                        mos.node_source,
-                        coefficient,
-                        af,
-                        ef,
-                        current,
-                    )
-                    .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, "FN"),
-                    ),
-                );
+            if let Some(flicker) = flicker {
+                let mut source = NoiseSource::flicker_with_frequency_exponent(
+                    mos.name.clone(),
+                    mos.node_drain,
+                    mos.node_source,
+                    flicker.coefficient,
+                    flicker.af,
+                    flicker.ef,
+                    flicker.current,
+                )
+                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                    &mos.name, "FN",
+                ));
+                source.parameter_exponent = flicker.binary_scale;
+                noise_sources.push(source);
             }
         }
 
@@ -7323,6 +7319,34 @@ R2 OUT 0 1k
     }
 
     #[test]
+    fn legacy_bsim_flicker_evaluates_unrepresentable_coefficients_in_band() {
+        for level in [4, 5] {
+            for (kf, m, af) in [(1e300, 2.5, 1), (f64::from_bits(1), 1e-200, -6)] {
+                let sources = collected_noise_sources_for_deck(&format!(
+                    "Legacy BSIM coefficient range\nVG g 0 -1\nM1 0 g 0 0 mm W=1u L=1u M={m}\n.model mm NMOS(LEVEL={level} TOX=0.03 KF={kf} AF={af})\n.end\n"
+                ));
+                let source = mechanism(&sources, "M1", "FN").unwrap();
+                assert_ne!(source.parameter_exponent, 0);
+                let cox = 3.453e-13 / (0.03 * 1e-4);
+                let expected = (kf * (1e-38_f64).powi(af)) / (100.0 * 1e-12 * cox * cox) * m;
+                let actual = source.try_spectral_density(100.0, 300.15).unwrap();
+                assert!(expected.is_normal());
+                assert!(
+                    (actual - expected).abs() < expected * 3e-13,
+                    "L{level} KF={kf} M={m} AF={af}: {actual:e} vs {expected:e}"
+                );
+                let mut nonrepresentable = source.clone();
+                nonrepresentable.parameter_exponent = i32::MAX;
+                assert!(
+                    nonrepresentable
+                        .try_spectral_density(100.0, 300.15)
+                        .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn legacy_bsim_active_flicker_rejects_invalid_normalization() {
         for level in [4, 5] {
             for (params, reason) in [
@@ -7331,7 +7355,6 @@ R2 OUT 0 1k
                 ("TOX=-0.03 KF=1e-28", "TOX"),
                 ("TOX=0.03 DL=1 KF=1e-28", "effective"),
                 ("TOX=0.03 DW=0.5 KF=1e-28", "effective"),
-                ("TOX=0.03 KF=1e300", "coefficient"),
             ] {
                 let netlist = Netlist::parse(&format!(
                     "Invalid legacy BSIM noise\nM1 0 0 0 0 mm W=0.5u L=1u\n.model mm NMOS(LEVEL={level} {params})\n.end\n"
