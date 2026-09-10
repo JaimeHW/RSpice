@@ -140,7 +140,7 @@ impl CircuitData {
             );
         }
         for binding in &self.multi_winding_transformers {
-            for &(node_pos, node_neg) in &binding.device.nodes {
+            for &(node_pos, node_neg) in binding.device.nodes() {
                 Self::add_force_accept_topology_edge(&mut graph, node_pos, node_neg);
             }
         }

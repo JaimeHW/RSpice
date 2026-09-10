@@ -791,7 +791,7 @@ impl Engine {
 
         // Multi-winding transformer stamps.
         for binding in &circuit.multi_winding_transformers {
-            for (winding_idx, &(pos, neg)) in binding.device.nodes.iter().enumerate() {
+            for (winding_idx, &(pos, neg)) in binding.device.nodes().iter().enumerate() {
                 let br = circuit.get_branch_matrix_index(binding.branch_ordinals[winding_idx]);
                 if pos > 0 {
                     triplets.push((br - 1, pos - 1, 0.0));

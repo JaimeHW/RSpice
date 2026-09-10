@@ -746,7 +746,7 @@ impl CircuitData {
         rhs: &mut [Value],
     ) {
         for binding in &self.multi_winding_transformers {
-            for (winding_idx, &(pos, neg)) in binding.device.nodes.iter().enumerate() {
+            for (winding_idx, &(pos, neg)) in binding.device.nodes().iter().enumerate() {
                 let br = self.get_branch_matrix_index(binding.branch_ordinals[winding_idx]);
                 if pos > 0 {
                     matrix.push(br - 1, pos - 1, 1.0);

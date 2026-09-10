@@ -85,6 +85,14 @@ Verified against `src/device/`:
 inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
 hysteresis model.
 
+The programmatic `MultiWindingTransformer` API owns immutable winding and
+coupling arrays so its cached flux matrix cannot become stale. `new` now
+returns `Result`, validates the complete matrix shape and finite symmetric
+coupling data, and rejects nonpositive self-inductances. Read access uses
+`nodes()`, `inductances()`, `coupling_matrix()`, `branches()`, and
+`num_windings()`. `set_branches` and `set_initial_current` also return
+`Result`; invalid assignments preserve the previous binding and history.
+
 Linear-inductor geometry is dialect-specific. Under the ngspice and
 `BestAvailable` policies a model card may synthesize inductance from `NT` with
 `LENGTH` and `DIA` or `CSECT` (optionally `MU`) using ngspice's Lundin/Nagaoka

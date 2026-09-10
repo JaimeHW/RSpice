@@ -546,18 +546,8 @@ impl Engine {
         // off-diagonals are added after the complete registry is established.
         for (binding_index, binding) in circuit.multi_winding_transformers.iter().enumerate() {
             let device = &binding.device;
-            let winding_count = device.num_windings;
-            if winding_count == 0
-                || device.nodes.len() != winding_count
-                || device.inductances.len() != winding_count
-                || device.branches.len() != winding_count
-                || device.coupling_matrix.len() != winding_count
-                || device
-                    .coupling_matrix
-                    .iter()
-                    .any(|row| row.len() != winding_count)
-                || binding.branch_ordinals.len() != winding_count
-            {
+            let winding_count = device.num_windings();
+            if binding.branch_ordinals.len() != winding_count {
                 return Err(SimulationError::Circuit(format!(
                     "periodic MNA transformer '{}' has malformed winding/matrix cardinality",
                     device.name
@@ -588,11 +578,11 @@ impl Engine {
                     }
                     Some(PeriodicMnaRegistration::Inductor(inductor_index)) => {
                         if circuit.inductors.node_pos[*inductor_index]
-                            != device.nodes[winding_index].0
+                            != device.nodes()[winding_index].0
                             || circuit.inductors.node_neg[*inductor_index]
-                                != device.nodes[winding_index].1
+                                != device.nodes()[winding_index].1
                             || circuit.inductors.inductances[*inductor_index]
-                                != device.inductances[winding_index]
+                                != device.inductances()[winding_index]
                         {
                             return Err(SimulationError::Circuit(format!(
                                 "periodic MNA transformer '{}' winding {} disagrees with standalone inductor branch {branch_ordinal}",
@@ -768,9 +758,9 @@ impl Engine {
                     let name = format!("{}#{}", device.name, winding_index + 1);
                     solver
                         .try_add_periodic_inductor_branch(
-                            device.nodes[winding_index].0,
-                            device.nodes[winding_index].1,
-                            device.inductances[winding_index],
+                            device.nodes()[winding_index].0,
+                            device.nodes()[winding_index].1,
+                            device.inductances()[winding_index],
                             branch_ordinal,
                             &name,
                         )
@@ -1216,26 +1206,15 @@ impl Engine {
 
         for binding in &circuit.multi_winding_transformers {
             let device = &binding.device;
-            let winding_count = device.num_windings;
-            if device.name.trim().is_empty()
-                || winding_count == 0
-                || device.nodes.len() != winding_count
-                || device.inductances.len() != winding_count
-                || device.branches.len() != winding_count
-                || binding.branch_ordinals.len() != winding_count
-                || device.coupling_matrix.len() != winding_count
-                || device
-                    .coupling_matrix
-                    .iter()
-                    .any(|row| row.len() != winding_count)
-            {
+            let winding_count = device.num_windings();
+            if device.name.trim().is_empty() || binding.branch_ordinals.len() != winding_count {
                 return Err(SimulationError::Circuit(format!(
                     "periodic MNA transformer '{}' has malformed winding/matrix cardinality",
                     device.name
                 )));
             }
             for winding in 0..winding_count {
-                let (pos, neg) = device.nodes[winding];
+                let (pos, neg) = device.nodes()[winding];
                 let ordinal = binding.branch_ordinals[winding];
                 let expected_matrix_branch = num_nodes.checked_add(ordinal).ok_or_else(|| {
                     SimulationError::Circuit(format!(
@@ -1247,9 +1226,7 @@ impl Engine {
                 if pos > num_nodes
                     || neg > num_nodes
                     || pos == neg
-                    || !device.inductances[winding].is_finite()
-                    || device.inductances[winding] == 0.0
-                    || device.branches[winding] != Some(expected_matrix_branch)
+                    || device.branches()[winding] != Some(expected_matrix_branch)
                 {
                     return Err(SimulationError::Circuit(format!(
                         "periodic MNA transformer '{}' winding {} has malformed terminals, inductance, or canonical branch binding",
@@ -1264,29 +1241,8 @@ impl Engine {
                     )));
                 }
                 for column in 0..winding_count {
-                    if !device.coupling_matrix[winding][column].is_finite() {
-                        return Err(SimulationError::Circuit(format!(
-                            "periodic MNA transformer '{}' has non-finite coupling coefficient ({winding}, {column})",
-                            device.name
-                        )));
-                    }
-                    let mutual = device.mutual_inductance(winding, column);
-                    if !mutual.is_finite() {
-                        return Err(SimulationError::Circuit(format!(
-                            "periodic MNA transformer '{}' has non-finite inductance matrix entry ({winding}, {column})",
-                            device.name
-                        )));
-                    }
                     if winding != column {
-                        let reverse = device.mutual_inductance(column, winding);
-                        let tolerance =
-                            32.0 * Value::EPSILON * mutual.abs().max(reverse.abs()).max(1.0);
-                        if (mutual - reverse).abs() > tolerance {
-                            return Err(SimulationError::Circuit(format!(
-                                "periodic MNA transformer '{}' has asymmetric mutual inductance entries ({winding}, {column})",
-                                device.name
-                            )));
-                        }
+                        let mutual = device.mutual_inductance(winding, column);
                         solver
                             .try_add_exact_mna_inductance_entry(
                                 branch_index(ordinal),
@@ -1769,11 +1725,14 @@ mod tests {
             vec![(primary, 0), (secondary, 0)],
             vec![l1, l2],
             vec![vec![1.0, k], vec![k, 1.0]],
-        );
-        transformer.set_branches(vec![
-            circuit.get_branch_matrix_index(branch1),
-            circuit.get_branch_matrix_index(branch2),
-        ]);
+        )
+        .expect("valid transformer");
+        transformer
+            .set_branches(vec![
+                circuit.get_branch_matrix_index(branch1),
+                circuit.get_branch_matrix_index(branch2),
+            ])
+            .unwrap();
         circuit
             .multi_winding_transformers
             .push(MultiWindingTransformerBinding {
@@ -1909,7 +1868,8 @@ mod tests {
             vec![(primary, 0), (secondary, 0)],
             vec![100.0e-6, 25.0e-6],
             vec![vec![1.0, 0.8], vec![0.8, 1.0]],
-        );
+        )
+        .expect("valid transformer");
         circuit
             .multi_winding_transformers
             .push(MultiWindingTransformerBinding {

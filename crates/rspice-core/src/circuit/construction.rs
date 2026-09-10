@@ -520,7 +520,7 @@ impl CircuitData {
             binding.device.node2_neg = Self::remap_node_id(binding.device.node2_neg, old_node_id);
         }
         for binding in &mut self.multi_winding_transformers {
-            for (pos, neg) in &mut binding.device.nodes {
+            for (pos, neg) in binding.device.nodes_mut() {
                 *pos = Self::remap_node_id(*pos, old_node_id);
                 *neg = Self::remap_node_id(*neg, old_node_id);
             }

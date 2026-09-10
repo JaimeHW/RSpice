@@ -412,17 +412,15 @@ impl DynamicDevice for CoupledInductorPair {
 pub struct MultiWindingTransformer {
     /// Name
     pub name: String,
-    /// Number of windings
-    pub num_windings: usize,
     /// Node connections: [(pos, neg), ...] for each winding
-    pub nodes: Vec<(NodeId, NodeId)>,
+    nodes: Vec<(NodeId, NodeId)>,
     /// Self-inductances
-    pub inductances: Vec<Value>,
+    inductances: Vec<Value>,
     /// Branch indices
-    pub branches: Vec<Option<NodeId>>,
+    branches: Vec<Option<NodeId>>,
     /// Coupling matrix (symmetric, diagonal is 1.0)
     /// `k[i][j]` = coupling between winding `i` and `j`
-    pub coupling_matrix: Vec<Vec<Value>>,
+    coupling_matrix: Vec<Vec<Value>>,
     /// Inductance matrix (`L[i][j] = k[i][j] * sqrt(Li * Lj)`)
     inductance_matrix: Vec<Vec<Value>>,
     /// Previous currents
@@ -434,33 +432,66 @@ pub struct MultiWindingTransformer {
 }
 
 impl MultiWindingTransformer {
-    /// Create a new multi-winding transformer
+    /// Create a transformer with immutable electrical parameters.
+    ///
+    /// Returns an error for empty or mismatched winding arrays, nonpositive
+    /// or nonfinite self-inductances, or a coupling matrix that is not square,
+    /// finite, symmetric, unit-diagonal, and bounded by -1 and 1.
     pub fn new(
         name: String,
         nodes: Vec<(NodeId, NodeId)>,
         inductances: Vec<Value>,
         coupling_coefficients: Vec<Vec<Value>>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let n = inductances.len();
-        assert_eq!(nodes.len(), n);
-        assert_eq!(coupling_coefficients.len(), n);
-
-        // Build inductance matrix
-        let mut l_matrix = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                if i == j {
-                    l_matrix[i][j] = inductances[i];
-                } else {
-                    let k = coupling_coefficients[i][j];
-                    l_matrix[i][j] = mutual_inductance_value(k, inductances[i], inductances[j]);
+        let invalid = |reason: &str| format!("transformer '{name}': {reason}");
+        if n == 0
+            || nodes.len() != n
+            || coupling_coefficients.len() != n
+            || coupling_coefficients.iter().any(|row| row.len() != n)
+        {
+            return Err(invalid(
+                "expected matching nonempty winding arrays and a square coupling matrix",
+            ));
+        }
+        if inductances.iter().any(|l| !l.is_finite() || *l <= 0.0) {
+            return Err(invalid("self-inductances must be finite and positive"));
+        }
+        for (i, row) in coupling_coefficients.iter().enumerate() {
+            for (j, &k) in row.iter().enumerate() {
+                if !k.is_finite() || !(-1.0..=1.0).contains(&k) {
+                    return Err(invalid(
+                        "coupling coefficients must be finite and in [-1, 1]",
+                    ));
+                }
+                if (i == j && k != 1.0) || k != coupling_coefficients[j][i] {
+                    return Err(invalid(
+                        "coupling matrix must be symmetric with a unit diagonal",
+                    ));
                 }
             }
         }
 
-        Self {
+        // Build inductance matrix
+        let mut l_matrix = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            l_matrix[i][i] = inductances[i];
+            for j in 0..i {
+                let mutual = mutual_inductance_value(
+                    coupling_coefficients[i][j],
+                    inductances[i],
+                    inductances[j],
+                );
+                if !mutual.is_finite() {
+                    return Err(invalid("inductance matrix must remain finite"));
+                }
+                l_matrix[i][j] = mutual;
+                l_matrix[j][i] = mutual;
+            }
+        }
+
+        Ok(Self {
             name,
-            num_windings: n,
             nodes,
             inductances,
             branches: vec![None; n],
@@ -469,13 +500,54 @@ impl MultiWindingTransformer {
             currents_prev: vec![0.0; n],
             currents_prev_prev: vec![0.0; n],
             voltages_prev: vec![0.0; n],
-        }
+        })
     }
 
-    /// Set branch indices
-    pub fn set_branches(&mut self, branches: Vec<NodeId>) {
-        assert_eq!(branches.len(), self.num_windings);
+    /// Number of windings.
+    pub fn num_windings(&self) -> usize {
+        self.inductances.len()
+    }
+
+    /// Terminal pairs in winding order.
+    pub fn nodes(&self) -> &[(NodeId, NodeId)] {
+        &self.nodes
+    }
+
+    pub(crate) fn nodes_mut(&mut self) -> &mut [(NodeId, NodeId)] {
+        &mut self.nodes
+    }
+
+    /// Self-inductances in winding order.
+    pub fn inductances(&self) -> &[Value] {
+        &self.inductances
+    }
+
+    /// Symmetric signed coupling coefficients, including the unit diagonal.
+    pub fn coupling_matrix(&self) -> &[Vec<Value>] {
+        &self.coupling_matrix
+    }
+
+    /// One-based MNA branch indices, absent until assigned.
+    pub fn branches(&self) -> &[Option<NodeId>] {
+        &self.branches
+    }
+
+    /// Assign distinct, nonzero MNA branch indices for every winding.
+    /// Invalid assignments leave the existing indices unchanged.
+    pub fn set_branches(&mut self, branches: Vec<NodeId>) -> Result<(), String> {
+        if branches.len() != self.num_windings()
+            || branches
+                .iter()
+                .enumerate()
+                .any(|(i, &branch)| branch == 0 || branches[..i].contains(&branch))
+        {
+            return Err(format!(
+                "transformer '{}': expected one distinct nonzero branch index per winding",
+                self.name
+            ));
+        }
         self.branches = branches.into_iter().map(Some).collect();
+        Ok(())
     }
 
     /// Get mutual inductance between two windings
@@ -483,17 +555,23 @@ impl MultiWindingTransformer {
         self.inductance_matrix[i][j]
     }
 
-    /// Set initial current for a winding
-    pub fn set_initial_current(&mut self, winding: usize, current: Value) {
-        if winding < self.num_windings {
-            self.currents_prev[winding] = current;
-            self.currents_prev_prev[winding] = current;
+    /// Set both accepted current-history samples for one winding.
+    /// An invalid winding or nonfinite current leaves history unchanged.
+    pub fn set_initial_current(&mut self, winding: usize, current: Value) -> Result<(), String> {
+        if winding >= self.num_windings() || !current.is_finite() {
+            return Err(format!(
+                "transformer '{}': expected a valid winding and finite initial current",
+                self.name
+            ));
         }
+        self.currents_prev[winding] = current;
+        self.currents_prev_prev[winding] = current;
+        Ok(())
     }
 
     /// Stamp DC short-circuit topology for all windings.
     pub fn stamp_dc_short(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
-        for i in 0..self.num_windings {
+        for i in 0..self.num_windings() {
             let branch = self.branches[i].expect("Branch index must be set");
             let (pos, neg) = self.nodes[i];
             matrix.stamp(branch, pos, 1.0);
@@ -509,7 +587,7 @@ impl MultiWindingTransformer {
         dt: Value,
         coeff: &CompanionCoefficients,
     ) -> (Vec<Vec<Value>>, Vec<Value>) {
-        let n = self.num_windings;
+        let n = self.num_windings();
         let r_matrix: Vec<Vec<Value>> = self
             .inductance_matrix
             .iter()
@@ -553,7 +631,7 @@ impl MultiWindingTransformer {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
-        let n = self.num_windings;
+        let n = self.num_windings();
         let (r_matrix, v_eq) = self.companion_matrix(dt, coeff);
 
         for i in 0..n {
@@ -584,7 +662,7 @@ impl MultiWindingTransformer {
         dt: Value,
         coeff: &CompanionCoefficients,
     ) {
-        for row in 0..self.num_windings {
+        for row in 0..self.num_windings() {
             let Some(branch_row) = self.branches[row] else {
                 continue;
             };
@@ -602,7 +680,7 @@ impl MultiWindingTransformer {
             if coeff.coeff_i_n != 0.0 {
                 correction -= coeff.coeff_i_n * self.voltages_prev[row];
             }
-            for column in 0..self.num_windings {
+            for column in 0..self.num_windings() {
                 let Some(branch_column) = self.branches[column] else {
                     continue;
                 };
@@ -625,7 +703,7 @@ impl MultiWindingTransformer {
 
     /// Update history from an accepted solution vector.
     pub fn update_state_from_solution(&mut self, solution: &[Value]) {
-        for i in 0..self.num_windings {
+        for i in 0..self.num_windings() {
             let (pos, neg) = self.nodes[i];
             let v_pos = if pos == 0 {
                 0.0
@@ -670,6 +748,110 @@ impl DynamicDevice for MultiWindingTransformer {
 #[cfg(test)]
 mod correction_tests {
     use super::*;
+
+    #[test]
+    fn multi_winding_construction_rejects_malformed_electrical_data() {
+        let nodes = vec![(1, 0), (2, 0)];
+        let inductances = vec![2.0, 8.0];
+        let coupling = vec![vec![1.0, -0.25], vec![-0.25, 1.0]];
+        for (nodes, inductances, coupling) in [
+            (vec![], vec![], vec![]),
+            (vec![(1, 0)], inductances.clone(), coupling.clone()),
+            (nodes.clone(), inductances.clone(), vec![]),
+            (
+                nodes.clone(),
+                inductances.clone(),
+                vec![vec![1.0], vec![-0.25, 1.0]],
+            ),
+            (
+                nodes.clone(),
+                inductances.clone(),
+                vec![vec![1.0, -0.25], vec![-0.25, 1.0, 0.0]],
+            ),
+            (
+                nodes.clone(),
+                inductances.clone(),
+                vec![vec![1.0, -0.25], vec![0.25, 1.0]],
+            ),
+            (
+                nodes.clone(),
+                inductances.clone(),
+                vec![vec![0.5, -0.25], vec![-0.25, 1.0]],
+            ),
+        ] {
+            let error = MultiWindingTransformer::new("Tbad".into(), nodes, inductances, coupling)
+                .expect_err("invalid electrical data must fail at construction");
+            assert!(error.contains("Tbad"));
+        }
+        for invalid in [0.0, -1.0, Value::INFINITY, Value::NEG_INFINITY, Value::NAN] {
+            assert!(
+                MultiWindingTransformer::new(
+                    "Tbad".into(),
+                    nodes.clone(),
+                    vec![2.0, invalid],
+                    coupling.clone(),
+                )
+                .is_err()
+            );
+        }
+        for invalid in [
+            -1.01,
+            1.01,
+            Value::INFINITY,
+            Value::NEG_INFINITY,
+            Value::NAN,
+        ] {
+            assert!(
+                MultiWindingTransformer::new(
+                    "Tbad".into(),
+                    nodes.clone(),
+                    inductances.clone(),
+                    vec![vec![1.0, invalid], vec![invalid, 1.0]],
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn multi_winding_invalid_assignments_preserve_physical_history() {
+        let mut transformer = MultiWindingTransformer::new(
+            "T1".into(),
+            vec![(1, 0), (2, 0)],
+            vec![2.0, 8.0],
+            vec![vec![1.0, -0.25], vec![-0.25, 1.0]],
+        )
+        .unwrap();
+        transformer.set_branches(vec![3, 4]).unwrap();
+        transformer.set_initial_current(0, 2.0).unwrap();
+        transformer.set_initial_current(1, -3.0).unwrap();
+        for branches in [vec![], vec![3], vec![3, 4, 5], vec![0, 4], vec![3, 3]] {
+            assert!(transformer.set_branches(branches).is_err());
+            assert_eq!(transformer.branches(), &[Some(3), Some(4)]);
+        }
+        for (winding, current) in [
+            (2, 0.0),
+            (usize::MAX, 0.0),
+            (0, Value::NAN),
+            (1, Value::INFINITY),
+        ] {
+            assert!(transformer.set_initial_current(winding, current).is_err());
+        }
+        // L = [[2,-1],[-1,8]]; i(t) = [2+4t,-3+2t], v=L*i'=[6,12].
+        // Invalid assignments must not alter the physical ramp at t=0.5.
+        let mut correction = [0.0; 4];
+        transformer.overwrite_transient_correction_rhs(
+            &mut correction,
+            &[6.0, 12.0, 4.0, -2.0],
+            0.5,
+            &CompanionCoefficients::backward_euler(),
+        );
+        assert_eq!(correction, [0.0; 4]);
+        let (resistance, history) =
+            transformer.companion_matrix(0.5, &CompanionCoefficients::backward_euler());
+        assert_eq!(resistance, vec![vec![4.0, -2.0], vec![-2.0, 16.0]]);
+        assert_eq!(history, vec![14.0, -52.0]);
+    }
 
     #[test]
     fn winding_turns_ratio_extremes_preserve_representable_results() {
@@ -729,7 +911,8 @@ mod correction_tests {
                     vec![(1, 0), (2, 0)],
                     vec![l1, l2],
                     vec![vec![1.0, coefficient], vec![coefficient, 1.0]],
-                );
+                )
+                .expect("valid transformer");
                 for actual in [
                     coupling.mutual_inductance(l1, l2),
                     pair.m,
@@ -776,7 +959,8 @@ mod correction_tests {
                 vec![(1, 0), (2, 0)],
                 vec![2.0, 8.0],
                 vec![vec![1.0, coefficient], vec![coefficient, 1.0]],
-            );
+            )
+            .expect("valid transformer");
             assert_eq!(transformer.mutual_inductance(0, 1), 4.0 * coefficient);
             assert_eq!(transformer.mutual_inductance(1, 0), 4.0 * coefficient);
         }
@@ -834,8 +1018,9 @@ mod correction_tests {
             vec![(1, 0), (2, 0)],
             vec![2.0, 8.0],
             vec![vec![1.0, 0.25], vec![0.25, 1.0]],
-        );
-        transformer.set_branches(vec![3, 4]);
+        )
+        .expect("valid transformer");
+        transformer.set_branches(vec![3, 4]).unwrap();
         transformer.currents_prev = vec![1.25, -0.75];
         transformer.currents_prev_prev = vec![1.0, -0.5];
         transformer.voltages_prev = vec![0.125, -0.25];

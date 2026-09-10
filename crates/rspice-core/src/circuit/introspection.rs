@@ -1233,7 +1233,10 @@ impl CircuitData {
                 .iter()
                 .map(|branch_ordinal| self.num_nodes + *branch_ordinal)
                 .collect();
-            binding.device.set_branches(branches);
+            binding
+                .device
+                .set_branches(branches)
+                .expect("canonical transformer branch indices");
         }
         for binding in &mut self.jiles_atherton_inductors {
             let branch_matrix_index = self.num_nodes + binding.branch_ordinal;
