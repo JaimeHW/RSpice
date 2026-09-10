@@ -689,11 +689,16 @@ impl<'a> HierarchyResolver<'a> {
         }
 
         let search_order = self.view_search_order(&requested.view, is_root, instance_path);
-        let (master, resolution_error) =
-            match self.resolve_master(&requested, binding, &search_order) {
-                Ok(master) => (master, None),
-                Err(error) => (None, Some(error)),
-            };
+        let configured_model_section = self.configured_model_section(instance_path);
+        let (master, resolution_error) = match self.resolve_master(
+            &requested,
+            binding,
+            &search_order,
+            configured_model_section.as_deref(),
+        ) {
+            Ok(master) => (master, None),
+            Err(error) => (None, Some(error)),
+        };
         let resolved_reference = master
             .as_ref()
             .and_then(|(_, reference)| reference.clone())
@@ -785,8 +790,13 @@ impl<'a> HierarchyResolver<'a> {
                 "binding at {instance_path} declares Browser eligibility, but its filesystem-backed source is unavailable in this browser session"
             ));
         }
-        let configured_model_section = self.configured_model_section(instance_path);
-        if let Some(section) = configured_model_section.as_deref()
+        let model_section = configured_model_section.or_else(|| {
+            master
+                .as_ref()
+                .and_then(|master| master.materialized_binding.as_ref())
+                .and_then(|binding| binding.model_section.clone())
+        });
+        if let Some(section) = model_section.as_deref()
             && status.is_resolved()
             && master
                 .as_ref()
@@ -800,20 +810,6 @@ impl<'a> HierarchyResolver<'a> {
                 "model section '{section}' at {instance_path} requires a source-backed SPICE or extracted view"
             ));
         }
-        if let Some(section) = configured_model_section.as_deref()
-            && status.is_resolved()
-            && let Some(source_path) = master
-                .as_ref()
-                .and_then(|value| value.materialized_binding.as_ref())
-                .and_then(|binding| binding.source_path.as_deref())
-            && let Err(error) = validate_configured_model_section(source_path, section)
-        {
-            status = HierarchyBindingStatus::Unresolved;
-            diagnostic = Some(format!(
-                "model section '{section}' at {instance_path} is unavailable: {error}"
-            ));
-        }
-
         let project_veriloga = if status.is_resolved()
             && master
                 .as_ref()
@@ -876,7 +872,7 @@ impl<'a> HierarchyResolver<'a> {
                 resolved_reference: resolved_reference.clone(),
                 resolved_view_type: view_type,
                 materialized_binding,
-                model_section: configured_model_section,
+                model_section: model_section.clone(),
                 stop_boundary,
                 project_veriloga,
             });
@@ -893,6 +889,9 @@ impl<'a> HierarchyResolver<'a> {
             used_review_fallback,
             diagnostic,
         );
+        if let Some(section) = model_section {
+            row.model_section = section;
+        }
         row.warnings = warnings;
         self.upsert(row, instance_path);
         if status.is_resolved() {
@@ -1363,6 +1362,7 @@ impl<'a> HierarchyResolver<'a> {
         requested: &CellViewRef,
         binding: Option<&LibraryCellInstance>,
         search_order: &[String],
+        configured_model_section: Option<&str>,
     ) -> Result<Option<(HierarchyMaster<'a>, Option<CellViewRef>)>, String> {
         let library = find_library(self.libraries, &requested.library);
         let cell = library.and_then(|library| find_cell(library, &requested.cell));
@@ -1440,7 +1440,7 @@ impl<'a> HierarchyResolver<'a> {
                         candidate
                     ));
                 };
-                let materialized = materialize_authoritative_source_binding(
+                let mut materialized = materialize_authoritative_source_binding(
                     placed,
                     library.expect("view implies library"),
                     cell.expect("view implies cell"),
@@ -1448,6 +1448,9 @@ impl<'a> HierarchyResolver<'a> {
                     self.workspace,
                     self.libraries,
                 )?;
+                if let Some(section) = configured_model_section {
+                    materialized.model_section = Some(section.to_owned());
+                }
                 self.validate_source_binding(&materialized)?;
                 return Ok(Some((
                     HierarchyMaster {

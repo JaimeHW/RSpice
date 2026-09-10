@@ -224,21 +224,30 @@ pub(super) fn materialize_authoritative_source_binding(
         .as_ref()
         .map(|binding| binding.netlist_alias().to_owned())
         .or_else(|| {
-            view.metadata
-                .get("veriloga.module")
-                .or_else(|| view.metadata.get("netlist.module"))
-                .or_else(|| cell.metadata.get("veriloga.module"))
-                .or_else(|| cell.metadata.get("netlist.module"))
-                .cloned()
+            metadata_value(
+                [&view.metadata, &cell.metadata],
+                &[
+                    "veriloga.module",
+                    "netlist.model",
+                    "netlist.master",
+                    "netlist.module",
+                    "model.family",
+                ],
+            )
         });
     materialized.netlist_template = metadata_value(
         [&view.metadata, &cell.metadata],
         &["netlist.template", "netlist_template"],
     );
-    materialized.model_section = metadata_value(
-        [&view.metadata, &cell.metadata],
-        &["netlist.section", "model.section"],
-    );
+    materialized
+        .variant_model_section
+        .clone_from(&placed.variant_model_section);
+    materialized.model_section = placed.variant_model_section.clone().or_else(|| {
+        metadata_value(
+            [&view.metadata, &cell.metadata],
+            &["netlist.section", "model.section"],
+        )
+    });
     materialized.reference_prefix = metadata_value(
         [&view.metadata, &cell.metadata],
         &["reference.prefix", "reference_prefix"],
@@ -512,26 +521,6 @@ pub(super) fn validate_source_file(
             binding.library, binding.cell, binding.view
         ))
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn validate_configured_model_section(
-    source_path: &Path,
-    section: &str,
-) -> Result<(), String> {
-    let mut processor = rspice_core::netlist::IncludeProcessor::new(source_path);
-    processor
-        .process_lib(&source_path.to_string_lossy(), Some(section))
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn validate_configured_model_section(
-    _source_path: &Path,
-    _section: &str,
-) -> Result<(), String> {
-    Err("filesystem-backed model sections are unavailable in this browser session".to_owned())
 }
 
 #[cfg(target_arch = "wasm32")]

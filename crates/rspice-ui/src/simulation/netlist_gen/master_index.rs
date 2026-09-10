@@ -611,24 +611,23 @@ impl<'a> MasterWalk<'a> {
         Some(closure)
     }
 
-    /// The executable binding of one occurrence: the plan's when it governs the
-    /// occurrence, and the placed one otherwise.
+    /// The executable binding of one occurrence. Rejected plan entries never
+    /// fall back to placed metadata; standalone inspection carries no plan.
     fn binding(
         &mut self,
         component: &Component,
         path: &InstancePath,
     ) -> Option<LibraryCellInstance> {
-        if let Some(execution) = self.plan.and_then(|plan| plan.binding(path)) {
-            return match execution.materialized_binding() {
-                Some(binding) => Some(binding.clone()),
-                None => {
-                    self.defects.push(NetlistDefect::UnresolvedOccurrence {
-                        occurrence: path.clone(),
-                        detail: "the execution plan did not materialize this instance".to_owned(),
-                    });
-                    None
-                }
-            };
+        match self.hierarchy.materialized_binding(path) {
+            Ok(Some(binding)) => return Some(binding.clone()),
+            Ok(None) => {}
+            Err(detail) => {
+                self.defects.push(NetlistDefect::UnresolvedOccurrence {
+                    occurrence: path.clone(),
+                    detail,
+                });
+                return None;
+            }
         }
         match component.library_cell.as_ref() {
             Some(binding) => Some(binding.clone()),

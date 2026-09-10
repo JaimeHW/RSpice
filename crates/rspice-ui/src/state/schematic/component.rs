@@ -117,6 +117,11 @@ pub struct LibraryCellInstance {
     /// authoritative source file.
     #[serde(default)]
     pub model_section: Option<String>,
+    /// Variant section captured by the execution projection. It overrides
+    /// view defaults, but an explicit configuration override still wins.
+    /// Persisted placement metadata cannot acquire this authority.
+    #[serde(skip)]
+    pub(crate) variant_model_section: Option<String>,
     /// Preferred reference-designator prefix for newly placed instances.
     /// This does not rewrite existing instances when a library definition is
     /// revised.
@@ -339,6 +344,7 @@ impl LibraryCellInstance {
             module_name: None,
             netlist_template: None,
             model_section: None,
+            variant_model_section: None,
             reference_prefix: None,
             parameter_order: Vec::new(),
             terminal_order: Vec::new(),

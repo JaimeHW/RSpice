@@ -99,6 +99,200 @@ fn omission() -> VariantObjectOverride {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn source_replacement_uses_the_requested_corner(
+    configured: bool,
+    configured_section: Option<&str>,
+    master_key: &str,
+) {
+    for section in [None, Some("FF"), Some("MISSING"), Some("NO_MASTER")] {
+        let selected = configured_section.or(section).unwrap_or("TT");
+        let path = std::env::temp_dir().join(format!(
+            "rspice-variant-corner-{}.lib",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, ".lib TT\n.subckt vendor_load a b params: scale=1\nRload a b {1000*scale}\n.ends vendor_load\n.endl TT\n.lib FF\n.subckt vendor_load a b params: scale=1\nRload a b {7000*scale}\n.ends vendor_load\n.endl FF\n.lib NO_MASTER\n.subckt unrelated a b\nRload a b 42k\n.ends unrelated\n.endl NO_MASTER\n").unwrap();
+        let (mut workspace, mut libraries, mut top) = fixture(configured);
+        connect_testbench(&mut top, &workspace, &libraries);
+        top.components[0].params = "scale=2".to_owned();
+        let mut view = View::new("spice", ViewType::Spice).with_path(path.clone());
+        for (key, value) in [
+            ("netlist.ports", "a,b"),
+            (master_key, "vendor_load"),
+            // An overridden default must never be validated or executed.
+            (
+                "netlist.section",
+                if section.is_some() || configured_section.is_some() {
+                    "unavailable_default"
+                } else {
+                    "TT"
+                },
+            ),
+            ("netlist.parameter_order", "scale"),
+            ("netlist.template", "{ref} {nodes} {model} {params}"),
+            ("reference.prefix", "X"),
+        ] {
+            view.metadata.insert(key.to_owned(), value.to_owned());
+        }
+        let cell = libraries
+            .get_library_mut("work")
+            .unwrap()
+            .get_cell_mut("alternate")
+            .unwrap();
+        cell.remove_view("schematic");
+        cell.add_view(view);
+        workspace
+            .schematic_buffers
+            .remove("work/alternate/schematic");
+        if configured {
+            let current = workspace.configuration_sets.active().unwrap();
+            let (id, revision) = (current.id(), current.revision());
+            let mut definition = current.definition().clone();
+            definition.executable_view_policy = vec!["spice".to_owned(), "schematic".to_owned()];
+            if let Some(section) = configured_section {
+                definition.overrides = vec![ConfigurationSetOverride {
+                    instance_path: "/X1".to_owned(),
+                    executable_views: vec!["spice".to_owned()],
+                    stop_view: None,
+                    model_section: Some(section.to_owned()),
+                    eligible_platforms: vec![crate::state::ConfigurationPlatform::Desktop],
+                }];
+            }
+            workspace
+                .configuration_sets
+                .update(id, revision, definition)
+                .unwrap();
+        }
+        let active = workspace.active_view.clone();
+        let mut change = replacement();
+        if let VariantObjectOverride::Substitute { replacement } = &mut change {
+            replacement.view = "spice".to_owned();
+            replacement.model_section = section.map(str::to_owned);
+        }
+        activate(&mut workspace, &active, top.components[0].id, change);
+        let original = serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap();
+        let projection = workspace
+            .inspect_design_projection(&libraries, &active, &top)
+            .unwrap();
+        if matches!(selected, "MISSING" | "NO_MASTER") {
+            assert!(!projection.hierarchy_resolution().is_valid());
+            let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+            let generated = generate_netlist_hierarchical(
+                projection.root_schematic().unwrap(),
+                &[],
+                &hierarchy,
+            );
+            assert!(!generated.errors.is_empty());
+            let diagnostics = projection
+                .hierarchy_resolution()
+                .bindings
+                .iter()
+                .filter_map(|row| row.diagnostic.as_deref())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(
+                diagnostics.contains(if selected == "MISSING" {
+                    "MISSING"
+                } else {
+                    "vendor_load"
+                }),
+                "{diagnostics}"
+            );
+            assert_eq!(
+                serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap(),
+                original
+            );
+            std::fs::remove_file(&path).unwrap();
+            continue;
+        }
+        let projection = projection.into_execution().unwrap();
+        let execution = projection.plan().binding(&instance_path("/X1")).unwrap();
+        let binding = execution.materialized_binding().unwrap();
+        assert_eq!(execution.model_section(), Some(selected));
+        assert!(
+            projection
+                .hierarchy_resolution()
+                .bindings
+                .iter()
+                .any(|row| row.reference.cell == "alternate" && row.model_section == selected)
+        );
+        assert_eq!(binding.source_path.as_deref(), Some(path.as_path()));
+        assert_eq!(binding.module_name.as_deref(), Some("vendor_load"));
+        assert_eq!(binding.model_section.as_deref(), Some(selected));
+        let mut encoded = serde_json::to_value(binding).unwrap();
+        assert!(encoded.get("variant_model_section").is_none());
+        encoded["variant_model_section"] = serde_json::json!("forged");
+        let restored: LibraryCellInstance = serde_json::from_value(encoded).unwrap();
+        assert!(restored.variant_model_section.is_none());
+        assert_eq!(binding.parameter_order, ["scale"]);
+        assert_eq!(binding.reference_prefix.as_deref(), Some("X"));
+        assert_eq!(
+            binding.netlist_template.as_deref(),
+            Some("{ref} {nodes} {model} {params}")
+        );
+        let hierarchy = HierarchySource::from_design_projection(&libraries, &projection);
+        let generated =
+            generate_netlist_hierarchical(projection.root_schematic().unwrap(), &[], &hierarchy);
+        assert!(
+            generated.errors.is_empty(),
+            "{:?}\n{}",
+            generated.errors,
+            generated.netlist
+        );
+        assert!(
+            !generated.netlist.contains("model_section="),
+            "{}",
+            generated.netlist
+        );
+        let netlist =
+            rspice_core::Netlist::parse_with_path(&generated.netlist, &path.with_extension("cir"))
+                .unwrap();
+        let result = rspice_core::engine::Engine::new(rspice_core::SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .unwrap();
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("V1"))
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let resistance = if selected == "FF" { 7000.0 } else { 1000.0 };
+        assert!(
+            (result.branch_currents[branch] + 5.0 / (2.0 * resistance)).abs() < 1e-12,
+            "configured={configured} section={section:?}: {:?}",
+            result.branch_currents
+        );
+        assert_eq!(
+            serde_json::to_value((&top, &workspace.schematic_buffers)).unwrap(),
+            original
+        );
+    }
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn unconfigured_source_replacements_execute_the_selected_library_corner() {
+    for key in ["netlist.module", "netlist.model", "netlist.master"] {
+        source_replacement_uses_the_requested_corner(false, None, key);
+    }
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn configured_source_replacements_execute_the_selected_library_corner() {
+    for key in ["netlist.module", "netlist.model", "netlist.master"] {
+        source_replacement_uses_the_requested_corner(true, None, key);
+    }
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn configuration_corners_override_variant_choices_before_source_validation() {
+    for section in ["TT", "FF"] {
+        source_replacement_uses_the_requested_corner(true, Some(section), "netlist.module");
+    }
+}
+
 fn connect_testbench(
     top: &mut SchematicState,
     workspace: &ProjectWorkspace,

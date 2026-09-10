@@ -414,7 +414,7 @@ impl ProjectWorkspace {
             .borrow_mut()
             .retain(|cell_view_key, _| schematic_buffers.contains_key(cell_view_key));
 
-        self.preserve_variant_connections(
+        self.materialize_variant_bindings(
             libraries,
             active_reference,
             active_schematic,
@@ -449,7 +449,7 @@ impl ProjectWorkspace {
     /// per-document materialization cache: library symbols and other masters'
     /// live interfaces participate in the complete projection key, not in one
     /// document's source-only memo key.
-    fn preserve_variant_connections(
+    fn materialize_variant_bindings(
         &self,
         libraries: &LibraryManager,
         active_reference: &CellViewRef,
@@ -530,14 +530,52 @@ impl ProjectWorkspace {
             }
             let target_reference =
                 CellViewRef::new(&replacement.library, &replacement.cell, &replacement.view);
-            let target_symbol = target_symbols
-                .resolve_reference(&target_reference)
-                .ok_or_else(|| {
-                    refusal(format!(
-                        "{} has no resolved pin contract",
-                        target_reference.display_path()
-                    ))
-                })?;
+            let mut target_binding = LibraryCellInstance::new(
+                &target_reference.library,
+                &target_reference.cell,
+                &target_reference.view,
+            );
+            if let Some(library) = find_library(libraries, &target_reference.library)
+                && let Some(cell) = find_cell(library, &target_reference.cell)
+                && let Some(view) = find_view(cell, &target_reference.view)
+            {
+                if hierarchy_stop_view(view.view_type) {
+                    target_binding = materialize_authoritative_source_binding(
+                        &target_binding,
+                        library,
+                        cell,
+                        view,
+                        self,
+                        libraries,
+                    )
+                    .map_err(&refusal)?;
+                }
+                if replacement.model_section.is_some()
+                    && !matches!(view.view_type, ViewType::Spice | ViewType::Extracted)
+                {
+                    return Err(refusal(
+                        "a model section requires a source-backed SPICE or extracted view"
+                            .to_owned(),
+                    ));
+                }
+            }
+            target_binding
+                .variant_model_section
+                .clone_from(&replacement.model_section);
+            if replacement.model_section.is_some() {
+                target_binding
+                    .model_section
+                    .clone_from(&replacement.model_section);
+            }
+            let target_symbol =
+                target_symbols
+                    .resolve_binding(&target_binding)
+                    .ok_or_else(|| {
+                        refusal(format!(
+                            "{} has no resolved pin contract",
+                            target_reference.display_path()
+                        ))
+                    })?;
             if !target_symbol.issues().is_empty() {
                 return Err(refusal(format!(
                     "replacement symbol has invalid pin metadata: {:?}",
@@ -612,9 +650,10 @@ impl ProjectWorkspace {
                     direction: pin.direction,
                 });
             }
-            updates.push((key.clone(), source.id, layout, ports));
+            target_binding.bind_interface(&ports);
+            updates.push((key.clone(), source.id, layout, target_binding));
         }
-        for (key, component_id, layout, ports) in updates {
+        for (key, component_id, layout, binding) in updates {
             let component = projected
                 .get_mut(&key)
                 .expect("prepared document")
@@ -622,11 +661,7 @@ impl ProjectWorkspace {
                 .iter_mut()
                 .find(|component| component.id == component_id)
                 .expect("prepared component");
-            component
-                .library_cell
-                .as_mut()
-                .expect("materialized substitution")
-                .bind_interface(&ports);
+            component.library_cell = Some(binding);
             component.execution_terminal_layout = Some(layout);
         }
         Ok(())

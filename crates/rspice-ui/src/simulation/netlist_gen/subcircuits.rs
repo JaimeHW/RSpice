@@ -221,6 +221,23 @@ impl<'a> HierarchySource<'a> {
             .and_then(|plan| plan.binding(instance_path))
     }
 
+    /// A frozen plan is authoritative even when it rejected an occurrence.
+    /// `None` permits placed-binding inspection only when there is no plan.
+    pub(super) fn materialized_binding(
+        &self,
+        path: &InstancePath,
+    ) -> Result<Option<&LibraryCellInstance>, String> {
+        let Some(plan) = self.execution_plan.as_ref() else {
+            return Ok(None);
+        };
+        plan.binding(path)
+            .and_then(ConfigurationExecutionBinding::materialized_binding)
+            .map(Some)
+            .ok_or_else(|| {
+                format!("the execution plan did not resolve a materialized binding at {path}")
+            })
+    }
+
     /// The frozen plan this source was bound to, when it carries one. A source
     /// indexed straight from workspace buffers — an inspection of one cell view
     /// rather than an execution — carries none.

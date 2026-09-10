@@ -675,11 +675,8 @@ impl<'a> NetlistGenerator<'a> {
 
     /// The frozen resolved binding when a plan governs this instance.
     ///
-    /// The plan wins wherever it speaks: falling back to the placed binding for
-    /// an instance the plan resolved would make validation and executable bytes
-    /// disagree. An instance the plan does not carry — a cell view checked on
-    /// its own, or an occurrence that never resolved — reports through the
-    /// placed binding, which is what names the master that is missing.
+    /// A rejected occurrence must not recover execution through its placed
+    /// metadata. Standalone inspection can use that metadata without a plan.
     fn effective_library_binding<'b>(
         &'b self,
         component: &'b Component,
@@ -691,15 +688,7 @@ impl<'a> NetlistGenerator<'a> {
             return Ok(Some(placed));
         };
         let path = self.child_hierarchy_path(component)?;
-        let Some(resolved) = hierarchy.execution_binding(&path) else {
-            return Ok(Some(placed));
-        };
-        resolved.materialized_binding().map(Some).ok_or_else(|| {
-            format!(
-                "configuration execution plan did not materialize instance '{}' at {}",
-                component.name, path
-            )
-        })
+        Ok(hierarchy.materialized_binding(&path)?.or(Some(placed)))
     }
 
     /// Consume the generated lines (subcircuit-body assembly).

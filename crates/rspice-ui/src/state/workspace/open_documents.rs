@@ -565,6 +565,17 @@ impl ProjectWorkspace {
                         // Removed before reference preparation.
                     }
                     crate::state::VariantObjectOverride::Substitute { replacement } => {
+                        crate::state::params_string::validate_parameter_text(&component.params)
+                            .map_err(|reason| {
+                                crate::state::DesignManagementError::InvalidReplacementParameters {
+                                    object: crate::state::SchematicObjectKey::new(
+                                        cell_view_key,
+                                        component.id,
+                                    )
+                                    .expect("validated override owner"),
+                                    reason,
+                                }
+                            })?;
                         let prior = component.library_cell.take();
                         let mut binding = crate::state::LibraryCellInstance::new(
                             replacement.library.clone(),
@@ -576,25 +587,11 @@ impl ProjectWorkspace {
                             binding.terminal_dirs = prior.terminal_dirs;
                             binding.interface_bound = prior.interface_bound;
                         }
+                        binding.model_section.clone_from(&replacement.model_section);
                         component.kind = crate::state::ComponentType::CellInstance;
                         component.library_cell = Some(binding);
                         if let Some(value) = &replacement.value_override {
                             component.value.clone_from(value);
-                        }
-                        if let Some(section) = &replacement.model_section {
-                            let object =
-                                crate::state::SchematicObjectKey::new(cell_view_key, component.id)?;
-                            component.params = crate::state::params_string::set_parameter_value(
-                                &component.params,
-                                "model_section",
-                                section,
-                            )
-                            .map_err(|reason| {
-                                crate::state::DesignManagementError::InvalidReplacementParameters {
-                                    object,
-                                    reason,
-                                }
-                            })?;
                         }
                     }
                 }
@@ -2049,7 +2046,8 @@ mod tests {
         assert_eq!(binding.library, "qualified");
         assert_eq!(binding.cell, "resistor_aecq");
         assert_eq!(component.value, "2 kohm");
-        assert!(component.params.contains("model_section=automotive"));
+        assert_eq!(binding.model_section.as_deref(), Some("automotive"));
+        assert!(!component.params.contains("model_section="));
         assert_eq!(component.name, "R1");
 
         schematic
