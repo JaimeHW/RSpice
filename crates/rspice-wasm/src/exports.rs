@@ -208,6 +208,50 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn pss_vcvs_dependent_charge_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::PssConfig;
+        let deck = rspice_core::Netlist::parse("Controlled charge in WASM\nI1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\nE1 out 0 in 0 2\nC2 out 0 0.2\n.end\n").unwrap();
+        let point = rspice_core::Engine::default()
+            .run_pss_operating_point_with_abort(
+                &deck,
+                PssConfig::new(1.0)
+                    .with_points_per_period(1024)
+                    .with_tstab_periods(0),
+                &NoAbort,
+            )
+            .unwrap();
+        assert_eq!(point.shooting_state_basis(), ["C:C1"]);
+        assert_eq!(point.analysis().floquet_multipliers.len(), 1);
+        assert!((point.analysis().floquet_multipliers[0].re - (-10.0_f64).exp()).abs() < 2e-7);
+        let result = &point.analysis().result;
+        let input = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("in"))
+            .unwrap();
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        for (&vin, &vout) in result.waveforms[input]
+            .values
+            .iter()
+            .zip(&result.waveforms[output].values)
+        {
+            assert!((vout - 2.0 * vin).abs() < 2e-12);
+        }
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("E1"))
+            .unwrap();
+        let expected = 4.0 * result.waveforms[input].values[0];
+        assert!((result.branch_waveforms[branch].values[0] - expected).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn promoted_vbic_thermal_decay_in_wasm() {
         use rspice_core::engine::{Engine, SimulationConfig, TransientStartupMode};
         use rspice_core::numerics::integration::IntegrationMethod;

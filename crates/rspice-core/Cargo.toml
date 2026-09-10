@@ -274,6 +274,8 @@ thiserror.workspace = true
 log.workspace = true
 nom.workspace = true
 num-complex.workspace = true
+# Exact sparse rank decisions for ideal-source shooting constraints.
+num-bigint = "0.4.8"
 libm = "0.2"
 rustfft.workspace = true
 rustc-hash.workspace = true

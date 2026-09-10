@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 82;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 83;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1452,9 +1452,9 @@ impl PssOperatingPoint {
 
     pub(in crate::engine) fn validate_shooting_basis_for_circuit(
         &self,
-        circuit: &CircuitData,
+        circuit: &PssCircuit,
     ) -> Result<(), SimulationError> {
-        let expected = Engine::pss_shooting_state_basis(circuit);
+        let expected = circuit.state_basis_names();
         if self.shooting_state_basis != expected {
             return Err(SimulationError::Circuit(format!(
                 "retained PSS shooting-state basis does not match the elaborated circuit: expected {expected:?}, received {:?}",
@@ -1618,10 +1618,6 @@ impl Engine {
         Ok(required_steps)
     }
 
-    fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
-        state::PssStateBasis::new(circuit).names(circuit)
-    }
-
     /// Run Periodic Steady-State analysis
     ///
     /// This is the main entry point for PSS simulation. It handles both driven
@@ -1722,7 +1718,7 @@ impl Engine {
                 "PSS semantic producer inputs changed during the periodic solve".to_owned(),
             ));
         }
-        let shooting_state_basis = Self::pss_shooting_state_basis(&circuit);
+        let shooting_state_basis = circuit.state_basis_names();
         let identity = PssOperatingPointIdentity::bind(
             producer,
             &retained_config,
@@ -1778,7 +1774,7 @@ impl Engine {
                 "PSS semantic producer inputs changed during the periodic solve".to_owned(),
             ));
         }
-        let shooting_state_basis = Self::pss_shooting_state_basis(&circuit);
+        let shooting_state_basis = circuit.state_basis_names();
         let identity = PssOperatingPointIdentity::bind(
             producer,
             &retained_config,
@@ -2188,7 +2184,7 @@ impl Engine {
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        let mut circuit = PssCircuit::new(circuit);
+        let mut circuit = PssCircuit::new_with_abort(circuit, self.config.resource_limits, abort)?;
         circuit.ensure_regular_prescribed_currents(config.period())?;
         // Validate circuit has reactive elements
         let state_dimension = circuit.state_dimension();
@@ -3021,10 +3017,16 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut initial = circuit.clone();
-        initial.add_initial_constraints()?;
-        let mut matrix =
-            self.build_matrix_with_extra_pattern(&initial, &initial.initial_extra_pattern())?;
+        initial.add_initial_constraints(abort)?;
+        self.ensure_matrix_unknowns(initial.matrix_size())?;
+        let mut extra = initial.initial_extra_pattern();
+        if initial.has_initial_charge_rates() {
+            let base = self.build_matrix(&initial)?;
+            extra.extend(initial.initial_charge_pattern(&base, abort)?);
+        }
+        let mut matrix = self.build_matrix_with_extra_pattern(&initial, &extra)?;
         initial.link_indices(&matrix);
+        initial.link_initial_charge_pattern(&matrix, abort)?;
         let coeff = CompanionCoefficients::for_method(
             crate::numerics::integration::IntegrationMethod::BackwardEuler,
         );
@@ -3905,6 +3907,7 @@ impl Engine {
             pss.stamp_initial_inductor_constraints(matrix, rhs)?;
         }
         let initial_flux_rates = pss.has_initial_flux_rates();
+        let initial_charge_rates = pss.has_initial_charge_rates();
         let PssCircuit {
             circuit,
             diode_history,
@@ -3949,7 +3952,7 @@ impl Engine {
             circuit
                 .capacitors
                 .stamp_transient_branch_companions(matrix, rhs, dt, coeff, num_nodes);
-        } else {
+        } else if !initial_charge_rates {
             // Only independent voltage constraints carry reactions in this
             // initialization solve. Dependent IC-capacitor current slots are
             // provisional Newton seeds; real steps stamp every physical
@@ -4073,6 +4076,8 @@ impl Engine {
         .map_err(SimulationError::Circuit)?;
         if !initialization {
             pss.stamp_prescribed_current_correction(rhs, step)?;
+        } else {
+            pss.stamp_initial_charge_constraints(matrix, rhs, linearize_at, physical_probe)?;
         }
         Ok(())
     }
@@ -4517,7 +4522,8 @@ mod tests {
                         "VBIC charge oracle\nV1 in 0 SIN(0 0.1 1meg)\nR1 in out 1k\n{device}.end\n"
                     ))
                     .unwrap();
-                    let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                    let mut circuit =
+                        PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
                     assert_eq!(circuit.state_dimension(), 1);
                     circuit.set_state(&[0.04]).unwrap();
                     let mut matrix = engine.build_matrix(&circuit).unwrap();
@@ -4579,7 +4585,7 @@ mod tests {
                     ""
                 };
                 let netlist = Netlist::parse(&format!("{deck}{extra}.end\n")).unwrap();
-                let mut base = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                let mut base = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
                 let initial = vec![0.0; base.state_dimension()];
                 base.set_state(&initial).unwrap();
                 let mut times = (0..=64)
@@ -4882,7 +4888,7 @@ mod tests {
     fn pss_reactive_state_reset_initializes_complete_capacitor_history() {
         let engine = Engine::new(SimulationConfig::default());
         let netlist = Netlist::parse("PSS history\nR1 out 0 1k\nC1 out 0 1n\n.end\n").unwrap();
-        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         circuit.capacitors.v_prev = vec![11.0];
         circuit.capacitors.v_prev_prev = vec![12.0];
         circuit.capacitors.v_prev_prev_prev = vec![13.0];
@@ -4918,7 +4924,7 @@ mod tests {
         .expect("history fixture parses");
         let engine = Engine::new(SimulationConfig::default());
         let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let mut circuit = PssCircuit::new(circuit);
+        let mut circuit = PssCircuit::new(circuit).unwrap();
         let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         circuit.capacitors.v_prev[0] = 3.0;
@@ -4961,6 +4967,29 @@ mod tests {
     }
 
     #[test]
+    fn vcvs_initial_charge_rates_obey_the_matrix_unknown_limit() {
+        for control in ["", "E1 out 0 in 0 2\nC2 out 0 0.2\n"] {
+            let netlist = Netlist::parse(&format!(
+                "PSS initialization limit\nI1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\n{control}.end\n"
+            )).unwrap();
+            let mut circuit =
+                PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();
+            let size = circuit.matrix_size();
+            let mut config = SimulationConfig::default();
+            config.resource_limits.max_matrix_unknowns = size;
+            let error = Engine::new(config)
+                .pss_initial_node_solution(&mut circuit, &NoAbort)
+                .unwrap_err();
+            assert!(
+                matches!(error, SimulationError::ResourceLimit(ref limit)
+                if limit.resource == crate::resource::ResourceKind::MatrixUnknowns),
+                "{error}"
+            );
+            assert_eq!(circuit.matrix_size(), size);
+        }
+    }
+
+    #[test]
     fn pss_cancelled_newton_trial_restores_behavioral_evaluator_state() {
         let netlist = Netlist::parse(
             "cancelled PSS trial rollback\n\
@@ -4972,7 +5001,7 @@ mod tests {
         .expect("rollback fixture parses");
         let engine = Engine::new(SimulationConfig::default());
         let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let mut circuit = PssCircuit::new(circuit);
+        let mut circuit = PssCircuit::new(circuit).unwrap();
         let matrix = engine.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         let freeze_time = 0.0;
@@ -4999,7 +5028,7 @@ mod tests {
             Netlist::parse("invalid PSS matrix\nB1 out 0 V=1\nR1 out 0 1k\nC1 out 0 100p\n.end\n")
                 .unwrap();
         let engine = Engine::default();
-        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         let size = circuit.matrix_size();
         // Keep every valid stamp slot, but give the solver a matrix whose
         // dimension disagrees with the circuit's RHS. This is a structural
@@ -5034,7 +5063,7 @@ mod tests {
             None
         );
 
-        let mut fresh = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut fresh = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         let mut fresh_matrix = engine.build_matrix(&fresh).unwrap();
         fresh.link_indices(&fresh_matrix);
         let expected = engine
@@ -5060,7 +5089,7 @@ mod tests {
         ).unwrap();
         let engine = Engine::default();
         for method in [IntegrationMethod::Trapezoidal, IntegrationMethod::Gear2] {
-            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
             circuit.set_state(&[]).unwrap();
             let initial = engine
                 .pss_initial_node_solution(&mut circuit, &NoAbort)
@@ -5144,7 +5173,7 @@ mod tests {
         let netlist =
             Netlist::parse("physical flux residual\nI1 0 a 1m\nL1 a b 100u\nR1 b 0 100\n.end\n")
                 .unwrap();
-        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         circuit.set_state(&[]).unwrap();
         let mut matrix = engine.build_matrix(&circuit).unwrap();
         circuit.link_indices(&matrix);
@@ -5207,7 +5236,7 @@ mod tests {
                 ))
                 .unwrap();
                 let engine = Engine::default();
-                let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
                 let mut matrix = engine.build_matrix(&circuit).unwrap();
                 circuit.link_indices(&matrix);
                 engine
@@ -5286,7 +5315,7 @@ mod tests {
             min_timestep: 1e-12,
             ..SimulationConfig::default()
         });
-        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         let mut matrix = engine.build_matrix(&circuit).unwrap();
         circuit.link_indices(&matrix);
         let initial = vec![0.0; circuit.matrix_size()];
@@ -5329,7 +5358,8 @@ mod tests {
         )
         .expect("nonconvergence fixture parses");
         let builder = Engine::new(SimulationConfig::default());
-        let mut circuit = PssCircuit::new(builder.build_circuit(&netlist).expect("circuit builds"));
+        let mut circuit =
+            PssCircuit::new(builder.build_circuit(&netlist).expect("circuit builds")).unwrap();
         let matrix = builder.build_matrix(&circuit).expect("matrix builds");
         circuit.link_indices(&matrix);
         let engine = Engine::new(SimulationConfig {
@@ -5471,7 +5501,7 @@ mod tests {
 
     #[test]
     fn continuation_state_rejects_unadvanced_delay_history() {
-        let mut circuit = PssCircuit::new(CircuitData::new());
+        let mut circuit = PssCircuit::new(CircuitData::new()).unwrap();
         circuit.tlines.push(crate::device::TransmissionLine::new(
             "T1".to_string(),
             1,

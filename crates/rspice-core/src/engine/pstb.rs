@@ -206,7 +206,11 @@ impl Engine {
                 });
             }
         }
-        let circuit = super::pss::PssCircuit::new(engine.build_circuit_with_abort(netlist, abort)?);
+        let circuit = super::pss::PssCircuit::new_with_abort(
+            engine.build_circuit_with_abort(netlist, abort)?,
+            engine.config.resource_limits,
+            abort,
+        )?;
         if circuit
             .inductor_probe_names()
             .iter()

@@ -5,6 +5,8 @@ use crate::numerics::integration::TwoTerminalChargeHistory;
 
 mod current;
 use current::PssCurrentBasis;
+mod voltage;
+use voltage::{InitialChargeRates, PssVoltageConstraintBuilder, PssVoltageConstraints};
 
 #[derive(Debug, Clone, Copy)]
 enum VoltageBranch {
@@ -24,7 +26,7 @@ enum VoltageBranch {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ForestValue {
     Zero,
     State(usize),
@@ -41,6 +43,8 @@ struct ForestEdge {
 }
 
 /// A spanning forest removes redundant electrical charge-voltage coordinates.
+/// Ideal amplifier relations use an exact sparse reduction instead, retaining
+/// independent differential charge voltages through cascaded control paths.
 /// Independent voltage sources enter the forest first: their prescribed
 /// voltages are constraints, never shooting unknowns. Exact zero-ohm branches
 /// prescribe zero voltage in the same forest. The remaining branch
@@ -50,13 +54,41 @@ struct ForestEdge {
 pub(super) struct PssStateBasis {
     voltage_branches: Vec<VoltageBranch>,
     forest: Vec<ForestEdge>,
+    voltage_constraints: Option<PssVoltageConstraints>,
     currents: PssCurrentBasis,
 }
 
 impl PssStateBasis {
-    pub(super) fn new(circuit: &CircuitData) -> Self {
+    pub(super) fn new(
+        circuit: &CircuitData,
+        limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
         let node_count = circuit.num_nodes() + 1;
-        let mut parents: Vec<usize> = (0..node_count).collect();
+        let mut voltage_constraints = if circuit.vcvs.is_empty() {
+            None
+        } else {
+            let mut constraints = PssVoltageConstraintBuilder::new(node_count, limits)?;
+            for index in 0..circuit.vcvs.len() {
+                constraints.add(
+                    [
+                        (circuit.vcvs.node_pos[index], 1.0),
+                        (circuit.vcvs.node_neg[index], -1.0),
+                        (circuit.vcvs.ctrl_pos[index], -circuit.vcvs.gains[index]),
+                        (circuit.vcvs.ctrl_neg[index], circuit.vcvs.gains[index]),
+                    ],
+                    ForestValue::Zero,
+                    abort,
+                )?;
+            }
+            Some(constraints)
+        };
+        let forest_node_count = if voltage_constraints.is_some() {
+            0
+        } else {
+            node_count
+        };
+        let mut parents: Vec<usize> = (0..forest_node_count).collect();
         fn root(parents: &mut [usize], mut node: usize) -> usize {
             while parents[node] != node {
                 parents[node] = parents[parents[node]];
@@ -64,18 +96,21 @@ impl PssStateBasis {
             }
             node
         }
-        let mut adjacency = vec![Vec::new(); node_count];
+        let mut adjacency = vec![Vec::new(); forest_node_count];
         let mut voltage_branches = Vec::new();
         let mut add = |pos: usize, neg: usize, value: ForestValue| {
+            if let Some(constraints) = &mut voltage_constraints {
+                return constraints.add([(pos, 1.0), (neg, -1.0)], value, abort);
+            }
             let rp = root(&mut parents, pos);
             let rn = root(&mut parents, neg);
             if rp == rn {
-                return false;
+                return Ok(false);
             }
             parents[rp] = rn;
             adjacency[pos].push((neg, value, -1.0));
             adjacency[neg].push((pos, value, 1.0));
-            true
+            Ok(true)
         };
         for (index, (&pos, &neg)) in circuit
             .voltage_sources
@@ -84,7 +119,7 @@ impl PssStateBasis {
             .zip(&circuit.voltage_sources.node_neg)
             .enumerate()
         {
-            add(pos, neg, ForestValue::Source(index));
+            add(pos, neg, ForestValue::Source(index))?;
         }
         for (index, source) in circuit
             .behavioral_sources
@@ -97,7 +132,7 @@ impl PssStateBasis {
                     source.node_pos,
                     source.node_neg,
                     ForestValue::BehavioralSource(index),
-                );
+                )?;
             }
         }
         // Use the effective large-signal resistance, not the reported value,
@@ -111,7 +146,7 @@ impl PssStateBasis {
             .zip(&circuit.resistor_branches.resistances)
         {
             if resistance == 0.0 {
-                add(pos, neg, ForestValue::Zero);
+                add(pos, neg, ForestValue::Zero)?;
             }
         }
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
@@ -120,7 +155,7 @@ impl PssStateBasis {
                     stamp.pp.row,
                     stamp.nn.row,
                     ForestValue::State(voltage_branches.len()),
-                )
+                )?
             {
                 voltage_branches.push(VoltageBranch::Capacitor(index));
             }
@@ -131,7 +166,7 @@ impl PssStateBasis {
                     diode.node_anode,
                     diode.node_cathode,
                     ForestValue::State(voltage_branches.len()),
-                )
+                )?
             {
                 voltage_branches.push(VoltageBranch::Diode(index));
             }
@@ -143,7 +178,7 @@ impl PssStateBasis {
                 .enumerate()
             {
                 if let Some((pos, neg)) = nodes
-                    && add(pos, neg, ForestValue::State(voltage_branches.len()))
+                    && add(pos, neg, ForestValue::State(voltage_branches.len()))?
                 {
                     voltage_branches.push(VoltageBranch::Bjt {
                         device,
@@ -157,7 +192,7 @@ impl PssStateBasis {
         for (device, jfet) in circuit.jfets.iter().enumerate() {
             for (charge, nodes) in jfet.classic_charge_storage_nodes().into_iter().enumerate() {
                 if let Some((pos, neg)) = nodes
-                    && add(pos, neg, ForestValue::State(voltage_branches.len()))
+                    && add(pos, neg, ForestValue::State(voltage_branches.len()))?
                 {
                     voltage_branches.push(VoltageBranch::Jfet {
                         device,
@@ -168,10 +203,10 @@ impl PssStateBasis {
                 }
             }
         }
-        let mut visited = vec![false; node_count];
+        let mut visited = vec![false; forest_node_count];
         let mut forest = Vec::new();
         let mut pending = Vec::new();
-        for start in 0..node_count {
+        for start in 0..forest_node_count {
             if visited[start] {
                 continue;
             }
@@ -192,11 +227,14 @@ impl PssStateBasis {
                 }
             }
         }
-        Self {
+        Ok(Self {
             voltage_branches,
             forest,
+            voltage_constraints: voltage_constraints
+                .map(|constraints| constraints.finish(circuit, abort))
+                .transpose()?,
             currents: PssCurrentBasis::new(circuit),
-        }
+        })
     }
 
     pub(super) fn names(&self, circuit: &CircuitData) -> Vec<String> {
@@ -272,6 +310,7 @@ pub(in crate::engine) struct PssCircuit {
     solution_scratch: Vec<Value>,
     current_balance: Vec<Value>,
     initial_flux_rates: Option<usize>,
+    initial_charge_rates: Option<InitialChargeRates>,
     current_source_rates: Vec<Value>,
     current_source_offsets: [Vec<Value>; 3],
     current_source_times: [Value; 2],
@@ -291,10 +330,23 @@ impl std::ops::DerefMut for PssCircuit {
 }
 
 impl PssCircuit {
-    pub(in crate::engine) fn new(circuit: CircuitData) -> Self {
+    #[cfg(test)]
+    pub(in crate::engine) fn new(circuit: CircuitData) -> Result<Self, SimulationError> {
+        Self::new_with_abort(
+            circuit,
+            crate::resource::ResourceLimits::default(),
+            &crate::abort_signal::NoAbort,
+        )
+    }
+
+    pub(in crate::engine) fn new_with_abort(
+        circuit: CircuitData,
+        limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, SimulationError> {
         let capacitor_trial_currents = vec![0.0; circuit.capacitors.len()];
         let inductor_trial_offsets = vec![[0.0; 2]; circuit.inductors.len()];
-        let basis = PssStateBasis::new(&circuit);
+        let basis = PssStateBasis::new(&circuit, limits, abort)?;
         let solution_scratch = vec![0.0; circuit.matrix_size() + 1];
         let current_balance = vec![0.0; basis.currents.workspace_size()];
         let current_source_rates = if basis.currents.has_prescribed_currents() {
@@ -321,7 +373,7 @@ impl PssCircuit {
             &solution_scratch[1..],
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
-        Self {
+        Ok(Self {
             circuit,
             diode_history,
             bjt_history,
@@ -336,10 +388,11 @@ impl PssCircuit {
             solution_scratch,
             current_balance,
             initial_flux_rates: None,
+            initial_charge_rates: None,
             current_source_rates,
             current_source_offsets,
             current_source_times: [0.0; 2],
-        }
+        })
     }
 
     pub(in crate::engine) fn grid_steps(&self, config: &crate::analysis::PssConfig) -> usize {
@@ -351,6 +404,10 @@ impl PssCircuit {
 
     pub(in crate::engine) fn state_dimension(&self) -> usize {
         self.basis.voltage_branches.len() + self.basis.currents.representatives.len()
+    }
+
+    pub(in crate::engine) fn state_basis_names(&self) -> Vec<String> {
+        self.basis.names(&self.circuit)
     }
 
     pub(super) fn extract_state(&self) -> Vec<Value> {
@@ -382,6 +439,20 @@ impl PssCircuit {
             "PSS shooting-state shape must match its basis"
         );
         self.solution_scratch.fill(0.0);
+        if let Some(constraints) = &self.basis.voltage_constraints {
+            constraints.solve(&mut self.solution_scratch, |value| match value {
+                ForestValue::Zero => Ok(0.0),
+                ForestValue::State(index) => Ok(state[index]),
+                ForestValue::Source(index) => {
+                    Ok(self.circuit.voltage_sources.transient_value_at(index, 0.0))
+                }
+                ForestValue::BehavioralSource(index) => {
+                    self.circuit.behavioral_sources.voltage_sources[index]
+                        .evaluate(&[], 0.0)
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))
+                }
+            })?;
+        }
         for edge in &self.basis.forest {
             let value = match edge.value {
                 ForestValue::Zero => 0.0,
@@ -476,13 +547,28 @@ impl PssCircuit {
     /// An exact initialization constraint carries displacement current while
     /// fixing the accepted branch voltage. Adding only forest coordinates
     /// avoids redundant ideal-source loops for parallel charge branches.
-    pub(super) fn add_initial_constraints(&mut self) -> Result<(), SimulationError> {
+    pub(super) fn add_initial_constraints(
+        &mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         self.basis.currents.source_balance(
             &self.circuit.current_sources,
             &mut self.current_balance,
             true,
         )?;
+        if let Some(constraints) = &self.basis.voltage_constraints {
+            let branches = (0..self.basis.voltage_branches.len())
+                .map(|_| self.circuit.allocate_branch())
+                .collect();
+            self.initial_charge_rates = Some(InitialChargeRates::new(constraints, branches));
+        }
         for index in 0..self.basis.voltage_branches.len() {
+            if self.initial_charge_rates.is_some() {
+                break;
+            }
             let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
             let value = match self.basis.voltage_branches[index] {
                 VoltageBranch::Capacitor(index) => self.capacitors.v_prev[index],
@@ -526,7 +612,136 @@ impl PssCircuit {
             self.initial_flux_rates,
             |row, col, _| entries.push((row, col)),
         );
+        if let Some(rates) = &self.initial_charge_rates {
+            for (index, &branch) in rates.branches.iter().enumerate() {
+                let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
+                for node in [pos, neg] {
+                    if node != 0 {
+                        entries.push((self.num_nodes() + branch - 1, node - 1));
+                    }
+                }
+            }
+        }
         entries
+    }
+
+    pub(super) fn initial_charge_pattern(
+        &self,
+        matrix: &StaticMatrix,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(usize, usize)>, SimulationError> {
+        self.initial_charge_rates.as_ref().map_or_else(
+            || Ok(Vec::new()),
+            |rates| rates.extra_pattern(matrix, self.num_nodes(), abort),
+        )
+    }
+
+    pub(super) fn link_initial_charge_pattern(
+        &mut self,
+        matrix: &StaticMatrix,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        if let Some(rates) = &mut self.initial_charge_rates {
+            rates.link_pattern(matrix, abort)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn has_initial_charge_rates(&self) -> bool {
+        self.initial_charge_rates.is_some()
+    }
+
+    pub(super) fn stamp_initial_charge_constraints(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        physical_probe: bool,
+    ) -> Result<(), SimulationError> {
+        let Some(rates) = &self.initial_charge_rates else {
+            return Ok(());
+        };
+        let nodes = self.circuit.num_nodes();
+        let mut stamps = Vec::new();
+        let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+        matrix.with_probe_values(|charge, unused_rhs| {
+            self.circuit
+                .capacitors
+                .stamp_transient_norton_companions(charge, unused_rhs, 1.0, &coeff);
+            for (index, branch) in self.circuit.capacitors.ic_branch_indices.iter().enumerate() {
+                if let Some(branch) = branch {
+                    let row = nodes + branch - 1;
+                    let stamp = &self.circuit.capacitors.stamps[index];
+                    let capacitance = self.circuit.capacitors.capacitances[index];
+                    for (node, sign) in [(stamp.pp.row, -1.0), (stamp.nn.row, 1.0)] {
+                        if node != 0 {
+                            charge.add(row, node - 1, sign * capacitance);
+                        }
+                    }
+                }
+            }
+            self.circuit.diodes.stamp_charge_companions(
+                charge,
+                unused_rhs,
+                solution,
+                &coeff,
+                1.0,
+                &self.diode_history,
+                physical_probe,
+            );
+            Engine::stamp_bjt_transient_companions(
+                super::super::transient::TransientCompanionStamp {
+                    circuit: &self.circuit,
+                    matrix: charge,
+                    rhs: unused_rhs,
+                    voltages: solution,
+                    coeff: &coeff,
+                    dt: 1.0,
+                },
+                &self.bjt_history,
+                &mut self.bjt_snapshot_cache,
+                false,
+            )?;
+            Engine::stamp_jfet_transient_companions(
+                super::super::transient::TransientCompanionStamp {
+                    circuit: &self.circuit,
+                    matrix: charge,
+                    rhs: unused_rhs,
+                    voltages: solution,
+                    coeff: &coeff,
+                    dt: 1.0,
+                },
+                &self.jfet_history,
+                false,
+            );
+            rates.project(charge.values_mut(), &self.circuit, rhs, &mut stamps)
+        })?;
+        for (row, col, value) in stamps {
+            matrix.add(row, col, value);
+        }
+        for (index, &branch) in rates.branches.iter().enumerate() {
+            let row = nodes + branch - 1;
+            let (pos, neg) = self.basis.voltage_nodes(&self.circuit, index);
+            for (node, sign) in [(pos, 1.0), (neg, -1.0)] {
+                if node != 0 {
+                    matrix.add(row, node - 1, sign);
+                }
+            }
+            rhs[row] = self.solution_scratch[pos] - self.solution_scratch[neg];
+        }
+        for (index, branch) in self.circuit.capacitors.ic_branch_indices.iter().enumerate() {
+            if let Some(branch) = branch {
+                let row = nodes + branch - 1;
+                let stamp = &self.circuit.capacitors.stamps[index];
+                matrix.add(row, row, 1.0);
+                for (node, sign) in [(stamp.pp.row, 1.0), (stamp.nn.row, -1.0)] {
+                    if node != 0 {
+                        matrix.add(node - 1, row, sign);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn has_initial_flux_rates(&self) -> bool {
@@ -777,6 +992,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn vcvs_constraints_restore_differential_cascaded_charge_states() {
+        let engine = Engine::default();
+        for gain in [0.0, 2.0, -0.25, 1e-12] {
+            for reversed in [false, true] {
+                let control = if reversed { "b a" } else { "a b" };
+                let deck = Netlist::parse(&format!(
+                    "Differential controlled charge\nVa a 0 2\nRb b 0 1k\nVc c 0 3\nE1 d c {control} {gain:e}\nE2 e 0 d c -2\nC1 a b 1u\nC2 d c 2u\nC3 e 0 3u\nC4 d e 4u\n.end\n"
+                )).unwrap();
+                let mut circuit =
+                    PssCircuit::new(Engine::default().build_circuit(&deck).unwrap()).unwrap();
+                assert_eq!(circuit.basis.names(&circuit), ["C:C1"]);
+                for voltage in [-0.5, 0.75] {
+                    circuit.set_state(&[voltage]).unwrap();
+                    let output = if reversed {
+                        -gain * voltage
+                    } else {
+                        gain * voltage
+                    };
+                    for (&actual, expected) in circuit.capacitors.v_prev.iter().zip([
+                        voltage,
+                        output,
+                        -2.0 * output,
+                        3.0 + 3.0 * output,
+                    ]) {
+                        assert!((actual - expected).abs() <= 2e-15 * expected.abs().max(1.0));
+                    }
+                    assert!((circuit.extract_state()[0] - voltage).abs() < 1e-15);
+                    let solution = engine
+                        .pss_initial_node_solution(&mut circuit, &crate::abort_signal::NoAbort)
+                        .unwrap();
+                    let rate = (2.0 - voltage) / (1e3 * 1e-6) * if reversed { -gain } else { gain };
+                    for (index, expected) in [-14e-6 * rate, 18e-6 * rate].into_iter().enumerate() {
+                        let current =
+                            solution[circuit.num_nodes() + circuit.vcvs.branch_indices[index] - 1];
+                        assert!(
+                            (current - expected).abs() < 2e-12 * expected.abs().max(1e-6),
+                            "gain {gain}, current {current} vs {expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vcvs_initialization_retains_ic_capacitor_and_semiconductor_charge_currents() {
+        for input in [
+            "V1 in 0 SIN(0 0.01 1)",
+            "B1 in 0 V=0.01*sin(2*pi*time)",
+            "B1 in 0 V=spice_sin(0,0.01,1)",
+        ] {
+            let deck = Netlist::parse(&format!(
+                "Controlled physical initial currents\n{input}\nR1 in 0 1k\nE1 out 0 in 0 2\nC1 out 0 0.2 IC=0\nD1 out 0 DM\nJ1 0 out 0 JM\n.model DM D(IS=0 CJO=0.05 M=0)\n.model JM NJF(CGS=0.07 CGD=0.11)\n.end\n"
+            )).unwrap();
+            let engine = Engine::new(
+                super::super::super::SimulationConfig::default()
+                    .with_spice_dialect(crate::config::SpiceDialect::Xyce),
+            );
+            let mut circuit = PssCircuit::new(engine.build_circuit(&deck).unwrap()).unwrap();
+            assert_eq!(circuit.state_dimension(), 0);
+            circuit.set_state(&[]).unwrap();
+            let solution = engine
+                .pss_initial_node_solution(&mut circuit, &crate::abort_signal::NoAbort)
+                .unwrap();
+            let rate = 0.02 * std::f64::consts::TAU;
+            let source = circuit.num_nodes() + circuit.vcvs.branch_indices[0] - 1;
+            let capacitor =
+                circuit.num_nodes() + circuit.capacitors.ic_branch_indices[0].unwrap() - 1;
+            assert!(
+                (solution[source] + (0.2 + 0.05 + 0.07 + 0.11) * rate).abs() < 2e-12,
+                "{input}: {}",
+                solution[source]
+            );
+            assert!((solution[capacitor] - 0.2 * rate).abs() < 2e-12);
+        }
+    }
+
+    #[test]
     fn jfet_storage_forest_restores_charge_history_and_removes_redundant_coordinates() {
         for (extra, names) in [
             ("", vec!["J:J1:qgs", "J:J1:qgd"]),
@@ -788,7 +1081,7 @@ mod tests {
                 "JFET charge forest\nVd d 0 1\nRg g 0 1k\nRs s 0 100\nJ1 d g s jm\n.model jm NJF(CGS=1n CGD=2n)\n{extra}.end\n"
             )).unwrap();
             let engine = Engine::default();
-            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
             assert_eq!(circuit.basis.names(&circuit), names);
             let state = vec![-0.3; names.len()];
             circuit.set_state(&state).unwrap();
@@ -811,7 +1104,7 @@ mod tests {
         let netlist = Netlist::parse(
             "JFET winding cutsets\nI1 0 a SIN(0 1m 1meg)\nL1 a b 1u\nL2 b d 2u\nRg g 0 1k\nJ1 d g 0 jm\n.model jm NJF(CGS=1n CGD=2n)\n.end\n",
         ).unwrap();
-        let circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+        let circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();
         assert_eq!(circuit.basis.names(&circuit), ["J:J1:qgs", "J:J1:qgd"]);
         assert!(circuit.basis.currents.representatives.is_empty());
     }
@@ -824,7 +1117,8 @@ mod tests {
             ("Vb b 0 0.1\n", Vec::new()),
         ] {
             let netlist = Netlist::parse(&format!("VBIC state forest\nVc c 0 1\nR1 b 0 1k\nQ1 c b 0 vm\n.model vm NPN(LEVEL=4 CJE=10p CJC=20p CBEO=30p CBCO=40p RCX=0 RCI=0 RBX=0 RBI=0 RBP=0 QCO=1p GAMM=0 TF=0 TR=0)\n{extra}.end\n")).unwrap();
-            let mut circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+            let mut circuit =
+                PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();
             assert_eq!(circuit.basis.names(&circuit), state_names);
             let state = vec![0.1; state_names.len()];
             circuit.set_state(&state).unwrap();
@@ -841,7 +1135,7 @@ mod tests {
                     "Shorted charge forest\nV1 a 0 2\nRz1 {first} {resistance:e} AC=0\nRz2 {second} 0\nR1 c 0 1k\nC1 a b 1n\nC2 b c 2n\nC3 a c 3n\nD1 c a dm\n.model dm D(IS=0 CJO=1n M=0)\n.options device zeroresistancetol=1\n.end\n"
                 )).unwrap();
                 let mut circuit =
-                    PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+                    PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();
                 let (names, values, first_voltage) = if resistance == 0.0 {
                     (vec!["C:C2"], vec![0.5], 0.0)
                 } else {
@@ -865,7 +1159,8 @@ mod tests {
     #[test]
     fn voltage_forest_preserves_all_charge_branches_in_a_loop() {
         let netlist = Netlist::parse("charge loop\nV1 a 0 2\nR1 b 0 1k\nR2 c 0 1k\nC1 a b 1n\nC2 b c 2n\nC3 a c 3n\nD1 c a dm\n.model dm D(IS=1e-30 CJO=1n M=0)\n.end\n").unwrap();
-        let mut circuit = PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap());
+        let mut circuit =
+            PssCircuit::new(Engine::default().build_circuit(&netlist).unwrap()).unwrap();
         assert_eq!(circuit.state_dimension(), 2);
         assert_eq!(circuit.basis.names(&circuit), ["C:C1", "C:C2"]);
         circuit.set_state(&[0.25, -0.5]).unwrap();

@@ -430,8 +430,12 @@ impl Engine {
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
             operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
+            let mut circuit = super::pss::PssCircuit::new_with_abort(
+                circuit,
+                self.config.resource_limits,
+                abort,
+            )?;
             operating_point.validate_shooting_basis_for_circuit(&circuit)?;
-            let mut circuit = super::pss::PssCircuit::new(circuit);
             circuit.integration_steps = operating_point
                 .analysis()
                 .result

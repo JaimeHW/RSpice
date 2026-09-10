@@ -186,6 +186,7 @@ impl BehavioralReferenceError {
 enum DerivativeTarget {
     Node(usize),
     Branch(usize),
+    Time,
 }
 
 struct BehavioralDerivativeContext<'a> {
@@ -253,6 +254,40 @@ pub struct BehavioralVoltageSource {
 }
 
 impl BehavioralVoltageSource {
+    pub(crate) fn explicit_time_derivative(&self, time: Value) -> Option<Value> {
+        if self.is_solution_dependent() {
+            return None;
+        }
+        let context = BehavioralDerivativeContext {
+            program: &self.program,
+            node_values: &[],
+            branch_values: &[],
+            time,
+            frequency: self.frequency,
+            temperature: self.temperature,
+            gmin: self.gmin,
+            expression_dialect: self.expression_dialect,
+            target: DerivativeTarget::Time,
+        };
+        let (outgoing, derivative) = eval_behavioral_expr_with_derivative(&self.ast, &context)?;
+        let point = Vm::new().execute(
+            &self.program,
+            &Context::transient(&[], &[], time)
+                .with_temperature(self.temperature)
+                .with_frequency(self.frequency)
+                .with_gmin(self.gmin)
+                .with_expression_dialect(self.expression_dialect),
+        );
+        // A one-sided expression branch may have a finite slope after a jump.
+        // It is not a finite displacement current at the published value.
+        let scale = point.abs().max(outgoing.abs());
+        (derivative.is_finite()
+            && point.is_finite()
+            && outgoing.is_finite()
+            && (point == outgoing || (point - outgoing).abs() <= 8.0 * Value::EPSILON * scale))
+            .then_some(derivative)
+    }
+
     fn nonfinite_error(
         &self,
         quantity: impl Into<String>,
@@ -1248,9 +1283,70 @@ fn eval_behavioral_expr_with_derivative(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
 ) -> Option<(Value, Value)> {
+    if matches!(context.target, DerivativeTarget::Time) && !crate::expr::constant_over_time(expr) {
+        // Newton's regularized slopes and pointwise Boolean/table derivatives
+        // are not necessarily outgoing time derivatives. Only use the rules
+        // qualified below for physical displacement current; unsupported
+        // corners must not silently publish a zero or regularized current.
+        let qualified = match expr {
+            Expr::Time
+            | Expr::Unary {
+                op: UnaryOp::Neg, ..
+            } => true,
+            Expr::Binary {
+                op:
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge,
+                ..
+            } => true,
+            Expr::Binary {
+                op: BinaryOp::Pow,
+                right,
+                ..
+            } => matches!(right.as_ref(),
+                Expr::Const(value) if value.is_finite() && *value >= 0.0 && value.fract() == 0.0),
+            Expr::Function {
+                func:
+                    Function::Abs
+                    | Function::Exp
+                    | Function::Sin
+                    | Function::Cos
+                    | Function::Tan
+                    | Function::Atan
+                    | Function::Sinh
+                    | Function::Cosh
+                    | Function::Tanh
+                    | Function::Asinh
+                    | Function::Sqr
+                    | Function::Min
+                    | Function::Max
+                    | Function::Uramp
+                    | Function::If,
+                ..
+            } => true,
+            Expr::Function {
+                func:
+                    Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm,
+                args,
+            } => args.iter().all(crate::expr::constant_over_time),
+            _ => false,
+        };
+        if !qualified {
+            return None;
+        }
+    }
     match expr {
         Expr::Const(value) => Some((*value, 0.0)),
-        Expr::Time => Some((context.time, 0.0)),
+        Expr::Time => Some((
+            context.time,
+            Value::from(matches!(context.target, DerivativeTarget::Time)),
+        )),
         Expr::Frequency => Some((context.frequency, 0.0)),
         Expr::Temperature => Some((context.temperature, 0.0)),
         Expr::ThermalVoltage => Some((
@@ -1308,6 +1404,37 @@ fn eval_behavioral_expr_with_derivative(
                 eval_behavioral_expr_with_derivative(left, context)?;
             let (right_value, right_derivative) =
                 eval_behavioral_expr_with_derivative(right, context)?;
+            if matches!(context.target, DerivativeTarget::Time)
+                && matches!(
+                    op,
+                    BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+                )
+                && left_value == right_value
+                && !(crate::expr::constant_over_time(left)
+                    && crate::expr::constant_over_time(right))
+            {
+                if left_derivative == right_derivative {
+                    return None;
+                }
+                let positive = left_derivative > right_derivative;
+                let truth = match op {
+                    BinaryOp::Gt | BinaryOp::Ge => positive,
+                    _ => !positive,
+                };
+                return Some((bool_value(truth), 0.0));
+            }
+            if matches!(context.target, DerivativeTarget::Time) && *op == BinaryOp::Pow {
+                // The time rule uses the polynomial derivative at zero too;
+                // Xyce's Newton rule deliberately zeroes that derivative.
+                return Some((
+                    left_value.powf(right_value),
+                    if right_value == 0.0 {
+                        0.0
+                    } else {
+                        right_value * left_value.powf(right_value - 1.0) * left_derivative
+                    },
+                ));
+            }
             eval_binary_with_derivative(
                 *op,
                 left_value,
@@ -1376,6 +1503,9 @@ fn eval_function_with_derivative(
     match func {
         Function::Abs => {
             let (x, dx) = eval_arg(0)?;
+            if x == 0.0 && matches!(context.target, DerivativeTarget::Time) {
+                return Some((0.0, dx.abs()));
+            }
             Some((x.abs(), x.signum() * dx))
         }
         Function::Sqrt => {
@@ -1544,7 +1674,11 @@ fn eval_function_with_derivative(
             let mut best = eval_arg(0)?;
             for index in 1..args.len() {
                 let candidate = eval_arg(index)?;
-                if candidate.0 < best.0 {
+                if candidate.0 < best.0
+                    || (candidate.0 == best.0
+                        && matches!(context.target, DerivativeTarget::Time)
+                        && candidate.1 < best.1)
+                {
                     best = candidate;
                 }
             }
@@ -1554,7 +1688,11 @@ fn eval_function_with_derivative(
             let mut best = eval_arg(0)?;
             for index in 1..args.len() {
                 let candidate = eval_arg(index)?;
-                if candidate.0 > best.0 {
+                if candidate.0 > best.0
+                    || (candidate.0 == best.0
+                        && matches!(context.target, DerivativeTarget::Time)
+                        && candidate.1 > best.1)
+                {
                     best = candidate;
                 }
             }
@@ -1577,6 +1715,9 @@ fn eval_function_with_derivative(
         }
         Function::Uramp => {
             let (x, dx) = eval_arg(0)?;
+            if x == 0.0 && matches!(context.target, DerivativeTarget::Time) {
+                return Some((0.0, dx.max(0.0)));
+            }
             Some((x.max(0.0), if x > 0.0 { dx } else { 0.0 }))
         }
         Function::Stp => {
@@ -1660,10 +1801,44 @@ fn eval_function_with_derivative(
         | Function::BarycentricFile => Some((0.0, 0.0)),
         Function::Sdt => None,
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
-            None
+            if !matches!(context.target, DerivativeTarget::Time) {
+                return None;
+            }
+            let mut values = Vec::with_capacity(args.len());
+            for index in 0..args.len() {
+                let (value, derivative) = eval_arg(index)?;
+                if derivative != 0.0 {
+                    return None;
+                }
+                values.push(value);
+            }
+            crate::expr::spice_waveform_value_and_time_derivative(func, &values, context.time)
         }
         Function::If => {
-            let (condition, _) = eval_arg(0)?;
+            let (condition, derivative) = eval_arg(0)?;
+            if condition == 0.0
+                && matches!(context.target, DerivativeTarget::Time)
+                && !crate::expr::constant_over_time(&args[0])
+                && !matches!(
+                    &args[0],
+                    Expr::Binary {
+                        op: BinaryOp::Lt
+                            | BinaryOp::Le
+                            | BinaryOp::Gt
+                            | BinaryOp::Ge
+                            | BinaryOp::Eq
+                            | BinaryOp::Ne
+                            | BinaryOp::And
+                            | BinaryOp::Or,
+                        ..
+                    }
+                )
+            {
+                if derivative == 0.0 {
+                    return None;
+                }
+                return eval_arg(1);
+            }
             if condition != 0.0 {
                 eval_arg(1)
             } else {
@@ -3143,6 +3318,83 @@ mod tests {
         };
         eval_behavioral_expr_with_derivative(&ast, &context)
             .unwrap_or_else(|| panic!("analytic derivative for `{expression}` failed"))
+    }
+
+    #[test]
+    fn vcvs_initial_source_derivatives_follow_implicit_waveform_defaults_and_corners() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, time, expected) in [
+                ("2*spice_sin(0,1,1)", 0.0, 2.0 * std::f64::consts::TAU),
+                ("sin(2*pi*time)^1", 0.0, std::f64::consts::TAU),
+                (
+                    "if(sin(2*pi*time)<=0,2*sin(2*pi*time),sin(2*pi*time))",
+                    0.0,
+                    std::f64::consts::TAU,
+                ),
+                ("abs(-sin(2*pi*time))", 0.0, std::f64::consts::TAU),
+                (
+                    "min(sin(2*pi*time),-sin(2*pi*time))",
+                    0.0,
+                    -std::f64::consts::TAU,
+                ),
+                (
+                    "max(sin(2*pi*time),2*sin(2*pi*time))",
+                    0.0,
+                    2.0 * std::f64::consts::TAU,
+                ),
+                ("spice_pulse(0,3,0,1,2,1,5)", 0.0, 3.0),
+                ("spice_pulse(0,3,0,1,2,1,5)", 1.0, 0.0),
+                ("spice_pulse(0,3,0,1,2,1,5)", 2.0, -1.5),
+                ("spice_pulse(0,3,0,1,2,1,5)", 5.0, 3.0),
+                ("spice_exp(0,2,0.5,0.25,0.75,0.5)", 0.5, 8.0),
+                (
+                    "spice_exp(0,2,0.5,0.25,0.75,0.5)",
+                    0.75,
+                    8.0 * (-1.0_f64).exp() - 4.0,
+                ),
+                (
+                    "spice_sffm(0,0.2,3,0.5,2)",
+                    0.0,
+                    0.8 * std::f64::consts::TAU,
+                ),
+            ] {
+                let mut source =
+                    BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
+                source.expression_dialect = dialect;
+                let actual = source.explicit_time_derivative(time).unwrap();
+                assert!(
+                    (actual - expected).abs() < 4e-13 * expected.abs().max(1.0),
+                    "{expression} at {time}: {actual} vs {expected}"
+                );
+            }
+            let mut source = BehavioralVoltageSource::new(
+                "B1".to_owned(),
+                1,
+                0,
+                1,
+                "spice_pulse(0,1,0,0,1,1,3)",
+            )
+            .unwrap();
+            source.expression_dialect = dialect;
+            assert_eq!(source.explicit_time_derivative(0.0), None);
+            for expression in [
+                "if(sin(2*pi*time)>0,1,0)",
+                "if(sin(2*pi*time)^2>0,time,0)",
+                // Newton slopes cannot certify these outgoing derivatives.
+                "floor(-sin(2*pi*time))",
+                "ln(sin(2*pi*time)-1)",
+                "sqrt(sin(2*pi*time)^2)",
+                "table(sin(2*pi*time),0,0,1,1)",
+                "if(!sin(2*pi*time),2*sin(2*pi*time),sin(2*pi*time))",
+                "spice_sin(0,sin(2*pi*time)^2,1)",
+                "exp(1000+sin(2*pi*time))",
+            ] {
+                let mut source =
+                    BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
+                source.expression_dialect = dialect;
+                assert_eq!(source.explicit_time_derivative(0.0), None);
+            }
+        }
     }
 
     fn eval_node_derivative(expression: &str, node_value: Value) -> (Value, Value) {

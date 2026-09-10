@@ -5358,6 +5358,7 @@ dependencies = [
  "log",
  "miniz_oxide 0.8.9",
  "nom 8.0.0",
+ "num-bigint 0.4.8",
  "num-complex",
  "portable-atomic",
  "proptest",

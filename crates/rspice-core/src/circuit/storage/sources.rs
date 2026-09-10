@@ -1009,6 +1009,18 @@ impl VoltageSources {
         }
     }
 
+    /// Outgoing slope under the same defaults and PWL snapshot as the voltage.
+    pub(crate) fn right_derivative_at_time(&self, index: usize, time: Value) -> Value {
+        self.source_specs[index].as_ref().map_or(0.0, |spec| {
+            Self::source_time_component::<true>(
+                spec,
+                time,
+                self.transient_context,
+                self.pwl_waveforms[index].as_deref(),
+            )
+        })
+    }
+
     /// Maximum absolute change expected from time-varying sources over [t0, t1].
     #[inline]
     pub fn max_expected_delta(&self, t0: Value, t1: Value) -> Value {

@@ -8,6 +8,56 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn vcvs_dependent_charge_survives_transient_continuation() {
+    let deck = Netlist::parse("Controlled charge continuation\nI1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\nE1 out 0 in 0 2\nC2 out 0 0.2\n.end\n").unwrap();
+    let engine = Engine::default();
+    let (analysis, state) = engine
+        .run_pss_with_continuation_state(
+            &deck,
+            PssConfig::new(1.0)
+                .with_points_per_period(1024)
+                .with_tstab_periods(0),
+        )
+        .unwrap();
+    assert_eq!(analysis.monodromy.len(), 1);
+    let (continued, _) = engine
+        .run_tran_from_pss_state(&deck, &state, 0.1, 0.001)
+        .unwrap();
+    let node = |name: &str| {
+        continued
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let branch = |name: &str| {
+        continued
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .unwrap()
+    };
+    let omega = std::f64::consts::TAU;
+    for (index, &time) in continued.time.iter().enumerate() {
+        let vin = continued.voltages[node("in")][index];
+        let vout = continued.voltages[node("out")][index];
+        let expected = ((omega * time).sin() - 0.1 * omega * (omega * time).cos())
+            / (1.0 + (0.1 * omega).powi(2));
+        assert!(
+            (vin - expected).abs() < 3e-5,
+            "t={time}: {vin} vs {expected}"
+        );
+        assert!((vout - 2.0 * vin).abs() < 2e-12);
+        assert!(
+            (continued.branch_currents[branch("E1")][index]
+                + continued.branch_currents[branch("C2")][index])
+                .abs()
+                < 2e-12
+        );
+    }
+}
+
+#[test]
 fn classic_jfet_pss_continues_the_analytic_orbit_and_persists_its_history() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {

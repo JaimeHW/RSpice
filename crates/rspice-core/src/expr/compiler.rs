@@ -33,7 +33,7 @@ pub(crate) fn function_uses_implicit_time(function: Function) -> bool {
     )
 }
 
-fn constant_over_time(expr: &Expr) -> bool {
+pub(crate) fn constant_over_time(expr: &Expr) -> bool {
     match expr {
         Expr::Time | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::StringLiteral(_) => {
             false

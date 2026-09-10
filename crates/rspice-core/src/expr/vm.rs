@@ -1159,6 +1159,87 @@ fn spice_sffm_from_args(time: Value, args: &[Value]) -> Value {
             .sin()
 }
 
+/// Outgoing derivatives of implicit-time waveforms with fixed parameters.
+/// Values and defaults come from the same helpers used by the bytecode VM.
+pub(crate) fn spice_waveform_value_and_time_derivative(
+    function: super::Function,
+    args: &[Value],
+    time: Value,
+) -> Option<(Value, Value)> {
+    use super::Function;
+    let (value, derivative) = match function {
+        Function::SpiceSin => {
+            let [_, amplitude, frequency, delay, damping, phase] = spice_waveform_parameters(args);
+            let elapsed = time - delay;
+            let omega = TWO_PI * frequency;
+            let phase = omega * elapsed + phase.to_radians();
+            (
+                spice_sin_from_args(time, args),
+                if elapsed < 0.0 || amplitude == 0.0 {
+                    0.0
+                } else {
+                    amplitude
+                        * (-damping * elapsed).exp()
+                        * (omega * phase.cos() - damping * phase.sin())
+                },
+            )
+        }
+        Function::SpicePulse => {
+            let [v1, v2, delay, rise, fall, width, period] = spice_waveform_parameters(args);
+            let mut elapsed = time - delay;
+            if period.is_finite() && period > 0.0 {
+                elapsed = elapsed.rem_euclid(period);
+            }
+            let derivative = if time < delay || v1 == v2 {
+                0.0
+            } else if (elapsed == 0.0 && rise <= 0.0) || (elapsed == rise + width && fall <= 0.0) {
+                return None;
+            } else if rise > 0.0 && elapsed < rise {
+                (v2 - v1) / rise
+            } else if fall > 0.0 && elapsed >= rise + width && elapsed < rise + width + fall {
+                (v1 - v2) / fall
+            } else {
+                0.0
+            };
+            (spice_pulse_from_args(time, args), derivative)
+        }
+        Function::SpiceExp => {
+            let [v1, v2, td1, tau1, td2, tau2] = spice_exp_parameters(args);
+            let edge = |delay: Value, tau: Value| {
+                if time < delay || v1 == v2 {
+                    0.0
+                } else {
+                    (v2 - v1) / tau * (-(time - delay) / tau).exp()
+                }
+            };
+            (
+                spice_exp_from_args(time, args),
+                if time < td1 {
+                    0.0
+                } else {
+                    edge(td1, tau1) - edge(td2, tau2)
+                },
+            )
+        }
+        Function::SpiceSffm => {
+            let [_, amplitude, carrier, modulation, signal] = spice_waveform_parameters(args);
+            let wc = TWO_PI * carrier;
+            let wm = TWO_PI * signal;
+            let phase = wc * time + modulation * (wm * time).sin();
+            (
+                spice_sffm_from_args(time, args),
+                if amplitude == 0.0 {
+                    0.0
+                } else {
+                    amplitude * phase.cos() * (wc + modulation * wm * (wm * time).cos())
+                },
+            )
+        }
+        _ => return None,
+    };
+    (value.is_finite() && derivative.is_finite()).then_some((value, derivative))
+}
+
 pub(super) fn xyce_tanh(value: Value) -> Value {
     if value > XYCE_TANH_SATURATION_THRESHOLD {
         1.0

@@ -11,6 +11,105 @@ use rspice_core::netlist::Netlist;
 
 const F0: f64 = 1.0e6;
 
+#[test]
+fn vcvs_charge_constraints_preserve_the_free_rc_mode() {
+    for gain in [0.0, 2.0, -0.25] {
+        for prescribed in [false, true] {
+            let input = if prescribed {
+                "V1 in 0 SIN(0 1 1)\nR1 in 0 1\n"
+            } else {
+                "I1 0 in SIN(0 1 1)\nR1 in 0 1\nC1 in 0 0.1\n"
+            };
+            let deck = Netlist::parse(&format!(
+                "Controlled charge orbit\n{input}E1 out 0 in 0 {gain}\nC2 out 0 0.2\n.end\n"
+            ))
+            .unwrap();
+            let point = Engine::default()
+                .run_pss_operating_point_with_abort(
+                    &deck,
+                    PssConfig::new(1.0)
+                        .with_points_per_period(1024)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap();
+            let expected_states: &[&str] = if prescribed { &[] } else { &["C:C1"] };
+            assert_eq!(point.shooting_state_basis(), expected_states);
+            let analysis = point.analysis();
+            assert_eq!(analysis.floquet_multipliers.len(), usize::from(!prescribed));
+            if !prescribed {
+                let multiplier = analysis.floquet_multipliers[0];
+                assert!((multiplier.re - (-10.0_f64).exp()).abs() < 2e-7);
+                assert_eq!(multiplier.im, 0.0);
+            }
+            let result = &analysis.result;
+            let input = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("in"))
+                .unwrap();
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let omega = std::f64::consts::TAU;
+            for ((&time, &vin), &vout) in result
+                .time
+                .iter()
+                .zip(&result.waveforms[input].values)
+                .zip(&result.waveforms[output].values)
+            {
+                let phase = omega * time;
+                let expected = if prescribed {
+                    phase.sin()
+                } else {
+                    (phase.sin() - 0.1 * omega * phase.cos()) / (1.0 + (0.1 * omega).powi(2))
+                };
+                assert!(
+                    (vin - expected).abs() < 2e-5,
+                    "gain {gain}, t={time}, {vin} vs {expected}"
+                );
+                assert!((vout - gain * vin).abs() < 2e-12);
+            }
+            let branch = result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("E1"))
+                .unwrap();
+            let derivative = if prescribed {
+                omega
+            } else {
+                -result.waveforms[input].values[0] / 0.1
+            };
+            assert!(
+                (result.branch_waveforms[branch].values[0] + 0.2 * gain * derivative).abs() < 2e-12,
+                "the initial source current must include dependent-capacitor displacement current"
+            );
+            if gain == 2.0 && !prescribed {
+                let pac = Engine::default()
+                    .run_pac_from_pss_with_abort(
+                        &deck,
+                        PacConfig::new()
+                            .with_fundamental(1.0)
+                            .with_sweep(0.25, 0.25, 1)
+                            .with_sweep_type(PacSweepType::Linear)
+                            .with_sidebands(0, 0)
+                            .with_input_source("I1")
+                            .with_output_node("out"),
+                        &point,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                let actual = pac.result.conversion_matrix.get(0, 0, 0).unwrap();
+                let expected = num_complex::Complex64::new(gain, 0.0)
+                    / num_complex::Complex64::new(1.0, omega * 0.25 * 0.1);
+                assert!((actual - expected).norm() < 2e-12);
+            }
+        }
+    }
+}
+
 fn retained_linear_operating_point(engine: &Engine, netlist: &Netlist) -> PssOperatingPoint {
     let config = PssConfig::new(F0)
         .with_harmonics(20)

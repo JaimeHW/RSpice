@@ -601,7 +601,7 @@ mod tests {
             }
             deck.push_str("K1 L1 L5 0.3\n.end\n");
             let netlist = Netlist::parse(&deck).unwrap();
-            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+            let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
             assert_eq!(circuit.state_dimension(), 3);
             circuit.set_state(&[0.0; 3]).unwrap();
             let offset = circuit.inductors.i_prev.clone();
@@ -689,7 +689,7 @@ mod tests {
                 }
                 deck.push_str(&format!("K1 L1 L5 {coupling}\n.end\n"));
                 let netlist = Netlist::parse(&deck).unwrap();
-                let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+                let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
                 let state = [0.2, -0.3, 0.4];
                 assert_eq!(circuit.state_dimension(), state.len());
                 circuit.set_state(&state).unwrap();
@@ -728,7 +728,7 @@ mod tests {
         let netlist = Netlist::parse(
             "mixed magnetic coordinates\nV1 in 0 1\nR1 in out 1k\nL1 out mid 40u\nL2 mid 0 60u\nR3 in a 50\nL3 a 0 100u\nL4 b 0 200u\nR4 b 0 100\nK1 L3 L4 0.6\n.end\n",
         ).unwrap();
-        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap());
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
         assert_eq!(circuit.state_dimension(), 3);
         circuit.set_state(&[1e-4, 2e-3, -1e-3]).unwrap();
         let solution = engine
