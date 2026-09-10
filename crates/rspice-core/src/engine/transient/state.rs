@@ -867,7 +867,8 @@ impl Engine {
         cache_reuse: VbicCachedSnapshotReuse,
         voltage_abstol: Value,
         reltol: Value,
-    ) {
+        xyce_one_step_order2: bool,
+    ) -> Result<(), SimulationError> {
         let TransientCompanionStamp {
             circuit,
             matrix,
@@ -927,6 +928,16 @@ impl Engine {
             if charge_factor <= 0.0 {
                 continue;
             }
+            // Schur elimination must follow the OneStep static/history split.
+            // The private equations are half a trapezoidal companion; reducing
+            // a BE companion first and then halving only its DC stamp changes
+            // the internal resistance/charge balance.
+            let private_coeff = if xyce_one_step_order2 {
+                CompanionCoefficients::trapezoidal()
+            } else {
+                *coeff
+            };
+            let coeff = &private_coeff;
             let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
                 Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
             let cached_snapshot = vbic_snapshot_cache.get(idx).copied().flatten();
@@ -982,13 +993,37 @@ impl Engine {
                 continue;
             };
 
+            if xyce_one_step_order2 {
+                let previous_current =
+                    history.accepted_terminal_currents[idx].ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' OneStep companion requires accepted terminal-current history",
+                            bjt.name
+                        ))
+                    })?;
+                let previous_external = Self::vbic_external_from_linear_history(
+                    bjt,
+                    &history.dynamic_internal_prev[idx],
+                    &history.dynamic_linear_prev[idx],
+                );
+                let [vc, vb, ve, vs] = previous_external;
+                let previous_static = bjt.external_terminal_currents_at_bias(vc, vb, ve, vs);
+                // At an external terminal, OneStep is half the full Trap
+                // current plus half the previous total current. The global
+                // history already supplies half the previous DC-reduced
+                // current, so replace that term before projecting tied nodes.
+                for row in 0..BJT_EXTERNAL_STATE_DIM {
+                    reduced_i_eq[row] += previous_static[row] - previous_current[row];
+                }
+            }
             bjt.project_legacy_tied_terminal_system(&mut y_total, &mut reduced_i_eq);
+            let weight = if xyce_one_step_order2 { 0.5 } else { 1.0 };
             let mut delta = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
             let mut delta_i_eq = [0.0; BJT_EXTERNAL_STATE_DIM];
             for row in 0..BJT_EXTERNAL_STATE_DIM {
-                delta_i_eq[row] = reduced_i_eq[row] - base_static_i_eq[row];
+                delta_i_eq[row] = weight * (reduced_i_eq[row] - base_static_i_eq[row]);
                 for col in 0..BJT_EXTERNAL_STATE_DIM {
-                    delta[row][col] = y_total[row][col] - base_static_g[row][col];
+                    delta[row][col] = weight * (y_total[row][col] - base_static_g[row][col]);
                 }
             }
             let nodes = [
@@ -999,6 +1034,7 @@ impl Engine {
             ];
             Self::stamp_external_reduced_system(matrix, rhs, &nodes, &delta, &delta_i_eq);
         }
+        Ok(())
     }
 
     /// Stamp one promoted VBIC charge branch as a Norton companion on its

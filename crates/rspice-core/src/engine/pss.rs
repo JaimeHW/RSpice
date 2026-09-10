@@ -4019,7 +4019,8 @@ impl Engine {
                 super::transient::VbicCachedSnapshotReuse::SeedOnly,
                 self.voltage_abstol(),
                 self.voltage_reltol(),
-            );
+                false,
+            )?;
             Self::stamp_jfet_transient_companions(
                 super::transient::TransientCompanionStamp {
                     circuit,

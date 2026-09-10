@@ -519,20 +519,26 @@ mod wasm_tests {
 
     #[wasm_bindgen_test]
     fn small_private_bjt_transient_ramp_in_wasm() {
-        let mut config = rspice_core::engine::SimulationConfig::default();
-        config.convergence_config.gmin_target = 0.0;
-        config.convergence_config.junction_gmin_target = 0.0;
-        let engine = rspice_core::Engine::new(config);
-        for scale in [1e-20, 1e-200] {
-            let deck = rspice_core::Netlist::parse(&format!("Private BJT ramp\nVB b 0 PWL(0 0 50n .001)\nQ1 0 b 0 mm M={scale}\n.model mm NPN(IS=0 RB=5k RBM=1k CJE=1p CJC=2p MJE=0 MJC=0)\n.end\n")).unwrap();
-            let tran = engine
-                .run_tran_with_abort(&deck, 50e-9, 0.05e-9, &rspice_core::abort_signal::NoAbort)
-                .unwrap();
-            assert_eq!(*tran.time.last().unwrap(), 50e-9);
-            let currents = tran.try_branch_current_waveform_named("VB").unwrap();
-            for (&time, &current) in tran.time.iter().zip(currents) {
-                let expected = 6e-8 * (-time / 15e-9).exp_m1();
-                assert!((current / scale - expected).abs() < 6e-12);
+        for dialect in [
+            rspice_core::engine::SpiceDialect::Ngspice,
+            rspice_core::engine::SpiceDialect::Xyce,
+        ] {
+            let mut config =
+                rspice_core::engine::SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let engine = rspice_core::Engine::new(config);
+            for scale in [1e-20, 1e-200] {
+                let deck = rspice_core::Netlist::parse(&format!("Private BJT ramp\nVB b 0 PWL(0 0 50n .001)\nQ1 0 b 0 mm M={scale}\n.model mm NPN(IS=0 RB=5k RBM=1k CJE=1p CJC=2p MJE=0 MJC=0)\n.end\n")).unwrap();
+                let tran = engine
+                    .run_tran_with_abort(&deck, 50e-9, 0.05e-9, &rspice_core::abort_signal::NoAbort)
+                    .unwrap();
+                assert_eq!(*tran.time.last().unwrap(), 50e-9);
+                let currents = tran.try_branch_current_waveform_named("VB").unwrap();
+                for (&time, &current) in tran.time.iter().zip(currents) {
+                    let expected = 6e-8 * (-time / 15e-9).exp_m1();
+                    assert!((current / scale - expected).abs() < 6e-12);
+                }
             }
         }
     }

@@ -2732,30 +2732,16 @@ fn private_bjt_transient_small_instances_preserve_rc_response() {
         let engine = Engine::new(config);
         for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
             for parameter in ["M", "AREA"] {
-                let mut reference = None;
                 for scale in [1.0, 1e-20, 1e-200] {
                     let deck = Netlist::parse(&format!("Private BJT ramp\nVB b 0 PWL(0 0 50n {})\nQ1 0 b 0 mm {parameter}={scale}\n.model mm {kind}(IS=0 RB=5k RBM=1k CJE=1p CJC=2p MJE=0 MJC=0)\n.end\n",p*0.001)).unwrap();
                     let tran = engine.run_tran(&deck, 50e-9, 0.05e-9).unwrap();
                     assert!(tran.time.len() > 3);
                     assert_eq!(*tran.time.last().unwrap(), 50e-9);
                     let currents = tran.try_branch_current_waveform_named("VB").unwrap();
-                    if scale == 1.0 {
-                        reference = Some((tran.time.clone(), currents.to_vec()));
-                    }
-                    let (reference_time, reference_current) = reference.as_ref().unwrap();
-                    assert_eq!(&tran.time, reference_time);
-                    for ((&time, &current), &unit_current) in
-                        tran.time.iter().zip(currents).zip(reference_current)
-                    {
+                    for (&time, &current) in tran.time.iter().zip(currents) {
                         // R=5k/scale and C=3p*scale: tau=15ns, independent
                         // of instance size. Ramp slope is +/-20,000 V/s.
-                        let expected = if dialect == SpiceDialect::Ngspice {
-                            p * 6e-8 * (-time / 15e-9).exp_m1()
-                        } else {
-                            // Isolate multiplicity/area scaling from Xyce's
-                            // separate startup-history qualification.
-                            unit_current
-                        };
+                        let expected = p * 6e-8 * (-time / 15e-9).exp_m1();
                         let actual = current / scale;
                         assert!(
                             (actual - expected).abs() < 6e-12,
@@ -2763,6 +2749,53 @@ fn private_bjt_transient_small_instances_preserve_rc_response() {
                         );
                     }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    config.convergence_config.voltage_abstol = 1e-12;
+    config.convergence_config.voltage_reltol = 1e-9;
+    config.convergence_config.current_abstol = 1e-14;
+    config.convergence_config.residual_reltol = 1e-9;
+    config.transient_nonlinear_abstol = Some(1e-12);
+    config.transient_nonlinear_reltol = Some(1e-9);
+    config.transient_nonlinear_rhstol = Some(1e-14);
+    let engine = Engine::new(config);
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let sources = format!(
+            "Private nonlinear BJT\nVC c 0 {polarity}\nVB b 0 PWL(0 {} 50n {})\n",
+            polarity * 0.5,
+            polarity * 0.7
+        );
+        // With no Early or high-injection effects, RB remains 5k even
+        // though RBM<RB selects a private base. Diffusion and depletion
+        // charge still depend nonlinearly on the evolving private voltage.
+        let model = "IS=1e-14 BF=100 CJE=1p CJC=2p TF=1n";
+        let private = Netlist::parse(&format!(
+            "{sources}Q1 c b 0 mm\n.model mm {kind}({model} RB=5k RBM=1k)\n.end\n"
+        ))
+        .unwrap();
+        let explicit = Netlist::parse(&format!(
+            "{sources}RB b bi 5k\nQ1 c bi 0 mm\n.model mm {kind}({model})\n.end\n"
+        ))
+        .unwrap();
+        let actual = engine.run_tran(&private, 100e-9, 0.05e-9).unwrap();
+        let expected = engine.run_tran(&explicit, 100e-9, 0.05e-9).unwrap();
+        assert_eq!(actual.time, expected.time);
+        for branch in ["VB", "VC"] {
+            let a = actual.try_branch_current_waveform_named(branch).unwrap();
+            let b = expected.try_branch_current_waveform_named(branch).unwrap();
+            for ((&time, &a), &b) in actual.time.iter().zip(a).zip(b) {
+                assert!(
+                    (a - b).abs() < 1e-11,
+                    "{kind} {branch} t={time:e}: {a:e} vs {b:e}"
+                );
             }
         }
     }

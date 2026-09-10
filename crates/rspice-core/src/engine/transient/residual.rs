@@ -1536,7 +1536,8 @@ impl Engine {
             vbic_reuse,
             self.voltage_abstol(),
             self.voltage_reltol(),
-        );
+            ctx.xyce_one_step_order2,
+        )?;
         Self::stamp_jfet_transient_companions(
             TransientCompanionStamp {
                 circuit,
