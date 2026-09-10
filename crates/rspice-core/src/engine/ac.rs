@@ -1711,12 +1711,16 @@ impl Engine {
         }
 
         let s = Complex64::new(0.0, omega);
+        // Legacy hidden rows use incoming branch balance, opposite to
+        // terminal KCL. Match stamp_legacy_bjt_companion's charge orientation
+        // before eliminating the private base-resistance state.
+        let internal_s = if bjt.uses_legacy_gummel_poon() { -s } else { s };
         let mut internal =
             [[Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
         for row in 0..BJT_INTERNAL_STATE_DIM {
             for col in 0..BJT_INTERNAL_STATE_DIM {
-                internal[row][col] =
-                    Complex64::new(snapshot.reduction.g_ii[row][col], 0.0) + s * c_ii[row][col];
+                internal[row][col] = Complex64::new(snapshot.reduction.g_ii[row][col], 0.0)
+                    + internal_s * c_ii[row][col];
             }
         }
 
@@ -1725,8 +1729,8 @@ impl Engine {
         for col in 0..BJT_EXTERNAL_STATE_DIM {
             let mut rhs = [Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM];
             for row in 0..BJT_INTERNAL_STATE_DIM {
-                rhs[row] =
-                    -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0) + s * c_ie[row][col]);
+                rhs[row] = -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0)
+                    + internal_s * c_ie[row][col]);
             }
 
             let Some(solution) =

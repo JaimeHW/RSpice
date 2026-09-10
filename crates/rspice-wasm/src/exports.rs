@@ -422,6 +422,23 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn legacy_private_base_ac_conserves_current_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        let deck=rspice_core::Netlist::parse("Private BJT AC\nVC c 0 1\nVB b 0 DC .65 AC 1\nVE e 0 0\nVS s 0 -.2\nQ1 c b e s mm AREA=5 M=3\n.model mm NPN(IS=1e-14 BF=100 VAF=40 VAR=20 IKF=1m RC=20 RB=30 RBM=10 RE=10 CJE=1p CJC=2p CJS=3p TF=1n TR=2n)\n.end\n").unwrap();
+        for ac in engine
+            .run_ac_with_abort(&deck, &[1e3, 1e6, 1e9], &rspice_core::abort_signal::NoAbort)
+            .unwrap()
+        {
+            let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
+            let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+            assert!(sum.norm() < 2e-11 * scale, "terminal sum={sum:?}");
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn legacy_bjt_gmin_placement_and_substrate_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         for (dialect, dc_expected, ac_expected) in [

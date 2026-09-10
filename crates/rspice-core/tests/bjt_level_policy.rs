@@ -2590,3 +2590,73 @@ fn ngspice_gp_gmin_substrate_and_series_network_match_explicit_resistors() {
         }
     }
 }
+
+#[test]
+fn legacy_private_base_ac_reduction_matches_explicit_rc_network() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for kind in ["NPN", "PNP"] {
+            for subs in [1, -1] {
+                for (area, m) in [(1.0, 1.0), (5.0, 0.25)] {
+                    // Grading zero makes these pure capacitors. RBM<RB keeps
+                    // a private base node; IS=0 and no Early/knee terms make
+                    // the base resistance constant, so the RC oracle is exact.
+                    let sources = "Private BJT AC\nVC c 0 0 AC .3\nVB b 0 0 AC 1\nVE e 0 0 AC .2\nVS s 0 0 AC .4\n";
+                    let actual = Netlist::parse(&format!("{sources}Q1 c b e s mm AREA={area} M={m}\n.model mm {kind}(IS=0 SUBS={subs} RC=2k RB=5k RBM=1k RE=1k CJE=1p CJC=2p CJS=3p MJE=0 MJC=0 MJS=0)\n.end\n")).unwrap();
+                    let scale = area * m;
+                    let connection = if subs == 1 { "ci" } else { "bi" };
+                    let reference = Netlist::parse(&format!("{sources}RC c ci {}\nRB b bi {}\nRE e ei {}\nCBE bi ei {}\nCBC bi ci {}\nCS s {connection} {}\n.end\n",2e3/scale,5e3/scale,1e3/scale,1e-12*scale,2e-12*scale,3e-12*scale)).unwrap();
+                    let frequencies = [1e3, 1e6, 1e9];
+                    let expected = engine.run_ac(&reference, &frequencies).unwrap();
+                    let actual = engine.run_ac(&actual, &frequencies).unwrap();
+                    for (point, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                        for branch in ["VC", "VB", "VE", "VS"] {
+                            let get = |result: &rspice_core::analysis::ac::AcResult| {
+                                result.currents[result
+                                    .branch_names
+                                    .iter()
+                                    .position(|name| name.eq_ignore_ascii_case(branch))
+                                    .unwrap()]
+                            };
+                            let a = get(actual);
+                            let b = get(expected);
+                            assert!(
+                                (a - b).norm() < 2e-11 * b.norm().max(1e-12),
+                                "{dialect:?} {kind} SUBS={subs} AREA={area} M={m} f={} {branch}: {a:?} vs {b:?}",
+                                frequencies[point]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_private_base_ac_reduction_conserves_nonlinear_terminal_current() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for gmin in [0.0, 1e-3] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = gmin;
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for subs in [1, -1] {
+                    let deck=Netlist::parse(&format!("Private BJT KCL\nVC c 0 {p}\nVB b 0 DC {} AC 1\nVE e 0 0\nVS s 0 {}\nQ1 c b e s mm AREA=5 M=3\n.model mm {kind}(IS=1e-14 BF=100 BR=2 VAF=40 VAR=20 IKF=1m IKR=2m SUBS={subs} RC=20 RB=30 RBM=10 RE=10 CJE=1p CJC=2p CJS=3p TF=1n TR=2n)\n.end\n",p*0.65,p*(-0.2))).unwrap();
+                    for ac in engine.run_ac(&deck, &[1.0, 1e3, 1e6, 1e9]).unwrap() {
+                        let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
+                        let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+                        assert!(
+                            sum.norm() < 2e-11 * scale,
+                            "{dialect:?} {kind} SUBS={subs} GMIN={gmin}: terminal sum={sum:?}, scale={scale}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
