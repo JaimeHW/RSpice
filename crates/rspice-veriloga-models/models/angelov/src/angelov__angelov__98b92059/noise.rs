@@ -146,7 +146,7 @@ impl Instance {
 		N=K;
 		LL=MA;
 		}
-		let O=N* 8.617333262e-5f64;
+		let O=N* 8.617333262145177e-5f64;
 		let P=N- staged[1];
 		let Q=P.abs();
 		let MC=LL* ((2f64* ((P>= 0f64) as u8 as f64))- LK);
@@ -1156,7 +1156,7 @@ impl Instance {
 		}else{
 		R
 		};
-		let U=T* 8.617333262e-5f64;
+		let U=T* 8.617333262145177e-5f64;
 		let W=(T- V).abs();
 		let X=parameters[57]> A;
 		let Y=(W> A)|| X;

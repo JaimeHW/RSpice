@@ -436,7 +436,7 @@ impl Instance {
 		let Z=W+ 273.15f64;
 		Z
 		};
-		let AB=AA* 8.617333262e-5f64;
+		let AB=AA* 8.617333262145177e-5f64;
 		let AD=AC* AB;
 		let AF=AE/ AB;
 		let AG=AB+ AB;

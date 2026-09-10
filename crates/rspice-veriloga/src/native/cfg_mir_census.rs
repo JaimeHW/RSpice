@@ -1857,7 +1857,7 @@ fn the_criterion_rejects_a_mis_differentiated_max() {
         node_potentials,
         branch_flows: vec![0.0; artifact.mir.branches.len()],
         temperature: 300.15,
-        thermal_voltage: 1.380_649e-23 / 1.602_176_634e-19 * 300.15,
+        thermal_voltage: rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K * 300.15,
         multiplicity: 1.0,
         ..Default::default()
     };

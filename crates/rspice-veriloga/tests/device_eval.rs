@@ -18,11 +18,75 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn thermal_voltage_spellings_preserve_precision_and_subnormal_range() {
+    // Oracles round the exact SI rational 1380649/16021766340 times each
+    // binary64 input. Multiplication by the rounded scale may differ by one ULP.
+    let cases = [
+        (5e-324, 0x0000000000000000_u64),
+        (1e-318, 0x0000000000000011_u64),
+        (1e-310, 0x0000000067f5e2f6_u64),
+        (1e-300, 0x00ce41a9117cd314_u64),
+        (2.2250738585072014e-308, 0x0000005a5bfa538b_u64),
+        (1.0, 0x3f1696fe94e2cf9e_u64),
+        (300.15, 0x3f9a7c55c97686ec_u64),
+        (1e+300, 0x7d60dda58c073969_u64),
+        (1.7976931348623157e+308, 0x7f1696fe94e2cf9d_u64),
+    ];
+    assert_eq!(
+        rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K.to_bits(),
+        0x3f1696fe94e2cf9e
+    );
+    for expression in [
+        "$vt()",
+        "$vt",
+        "$thermal_vt()",
+        "$vt($temperature)",
+        "$thermal_vt($temperature)",
+        "$vt(V(p))",
+    ] {
+        for assigned in [false, true] {
+            let statement = if assigned {
+                format!("y={expression}; I(p)<+y;")
+            } else {
+                format!("I(p)<+{expression};")
+            };
+            let fixture = compile(&format!(
+                "module thermal_range(p); inout p; electrical p; real y; analog begin {statement} end endmodule"
+            ));
+            let mut device = fixture.device("THERMAL", &[1]);
+            for (temperature, expected) in cases {
+                device.try_set_temperature(temperature).unwrap();
+                device.update_voltages(&[temperature]);
+                let actual = device.try_evaluate().unwrap()[0];
+                assert!(
+                    actual.to_bits().abs_diff(expected) <= 1,
+                    "{expression}, assigned={assigned}, T={temperature:e}: {actual:e}, expected bits {expected:x}"
+                );
+                let runtime =
+                    rspice_veriloga_runtime::GeneratedEvalContext::new(&[], temperature, 1);
+                let mut vm = rspice_veriloga::vm::VmContext::new(1);
+                vm.temperature = temperature;
+                assert_eq!(
+                    actual.to_bits(),
+                    runtime.thermal_voltage().to_bits(),
+                    "{expression}, T={temperature:e}"
+                );
+                assert_eq!(actual.to_bits(), vm.vt().to_bits());
+                if assigned {
+                    fixture.observe(&mut device);
+                    assert_eq!(device.variable("y").unwrap().to_bits(), actual.to_bits());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn ddx_laplace_system_quantities_preserve_values_jacobians_and_readback() {
     use rspice_veriloga::vm::IntegrationCoefficients;
 
-    let thermal_scale = 8.617333262e-5;
-    let ambient_vt = 330.0 * 1.380649e-23 / 1.602176634e-19;
+    let thermal_scale = 8.617333262145177e-5;
+    let ambient_vt = 330.0 * thermal_scale;
     for (input, factor) in [
         ("$abstime*V(p)*V(p)*V(p)", None),
         ("$realtime*V(p)*V(p)*V(p)", None),
@@ -96,7 +160,7 @@ fn ddx_laplace_system_quantities_preserve_values_jacobians_and_readback() {
 
 #[test]
 fn ddx_laplace_thermal_arguments_keep_quotient_dependencies() {
-    let k = 8.617333262e-5;
+    let k = 8.617333262145177e-5;
     for (input, scale) in [
         ("V(p)*V(p)*V(p)/$vt(V(p))", 1.0 / k),
         ("$vt(V(p)*V(p)*V(p))/V(p)", k),
@@ -124,7 +188,7 @@ fn ddx_laplace_thermal_arguments_keep_quotient_dependencies() {
 
 #[test]
 fn ddx_laplace_thermal_arguments_keep_mixed_electrical_derivatives() {
-    let k = 8.617333262e-5;
+    let k = 8.617333262145177e-5;
     for mixed in [false, true] {
         let first = "ddx(laplace_nd($vt(V(p)*V(q))*V(p), '{1.0,0.5}, '{1.0,0.25}),V(p))";
         let value = if mixed {

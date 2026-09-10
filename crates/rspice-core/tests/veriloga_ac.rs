@@ -1081,7 +1081,7 @@ fn nested_ddx_laplace_model_solves_through_the_engine() {
             let model = write_model(
             &format!("curvature_{operator}_{case}"),
             &format!(
-                "module curvature(p,n); inout p,n; electrical p,n; real y; parameter real inv_k=1.0/8.617333262e-5;
+                "module curvature(p,n); inout p,n; electrical p,n; real y; parameter real inv_k=1.0/8.617333262145177e-5;
                 analog begin
                     y=ddx(ddx({operator}({input},{numerator},{denominator}),V(p)),V(p));
                     I(p,n)<+y;

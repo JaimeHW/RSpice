@@ -54,7 +54,7 @@ const STACK_ALIGNMENT: usize = 16;
 const STACK_PROBE_INTERVAL_BYTES: usize = 4080;
 const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
 const MAX_SEGMENT_INSTRUCTIONS: usize = 1024;
-const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 const MAX_RUNTIME_LOOP_ITERATIONS: u64 = 100_000;
 const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
 /// D0-D7 and D16-D22, every one of them volatile: the host convention keeps

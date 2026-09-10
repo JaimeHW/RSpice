@@ -124,7 +124,7 @@ pub(super) struct OperatingPoint {
     prelude_slots: Vec<f64>,
 }
 
-const BOLTZMANN_OVER_ELECTRON: f64 = 1.380_649e-23 / 1.602_176_634e-19;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K as BOLTZMANN_OVER_ELECTRON;
 
 impl OperatingPoint {
     pub(super) fn new(

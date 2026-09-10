@@ -2539,7 +2539,7 @@ endmodule
                 branch_flows: vec![0.0; artifact.mir.branches.len()],
                 branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],
                 temperature: 300.15,
-                thermal_voltage: 300.15 * 8.617_333_262e-5,
+                thermal_voltage: 300.15 * rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K,
                 multiplicity: 1.0,
                 time: 0.0,
                 analyses: HashSet::new(),

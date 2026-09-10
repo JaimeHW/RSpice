@@ -651,7 +651,7 @@ impl Instance {
 		let T=1f64;
 		let V=staged[0];
 		let X=0f64;
-		let AA=8.617333262e-5f64;
+		let AA=8.617333262145177e-5f64;
 		let AG=0f64;
 		let AH=staged[2]!=0.0;
 		let AJ=parameters[59];

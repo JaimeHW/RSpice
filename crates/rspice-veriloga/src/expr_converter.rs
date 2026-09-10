@@ -743,7 +743,8 @@ impl<'a> ExprConverter<'a> {
                     // $vt(temp) = k*temp/q
                     let temp_expr = self.convert(arena, &func.args[0])?;
                     // vt = temp * (k/q) where k/q ~ 8.617e-5
-                    let scale = arena.push(Node::Const(8.617333262e-5));
+                    let scale =
+                        arena.push(Node::Const(rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K));
                     Ok(arena.push(Node::Binary(BinaryOp::Mul, temp_expr, scale)))
                 }
             }

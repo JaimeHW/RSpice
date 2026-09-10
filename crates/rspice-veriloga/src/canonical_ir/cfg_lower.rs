@@ -3707,7 +3707,7 @@ impl<'a> CfgLowerer<'a> {
     }
 }
 
-const THERMAL_VOLTAGE_PER_KELVIN: f64 = 8.617_333_262e-5;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K as THERMAL_VOLTAGE_PER_KELVIN;
 
 fn is_noise_name(name: &str) -> bool {
     matches!(

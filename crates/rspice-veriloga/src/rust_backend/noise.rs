@@ -132,7 +132,12 @@ pub(super) fn generate_noise_file(
     // are in the bundle digest. The assertion is what ties them to the ruling.
     const _: () = assert!(rspice_veriloga_runtime::LIMEXP_MAX == 5.54062238439351e34);
     out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
-    out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
+    writeln!(
+        out,
+        "const THERMAL_VOLTAGE_PER_K: f64 = {:.17e};\n",
+        rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K
+    )
+    .expect("write thermal voltage import");
 
     out.push_str(&descriptor_table(artifact));
     out.push_str("\nimpl Instance {\n");
@@ -1946,7 +1951,7 @@ mod grouped_process_tests {
             branch_flows: vec![0.0; artifact.mir.branches.len()],
             branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],
             temperature: 300.15,
-            thermal_voltage: 300.15 * 1.380649e-23 / 1.602176634e-19,
+            thermal_voltage: 300.15 * rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K,
             multiplicity: 1.0,
             time: 0.0,
             analyses: HashSet::from(["noise".into(), "smallsig".into()]),

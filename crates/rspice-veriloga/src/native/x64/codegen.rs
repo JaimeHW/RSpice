@@ -96,9 +96,11 @@ const ABS_VALUE_MASK_LOW: u64 = 0x7fff_ffff_ffff_ffff;
 const ABS_VALUE_MASK_HIGH: u64 = 0;
 const NEG_VALUE_MASK_LOW: u64 = 0x8000_0000_0000_0000;
 const NEG_VALUE_MASK_HIGH: u64 = 0;
+#[cfg(test)]
 const K_BOLTZMANN: f64 = 1.380649e-23;
+#[cfg(test)]
 const Q_ELECTRON: f64 = 1.602176634e-19;
-const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
+use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
 #[cfg(all(test, target_arch = "x86_64"))]
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;

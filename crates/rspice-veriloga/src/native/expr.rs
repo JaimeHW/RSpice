@@ -7175,7 +7175,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
 
         lower_temperature(self, args[0])?;
-        self.push(NativeOp::Const(8.617333262e-5))?;
+        self.push(NativeOp::Const(
+            rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K,
+        ))?;
         self.append_arithmetic("Mul")
     }
 
