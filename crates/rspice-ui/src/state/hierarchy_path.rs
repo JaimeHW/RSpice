@@ -37,7 +37,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 mod probe_rewrite;
-pub(crate) use probe_rewrite::remap_instance_probes;
+pub(crate) use probe_rewrite::{remap_instance_probes, remap_instance_probes_many};
 
 /// Maximum rendered length of a path or pattern, in bytes.
 ///

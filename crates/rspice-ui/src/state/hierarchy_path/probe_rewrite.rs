@@ -8,6 +8,16 @@ pub(crate) fn remap_instance_probes(
     from: &InstancePath,
     to: &InstancePath,
 ) -> Result<Option<String>, String> {
+    remap_instance_probes_many(expression, &[(from.clone(), to.clone())])
+}
+
+/// Apply a simultaneous identity map once to each original probe argument.
+/// Destinations already include ancestor edits; longest-prefix matching keeps
+/// a child rename from being lost when its parent is renamed in the same edit.
+pub(crate) fn remap_instance_probes_many(
+    expression: &str,
+    mappings: &[(InstancePath, InstancePath)],
+) -> Result<Option<String>, String> {
     let mut chars = expression.char_indices().peekable();
     let mut edits = Vec::new();
     while let Some((start, character)) = chars.next() {
@@ -61,8 +71,7 @@ pub(crate) fn remap_instance_probes(
             } else if !quoted && matches!(character, ',' | ')') {
                 if let Some(replacement) = remap_argument(
                     &expression[argument_start..offset],
-                    from,
-                    to,
+                    mappings,
                     name.eq_ignore_ascii_case("i"),
                 )? {
                     edits.push((argument_start..offset, replacement));
@@ -93,8 +102,7 @@ pub(crate) fn remap_instance_probes(
 
 fn remap_argument(
     argument: &str,
-    from: &InstancePath,
-    to: &InstancePath,
+    mappings: &[(InstancePath, InstancePath)],
     current: bool,
 ) -> Result<Option<String>, String> {
     let trimmed = argument.trim();
@@ -105,6 +113,21 @@ fn remap_argument(
         trimmed
     };
     let Ok(target) = ProbeTarget::parse(raw) else {
+        return Ok(None);
+    };
+    let device = current
+        .then(|| target.scope.child(&target.leaf).ok())
+        .flatten();
+    let Some((from, to)) = mappings
+        .iter()
+        .filter(|(from, _)| {
+            target.scope.starts_with(from)
+                || device
+                    .as_ref()
+                    .is_some_and(|device| device.fold_key() == from.fold_key())
+        })
+        .max_by_key(|(from, _)| from.depth())
+    else {
         return Ok(None);
     };
     let moved = if let Some(tail) = target.scope.strip_prefix(from) {
@@ -144,6 +167,35 @@ fn remap_argument(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simultaneous_probe_swaps_and_nested_renames_use_original_arguments_once() {
+        let mappings = [
+            ("/V1", "/V2"),
+            ("/V2", "/V1"),
+            ("/X1", "/X9"),
+            ("/X1/V1", "/X9/V3"),
+        ]
+        .map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert_eq!(
+            remap_instance_probes_many("I(V1)-I(V2)+I(/X1/V1)+V(/X1/n)+V(V1)", &mappings,)
+                .unwrap()
+                .as_deref(),
+            Some("I(V2)-I(V1)+I(/X9/V3)+V(/X9/n)+V(V1)")
+        );
+        let reversed = mappings.into_iter().rev().collect::<Vec<_>>();
+        assert_eq!(
+            remap_instance_probes_many("I(/X1/V1)", &reversed)
+                .unwrap()
+                .as_deref(),
+            Some("I(/X9/V3)")
+        );
+    }
 
     #[test]
     fn only_probe_instance_paths_change_and_authored_formatting_survives() {

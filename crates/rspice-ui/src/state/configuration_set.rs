@@ -463,7 +463,7 @@ impl ConfigurationSetCatalog {
         from: &InstancePath,
         to: &InstancePath,
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_selected_instance_paths(from, to, |_| true)
+        self.remap_selected_instance_paths(&[(from.clone(), to.clone())], |_| true)
     }
 
     /// Instance paths are relative to an executable root. A same-spelled
@@ -474,29 +474,41 @@ impl ConfigurationSetCatalog {
         from: &InstancePath,
         to: &InstancePath,
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_selected_instance_paths(from, to, |candidate| {
-            candidate.key().eq_ignore_ascii_case(&root.key())
+        self.remap_selected_instance_paths(&[(from.clone(), to.clone())], |candidate| {
+            candidate.root().key().eq_ignore_ascii_case(&root.key())
         })
+    }
+
+    pub(crate) fn remap_configuration_instance_paths(
+        &mut self,
+        id: ConfigurationSetId,
+        mappings: &[(InstancePath, InstancePath)],
+    ) -> Result<usize, ConfigurationSetError> {
+        self.remap_selected_instance_paths(mappings, |candidate| candidate.id() == id)
     }
 
     fn remap_selected_instance_paths(
         &mut self,
-        from: &InstancePath,
-        to: &InstancePath,
-        selects: impl Fn(&CellViewRef) -> bool,
+        mappings: &[(InstancePath, InstancePath)],
+        selects: impl Fn(&ConfigurationSet) -> bool,
     ) -> Result<usize, ConfigurationSetError> {
         self.validate()?;
         let mut candidate = self.clone();
         let mut changed = 0usize;
         for configuration in &mut candidate.configurations {
-            if !selects(configuration.root()) {
+            if !selects(configuration) {
                 continue;
             }
             let definition = &mut configuration.definition;
             let mut remapped = false;
 
             let dut = parse_instance_path("configuration.dut-path", &definition.dut_path)?;
-            if let Some(tail) = dut.strip_prefix(from) {
+            if let Some((from, to)) = mappings
+                .iter()
+                .filter(|(from, _)| dut.starts_with(from))
+                .max_by_key(|(from, _)| from.depth())
+            {
+                let tail = dut.strip_prefix(from).expect("matched prefix");
                 let rerooted = to.join(&tail).map_err(|source| {
                     ConfigurationSetError::InvalidInstancePath {
                         field: "configuration.dut-path",
@@ -513,7 +525,14 @@ impl ConfigurationSetCatalog {
                     "configuration.override.path",
                     &scoped.instance_path,
                 )?;
-                let Some(rerooted) = remap_pattern_prefix(&pattern, from, to)? else {
+                let mut replacements = Vec::new();
+                for (from, to) in mappings {
+                    if let Some(replacement) = remap_pattern_prefix(&pattern, from, to)? {
+                        replacements.push((from.depth(), replacement));
+                    }
+                }
+                let Some((_, rerooted)) = replacements.into_iter().max_by_key(|(depth, _)| *depth)
+                else {
                     continue;
                 };
                 let rerooted = rerooted.to_string();
@@ -1915,6 +1934,47 @@ mod tests {
             Ok(0)
         );
         assert_eq!(catalog.find(id).expect("untouched").revision(), 2);
+    }
+
+    #[test]
+    fn simultaneous_configuration_swaps_revise_once_and_collisions_roll_back() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let mut source = definition("Swaps");
+        source.dut_path = "/X1/child".to_owned();
+        source.overrides = vec![scoped("/X1/left"), scoped("/X2/right"), scoped("/*/common")];
+        let id = catalog.create(source).unwrap();
+        let mappings = [("/X1", "/X2"), ("/X2", "/X1")].map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert_eq!(
+            catalog.remap_configuration_instance_paths(id, &mappings),
+            Ok(1)
+        );
+        let changed = catalog.find(id).unwrap();
+        assert_eq!(changed.dut_path(), "/X2/child");
+        assert_eq!(changed.revision(), 2);
+        let paths = changed
+            .overrides()
+            .iter()
+            .map(|entry| entry.instance_path.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(paths, HashSet::from(["/X2/left", "/X1/right", "/*/common"]));
+        let before = catalog.clone();
+        let collisions = [("/X2/left", "/merged"), ("/X1/right", "/merged")].map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert!(
+            catalog
+                .remap_configuration_instance_paths(id, &collisions)
+                .is_err()
+        );
+        assert_eq!(catalog, before);
     }
 
     #[test]
