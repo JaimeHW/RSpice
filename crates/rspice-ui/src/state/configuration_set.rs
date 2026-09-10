@@ -451,99 +451,61 @@ impl ConfigurationSetCatalog {
         )
     }
 
-    /// Re-root every configured path that passes through a renamed or
-    /// re-parented instance.
-    ///
-    /// A pattern is rewritten only when its leading positions name `from`
-    /// outright. A wildcard in that region is left alone on purpose: it already
-    /// matches whatever the instance is called, so rewriting it would narrow a
-    /// scope the author deliberately left open.
-    pub fn remap_instance_path_prefix(
-        &mut self,
-        from: &InstancePath,
-        to: &InstancePath,
-    ) -> Result<usize, ConfigurationSetError> {
-        self.remap_selected_instance_paths(&[(from.clone(), to.clone())], |_| true)
-    }
-
+    /// Rewrite original paths in one declared configuration. Callers resolve
+    /// each executable root separately, so a same-spelled instance in another
+    /// root cannot accidentally acquire the edit. Wildcards remain open.
     pub(crate) fn remap_configuration_instance_paths(
         &mut self,
         id: ConfigurationSetId,
         mappings: &[(InstancePath, InstancePath)],
     ) -> Result<usize, ConfigurationSetError> {
-        self.remap_selected_instance_paths(mappings, |candidate| candidate.id() == id)
-    }
-
-    fn remap_selected_instance_paths(
-        &mut self,
-        mappings: &[(InstancePath, InstancePath)],
-        selects: impl Fn(&ConfigurationSet) -> bool,
-    ) -> Result<usize, ConfigurationSetError> {
         self.validate()?;
-        let mut candidate = self.clone();
-        let mut changed = 0usize;
-        for configuration in &mut candidate.configurations {
-            if !selects(configuration) {
-                continue;
-            }
-            let definition = &mut configuration.definition;
-            let mut remapped = false;
+        let current = self.find(id).ok_or(ConfigurationSetError::NotFound(id))?;
+        let revision = current.revision();
+        let mut definition = current.definition().clone();
+        let mut remapped = false;
 
-            let dut = parse_instance_path("configuration.dut-path", &definition.dut_path)?;
-            if let Some((from, to)) = mappings
-                .iter()
-                .filter(|(from, _)| dut.starts_with(from))
-                .max_by_key(|(from, _)| from.depth())
-            {
-                let tail = dut.strip_prefix(from).expect("matched prefix");
-                let rerooted = to.join(&tail).map_err(|source| {
-                    ConfigurationSetError::InvalidInstancePath {
+        let dut = parse_instance_path("configuration.dut-path", &definition.dut_path)?;
+        if let Some((from, to)) = mappings
+            .iter()
+            .filter(|(from, _)| dut.starts_with(from))
+            .max_by_key(|(from, _)| from.depth())
+        {
+            let tail = dut.strip_prefix(from).expect("matched prefix");
+            let rerooted =
+                to.join(&tail)
+                    .map_err(|source| ConfigurationSetError::InvalidInstancePath {
                         field: "configuration.dut-path",
                         path: definition.dut_path.clone(),
                         source,
-                    }
-                })?;
-                remapped |= rerooted != dut;
-                definition.dut_path = rerooted.to_string();
-            }
-
-            for scoped in &mut definition.overrides {
-                let pattern = parse_instance_path_pattern(
-                    "configuration.override.path",
-                    &scoped.instance_path,
-                )?;
-                let mut replacements = Vec::new();
-                for (from, to) in mappings {
-                    if let Some(replacement) = remap_pattern_prefix(&pattern, from, to)? {
-                        replacements.push((from.depth(), replacement));
-                    }
-                }
-                let Some((_, rerooted)) = replacements.into_iter().max_by_key(|(depth, _)| *depth)
-                else {
-                    continue;
-                };
-                let rerooted = rerooted.to_string();
-                remapped |= rerooted != scoped.instance_path;
-                scoped.instance_path = rerooted;
-            }
-
-            if !remapped {
-                continue;
-            }
-            sort_overrides(&mut definition.overrides);
-            configuration.revision = configuration
-                .revision
-                .checked_add(1)
-                .ok_or(ConfigurationSetError::RevisionExhausted(configuration.id))?;
-            configuration.semantic_digest = semantic_digest(&configuration.definition)?;
-            changed += 1;
+                    })?;
+            remapped |= rerooted != dut;
+            definition.dut_path = rerooted.to_string();
         }
-        if changed == 0 {
+
+        for scoped in &mut definition.overrides {
+            let pattern =
+                parse_instance_path_pattern("configuration.override.path", &scoped.instance_path)?;
+            let mut replacements = Vec::new();
+            for (from, to) in mappings {
+                if let Some(replacement) = remap_pattern_prefix(&pattern, from, to)? {
+                    replacements.push((from.depth(), replacement));
+                }
+            }
+            let Some((_, rerooted)) = replacements.into_iter().max_by_key(|(depth, _)| *depth)
+            else {
+                continue;
+            };
+            let rerooted = rerooted.to_string();
+            remapped |= rerooted != scoped.instance_path;
+            scoped.instance_path = rerooted;
+        }
+
+        if !remapped {
             return Ok(0);
         }
-        candidate.validate()?;
-        *self = candidate;
-        Ok(changed)
+        self.update(id, revision, definition)?;
+        Ok(1)
     }
 
     /// Apply one root rewrite to every configuration the selector names,
@@ -1896,7 +1858,10 @@ mod tests {
 
         let from = InstancePath::parse("/xafe").expect("renamed instance");
         let to = InstancePath::parse("/XANALOG").expect("new name");
-        assert_eq!(catalog.remap_instance_path_prefix(&from, &to), Ok(1));
+        assert_eq!(
+            catalog.remap_configuration_instance_paths(id, &[(from, to.clone())]),
+            Ok(1)
+        );
 
         let remapped = catalog.find(id).expect("remapped");
         assert_eq!(remapped.dut_path(), "/XANALOG");
@@ -1914,9 +1879,12 @@ mod tests {
         catalog.validate().expect("remapped catalog validates");
 
         assert_eq!(
-            catalog.remap_instance_path_prefix(
-                &InstancePath::parse("/XNOWHERE").expect("absent instance"),
-                &to
+            catalog.remap_configuration_instance_paths(
+                id,
+                &[(
+                    InstancePath::parse("/XNOWHERE").expect("absent instance"),
+                    to
+                )]
             ),
             Ok(0)
         );
@@ -1965,6 +1933,37 @@ mod tests {
     }
 
     #[test]
+    fn path_remapping_requires_an_existing_configuration_and_preserves_other_roots() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let id = catalog.create(definition("Selected root")).unwrap();
+        let mut other = definition("Independent root");
+        other.root = CellViewRef::new("user", "other", "schematic");
+        let other_id = catalog.create(other).unwrap();
+        let other_before = catalog.find(other_id).unwrap().clone();
+        let before = catalog.clone();
+        let missing = ConfigurationSetId::new();
+        assert_eq!(
+            catalog.remap_configuration_instance_paths(missing, &[]),
+            Err(ConfigurationSetError::NotFound(missing))
+        );
+        assert_eq!(catalog, before);
+        let mappings = [(
+            InstancePath::parse("/XAFE").unwrap(),
+            InstancePath::parse("/XNEW").unwrap(),
+        )];
+        assert_eq!(
+            catalog.remap_configuration_instance_paths(id, &mappings),
+            Ok(1)
+        );
+        assert_eq!(catalog.find(id).unwrap().dut_path(), "/XNEW");
+        assert_eq!(catalog.find(other_id).unwrap(), &other_before);
+        assert_eq!(
+            catalog.active_configuration_id(),
+            before.active_configuration_id()
+        );
+    }
+
+    #[test]
     fn instance_prefix_remap_can_re_root_onto_the_design_root() {
         let mut catalog = ConfigurationSetCatalog::default();
         let mut source = definition("Release");
@@ -1973,9 +1972,12 @@ mod tests {
         let id = catalog.create(source).expect("configuration");
 
         assert_eq!(
-            catalog.remap_instance_path_prefix(
-                &InstancePath::parse("/XTB").expect("testbench wrapper"),
-                &InstancePath::root()
+            catalog.remap_configuration_instance_paths(
+                id,
+                &[(
+                    InstancePath::parse("/XTB").expect("testbench wrapper"),
+                    InstancePath::root()
+                )]
             ),
             Ok(1)
         );
