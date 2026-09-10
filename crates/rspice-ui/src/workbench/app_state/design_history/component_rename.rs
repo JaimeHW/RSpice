@@ -8,9 +8,6 @@ use crate::state::{
     SavedOutput, remap_instance_probes,
 };
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, Clone)]
 pub(super) struct ComponentRenameRecord {
     document: CellViewRef,

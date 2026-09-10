@@ -18,6 +18,9 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::app::{RSpiceApp, RenameSelectionTarget};
 use crate::workbench::app_state::AppState;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod transaction_tests;
+
 const EYEBROW: &str = "EDIT \u{00b7} STABLE IDENTITY";
 const TITLE: &str = "Rename selected object";
 const PRIMARY: &str = "Rename object";

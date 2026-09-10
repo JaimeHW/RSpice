@@ -1,8 +1,12 @@
-use super::*;
+//! Native command history and persistence acceptance for component renames.
+//! Assertions cross the schematic, configuration, plan, and durable probe owners.
+
+use crate::product::{ObjectRevision, SavedOutputId, SimulationPlanId};
 use crate::state::{
-    ConfigurationBlackBoxPolicy, ConfigurationModelProfile, Point, SavedOutputCompatibility,
+    CellViewRef, Component, ComponentType, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
+    ConfigurationSetDefinition, ConfigurationSetId, Point, SavedOutput, SavedOutputCompatibility,
     SavedOutputKind, SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SchematicProbe,
-    UnresolvedBindingPolicy,
+    SchematicSnapshot, SchematicState, UnresolvedBindingPolicy,
 };
 use crate::workbench::app::RSpiceApp;
 

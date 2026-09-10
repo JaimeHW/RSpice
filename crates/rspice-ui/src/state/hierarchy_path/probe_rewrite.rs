@@ -40,7 +40,7 @@ pub(crate) fn remap_instance_probes(
         while chars.peek().is_some_and(|(_, c)| c.is_whitespace()) {
             chars.next();
         }
-        if !chars.peek().is_some_and(|(_, c)| *c == '(') {
+        if chars.peek().is_none_or(|(_, c)| *c != '(') {
             continue;
         }
         let (open, _) = chars.next().expect("observed opening parenthesis");
