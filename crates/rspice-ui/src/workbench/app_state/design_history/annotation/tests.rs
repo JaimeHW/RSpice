@@ -3,6 +3,7 @@
 use super::*;
 
 mod manual_edit;
+mod reused_rename;
 use crate::product::{ObjectRevision, SimulationPlanId};
 use crate::state::{
     AnnotationObject, AnnotationPosition, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
@@ -346,7 +347,9 @@ fn annotation_updates_reused_masters_and_probes_in_independent_document_roots() 
     }
 }
 
-fn verify_reused_master_annotation(original_names: [&str; 2]) {
+fn reused_master_fixture(
+    original_names: [&str; 2],
+) -> (Fixture, CellViewRef, CellViewRef, CellViewRef) {
     use crate::state::{LibraryCellInstance, OpenCellView, View, ViewType};
     let mut fixture = fixture(&["V42"]);
     let state = &mut fixture.state;
@@ -449,7 +452,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         .find(fixture.configuration)
         .unwrap();
     let mut definition = configuration.definition().clone();
-    definition.dut_path = format!("/{}/V42", original_names[0]);
+    definition.dut_path = format!("/{}", original_names[0]);
     state
         .workspace
         .configuration_sets
@@ -457,6 +460,12 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         .unwrap();
     state.schematic.clear_undo_history();
     state.sync_active_schematic_to_workspace();
+    (fixture, root, child_ref, other_ref)
+}
+
+fn verify_reused_master_annotation(original_names: [&str; 2]) {
+    let (mut fixture, root, child_ref, other_ref) = reused_master_fixture(original_names);
+    let state = &mut fixture.state;
     let mut objects = vec![AnnotationObject {
         object: SchematicObjectKey::new(&child_ref.key(), fixture.sources[0]).unwrap(),
         current_reference: "V42".to_owned(),
@@ -551,7 +560,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
                 .find(fixture.configuration)
                 .unwrap()
                 .dut_path(),
-            format!("/{}/{name}", parents[0])
+            format!("/{}", parents[0])
         );
         let occurrence = &state
             .workspace

@@ -23,6 +23,7 @@
 mod annotation;
 mod compensation;
 mod component_rename;
+mod reference_preparation;
 mod references;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -627,7 +628,7 @@ pub(crate) struct DesignManagementHistoryEntry {
     pub(crate) committed_revision: ObjectRevision,
 }
 
-pub(crate) struct DesignManagementSchematicTransaction {
+pub(crate) struct SchematicReferenceTransaction {
     pub(crate) before: BTreeMap<String, SchematicState>,
     pub(crate) after: BTreeMap<String, SchematicState>,
     pub(crate) references: ReferenceChanges,
@@ -735,7 +736,8 @@ impl AppState {
             .into_iter()
             .map(|key| {
                 DocumentCompensation::naming(
-                    annotation::reference_from_key(&key).expect("validated schematic document key"),
+                    reference_preparation::reference_from_key(&key)
+                        .expect("validated schematic document key"),
                 )
             })
             .collect();
@@ -1828,7 +1830,7 @@ impl DesignManagementRecord {
                     .map(|(_, schematic)| schematic)
             }
             .ok_or_else(|| format!("Annotation schematic '{key}' is no longer available."))?;
-            annotation::validate_annotation_document(state, key, schematic)?;
+            reference_preparation::validate_reference_document(state, key, schematic)?;
         }
         self.references.prepare(state, operation != "undone")?;
         Ok(())
@@ -1847,7 +1849,7 @@ impl DesignManagementRecord {
             .workspace
             .replace_design_management(self.before.clone())
             .map_err(|error| error.to_string())?;
-        apply_schematic_map(state, &self.before_schematics)?;
+        apply_schematic_map(state, &self.before_schematics, false)?;
         references.publish(state);
         state.reanchor_annotation_history_revision(self.before_project_revision, revision);
         self.before_project_revision = revision;
@@ -1869,7 +1871,7 @@ impl DesignManagementRecord {
             .workspace
             .replace_design_management(self.after.clone())
             .map_err(|error| error.to_string())?;
-        apply_schematic_map(state, &self.after_schematics)?;
+        apply_schematic_map(state, &self.after_schematics, false)?;
         references.publish(state);
         state.reanchor_annotation_history_revision(self.undo_guard_revision, revision);
         self.undo_guard_revision = revision;
@@ -1992,11 +1994,16 @@ fn schematic_map_matches(state: &AppState, expected: &BTreeMap<String, Schematic
 fn apply_schematic_map(
     state: &mut AppState,
     snapshots: &BTreeMap<String, SchematicSnapshot>,
+    preserve_selection: bool,
 ) -> Result<(), String> {
     let active_key = state.workspace.active_schematic_reference().key();
     for (key, snapshot) in snapshots {
         if key.eq_ignore_ascii_case(&active_key) {
+            let selection = preserve_selection.then(|| state.schematic.selection.clone());
             snapshot.apply(&mut state.schematic);
+            if let Some(selection) = selection {
+                state.schematic.selection = selection;
+            }
             state
                 .workspace
                 .schematic_buffers
@@ -2019,7 +2026,19 @@ fn apply_schematic_map(
             .schematic_buffers
             .get_mut(&existing_key)
             .expect("the retained schematic key remains present");
+        let selection = preserve_selection.then(|| schematic.selection.clone());
         snapshot.apply(schematic);
+        if let Some(selection) = selection {
+            schematic.selection = selection;
+        }
+    }
+    for open in &mut state.workspace.open_views {
+        if snapshots
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case(&open.reference.key()))
+        {
+            open.dirty = true;
+        }
     }
     Ok(())
 }

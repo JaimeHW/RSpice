@@ -1,17 +1,18 @@
 //! One publication boundary for a component name and the live references
 //! carried with it. History owns exact affected content, never retained runs.
 
+use super::reference_preparation::{reference_from_key, validate_reference_document};
 use super::references::PreparedReferences;
 use super::*;
-use crate::state::{AnnotationState, Component, SchematicObjectKey, remap_instance_probes};
+use crate::state::{AnnotationState, Component, SchematicObjectKey};
 use crate::workbench::state::InlineEditAuthority;
 
 #[derive(Debug, Clone)]
 pub(super) struct ComponentRenameRecord {
     pub(super) description: String,
     document: CellViewRef,
-    before: SchematicSnapshot,
-    after: SchematicSnapshot,
+    before: BTreeMap<String, SchematicSnapshot>,
+    after: BTreeMap<String, SchematicSnapshot>,
     references: ReferenceChanges,
     annotation: Option<AnnotationChange>,
 }
@@ -99,12 +100,10 @@ impl AppState {
         description: &str,
     ) -> Result<bool, String> {
         let document = self.workspace.active_schematic_reference();
-        let before = SchematicSnapshot::capture(&self.schematic);
-        let mut after = before.clone();
-        after.components = self
+        let components = self
             .schematic
             .prepare_component_edit(expected, candidate.clone())?;
-        if before.is_equal(&after) {
+        if self.schematic.components == components {
             return Ok(false);
         }
         if !self.project_lifecycle.project_open || document_read_only(self, &document) {
@@ -119,66 +118,21 @@ impl AppState {
             );
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
-            self.schematic.components = after.components;
+            let before = SchematicSnapshot::capture(&self.schematic);
+            self.schematic.components = components;
             self.schematic.is_dirty = true;
             self.schematic.bump_topology_version();
             self.schematic.commit_undo_from(before, description);
             return Ok(true);
         }
-        let occurrence = self.workspace.occurrence_path();
-        let from = occurrence
-            .child(&expected.name)
-            .map_err(|error| error.to_string())?;
-        let to = occurrence
-            .child(&candidate.name)
-            .map_err(|error| error.to_string())?;
-        // Primitive current probes name the emitted SPICE card, which may
-        // differ from a legacy/imported component's display name.
-        let probe_from = if expected.kind == ComponentType::CellInstance {
-            from.clone()
-        } else {
-            occurrence
-                .child(&expected.emitted_instance_name())
-                .map_err(|error| error.to_string())?
-        };
-        let root = self
-            .workspace
-            .active_occurrence()
-            .map_or_else(|| document.clone(), |occurrence| occurrence.root.clone());
-        let mut configurations = self.workspace.configuration_sets.clone();
-        configurations
-            .remap_instance_paths_in_root(&root, &from, &to)
-            .map_err(|error| error.to_string())?;
-        let mut outputs = Vec::new();
-        if root
-            .key()
-            .eq_ignore_ascii_case(&self.workspace.simulation_root_reference().key())
-        {
-            for record in &self.workspace.simulation_plan_payloads {
-                for output in &record.payload.saved_outputs {
-                    if let Some(after) =
-                        remap_instance_probes(&output.source_expression, &probe_from, &to)?
-                    {
-                        let mut replacement = output.clone();
-                        replacement.source_expression = after;
-                        outputs.push((record.plan_id, replacement));
-                    }
-                }
-            }
-        }
-        for probe in &mut after.probes {
-            if let Some(expression) = &probe.source_expression
-                && let Some(rewritten) = remap_instance_probes(expression, &probe_from, &to)?
-            {
-                if probe.reference == *expression {
-                    probe.reference = rewritten.clone();
-                }
-                probe.source_expression = Some(rewritten);
-                probe.validate()?;
-            }
-        }
-        let mut references = ReferenceChanges::between(self, &configurations, outputs);
-        references.add_instance_renames(&document, &before.components, &after.components);
+        let mut after_schematic = self.schematic.clone();
+        after_schematic.components = components;
+        after_schematic.is_dirty = true;
+        after_schematic.bump_topology_version();
+        let transaction = self.prepare_schematic_reference_transaction(
+            BTreeMap::from([(document.key(), self.schematic.clone())]),
+            BTreeMap::from([(document.key(), after_schematic)]),
+        )?;
         let annotation_before = self.workspace.design_management.annotation();
         let mut annotation_after = annotation_before.clone();
         let annotation = annotation_after
@@ -206,21 +160,36 @@ impl AppState {
         let mut record = ComponentRenameRecord {
             description: description.to_owned(),
             document: document.clone(),
-            before,
-            after,
-            references,
+            before: capture_schematic_map(transaction.before),
+            after: capture_schematic_map(transaction.after),
+            references: transaction.references,
             annotation,
         };
-        let prepared = record.prepare(self, true)?;
+        let prepared = PreparedComponentRename {
+            references: transaction.prepared_references,
+            annotation: record.prepare_annotation(self, true)?,
+        };
+        let documents = record
+            .after
+            .keys()
+            .map(|key| reference_from_key(key).map(DocumentCompensation::naming))
+            .collect::<Result<Vec<_>, _>>()?;
         record.publish(self, true, prepared)?;
-        self.schematic.undo_history.clear_redo();
+        for key in record.after.keys() {
+            if key.eq_ignore_ascii_case(&document.key()) {
+                self.schematic.undo_history.clear_redo();
+            } else {
+                self.workspace
+                    .schematic_buffers
+                    .get_mut(key)
+                    .expect("guarded reference document")
+                    .undo_history
+                    .clear_redo();
+            }
+        }
         self.workspace.save_active_schematic(&self.schematic);
         self.push_project_record(
-            RecordHeader::committed(
-                vec![DocumentCompensation::naming(document.clone())],
-                Some(document.clone()),
-                Some(document),
-            ),
+            RecordHeader::committed(documents, Some(document.clone()), Some(document)),
             ProjectDesignBody::ComponentRename(Box::new(record)),
         );
         Ok(true)
@@ -237,8 +206,7 @@ impl ComponentRenameRecord {
 
     fn matches(&self, state: &AppState, forward: bool) -> bool {
         let expected = if forward { &self.before } else { &self.after };
-        schematic_for_reference(state, &self.document)
-            .is_some_and(|schematic| expected.is_equal_state(schematic))
+        schematic_map_matches(state, expected)
             && self.references.matches(state, forward)
             && self.annotation.as_ref().is_none_or(|change| {
                 state.workspace.design_management.annotation()
@@ -276,16 +244,26 @@ impl ComponentRenameRecord {
                     .to_owned(),
             );
         }
-        if schematic_for_reference(state, &self.document)
-            .is_some_and(SchematicState::has_pending_operation)
-        {
-            return Err(
-                "Finish or cancel the active schematic gesture before renaming.".to_owned(),
-            );
+        for key in self.before.keys() {
+            let reference = reference_from_key(key)?;
+            let source = schematic_for_reference(state, &reference)
+                .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
+            validate_reference_document(state, key, source)?;
         }
         let references = self.references.prepare(state, forward)?;
-        let annotation = self
-            .annotation
+        let annotation = self.prepare_annotation(state, forward)?;
+        Ok(PreparedComponentRename {
+            references,
+            annotation,
+        })
+    }
+
+    fn prepare_annotation(
+        &self,
+        state: &AppState,
+        forward: bool,
+    ) -> Result<Option<DesignManagementCatalog>, String> {
+        self.annotation
             .as_ref()
             .map(|change| {
                 let current = &state.workspace.design_management;
@@ -310,11 +288,7 @@ impl ComponentRenameRecord {
                     .map_err(|error| error.to_string())?;
                 Ok::<_, String>(prepared)
             })
-            .transpose()?;
-        Ok(PreparedComponentRename {
-            references,
-            annotation,
-        })
+            .transpose()
     }
 
     fn publish(
@@ -329,22 +303,11 @@ impl ComponentRenameRecord {
                 .replace_design_management(candidate)
                 .map_err(|error| error.to_string())?;
         }
-        let schematic = if state.workspace.active_schematic_reference() == self.document {
-            &mut state.schematic
-        } else {
-            state
-                .workspace
-                .schematic_buffers
-                .get_mut(&self.document.key())
-                .expect("guarded document")
-        };
-        // All object IDs are retained, so selection is still valid.
-        let selection = schematic.selection.clone();
-        if forward { &self.after } else { &self.before }.apply(schematic);
-        schematic.selection = selection;
-        if state.workspace.active_schematic_reference() == self.document {
-            state.workspace.save_active_schematic(&state.schematic);
-        }
+        apply_schematic_map(
+            state,
+            if forward { &self.after } else { &self.before },
+            true,
+        )?;
         prepared.references.publish(state);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;

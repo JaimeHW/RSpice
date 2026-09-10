@@ -3,14 +3,6 @@
 
 use super::{InstancePath, ProbeTarget};
 
-pub(crate) fn remap_instance_probes(
-    expression: &str,
-    from: &InstancePath,
-    to: &InstancePath,
-) -> Result<Option<String>, String> {
-    remap_instance_probes_many(expression, &[(from.clone(), to.clone())])
-}
-
 /// Apply a simultaneous identity map once to each original probe argument.
 /// Destinations already include ancestor edits; longest-prefix matching keeps
 /// a child rename from being lost when its parent is renamed in the same edit.
@@ -210,7 +202,9 @@ mod tests {
             ("param(X1) + avg(I(X1))", "param(X1) + avg(I(X9))"),
         ] {
             assert_eq!(
-                remap_instance_probes(input, &from, &to).unwrap().as_deref(),
+                remap_instance_probes_many(input, &[(from.clone(), to.clone())])
+                    .unwrap()
+                    .as_deref(),
                 Some(expected),
                 "{input}"
             );
@@ -224,7 +218,7 @@ mod tests {
             "someI(X1)",
         ] {
             assert_eq!(
-                remap_instance_probes(input, &from, &to).unwrap(),
+                remap_instance_probes_many(input, &[(from.clone(), to.clone())]).unwrap(),
                 None,
                 "{input}"
             );

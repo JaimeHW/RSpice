@@ -466,19 +466,6 @@ impl ConfigurationSetCatalog {
         self.remap_selected_instance_paths(&[(from.clone(), to.clone())], |_| true)
     }
 
-    /// Instance paths are relative to an executable root. A same-spelled
-    /// instance in another root is a different design object.
-    pub(crate) fn remap_instance_paths_in_root(
-        &mut self,
-        root: &CellViewRef,
-        from: &InstancePath,
-        to: &InstancePath,
-    ) -> Result<usize, ConfigurationSetError> {
-        self.remap_selected_instance_paths(&[(from.clone(), to.clone())], |candidate| {
-            candidate.root().key().eq_ignore_ascii_case(&root.key())
-        })
-    }
-
     pub(crate) fn remap_configuration_instance_paths(
         &mut self,
         id: ConfigurationSetId,
