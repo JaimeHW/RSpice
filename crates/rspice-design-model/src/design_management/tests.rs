@@ -4,6 +4,7 @@ use super::*;
 
 mod drawing_sheet_release;
 mod sheet_lifecycle;
+mod manual_annotation;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {

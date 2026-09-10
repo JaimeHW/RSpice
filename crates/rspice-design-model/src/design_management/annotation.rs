@@ -211,6 +211,22 @@ pub struct RenumberPreview {
     pub semantic_digest: ContentDigest,
 }
 
+/// The accepted action that assigned these references. Omitted on legacy
+/// renumber entries to preserve their serialized content and semantic digest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnnotationJournalOrigin {
+    #[default]
+    ReviewedRenumbering,
+    ManualEdit,
+}
+
+impl AnnotationJournalOrigin {
+    fn is_renumbering(&self) -> bool {
+        *self == Self::ReviewedRenumbering
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnnotationJournalEntry {
@@ -220,10 +236,20 @@ pub struct AnnotationJournalEntry {
     policy_digest: ContentDigest,
     request_digest: ContentDigest,
     mappings: BTreeMap<SchematicObjectKey, AnnotationMapping>,
+    #[serde(
+        default,
+        skip_serializing_if = "AnnotationJournalOrigin::is_renumbering"
+    )]
+    origin: AnnotationJournalOrigin,
     semantic_digest: ContentDigest,
 }
 
 impl AnnotationJournalEntry {
+    #[must_use]
+    pub const fn origin(&self) -> AnnotationJournalOrigin {
+        self.origin
+    }
+
     #[must_use]
     pub const fn id(&self) -> AnnotationJournalId {
         self.id
@@ -292,6 +318,8 @@ struct AnnotationJournalMaterial<'a> {
     policy_digest: ContentDigest,
     request_digest: ContentDigest,
     mappings: &'a BTreeMap<SchematicObjectKey, AnnotationMapping>,
+    #[serde(skip_serializing_if = "AnnotationJournalOrigin::is_renumbering")]
+    origin: AnnotationJournalOrigin,
 }
 
 /// Mutable ownership authority layered over the immutable annotation journal.
@@ -316,6 +344,7 @@ impl<'a> From<&'a AnnotationJournalEntry> for AnnotationJournalMaterial<'a> {
             policy_digest: entry.policy_digest,
             request_digest: entry.request_digest,
             mappings: &entry.mappings,
+            origin: entry.origin,
         }
     }
 }
@@ -776,6 +805,69 @@ impl AnnotationState {
         if &current != preview {
             return Err(DesignManagementError::StaleRenumberPreview);
         }
+        self.append_reference_assignment(
+            preview.request_digest,
+            preview.mappings.clone(),
+            AnnotationJournalOrigin::ReviewedRenumbering,
+        )
+    }
+
+    /// Supersede an existing annotation assignment after a checked manual
+    /// component edit. The caller owns final schematic collision validation
+    /// and publication together with dependent references. Unannotated objects
+    /// need no journal entry; prior annotation evidence is never rewritten.
+    pub fn commit_manual_reference_edit(
+        &mut self,
+        object: SchematicObjectKey,
+        expected_reference: &str,
+        new_reference: &str,
+    ) -> Result<Option<AnnotationJournalId>, DesignManagementError> {
+        self.validate()?;
+        object.validate()?;
+        if self.object_authorities.contains_key(&object) {
+            return Err(DesignManagementError::InactiveAnnotationObjectAuthority(
+                object,
+            ));
+        }
+        let Some(current) =
+            self.effective_mapping_for(object.cell_view_key(), object.object_id())?
+        else {
+            return Ok(None);
+        };
+        validate_reference_designator(expected_reference)?;
+        validate_reference_designator(new_reference)?;
+        if current.new_reference != expected_reference {
+            return Err(DesignManagementError::StaleAnnotationReference {
+                object,
+                expected: expected_reference.to_owned(),
+                actual: current.new_reference.clone(),
+            });
+        }
+        if expected_reference == new_reference {
+            return Ok(None);
+        }
+        let mappings = BTreeMap::from([(
+            object,
+            AnnotationMapping {
+                old_reference: expected_reference.to_owned(),
+                new_reference: new_reference.to_owned(),
+            },
+        )]);
+        let request_digest = digest("rspice-manual-reference-edit-semantic/v1", &mappings)?;
+        self.append_reference_assignment(
+            request_digest,
+            mappings,
+            AnnotationJournalOrigin::ManualEdit,
+        )
+        .map(Some)
+    }
+
+    fn append_reference_assignment(
+        &mut self,
+        request_digest: ContentDigest,
+        mappings: BTreeMap<SchematicObjectKey, AnnotationMapping>,
+        origin: AnnotationJournalOrigin,
+    ) -> Result<AnnotationJournalId, DesignManagementError> {
         require_limit(
             "annotation journal entries",
             self.journal.len() + 1,
@@ -787,10 +879,11 @@ impl AnnotationState {
         let mut entry = AnnotationJournalEntry {
             id,
             sequence,
-            policy_revision: preview.policy_revision,
-            policy_digest: preview.policy_digest,
-            request_digest: preview.request_digest,
-            mappings: preview.mappings.clone(),
+            policy_revision: self.policy.revision,
+            policy_digest: self.policy.semantic_digest,
+            request_digest,
+            mappings,
+            origin,
             semantic_digest: empty_digest(),
         };
         entry.semantic_digest = digest(

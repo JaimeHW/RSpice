@@ -153,6 +153,14 @@ pub enum DesignManagementError {
     ProtectedReferenceReviewRequired(SchematicObjectKey),
     #[error("renumber preview is stale relative to policy or schematic objects")]
     StaleRenumberPreview,
+    #[error(
+        "annotation reference for {object} changed: expected {expected:?}, current is {actual:?}"
+    )]
+    StaleAnnotationReference {
+        object: SchematicObjectKey,
+        expected: String,
+        actual: String,
+    },
     #[error("annotation journal sequence is {actual}; expected {expected}")]
     InvalidAnnotationSequence { expected: u64, actual: u64 },
     #[error("annotation object authority contains a redirect cycle at {0}")]
