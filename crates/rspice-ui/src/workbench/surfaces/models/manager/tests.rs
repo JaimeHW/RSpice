@@ -9,6 +9,8 @@ use super::*;
 use crate::state::model_library::{ModelQualificationState, ModelType};
 use crate::state::{Component, ComponentType, Point};
 
+mod provider_dialog;
+
 #[test]
 fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     let mut state = AppState::default();

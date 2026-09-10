@@ -1545,9 +1545,9 @@ fn publish_definition_provider(
     definition: &str,
     provider_library: &str,
     reason: &str,
-) {
+) -> Result<String, String> {
     let mut candidate = app.state.model_library_manager.clone();
-    let result = candidate
+    candidate
         .resolve_definition_provider(scope, definition, provider_library, reason.trim())
         .and_then(|record| {
             publish_model_resolution_candidate(
@@ -1570,28 +1570,23 @@ fn publish_definition_provider(
                     revision.get()
                 )
             })
-        });
-    receipt(app, result);
+        })
 }
 
 fn clear_definition_provider(
     app: &mut ManagerRenderContext<'_>,
     scope: ModelConsumerScope,
     definition: &str,
-) {
+) -> Result<String, String> {
     let mut candidate = app.state.model_library_manager.clone();
     if !candidate.clear_definition_provider(scope, definition) {
-        receipt(
-            app,
-            Err(format!(
-                "No provider decision exists for {} '{}'.",
-                scope.label(),
-                definition
-            )),
-        );
-        return;
+        return Err(format!(
+            "No provider decision exists for {} '{}'.",
+            scope.label(),
+            definition
+        ));
     }
-    let result = publish_model_resolution_candidate(
+    publish_model_resolution_candidate(
         app.state,
         candidate,
         format!("clear {} provider decision {definition}", scope.label()),
@@ -1603,8 +1598,7 @@ fn clear_definition_provider(
             definition,
             revision.get()
         )
-    });
-    receipt(app, result);
+    })
 }
 
 fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Vec<String> {

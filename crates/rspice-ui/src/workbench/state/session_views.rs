@@ -1075,6 +1075,7 @@ pub enum ModelsWorkbenchDialog {
         providers: Vec<String>,
         selected_provider: String,
         reason: String,
+        error: Option<String>,
     },
     BindingTrace {
         model: String,

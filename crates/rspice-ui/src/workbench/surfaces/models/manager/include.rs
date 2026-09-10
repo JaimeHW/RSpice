@@ -660,7 +660,12 @@ fn include_definition_table(
                         node.set_label(announcement.clone());
                     });
                     if response.clicked() {
-                        if row.scope == ModelConsumerScope::Subcircuit
+                        // A settled decision is still editable and clearable.
+                        // Keep the resolution state separate from its route.
+                        if row.providers.len() > 1 || row.resolved_provider.is_some() {
+                            conflict =
+                                Some((row.definition.clone(), row.scope, row.providers.clone()));
+                        } else if row.scope == ModelConsumerScope::Subcircuit
                             && let Ok(Some(provider)) = app
                                 .state
                                 .model_library_manager
@@ -668,9 +673,6 @@ fn include_definition_table(
                         {
                             create_subcircuit_symbol =
                                 Some((provider.library, row.definition.clone()));
-                        } else if row.contested() {
-                            conflict =
-                                Some((row.definition.clone(), row.scope, row.providers.clone()));
                         }
                     }
                 }
@@ -690,6 +692,7 @@ fn include_definition_table(
             providers,
             selected_provider,
             reason: String::new(),
+            error: None,
         });
     }
     if let Some((library, subcircuit)) = create_subcircuit_symbol {

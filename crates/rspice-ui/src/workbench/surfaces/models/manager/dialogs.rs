@@ -372,6 +372,7 @@ pub(super) fn render_dialog(
             providers,
             mut selected_provider,
             mut reason,
+            mut error,
         } => {
             let has_record = app
                 .state
@@ -415,6 +416,9 @@ pub(super) fn render_dialog(
                 ui.add_space(6.0);
                 ui.label("Engineering audit reason");
                 ui.text_edit_multiline(&mut reason);
+                if let Some(error) = &error {
+                    ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+                }
                 // Withdrawing a published decision is not the transaction this
                 // dialog commits, so it sits beside the record it withdraws
                 // rather than in the footer where the commit lives.
@@ -426,22 +430,26 @@ pub(super) fn render_dialog(
                         .clicked();
                 }
             });
-            if clear {
-                clear_definition_provider(app, scope, &definition);
-                app.state.workbench.models_view.dialog = None;
-                return;
-            }
-            match choice {
-                DialogChoice::Primary => {
+            if clear || choice == DialogChoice::Primary {
+                let result = if clear {
+                    clear_definition_provider(app, scope, &definition)
+                } else {
                     publish_definition_provider(
                         app,
                         scope,
                         &definition,
                         &selected_provider,
                         &reason,
-                    );
+                    )
+                };
+                error = result.as_ref().err().cloned();
+                receipt(app, result);
+                if error.is_none() {
                     app.state.workbench.models_view.dialog = None;
+                    return;
                 }
+            }
+            match choice {
                 DialogChoice::Secondary => {
                     app.queue_command(Command::ModelEditor);
                     app.state.workbench.models_view.dialog = None;
@@ -451,7 +459,7 @@ pub(super) fn render_dialog(
                     app.state.workbench.models_view.operational_state =
                         ModelsOperationalState::Cancelled;
                 }
-                DialogChoice::None => {
+                DialogChoice::None | DialogChoice::Primary => {
                     app.state.workbench.models_view.dialog =
                         Some(ModelsWorkbenchDialog::DefinitionConflict {
                             definition,
@@ -459,6 +467,7 @@ pub(super) fn render_dialog(
                             providers,
                             selected_provider,
                             reason,
+                            error,
                         });
                 }
             }
