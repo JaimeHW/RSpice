@@ -81,6 +81,9 @@ impl DesignCheckRuntime {
 
 impl AppState {
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
+        if self.workspace.annotation_restoration_error().is_some() {
+            self.sync_active_schematic_to_workspace();
+        }
         let subject = self.workspace.active_schematic_reference();
         let config = design_check_config(self, &subject);
         // Checks run over the design as configured, not over the editor
@@ -264,6 +267,9 @@ fn design_check_input_digest(
     subject: &CellViewRef,
     config: &DrcConfig,
 ) -> Result<ContentDigest, String> {
+    if let Some(error) = state.workspace.annotation_restoration_error() {
+        return Err(format!("reference annotation restoration failed: {error}"));
+    }
     let mut live_buffers = state.workspace.schematic_buffers.clone();
     if matches!(
         state.workspace.active_view_type(),

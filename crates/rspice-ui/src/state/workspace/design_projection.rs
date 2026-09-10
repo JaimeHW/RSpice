@@ -321,6 +321,11 @@ impl ProjectWorkspace {
         active_reference: &CellViewRef,
         active_schematic: &SchematicState,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
+        if let Some(error) = self.annotation_restoration_error() {
+            return Err(ConfigurationExecutionPlanError::DesignManagement(format!(
+                "reference annotation restoration failed: {error}. Correct the references, then check the design to retry."
+            )));
+        }
         let inputs = self.design_inputs(active_reference, active_schematic);
         let key = inputs
             .as_ref()
@@ -355,6 +360,9 @@ impl ProjectWorkspace {
         active_reference: &CellViewRef,
         active_schematic: &SchematicState,
     ) -> Option<DesignProjectionKey> {
+        if self.annotation_restoration_error().is_some() {
+            return None;
+        }
         self.design_inputs(active_reference, active_schematic)
             .map(|inputs| self.projection_key(libraries, &inputs))
     }

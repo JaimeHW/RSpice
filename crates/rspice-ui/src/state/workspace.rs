@@ -1478,6 +1478,11 @@ pub struct ProjectWorkspace {
     /// configuration set describes how that identity is executed.
     #[serde(default)]
     pub design_management: crate::state::DesignManagementCatalog,
+    /// A failed recovery must retain the authored documents without letting
+    /// an incomplete reference transition acquire execution authority.
+    /// Recomputed when restoring a session; never trusted from persistence.
+    #[serde(skip)]
+    annotation_restoration_error: Option<String>,
     /// Project-owned bus-width and global-net policy. Older projects migrate
     /// to strict fail-closed defaults instead of inheriting UI state.
     #[serde(default)]
@@ -1496,14 +1501,10 @@ pub struct ProjectWorkspace {
     #[serde(default, skip_serializing)]
     pub hierarchy_instances: Vec<String>,
     pub schematic_buffers: HashMap<String, SchematicState>,
-    /// Last design projection handed out, retained while every input it was
-    /// derived from stands still. Derived state, so a restored project
-    /// rebuilds it on first demand instead of trusting a persisted copy.
+    /// Derived projection, retained only while all of its inputs match.
     #[serde(skip)]
     design_projection_cache: std::cell::RefCell<Option<std::sync::Arc<DesignProjection>>>,
-    /// Design-management materialization of each cell view, retained per
-    /// source document so one edit re-materializes one cell view rather than
-    /// the whole design. Derived state for the same reason.
+    /// Per-document materialization memo; edits invalidate only affected views.
     #[serde(skip)]
     materialized_buffers:
         std::cell::RefCell<HashMap<String, (BufferMemoKey, std::sync::Arc<SchematicState>)>>,
@@ -1649,6 +1650,7 @@ impl Default for ProjectWorkspace {
             project: ProjectDescriptor::default(),
             configuration_sets: crate::state::ConfigurationSetCatalog::default(),
             design_management: crate::state::DesignManagementCatalog::default(),
+            annotation_restoration_error: None,
             connectivity: crate::state::ConnectivityContract::default(),
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],

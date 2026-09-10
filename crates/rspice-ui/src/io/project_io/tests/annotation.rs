@@ -11,6 +11,7 @@ use crate::state::{
 };
 use std::collections::BTreeMap;
 
+#[derive(Clone)]
 struct PendingAnnotation {
     project: ProjectFile,
     root: CellViewRef,
@@ -260,6 +261,52 @@ fn reopening_pending_annotation_aligns_hierarchy_outputs_and_bound_probes_once()
     assert!(again.workspace_migration_warning.is_none());
 }
 
+fn damage_pending_annotation(fixture: &mut PendingAnnotation, failure: &str) {
+    let master = fixture
+        .project
+        .workspace
+        .schematic_buffers
+        .get_mut(&fixture.child.key())
+        .unwrap();
+    match failure {
+        "unrecorded name" => {
+            master
+                .components
+                .iter_mut()
+                .find(|component| component.id == fixture.voltage)
+                .unwrap()
+                .name = "V99".to_owned()
+        }
+        "collision" => {
+            let id = master.add_component(ComponentType::VoltageSource, Point::new(300, 0));
+            master
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .unwrap()
+                .name = "V1".to_owned();
+        }
+        "malformed reference" => {
+            master
+                .components
+                .iter_mut()
+                .find(|component| component.id == fixture.dependent)
+                .unwrap()
+                .params = "vref='unfinished".to_owned()
+        }
+        "output revision" => {
+            fixture
+                .project
+                .workspace
+                .plan_data_mut(fixture.outputs[0].0)
+                .unwrap()
+                .saved_outputs[0]
+                .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap()
+        }
+        _ => unreachable!(),
+    }
+}
+
 #[test]
 fn annotation_restoration_refuses_before_publishing_any_project_owner() {
     for failure in [
@@ -269,49 +316,7 @@ fn annotation_restoration_refuses_before_publishing_any_project_owner() {
         "output revision",
     ] {
         let mut fixture = pending_annotation();
-        let master = fixture
-            .project
-            .workspace
-            .schematic_buffers
-            .get_mut(&fixture.child.key())
-            .unwrap();
-        match failure {
-            "unrecorded name" => {
-                master
-                    .components
-                    .iter_mut()
-                    .find(|component| component.id == fixture.voltage)
-                    .unwrap()
-                    .name = "V99".to_owned()
-            }
-            "collision" => {
-                let id = master.add_component(ComponentType::VoltageSource, Point::new(300, 0));
-                master
-                    .components
-                    .iter_mut()
-                    .find(|component| component.id == id)
-                    .unwrap()
-                    .name = "V1".to_owned();
-            }
-            "malformed reference" => {
-                master
-                    .components
-                    .iter_mut()
-                    .find(|component| component.id == fixture.dependent)
-                    .unwrap()
-                    .params = "vref='unfinished".to_owned()
-            }
-            "output revision" => {
-                fixture
-                    .project
-                    .workspace
-                    .plan_data_mut(fixture.outputs[0].0)
-                    .unwrap()
-                    .saved_outputs[0]
-                    .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap()
-            }
-            _ => unreachable!(),
-        }
+        damage_pending_annotation(&mut fixture, failure);
         let before = serde_json::to_value(&fixture.project.workspace).unwrap();
         let dirty = fixture.project.workspace.project_metadata_dirty;
         let snapshots: BTreeMap<_, _> = fixture
@@ -434,6 +439,88 @@ fn restore_annotation_session(state: &AppState, ron: bool) -> AppState {
     }
 }
 
+fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
+    let expected =
+        load_project_text(&serialize_project_file(&fixture.project).unwrap(), None).unwrap();
+    for reference in [&fixture.root, &fixture.child] {
+        let restored = &state.workspace.schematic_buffers[&reference.key()];
+        let canonical = &expected.workspace.schematic_buffers[&reference.key()];
+        assert_eq!(restored.components, canonical.components);
+        assert_eq!(restored.probes, canonical.probes);
+    }
+    assert_eq!(
+        state.workspace.configuration_sets,
+        expected.workspace.configuration_sets
+    );
+    assert_eq!(
+        state.workspace.simulation_plan_payloads,
+        expected.workspace.simulation_plan_payloads
+    );
+    assert_eq!(state.workspace.active_view, expected.workspace.active_view);
+    assert_eq!(
+        serde_json::to_value(&state.workspace.open_views).unwrap(),
+        serde_json::to_value(&expected.workspace.open_views).unwrap()
+    );
+    if let Some(active) = state.workspace.active_context_schematic() {
+        assert_eq!(state.schematic.components, active.components);
+    }
+    assert_eq!(
+        state.workspace.design_management,
+        fixture.project.workspace.design_management
+    );
+    assert!(
+        state
+            .workspace
+            .design_projection(
+                &state.library_manager,
+                &fixture.child,
+                &state.workspace.schematic_buffers[&fixture.child.key()],
+            )
+            .is_ok()
+    );
+}
+
+#[test]
+fn session_restores_pending_annotation_and_every_reference_once() {
+    for ron in [false, true] {
+        for schematic_active in [false, true] {
+            let mut fixture = pending_annotation();
+            if !schematic_active {
+                let reference = CellViewRef::new("user", &fixture.child.cell, "layout");
+                fixture
+                    .project
+                    .libraries
+                    .get_library_mut("user")
+                    .unwrap()
+                    .get_cell_mut(&fixture.child.cell)
+                    .unwrap()
+                    .add_view(View::new("layout", ViewType::Layout));
+                fixture
+                    .project
+                    .workspace
+                    .open_view(reference, ViewType::Layout);
+            }
+            let state = annotation_session(&fixture.project);
+            let original = serde_json::to_value(&state.workspace).unwrap();
+            let restored = restore_annotation_session(&state, ron);
+            assert_restored_annotation(&restored, &fixture);
+            assert_eq!(serde_json::to_value(&state.workspace).unwrap(), original);
+            assert!(restored.log_buffer.entries().any(|entry| {
+                entry
+                    .message
+                    .contains("Applied approved reference annotation")
+            }));
+            let repeated = restore_annotation_session(&restored, ron);
+            assert_restored_annotation(&repeated, &fixture);
+            assert!(!repeated.log_buffer.entries().any(|entry| {
+                entry
+                    .message
+                    .contains("Applied approved reference annotation")
+            }));
+        }
+    }
+}
+
 #[test]
 fn session_retains_unsaved_schematic_flags_across_document_switches() {
     for ron in [false, true] {
@@ -468,5 +555,126 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
         let repeated = restore_annotation_session(&restored, ron);
         assert!(repeated.schematic.is_dirty);
         assert!(repeated.workspace.open_views.iter().all(|open| open.dirty));
+    }
+}
+
+#[test]
+fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_after_repair() {
+    for ron in [false, true] {
+        for configured in [false, true] {
+            for failure in [
+                "unrecorded name",
+                "collision",
+                "malformed reference",
+                "output revision",
+            ] {
+                let mut fixture = pending_annotation();
+                if !configured {
+                    fixture.project.workspace.configuration_sets = Default::default();
+                }
+                let mut broken = fixture.clone();
+                damage_pending_annotation(&mut broken, failure);
+                let source = annotation_session(&broken.project);
+                let mut restored = restore_annotation_session(&source, ron);
+                for reference in [&fixture.root, &fixture.child] {
+                    assert_eq!(
+                        restored.workspace.schematic_buffers[&reference.key()].components,
+                        source.workspace.schematic_buffers[&reference.key()].components
+                    );
+                    assert_eq!(
+                        restored.workspace.schematic_buffers[&reference.key()].probes,
+                        source.workspace.schematic_buffers[&reference.key()].probes
+                    );
+                }
+                assert_eq!(
+                    restored.workspace.configuration_sets,
+                    source.workspace.configuration_sets
+                );
+                assert_eq!(
+                    restored.workspace.simulation_plan_payloads,
+                    source.workspace.simulation_plan_payloads
+                );
+                assert!(
+                    serde_json::to_value(&restored.workspace)
+                        .unwrap()
+                        .get("annotation_restoration_error")
+                        .is_none()
+                );
+                for blocked in [&restored, &restore_annotation_session(&restored, ron)] {
+                    let error = blocked
+                        .workspace
+                        .design_projection(
+                            &blocked.library_manager,
+                            &fixture.child,
+                            &blocked.schematic,
+                        )
+                        .unwrap_err();
+                    assert!(
+                        error.to_string().contains("reference annotation"),
+                        "{failure}: {error}"
+                    );
+                    assert!(
+                        blocked
+                            .workspace
+                            .design_projection_key(
+                                &blocked.library_manager,
+                                &fixture.child,
+                                &blocked.schematic,
+                            )
+                            .is_none()
+                    );
+                    assert!(
+                        blocked
+                            .log_buffer
+                            .entries()
+                            .any(|entry| entry.message.contains("reference annotation"))
+                    );
+                }
+                // Repair the invalid owner, but keep active and inactive edit
+                // transactions pending: neither may be overwritten by recovery.
+                restored.schematic.begin_operation("Repair reference owner");
+                restored.schematic.components.clone_from(
+                    &fixture.project.workspace.schematic_buffers[&fixture.child.key()].components,
+                );
+                restored
+                    .workspace
+                    .plan_data_mut(fixture.outputs[0].0)
+                    .unwrap()
+                    .saved_outputs[0]
+                    .revision = fixture
+                    .project
+                    .workspace
+                    .plan_data(fixture.outputs[0].0)
+                    .unwrap()
+                    .saved_outputs[0]
+                    .revision;
+                restored.sync_active_schematic_to_workspace();
+                assert!(restored.workspace.annotation_restoration_error().is_some());
+                restored.schematic.end_operation();
+                restored
+                    .workspace
+                    .schematic_buffers
+                    .get_mut(&fixture.root.key())
+                    .unwrap()
+                    .begin_operation("Other unfinished edit");
+                restored.sync_active_schematic_to_workspace();
+                assert!(restored.workspace.annotation_restoration_error().is_some());
+                restored
+                    .workspace
+                    .schematic_buffers
+                    .get_mut(&fixture.root.key())
+                    .unwrap()
+                    .end_operation();
+                // Checking a repaired document uses the normal sync/retry path.
+                // DRC findings are independent of the restored reference closure.
+                let _ = restored.run_active_design_checks();
+                assert!(
+                    restored.workspace.annotation_restoration_error().is_none(),
+                    "{failure}"
+                );
+                assert_restored_annotation(&restored, &fixture);
+                assert_restored_annotation(&restore_annotation_session(&restored, ron), &fixture);
+            }
+        }
     }
 }

@@ -754,7 +754,44 @@ impl AppState {
             self.schematic
                 .revalidate_instance_bindings(&self.library_manager);
             self.workspace.save_active_schematic(&self.schematic);
+        }
+        self.retry_annotation_restoration();
+        if is_schematic_like(self.workspace.active_view_type()) {
             self.sync_generated_symbol_view();
+        }
+    }
+
+    /// A recovered reference transition can be retried after its owners are
+    /// repaired. Never publish it over an unfinished edit in any document.
+    fn retry_annotation_restoration(&mut self) {
+        let Some(previous_error) = self
+            .workspace
+            .annotation_restoration_error()
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        if self
+            .workspace
+            .schematic_buffers
+            .values()
+            .any(SchematicState::has_pending_operation)
+        {
+            return;
+        }
+        match self.workspace.restore_pending_annotation(&self.library_manager) {
+            Ok(count) => {
+                if let Some(schematic) = self.workspace.active_context_schematic() {
+                    self.schematic = schematic.clone();
+                }
+                self.push_user_message(ConsoleMessage::info(format!(
+                    "Reference annotation recovery completed ({count} component(s) updated)."
+                )));
+            }
+            Err(error) if error != previous_error => self.push_user_message(ConsoleMessage::error(format!(
+                "Reference annotation recovery still needs correction: {error}. Recovered documents were preserved."
+            ))),
+            Err(_) => {}
         }
     }
 

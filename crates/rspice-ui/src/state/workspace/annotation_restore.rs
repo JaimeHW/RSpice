@@ -10,6 +10,19 @@ impl ProjectWorkspace {
         &mut self,
         libraries: &LibraryManager,
     ) -> Result<usize, String> {
+        let result = self.apply_pending_annotation(libraries);
+        self.annotation_restoration_error = result.as_ref().err().cloned();
+        // Success changes reference owners; refusal changes their eligibility.
+        // Neither may reuse a projection handed out before this attempt.
+        self.design_projection_cache.get_mut().take();
+        result
+    }
+
+    pub(crate) fn annotation_restoration_error(&self) -> Option<&str> {
+        self.annotation_restoration_error.as_deref()
+    }
+
+    fn apply_pending_annotation(&mut self, libraries: &LibraryManager) -> Result<usize, String> {
         let annotation = self.design_management.annotation();
         if annotation.journal().is_empty() {
             return Ok(0);

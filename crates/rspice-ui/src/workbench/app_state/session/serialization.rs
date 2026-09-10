@@ -275,6 +275,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 schematic.is_dirty = true;
             }
         }
+        // Restore the entire reference closure before acquiring the active
+        // buffer. A failure preserves recovery data and gates execution;
+        // propagating a serde error here would discard the whole session.
+        let annotation_restoration = project_workspace.restore_pending_annotation(&library_manager);
         let schematic = project_workspace
             .active_context_schematic()
             .cloned()
@@ -305,6 +309,15 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        match annotation_restoration {
+            Ok(0) => {}
+            Ok(count) => state.push_user_message(ConsoleMessage::warning(format!(
+                "Applied approved reference annotation to {count} component(s) and updated their live references."
+            ))),
+            Err(error) => state.push_user_message(ConsoleMessage::error(format!(
+                "Session reference annotation restoration failed: {error}. Recovered documents were preserved. Correct the references, then check the design to retry."
+            ))),
+        }
         // Snap targets and unfinished-conductor routing are session-owned
         // editor presentation. Schematic documents deliberately skip them,
         // so restore the exact device-local settings after loading the active
