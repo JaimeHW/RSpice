@@ -7,10 +7,11 @@ use crate::state::{
     Component, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetId,
     SavedOutput, remap_instance_probes,
 };
+use crate::workbench::state::InlineEditAuthority;
 
 #[derive(Debug, Clone)]
 pub(super) struct ComponentRenameRecord {
-    pub(super) description: &'static str,
+    pub(super) description: String,
     document: CellViewRef,
     before: SchematicSnapshot,
     after: SchematicSnapshot,
@@ -40,6 +41,56 @@ struct PreparedReferences {
 }
 
 impl AppState {
+    pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
+        InlineEditAuthority {
+            project: self.workspace.project.id(),
+            document: self.workspace.active_schematic_reference(),
+            occurrence: self.workspace.active_occurrence().cloned(),
+            design_epoch: self.design_execution_epoch,
+            document_epoch: self.active_schematic_epoch,
+        }
+    }
+
+    /// Used by focus changes, document navigation, and commands before they
+    /// read or replace the design. A failed commit retains the complete draft.
+    pub(crate) fn commit_inline_component_edit(&mut self) -> Result<bool, String> {
+        let Some(session) = self.workbench.inline_edit.session().cloned() else {
+            return Ok(false);
+        };
+        if session.candidate.as_ref() == Some(&session.expected) {
+            self.workbench.inline_edit.end();
+            return Ok(false);
+        }
+        let result = if session.authority != self.inline_edit_authority() {
+            Err("The document or hierarchy occurrence changed. Cancel this inspector draft and edit the current component.".to_owned())
+        } else if let Some(candidate) = session.candidate {
+            self.edit_component_transaction(&session.expected, candidate, &session.description)
+        } else {
+            Err(session
+                .error
+                .unwrap_or_else(|| "Correct the inspector field before applying it.".to_owned()))
+        };
+        match &result {
+            Ok(_) => self.workbench.inline_edit.end(),
+            Err(error) => self.workbench.inline_edit.set_error(Some(error.clone())),
+        }
+        result
+    }
+
+    /// A command/navigation boundary reports a refusal once and leaves the
+    /// inspector's draft available for correction or explicit cancellation.
+    pub(crate) fn commit_pending_inspector_edit(&mut self) -> bool {
+        match self.commit_inline_component_edit() {
+            Ok(_) => true,
+            Err(error) => {
+                self.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                    "Inspector edit was not applied: {error}"
+                )));
+                false
+            }
+        }
+    }
+
     pub(crate) fn rename_component_transaction(
         &mut self,
         expected: &Component,
@@ -56,7 +107,7 @@ impl AppState {
         &mut self,
         expected: &Component,
         candidate: Component,
-        description: &'static str,
+        description: &str,
     ) -> Result<bool, String> {
         let document = self.workspace.active_schematic_reference();
         let before = SchematicSnapshot::capture(&self.schematic);
@@ -153,7 +204,7 @@ impl AppState {
             }
         }
         let record = ComponentRenameRecord {
-            description,
+            description: description.to_owned(),
             document: document.clone(),
             before,
             after,

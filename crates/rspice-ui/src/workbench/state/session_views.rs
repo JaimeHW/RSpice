@@ -1992,7 +1992,7 @@ impl NotificationFilter {
 }
 
 /// Which instance field an inspector inline edit is editing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InlineEditField {
     /// The reference designator. Validated against the SPICE designator
     /// rules and case-insensitive uniqueness before it is ever applied.
@@ -2006,30 +2006,45 @@ pub enum InlineEditField {
     Parameter(String),
 }
 
-/// One live inline-edit session in the inspector.
-///
-/// Edits apply to the design on every keystroke so the canvas, netlist, and
-/// connectivity track what the field says. The undo history, however,
-/// records **one** entry per session: the snapshot is captured when the
-/// field takes focus and committed when it loses it, so typing a value is a
-/// single undo step rather than one per character.
+/// The document and occurrence that authorized an isolated inspector draft.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InlineEditAuthority {
+    pub project: crate::product::ProjectId,
+    pub document: crate::state::CellViewRef,
+    pub occurrence: Option<crate::state::workspace::DocumentOccurrence>,
+    pub design_epoch: u64,
+    pub document_epoch: u64,
+}
+
+/// One field's expected component and validated candidate. No design snapshot
+/// is needed until the application publishes the completed edit.
+#[derive(Debug, Clone)]
+pub(crate) struct InlineEditSession {
+    pub expected: crate::state::Component,
+    pub field: InlineEditField,
+    pub authority: InlineEditAuthority,
+    pub description: String,
+    pub buffer: String,
+    pub candidate: Option<crate::state::Component>,
+    pub error: Option<String>,
+    pub widget: Option<egui::Id>,
+}
+
+/// An inspector field remains a draft until Enter or a successful focus change.
+/// Escape discards it without mutating the design or its history.
 #[derive(Debug, Clone, Default)]
 pub struct InlineEdit {
-    /// Instance being edited, and which of its fields.
-    target: Option<(u64, InlineEditField)>,
-    /// Design state as it stood when the field took focus.
-    before: Option<crate::state::SchematicSnapshot>,
-    /// Text as typed, which may not yet be a legal value.
-    buffer: String,
-    /// Why the typed text has not been applied, when it has not.
-    error: Option<String>,
+    session: Option<InlineEditSession>,
 }
 
 impl InlineEdit {
     /// The buffer for `target`, or `None` when a different field (or no
     /// field) owns the session.
     pub fn buffer_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
-        (self.target.as_ref() == Some(&(component, field.clone()))).then_some(self.buffer.as_str())
+        self.session
+            .as_ref()
+            .filter(|session| session.expected.id == component && session.field == *field)
+            .map(|session| session.buffer.as_str())
     }
 
     /// Which of `component`'s fields holds the open session, if any.
@@ -2038,67 +2053,65 @@ impl InlineEdit {
     /// validation strip for exactly as long as one of its own fields is being
     /// typed into, rather than permanently.
     pub fn editing_field(&self, component: u64) -> Option<&InlineEditField> {
-        self.target
+        self.session
             .as_ref()
-            .filter(|(id, _)| *id == component)
-            .map(|(_, field)| field)
+            .filter(|session| session.expected.id == component)
+            .map(|session| &session.field)
     }
 
     /// Why the open session's text was rejected, if it was.
     pub fn error_for(&self, component: u64, field: &InlineEditField) -> Option<&str> {
-        (self.target.as_ref() == Some(&(component, field.clone())))
-            .then_some(self.error.as_deref())
-            .flatten()
+        self.session
+            .as_ref()
+            .filter(|session| session.expected.id == component && session.field == *field)
+            .and_then(|session| session.error.as_deref())
     }
 
-    /// Open a session on `field`, seeding the buffer with the current text
-    /// and capturing the snapshot this session will fold into one undo
-    /// entry. Re-opening the same field keeps the session intact.
-    pub fn begin(
+    pub(crate) fn session(&self) -> Option<&InlineEditSession> {
+        self.session.as_ref()
+    }
+
+    pub(crate) fn begin(&mut self, session: InlineEditSession) {
+        self.session = Some(session);
+    }
+
+    /// The host supplies either a validated complete candidate or its rejection.
+    pub(crate) fn set_draft(
         &mut self,
-        component: u64,
-        field: InlineEditField,
-        current: &str,
-        before: crate::state::SchematicSnapshot,
+        text: String,
+        candidate: Result<crate::state::Component, String>,
     ) {
-        if self.target.as_ref() == Some(&(component, field.clone())) {
-            return;
+        if let Some(session) = &mut self.session {
+            session.buffer = text;
+            match candidate {
+                Ok(candidate) => {
+                    session.candidate = Some(candidate);
+                    session.error = None;
+                }
+                Err(error) => {
+                    session.candidate = None;
+                    session.error = Some(error);
+                }
+            }
         }
-        self.target = Some((component, field));
-        self.before = Some(before);
-        self.buffer = current.to_owned();
-        self.error = None;
-    }
-
-    /// Replace the typed text.
-    pub fn set_buffer(&mut self, text: String) {
-        self.buffer = text;
     }
 
     /// Record why the typed text was not applied, or clear the rejection.
     pub fn set_error(&mut self, error: Option<String>) {
-        self.error = error;
-    }
-
-    /// End the session, returning the snapshot to fold into one undo entry.
-    pub fn end(&mut self) -> Option<crate::state::SchematicSnapshot> {
-        self.target = None;
-        self.buffer.clear();
-        self.error = None;
-        self.before.take()
-    }
-
-    /// Abandon any session that does not belong to `component` — selection
-    /// moved on, so its buffer and snapshot are no longer meaningful.
-    pub fn release_unless(
-        &mut self,
-        component: Option<u64>,
-    ) -> Option<crate::state::SchematicSnapshot> {
-        match (&self.target, component) {
-            (Some((owner, _)), Some(id)) if *owner == id => None,
-            (Some(_), _) => self.end(),
-            (None, _) => None,
+        if let Some(session) = &mut self.session {
+            session.error = error;
         }
+    }
+
+    pub(crate) fn set_widget(&mut self, widget: egui::Id) {
+        if let Some(session) = &mut self.session {
+            session.widget = Some(widget);
+        }
+    }
+
+    /// Release a committed or explicitly cancelled draft.
+    pub fn end(&mut self) {
+        self.session = None;
     }
 }
 

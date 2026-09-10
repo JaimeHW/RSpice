@@ -272,23 +272,52 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
 // =============================================================================
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let sheet = sheet_connectivity(&app.state);
+    if let Some(session) = app.state.workbench.inline_edit.session()
+        && (session.authority != app.state.inline_edit_authority()
+            || app.state.schematic_edit_read_only()
+            || !app.state.schematic.components.contains(&session.expected))
+    {
+        if session.candidate.as_ref() == Some(&session.expected) {
+            app.state.workbench.inline_edit.end();
+        } else {
+            ui.label("The document changed while this inspector edit was open. The draft has not been applied.");
+            ui.add(
+                egui::Label::new(format!("{}: {}", session.expected.name, session.buffer))
+                    .selectable(true),
+            );
+            if ui.button("Discard inspector draft").clicked() {
+                app.state.workbench.inline_edit.end();
+            }
+            return;
+        }
+    }
+    let mut sheet = sheet_connectivity(&app.state);
     if let Some(reason) = sheet.unresolved.as_deref() {
         unresolved_projection_note(ui, reason);
     }
-    let inspected = subject(&app.state, &sheet.nets);
+    let mut inspected = subject(&app.state, &sheet.nets);
 
-    // An edit session belongs to one instance. If the selection moved on
-    // while a field was still open, close it now so its keystrokes land in
-    // the undo history as the single entry they were.
+    // Resolve a pending field before the selection can adopt a different owner.
     let owner = match inspected {
         DesignSubject::Component(id) => Some(id),
         _ => None,
     };
-    if let Some(before) = app.state.workbench.inline_edit.release_unless(owner) {
-        app.state
-            .schematic
-            .commit_undo_from(before, "edit instance");
+    if let Some(editing) = app
+        .state
+        .workbench
+        .inline_edit
+        .session()
+        .map(|session| session.expected.id)
+        && owner != Some(editing)
+    {
+        match app.state.commit_inline_component_edit() {
+            Ok(true) => sheet = sheet_connectivity(&app.state),
+            Ok(false) => {}
+            Err(_) => {
+                app.state.schematic.selection.select_only_component(editing);
+                inspected = DesignSubject::Component(editing);
+            }
+        }
     }
 
     match inspected {

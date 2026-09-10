@@ -32,52 +32,62 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
 /// value the engine refuses is refused wherever it was typed. Until this ran
 /// here, `TD=-1n` was turned away by the editor and accepted by the inline
 /// field beside it.
+#[cfg(test)]
 pub(super) fn field_rejection(
     state: &AppState,
     component: &Component,
     field: &InlineEditField,
     candidate: &str,
 ) -> Option<String> {
-    if let InlineEditField::Parameter(key) = field {
-        match crate::workbench::app::authoritative_component_property_sheet(state, component) {
-            Ok(Some(sheet)) => {
-                if let Some(definition) = sheet.get(key)
-                    && let Some(rejection) =
-                        parameter_source_rejection(state, definition, candidate)
-                {
-                    return Some(rejection);
-                }
-            }
-            Ok(None) => {}
-            Err(error) => return Some(error),
-        }
+    prepare_field_edit(state, component, field, candidate).err()
+}
+
+fn prepare_field_edit(
+    state: &AppState,
+    component: &Component,
+    field: &InlineEditField,
+    source: &str,
+) -> Result<Component, String> {
+    let mut authored = source.to_owned();
+    let mut typed_value = None;
+    if let InlineEditField::Parameter(key) = field
+        && let Some(sheet) =
+            crate::workbench::app::authoritative_component_property_sheet(state, component)?
+        && let Some(definition) = sheet.get(key)
+    {
+        typed_value = parameter_source_value(state, definition, source)?;
+        authored = typed_value
+            .as_ref()
+            .map(crate::properties::property_bridge::property_value_to_string)
+            .unwrap_or_default();
     }
-    if let Some(refusal) = source_contract_rejection(state, component, field, candidate) {
-        return Some(refusal);
+    let candidate = edited_component(component, field, &authored);
+    if let Some(refusal) = source_contract_rejection(state, &candidate, field, typed_value.as_ref())
+    {
+        return Err(refusal);
     }
     let InlineEditField::Instance = field else {
-        return None;
+        return Ok(candidate);
     };
-    let candidate = candidate.trim();
-    if candidate.is_empty() {
-        return Some("Enter a non-empty instance name.".to_owned());
+    if candidate.name.is_empty() {
+        return Err("Enter a non-empty instance name.".to_owned());
     }
-    if candidate.eq_ignore_ascii_case(&component.name) {
-        return None;
+    if candidate.name.eq_ignore_ascii_case(&component.name) {
+        return Ok(candidate);
     }
-    if let Err(error) = component.validate_reference_designator(candidate) {
-        return Some(error);
-    }
-    state
+    candidate.validate_reference_designator(&candidate.name)?;
+    if state
         .schematic
         .components
         .iter()
-        .any(|other| other.id != component.id && other.name.eq_ignore_ascii_case(candidate))
-        .then(|| {
-            format!(
-                "A component named `{candidate}` already exists; SPICE designators are case-insensitively unique."
-            )
-        })
+        .any(|other| other.id != component.id && other.name.eq_ignore_ascii_case(&candidate.name))
+    {
+        return Err(format!(
+            "A component named `{}` already exists; SPICE designators are case-insensitively unique.",
+            candidate.name
+        ));
+    }
+    Ok(candidate)
 }
 
 /// Why committing `candidate` into `field` would break this source's waveform
@@ -93,23 +103,17 @@ fn source_contract_rejection(
     state: &AppState,
     component: &Component,
     field: &InlineEditField,
-    candidate: &str,
+    typed_value: Option<&PropertyValue>,
 ) -> Option<String> {
     let sheet = state.property_registry.get(component.kind)?;
-    let mut candidate_component = component.clone();
-    match field {
+    if matches!(field, InlineEditField::Instance) {
         // The reference designator is not a waveform field, and re-reading the
         // contract on a rename would refuse a rename for a value the rename
         // did not touch.
-        InlineEditField::Instance => return None,
-        InlineEditField::Value => candidate_component.value = candidate.to_owned(),
-        InlineEditField::Parameters => candidate_component.params = candidate.trim().to_owned(),
-        InlineEditField::Parameter(key) => {
-            candidate_component.params = write_param(&component.params, key, candidate);
-        }
+        return None;
     }
     let mut values = crate::properties::property_bridge::collect_properties_from_component(
-        &candidate_component,
+        component,
         &state.property_registry,
     );
     // The edited field is presented as the *typed* value it commits as, which
@@ -118,20 +122,11 @@ fn source_contract_rejection(
     // bare engineering parser: `td=-1ns` carries its unit into the parameter
     // string, fails that parse, and became a field the contract could not see.
     if let InlineEditField::Parameter(key) = field
-        && let Some(definition) = sheet.get(key)
-        && let Ok(Some(value)) = parameter_source_value(state, definition, candidate)
+        && let Some(value) = typed_value
     {
-        values.insert(key.clone(), value);
+        values.insert(key.clone(), value.clone());
     }
-    crate::properties::property_bridge::source_commit_refusal(&candidate_component, &values, sheet)
-}
-
-pub(super) fn parameter_source_rejection(
-    state: &AppState,
-    definition: &PropertyDefinition,
-    candidate: &str,
-) -> Option<String> {
-    parameter_source_value(state, definition, candidate).err()
+    crate::properties::property_bridge::source_commit_refusal(component, &values, sheet)
 }
 
 /// The typed value `candidate` commits as, or why it cannot commit.
@@ -202,66 +197,28 @@ fn parameter_source_value(
     Ok(Some(value))
 }
 
-/// Write `candidate` into `field` on the live design.
-///
-/// Returns `true` when the design actually changed, so a session that only
-/// regained and lost focus never manufactures an undo entry.
-pub(super) fn apply_field(
-    state: &mut AppState,
-    id: u64,
+/// Build the complete component candidate without publishing draft text.
+pub(super) fn edited_component(
+    component: &Component,
     field: &InlineEditField,
     candidate: &str,
-) -> bool {
-    let Some(component) = state
-        .schematic
-        .components
-        .iter_mut()
-        .find(|component| component.id == id)
-    else {
-        return false;
-    };
-    let changed = match field {
+) -> Component {
+    let mut component = component.clone();
+    match field {
         InlineEditField::Instance => {
-            let candidate = candidate.trim();
-            if component.name == candidate {
-                false
-            } else {
-                component.name = candidate.to_owned();
-                true
-            }
+            component.name = candidate.trim().to_owned();
         }
         InlineEditField::Value => {
-            if component.value == candidate {
-                false
-            } else {
-                component.value = candidate.to_owned();
-                true
-            }
+            component.value = candidate.to_owned();
         }
         InlineEditField::Parameters => {
-            let updated = candidate.trim().to_owned();
-            if component.params == updated {
-                false
-            } else {
-                component.params = updated;
-                true
-            }
+            component.params = candidate.trim().to_owned();
         }
         InlineEditField::Parameter(key) => {
-            let updated = write_param(&component.params, key, candidate);
-            if component.params == updated {
-                false
-            } else {
-                component.params = updated;
-                true
-            }
+            component.params = write_param(&component.params, key, candidate);
         }
-    };
-    if changed {
-        state.schematic.is_dirty = true;
-        state.schematic.bump_topology_version();
     }
-    changed
+    component
 }
 
 /// Set `key` to `value` in a `key=value key=value` parameter string,
@@ -288,28 +245,64 @@ pub(super) fn write_param(params: &str, key: &str, value: &str) -> String {
     parts.join(" ")
 }
 
-/// Open an edit session on `field`, seeded with `current`.
-pub(super) fn begin_edit(
-    app: &mut RSpiceApp,
-    component: &Component,
-    field: InlineEditField,
-    current: String,
-) {
+/// Finish the previous field before opening a draft against the live component.
+pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEditField) -> bool {
     if app.state.schematic_edit_read_only() {
-        return;
+        return false;
     }
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
-    app.state
+    if app
+        .state
         .workbench
         .inline_edit
-        .begin(component.id, field, &current, before);
+        .buffer_for(component_id, &field)
+        .is_some()
+    {
+        return true;
+    }
+    if app.state.commit_inline_component_edit().is_err() {
+        return false;
+    }
+    let Some(component) = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .cloned()
+    else {
+        return false;
+    };
+    let session = crate::workbench::state::InlineEditSession {
+        buffer: field_value(&component, &field),
+        candidate: Some(component.clone()),
+        expected: component,
+        description: edit_description(&field),
+        field,
+        authority: app.state.inline_edit_authority(),
+        error: None,
+        widget: None,
+    };
+    app.state.workbench.inline_edit.begin(session);
+    true
 }
 
-/// End the open session, folding everything typed into it into one undo
-/// entry described by `description`.
-pub(super) fn commit_edit(app: &mut RSpiceApp, description: &str) {
-    if let Some(before) = app.state.workbench.inline_edit.end() {
-        app.state.schematic.commit_undo_from(before, description);
+pub(super) fn update_edit(app: &mut RSpiceApp, text: String) {
+    let Some(session) = app.state.workbench.inline_edit.session() else {
+        return;
+    };
+    let candidate = prepare_field_edit(&app.state, &session.expected, &session.field, &text);
+    app.state.workbench.inline_edit.set_draft(text, candidate);
+}
+
+fn restore_edit_focus(ctx: &egui::Context, app: &RSpiceApp) {
+    if let Some(widget) = app
+        .state
+        .workbench
+        .inline_edit
+        .session()
+        .and_then(|session| session.widget)
+    {
+        ctx.memory_mut(|memory| memory.request_focus(widget));
     }
 }
 
@@ -746,52 +739,92 @@ pub(super) fn edit_row_with_hint(
         .inline_edit
         .error_for(component.id, &field)
         .map(str::to_owned);
+    let cancel = app
+        .state
+        .workbench
+        .inline_edit
+        .session()
+        .is_some_and(|session| {
+            session.expected.id == component.id
+                && session.field == field
+                && session.widget.is_some_and(|widget| {
+                    ui.memory(|memory| {
+                        memory.has_focus(widget) || memory.had_focus_last_frame(widget)
+                    })
+                })
+        })
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
 
     let tuning = Command::VerificationPage(VerificationPage::Tuning);
-    let (response, tuning_response) = if matches!(field, InlineEditField::Value) {
-        let tuning_block_reason = rejection.as_ref().map_or_else(
-            || component_tuning_action_block_reason(app, component),
-            |reason| {
-                Some(format!(
-                    "resolve the Value validation error before tuning: {reason}"
-                ))
-            },
-        );
-        let (edit, action) = property_row_input_action(
-            ui,
-            label,
-            &mut buffer,
-            rejection.is_some(),
-            WorkbenchIcon::Sliders,
-            &format!("Scrub-tune {} in the parameter sandbox", component.name),
-            tuning_block_reason.is_none(),
-            tuning_block_reason.as_deref(),
-        );
-        (edit, Some(action))
-    } else {
-        (
-            property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some()),
-            None,
-        )
-    };
-    if response.gained_focus() {
-        begin_edit(app, component, field.clone(), buffer.clone());
-    }
-    if response.changed() {
-        begin_edit(app, component, field.clone(), buffer.clone());
-        app.state.workbench.inline_edit.set_buffer(buffer.clone());
-        match field_rejection(&app.state, component, &field, &buffer) {
-            Some(reason) => app.state.workbench.inline_edit.set_error(Some(reason)),
-            None => {
-                app.state.workbench.inline_edit.set_error(None);
-                apply_field(&mut app.state, component.id, &field, &buffer);
+    let (response, tuning_response) = ui
+        .push_id((component.id, &field), |ui| {
+            if matches!(field, InlineEditField::Value) {
+                let tuning_block_reason = rejection.as_ref().map_or_else(
+                    || component_tuning_action_block_reason(app, component),
+                    |reason| {
+                        Some(format!(
+                            "resolve the Value validation error before tuning: {reason}"
+                        ))
+                    },
+                );
+                let (edit, action) = property_row_input_action(
+                    ui,
+                    label,
+                    &mut buffer,
+                    rejection.is_some(),
+                    WorkbenchIcon::Sliders,
+                    &format!("Scrub-tune {} in the parameter sandbox", component.name),
+                    tuning_block_reason.is_none(),
+                    tuning_block_reason.as_deref(),
+                );
+                (edit, Some(action))
+            } else {
+                (
+                    property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some()),
+                    None,
+                )
             }
+        })
+        .inner;
+    if cancel {
+        app.state.workbench.inline_edit.end();
+        ui.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+        });
+        response.surrender_focus();
+        return None;
+    }
+    if response.gained_focus() || response.changed() {
+        if !begin_edit(app, component.id, field.clone()) {
+            restore_edit_focus(ui.ctx(), app);
+            return None;
+        }
+        app.state.workbench.inline_edit.set_widget(response.id);
+        if response.changed() {
+            update_edit(app, buffer);
         }
     }
-    if response.lost_focus() {
-        commit_edit(app, &edit_description(&field));
+    if response.lost_focus()
+        && app
+            .state
+            .workbench
+            .inline_edit
+            .buffer_for(component.id, &field)
+            .is_some()
+        && app.state.commit_inline_component_edit().is_err()
+    {
+        restore_edit_focus(ui.ctx(), app);
     }
     if tuning_response.is_some_and(|response| response.clicked()) {
+        if app.state.commit_inline_component_edit().is_err() {
+            restore_edit_focus(ui.ctx(), app);
+            return app
+                .state
+                .workbench
+                .inline_edit
+                .error_for(component.id, &field)
+                .map(str::to_owned);
+        }
         match stage_component_tuning(app, component.id) {
             Ok(()) => tuning.execute(app),
             Err(error) => {

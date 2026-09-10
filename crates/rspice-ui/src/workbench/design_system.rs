@@ -1197,7 +1197,7 @@ pub fn property_row_input(ui: &mut Ui, label: &str, value: &mut String, invalid:
 /// without making that presentation text part of the authoritative value.
 ///
 /// This is important for override fields: focusing an inherited value must
-/// not itself materialize an override, while the first typed character must.
+/// not itself materialize an override; only authored text may do that.
 pub fn property_row_input_with_hint(
     ui: &mut Ui,
     label: &str,

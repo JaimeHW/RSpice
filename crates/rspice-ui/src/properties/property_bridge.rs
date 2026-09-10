@@ -502,7 +502,7 @@ fn property_value_from_schema(
 /// Converts a PropertyValue to its string representation.
 ///
 /// Used for serialization to SPICE netlist format.
-fn property_value_to_string(value: &PropertyValue) -> String {
+pub(crate) fn property_value_to_string(value: &PropertyValue) -> String {
     match value {
         // Rust's finite-f64 display is the shortest decimal that round-trips
         // to the same binary value. This boundary feeds the durable SPICE

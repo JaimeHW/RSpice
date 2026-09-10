@@ -84,33 +84,19 @@ fn each_editable_group_reserves_its_strip_only_for_its_own_fields() {
     assert!(!editing_identity_field(&app.state, id));
     assert!(!editing_parameter_field(&app.state, id));
 
-    let component = app
-        .state
-        .schematic
-        .components
-        .iter()
-        .find(|component| component.id == id)
-        .expect("the model-bound instance")
-        .clone();
-    begin_edit(
-        &mut app,
-        &component,
-        InlineEditField::Value,
-        component.value.clone(),
-    );
+    assert!(begin_edit(&mut app, id, InlineEditField::Value));
     assert!(editing_identity_field(&app.state, id));
     assert!(!editing_parameter_field(&app.state, id));
 
-    begin_edit(
+    assert!(begin_edit(
         &mut app,
-        &component,
+        id,
         InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
-        String::new(),
-    );
+    ));
     assert!(!editing_identity_field(&app.state, id));
     assert!(editing_parameter_field(&app.state, id));
 
-    commit_edit(&mut app, "edit instance temperature");
+    app.state.commit_inline_component_edit().unwrap();
     assert!(!editing_identity_field(&app.state, id));
     assert!(!editing_parameter_field(&app.state, id));
 }
@@ -563,9 +549,10 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
     let field = InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned());
 
     assert_eq!(field_value(&component, &field), "");
-    begin_edit(&mut app, &component, field.clone(), String::new());
-    assert!(apply_field(&mut app.state, id, &field, "85"));
-    commit_edit(&mut app, &edit_description(&field));
+    assert!(begin_edit(&mut app, id, field.clone()));
+    update_edit(&mut app, "85°C".to_owned());
+    assert_eq!(app.state.schematic.components[0], component);
+    assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(
         crate::state::parse_params_string(&app.state.schematic.components[0].params)
@@ -593,11 +580,12 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
     let field = InlineEditField::Parameters;
 
     assert_eq!(field_value(&component, &field), "");
-    begin_edit(&mut app, &component, field.clone(), String::new());
+    assert!(begin_edit(&mut app, id, field.clone()));
     for candidate in ["m=2", "m=2 tc1=0.01"] {
-        assert!(apply_field(&mut app.state, id, &field, candidate));
+        update_edit(&mut app, candidate.to_owned());
+        assert_eq!(app.state.schematic.components[0], component);
     }
-    commit_edit(&mut app, &edit_description(&field));
+    assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(app.state.schematic.components[0].params, "m=2 tc1=0.01");
     assert!(app.state.schematic.undo());
@@ -927,21 +915,26 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
 
 #[test]
 fn applying_a_field_reports_whether_the_design_actually_changed() {
-    let mut state = state_with_two_components();
-    let id = state.schematic.components[0].id;
-    let before = state.schematic.topology_version();
+    let mut app = RSpiceApp::test_instance();
+    app.state = state_with_two_components();
+    let id = app.state.schematic.components[0].id;
+    let before = app.state.schematic.topology_version();
 
-    assert!(apply_field(&mut state, id, &InlineEditField::Value, "10k"));
-    assert_eq!(state.schematic.components[0].value, "10k");
-    assert!(state.schematic.topology_version() > before);
+    assert!(begin_edit(&mut app, id, InlineEditField::Value));
+    update_edit(&mut app, "10k".to_owned());
+    assert!(app.state.commit_inline_component_edit().unwrap());
+    assert_eq!(app.state.schematic.components[0].value, "10k");
+    assert!(app.state.schematic.topology_version() > before);
 
-    let settled = state.schematic.topology_version();
+    let settled = app.state.schematic.topology_version();
+    assert!(begin_edit(&mut app, id, InlineEditField::Value));
+    update_edit(&mut app, "10k".to_owned());
     assert!(
-        !apply_field(&mut state, id, &InlineEditField::Value, "10k"),
+        !app.state.commit_inline_component_edit().unwrap(),
         "rewriting the same text is not a change"
     );
     assert_eq!(
-        state.schematic.topology_version(),
+        app.state.schematic.topology_version(),
         settled,
         "an unchanged write must not advance topology"
     );
@@ -1105,25 +1098,24 @@ fn the_default_section_choice_removes_the_instance_override() {
 
 #[test]
 fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
-    let mut state = state_with_two_components();
-    let id = state.schematic.components[0].id;
-    state.schematic.init_undo_history();
-    let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+    let mut app = RSpiceApp::test_instance();
+    app.state = state_with_two_components();
+    let id = app.state.schematic.components[0].id;
+    app.state.schematic.init_undo_history();
+    let before = app.state.schematic.components[0].clone();
+    assert!(begin_edit(&mut app, id, InlineEditField::Value));
 
-    for text in ["1", "1k", "1k5"] {
-        apply_field(&mut state, id, &InlineEditField::Value, text);
+    for text in ["1", "1k", "15k"] {
+        update_edit(&mut app, text.to_owned());
+        assert_eq!(app.state.schematic.components[0], before);
     }
-    assert!(
-        state
-            .schematic
-            .commit_undo_from(before, "edit instance value")
-    );
-    assert_eq!(state.schematic.components[0].value, "1k5");
+    assert!(app.state.commit_inline_component_edit().unwrap());
+    assert_eq!(app.state.schematic.components[0].value, "15k");
 
-    assert!(state.schematic.undo());
-    assert_ne!(state.schematic.components[0].value, "1k5");
+    assert!(app.state.schematic.undo());
+    assert_eq!(app.state.schematic.components[0], before);
     assert!(
-        !state.schematic.can_undo(),
+        !app.state.schematic.can_undo(),
         "three keystrokes produced more than one undo step"
     );
 }

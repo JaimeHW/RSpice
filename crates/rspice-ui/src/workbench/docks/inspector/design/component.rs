@@ -230,6 +230,9 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             if let Some(target) = model_source.as_ref() {
                 let response = Button::new("Open model source…").ghost().show(ui);
                 if response.clicked() {
+                    if !app.state.commit_pending_inspector_edit() {
+                        return;
+                    }
                     match target {
                         ComponentModelSourceTarget::Catalog { library, model } => {
                             app.state.select_model_library(library.as_str());
@@ -409,6 +412,7 @@ pub(crate) fn apply_bound_model_choice(
     component_id: u64,
     selected_model: &str,
 ) -> Result<bool, String> {
+    app.state.commit_inline_component_edit()?;
     let component = app
         .state
         .schematic
@@ -482,6 +486,9 @@ pub(super) fn apply_bound_model_section(
     component_id: u64,
     selected_section: &str,
 ) {
+    if !app.state.commit_pending_inspector_edit() {
+        return;
+    }
     let Some(component) = app
         .state
         .schematic
