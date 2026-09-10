@@ -5,6 +5,34 @@ use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
 
 #[test]
+fn diode_dc_preserves_resolved_currents_near_zero_bias() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let nvt = 300.15
+            * if dialect == SpiceDialect::Xyce {
+                1.3806226e-23 / 1.6021918e-19
+            } else {
+                1.38064852e-23 / 1.6021766208e-19
+            };
+        for voltage in [-1e-20, 1e-20, -1e-200, 1e-200] {
+            let deck=Netlist::parse(&format!("Small diode bias\nV1 anode 0 {voltage:e}\nD1 anode 0 DM\n.model DM D(IS=0.01)\n.end\n")).unwrap();
+            let result = engine.run_dc_op(&deck).unwrap();
+            let current = branch_current(&result, "V1");
+            let expected = -0.01 / nvt;
+            assert!(
+                (current / voltage - expected).abs() < 2e-14 * expected.abs(),
+                "{dialect:?}, {voltage:e}: {current:e}"
+            );
+            let diode = result.try_dc_observable_named("I(D1)").unwrap();
+            assert!((diode / voltage + expected).abs() < 2e-14 * expected.abs());
+        }
+    }
+}
+
+#[test]
 fn diode_charge_only_reactive_state_matches_the_analytic_rc_response() {
     // A reverse-biased M=0 junction has Q=CJO*V. With negligible IS, this
     // circuit is exactly an RC low-pass with no explicit capacitor. Checking

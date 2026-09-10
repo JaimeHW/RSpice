@@ -1212,7 +1212,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v86 removes environment-controlled legacy BJT transient equations.
     // v87 preserves signed linear magnetic coupling in every resolved overlay.
     // v88 preserves mutual inductance across intermediate product range loss.
-    hasher.update(b"rspice-transient-resolved-config-v88\0");
+    // v89 preserves diode currents at small bias and intermediate quotient range loss.
+    hasher.update(b"rspice-transient-resolved-config-v89\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

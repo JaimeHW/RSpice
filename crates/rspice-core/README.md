@@ -521,6 +521,10 @@ algebraic control voltages: exact port dependencies exclude state or nonlinear
 current-derivative feedback, and an exact passivity check on each feedback
 component certifies a unique algebraic solution. Trial currents and their first
 time derivatives use the canonical full device law and its implicit Jacobian.
+Residuals scale to the actual control voltages, so large controlled-source gains
+cannot hide small input errors behind an absolute voltage floor. Diode junction,
+sidewall, recombination and tunneling currents preserve the exponential law near
+zero bias without subtractive cancellation or avoidable intermediate range loss.
 Breakdown/recombination joins, injection knees, higher constitutive derivatives,
 solution-dependent behavioral sources and general nonlinear charge/flux
 manifolds still require further closure support. Behavioral displacement

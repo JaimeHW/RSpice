@@ -230,8 +230,7 @@ impl ResolvedDiodeJunction {
         }
 
         if voltage >= -3.0 * nvt {
-            let (exponential, derivative) = Diode::limited_exp(voltage / nvt, MAX_EXP_ARG);
-            return (isat * (exponential - 1.0), (isat / nvt) * derivative);
+            return Diode::exponential_current(isat, voltage, nvt);
         }
 
         if let Some((breakdown_voltage, breakdown_emission_voltage)) = self.breakdown
@@ -2092,11 +2091,8 @@ impl Diode {
         if !(thermal.is_finite() && thermal > 0.0) {
             return (0.0, 0.0);
         }
-        let (exponential, derivative) = Self::limited_exp(-vd / thermal, MAX_EXP_ARG);
-        (
-            -saturation * (exponential - 1.0),
-            saturation * derivative / thermal,
-        )
+        let (current, conductance) = Self::exponential_current(saturation, -vd, thermal);
+        (-current, conductance)
     }
 
     /// Total saturation current across both junctions.
@@ -2149,10 +2145,7 @@ impl Diode {
             vd
         };
         let nr_vt = nr * self.vt;
-        let (exponential, exponential_derivative) =
-            Self::limited_exp(evaluation_vd / nr_vt, MAX_EXP_ARG);
-        let base_current = isr * (exponential - 1.0);
-        let base_conductance = (isr / nr_vt) * exponential_derivative;
+        let (base_current, base_conductance) = Self::exponential_current(isr, evaluation_vd, nr_vt);
 
         let normalized_depletion = 1.0 - evaluation_vd / self.vj;
         let generation_base = normalized_depletion * normalized_depletion + 0.005;
@@ -2251,8 +2244,7 @@ impl Diode {
 
         let n_vt = emission_coefficient.max(EPSMIN) * self.vt;
         if vd >= -3.0 * n_vt {
-            let (e, de_darg) = Self::limited_exp(vd / n_vt, MAX_EXP_ARG);
-            return (isat * (e - 1.0), (isat / n_vt) * de_darg);
+            return Self::exponential_current(isat, vd, n_vt);
         }
 
         if let Some(brkdwn_v) = self.active_breakdown_voltage()
@@ -2324,6 +2316,31 @@ impl Diode {
             }
         }
         if xbv.is_finite() { Some(xbv) } else { Some(bv) }
+    }
+
+    /// Evaluate Is*(exp(V/VT)-1) without cancelling the current near zero
+    /// or losing a representable result in the intermediate V/VT quotient.
+    /// The exponential continuation and its tangent are unchanged.
+    fn exponential_current(saturation: Value, voltage: Value, thermal: Value) -> (Value, Value) {
+        let argument = voltage / thermal;
+        let (exponential, derivative) = Self::limited_exp(argument, MAX_EXP_ARG);
+        let current = if argument == 0.0 && voltage != 0.0 {
+            rspice_veriloga_runtime::arithmetic::product_div(saturation, voltage, thermal)
+        } else {
+            saturation
+                * if argument.abs() < 0.5 {
+                    argument.exp_m1()
+                } else {
+                    exponential - 1.0
+                }
+        };
+        let ratio = saturation / thermal;
+        let conductance = if ratio.is_normal() || saturation == 0.0 {
+            ratio * derivative
+        } else {
+            rspice_veriloga_runtime::arithmetic::product_div(saturation, derivative, thermal)
+        };
+        (current, conductance)
     }
 
     fn limited_exp(arg: Value, max_arg: Value) -> (Value, Value) {
@@ -2504,6 +2521,68 @@ impl NonlinearDevice for Diode {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn exponential_current_retains_small_signal_and_range() {
+        for (isat, voltage, thermal, expected, slope) in [
+            (1.0, 1e-20, 1.0, 1e-20, 1.0),
+            (1.0, -1e-20, 1.0, -1e-20, 1.0),
+            (1e300, 1e-200, 1e300, 1e-200, 1.0),
+            (1e300, -1e-200, 1e300, -1e-200, 1.0),
+            (
+                1e307,
+                -0.03,
+                0.01,
+                1e307 * (-3.0_f64).exp_m1(),
+                1e307 * (-3.0_f64).exp() / 0.01,
+            ),
+            (
+                1e-300,
+                1e32,
+                1e30,
+                1e-300 * 100.0_f64.exp_m1(),
+                1e-300 * 100.0_f64.exp() / 1e30,
+            ),
+            (1e300, -1.0, 1e-300, -1e300, 0.0),
+        ] {
+            let (current, conductance) = Diode::exponential_current(isat, voltage, thermal);
+            assert!(
+                (current - expected).abs() <= 2e-14 * expected.abs(),
+                "I({isat:e},{voltage:e},{thermal:e})={current:e} vs {expected:e}"
+            );
+            assert!(
+                (conductance - slope).abs() <= 2e-14 * slope.abs(),
+                "G({isat:e},{voltage:e},{thermal:e})={conductance:e} vs {slope:e}"
+            );
+        }
+        let mut diode = Diode::spice_defaults("D1".into(), 1, 0);
+        diode.is = 0.01;
+        diode.n = 1.0;
+        diode.vt = 0.025;
+        diode.sidewall_current_given = true;
+        diode.sidewall_saturation_current = 0.02;
+        diode.sidewall_perimeter = 1.0;
+        diode.recombination_saturation_current = 0.03;
+        for voltage in [-1e-22, 1e-22] {
+            let (junction, gj) = diode
+                .resolved_level_one_junction()
+                .current_and_conductance(voltage);
+            let (sidewall, gs) = diode.sidewall_current_and_conductance(voltage);
+            let (tunnel, gt) = diode.tunnel_current_and_conductance(voltage, 0.04);
+            let (recombination, gr) = diode.recombination_current_and_conductance(voltage);
+            for (current, slope) in [
+                (junction, gj),
+                (sidewall, gs),
+                (tunnel, gt),
+                (recombination, gr),
+            ] {
+                assert!(
+                    (current / (slope * voltage) - 1.0).abs() < 2e-15,
+                    "{current:e}, {slope:e}, {voltage:e}"
+                );
+            }
+        }
+    }
     use super::*;
 
     #[test]

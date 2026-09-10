@@ -12,6 +12,74 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6;
 
 #[test]
+fn nonlinear_descriptor_small_control_signals_preserve_amplified_orbits() {
+    for dialect in [
+        rspice_core::config::SpiceDialect::Ngspice,
+        rspice_core::config::SpiceDialect::Xyce,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let nvt = 300.15
+            * if dialect == rspice_core::config::SpiceDialect::Xyce {
+                1.3806226e-23 / 1.6021918e-19
+            } else {
+                1.38064852e-23 / 1.6021766208e-19
+            };
+        let conductance = 0.01 / nvt;
+        let gain = 1.0 / (1.0 + conductance);
+        let engine = Engine::new(config);
+        for amplitude in [1e-14, 1e-200] {
+            let deck=Netlist::parse(&format!("Small signal nonlinear control\nV1 src 0 SIN(0 {amplitude:e} 1)\nR1 src in 1\nD1 in 0 DM\n.model DM D(IS=0.01)\nE1 out 0 in 0 {:e}\nCout out 0 1u\n.end\n",1.0/amplitude)).unwrap();
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &deck,
+                    PssConfig::new(1.0)
+                        .with_points_per_period(64)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap();
+            assert!(point.shooting_state_basis().is_empty());
+            let result = &point.analysis().result;
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let branch = |name: &str| {
+                result
+                    .branch_names
+                    .iter()
+                    .position(|entry| entry.eq_ignore_ascii_case(name))
+                    .unwrap()
+            };
+            for (index, &time) in result.time.iter().enumerate() {
+                let omega = std::f64::consts::TAU;
+                let voltage = gain * (omega * time).sin();
+                let current = -1e-6 * gain * omega * (omega * time).cos();
+                let actual = result.waveforms[output].values[index];
+                assert!(
+                    (actual - voltage).abs() < 2e-11,
+                    "{dialect:?}, {amplitude:e}, t={time}: V {actual} vs {voltage}"
+                );
+                let actual = result.branch_waveforms[branch("E1")].values[index];
+                assert!(
+                    (actual - current).abs() < 2e-16,
+                    "{dialect:?}, {amplitude:e}, t={time}: I {actual} vs {current}"
+                );
+                let actual = result.branch_waveforms[branch("V1")].values[index] / amplitude;
+                let expected = -conductance * voltage;
+                assert!(
+                    (actual - expected).abs() < 2e-11,
+                    "{dialect:?}, {amplitude:e}, t={time}: source I {actual} vs {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn nonlinear_descriptor_orbits_preserve_implicit_voltages_and_physical_currents() {
     for dialect in [
         rspice_core::config::SpiceDialect::Ngspice,

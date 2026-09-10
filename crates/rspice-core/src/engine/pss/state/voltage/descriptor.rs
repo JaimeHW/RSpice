@@ -752,6 +752,61 @@ mod tests {
     use crate::abort_signal::NoAbort;
 
     #[test]
+    fn nonlinear_descriptor_solves_feedforward_ports_with_zero_external_drive() {
+        let (engine, mut circuit) = build(
+            "V1 src 0 SIN(0.3 0.01 1)\nD1 src 0 DM\nH1 out 0 V1 1e6\nD2 out 0 DM\n.model DM D(IS=1e-12)\nCout out 0 1u",
+            crate::config::SpiceDialect::Ngspice,
+        );
+        assert_eq!(circuit.state_dimension(), 0);
+        circuit.set_state(&[]).unwrap();
+        let solution = engine
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
+            .unwrap();
+        let (current, conductance) = circuit.diodes.devices[0].stamped_current_and_conductance(0.3);
+        let output = -1e6 * current;
+        let rate = -1e6 * conductance * 0.01 * std::f64::consts::TAU;
+        let load = circuit.diodes.devices[1].stamped_conduction_current(output);
+        close(
+            solution[circuit.get_node_by_name("out").unwrap() - 1],
+            output,
+        );
+        close(
+            solution[circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1],
+            -1e-6 * rate - load,
+        );
+    }
+
+    #[test]
+    fn nonlinear_descriptor_keeps_small_signal_constraint_accuracy_under_gain() {
+        let (engine, mut circuit) = build(
+            "V1 src 0 1e-14\nR1 src in 1\nD1 in 0 DM\n.model DM D(IS=0.01)\nE1 out 0 in 0 1e14\nCout out 0 1u",
+            crate::config::SpiceDialect::Ngspice,
+        );
+        assert_eq!(circuit.state_dimension(), 0);
+        circuit.set_state(&[]).unwrap();
+        let solution = engine
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
+            .unwrap();
+        let input = solution[circuit.get_node_by_name("in").unwrap() - 1];
+        let output = solution[circuit.get_node_by_name("out").unwrap() - 1];
+        let diode = &circuit.diodes.devices[0];
+        // expm1 gives an independent forward-law oracle near zero bias.
+        let slope = diode.stamped_current_and_conductance(0.0).1;
+        let gmin = slope - diode.is / (diode.n * diode.vt);
+        let current = diode.is * (input / (diode.n * diode.vt)).exp_m1() + gmin * input;
+        assert!(
+            (1e-14 - input - current).abs() < 1e-27,
+            "KCL at {input:e}, output={output:e}: residual {:e}",
+            1e-14 - input - current
+        );
+        let expected = 1.0 / (1.0 + slope);
+        assert!(
+            (output - expected).abs() < 2e-12,
+            "{output:e} vs {expected:e}"
+        );
+    }
+
+    #[test]
     fn nonlinear_descriptor_solves_implicit_divider_and_controlled_charge() {
         for dialect in [
             crate::config::SpiceDialect::Ngspice,

@@ -33,6 +33,19 @@ fn sum(terms: impl Iterator<Item = (Value, Value)> + Clone) -> Result<Value, Sim
     rspice_veriloga_runtime::arithmetic::sum_products(terms).map_err(|_| precision_error())
 }
 
+// Compare nonnegative residual/scale pairs without overflowing a quotient
+// or rounding a subnormal normalized residual to zero.
+fn relative_less(left: (Value, Value), right: (Value, Value)) -> bool {
+    use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
+    let difference = S::product_sum(
+        S::new(left.0),
+        S::new(right.1),
+        S::new(-right.0),
+        S::new(left.1),
+    );
+    !difference.is_zero() && difference.binary64().is_sign_negative()
+}
+
 fn poll(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
@@ -267,7 +280,10 @@ impl NonlinearForcing {
                 input_rate[row] = forcing(1)?;
             }
         }
-        let mut voltage = if guess.len() == n {
+        // Every admitted constitutive law has f(0)=0. With zero forcing,
+        // passivity/uniqueness makes zero the exact solution, even when the
+        // previous sample was far from zero.
+        let mut voltage = if guess.len() == n && input.iter().any(|&value| value != 0.0) {
             guess.to_vec()
         } else {
             vec![0.0; n]
@@ -275,6 +291,7 @@ impl NonlinearForcing {
         let mut current = vec![[0.0; 2]; n];
         let mut conductance = vec![0.0; n];
         let mut residual = vec![0.0; n];
+        let mut line_scale = vec![0.0; n];
         let evaluate = |voltage: &[Value],
                         current: &mut [[Value; 2]],
                         conductance: &mut [Value],
@@ -288,23 +305,58 @@ impl NonlinearForcing {
                 current[index][0] = value;
                 conductance[index] = slope;
             }
-            let mut norm = 0.0_f64;
+            let mut norm = (0.0, 1.0);
             for row in 0..n {
                 poll(abort)?;
                 residual[row] = sum([(voltage[row], 1.0), (input[row], -1.0)].into_iter().chain(
                     (0..n).map(|col| (-self.plan.response[row * n + col], current[col][0])),
                 ))?;
-                norm = norm
-                    .max(residual[row].abs() / input[row].abs().max(voltage[row].abs()).max(1.0));
+                // A volt-scale absolute floor is unsafe: a dependent source
+                // may amplify a tiny control voltage into a full-scale output.
+                // Zero equations are exact; every nonzero row is relative to
+                // its own voltage scale, including subnormal voltages.
+                if residual[row] != 0.0 {
+                    let row_norm = (
+                        residual[row].abs(),
+                        input[row].abs().max(voltage[row].abs()),
+                    );
+                    if relative_less(norm, row_norm) {
+                        norm = row_norm;
+                    }
+                }
             }
             Ok::<_, SimulationError>(norm)
         };
         let mut converged = false;
         for _ in 0..100 {
             let norm = evaluate(&voltage, &mut current, &mut conductance, &mut residual)?;
-            if norm <= 64.0 * Value::EPSILON {
+            if !relative_less((64.0 * Value::EPSILON, 1.0), norm) {
                 converged = true;
                 break;
+            }
+            // Descent must use one fixed set of row scales across the line
+            // search. Rescaling by each trial voltage can report no progress
+            // as both a voltage and its residual approach a zero crossing.
+            // Include the old residual for rows driven through other ports.
+            let mut line_norm = (0.0, 1.0);
+            for row in 0..n {
+                line_scale[row] = input[row]
+                    .abs()
+                    .max(voltage[row].abs())
+                    .max(residual[row].abs());
+                let row_norm = (residual[row].abs(), line_scale[row]);
+                if relative_less(line_norm, row_norm) {
+                    line_norm = row_norm;
+                }
+            }
+            // A currently zero row may acquire a nonlinear trial residual
+            // through another port. Give it a positive, fixed merit scale;
+            // the final convergence test still uses its own voltage scale.
+            let active_scale = line_scale.iter().copied().fold(0.0, Value::max);
+            for scale in &mut line_scale {
+                if *scale == 0.0 {
+                    *scale = active_scale;
+                }
             }
             let correction = self.solve(&conductance, &residual, abort)?;
             let mut damping = 1.0;
@@ -316,8 +368,15 @@ impl NonlinearForcing {
                     trial[index] =
                         sum([(voltage[index], 1.0), (correction[index], -damping)].into_iter())?;
                 }
-                let trial_norm = evaluate(&trial, &mut current, &mut conductance, &mut residual)?;
-                if trial_norm < norm {
+                evaluate(&trial, &mut current, &mut conductance, &mut residual)?;
+                let mut trial_norm = (0.0, 1.0);
+                for row in 0..n {
+                    let row_norm = (residual[row].abs(), line_scale[row]);
+                    if relative_less(trial_norm, row_norm) {
+                        trial_norm = row_norm;
+                    }
+                }
+                if relative_less(trial_norm, line_norm) {
                     voltage.copy_from_slice(&trial);
                     improved = true;
                     break;
@@ -533,6 +592,20 @@ fn negative_semidefinite(
 mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
+
+    #[test]
+    fn nonlinear_relative_norm_preserves_extreme_scales() {
+        for (left, right) in [
+            ((1e300, 1e-300), (2e300, 1e-300)),
+            ((1e-300, 1e300), (2e-300, 1e300)),
+            ((0.0, 1.0), (Value::from_bits(1), Value::MAX)),
+            ((1.0, 1.0), (1.0, 0.0)),
+        ] {
+            assert!(relative_less(left, right));
+            assert!(!relative_less(right, left));
+            assert!(!relative_less(left, left));
+        }
+    }
 
     #[test]
     fn nonlinear_descriptor_passivity_is_exact_and_allows_feedforward() {
