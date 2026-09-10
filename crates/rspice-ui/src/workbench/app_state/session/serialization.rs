@@ -126,7 +126,22 @@ impl serde::Serialize for AppState {
             .map_err(<S::Error as serde::ser::Error>::custom)?;
         let field_count = if simulation_results.is_empty() { 9 } else { 10 };
         let mut state = serializer.serialize_struct("AppState", field_count)?;
-        state.serialize_field("project_workspace", &self.workspace)?;
+        let mut committed_workspace;
+        let workspace = if self
+            .workspace
+            .schematic_buffers
+            .values()
+            .any(crate::state::SchematicState::has_pending_operation)
+        {
+            committed_workspace = self.workspace.clone();
+            for schematic in committed_workspace.schematic_buffers.values_mut() {
+                schematic.cancel_operation();
+            }
+            &committed_workspace
+        } else {
+            &self.workspace
+        };
+        state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field(
             "ui_session",

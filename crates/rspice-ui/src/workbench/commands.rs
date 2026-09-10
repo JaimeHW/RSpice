@@ -1683,7 +1683,9 @@ impl Command {
                 }
             }
             Self::Cancel => {
-                if app.state.dialogs.descend_hierarchy.open {
+                if app.state.cancel_schematic_drag() {
+                    // A pointer edit is the innermost active interaction.
+                } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
                 } else if app.state.dialogs.move_selection.armed {
                     crate::workbench::app::cancel_armed_move_selection(&mut app.state);

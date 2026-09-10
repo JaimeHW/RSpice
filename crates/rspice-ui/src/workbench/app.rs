@@ -529,6 +529,7 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
+        self.state.reconcile_schematic_drag(ctx, false);
         let initializing_frame = self.first_frame;
         let desired_zoom = self.state.ui.preferences.interface_scale();
         if (ctx.zoom_factor() - desired_zoom).abs() > f32::EPSILON {
@@ -736,10 +737,14 @@ impl RSpiceApp {
         );
         self.state.workbench.full_screen = window_state.full_screen;
         if let Some(document) = window_state.active_document {
+            // This is a temporary rendering projection, not user navigation.
+            // The gesture remains owned by its original window and document.
+            let drag = std::mem::take(&mut self.state.dialogs.interaction.drag);
             let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
                 &mut self.state,
                 &document,
             );
+            self.state.dialogs.interaction.drag = drag;
         }
         self.state.workbench.drawer = window_state.drawer;
         self.state.workbench.console_maximized = window_state.console_maximized;
@@ -814,6 +819,7 @@ impl RSpiceApp {
         }
 
         for window in close_windows {
+            self.state.cancel_schematic_drag_in_window(window);
             let _ = self.state.workbench.window_session.close_window(window);
         }
     }
@@ -1440,6 +1446,9 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod gesture_tests;
 
 #[cfg(test)]
 mod tests {

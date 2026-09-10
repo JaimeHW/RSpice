@@ -112,6 +112,9 @@ impl SchematicState {
     /// prevents a route cancellation from unexpectedly discarding the user's
     /// selection.
     pub fn cancel_interaction_step(&mut self) {
+        if self.cancel_operation() {
+            return;
+        }
         if self.wire_drawing.active || self.bus_drawing.active {
             self.cancel_routing_gestures();
             return;

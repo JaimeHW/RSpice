@@ -738,6 +738,14 @@ impl AppState {
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         if is_schematic_like(self.workspace.active_view_type()) {
             let active = self.workspace.active_schematic_reference();
+            if self.schematic.has_pending_operation() {
+                // Window projection may retain a live gesture in a runtime
+                // buffer; it must not publish symbols or sheet transactions.
+                self.workspace
+                    .schematic_buffers
+                    .insert(active.key(), self.schematic.clone());
+                return;
+            }
             self.reconcile_active_sheet_membership(&active);
             // Nothing may be written back to the workspace still claiming a
             // master's netlist identity after that master is gone — including
@@ -925,6 +933,7 @@ impl AppState {
     }
 
     pub(crate) fn restore_active_schematic_from_workspace(&mut self) {
+        self.cancel_schematic_drag();
         self.workspace
             .ensure_library_model(&mut self.library_manager);
         let reference = self.workspace.active_view.clone();
@@ -941,6 +950,9 @@ impl AppState {
     }
 
     pub(crate) fn open_workspace_view(&mut self, reference: CellViewRef) {
+        if self.workspace.active_view != reference {
+            self.cancel_schematic_drag();
+        }
         self.sync_active_schematic_to_workspace();
         if self.workspace.active_view == reference {
             self.workbench
@@ -976,6 +988,7 @@ impl AppState {
         instance: Option<String>,
         reference: CellViewRef,
     ) {
+        self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
         let view_type = view_type_for_reference(self, &reference);
         match instance {
@@ -2068,6 +2081,7 @@ impl AppState {
     }
 
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
+        self.cancel_schematic_drag();
         self.sync_active_schematic_to_workspace();
         if let Some(reference) = self.workspace.focus_breadcrumb(index) {
             self.library_manager

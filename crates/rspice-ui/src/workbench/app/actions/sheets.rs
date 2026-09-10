@@ -381,6 +381,7 @@ fn activate(state: &mut AppState, id: SheetId, name: String) -> Result<String, S
     }
     // Objects authored on the sheet being left take their membership from the
     // sheet that is still active, so the buffer is synchronized first.
+    state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
     edit_catalog(state, "activate sheet", |catalog| {
         catalog.set_active(id).map_err(|error| error.to_string())

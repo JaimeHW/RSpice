@@ -51,9 +51,17 @@ impl SchematicState {
     /// `true` if an undo entry was created, `false` if nothing changed.
     pub fn end_operation(&mut self) -> bool {
         let snapshot = super::super::undo_history::SchematicSnapshot::capture(self);
+        let was_dirty = self.undo_history.pending_was_dirty();
         let committed = self.undo_history.end_operation(snapshot);
         if committed {
+            self.is_dirty = true;
             self.content_version = self.content_version.wrapping_add(1);
+        } else if !self.has_pending_operation()
+            && let Some(was_dirty) = was_dirty
+        {
+            // Moving back to the starting position is a no-op, even though
+            // the intermediate preview marked the document as modified.
+            self.is_dirty = was_dirty;
         }
         committed
     }
@@ -199,6 +207,10 @@ impl SchematicState {
     /// Check if an operation is currently pending
     pub fn has_pending_operation(&self) -> bool {
         self.undo_history.has_pending_operation()
+    }
+
+    pub(crate) fn pending_operation_id(&self) -> Option<u64> {
+        self.undo_history.pending_operation_id()
     }
 
     /// Re-check every hierarchical placement in this document against the

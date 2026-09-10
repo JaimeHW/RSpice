@@ -75,6 +75,7 @@ pub type UndoSequence = u64;
 pub const UNSTAMPED_UNDO_SEQUENCE: UndoSequence = 0;
 
 static NEXT_UNDO_SEQUENCE: AtomicU64 = AtomicU64::new(UNSTAMPED_UNDO_SEQUENCE + 1);
+static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Draw the next global sequence. Every commit boundary — this module's
 /// `end_operation`, `undo` and `redo`, and every project-level transaction
@@ -286,6 +287,7 @@ pub struct UndoEntry {
 /// Tracks an in-progress operation for transaction-based undo
 #[derive(Debug, Clone)]
 struct PendingOperation {
+    id: u64,
     /// Snapshot captured at begin_operation
     before_snapshot: SchematicSnapshot,
     /// Description of the operation
@@ -395,6 +397,7 @@ impl UndoHistory {
         }
 
         self.pending = Some(PendingOperation {
+            id: NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed),
             before_snapshot,
             description: description.into(),
             nesting_depth: 0,
@@ -453,6 +456,19 @@ impl UndoHistory {
         let pending = self.pending.take()?;
         self.adopt_restored_sheet_assignments(&pending.before_snapshot.sheet_assignments);
         Some(pending.before_snapshot)
+    }
+
+    pub(crate) fn pending_operation_id(&self) -> Option<u64> {
+        self.pending.as_ref().map(|pending| pending.id)
+    }
+
+    pub(crate) fn pending_was_dirty(&self) -> Option<bool> {
+        self.pending
+            .as_ref()?
+            .before_snapshot
+            .cancel_state
+            .as_ref()
+            .map(|cancel| cancel.was_dirty)
     }
 
     /// A step that has just been applied makes its own membership the live

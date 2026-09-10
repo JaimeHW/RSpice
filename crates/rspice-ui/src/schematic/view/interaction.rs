@@ -45,6 +45,9 @@ pub(super) fn handle_tool_interactions(
     viewport: &Viewport,
     symbol_context: &SchematicSymbolContext,
 ) {
+    if state.reconcile_schematic_drag(ui.ctx(), false) {
+        return;
+    }
     retain_selection_on_active_sheet(state);
     if primary_pan_gesture_active(ui, response) {
         return;
@@ -729,7 +732,7 @@ fn handle_select_dragging(
     }
 
     if response.drag_started_by(egui::PointerButton::Primary)
-        && let Some(pos) = response.interact_pointer_pos()
+        && let Some(pos) = ui.input(|input| input.pointer.press_origin())
     {
         let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
         let wire_position =
@@ -758,13 +761,13 @@ fn handle_select_dragging(
                         state.schematic.selection.clear();
                         state.schematic.selection.select_component(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::DesignNote(id)) => {
                     if !state.schematic.selection.has_design_note(id) {
                         state.schematic.selection.select_only_design_note(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::DocumentationShape(id)) => {
                     if !state.schematic.selection.has_documentation_shape(id) {
@@ -773,41 +776,41 @@ fn handle_select_dragging(
                             .selection
                             .select_only_documentation_shape(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::Probe(id)) => {
                     if !state.schematic.selection.has_probe(id) {
                         state.schematic.selection.select_only_probe(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::NetLabel(id)) => {
                     if !state.schematic.selection.has_net_label(id) {
                         state.schematic.selection.select_only_net_label(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::BusTap(id)) => {
                     if !state.schematic.selection.has_bus_tap(id) {
                         state.schematic.selection.select_only_bus_tap(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::Junction(_))
                     if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_position);
+                    start_wire_vertex_drag(state, wire_position, ui.ctx());
                 }
                 Some(PointerTarget::Bus(id)) => {
                     if !state.schematic.selection.has_bus(id) {
                         state.schematic.selection.select_only_bus(id);
                     }
-                    start_selection_drag(state, grid_pos);
+                    start_selection_drag(state, grid_pos, ui.ctx());
                 }
                 Some(PointerTarget::Wire(_))
                     if filter.wires && active_wire_point_is_draggable(state, wire_position) =>
                 {
-                    start_wire_vertex_drag(state, wire_position);
+                    start_wire_vertex_drag(state, wire_position, ui.ctx());
                 }
                 _ => state.schematic.selection_rect.start_at(grid_pos),
             }
@@ -819,19 +822,24 @@ fn handle_select_dragging(
     {
         let grid_pos = resolve_grid_pointer(state, viewport, pos).snapped_position;
 
-        if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
+        if state.schematic_drag_owned_by_context(ui.ctx())
+            && state.dialogs.interaction.drag.drag_type == DragType::WireVertex
+            && let Some((old_x, old_y)) = state.dialogs.interaction.drag.last_pos
+        {
             let old_pos = Point::new(old_x, old_y);
             if with_active_wire_topology(state, |schematic| {
                 schematic.move_all_vertices_at(old_pos, grid_pos)
             }) {
-                state.dialogs.interaction.vertex_drag_pos = Some((grid_pos.x, grid_pos.y));
                 state
                     .dialogs
                     .interaction
                     .drag
                     .update((grid_pos.x, grid_pos.y));
             }
-        } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
+        } else if state.schematic_drag_owned_by_context(ui.ctx())
+            && state.dialogs.interaction.drag.drag_type == DragType::MoveSelection
+            && let Some((last_x, last_y)) = state.dialogs.interaction.drag.last_pos
+        {
             let delta = Point::new(
                 grid_pos.x.saturating_sub(last_x),
                 grid_pos.y.saturating_sub(last_y),
@@ -843,7 +851,11 @@ fn handle_select_dragging(
                         symbol_context.terminal_points(component)
                     })
                 });
-                state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
+                state
+                    .dialogs
+                    .interaction
+                    .drag
+                    .update((grid_pos.x, grid_pos.y));
             }
         } else if state.schematic.selection_rect.is_active() {
             state.schematic.selection_rect.update(grid_pos);
@@ -851,7 +863,7 @@ fn handle_select_dragging(
     }
 
     if response.drag_stopped_by(egui::PointerButton::Primary) {
-        if state.dialogs.interaction.vertex_drag_pos.is_some() {
+        if state.schematic_drag_owned_by_context(ui.ctx()) {
             let automatic_junctions = state
                 .schematic
                 .document_policy
@@ -864,22 +876,7 @@ fn handle_select_dragging(
             if state.schematic.end_operation() {
                 state.sync_active_schematic_to_workspace();
             }
-            state.dialogs.interaction.vertex_drag_pos = None;
             state.dialogs.interaction.drag.cancel();
-        } else if state.dialogs.last_drag_pos.is_some() {
-            let automatic_junctions = state
-                .schematic
-                .document_policy
-                .wire_junctions
-                .automatic_junctions();
-            with_active_wire_topology(state, |schematic| {
-                schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions)
-            });
-            if state.schematic.end_operation() {
-                state.sync_active_schematic_to_workspace();
-            }
-            state.dialogs.drag_start = None;
-            state.dialogs.last_drag_pos = None;
         } else {
             let left_to_right =
                 state.schematic.selection_rect.current.x >= state.schematic.selection_rect.start.x;
@@ -903,22 +900,13 @@ fn handle_select_dragging(
     }
 }
 
-fn start_wire_vertex_drag(state: &mut AppState, position: Point) {
-    state.schematic.begin_operation("drag wire vertex");
-    state.dialogs.interaction.vertex_drag_pos = Some((position.x, position.y));
-    state
-        .dialogs
-        .interaction
-        .drag
-        .start((position.x, position.y), DragType::WireVertex);
+fn start_wire_vertex_drag(state: &mut AppState, position: Point, ctx: &egui::Context) {
+    state.begin_schematic_drag((position.x, position.y), DragType::WireVertex, ctx);
 }
 
-fn start_selection_drag(state: &mut AppState, position: Point) {
-    state.schematic.begin_operation("move selection");
-    state.dialogs.drag_start = Some((position.x, position.y));
-    state.dialogs.last_drag_pos = Some((position.x, position.y));
+fn start_selection_drag(state: &mut AppState, position: Point, ctx: &egui::Context) {
+    state.begin_schematic_drag((position.x, position.y), DragType::MoveSelection, ctx);
 }
-
 fn select_drag_can_start(primary_pan_requested: bool) -> bool {
     !primary_pan_requested
 }

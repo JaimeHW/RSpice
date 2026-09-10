@@ -56,6 +56,7 @@ fn clear_full_screen_presentation(app: &mut RSpiceApp, request_platform_exit: bo
 pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
+    app.state.reconcile_schematic_drag(ctx, false);
     reconcile_platform_full_screen(app);
     // The announcement goes first so that it is the record that survives.
     // Both of these report a finished run, and the mirror drops a line whose
@@ -218,6 +219,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     {
         commands::result_navigation::perform_notification_action(app, action);
     }
+    app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);
 }
 
@@ -353,6 +355,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
 pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let ctx = root.ctx().clone();
     let ctx = &ctx;
+    app.state.reconcile_schematic_drag(ctx, false);
     reconcile_platform_full_screen(app);
     app.state.workbench.coarse_pointer = pointer_is_coarse(ctx, app.state.workbench.coarse_pointer);
     let viewport = ctx.content_rect().size();
@@ -406,6 +409,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
     if layout.has_overlay_drawer {
         docks::show_drawers(root, app, layout);
     }
+    app.state.reconcile_schematic_drag(ctx, true);
     apply_platform_full_screen_request(ctx, app);
 }
 
@@ -413,6 +417,7 @@ pub(crate) fn show_secondary(root: &mut egui::Ui, app: &mut RSpiceApp) {
 /// embeds it in a movable egui window, so nested top-level panels would escape
 /// that frame; render the owned document surface directly instead.
 pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, title: &str) -> bool {
+    app.state.reconcile_schematic_drag(ui.ctx(), false);
     let mut reattach = false;
     ui.horizontal(|ui| {
         ui.strong(title);
@@ -426,6 +431,7 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
     });
     ui.separator();
     surfaces::show(ui, app);
+    app.state.reconcile_schematic_drag(ui.ctx(), true);
     reattach
 }
 

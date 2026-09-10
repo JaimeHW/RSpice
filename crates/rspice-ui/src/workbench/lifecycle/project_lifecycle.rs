@@ -268,6 +268,11 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
             .schematic_buffers
             .insert(workspace.active_key(), state.schematic.clone());
     }
+    // A save/checkpoint retains committed content even when a native window
+    // currently holds a live pointer preview in one of the runtime buffers.
+    for schematic in workspace.schematic_buffers.values_mut() {
+        schematic.cancel_operation();
+    }
     workspace.mark_all_clean();
     for schematic in workspace.schematic_buffers.values_mut() {
         strip_schematic_runtime_state(schematic);
@@ -1809,6 +1814,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
         return Err(ProjectLifecycleError::LastPresentedDocument);
     }
     // Capture the live editor before removing only its presentation record.
+    state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
     let closing = state.workspace.active_view.clone();
     state.workspace.close_view(&closing);

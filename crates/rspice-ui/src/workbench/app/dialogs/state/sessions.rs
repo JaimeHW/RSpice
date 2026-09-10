@@ -298,11 +298,6 @@ pub struct DialogState {
     pub(crate) pending_autosave_restore:
         Option<crate::workbench::lifecycle::recovery_checkpoint::AutosaveRestoreCandidate>,
 
-    /// Starting position of selection drag (grid coords)
-    pub drag_start: Option<(i32, i32)>,
-    /// Last drag position for computing delta (grid coords)
-    pub last_drag_pos: Option<(i32, i32)>,
-
     /// DRC results (cached from last run; surfaced by the schematic view)
     pub drc_results: Option<crate::services::drc::DrcResult>,
     /// `topology_version` when the last check ran — canvas markers hide and
