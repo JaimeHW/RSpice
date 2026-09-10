@@ -315,6 +315,65 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn pss_large_drop_port_precision_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::PssConfig;
+        let mut config = rspice_core::engine::SimulationConfig::default()
+            .with_spice_dialect(rspice_core::config::SpiceDialect::Ngspice);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        let thermal = 300.15 * 1.38064852e-23 / 1.6021766208e-19;
+        for (source, resistance, saturation, gain, scale) in [
+            (1.0, 1e20, 1.0, 1e22, 100.0),
+            (1e300, 1e300, 1e298, 1e298, 1.0),
+        ] {
+            let deck = rspice_core::Netlist::parse(&format!(
+                "Large drop diode in WASM\nV1 src 0 SIN({source:e} {:e} 1)\nR1 src in {resistance:e}\nD1 in 0 DM\n.model DM D(IS={saturation:e})\nE1 out 0 in 0 {gain:e}\nCout out 0 1u\n.end\n", 0.5 * source,
+            )).unwrap();
+            let point = engine
+                .run_pss_operating_point_with_abort(
+                    &deck,
+                    PssConfig::new(1.0)
+                        .with_points_per_period(64)
+                        .with_tstab_periods(0),
+                    &NoAbort,
+                )
+                .unwrap();
+            assert!(point.shooting_state_basis().is_empty());
+            let result = &point.analysis().result;
+            let node = |name: &str| {
+                result
+                    .node_names
+                    .iter()
+                    .position(|entry| entry.eq_ignore_ascii_case(name))
+                    .unwrap()
+            };
+            let branch = result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("E1"))
+                .unwrap();
+            for (index, &time) in result.time.iter().enumerate() {
+                let phase = std::f64::consts::TAU * time;
+                let expected = 1.0 + 0.5 * phase.sin();
+                for voltage in [
+                    result.waveforms[node("in")].values[index] * gain,
+                    result.waveforms[node("out")].values[index],
+                ] {
+                    assert!((voltage / (scale * thermal) - expected).abs() < 2e-11);
+                }
+                let current_scale = 1e-6 * scale * thermal * 0.5 * std::f64::consts::TAU;
+                assert!(
+                    (result.branch_waveforms[branch].values[index] / current_scale + phase.cos())
+                        .abs()
+                        < 2e-11
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn pss_small_control_voltage_precision_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::PssConfig;

@@ -19,6 +19,7 @@ struct Plan {
 #[derive(Debug, Clone, Default)]
 struct Sample {
     voltage: Vec<Value>,
+    voltage_rate: Vec<Value>,
     current: Vec<[Value; 2]>,
 }
 
@@ -67,7 +68,7 @@ impl NonlinearForcing {
         // Higher descriptor indices need model Taylor jets and branch proofs.
         if orders
             .iter()
-            .any(|(&(kind, _), &order)| kind == ConstraintSource::Diode && order > 1)
+            .any(|(&(kind, _), &order)| kind.is_nonlinear() && order > 1)
         {
             return Ok(None);
         }
@@ -81,11 +82,9 @@ impl NonlinearForcing {
         let mut rates = vec![false; n];
         for (row, port) in ports.iter_mut().enumerate() {
             poll(abort)?;
-            rates[row] = orders
-                .get(&(ConstraintSource::Diode, row))
-                .copied()
-                .unwrap_or(0)
-                != 0;
+            rates[row] = [ConstraintSource::Diode, ConstraintSource::DiodeVoltage]
+                .into_iter()
+                .any(|kind| orders.get(&(kind, row)).is_some_and(|&order| order != 0));
             port.retain(|&(value, weight)| {
                 if let Some((ConstraintSource::Diode, col, _)) = value.source() {
                     response[row * n + col] = weight;
@@ -221,7 +220,8 @@ impl NonlinearForcing {
         time: Value,
         extra: usize,
     ) -> Result<Value, SimulationError> {
-        let Some((ConstraintSource::Diode, index, order)) = value.source() else {
+        let Some((kind, index, order)) = value.source().filter(|(kind, _, _)| kind.is_nonlinear())
+        else {
             return Err(precision_error());
         };
         let sample = if time == 0.0 {
@@ -235,14 +235,20 @@ impl NonlinearForcing {
         order
             .checked_add(extra)
             .and_then(|order| {
-                sample
-                    .and_then(|sample| sample.current.get(index))
-                    .and_then(|current| current.get(order))
+                sample.and_then(|sample| match (kind, order) {
+                    (ConstraintSource::DiodeVoltage, 0) => sample.voltage.get(index),
+                    (ConstraintSource::DiodeVoltage, 1) => sample.voltage_rate.get(index),
+                    (ConstraintSource::Diode, _) => sample
+                        .current
+                        .get(index)
+                        .and_then(|current| current.get(order)),
+                    _ => None,
+                })
             })
             .copied()
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "PSS nonlinear constraint current was not prepared at t={time:e}"
+                    "PSS nonlinear constraint value was not prepared at t={time:e}"
                 ))
             })
     }
@@ -392,7 +398,7 @@ impl NonlinearForcing {
                 "PSS nonlinear algebraic constraint did not converge at t={time:e}"
             )));
         }
-        if self.plan.rates.iter().any(|&rate| rate) {
+        let voltage_rate = if self.plan.rates.iter().any(|&rate| rate) {
             let rate = self.solve(&conductance, &input_rate, abort)?;
             for index in 0..n {
                 poll(abort)?;
@@ -400,8 +406,15 @@ impl NonlinearForcing {
                     current[index][1] = sum([(conductance[index], rate[index])].into_iter())?;
                 }
             }
-        }
-        Ok(Sample { voltage, current })
+            rate
+        } else {
+            Vec::new()
+        };
+        Ok(Sample {
+            voltage,
+            voltage_rate,
+            current,
+        })
     }
 
     fn solve(

@@ -78,10 +78,35 @@ impl PssDescriptor {
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Option<PssStateBasis>, SimulationError> {
-        let size = circuit.matrix_size();
+        Self::build_with_ports(circuit, limits, abort, None)
+    }
+
+    fn build_with_ports(
+        circuit: &CircuitData,
+        limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+        nonlinear_ports: Option<Vec<Vec<(ForestValue, Value)>>>,
+    ) -> Result<Option<PssStateBasis>, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        let size = circuit.matrix_size();
+        let mut prepared_words = 0_usize;
+        if let Some(ports) = &nonlinear_ports {
+            prepared_words = ports.len().saturating_mul(3);
+            for port in ports {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                prepared_words =
+                    prepared_words.saturating_add(port.len().saturating_mul(FORM_TERM_WORDS));
+            }
+        }
+        let port_overhead = if nonlinear_ports.is_some() {
+            circuit.diodes.len().saturating_mul(32)
+        } else {
+            0
+        };
         // Each admitted linear device stamps at most eight static entries.
         // Include the triplet builder's initial capacity and geometric growth
         // before it allocates, alongside both reducers and pending row maps.
@@ -92,13 +117,19 @@ impl PssDescriptor {
             });
         let triplet_words = stamp_bound.max(size.saturating_mul(6)).saturating_mul(6);
         PssVoltageConstraintBuilder::ensure_words(
-            size.saturating_mul(48).saturating_add(triplet_words),
+            size.saturating_mul(48)
+                .saturating_add(triplet_words)
+                .saturating_add(prepared_words)
+                .saturating_add(port_overhead),
             limits.max_result_values,
         )?;
         let mut dynamic =
             PssVoltageConstraintBuilder::new(size.saturating_mul(2).saturating_add(1), limits)?;
         let mut algebraic = PssVoltageConstraintBuilder::new(size.saturating_add(1), limits)?;
-        let overhead = size.saturating_mul(32);
+        let overhead = size
+            .saturating_mul(32)
+            .saturating_add(prepared_words)
+            .saturating_add(port_overhead);
         let mut words = overhead
             .saturating_add(dynamic.retained_words)
             .saturating_add(algebraic.retained_words)
@@ -274,6 +305,40 @@ impl PssDescriptor {
             }
         }
         drop(dc);
+        if nonlinear_ports.is_some() {
+            // Replay the physical equations with the solved diode voltages
+            // first. Their differentiated constraints preserve small port
+            // rates in downstream capacitor/source currents as well.
+            PssVoltageConstraintBuilder::ensure_words(
+                words.saturating_add(circuit.diodes.len().saturating_mul(128)),
+                limits.max_result_values,
+            )?;
+            rows.reserve(circuit.diodes.len());
+            for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let mut row = VoltageRow::default();
+                for (node, sign) in [(diode.node_anode, 1), (diode.node_cathode, -1)] {
+                    if node != 0 {
+                        PssVoltageConstraintBuilder::add_integer(
+                            &mut row.nodes,
+                            node,
+                            BigInt::from(sign),
+                        );
+                    }
+                }
+                row.values.insert(
+                    ForestValue::SourceDerivative {
+                        index,
+                        order: 0,
+                        kind: ConstraintSource::DiodeVoltage,
+                    },
+                    BigInt::from(1),
+                );
+                rows.push(row);
+            }
+        }
         // E*x' + A*x = b(t). Eliminate only derivative columns first.
         // Each independent residual C*x=d(t) also implies C*x'=d'(t).
         // Feeding that derivative back exposes hidden higher-index constraints.
@@ -298,6 +363,13 @@ impl PssDescriptor {
             );
             if let Some(remainder) = algebraic.admit(row, 1, abort)? {
                 if !remainder.values.is_empty() {
+                    if nonlinear_ports.is_some() {
+                        // These are the original port equations (and their
+                        // derivatives), evaluated by NonlinearForcing. The
+                        // first pass already rejected independent source-only
+                        // constraints and ports carrying dynamic coordinates.
+                        continue;
+                    }
                     // A constitutive inverse or differential nonlinear closure
                     // is needed here; do not certify it by linearization.
                     if !circuit.diodes.is_empty() {
@@ -352,8 +424,37 @@ impl PssDescriptor {
                 voltage_branches.push(VoltageBranch::Capacitor(index));
             }
         }
-        let mut retained_words = size.saturating_mul(3);
-        algebraic.reserve_retained_words(retained_words)?;
+        if nonlinear_ports.is_none() && !circuit.diodes.is_empty() {
+            let port_headers = circuit.diodes.len().saturating_mul(3);
+            algebraic.reserve_retained_words(port_headers)?;
+            let mut nonlinear_ports = Vec::with_capacity(circuit.diodes.len());
+            for diode in &circuit.diodes.devices {
+                let row = algebraic.port_row(diode.node_anode, diode.node_cathode, abort)?;
+                // State dependence or derivatives of a nonlinear current can
+                // carry real charge/flux dynamics. Keep that existing basis.
+                if !row.nodes.is_empty()
+                    || row.values.keys().any(|value| match value.source() {
+                        Some((ConstraintSource::Diode, _, order)) => order != 0,
+                        Some(_) => false,
+                        None => true,
+                    })
+                {
+                    return Ok(None);
+                }
+                nonlinear_ports.push(algebraic.compile_row(row)?);
+            }
+            // At most one replay: the second pass receives the original
+            // constitutive response and never compiles a new one. Release
+            // the first reducer and state vectors before allocating it.
+            drop(algebraic);
+            drop(representatives);
+            drop(voltage_branches);
+            drop(ic_rows);
+            return Self::build_with_ports(circuit, limits, abort, Some(nonlinear_ports));
+        }
+        let nonlinear_ports = nonlinear_ports.unwrap_or_default();
+        let mut retained_words = size.saturating_mul(3).saturating_add(prepared_words);
+        algebraic.reserve_retained_words(size.saturating_mul(3))?;
         let mut forms = Vec::with_capacity(size);
         for unknown in 1..=size {
             let row = algebraic.port_row(unknown, 0, abort)?;
@@ -392,27 +493,6 @@ impl PssDescriptor {
                 retained_words.saturating_add(form.len().saturating_mul(FORM_TERM_WORDS));
             charge_forcing.push(form);
         }
-        let port_headers = circuit.diodes.len().saturating_mul(3);
-        algebraic.reserve_retained_words(port_headers)?;
-        retained_words = retained_words.saturating_add(port_headers);
-        let mut nonlinear_ports = Vec::with_capacity(circuit.diodes.len());
-        for diode in &circuit.diodes.devices {
-            let row = algebraic.port_row(diode.node_anode, diode.node_cathode, abort)?;
-            // State dependence or derivatives of a nonlinear current can
-            // carry real charge/flux dynamics. Keep that existing basis.
-            if !row.nodes.is_empty()
-                || row.values.keys().any(|value| match value.source() {
-                    Some((ConstraintSource::Diode, _, order)) => order != 0,
-                    Some(_) => false,
-                    None => true,
-                })
-            {
-                return Ok(None);
-            }
-            retained_words =
-                retained_words.saturating_add(row.values.len().saturating_mul(FORM_TERM_WORDS));
-            nonlinear_ports.push(algebraic.compile_row(row)?);
-        }
         drop(algebraic);
         // Reserve source-order map nodes and traversal work before collecting
         // derivative requests. They coexist with compiled forms and caches.
@@ -422,7 +502,7 @@ impl PssDescriptor {
             .saturating_add(circuit.current_sources.len())
             .saturating_add(circuit.behavioral_sources.voltage_sources.len())
             .saturating_add(circuit.behavioral_sources.current_sources.len())
-            .saturating_add(circuit.diodes.len());
+            .saturating_add(circuit.diodes.len().saturating_mul(2));
         retained_words = retained_words.saturating_add(source_count.saturating_mul(64));
         PssVoltageConstraintBuilder::ensure_words(retained_words, limits.max_result_values)?;
         let mut descriptor = Self {
@@ -484,20 +564,20 @@ impl PssDescriptor {
         circuit: &mut CircuitData,
         state: &[Value],
         voltage_count: usize,
-        solution: &mut [Value],
-    ) -> Result<(), SimulationError> {
+        time: Value,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = self.solution.node_forms.len().saturating_add(1);
         self.solution
-            .ensure_evaluation_work(solution.len().saturating_mul(2), self.solution.max_terms())?;
-        let mut trial = vec![0.0; solution.len()];
+            .ensure_evaluation_work(size.saturating_mul(2), self.solution.max_terms())?;
+        let mut trial = vec![0.0; size];
         self.solution.solve(&mut trial, |value| {
             if value.source().is_some() {
-                self.forcing_value(circuit, value, 0.0, 0)
+                self.forcing_value(circuit, value, time, 0)
             } else {
                 value.evaluate(circuit, state, voltage_count)
             }
         })?;
-        solution.copy_from_slice(&trial);
-        Ok(())
+        Ok(trial)
     }
 
     fn winding_form<'a>(
@@ -608,7 +688,7 @@ impl PssDescriptor {
     ) -> Result<(), SimulationError> {
         self.behavioral.ensure_regular(circuit, period, abort)?;
         for ((kind, index), order) in self.forcing_orders(circuit, abort)? {
-            if kind.is_behavioral() || kind == ConstraintSource::Diode {
+            if kind.is_behavioral() || kind.is_nonlinear() {
                 continue;
             }
             if order == 0 {
@@ -674,7 +754,7 @@ impl PssDescriptor {
         order: usize,
     ) -> Result<Value, SimulationError> {
         match value.source() {
-            Some((ConstraintSource::Diode, _, _)) => self
+            Some((kind, _, _)) if kind.is_nonlinear() => self
                 .nonlinear
                 .as_ref()
                 .ok_or_else(precision_error)?
@@ -750,6 +830,56 @@ impl PssDescriptor {
 mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
+
+    #[test]
+    fn nonlinear_descriptor_preserves_port_voltages_and_rates_after_large_drops() {
+        for dialect in [
+            crate::config::SpiceDialect::Ngspice,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            for (source, resistance, saturation, gain, output_scale, current_scale) in [
+                (1.0, 1e20, 1.0, 1e22, 100.0, 1e-20),
+                (1e300, 1e300, 1e298, 1e298, 1.0, 1.0),
+            ] {
+                let (engine, mut circuit) = build(
+                    &format!(
+                        "V1 src 0 SIN({source:e} {:e} 1)\nR1 src in {resistance:e}\nD1 in 0 DM\n.model DM D(IS={saturation:e})\nE1 out 0 in 0 {gain:e}\nCout out 0 1u",
+                        0.5 * source,
+                    ),
+                    dialect,
+                );
+                assert_eq!(circuit.state_dimension(), 0);
+                circuit.set_state(&[]).unwrap();
+                let solution = engine
+                    .pss_initial_node_solution(&mut circuit, &NoAbort)
+                    .unwrap();
+                // Both biases are within 1e-18 relative error of the linear
+                // Shockley limit. Large resistor drops must not erase them.
+                let thermal = circuit.diodes.devices[0].vt;
+                let expected_output = output_scale * thermal;
+                let input = solution[circuit.get_node_by_name("in").unwrap() - 1];
+                let output = solution[circuit.get_node_by_name("out").unwrap() - 1];
+                assert!(
+                    (input * gain / expected_output - 1.0).abs() < 2e-12,
+                    "{dialect:?}: input={input:e}"
+                );
+                assert!(
+                    (output / expected_output - 1.0).abs() < 2e-12,
+                    "{dialect:?}: output={output:e}"
+                );
+                let source_current =
+                    solution[circuit.num_nodes() + circuit.voltage_sources.branch_indices[0] - 1];
+                let output_current =
+                    solution[circuit.num_nodes() + circuit.vcvs.branch_indices[0] - 1];
+                assert!((source_current / -current_scale - 1.0).abs() < 2e-12);
+                let expected_current = -1e-6 * expected_output * 0.5 * std::f64::consts::TAU;
+                assert!(
+                    (output_current / expected_current - 1.0).abs() < 2e-12,
+                    "{dialect:?}: current={output_current:e}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn nonlinear_descriptor_solves_feedforward_ports_with_zero_external_drive() {

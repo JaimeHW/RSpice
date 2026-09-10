@@ -529,6 +529,11 @@ algebraic control voltages: exact port dependencies exclude state or nonlinear
 current-derivative feedback, and an exact passivity check on each feedback
 component certifies a unique algebraic solution. Trial currents and their first
 time derivatives use the canonical full device law and its implicit Jacobian.
+Solved port voltages and their analytic rates enter the exact projection
+directly, preserving small voltages beneath large resistor drops. Overflowing
+Jacobian products use a jointly scaled row and right-hand side. A descriptor
+with no independent dynamic state supplies the complete candidate at each time;
+the same physical residual checks used after Newton certify it before acceptance.
 Residuals scale to the actual control voltages, so large controlled-source gains
 cannot hide small input errors behind an absolute voltage floor. Diode junction,
 sidewall, recombination and tunneling currents preserve the exponential law near

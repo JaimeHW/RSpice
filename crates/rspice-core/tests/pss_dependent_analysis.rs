@@ -12,6 +12,87 @@ use rspice_core::netlist::Netlist;
 const F0: f64 = 1.0e6;
 
 #[test]
+fn nonlinear_descriptor_large_drops_preserve_full_orbits() {
+    for dialect in [
+        rspice_core::config::SpiceDialect::Ngspice,
+        rspice_core::config::SpiceDialect::Xyce,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let thermal = 300.15
+            * if dialect == rspice_core::config::SpiceDialect::Xyce {
+                1.3806226e-23 / 1.6021918e-19
+            } else {
+                1.38064852e-23 / 1.6021766208e-19
+            };
+        let engine = Engine::new(config);
+        for (source, resistance, saturation, gain, output_scale, current_scale) in [
+            (1.0, 1e20, 1.0, 1e22, 100.0, 1e-20),
+            (1e300, 1e300, 1e298, 1e298, 1.0, 1.0),
+        ] {
+            for terminals in ["in 0", "0 in"] {
+                let deck = Netlist::parse(&format!(
+                    "Large drop nonlinear control\nV1 src 0 SIN({source:e} {:e} 1)\nR1 src in {resistance:e}\nD1 {terminals} DM\n.model DM D(IS={saturation:e})\nE1 out 0 in 0 {gain:e}\nCout out 0 1u\n.end\n", 0.5 * source,
+                )).unwrap();
+                let point = engine
+                    .run_pss_operating_point_with_abort(
+                        &deck,
+                        PssConfig::new(1.0)
+                            .with_points_per_period(64)
+                            .with_tstab_periods(0),
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("{dialect:?}, {source:e}, {terminals}: {error}")
+                    });
+                assert!(point.shooting_state_basis().is_empty());
+                let result = &point.analysis().result;
+                let node = |name: &str| {
+                    result
+                        .node_names
+                        .iter()
+                        .position(|entry| entry.eq_ignore_ascii_case(name))
+                        .unwrap()
+                };
+                let branch = |name: &str| {
+                    result
+                        .branch_names
+                        .iter()
+                        .position(|entry| entry.eq_ignore_ascii_case(name))
+                        .unwrap()
+                };
+                let voltage_scale = output_scale * thermal;
+                let cap_scale = 1e-6 * voltage_scale * 0.5 * std::f64::consts::TAU;
+                for (index, &time) in result.time.iter().enumerate() {
+                    let phase = std::f64::consts::TAU * time;
+                    let wave = 1.0 + 0.5 * phase.sin();
+                    let actual_input = result.waveforms[node("in")].values[index] * gain;
+                    let actual_output = result.waveforms[node("out")].values[index];
+                    let actual_source =
+                        result.branch_waveforms[branch("V1")].values[index] / current_scale;
+                    let actual_cap = result.branch_waveforms[branch("E1")].values[index];
+                    for actual in [actual_input, actual_output] {
+                        assert!(
+                            (actual / voltage_scale - wave).abs() < 2e-11,
+                            "{dialect:?}, {source:e}, {terminals}, t={time}: voltage {actual:e}"
+                        );
+                    }
+                    assert!(
+                        (actual_source + wave).abs() < 2e-11,
+                        "t={time}: source current {actual_source:e}"
+                    );
+                    assert!(
+                        (actual_cap / cap_scale + phase.cos()).abs() < 2e-11,
+                        "{dialect:?}, {source:e}, {terminals}, t={time}: capacitor current {actual_cap:e}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn nonlinear_descriptor_small_control_signals_preserve_amplified_orbits() {
     for dialect in [
         rspice_core::config::SpiceDialect::Ngspice,

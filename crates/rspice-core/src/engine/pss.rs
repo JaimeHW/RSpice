@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 90;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 91;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -3643,12 +3643,37 @@ impl Engine {
         start: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let size = circuit.matrix_size();
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
         let mut proposal = Vec::with_capacity(size);
         let correction_form = !step.initialization
             && (!circuit.inductors.is_empty() || !circuit.capacitors.is_empty());
+
+        if !step.initialization
+            && circuit.project_forced_solution(step.t_next, &mut new_solution)?
+        {
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&new_solution);
+            }
+            if self.pss_check_physical_candidate(
+                circuit,
+                matrix,
+                step,
+                &new_solution,
+                &mut rhs,
+                &mut proposal,
+                true,
+            )? {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                return Ok(Some(new_solution));
+            }
+        }
 
         for _iter in 0..self.config.max_iterations {
             if abort.is_aborted() {
@@ -3719,58 +3744,20 @@ impl Engine {
                     let device_converged = !circuit.has_nonlinear_devices()
                         || circuit.nonlinear_converged(self.device_convergence_criteria());
 
-                    if voltage_converged && device_converged && linearized_residual_converged {
-                        // A solved Newton linearization is not a proof of the
-                        // physical DAE. Restamp F and Q at the candidate bias,
-                        // bypassing limiter companions, before accepting it.
-                        if correction_form {
-                            self.pss_stamp_non_norton_system(
-                                circuit,
-                                matrix,
-                                &mut rhs,
-                                step,
-                                &new_solution,
-                                true,
-                            )?;
-                            circuit
-                                .capacitors
-                                .stamp_norton_currents(&mut rhs, &circuit.capacitor_trial_currents);
-                        } else {
-                            self.pss_stamp_system(
-                                circuit,
-                                matrix,
-                                &mut rhs,
-                                step,
-                                &new_solution,
-                                true,
-                            )?;
-                        }
-                        if self.pss_residual_convergence_met(
+                    if voltage_converged
+                        && device_converged
+                        && linearized_residual_converged
+                        && self.pss_check_physical_candidate(
                             circuit,
                             matrix,
-                            &new_solution,
-                            &rhs,
                             step,
-                        ) {
-                            if correction_form {
-                                matrix.correction_rhs_into(&rhs, &new_solution, &mut proposal)?;
-                                circuit.stabilize_inductor_correction_rhs(
-                                    &mut proposal,
-                                    &new_solution,
-                                    step,
-                                    true,
-                                )?;
-                                if !self.pss_inductor_residual_convergence_met(
-                                    circuit,
-                                    &new_solution,
-                                    &proposal,
-                                    step.coeff,
-                                ) {
-                                    continue;
-                                }
-                            }
-                            return Ok(Some(new_solution));
-                        }
+                            &new_solution,
+                            &mut rhs,
+                            &mut proposal,
+                            false,
+                        )?
+                    {
+                        return Ok(Some(new_solution));
                     }
                 }
                 Err(error @ (SolverError::OutOfMemory | SolverError::InvalidCircuit(_))) => {
@@ -3790,6 +3777,49 @@ impl Engine {
         }
 
         Ok(None)
+    }
+
+    /// Certify the physical F/Q equations for either a Newton proposal or
+    /// an exactly projected forced solution. Limiter companions cannot serve
+    /// as the acceptance residual.
+    #[allow(clippy::too_many_arguments)]
+    fn pss_check_physical_candidate(
+        &self,
+        circuit: &mut PssCircuit,
+        matrix: &mut StaticMatrix,
+        step: PssCompanionStep<'_>,
+        solution: &[Value],
+        rhs: &mut [Value],
+        scratch: &mut Vec<Value>,
+        capture_from_solution: bool,
+    ) -> Result<bool, SimulationError> {
+        let correction_form = !step.initialization
+            && (!circuit.inductors.is_empty() || !circuit.capacitors.is_empty());
+        if correction_form {
+            self.pss_stamp_non_norton_system(circuit, matrix, rhs, step, solution, true)?;
+            if capture_from_solution {
+                scratch.clear();
+                scratch.resize(solution.len(), 0.0);
+                circuit.capture_capacitor_trial_currents(solution, scratch, step);
+                circuit.capture_inductor_trial_offsets(solution, scratch);
+            }
+            circuit
+                .capacitors
+                .stamp_norton_currents(rhs, &circuit.capacitor_trial_currents);
+        } else {
+            self.pss_stamp_system(circuit, matrix, rhs, step, solution, true)?;
+        }
+        if !self.pss_residual_convergence_met(circuit, matrix, solution, rhs, step) {
+            return Ok(false);
+        }
+        if correction_form && !circuit.inductors.is_empty() {
+            matrix.correction_rhs_into(rhs, solution, scratch)?;
+            circuit.stabilize_inductor_correction_rhs(scratch, solution, step, true)?;
+            if !self.pss_inductor_residual_convergence_met(circuit, solution, scratch, step.coeff) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// A winding's error scale is its physical voltage/flux rate, not the
@@ -4518,6 +4548,40 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[test]
+    fn forced_descriptor_candidates_require_physical_residual_acceptance() {
+        let netlist = Netlist::parse("Forced candidate certificate\nV1 in 0 SIN(1 0.5 1)\nE1 out 0 in 0 2\nC1 out 0 1u\n.end\n").unwrap();
+        let engine = Engine::default();
+        let mut circuit = PssCircuit::new(engine.build_circuit(&netlist).unwrap()).unwrap();
+        assert_eq!(circuit.state_dimension(), 0);
+        let start = engine
+            .pss_initial_node_solution(&mut circuit, &NoAbort)
+            .unwrap();
+        engine.pss_initialize_reactive_state(&mut circuit, &start);
+        let output = circuit.get_node_by_name("out").unwrap();
+        // Deliberately leave the compiled descriptor stale. Its proposed E1
+        // current omits this load; the physical check must reject that proposal
+        // and let Newton solve the complete, changed circuit.
+        circuit.current_sources.add("Iextra".into(), output, 0, 1.0);
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let coeff = CompanionCoefficients::backward_euler();
+        let step = PssCompanionStep {
+            coeff: &coeff,
+            t_next: 0.125,
+            dt: 0.125,
+            initialization: false,
+        };
+        let actual = engine
+            .pss_newton_trial(&mut circuit, &mut matrix, step, &start, &NoAbort)
+            .unwrap()
+            .unwrap();
+        let phase = std::f64::consts::TAU * step.t_next;
+        let branch = circuit.num_nodes() + circuit.vcvs.branch_indices[0] - 1;
+        assert!((actual[output - 1] - (2.0 + phase.sin())).abs() < 1e-12);
+        assert!((actual[branch] + 1.0 + 1e-6 * std::f64::consts::TAU * phase.cos()).abs() < 1e-12);
+    }
 
     #[test]
     fn pss_vbic_charge_matches_explicit_capacitors_for_both_polarities() {

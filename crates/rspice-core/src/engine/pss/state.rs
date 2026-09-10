@@ -19,11 +19,16 @@ enum ConstraintSource {
     BehavioralVoltage,
     BehavioralCurrent,
     Diode,
+    DiodeVoltage,
 }
 
 impl ConstraintSource {
     fn is_behavioral(self) -> bool {
         matches!(self, Self::BehavioralVoltage | Self::BehavioralCurrent)
+    }
+
+    fn is_nonlinear(self) -> bool {
+        matches!(self, Self::Diode | Self::DiodeVoltage)
     }
 }
 
@@ -569,11 +574,11 @@ impl PssCircuit {
             self.solution_scratch.fill(0.0);
         }
         if let Some(descriptor) = &self.basis.descriptor {
-            descriptor.solve(
+            self.solution_scratch = descriptor.solve(
                 &mut self.circuit,
                 state,
                 self.basis.voltage_branches.len(),
-                &mut self.solution_scratch,
+                0.0,
             )?;
         }
         if let Some(constraints) = &self.basis.voltage_constraints {
@@ -682,15 +687,32 @@ impl PssCircuit {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let mut solution = vec![0.0; self.solution_scratch.len()];
-        descriptor.solve(
+        self.solution_scratch = descriptor.solve(
             &mut self.circuit,
             &state,
             self.basis.voltage_branches.len(),
-            &mut solution,
+            0.0,
         )?;
-        self.solution_scratch.copy_from_slice(&solution);
-        Ok(Some(solution[1..].to_vec()))
+        Ok(Some(self.solution_scratch[1..].to_vec()))
+    }
+
+    /// A descriptor without independent states specifies every MNA unknown
+    /// at the prepared time. This is a candidate for physical certification,
+    /// not permission to skip the device residual and companion checks.
+    pub(super) fn project_forced_solution(
+        &mut self,
+        time: Value,
+        solution: &mut [Value],
+    ) -> Result<bool, SimulationError> {
+        if self.state_dimension() != 0 {
+            return Ok(false);
+        }
+        let Some(descriptor) = &self.basis.descriptor else {
+            return Ok(false);
+        };
+        let projected = descriptor.solve(&mut self.circuit, &[], 0, time)?;
+        solution.copy_from_slice(&projected[1..]);
+        Ok(true)
     }
 
     /// An exact initialization constraint carries displacement current while
