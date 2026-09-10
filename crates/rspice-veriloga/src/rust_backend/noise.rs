@@ -13,7 +13,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::canonical_ir::ad::{DifferentiationError, differentiate_with_control};
-use crate::canonical_ir::cfg::{CfgInstruction, CfgValue, CfgValueType};
 use crate::canonical_ir::frequency::{self, DynamicPower};
 use crate::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CanonicalNoiseSourceKind, CfgBinaryOp, CfgFunction, CfgTerminator,
@@ -982,35 +981,7 @@ fn plan_grouped_noise(
     // The real routing gain is the residual derivative at the DC operating
     // point, even when that same contribution also carries charge. Clear the
     // transient companion only after AD has recovered the reactive lane.
-    // Metadata must be checked first: replacing a derivative used as a PSD or
-    // a source guard would otherwise disguise an unsupported noise model.
-    let metadata_roots = cfg
-        .noise_processes
-        .iter()
-        .flat_map(|process| {
-            std::iter::once(process.active)
-                .chain(std::iter::once(process.psd))
-                .chain(process.exponent)
-                .chain(process.table.iter().copied())
-        })
-        .collect::<Vec<_>>();
-    let (metadata, _) =
-        crate::canonical_ir::prune_cfg_to_outputs(&differentiated.function, &metadata_roots);
-    if metadata.values.iter().any(|value| {
-        matches!(
-            value.kind,
-            CfgValueKind::Ddt { .. }
-                | CfgValueKind::DdtScale
-                | CfgValueKind::Idt { .. }
-                | CfgValueKind::IdtScale
-        )
-    }) {
-        return Err(unsupported(
-            artifact,
-            "a time derivative or integral in generated noise magnitude or activation metadata",
-        ));
-    }
-    freeze_noise_primal(&mut differentiated.function);
+    frequency::freeze_noise_primal(&mut differentiated.function);
 
     let mut wanted = Vec::new();
     let mut processes = Vec::with_capacity(cfg.noise_processes.len());
@@ -1173,36 +1144,6 @@ fn validate_noise_routing(
         }
     }
     Ok(linear)
-}
-
-/// Freeze the large-signal body at its DC values without losing validation of
-/// an operator's input. No noise query reads or advances transient companions.
-fn freeze_noise_primal(function: &mut CfgFunction) {
-    let zero = ValueId::from(function.values.len());
-    function.values.push(CfgValue {
-        id: zero,
-        value_type: CfgValueType::Real,
-        kind: CfgValueKind::RealConstant(0.0),
-    });
-    function.blocks[usize::from(function.entry)]
-        .instructions
-        .insert(0, CfgInstruction { result: zero });
-    for value in &mut function.values {
-        value.kind = match value.kind {
-            CfgValueKind::Ddt { input, .. } => CfgValueKind::Binary {
-                op: CfgBinaryOp::CheckedValue,
-                left: input,
-                right: zero,
-            },
-            CfgValueKind::Idt { input, ic, .. } => CfgValueKind::Binary {
-                op: CfgBinaryOp::CheckedValue,
-                left: input,
-                right: ic,
-            },
-            CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
-            _ => continue,
-        };
-    }
 }
 
 /// Track structural dependence on a stochastic realization through every CFG
@@ -2339,23 +2280,38 @@ endmodule
     }
 
     #[test]
-    fn static_noise_projection_does_not_mask_dynamic_metadata() {
-        for body in [
-            "I(p,n) <+ white_noise(1.0 + ddt(V(p,n)), \"psd\");",
-            "if (ddt(V(p,n)) > 0.0) I(p,n) <+ white_noise(1.0, \"guard\");",
-            "I(p,n) <+ ddt(white_noise(1.0 + ddt(V(p,n)), \"psd\"));",
+    fn static_noise_projection_evaluates_dynamic_metadata_and_guards() {
+        for (body, expected_active) in [
+            ("I(p,n)<+white_noise(1.0+ddt(V(p,n)),\"psd\");", 1.0),
+            (
+                "if(ddt(V(p,n))>0.0) I(p,n)<+white_noise(1.0,\"guard\");",
+                0.0,
+            ),
+            ("I(p,n)<+ddt(white_noise(1.0+ddt(V(p,n)),\"psd\"));", 1.0),
         ] {
-            let artifact = crate::VerilogACompiler::default()
-                .compile_canonical_ir(&format!(
-                    "module dynamic_noise(p,n); inout p,n; electrical p,n; real source; analog begin {body} end endmodule"
-                ))
-                .unwrap_or_else(|error| panic!("{body}: {error}"));
-            let error = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
-                .expect_err("unsupported dynamic noise must remain explicit");
+            let artifact = crate::VerilogACompiler::default().compile_canonical_ir(&format!(
+                "module dynamic_metadata(p,n); inout p,n; electrical p,n; analog begin {body} end endmodule"
+            )).unwrap();
+            let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
+                .unwrap()
+                .unwrap();
+            let mut inputs = crate::canonical_ir::CfgEvalInputs {
+                node_potentials: vec![2.0, 0.0],
+                ..Default::default()
+            };
+            let result = crate::canonical_ir::evaluate_cfg(&plan.function, &inputs).unwrap();
+            assert_eq!(
+                result.value(plan.outputs[plan.processes[0].active]),
+                Some(expected_active),
+                "{body}"
+            );
+            if expected_active != 0.0 {
+                assert_eq!(result.value(plan.outputs[plan.processes[0].psd]), Some(1.0));
+            }
+            inputs.node_potentials[0] = f64::NAN;
             assert!(
-                error.to_string().contains("time derivative")
-                    || error.to_string().contains("stateful"),
-                "{body}: {error}"
+                crate::canonical_ir::evaluate_cfg(&plan.function, &inputs).is_err(),
+                "{body}: DC projection must retain input validation"
             );
         }
     }

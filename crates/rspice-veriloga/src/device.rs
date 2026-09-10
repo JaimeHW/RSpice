@@ -1943,17 +1943,14 @@ impl CanonicalNoiseRuntimePlan {
                 table: lowered.table.iter().copied().map(place).collect(),
             });
         }
-        let (function, outputs, _) =
+        let (mut function, outputs, _) =
             crate::canonical_ir::cfg_opt::optimize_with_tracking(&cfg.function, &wanted, &[]);
+        crate::canonical_ir::frequency::freeze_noise_primal(&mut function);
         for value in &function.values {
             use crate::canonical_ir::CfgValueKind;
             if matches!(
                 value.kind,
-                CfgValueKind::Ddt { .. }
-                    | CfgValueKind::DdtScale
-                    | CfgValueKind::Idt { .. }
-                    | CfgValueKind::IdtScale
-                    | CfgValueKind::IdtMod { .. }
+                CfgValueKind::IdtMod { .. }
                     | CfgValueKind::AbsDelay { .. }
                     | CfgValueKind::AbsDelayDerivative { .. }
                     | CfgValueKind::Slew { .. }

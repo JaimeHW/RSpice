@@ -16,6 +16,47 @@ use super::cfg::{
 };
 use crate::metrics::{PipelineCancelled, PipelineControl, PipelinePhase};
 
+/// Freeze noise metadata and routing gains at their DC primal values, retaining
+/// input validation. Existing value IDs stay valid; no transient history is read.
+pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
+    if !function.values.iter().any(|value| {
+        matches!(
+            value.kind,
+            CfgValueKind::Ddt { .. }
+                | CfgValueKind::Idt { .. }
+                | CfgValueKind::DdtScale
+                | CfgValueKind::IdtScale
+        )
+    }) {
+        return;
+    }
+    let zero = ValueId::from(function.values.len());
+    function.values.push(CfgValue {
+        id: zero,
+        value_type: CfgValueType::Real,
+        kind: CfgValueKind::RealConstant(0.0),
+    });
+    function.blocks[usize::from(function.entry)]
+        .instructions
+        .insert(0, CfgInstruction { result: zero });
+    for value in &mut function.values {
+        value.kind = match value.kind {
+            CfgValueKind::Ddt { input, .. } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: input,
+                right: zero,
+            },
+            CfgValueKind::Idt { input, ic, .. } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: input,
+                right: ic,
+            },
+            CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
+            _ => continue,
+        };
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct DynamicPower {
     pub ddt: u32,

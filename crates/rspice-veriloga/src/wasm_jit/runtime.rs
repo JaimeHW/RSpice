@@ -1270,6 +1270,44 @@ mod tests {
     }
 
     #[test]
+    fn integration_helpers_preserve_history_during_small_signal_queries() {
+        for analysis in [1, 3] {
+            let mut context = VmContext::with_states(0, 1);
+            context.analysis_type = analysis;
+            let accepted = context.accepted_checkpoint().unwrap();
+            let mut session = WasmJitRuntimeSession::new(context);
+            for (opcode, operands, expected) in [
+                (440, [2.0, 0.0, 0.0, 0.0, 0.0], 0.0),
+                (442, [2.0, 3.0, 0.0, 0.0, 0.0], 3.0),
+                (444, [2.0, 3.0, 2.0, 0.0, 0.0], 1.0),
+            ] {
+                let value = evaluate_helper_with_session(
+                    opcode,
+                    0,
+                    0,
+                    0,
+                    operands,
+                    &[],
+                    Some(&mut session),
+                )
+                .unwrap();
+                assert_eq!(value, expected);
+                assert_eq!(session.context().accepted_checkpoint().unwrap(), accepted);
+                assert_eq!(session.context().state_values, vec![0.0]);
+                assert_eq!(session.context().state_derivatives, vec![0.0]);
+                let mut invalid = operands;
+                invalid[0] = f64::NAN;
+                assert!(
+                    evaluate_helper_with_session(opcode, 0, 0, 0, invalid, &[], Some(&mut session))
+                        .is_err()
+                );
+                assert!(session.take_error().is_some());
+                assert_eq!(session.context().accepted_checkpoint().unwrap(), accepted);
+            }
+        }
+    }
+
+    #[test]
     fn stateful_helpers_share_reference_vm_candidate_semantics() {
         let mut context = VmContext::with_states(0, 1);
         context.state_values_prev[0] = 2.0;

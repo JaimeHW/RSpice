@@ -1612,6 +1612,12 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
         );
     }
     let value = unsafe { *operands };
+    if matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium() {
+        if !value.is_finite() {
+            return invalid_native_integration_context(ctx, "ddt", state_id, "input is not finite");
+        }
+        return 0.0;
+    }
     let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
     let previous = if initialized {
         unsafe { *ctx.state_prev.add(state_id) }
@@ -1698,6 +1704,24 @@ unsafe fn rspice_integral_state_native(
     let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 4 } else { 2 }) };
     let input = operands[0];
     let initial_condition = operands[1];
+    if matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium() {
+        if !operands.iter().all(|value| value.is_finite()) {
+            return invalid_native_integration_context(
+                ctx,
+                operator,
+                state_id,
+                "operand is not finite",
+            );
+        }
+        return if wrapped {
+            match idtmod_wrapped_candidate(initial_condition, operands[2], operands[3]) {
+                Ok((value, _)) => value,
+                Err(detail) => invalid_native_integration_context(ctx, operator, state_id, detail),
+            }
+        } else {
+            initial_condition
+        };
+    }
     let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
     let previous = if initialized {
         unsafe { *ctx.state_prev.add(state_id) }

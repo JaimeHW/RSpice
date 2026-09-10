@@ -2101,6 +2101,7 @@ fn plan_noise(
         .map(ValueId::from)
         .collect::<Vec<_>>();
     let (mut function, outputs, mapped) = optimize_with_tracking(function, &wanted, &tracked);
+    frequency::freeze_noise_primal(&mut function);
     let mut origins = vec![None; function.values.len()];
     for (original, mapped) in tracked.into_iter().zip(mapped) {
         if let Some(mapped) = mapped {
@@ -2108,33 +2109,17 @@ fn plan_noise(
         }
     }
 
-    // One kind cannot appear in this body. `ddt` reads and writes per-instance
-    // history and `evaluate_noise_sources` takes `&self`, so a magnitude that
-    // depended on one would advance the transient state while the noise
-    // analysis merely read it.
-    //
-    // Whether any `ddt` is *left* is not the question — a charge storing one is
-    // the residual of its own contribution, and a residual can survive into a
-    // slice on an edge nothing here reads. The question is whether a magnitude
-    // reads one, and only reachability answers it.
+    // A live `ddx` still requires the differentiated body. Primal integrators
+    // and derivatives have already been frozen without touching their history.
     let live = reachable(&function, &outputs);
     for (index, value) in function.values.iter_mut().enumerate() {
-        // `ddt` reads and writes per-instance history, and a magnitude that
-        // reached one would advance the transient state while the noise
-        // analysis merely read it. A live `ddx` requires the differentiated
-        // body, including readbacks that select a noise-power branch.
-        if !matches!(
-            value.kind,
-            CfgValueKind::Ddt { .. } | CfgValueKind::Ddx { .. }
-        ) {
+        if !matches!(value.kind, CfgValueKind::Ddx { .. }) {
             continue;
         }
         if live[index] {
             return Err(NoiseDecline::LiveStateOperator);
         }
-        // Nothing the magnitudes read can observe this, by the walk just done,
-        // so it becomes a constant rather than a call: left as it was, the body
-        // would still advance the history of a charge no noise source mentions.
+        // Dead readbacks cannot affect a magnitude and need no emitted call.
         value.kind = CfgValueKind::RealConstant(0.0);
     }
     Ok(NoisePlan {

@@ -498,6 +498,17 @@ impl<'a> Vm<'a> {
             // State-based ddt using the transient solver's companion rule.
             Instruction::DdtState(idx) => {
                 let current_value = self.pop()?;
+                if matches!(self.context.analysis_type, 1 | 3)
+                    && !self.context.analysis_phase.is_equilibrium()
+                {
+                    if !current_value.is_finite() {
+                        return Err(VmError::InvalidNumericResult(
+                            "ddt input is not finite".into(),
+                        ));
+                    }
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
                 if self.context.state_values.len() <= *idx {
                     self.context.allocate_states(*idx + 1);
                 }
@@ -545,6 +556,17 @@ impl<'a> Vm<'a> {
             Instruction::IdtState(idx) => {
                 let ic = self.pop()?;
                 let current_value = self.pop()?;
+                if matches!(self.context.analysis_type, 1 | 3)
+                    && !self.context.analysis_phase.is_equilibrium()
+                {
+                    if !current_value.is_finite() || !ic.is_finite() {
+                        return Err(VmError::InvalidNumericResult(
+                            "idt operand is not finite".into(),
+                        ));
+                    }
+                    self.stack.push(ic);
+                    return Ok(());
+                }
                 if self.context.state_values.len() <= *idx {
                     self.context.allocate_states(*idx + 1);
                 }
@@ -587,6 +609,22 @@ impl<'a> Vm<'a> {
                 let modulus = self.pop()?;
                 let ic = self.pop()?;
                 let current_value = self.pop()?;
+                if matches!(self.context.analysis_type, 1 | 3)
+                    && !self.context.analysis_phase.is_equilibrium()
+                {
+                    if ![current_value, ic, modulus, offset]
+                        .iter()
+                        .all(|value| value.is_finite())
+                    {
+                        return Err(VmError::InvalidNumericResult(
+                            "idtmod operand is not finite".into(),
+                        ));
+                    }
+                    let (value, _) = super::idtmod_wrapped_candidate(ic, modulus, offset)
+                        .map_err(|detail| VmError::InvalidNumericResult(detail.into()))?;
+                    self.stack.push(value);
+                    return Ok(());
+                }
                 if self.context.state_values.len() <= *idx {
                     self.context.allocate_states(*idx + 1);
                 }

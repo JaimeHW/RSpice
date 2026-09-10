@@ -2708,6 +2708,61 @@ assert_eq!(disabled.0, vec![(true, 1.5), (false, 0.0)]);
 }
 
 #[test]
+fn generated_noise_powers_freeze_dynamic_values_without_touching_history() {
+    for (index, (dynamic, dc_value)) in [
+        ("ddt(V(p,n))", 0.0),
+        ("idt(V(p,n),3.0)", 3.0),
+        ("ddt(idt(V(p,n),3.0))", 0.0),
+        ("idt(ddt(V(p,n)),3.0)", 3.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module dynamic_noise_power(p,n); inout p,n; electrical p,n; real d; analog begin d={dynamic}; I(p,n)<+V(p,n)+d+white_noise(limexp(V(p,n)+d),\"input\"); end endmodule"
+        );
+        let name = format!("dynamic noise power {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+#[derive(Default)]
+struct Capture(Vec<f64>);
+impl runtime::GeneratedNoiseVisitor for Capture {{
+    fn visit(&mut self, _: usize, source: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool {{
+        assert!(source.active);
+        self.0.push(source.psd);
+        true
+    }}
+}}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{
+        assert!(process.active);
+        self.0.push(process.psd);
+        true
+    }}
+}}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext {{ voltages:&[2.0,0.0], temperature:300.15 }};
+let history=instance.capture_rollback_state();
+for frequency in [0.0,1.0,1e6] {{
+    let mut sources=Capture::default();
+    instance.evaluate_noise_sources(&ctx,&mut sources).unwrap();
+    let mut processes=Capture::default();
+    instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut processes).unwrap();
+    assert_eq!(sources.0.len(),1);
+    assert_eq!(processes.0.len(),1);
+    let expected=(2.0_f64+{dc_value:e}).exp();
+    for psd in sources.0.into_iter().chain(processes.0) {{
+        assert!((psd/expected-1.0).abs()<=8.0*f64::EPSILON);
+    }}
+    assert!(!ctx.evaluation_failed());
+    assert_eq!(instance.capture_rollback_state(),history);
+}}
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+    }
+}
+
+#[test]
 fn generated_unused_noise_processes_import_and_evaluate_math_helpers() {
     for (index, (power, expected)) in [
         ("limexp(V(p,n))", "2.0_f64.exp()"),

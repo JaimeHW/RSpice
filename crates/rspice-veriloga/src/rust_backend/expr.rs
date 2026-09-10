@@ -204,11 +204,11 @@ impl ExprEmitter<'_> {
                 self.lower_system_function_value(name.as_str(), args.as_slice(), &base)?
             }
             HirExprKind::Call { name, args } if is_ddt_name(name.as_str()) => {
-                self.lower_ddt_value(id, args.as_slice(), &base)?
+                self.lower_ddt_value(args.as_slice())?
             }
             HirExprKind::Call { name, args } if is_idt_name(name.as_str()) => {
                 let (expr, ic) = self.idt_operands(args.as_slice())?;
-                self.lower_idt_value(id, expr, ic, &base)?
+                self.lower_idt_value(id, expr, ic)?
             }
             HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
                 self.lower_analysis_value(args.as_slice(), &base)?
@@ -761,21 +761,14 @@ impl ExprEmitter<'_> {
         }
     }
 
-    fn lower_ddt_value(
-        &mut self,
-        id: ExprId,
-        args: &[ExprId],
-        base: &str,
-    ) -> Result<String, RustBackendError> {
+    fn lower_ddt_value(&mut self, args: &[ExprId]) -> Result<String, RustBackendError> {
         let operand_id = self.ddt_operand(args)?;
-        // Lowered for its side effects — the operand's own diagnostics fire
-        // before this one, exactly as they did when a slot lookup followed.
-        self.lower(operand_id)?;
-        let _ = base;
-        // Noise lowering carries no `ddt` state table, so there is no slot to
-        // bind. The refusal, and its wording, are what the empty table
-        // produced before the table itself was removed.
-        Err(self.internal(format!("ddt expression {id} has no generated state slot")))
+        let operand = self.lower(operand_id)?;
+        // Noise powers use the DC primal and never touch transient companions.
+        Ok(format!(
+            "ctx.checked_derivative_value({}, 0.0)",
+            operand.value
+        ))
     }
 
     fn ddt_operand(&self, args: &[ExprId]) -> Result<ExprId, RustBackendError> {
@@ -791,19 +784,18 @@ impl ExprEmitter<'_> {
         id: ExprId,
         expr: ExprId,
         ic: Option<ExprId>,
-        base: &str,
     ) -> Result<String, RustBackendError> {
-        // Both operands are lowered for their side effects, so their own
-        // diagnostics still fire first, exactly as they did when a slot lookup
-        // followed them.
-        self.lower(expr)?;
-        if let Some(ic) = ic {
-            self.lower(ic)?;
-        }
-        let _ = base;
-        // As for `ddt`: noise lowering has no `idt` state table to bind a slot
-        // in, and this is the refusal the empty table produced.
-        Err(self.internal(format!("idt expression {id} has no generated state slot")))
+        let input = self.lower(expr)?;
+        let ic = ic.ok_or_else(|| {
+            self.internal(format!(
+                "implicit idt expression {id} was not materialized before noise lowering"
+            ))
+        })?;
+        let ic = self.lower(ic)?;
+        Ok(format!(
+            "ctx.checked_derivative_value({}, {})",
+            input.value, ic.value
+        ))
     }
 
     fn idt_operands(&self, args: &[ExprId]) -> Result<(ExprId, Option<ExprId>), RustBackendError> {

@@ -2682,6 +2682,78 @@ fn ac_intermediate_range_survives_indexed_assignments_and_multiplicity() {
 }
 
 #[test]
+fn noise_powers_freeze_dynamic_values_without_touching_history() {
+    for (dynamic, dc_value) in [
+        ("ddt(V(p,n))", 0.0),
+        ("idt(V(p,n),3.0)", 3.0),
+        ("ddt(idt(V(p,n),3.0))", 0.0),
+        ("idt(ddt(V(p,n)),3.0)", 3.0),
+    ] {
+        let fixture = compile(&format!(
+            "module dynamic_noise_power(p,n); inout p,n; electrical p,n; real d; analog begin d={dynamic}; I(p,n)<+V(p,n)+d+white_noise(limexp(V(p,n)+d),\"input\"); end endmodule"
+        ));
+        let mut device = fixture.device("NOISE", &[1, 0]);
+        device.update_voltages(&[2.0]);
+        device.try_evaluate().unwrap();
+        device.advance_state();
+        device.try_set_analysis_type(3).unwrap();
+        let history = device.checkpoint_state().unwrap();
+        // The deterministic circuit contribution can itself contain an
+        // integrator, whose small-signal transfer has a pole at zero frequency.
+        for frequency in [1.0, 1e3, 1e6] {
+            let processes = device
+                .try_noise_processes_at_frequency(&[2.0], frequency)
+                .unwrap_or_else(|error| panic!("{dynamic}: {error}"));
+            assert_eq!(processes.len(), 1);
+            let expected = (2.0_f64 + dc_value).exp();
+            assert!((processes[0].psd / expected - 1.0).abs() <= 8.0 * f64::EPSILON);
+            assert_eq!(device.checkpoint_state().unwrap(), history);
+        }
+    }
+}
+
+#[test]
+fn integration_history_is_read_only_after_the_small_signal_operating_point() {
+    use rspice_veriloga_runtime::AnalogAnalysisPhase::{Equilibrium, Point};
+    for (operator, expected) in [
+        ("ddt(V(p,n))", 0.0),
+        ("idt(V(p,n),3.0)", 3.0),
+        ("idtmod(V(p,n),3.0,2.0,0.0)", 1.0),
+    ] {
+        let fixture = compile(&format!(
+            "module readonly_integrator(p,n); inout p,n; electrical p,n; analog I(p,n)<+{operator}; endmodule"
+        ));
+        for analysis in [1, 3] {
+            let mut device = fixture.device("STATE", &[1, 0]);
+            device
+                .try_begin_analysis_in_phase(analysis, Equilibrium)
+                .unwrap();
+            device.update_voltages(&[2.0]);
+            assert_eq!(device.try_evaluate().unwrap()[0], expected);
+            device.try_advance_state().unwrap();
+            device.try_set_analysis_phase(Point).unwrap();
+            let accepted = device.checkpoint_state().unwrap();
+            assert!(
+                accepted
+                    .accepted
+                    .state_initialized
+                    .iter()
+                    .any(|&initialized| initialized)
+            );
+            for voltage in [3.0, 4.0] {
+                device.update_voltages(&[voltage]);
+                assert_eq!(device.try_evaluate().unwrap()[0], expected);
+                assert_eq!(
+                    device.checkpoint_state().unwrap(),
+                    accepted,
+                    "{operator}, analysis {analysis}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn noise_injection_range_is_preserved_until_multiplicity_scaling() {
     for (gain, omega, multiplicity) in [(1e150, 1e200, 1e-200_f64), (1e-150, 1e-200, 1e200_f64)] {
         let fixture = compile(&format!(
