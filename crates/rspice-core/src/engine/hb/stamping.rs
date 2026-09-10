@@ -1762,7 +1762,7 @@ mod tests {
         let branch2 = circuit.allocate_branch_named("T1#2");
         let l1: Value = 100.0e-6;
         let l2: Value = 25.0e-6;
-        let k: Value = 0.8;
+        let k: Value = -0.8;
         let mutual = k * (l1 * l2).sqrt();
         let mut transformer = MultiWindingTransformer::new(
             "T1".to_string(),

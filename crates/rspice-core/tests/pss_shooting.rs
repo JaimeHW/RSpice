@@ -2191,15 +2191,22 @@ fn prescribed_current_drives_mutual_flux_without_adding_a_shooting_coordinate() 
 fn coupled_winding_history_preserves_the_transformer_orbit_and_continuation() {
     use num_complex::Complex64;
     let engine = Engine::default();
-    for coupling in [-0.6, 0.6] {
-        let secondary = if coupling < 0.0 { "0 b" } else { "b 0" };
+    for (coupling, secondary, orientation) in [
+        (-0.6, "b 0", 1.0),
+        (0.6, "0 b", -1.0),
+        (0.6, "b 0", 1.0),
+        (-0.6, "0 b", -1.0),
+    ] {
         let netlist = Netlist::parse(&format!(
-            "mutual flux history\nV1 in 0 SIN(0.5 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 {secondary} 200u\nR2 b 0 100\nK1 L1 L2 0.6\n.end\n"
+            "mutual flux history\nV1 in 0 SIN(0.5 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 {secondary} 200u\nR2 b 0 100\nK1 L1 L2 {coupling}\n.end\n"
         )).unwrap();
         let omega = std::f64::consts::TAU * F0;
         let z1 = Complex64::new(50.0, omega * 100e-6);
         let z2 = Complex64::new(100.0, omega * 200e-6);
-        let zm = Complex64::new(0.0, omega * coupling * (100e-6_f64 * 200e-6).sqrt());
+        let zm = Complex64::new(
+            0.0,
+            omega * coupling * orientation * (100e-6_f64 * 200e-6).sqrt(),
+        );
         let determinant = z1 * z2 - zm * zm;
         let transfers = [
             ("a", 1.0 - 50.0 * z2 / determinant),

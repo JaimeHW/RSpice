@@ -594,7 +594,7 @@ pub enum ElementKind {
     Coupling {
         /// Names of coupled inductors
         inductors: Vec<String>,
-        /// Coupling coefficient (0 < k ≤ 1)
+        /// Signed linear coupling (-1 ≤ k ≤ 1); nonlinear CORE cards use 0 ≤ k ≤ 1.
         coefficient: Value,
         /// Optional nonlinear magnetic-core model name.  Xyce's nonlinear
         /// mutual-inductor form is `Kname L1 [L2 ...] 1 CoreModel`;

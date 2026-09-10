@@ -8797,7 +8797,7 @@ mod tests {
 
     #[test]
     fn coupling_coefficient_outside_physical_range_is_rejected() {
-        for coefficient in ["-0.5", "1.2"] {
+        for coefficient in ["-1.2", "1.2"] {
             let err = Netlist::parse(&format!(
                 "bad coupling coefficient\n\
                  L1 a 0 1u\n\

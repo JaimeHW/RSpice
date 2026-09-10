@@ -1210,7 +1210,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v84 preserves flicker density through cancellation of extreme logarithms.
     // v85 preserves private BJT node constraints and thermal bias recovery.
     // v86 removes environment-controlled legacy BJT transient equations.
-    hasher.update(b"rspice-transient-resolved-config-v86\0");
+    // v87 preserves signed linear magnetic coupling in every resolved overlay.
+    hasher.update(b"rspice-transient-resolved-config-v87\0");
     hash_field(&mut hasher, "temperature", config.temperature.to_bits());
     hash_field(&mut hasher, "ramptime", config.ramptime.to_bits());
     hash_field(&mut hasher, "digital_delay_type", config.digital_delay_type);

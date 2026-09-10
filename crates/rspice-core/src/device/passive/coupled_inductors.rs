@@ -15,7 +15,8 @@
 //! ```text
 //! M = k * sqrt(L1 * L2)
 //! ```
-//! where k is the coupling coefficient (0 < k ≤ 1).
+//! where k is the signed coupling coefficient (-1 ≤ k ≤ 1). Negative k
+//! reverses the mutual voltage polarity relative to the authored terminals.
 //!
 //! For perfectly coupled inductors (k=1), the turns ratio is:
 //! ```text
@@ -52,7 +53,7 @@ pub struct InductorCoupling {
     pub name: String,
     /// Names of coupled inductors
     pub inductor_names: Vec<String>,
-    /// Coupling coefficient (0 < k ≤ 1)
+    /// Signed coupling coefficient (-1 ≤ k ≤ 1)
     pub coefficient: Value,
 }
 
@@ -70,12 +71,10 @@ pub(crate) struct CoupledWinding {
 impl InductorCoupling {
     /// Create a new inductor coupling
     pub fn new(name: String, inductor_names: Vec<String>, coefficient: Value) -> Self {
-        // Clamp coefficient to valid range
-        let k = coefficient.abs().min(1.0);
         Self {
             name,
             inductor_names,
-            coefficient: k,
+            coefficient,
         }
     }
 
@@ -143,7 +142,7 @@ impl CoupledInductorPair {
             node_neg: node2_neg,
             inductance: l2,
         } = second;
-        let m = k.abs().min(1.0) * (l1 * l2).sqrt();
+        let m = k * (l1 * l2).sqrt();
 
         Self {
             name,
@@ -155,7 +154,7 @@ impl CoupledInductorPair {
             node2_neg,
             l2,
             branch2: None,
-            k: k.abs().min(1.0),
+            k,
             m,
             current1_prev: 0.0,
             current1_prev_prev: 0.0,
@@ -430,7 +429,7 @@ impl MultiWindingTransformer {
                 if i == j {
                     l_matrix[i][j] = inductances[i];
                 } else {
-                    let k = coupling_coefficients[i][j].abs().min(1.0);
+                    let k = coupling_coefficients[i][j];
                     l_matrix[i][j] = k * (inductances[i] * inductances[j]).sqrt();
                 }
             }
@@ -648,6 +647,40 @@ impl DynamicDevice for MultiWindingTransformer {
 #[cfg(test)]
 mod correction_tests {
     use super::*;
+
+    #[test]
+    fn signed_coupling_preserves_constructor_polarity() {
+        for coefficient in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+            let coupling =
+                InductorCoupling::new("K1".into(), vec!["L1".into(), "L2".into()], coefficient);
+            assert_eq!(coupling.coefficient, coefficient);
+            assert_eq!(coupling.mutual_inductance(2.0, 8.0), 4.0 * coefficient);
+            let pair = CoupledInductorPair::new(
+                "K1".into(),
+                CoupledWinding {
+                    node_pos: 1,
+                    node_neg: 0,
+                    inductance: 2.0,
+                },
+                CoupledWinding {
+                    node_pos: 2,
+                    node_neg: 0,
+                    inductance: 8.0,
+                },
+                coefficient,
+            );
+            assert_eq!(pair.k, coefficient);
+            assert_eq!(pair.m, 4.0 * coefficient);
+            let transformer = MultiWindingTransformer::new(
+                "T1".into(),
+                vec![(1, 0), (2, 0)],
+                vec![2.0, 8.0],
+                vec![vec![1.0, coefficient], vec![coefficient, 1.0]],
+            );
+            assert_eq!(transformer.mutual_inductance(0, 1), 4.0 * coefficient);
+            assert_eq!(transformer.mutual_inductance(1, 0), 4.0 * coefficient);
+        }
+    }
 
     #[test]
     fn mutual_correction_matches_absolute_companion_polynomial() {

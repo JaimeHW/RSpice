@@ -13,6 +13,77 @@
 
 use rspice_core::{Engine, Netlist};
 
+#[test]
+fn signed_coupling_preserves_ac_phase_and_transient_startup() {
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for coefficient in [-0.75, 0.0, 0.75] {
+            for (secondary, orientation) in [("s 0", 1.0), ("0 s", -1.0)] {
+                let deck = Netlist::parse(&format!(
+                    "signed transformer\nV1 in 0 DC 0.5 AC 1 SIN(0.5 1 1k)\nR1 in p 50\nL1 p 0 10m\nL2 {secondary} 40m\nK1 L1 L2 {coefficient}\n.end\n"
+                )).unwrap();
+                let dc = engine.run_dc_op(&deck).unwrap();
+                for node in ["p", "s"] {
+                    assert!(dc.try_voltage_named(node).unwrap().abs() < 1e-12);
+                }
+                let mutual = coefficient * orientation * 0.02;
+                for point in engine.run_ac(&deck, &[100.0, 1000.0, 10000.0]).unwrap() {
+                    let omega = std::f64::consts::TAU * point.frequency;
+                    let expected =
+                        Complex64::new(0.0, omega * mutual) / Complex64::new(50.0, omega * 0.01);
+                    let index = point
+                        .node_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("s"))
+                        .unwrap();
+                    assert!(
+                        (point.voltages[index] - expected).norm() < 2e-12,
+                        "{dialect:?}, k={coefficient}, orientation={orientation}, f={}: {} vs {expected}",
+                        point.frequency,
+                        point.voltages[index]
+                    );
+                }
+                let transient = engine.run_tran(&deck, 1e-3, 1e-6).unwrap();
+                let values = node_series(&transient.node_names, &transient.voltages, "s");
+                let winding = transient
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("L1"))
+                    .unwrap();
+                let source = transient
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("V1"))
+                    .unwrap();
+                let omega = std::f64::consts::TAU * 1000.0;
+                let impedance = Complex64::new(50.0, omega * 0.01);
+                for (index, (&time, &actual)) in transient.time.iter().zip(values).enumerate() {
+                    let tone = Complex64::from_polar(1.0, omega * time);
+                    let decay = (-5000.0 * time).exp();
+                    let expected = (mutual * (Complex64::new(0.0, omega) * tone + 5000.0 * decay)
+                        / impedance)
+                        .im;
+                    let expected_current = 0.01 + ((tone - decay) / impedance).im;
+                    assert!(
+                        (actual - expected).abs() < 0.001,
+                        "{dialect:?}, k={coefficient}, orientation={orientation}, t={time}: {actual} vs {expected}"
+                    );
+                    assert!(
+                        (transient.branch_currents[winding][index] - expected_current).abs() < 1e-5
+                    );
+                    assert!(
+                        (transient.branch_currents[winding][index]
+                            + transient.branch_currents[source][index])
+                            .abs()
+                            < 1e-12
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'a [f64] {
     let idx = names
         .iter()

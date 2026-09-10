@@ -61,14 +61,6 @@ pub(super) fn parse_coupling(
     }
 
     let coefficient = expect_value(stream, line_num, params)?;
-    if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "Invalid coupling coefficient {coefficient}: expected a finite value in [0, 1]"
-            ),
-        });
-    }
     // Xyce's nonlinear magnetic-core form appends a model name after the
     // coupling value (for example `K1 Lp1 1 CORE_MODEL`).  A single-winding
     // card without that model is not a valid mutual-inductor declaration;
@@ -103,6 +95,18 @@ pub(super) fn parse_coupling(
     } else {
         None
     };
+
+    // Linear K cards retain signed winding polarity. Nonlinear CORE cards
+    // retain their existing nonnegative model-domain validation.
+    let minimum = if model.is_some() { 0.0 } else { -1.0 };
+    if !coefficient.is_finite() || !(minimum..=1.0).contains(&coefficient) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Invalid coupling coefficient {coefficient}: expected a finite value in [{minimum}, 1]"
+            ),
+        });
+    }
 
     if inductors.len() < 2 && model.is_none() {
         return Err(ParseError::Syntax {

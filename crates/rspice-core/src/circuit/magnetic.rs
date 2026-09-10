@@ -1620,7 +1620,7 @@ impl CircuitData {
             // A normalized M computed through square roots can round just
             // below one for an authored perfect pair. Its physical flux rank
             // is still singular, regardless of that roundoff.
-            binding.branch1_ordinal != binding.branch2_ordinal && binding.device.k >= 1.0
+            binding.branch1_ordinal != binding.branch2_ordinal && binding.device.k.abs() >= 1.0
         }) {
             return false;
         }

@@ -208,6 +208,35 @@ mod wasm_tests {
     use crate::js_interop::{js_array_property, js_property};
 
     #[wasm_bindgen_test]
+    fn signed_coupling_preserves_ac_phase_in_wasm() {
+        use rspice_core::Complex64;
+        let engine = rspice_core::Engine::default();
+        for (secondary, orientation) in [("s 0", 1.0), ("0 s", -1.0)] {
+            let deck = rspice_core::Netlist::parse(&format!(
+                "signed coupling in WASM\nV1 in 0 AC 1\nR1 in p 50\nL1 p 0 10m\nL2 {secondary} 40m\nK1 L1 L2 -0.75\n.end\n"
+            )).unwrap();
+            for point in engine
+                .run_ac_with_abort(
+                    &deck,
+                    &[100.0, 1000.0, 10000.0],
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap()
+            {
+                let omega = std::f64::consts::TAU * point.frequency;
+                let expected = Complex64::new(0.0, -orientation * omega * 0.015)
+                    / Complex64::new(50.0, omega * 0.01);
+                let output = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("s"))
+                    .unwrap();
+                assert!((point.voltages[output] - expected).norm() < 2e-12);
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn pss_coupled_descriptor_current_control_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::PssConfig;

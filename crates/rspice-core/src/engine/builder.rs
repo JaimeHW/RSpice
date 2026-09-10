@@ -4920,9 +4920,21 @@ impl Engine {
             let ElementKind::Coupling {
                 inductors,
                 coefficient,
-                model: Some(model),
+                model,
             } = &element.kind
             else {
+                continue;
+            };
+            // Stepped and programmatically supplied netlists also reach this
+            // boundary; constructors must not silently clamp their values.
+            let minimum = if model.is_some() { 0.0 } else { -1.0 };
+            if !coefficient.is_finite() || !(minimum..=1.0).contains(coefficient) {
+                return Err(SimulationError::Circuit(format!(
+                    "Invalid coupling coefficient {}={} (expected a finite value in [{minimum}, 1])",
+                    element.name, coefficient
+                )));
+            }
+            let Some(model) = model else {
                 continue;
             };
             if inductors.is_empty() {
@@ -8959,6 +8971,60 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn signed_coupling_perfect_flux_rank_survives_square_root_roundoff() {
+        for coefficient in [-1.0_f64, -0.999, 0.999, 1.0] {
+            // These inductances normalize an authored |k|=1 to slightly below
+            // one in binary64, which must not manufacture an independent mode.
+            let netlist = Netlist::parse(&format!(
+                "perfect mutual rank\nL1 a 0 10m\nL2 b 0 40m\nK1 L1 L2 {coefficient}\n.end\n"
+            ))
+            .unwrap();
+            let circuit = Engine::default().build_circuit(&netlist).unwrap();
+            assert_eq!(
+                circuit.has_positive_definite_mutual_inductance(),
+                coefficient.abs() < 1.0
+            );
+        }
+    }
+
+    #[test]
+    fn signed_coupling_preserves_resolved_overlays_and_validates_mutations() {
+        for coefficient in [-1.0, -0.5, -0.0, 0.0, 0.5, 1.0] {
+            let netlist = Netlist::parse(&format!(
+                "signed mutual overlays\n.param coupling={coefficient}\nL1 a 0 1\nL2 b 0 4\nL3 c 0 16\nK1 L1 L2 L3 {{coupling}}\n.end\n"
+            )).unwrap();
+            let circuit = Engine::default().build_circuit(&netlist).unwrap();
+            assert_eq!(circuit.couplings[0].coefficient, coefficient);
+            assert_eq!(circuit.coupled_inductor_pairs.len(), 3);
+            for (pair, geometric_mean) in circuit.coupled_inductor_pairs.iter().zip([2.0, 4.0, 8.0])
+            {
+                assert_eq!(pair.device.k, coefficient);
+                assert_eq!(pair.device.m, coefficient * geometric_mean);
+            }
+        }
+        for invalid in [
+            -1.01,
+            1.01,
+            Value::NAN,
+            Value::INFINITY,
+            Value::NEG_INFINITY,
+        ] {
+            let mut netlist =
+                Netlist::parse("mutated coupling\nL1 a 0 1\nL2 b 0 4\nK1 L1 L2 0.5\n.end\n")
+                    .unwrap();
+            let ElementKind::Coupling { coefficient, .. } = &mut netlist.elements[2].kind else {
+                panic!("coupling fixture");
+            };
+            *coefficient = invalid;
+            let error = Engine::default().build_circuit(&netlist).unwrap_err();
+            assert!(
+                error.to_string().contains("coupling coefficient K1="),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn classic_mos_series_scaling_preserves_representable_extremes() {
