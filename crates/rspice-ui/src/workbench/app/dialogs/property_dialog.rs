@@ -65,11 +65,17 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             return TabbedDialogResult::None;
         };
         let mut candidate = component.clone();
-        crate::properties::property_bridge::apply_properties_to_component(
+        if let Err(error) = crate::properties::property_bridge::apply_properties_to_component(
             &mut candidate,
             &values,
             &state.property_registry,
-        );
+        ) {
+            state.tabbed_property_dialog.open = true;
+            state.tabbed_property_dialog.commit_error = Some(format!(
+                "The component was not changed: {error} Correct its Parameters text in the inspector."
+            ));
+            return TabbedDialogResult::None;
+        }
         if let Err(error) = validate_component_identity(state, comp_id, &candidate) {
             state.tabbed_property_dialog.open = true;
             state
@@ -904,10 +910,12 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     };
-    (current != baseline).then(|| {
-        "The selected component changed while properties were open. Close and reopen the current object."
-            .to_owned()
-    })
+    if current != baseline {
+        return Some("The selected component changed while properties were open. Close and reopen the current object.".to_owned());
+    }
+    crate::state::params_string::validate_parameter_text(&current.params)
+        .err()
+        .map(|error| format!("Parameters text needs correction: {error} Close Object properties and correct it in the inspector."))
 }
 
 #[cfg(test)]
@@ -984,7 +992,8 @@ mod tests {
             &mut component,
             &values,
             &registry,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             validate_component_contract(&component, &values, sheet),
@@ -1148,6 +1157,48 @@ mod tests {
         );
         assert!(!state.schematic.can_undo());
         assert!(state.project_undo_sequence().is_none());
+    }
+
+    #[test]
+    fn malformed_parameter_refusal_keeps_rendered_property_edits_and_references_isolated() {
+        for source in ["note='unterminated", "temp=27 TEMP=85"] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut state = state_with_resistor();
+            state.schematic.components[0].params = source.to_owned();
+            add_current_output(&mut state);
+            let before = crate::state::SchematicSnapshot::capture(&state.schematic);
+            let payloads = state.workspace.simulation_plan_payloads.clone();
+            open_property_editor(&mut state, 44);
+            state
+                .tabbed_property_dialog
+                .set_value("name", PropertyValue::String("R99".to_owned()));
+            state
+                .tabbed_property_dialog
+                .set_value("r", PropertyValue::Expression("2k".to_owned()));
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
+                render_property_dialog(ctx, &mut state);
+            });
+            let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
+                render_property_dialog(ctx, &mut state);
+            });
+            assert!(before.is_equal_state(&state.schematic));
+            assert_eq!(state.workspace.simulation_plan_payloads, payloads);
+            assert!(state.tabbed_property_dialog.open);
+            assert!(
+                state
+                    .tabbed_property_dialog
+                    .commit_error
+                    .as_ref()
+                    .or(state.tabbed_property_dialog.session_error.as_ref())
+                    .unwrap()
+                    .contains("Parameters")
+            );
+            assert!(state.tabbed_property_dialog.is_modified("name"));
+            assert!(state.tabbed_property_dialog.is_modified("r"));
+            assert!(!state.schematic.can_undo());
+            assert!(state.project_undo_sequence().is_none());
+        }
     }
 
     #[test]

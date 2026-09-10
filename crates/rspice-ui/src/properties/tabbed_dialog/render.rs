@@ -1275,7 +1275,8 @@ fn preview_component(
         &mut component,
         &state.values,
         registry,
-    );
+    )
+    .ok()?;
     Some(component)
 }
 

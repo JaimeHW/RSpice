@@ -254,6 +254,9 @@ pub(crate) fn validate_component_properties(
     component: &Component,
     registry: &PropertyRegistry,
 ) -> Vec<(String, String)> {
+    if let Err(error) = crate::state::params_string::validate_parameter_text(&component.params) {
+        return vec![("parameters".to_owned(), error)];
+    }
     let Some(sheet) = registry.get(component.kind) else {
         return vec![(
             "schema".to_owned(),
@@ -341,11 +344,15 @@ pub(crate) fn source_commit_refusal(
 /// * `component` - The component to update
 /// * `properties` - HashMap of edited property values
 /// * `registry` - Property registry for type information (used for filtering)
+///
+/// Malformed or duplicate existing parameters return an error before any
+/// field changes, so a property-map round trip cannot discard authored text.
 pub fn apply_properties_to_component(
     component: &mut Component,
     properties: &HashMap<String, PropertyValue>,
     registry: &PropertyRegistry,
-) {
+) -> Result<(), String> {
+    crate::state::params_string::validate_parameter_text(&component.params)?;
     let primary_prop = get_primary_property_name(component.kind);
 
     // Update instance name
@@ -456,6 +463,7 @@ pub fn apply_properties_to_component(
 
     // Format secondary parameters into params string
     component.params = format_params_string(&secondary_params);
+    Ok(())
 }
 
 fn is_port_contract_property(key: &str) -> bool {
@@ -573,7 +581,7 @@ mod tests {
         let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
         let properties = HashMap::from([("r".to_owned(), PropertyValue::number(value))]);
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         assert_eq!(
             component
@@ -593,7 +601,7 @@ mod tests {
             PropertyValue::String("  R42  ".to_owned()),
         )]);
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         assert_eq!(component.name, "R42");
     }
@@ -609,7 +617,7 @@ mod tests {
             &PropertyValue::number(value),
             &PropertyValue::number(0.0)
         ));
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         let serialized = parse_params_string(&component.params);
         let tc1 = serialized.get("tc1").expect("non-default tc1 is retained");
@@ -628,7 +636,7 @@ mod tests {
             let mut properties = collect_properties_from_component(&component, &registry);
             properties.insert("ac".to_owned(), PropertyValue::number(2.5));
 
-            apply_properties_to_component(&mut component, &properties, &registry);
+            apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
             assert_eq!(component.value, "2.5");
             assert!(!parse_params_string(&component.params).contains_key("ac"));
@@ -644,7 +652,7 @@ mod tests {
             let mut properties = collect_properties_from_component(&component, &registry);
             properties.insert("w".to_owned(), PropertyValue::number(2e-6));
 
-            apply_properties_to_component(&mut component, &properties, &registry);
+            apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
             assert_eq!(component.value, "core_model");
             assert_eq!(
@@ -664,7 +672,7 @@ mod tests {
         let mut properties = collect_properties_from_component(&component, &registry);
         properties.insert("gain".to_owned(), PropertyValue::number(250000.0));
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         assert_eq!(component.value, "250000");
         assert!(!parse_params_string(&component.params).contains_key("gain"));
@@ -682,7 +690,7 @@ mod tests {
             ("rp".to_owned(), PropertyValue::Expression(String::new())),
         ]);
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         assert!(component.params.is_empty());
         assert!(!component.params.contains("inf"));
@@ -734,7 +742,7 @@ mod tests {
             Some(PropertyValue::String(value)) if !value.is_empty()
         ));
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         let encoded = parse_params_string(&component.params);
         assert_eq!(encoded.get("dir").map(String::as_str), Some("in"));
         assert_eq!(
@@ -787,7 +795,7 @@ mod tests {
             PropertyValue::String("Thermal monitor output".to_owned()),
         );
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         let contract = component.port_contract().expect("typed contract remains");
         assert_eq!(contract.direction, crate::state::PortDirection::Out);
@@ -830,7 +838,7 @@ mod tests {
         );
 
         properties.insert("interface_order".to_owned(), PropertyValue::number(4.0));
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         assert_eq!(
             component.port_contract().expect("contract").netlist_order,
             Some(4)
@@ -845,7 +853,7 @@ mod tests {
         );
 
         properties.insert("interface_order".to_owned(), PropertyValue::number(0.0));
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         assert_eq!(
             component.port_contract().expect("contract").netlist_order,
             None
@@ -874,7 +882,7 @@ mod tests {
             InstanceMultiplicity::PARAMETER_NAME.to_owned(),
             PropertyValue::number(4.0),
         );
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         assert_eq!(
             component.multiplicity.map(InstanceMultiplicity::value),
             Some(4.0)
@@ -891,14 +899,14 @@ mod tests {
             InstanceMultiplicity::PARAMETER_NAME.to_owned(),
             PropertyValue::number(1.0),
         );
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         assert!(component.multiplicity.is_none());
 
         properties.insert(
             InstanceMultiplicity::PARAMETER_NAME.to_owned(),
             PropertyValue::number(-2.0),
         );
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
         assert!(
             component.multiplicity.is_none(),
             "a value the engine refuses is not stored on the instance"
@@ -914,7 +922,7 @@ mod tests {
             PropertyValue::number(4.0),
         )]);
 
-        apply_properties_to_component(&mut component, &properties, &registry);
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
 
         assert!(component.multiplicity.is_none());
         assert_eq!(
@@ -979,5 +987,44 @@ mod pwl_tests {
         );
 
         assert_eq!(parsed.as_number(), Some(1e-3));
+    }
+
+    #[test]
+    fn property_round_trip_retains_flags_quoted_extensions_and_expression_groups() {
+        let registry = PropertyRegistry::new();
+        let mut component = Component::new(1, ComponentType::Diode, crate::state::Point::origin());
+        component.params = r#"off note="[\"a  b\" \"C:\\my data\"]" expr={V(a,b) + 1}"#.to_owned();
+        let original = parse_params_string(&component.params);
+        let mut properties = collect_properties_from_component(&component, &registry);
+        properties.insert("name".to_owned(), PropertyValue::String("D9".to_owned()));
+        apply_properties_to_component(&mut component, &properties, &registry).unwrap();
+        assert_eq!(component.name, "D9");
+        let round_trip = parse_params_string(&component.params);
+        for (key, value) in original {
+            assert_eq!(round_trip.get(&key), Some(&value), "{key}");
+        }
+        let values = collect_properties_from_component(&component, &registry);
+        assert_eq!(values.get("note"), properties.get("note"));
+    }
+
+    #[test]
+    fn property_application_refuses_malformed_or_ambiguous_text_before_any_mutation() {
+        let registry = PropertyRegistry::new();
+        for source in ["note='unterminated", "temp=27 TEMP=85"] {
+            let mut component =
+                Component::new(1, ComponentType::Resistor, crate::state::Point::origin());
+            component.params = source.to_owned();
+            let original = component.clone();
+            let values = HashMap::from([
+                ("name".to_owned(), PropertyValue::String("R9".to_owned())),
+                ("r".to_owned(), PropertyValue::Expression("2k".to_owned())),
+            ]);
+            assert!(apply_properties_to_component(&mut component, &values, &registry).is_err());
+            assert_eq!(component, original);
+            assert_eq!(
+                validate_component_properties(&component, &registry)[0].0,
+                "parameters"
+            );
+        }
     }
 }
