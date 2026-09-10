@@ -10,6 +10,7 @@
 //! - Follows industry-standard SPICE simulator practices
 
 use crate::Value;
+pub use rspice_veriloga_runtime::THERMAL_VOLTAGE_PER_K;
 
 //=============================================================================
 // Numerical Tolerances
@@ -185,7 +186,7 @@ pub const K_BOLTZMANN: Value = 1.380649e-23;
 pub const Q_ELECTRON: Value = 1.602176634e-19;
 
 /// Thermal voltage at reference temperature (kT/q)
-pub const VT_REFERENCE: Value = TEMP_REFERENCE * K_BOLTZMANN / Q_ELECTRON;
+pub const VT_REFERENCE: Value = TEMP_REFERENCE * THERMAL_VOLTAGE_PER_K;
 
 /// Boltzmann constant as Xyce 7.10 rounds it (J/K).
 ///
@@ -311,5 +312,5 @@ pub const JUNCTION_BREAKDOWN_FACTOR: Value = 0.9;
 /// Calculate thermal voltage at a given temperature
 #[inline]
 pub fn thermal_voltage(temp_kelvin: Value) -> Value {
-    temp_kelvin * K_BOLTZMANN / Q_ELECTRON
+    temp_kelvin * THERMAL_VOLTAGE_PER_K
 }

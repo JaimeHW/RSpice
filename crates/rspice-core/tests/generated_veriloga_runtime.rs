@@ -365,6 +365,29 @@ fn generated_runtime_snapshots_only_mutable_evaluation_state() {
 }
 
 #[test]
+fn generated_and_core_thermal_voltage_preserve_the_si_ratio_and_extreme_ranges() {
+    // Independently rounded from the exact SI ratio 1380649 / 16021766340,
+    // multiplied by each temperature's exact binary64 value.
+    for (temperature, expected) in [
+        (300.15, 0x3f9a_7c55_c976_86ec),
+        (1e-310, 0x0000_0000_67f5_e2f6),
+        (1e308, 0x7f09_21cb_7e69_c6d6),
+        (-0.0, 0x8000_0000_0000_0000),
+    ] {
+        let context = GeneratedEvalContext::new(&[], temperature, 0);
+        assert_eq!(context.thermal_voltage().to_bits(), expected);
+        assert_eq!(
+            rspice_core::constants::thermal_voltage(temperature).to_bits(),
+            expected
+        );
+    }
+    assert_eq!(
+        rspice_core::constants::VT_REFERENCE,
+        rspice_core::constants::thermal_voltage(rspice_core::constants::TEMP_REFERENCE)
+    );
+}
+
+#[test]
 fn generated_stamper_linearizes_current_contribution() {
     let voltages = [1.0, 0.5];
     let mut rhs = vec![0.0; 2];
