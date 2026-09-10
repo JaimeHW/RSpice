@@ -857,6 +857,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             "Measurements"
         };
         section_header(ui, title, None);
+        ui.label(
+            egui::RichText::new("Linear interpolation")
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text_dim),
+        )
+        .on_hover_text(
+            "Measurements use linear segments between retained samples. Plot smoothing and display decimation do not change these values.",
+        );
         measurement_rows(
             ui,
             &mut state.ui.results.derived,
@@ -1104,9 +1112,107 @@ pub(super) fn x_separation(
     }
 }
 
-/// min / max / rms rows per visible trace, optionally windowed to [a, b].
-/// The single-pass stats are cached per (trace, window, data version), so
-/// no samples are rescanned until the cursors or the data move.
+/// Interval statistics are cached by source, cursor window, and sweep branch.
+pub(super) fn trace_interval_statistics(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    trace: &StripTrace,
+    window: Option<(f64, f64)>,
+    branch: Option<usize>,
+) -> super::super::WindowStats {
+    use crate::analysis::measurements::{MeasurementError, measure_interval};
+
+    if window.is_some_and(|(a, b)| !a.is_finite() || !b.is_finite()) {
+        return Err(MeasurementError::NonFiniteWindow);
+    }
+    let (a_bits, b_bits) = window.map_or((u64::MAX, u64::MAX), |(a, b)| {
+        (a.min(b).to_bits(), a.max(b).to_bits())
+    });
+    let key = (
+        trace_key(model, trace),
+        a_bits,
+        b_bits,
+        branch.unwrap_or(usize::MAX),
+    );
+    derived.stats_or(key, || {
+        if trace.x.len() != trace.y.len() {
+            return Err(MeasurementError::LengthMismatch);
+        }
+        if trace.x.iter().any(|v| !v.is_finite()) {
+            return Err(MeasurementError::NonFiniteAxis);
+        }
+        let range = match branch {
+            Some(index) => {
+                let run = trace
+                    .shape
+                    .runs()
+                    .get(index)
+                    .ok_or(MeasurementError::NonMonotoneAxis)?;
+                run.start..run.end
+            }
+            None => 0..trace.x.len(),
+        };
+        measure_interval(&trace.x[range.clone()], &trace.y[range], window)
+    })
+}
+
+pub(super) fn measurement_values(
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    window: Option<(f64, f64)>,
+    significant_digits: usize,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    for trace in model.traces.iter().filter(|t| t.visible).take(4) {
+        let branches: Vec<Option<usize>> = if trace.shape.class() == SweepClass::MultiBranch
+            && trace.shape.branch_count() <= MAX_READOUT_BRANCHES
+        {
+            (0..trace.shape.branch_count()).map(Some).collect()
+        } else {
+            vec![None]
+        };
+        for branch in branches {
+            let mut name = trace.name.clone();
+            if let Some(branch) = branch {
+                name.push(' ');
+                name.push_str(&branch_tag(&trace.shape, branch));
+            }
+            if let Some(tag) = run_tag(model, trace) {
+                name.push_str(" · ");
+                name.push_str(&tag);
+            }
+            let stats = trace_interval_statistics(derived, model, trace, window, branch);
+            let stats = match stats {
+                Ok(stats) => stats,
+                Err(error) => {
+                    rows.push((name, format!("Unavailable: {error}")));
+                    continue;
+                }
+            };
+            let fmt = |v| model.format_trace_value(trace, v, significant_digits, quantity_policy);
+            rows.push((format!("{name} min"), fmt(stats.min)));
+            rows.push((format!("{name} max"), fmt(stats.max)));
+            if matches!(
+                trace.kind,
+                TraceKind::Value | TraceKind::Real | TraceKind::Imaginary
+            ) {
+                rows.push((format!("{name} rms"), fmt(stats.rms)));
+            }
+        }
+    }
+    let visible = model.traces.iter().filter(|trace| trace.visible).count();
+    if visible > 4 {
+        rows.push((
+            "Traces".to_owned(),
+            format!("Showing 4 of {visible}; hide traces to measure others"),
+        ));
+    }
+    rows
+}
+
+/// Min/max/RMS use retained linear segments, including interpolated A/B
+/// endpoints. Rendering interpolation and display decimation do not alter them.
 pub(super) fn measurement_rows(
     ui: &mut Ui,
     derived: &mut DerivedSeries,
@@ -1115,52 +1221,7 @@ pub(super) fn measurement_rows(
     significant_digits: usize,
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
 ) {
-    use crate::analysis::measurements as basic;
-
-    // Window identity for the cache key; u64::MAX is a NaN bit pattern no
-    // finite cursor can produce, marking the full-range case.
-    let (a_bits, b_bits) = match window {
-        Some((a, b)) => (a.to_bits(), b.to_bits()),
-        None => (u64::MAX, u64::MAX),
-    };
-
-    let mut rows: Vec<(String, String)> = Vec::new();
-    for trace in model.traces.iter().filter(|t| t.visible).take(4) {
-        let key = (trace_key(model, trace), a_bits, b_bits);
-        let stats = derived.stats_or(key, || {
-            let Some((a, b)) = window else {
-                return basic::calculate_min_max_rms(&trace.y);
-            };
-            // A bisected [start, end) is only the window on an ascending
-            // sweep. A reverse sweep gets the complementary slice and a loop
-            // gets one contiguous run that spans both branches — so the
-            // reported minimum, maximum and rms described samples the cursors
-            // never enclosed. The shape names the ranges that are inside it.
-            let ranges = trace.shape.window_ranges(&trace.x, a.min(b), a.max(b));
-            let samples: Vec<f64> = ranges
-                .into_iter()
-                .flat_map(|range| trace.y.get(range).unwrap_or_default().iter().copied())
-                .collect();
-            basic::calculate_min_max_rms(&samples)
-        });
-        let Some((min, max, rms)) = stats else {
-            continue;
-        };
-        // One formatter for every value the instrument reports, so a
-        // measurement and the cursor readout above it cannot disagree about
-        // a trace's unit.
-        let fmt = |v: f64| -> String {
-            model.format_trace_value(trace, v, significant_digits, quantity_policy)
-        };
-        rows.push((format!("{} min", trace.name), fmt(min)));
-        rows.push((format!("{} max", trace.name), fmt(max)));
-        if matches!(
-            trace.kind,
-            TraceKind::Value | TraceKind::Real | TraceKind::Imaginary
-        ) {
-            rows.push((format!("{} rms", trace.name), fmt(rms)));
-        }
-    }
+    let rows = measurement_values(derived, model, window, significant_digits, quantity_policy);
     let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     crate::ui::widgets::measurement_table(ui, &refs);
 }

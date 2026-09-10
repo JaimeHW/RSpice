@@ -43,11 +43,9 @@ fn spectrum_models(
 
 fn stats(results: &mut ResultsState, model: &StripModel) -> Option<(f64, f64, f64)> {
     let trace = &model.traces[0];
-    results
-        .derived
-        .stats_or((trace_key(model, trace), u64::MAX, u64::MAX), || {
-            crate::analysis::measurements::calculate_min_max_rms(&trace.y)
-        })
+    trace_interval_statistics(&mut results.derived, model, trace, None, None)
+        .ok()
+        .map(|stats| (stats.min, stats.max, stats.rms))
 }
 
 #[test]

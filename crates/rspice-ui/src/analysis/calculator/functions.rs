@@ -154,89 +154,38 @@ fn db(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 
 // --- Aggregates over the x-window (Waveform -> Scalar) ---
 
-/// The trapezoidal rule over a possibly non-uniform grid.
-///
-/// Exact for a piecewise-linear integrand, which is what a solver's retained
-/// samples represent, and correct across the duplicated timepoints SPICE
-/// emits at a vertical edge — a zero-width panel contributes zero area.
-fn trapezoid(x: &[f64], y: &[f64], f: impl Fn(f64) -> f64) -> f64 {
-    let mut area = 0.0;
-    for i in 1..x.len() {
-        area += (f(y[i]) + f(y[i - 1])) * 0.5 * (x[i] - x[i - 1]);
-    }
-    area
-}
-
-/// Mean of `f(y)` over the x-window: `∫f(y)dx ÷ (x_last − x_first)`.
-///
-/// A degenerate window — every sample at the same x, or a single sample —
-/// has no width to divide by, so it falls back to the arithmetic mean, which
-/// is the limit of the window mean as the window closes.
-///
-/// A **hole refuses the whole measurement**. The domain policy above leaves
-/// `NaN` where a sample fell outside a function's domain, and an integral
-/// across a missing region is not the mean it would be printed as: the panel
-/// has nowhere to show "…except between 1.2 s and 1.4 s". Skipping the holes
-/// would answer a different question — the mean of what survived — and
-/// letting the `NaN` through reads as a value, so the honest answer is the
-/// error. Both `avg` and `rms` go through here, which is why the check lives
-/// here and not in either of them.
-fn window_mean(
-    name: &str,
-    x: &[f64],
-    y: &[f64],
-    f: impl Fn(f64) -> f64,
-) -> Result<f64, EvaluationError> {
-    if x.is_empty() || x.len() != y.len() {
-        return Err(EvaluationError::MathError(format!(
-            "{name} needs a waveform with samples"
-        )));
-    }
-    if let Some(index) = y.iter().position(|v| !v.is_finite()) {
-        return Err(EvaluationError::MathError(format!(
-            "{name}: the series has undefined samples in the window (holes left where the \
-             math went out of domain), the first at x = {}",
-            x[index]
-        )));
-    }
-    if x.iter().any(|v| !v.is_finite()) {
-        return Err(EvaluationError::MathError(format!(
-            "{name}: the series has a non-finite position on its x-axis, so the window it \
-             would be averaged over has no width"
-        )));
-    }
-    let span = x[x.len() - 1] - x[0];
-    if span == 0.0 {
-        return Ok(y.iter().map(|v| f(*v)).sum::<f64>() / y.len() as f64);
-    }
-    Ok(trapezoid(x, y, f) / span)
-}
-
 fn avg(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("avg", &args, 1)?;
     match &args[0] {
+        CalcValue::Scalar(s) if !s.is_finite() => Err(domain_error("avg", "non-finite value")),
         // A DC value is its own mean.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
-        CalcValue::Waveform(x, y) => Ok(CalcValue::Scalar(window_mean("avg", x, y, |v| v)?)),
+        CalcValue::Waveform(x, y) => {
+            interval_statistics("avg", x, y).map(|stats| CalcValue::Scalar(stats.mean))
+        }
     }
 }
 
 fn rms(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("rms", &args, 1)?;
     match &args[0] {
+        CalcValue::Scalar(s) if !s.is_finite() => Err(domain_error("rms", "non-finite value")),
         // The RMS of a DC value is its magnitude, not the signed value.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(s.abs())),
-        // The mean of squares is non-negative by construction; the clamp
-        // catches a rounding excursion just below zero on a near-degenerate
-        // window and nothing else. It is deliberately *not* a NaN guard —
-        // `f64::max` ignores a NaN, so using it that way would turn a hole
-        // into a confident "0". `window_mean` refuses holes instead.
-        CalcValue::Waveform(x, y) => Ok(CalcValue::Scalar(
-            window_mean("rms", x, y, |v| v * v)?.max(0.0).sqrt(),
-        )),
+        CalcValue::Waveform(x, y) => {
+            interval_statistics("rms", x, y).map(|stats| CalcValue::Scalar(stats.rms))
+        }
     }
 }
 
+fn interval_statistics(
+    name: &str,
+    x: &[f64],
+    y: &[f64],
+) -> Result<crate::analysis::measurements::IntervalStatistics, EvaluationError> {
+    crate::analysis::measurements::measure_interval(x, y, None)
+        .map_err(|error| EvaluationError::MathError(format!("{name}: {error}")))
+}
 // --- Transformations (Waveform -> Waveform) ---
 
 /// One-sided difference from `at`, skipping neighbours that repeat `x[at]`.
@@ -1695,6 +1644,57 @@ mod tests {
             1.0e-12,
             "avg of a pulse",
         );
+    }
+
+    #[test]
+    fn interval_rms_is_exact_for_piecewise_linear_retained_samples() {
+        for (x, y, expected) in [
+            (vec![0.0, 1.0], vec![0.0, 1.0], (1.0_f64 / 3.0).sqrt()),
+            (
+                vec![0.0, 0.99, 1.0],
+                vec![1.0, 1.0, 0.0],
+                (149.0_f64 / 150.0).sqrt(),
+            ),
+            (
+                vec![1.0, 0.99, 0.0],
+                vec![0.0, 1.0, 1.0],
+                (149.0_f64 / 150.0).sqrt(),
+            ),
+        ] {
+            assert_close(
+                scalar_of("rms", vec![wave(x, y)]),
+                expected,
+                1.0e-14,
+                "PWL RMS",
+            );
+        }
+    }
+
+    #[test]
+    fn interval_aggregates_preserve_extreme_finite_signal_scales() {
+        for value in [1.0e-300, 1.0e300, f64::MAX] {
+            for name in ["avg", "rms"] {
+                let result = scalar_of(name, vec![wave(vec![-f64::MAX, f64::MAX], vec![value; 2])]);
+                assert!(result.is_finite());
+                assert_close(result / value, 1.0, 1.0e-14, name);
+            }
+        }
+    }
+
+    #[test]
+    fn interval_aggregates_refuse_to_merge_opposing_sweep_branches() {
+        for name in ["avg", "rms"] {
+            assert!(call(name, vec![wave(vec![0.0, 1.0, 0.0], vec![0.0, 1.0, 2.0])]).is_err());
+        }
+    }
+
+    #[test]
+    fn interval_aggregates_refuse_nonfinite_scalars() {
+        for name in ["avg", "rms"] {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert!(call(name, vec![CalcValue::Scalar(value)]).is_err());
+            }
+        }
     }
 
     #[test]

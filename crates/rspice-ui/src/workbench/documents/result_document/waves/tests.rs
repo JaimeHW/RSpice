@@ -11,6 +11,7 @@ mod degenerate;
 mod extent;
 mod honest_axes;
 mod interaction;
+mod measurements;
 mod source_cache;
 
 #[test]

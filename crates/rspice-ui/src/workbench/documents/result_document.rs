@@ -263,8 +263,11 @@ pub(crate) type DrawnAxes = (AxisExtent, AxisExtent);
 
 pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
 pub type WaveformSeriesResult = Result<WaveformSeries, String>;
-type WindowStatsKey = (u64, u64, u64);
-type WindowStats = Option<(f64, f64, f64)>;
+type WindowStatsKey = (u64, u64, u64, usize);
+type WindowStats = Result<
+    crate::analysis::measurements::IntervalStatistics,
+    crate::analysis::measurements::MeasurementError,
+>;
 
 /// Whether retained evidence belongs to the stable analysis authored in the
 /// simulation plan. Deterministically expanded executions (for example PVT
@@ -4012,12 +4015,12 @@ impl DerivedSeries {
         *self.ranges.entry(key).or_insert_with(build)
     }
 
-    /// Fetch or compute cached windowed (min, max, rms) measurements.
+    /// Fetch or compute interval statistics, including unavailable coverage.
     pub fn stats_or(
         &mut self,
-        key: (u64, u64, u64),
-        build: impl FnOnce() -> Option<(f64, f64, f64)>,
-    ) -> Option<(f64, f64, f64)> {
+        key: WindowStatsKey,
+        build: impl FnOnce() -> WindowStats,
+    ) -> WindowStats {
         *self.stats.entry(key).or_insert_with(build)
     }
 
