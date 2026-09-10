@@ -3,7 +3,7 @@
 
 use super::references::PreparedReferences;
 use super::*;
-use crate::state::{Component, remap_instance_probes};
+use crate::state::{AnnotationState, Component, SchematicObjectKey, remap_instance_probes};
 use crate::workbench::state::InlineEditAuthority;
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,20 @@ pub(super) struct ComponentRenameRecord {
     before: SchematicSnapshot,
     after: SchematicSnapshot,
     references: ReferenceChanges,
+    annotation: Option<AnnotationChange>,
+}
+
+#[derive(Debug, Clone)]
+struct AnnotationChange {
+    before: AnnotationState,
+    after: AnnotationState,
+    before_revision: ObjectRevision,
+    after_revision: ObjectRevision,
+}
+
+struct PreparedComponentRename {
+    references: PreparedReferences,
+    annotation: Option<DesignManagementCatalog>,
 }
 
 impl AppState {
@@ -165,15 +179,40 @@ impl AppState {
         }
         let mut references = ReferenceChanges::between(self, &configurations, outputs);
         references.add_instance_renames(&document, &before.components, &after.components);
-        let record = ComponentRenameRecord {
+        let annotation_before = self.workspace.design_management.annotation();
+        let mut annotation_after = annotation_before.clone();
+        let annotation = annotation_after
+            .commit_manual_reference_edit(
+                SchematicObjectKey::new(&document.key(), expected.id)
+                    .map_err(|error| error.to_string())?,
+                &expected.name,
+                &candidate.name,
+            )
+            .map_err(|error| error.to_string())?
+            .map(|_| -> Result<_, String> {
+                Ok(AnnotationChange {
+                    before: annotation_before.clone(),
+                    after: annotation_after,
+                    before_revision: self.workspace.project.revision(),
+                    after_revision: self
+                        .workspace
+                        .project
+                        .revision()
+                        .next()
+                        .map_err(|error| error.to_string())?,
+                })
+            })
+            .transpose()?;
+        let mut record = ComponentRenameRecord {
             description: description.to_owned(),
             document: document.clone(),
             before,
             after,
             references,
+            annotation,
         };
         let prepared = record.prepare(self, true)?;
-        record.publish(self, true, prepared);
+        record.publish(self, true, prepared)?;
         self.schematic.undo_history.clear_redo();
         self.workspace.save_active_schematic(&self.schematic);
         self.push_project_record(
@@ -201,6 +240,20 @@ impl ComponentRenameRecord {
         schematic_for_reference(state, &self.document)
             .is_some_and(|schematic| expected.is_equal_state(schematic))
             && self.references.matches(state, forward)
+            && self.annotation.as_ref().is_none_or(|change| {
+                state.workspace.design_management.annotation()
+                    == if forward {
+                        &change.before
+                    } else {
+                        &change.after
+                    }
+                    && state.workspace.project.revision()
+                        == if forward {
+                            change.before_revision
+                        } else {
+                            change.after_revision
+                        }
+            })
     }
 
     pub(super) fn validate_mutation(
@@ -211,7 +264,7 @@ impl ComponentRenameRecord {
         self.prepare(state, operation != "undone").map(|_| ())
     }
 
-    fn prepare(&self, state: &AppState, forward: bool) -> Result<PreparedReferences, String> {
+    fn prepare(&self, state: &AppState, forward: bool) -> Result<PreparedComponentRename, String> {
         if !state.project_lifecycle.project_open || document_read_only(state, &self.document) {
             return Err(
                 "Component rename requires an open, writable project and document.".to_owned(),
@@ -230,10 +283,52 @@ impl ComponentRenameRecord {
                 "Finish or cancel the active schematic gesture before renaming.".to_owned(),
             );
         }
-        self.references.prepare(state, forward)
+        let references = self.references.prepare(state, forward)?;
+        let annotation = self
+            .annotation
+            .as_ref()
+            .map(|change| {
+                let current = &state.workspace.design_management;
+                let mut candidate = current.clone();
+                *candidate.annotation_mut() = if forward {
+                    &change.after
+                } else {
+                    &change.before
+                }
+                .clone();
+                // Exercise the same catalog and revision validation as publication
+                // before history navigation or any schematic/reference changes.
+                let mut prepared = current.clone();
+                prepared
+                    .publish_reviewed_candidate(current.revision(), candidate)
+                    .map_err(|error| error.to_string())?;
+                state
+                    .workspace
+                    .project
+                    .revision()
+                    .next()
+                    .map_err(|error| error.to_string())?;
+                Ok::<_, String>(prepared)
+            })
+            .transpose()?;
+        Ok(PreparedComponentRename {
+            references,
+            annotation,
+        })
     }
 
-    fn publish(&self, state: &mut AppState, forward: bool, prepared: PreparedReferences) {
+    fn publish(
+        &mut self,
+        state: &mut AppState,
+        forward: bool,
+        prepared: PreparedComponentRename,
+    ) -> Result<(), String> {
+        if let Some(candidate) = prepared.annotation {
+            state
+                .workspace
+                .replace_design_management(candidate)
+                .map_err(|error| error.to_string())?;
+        }
         let schematic = if state.workspace.active_schematic_reference() == self.document {
             &mut state.schematic
         } else {
@@ -250,20 +345,43 @@ impl ComponentRenameRecord {
         if state.workspace.active_schematic_reference() == self.document {
             state.workspace.save_active_schematic(&state.schematic);
         }
-        prepared.publish(state);
+        prepared.references.publish(state);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         state.ui.netlist.current_generation_input_digest = None;
+        if let Some(change) = &mut self.annotation {
+            let restored = if forward {
+                &mut change.after_revision
+            } else {
+                &mut change.before_revision
+            };
+            let revision = state.workspace.project.revision();
+            state.reanchor_annotation_history_revision(*restored, revision);
+            *restored = revision;
+        }
+        Ok(())
+    }
+
+    pub(super) fn reanchor_annotation_revision(
+        &mut self,
+        previous: ObjectRevision,
+        replacement: ObjectRevision,
+    ) {
+        if let Some(change) = &mut self.annotation {
+            for revision in [&mut change.before_revision, &mut change.after_revision] {
+                if *revision == previous {
+                    *revision = replacement;
+                }
+            }
+        }
     }
 
     pub(super) fn apply_before(&mut self, state: &mut AppState) -> Result<(), String> {
         let prepared = self.prepare(state, false)?;
-        self.publish(state, false, prepared);
-        Ok(())
+        self.publish(state, false, prepared)
     }
 
     pub(super) fn apply_after(&mut self, state: &mut AppState) -> Result<(), String> {
         let prepared = self.prepare(state, true)?;
-        self.publish(state, true, prepared);
-        Ok(())
+        self.publish(state, true, prepared)
     }
 }

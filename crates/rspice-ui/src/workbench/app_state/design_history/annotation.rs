@@ -10,6 +10,71 @@ mod tests;
 type PathMappings = Vec<(InstancePath, InstancePath)>;
 
 impl AppState {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn retain_annotation_history_after_save_descriptor(
+        &mut self,
+        published: &crate::state::ProjectDescriptor,
+    ) {
+        let Some(path) = &published.path else {
+            return;
+        };
+        let before = self.workspace.project.revision();
+        if before == published.revision() {
+            return;
+        }
+        let mut expected = self.workspace.project.clone();
+        expected.set_path(path.clone());
+        // A first save can name an untitled project. Only that exact descriptor
+        // transition may carry the guards forward; delayed saves or unrelated
+        // descriptor changes must not acquire authority over newer edits.
+        if matches!(
+            (serde_json::to_value(&expected), serde_json::to_value(published)),
+            (Ok(expected), Ok(published)) if expected == published
+        ) {
+            self.reanchor_annotation_history_revision(before, published.revision());
+        }
+    }
+
+    /// A checked annotation compensation restores an earlier project state at
+    /// a new monotonic revision. Carry that exact revision relationship into
+    /// retained annotation/rename records. Unrelated external revision changes
+    /// still fail their guards; they never call this history-only operation.
+    pub(super) fn reanchor_annotation_history_revision(
+        &mut self,
+        previous: ObjectRevision,
+        replacement: ObjectRevision,
+    ) {
+        if previous == replacement {
+            return;
+        }
+        for record in self
+            .project_design_history
+            .undo
+            .iter_mut()
+            .chain(&mut self.project_design_history.redo)
+        {
+            match &mut record.body {
+                ProjectDesignBody::DesignManagement(record) => {
+                    for revision in [
+                        &mut record.before_project_revision,
+                        &mut record.undo_guard_revision,
+                    ] {
+                        if *revision == previous {
+                            *revision = replacement;
+                        }
+                    }
+                    if record.redo_guard_revision == Some(previous) {
+                        record.redo_guard_revision = Some(replacement);
+                    }
+                }
+                ProjectDesignBody::ComponentRename(record) => {
+                    record.reanchor_annotation_revision(previous, replacement)
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub(crate) fn prepare_design_management_schematic_transaction(
         &self,
         candidate: &DesignManagementCatalog,

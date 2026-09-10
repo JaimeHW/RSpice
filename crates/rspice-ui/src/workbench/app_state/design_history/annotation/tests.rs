@@ -1,6 +1,8 @@
 //! Annotation publication, dependent references and shared project history.
 
 use super::*;
+
+mod manual_edit;
 use crate::product::{ObjectRevision, SimulationPlanId};
 use crate::state::{
     AnnotationObject, AnnotationPosition, ConfigurationBlackBoxPolicy, ConfigurationModelProfile,
@@ -160,7 +162,7 @@ fn publish(fixture: &mut Fixture) {
     });
 }
 
-fn assert_references(fixture: &Fixture, names: &[&str]) {
+fn assert_component_references(fixture: &Fixture, names: &[&str]) {
     let state = &fixture.state;
     for (index, name) in names.iter().enumerate() {
         assert_eq!(
@@ -198,6 +200,11 @@ fn assert_references(fixture: &Fixture, names: &[&str]) {
             Some(output.id)
         );
     }
+}
+
+fn assert_references(fixture: &Fixture, names: &[&str]) {
+    assert_component_references(fixture, names);
+    let state = &fixture.state;
     assert_eq!(
         state
             .workspace

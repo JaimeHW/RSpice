@@ -124,6 +124,7 @@ struct DesignManagementRecord {
     before_schematics: BTreeMap<String, SchematicSnapshot>,
     after_schematics: BTreeMap<String, SchematicSnapshot>,
     references: ReferenceChanges,
+    before_project_revision: ObjectRevision,
     undo_guard_revision: ObjectRevision,
     redo_guard_revision: Option<ObjectRevision>,
 }
@@ -753,6 +754,8 @@ impl AppState {
                 before_schematics: capture_schematic_map(entry.before_schematics),
                 after_schematics: capture_schematic_map(entry.after_schematics),
                 references: entry.references,
+                before_project_revision: ObjectRevision::new(entry.committed_revision.get() - 1)
+                    .expect("design-management publication advances the project revision once"),
                 undo_guard_revision: entry.committed_revision,
                 redo_guard_revision: None,
             })),
@@ -1846,6 +1849,8 @@ impl DesignManagementRecord {
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &self.before_schematics)?;
         references.publish(state);
+        state.reanchor_annotation_history_revision(self.before_project_revision, revision);
+        self.before_project_revision = revision;
         self.redo_guard_revision = Some(revision);
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())
@@ -1866,6 +1871,7 @@ impl DesignManagementRecord {
             .map_err(|error| error.to_string())?;
         apply_schematic_map(state, &self.after_schematics)?;
         references.publish(state);
+        state.reanchor_annotation_history_revision(self.undo_guard_revision, revision);
         self.undo_guard_revision = revision;
         state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
         Ok(())

@@ -1452,6 +1452,7 @@ fn adopt_successful_save(
         if scope == SaveScope::AllDocuments
             || active_document(state) == ProjectDocumentId::ProjectConfiguration
         {
+            state.retain_annotation_history_after_save_descriptor(&candidate.workspace.project);
             state.workspace.project = candidate.workspace.project.clone();
         } else {
             // Saving one non-configuration document intentionally publishes a
