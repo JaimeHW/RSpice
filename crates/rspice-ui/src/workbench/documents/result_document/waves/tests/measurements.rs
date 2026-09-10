@@ -158,3 +158,44 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
     assert!(rows[0].1.contains("Unavailable"));
     assert!(rows[0].1.contains("50.0% interval coverage"));
 }
+
+#[test]
+fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
+    let mut state = transient(vec![0.0, 0.5e-12], vec![0.0, 0.1]);
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    for (a, b) in [(0.0, 0.5e-12), (0.5e-12, 0.0)] {
+        let rows = readout_rows(
+            &models[0],
+            CursorPair {
+                a: Some(a),
+                b: Some(b),
+            },
+            presentation,
+            state.ui.preferences.quantity_presentation_policy(),
+        );
+        assert_eq!(
+            rows[0].slope,
+            fmt_significant(
+                2e11,
+                usize::from(presentation.displayed_significant_digits().get()),
+                " V/s"
+            )
+        );
+    }
+    let coincident = readout_rows(
+        &models[0],
+        CursorPair {
+            a: Some(0.0),
+            b: Some(0.0),
+        },
+        presentation,
+        state.ui.preferences.quantity_presentation_policy(),
+    );
+    assert_eq!(coincident[0].slope, READOUT_ABSENT);
+}

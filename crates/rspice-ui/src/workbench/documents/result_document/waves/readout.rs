@@ -1034,7 +1034,7 @@ fn trace_readout_rows(
                 _ => None,
             };
             let slope = difference
-                .filter(|_| denominator.is_finite() && denominator.abs() > 1e-12)
+                .filter(|_| denominator.is_finite() && denominator != 0.0)
                 .map(|difference| difference / denominator)
                 .filter(|slope| slope.is_finite());
             ReadoutRow {
