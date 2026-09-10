@@ -888,17 +888,9 @@ impl Engine {
                 }
 
                 let rhs = current_state.3.map(|value| -value);
-                let Some((lu_internal, pivots_internal)) =
-                    Self::lu_decompose_small_dense_real(&jacobian, BJT_INTERNAL_STATE_DIM)
+                let Some(delta) =
+                    crate::numerics::solve_small_dense(&jacobian, &rhs, BJT_INTERNAL_STATE_DIM)
                 else {
-                    break;
-                };
-                let Some(delta) = Self::lu_solve_small_dense_real(
-                    &lu_internal,
-                    &pivots_internal,
-                    &rhs,
-                    BJT_INTERNAL_STATE_DIM,
-                ) else {
                     break;
                 };
                 let max_raw_delta = delta
@@ -990,15 +982,9 @@ impl Engine {
                     {
                         row[idx] += lambda;
                     }
-                    let Some((lu_internal, pivots_internal)) =
-                        Self::lu_decompose_small_dense_real(&damped_normal, BJT_INTERNAL_STATE_DIM)
-                    else {
-                        continue;
-                    };
                     let rhs = gradient.map(|value| -value);
-                    let Some(delta) = Self::lu_solve_small_dense_real(
-                        &lu_internal,
-                        &pivots_internal,
+                    let Some(delta) = crate::numerics::solve_small_dense(
+                        &damped_normal,
                         &rhs,
                         BJT_INTERNAL_STATE_DIM,
                     ) else {
