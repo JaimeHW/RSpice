@@ -412,14 +412,31 @@ impl NonlinearForcing {
     ) -> Result<Vec<Value>, SimulationError> {
         let n = conductance.len();
         let mut triplets = Vec::with_capacity(n * n);
+        let mut scaled_rhs = None;
         for row in 0..n {
             poll(abort)?;
+            let start = triplets.len();
             for (col, &slope) in conductance.iter().enumerate() {
                 let value = sum([
                     ((if row == col { 1.0 } else { 0.0 }), 1.0),
                     (-self.plan.response[row * n + col], slope),
                 ]
-                .into_iter())?;
+                .into_iter());
+                let Ok(value) = value else {
+                    // The row can exceed binary64 even when its solution and
+                    // current derivative are finite. Scale the complete row
+                    // and RHS together, retaining the coefficient exponent.
+                    triplets.truncate(start);
+                    let rhs = scaled_rhs.get_or_insert_with(|| rhs.to_vec());
+                    self.scaled_jacobian_row(
+                        row,
+                        conductance,
+                        &mut triplets,
+                        &mut rhs[row],
+                        abort,
+                    )?;
+                    break;
+                };
                 if value != 0.0 {
                     triplets.push((row, col, value));
                 }
@@ -427,12 +444,66 @@ impl NonlinearForcing {
         }
         let mut matrix = StaticMatrix::from_triplets(n, n, &triplets)?;
         poll(abort)?;
+        let rhs = scaled_rhs.as_deref().unwrap_or(rhs);
         let solution = match matrix.solve(rhs) {
             Err(SolverError::InaccurateSolution(_)) if n <= 64 => matrix.solve_dense_extended(rhs),
             result => result,
         }?;
         poll(abort)?;
         Ok(solution)
+    }
+
+    fn scaled_jacobian_row(
+        &self,
+        row: usize,
+        conductance: &[Value],
+        triplets: &mut Vec<(usize, usize, Value)>,
+        rhs: &mut Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        use rspice_veriloga_runtime::arithmetic::ScaledValue as S;
+        let n = conductance.len();
+        let one = S::new(1.0);
+        let mut scale = one;
+        let mut coefficients = Vec::with_capacity(n);
+        for (col, &slope) in conductance.iter().enumerate() {
+            poll(abort)?;
+            let coefficient = S::sum_products_div(
+                [
+                    [S::new(if row == col { 1.0 } else { 0.0 }), one],
+                    [S::new(-self.plan.response[row * n + col]), S::new(slope)],
+                ]
+                .into_iter(),
+                one,
+            )
+            .map_err(|_| precision_error())?;
+            let magnitude = if coefficient.binary64().is_sign_negative() {
+                coefficient.negated()
+            } else {
+                coefficient
+            };
+            if magnitude.divide(scale).binary64() > 1.0 {
+                scale = magnitude;
+            }
+            coefficients.push(coefficient);
+        }
+        let convert = |value: S| {
+            let result = value.divide(scale).binary64();
+            if !result.is_finite() || (result == 0.0 && !value.is_zero()) {
+                Err(precision_error())
+            } else {
+                Ok(result)
+            }
+        };
+        for (col, value) in coefficients.into_iter().enumerate() {
+            poll(abort)?;
+            let value = convert(value)?;
+            if value != 0.0 {
+                triplets.push((row, col, value));
+            }
+        }
+        *rhs = convert(S::new(*rhs))?;
+        Ok(())
     }
 }
 
@@ -592,6 +663,33 @@ fn negative_semidefinite(
 mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
+
+    #[test]
+    fn nonlinear_jacobian_recovers_finite_corrections_from_overflowed_products() {
+        let plan = Plan {
+            ports: vec![vec![]; 2],
+            response: vec![-1e300, 0.0, 0.0, 0.0],
+            rates: vec![true; 2],
+        };
+        let initial = Arc::new(Sample::default());
+        let forcing = NonlinearForcing {
+            plan: Arc::new(plan),
+            initial: initial.clone(),
+            samples: std::array::from_fn(|_| (0.0, initial.clone())),
+        };
+        let correction = forcing
+            .solve(&[1e300, 0.0], &[1e300, -0.25], &NoAbort)
+            .unwrap();
+        assert!((correction[0] / 1e-300 - 1.0).abs() < 2e-14);
+        assert_eq!(correction[1], -0.25);
+        // A derivative RHS uses the same Jacobian. The physical current rate
+        // remains finite even though the unscaled tangent exceeds binary64.
+        let rate = forcing
+            .solve(&[1e300, 0.0], &[2e300, 0.0], &NoAbort)
+            .unwrap();
+        assert!((rate[0] * 1e300 - 2.0).abs() < 4e-14);
+        assert_eq!(rate[1], 0.0);
+    }
 
     #[test]
     fn nonlinear_relative_norm_preserves_extreme_scales() {
