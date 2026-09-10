@@ -240,6 +240,33 @@ fn branch_form_noise_honors_quiet_dtemp_and_absolute_temp_precedence() {
 }
 
 #[test]
+fn resistor_flicker_preserves_cancelling_power_laws() {
+    for (voltage, resistance, af, frequency, ef, expected) in [
+        (16.0, 1.0, 1e308, 256.0, 5e307, 1.0),
+        (1.0, 10.0, 1e16, 0.01, 5e15, 1.5699254022704847),
+    ] {
+        for branch_form in [false, true] {
+            let tolerance = if branch_form { 100 } else { 0 };
+            let netlist = Netlist::parse(&format!(
+                "Resistor cancelling flicker\nVP p 0 {voltage}\nR1 p 0 RM {resistance}\n\
+                 .model RM R(KF=1 AF={af} EF={ef})\n.options device zeroresistancetol={tolerance}\n.end\n"
+            )).unwrap();
+            let result = Engine::default()
+                .run_port_noise_correlation(&netlist, &["VP".into()], &[frequency], TEMPERATURE)
+                .unwrap();
+            // Thermal noise is negligible here; both resistor forms must
+            // preserve the independent exact-input power-law reference.
+            let actual = result[0].current_correlation[0][0].re;
+            assert!(
+                (actual - expected).abs() < expected * 1e-13,
+                "branch={branch_form} I={} AF={af:e}: {actual:e} vs {expected:e}",
+                voltage / resistance
+            );
+        }
+    }
+}
+
+#[test]
 fn branch_form_ordinary_flicker_uses_exact_branch_current_and_matches_nodal() {
     let deck = |branch_form| {
         let tolerance = if branch_form { "1" } else { "0" };

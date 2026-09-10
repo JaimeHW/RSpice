@@ -10,6 +10,8 @@
 //! an assembled matrix rather than defining one.
 
 pub(crate) mod eigenspectrum;
+mod power_law;
+pub(crate) use power_law::scaled_power_law;
 pub mod integration;
 pub mod rustfft_qualification;
 

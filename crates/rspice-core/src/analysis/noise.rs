@@ -949,8 +949,8 @@ impl NoiseSource {
     }
 
     /// Restore range lost by intermediate powers/products. The common path
-    /// keeps powf accuracy; logarithms are needed only when a power itself
-    /// overflows, underflows or rounds into the subnormal range.
+    /// keeps powf accuracy; the wider logarithm is needed only when a power
+    /// itself overflows, underflows or rounds into the subnormal range.
     #[cold]
     fn flicker_density_scaled(
         &self,
@@ -983,45 +983,23 @@ impl NoiseSource {
             } else if self.af < 0.0 {
                 Value::INFINITY
             } else {
-                crate::numerics::scaled_exp_product_with_binary_scale(
-                    &[self.parameter],
-                    &[],
-                    -self.ef * frequency.ln(),
+                crate::numerics::scaled_power_law(
+                    self.parameter,
                     self.parameter_exponent,
+                    1.0,
+                    0.0,
+                    frequency,
+                    self.ef,
                 )
             };
         }
-        let exponent = if self.af == self.ef {
-            // Retain small differences between nearby bases, including an
-            // exactly cancelling ratio whose separate powers overflow.
-            let difference = current - frequency;
-            let log_ratio = if difference.abs() <= frequency * 0.5 {
-                (difference / frequency).ln_1p()
-            } else {
-                current.ln() - frequency.ln()
-            };
-            self.af * log_ratio
-        } else if current == frequency {
-            (self.af - self.ef) * current.ln()
-        } else {
-            let log_current = current.ln();
-            let log_frequency = frequency.ln();
-            let frequency_exponent = self.ef * log_frequency;
-            if frequency_exponent.is_finite() {
-                self.af.mul_add(log_current, -frequency_exponent)
-                    - self.ef.mul_add(log_frequency, -frequency_exponent)
-            } else {
-                // An infinite frequency exponent has no finite rounding
-                // residual. Keep genuine underflow/overflow, not inf-inf from
-                // an attempted compensation of the infinite product.
-                self.af * log_current - frequency_exponent
-            }
-        };
-        crate::numerics::scaled_exp_product_with_binary_scale(
-            &[self.parameter],
-            &[],
-            exponent,
+        crate::numerics::scaled_power_law(
+            self.parameter,
             self.parameter_exponent,
+            current,
+            self.af,
+            frequency,
+            self.ef,
         )
     }
 
@@ -1878,6 +1856,69 @@ mod mechanism_tests {
         );
         let expected = 1.248627071539086_f64;
         assert!((source.spectral_density(2.0, 300.15) - expected).abs() < expected * 2e-15);
+    }
+
+    #[test]
+    fn flicker_density_preserves_logarithmic_cancellation() {
+        let large = libm::scalbn(1.0, 1000);
+        let tiny = Value::from_bits(1);
+        // Independent 400-decimal-digit evaluations of the exact binary64
+        // inputs, including nonbinary powers and coefficient/exponent cancellation.
+        for (kf, current, af, frequency, ef, binary_scale, expected) in [
+            (1.0, 16.0, 1e308, 256.0, 5e307, 0, 1.0),
+            (1.0, 0.1, 1e16, 0.01, 5e15, 0, 1.5699254022704847),
+            (1.0, 0.1, -1e16, 0.01, -5e15, 0, 0.6369729405956249),
+            (1.0, 0.1, 1e308, 0.01, 5e307, 0, Value::INFINITY),
+            (1.0, 0.1, -1e308, 0.01, -5e307, 0, 0.0),
+            (1e-300, 9.0, 3.0 * large, 27.0, 2.0 * large, 0, 1e-300),
+            (
+                Value::MAX,
+                9.0,
+                -3.0 * large,
+                27.0,
+                -2.0 * large,
+                0,
+                Value::MAX,
+            ),
+            (tiny, 9.0, 3.0 * large, 27.0, 2.0 * large, 0, tiny),
+            (1.5, 2.0, 2147483647.0, 1.0, 0.0, -2147483647, 1.5),
+            (0.75, 4.0, 1073741824.0, 1.0, 0.0, i32::MIN, 0.75),
+            (3.0, tiny, 1.0, 1.0, 0.0, 1074, 3.0),
+            (0.75, 0.0, 0.0, 2.0, 2147483647.0, i32::MAX, 0.75),
+            (
+                1e-300,
+                2.4481220814345573e-241,
+                -235746844.7501831,
+                8.22336454506049e78,
+                718789682.6210938,
+                997,
+                1.3393986018581956,
+            ),
+        ] {
+            let mut source = NoiseSource::flicker_with_frequency_exponent(
+                "cancellation".into(),
+                1,
+                0,
+                kf,
+                af,
+                ef,
+                current,
+            );
+            source.parameter_exponent = binary_scale;
+            let actual = source.spectral_density(frequency, 300.15);
+            if expected == 0.0 || expected.is_infinite() {
+                assert_eq!(actual, expected);
+            } else {
+                assert!(
+                    actual > 0.0,
+                    "a representable positive density must survive"
+                );
+                assert!(
+                    (actual - expected).abs() <= (expected * Value::EPSILON * 4.0).max(tiny),
+                    "KF={kf:e} I={current:e} AF={af:e} f={frequency:e} EF={ef:e} scale={binary_scale}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
     }
 
     #[test]
