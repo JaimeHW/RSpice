@@ -47,12 +47,22 @@ fn canonical_artifact_with_unsupported_root(
     let metadata = artifact.metadata.clone();
     let mut hir = artifact.hir.clone();
     let mut mir = artifact.mir.clone();
-    let root = usize::from(mir.equations[0].expression.id);
+    let hir_root = usize::from(hir.contributions[0].expression.id);
+    let mir_root = usize::from(mir.equations[0].expression.id);
     let unsupported = HirExprKind::StringLiteral {
         value: "unsupported-native-expression".into(),
     };
-    hir.expressions[root].kind = unsupported.clone();
-    mir.expressions[root].kind = unsupported;
+    hir.expressions[hir_root].kind = unsupported.clone();
+    // Native lowering rebuilds the CFG from the structured analog body.
+    // Poison that authoritative expression as well as the equation views.
+    let rspice_veriloga::canonical_ir::hir::HirRegion::Contribution(contribution) =
+        &mut hir.body[0]
+    else {
+        panic!("fixture has one structured contribution");
+    };
+    hir.expressions[usize::from(contribution.expression.id)].kind = unsupported.clone();
+    contribution.expression.kind = "string".into();
+    mir.expressions[mir_root].kind = unsupported;
     hir.contributions[0].expression.kind = "string".into();
     mir.equations[0].expression.kind = "string".into();
     CanonicalIrArtifact::from_parts(metadata, hir, mir)
@@ -91,15 +101,23 @@ endmodule
     // equilibrium requires V(out)^2 + 1 = 0, which has no real solution.
     // A capacitor can still advance from the invalid seed, hiding a startup
     // failure behind a plausible-looking transient waveform.
-    let result = Engine::default().run_tran(&netlist, 1e-5, 1e-6);
-    assert!(
-        matches!(
-            result,
-            Err(rspice_core::SimulationError::ConvergenceFailed(_))
-        ),
-        "an unconverged nodeset must not become t=0: {:?}",
-        result.as_ref().map(|_| ())
-    );
+    let error = Engine::default()
+        .run_tran(&netlist, 1e-5, 1e-6)
+        .expect_err("an unconverged nodeset must not become t=0");
+    match error {
+        rspice_core::SimulationError::ConvergenceFailed(_) => {}
+        rspice_core::SimulationError::Circuit(detail) => {
+            // Exhausted startup recovery retains both failures in one
+            // diagnostic. It must still identify the failed DC equilibrium.
+            assert!(
+                detail
+                    .starts_with("Transient startup failed: primary DC error: Convergence failed")
+                    && detail.contains("; linearized fallback error:"),
+                "unexpected startup refusal: {detail}"
+            );
+        }
+        other => panic!("unexpected startup refusal: {other}"),
+    }
 
     // Explicit initial conditions still provide a valid non-equilibrium
     // startup, either as hard t=0 clamps or with the operating point skipped.
