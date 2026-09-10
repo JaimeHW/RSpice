@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+mod ownership;
+
 use crate::workbench::{
     SurfaceId, SurfaceRoute,
     state::{Drawer, Workspace, WorkspaceDocumentId, WorkspaceLayoutState},
@@ -231,6 +233,7 @@ impl std::error::Error for WindowSessionError {}
 pub struct WindowSessionRegistry {
     next_id: u64,
     windows: BTreeMap<ApplicationWindowId, ApplicationWindowState>,
+    #[serde(with = "ownership")]
     ownership: HashMap<WorkspaceDocumentId, ApplicationWindowId>,
     clamp_restored_windows: bool,
     #[serde(skip)]
