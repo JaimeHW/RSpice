@@ -445,11 +445,10 @@ fn scaled_flicker_density(
         libm::scalbn(gain.re, -gain_exponent),
         libm::scalbn(gain.im, -gain_exponent),
     );
-    let normalized_magnitude = normalized_gain.norm();
-    if !normalized_magnitude.is_finite() || normalized_magnitude <= 0.0 {
+    let normalized_power = normalized_gain.norm_sqr();
+    if !normalized_power.is_finite() || normalized_power <= 0.0 {
         return Err("the normalized flicker transfer magnitude is invalid");
     }
-    let gain_log2 = Value::from(gain_exponent) + libm::log2(normalized_magnitude);
     if frequency == 0.0 {
         return if exponent < 0.0 {
             Ok(0.0)
@@ -466,23 +465,35 @@ fn scaled_flicker_density(
         };
     }
 
-    let frequency_term = if exponent == 0.0 {
-        0.0
+    let frequency_power = frequency.powf(exponent);
+    let density = if frequency_power.is_normal() {
+        let (mantissa, power) = crate::numerics::product_binary_normalization(
+            &[coefficient, normalized_power],
+            &[frequency_power],
+        );
+        let power = i64::from(power)
+            + i64::from(coefficient_binary_exponent)
+            + 2 * i64::from(gain_exponent);
+        libm::scalbn(
+            mantissa,
+            power.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        )
     } else {
-        exponent * libm::log2(frequency)
+        // Normalize the coefficient before combining it with the bounded
+        // transfer power. Keep the gain's binary scale as a separate power
+        // of two: adding it to the source's i32 scale could overflow before
+        // the frequency law cancels it.
+        let coefficient_exponent = libm::ilogb(coefficient);
+        let mantissa = libm::scalbn(coefficient, -coefficient_exponent) * normalized_power;
+        crate::numerics::scaled_power_law(
+            mantissa,
+            coefficient_binary_exponent,
+            2.0,
+            Value::from(coefficient_exponent + 2 * gain_exponent),
+            frequency,
+            exponent,
+        )
     };
-    let log2_density =
-        2.0 * gain_log2 + libm::log2(coefficient) + Value::from(coefficient_binary_exponent)
-            - frequency_term;
-    if !log2_density.is_finite() {
-        return Err("the flicker-density exponent is non-finite");
-    }
-    let binary_exponent = libm::floor(log2_density);
-    if binary_exponent < i32::MIN as Value || binary_exponent > i32::MAX as Value {
-        return Err("the flicker-density exponent exceeds this platform");
-    }
-    let mantissa = libm::exp2(log2_density - binary_exponent);
-    let density = libm::scalbn(mantissa, binary_exponent as i32);
     if !density.is_finite() || density <= 0.0 {
         return Err("the nonzero flicker density is not representable");
     }
@@ -3120,6 +3131,66 @@ mod matrix_free_tests {
             )
             .expect("nonzero sub-millihertz flicker density remains physical");
         assert!((below_legacy_floor[0] - 1.0e6).abs() <= 4.0 * Value::EPSILON * 1.0e6);
+    }
+
+    #[test]
+    fn periodic_flicker_density_preserves_logarithmic_cancellation() {
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), 1);
+        solver.add_conductance(0, 0, 1.0);
+        let state = HbSolverState::new(1, 1);
+        // Independent 400-digit evaluations of the exact binary64 inputs.
+        for (frequency, exponent, expected) in [
+            (1.0009765625, 1524990908902.3088, 1.000000059050876),
+            (1.0000009536743164, 1560829435575521.8, 0.9999998717065953),
+            (1.0000000009313226, 1.598288580650332e18, 1.00000004937079),
+            (1.0000000000009095, 1.636647505824561e21, 0.9999998444843693),
+            (1.0000000000000009, 1.675927045963589e24, 0.9999999974867314),
+        ] {
+            let source = PeriodicNoiseSource {
+                name: "cancelling flicker".into(),
+                node_pos: 0,
+                node_neg: usize::MAX,
+                psd: vec![Complex64::default()],
+                binary_scale_exponent: i32::MAX,
+                flicker: Some((1.0, exponent)),
+            };
+            let actual = solver
+                .solve_periodic_noise(
+                    &state,
+                    PeriodicSidebandWindow {
+                        offset_hz: frequency,
+                        sideband_min: 0,
+                        sideband_max: 0,
+                    },
+                    0,
+                    None,
+                    &[source],
+                )
+                .unwrap();
+            assert!((actual[0] / expected - 1.0).abs() < 4.0 * Value::EPSILON);
+        }
+        for (gain, scale, exponent) in [
+            (
+                libm::scalbn(1.0, 1000),
+                i32::MAX,
+                Value::from(i32::MAX) + 2000.0,
+            ),
+            (
+                Value::from_bits(1),
+                i32::MIN,
+                Value::from(i32::MIN) - 2148.0,
+            ),
+        ] {
+            assert_eq!(
+                scaled_flicker_density(Complex64::new(gain, 0.0), 1.0, scale, 2.0, exponent),
+                Ok(1.0)
+            );
+        }
+        for scale in [i32::MIN, i32::MAX] {
+            assert!(
+                scaled_flicker_density(Complex64::new(1.0, 0.0), 1.0, scale, 1.0, 0.0).is_err()
+            );
+        }
     }
 
     #[test]
