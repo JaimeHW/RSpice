@@ -2,6 +2,8 @@
 //! and one typed defect per thing that went wrong.
 
 use super::*;
+
+mod variants;
 use crate::simulation::netlist_gen::{generate_netlist, generate_netlist_hierarchical};
 use crate::state::{
     Cell, ConfigurationSetCatalog, ConfigurationSetDefinition, ConfigurationSetOverride, Library,

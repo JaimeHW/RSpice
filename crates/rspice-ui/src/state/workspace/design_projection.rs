@@ -323,10 +323,33 @@ impl ProjectWorkspace {
         key: Option<DesignProjectionKey>,
     ) -> Result<DesignProjection, ConfigurationExecutionPlanError> {
         let root = self.simulation_root_reference();
+        // The live editor buffer replaces its persisted copy under whichever
+        // spelling the workspace already holds, so a case-different tab cannot
+        // introduce a second master for the same cell view.
+        let active_key = self.active_buffer_key(active_reference);
+        let mut schematic_buffers = HashMap::with_capacity(self.schematic_buffers.len() + 1);
+        for (cell_view_key, schematic) in &self.schematic_buffers {
+            if *cell_view_key == active_key {
+                continue;
+            }
+            let memo_key = inputs.and_then(|inputs| inputs.memo_key(cell_view_key));
+            let materialized = self.materialized_cell_view(cell_view_key, schematic, memo_key)?;
+            schematic_buffers.insert(cell_view_key.clone(), (*materialized).clone());
+        }
+        let memo_key = inputs.and_then(|inputs| inputs.memo_key(&active_key));
+        let materialized = self.materialized_cell_view(&active_key, active_schematic, memo_key)?;
+        schematic_buffers.insert(active_key, (*materialized).clone());
+        self.materialized_buffers
+            .borrow_mut()
+            .retain(|cell_view_key, _| schematic_buffers.contains_key(cell_view_key));
+
+        // Resolve the exact circuit that the netlister receives. Variants can
+        // remove instances, replace masters or introduce new child instances;
+        // the raw authored hierarchy is not their execution authority.
         let configured = self.configuration_sets.active().is_some();
-        let (resolution, plan) =
-            HierarchyResolver::new(self, libraries, Some((active_reference, active_schematic)))
-                .resolve_all();
+        let (resolution, plan) = HierarchyResolver::new(self, libraries, None)
+            .with_projected_buffers(&schematic_buffers)
+            .resolve_all();
         // Only a configuration blocks on an unresolved hierarchy. Without one,
         // an unresolved cell is reported by the generator against the instance
         // that could not be netlisted, which is the behaviour every legacy
@@ -349,26 +372,6 @@ impl ProjectWorkspace {
                 .join("; ");
             return Err(ConfigurationExecutionPlanError::Unresolved(diagnostics));
         }
-
-        // The live editor buffer replaces its persisted copy under whichever
-        // spelling the workspace already holds, so a case-different tab cannot
-        // introduce a second master for the same cell view.
-        let active_key = self.active_buffer_key(active_reference);
-        let mut schematic_buffers = HashMap::with_capacity(self.schematic_buffers.len() + 1);
-        for (cell_view_key, schematic) in &self.schematic_buffers {
-            if *cell_view_key == active_key {
-                continue;
-            }
-            let memo_key = inputs.and_then(|inputs| inputs.memo_key(cell_view_key));
-            let materialized = self.materialized_cell_view(cell_view_key, schematic, memo_key)?;
-            schematic_buffers.insert(cell_view_key.clone(), (*materialized).clone());
-        }
-        let memo_key = inputs.and_then(|inputs| inputs.memo_key(&active_key));
-        let materialized = self.materialized_cell_view(&active_key, active_schematic, memo_key)?;
-        schematic_buffers.insert(active_key, (*materialized).clone());
-        self.materialized_buffers
-            .borrow_mut()
-            .retain(|cell_view_key, _| schematic_buffers.contains_key(cell_view_key));
 
         let projection = DesignProjection {
             root,

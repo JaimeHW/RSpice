@@ -400,6 +400,9 @@ pub(super) struct HierarchyResolver<'a> {
     workspace: &'a ProjectWorkspace,
     libraries: &'a LibraryManager,
     active_overlay: Option<(&'a CellViewRef, &'a SchematicState)>,
+    /// A complete frozen projection replaces raw buffers when resolving an
+    /// executable design. Editor/reference inspection keeps the live overlay.
+    projected_buffers: Option<&'a HashMap<String, SchematicState>>,
     root: CellViewRef,
     configuration: Option<&'a crate::state::ConfigurationSet>,
     /// The active configuration's overrides with their patterns canonicalized,
@@ -456,6 +459,7 @@ impl<'a> HierarchyResolver<'a> {
             workspace,
             libraries,
             active_overlay,
+            projected_buffers: None,
             root,
             configuration,
             overrides: configuration
@@ -476,6 +480,14 @@ impl<'a> HierarchyResolver<'a> {
             execution_bindings: BTreeMap::new(),
             execution_order: Vec::new(),
         }
+    }
+
+    pub(super) fn with_projected_buffers(
+        mut self,
+        buffers: &'a HashMap<String, SchematicState>,
+    ) -> Self {
+        self.projected_buffers = Some(buffers);
+        self
     }
 
     pub(super) fn resolve(self) -> HierarchyResolution {
@@ -1455,6 +1467,12 @@ impl<'a> HierarchyResolver<'a> {
     }
 
     fn find_schematic(&self, reference: &CellViewRef) -> Option<&'a SchematicState> {
+        if let Some(buffers) = self.projected_buffers {
+            return buffers
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(&reference.key()))
+                .map(|(_, schematic)| schematic);
+        }
         if let Some((overlay_reference, schematic)) = self.active_overlay
             && overlay_reference
                 .key()
