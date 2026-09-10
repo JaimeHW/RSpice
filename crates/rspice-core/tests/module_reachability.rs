@@ -82,12 +82,15 @@ fn declared_submodules(source: &str) -> BTreeSet<String> {
             names.insert(stem.to_owned());
         }
 
-        let rest = line
-            .strip_prefix("pub(crate) ")
-            .or_else(|| line.strip_prefix("pub(super) "))
-            .or_else(|| line.strip_prefix("pub(in crate) "))
-            .or_else(|| line.strip_prefix("pub "))
-            .unwrap_or(line);
+        let rest = if let Some(restricted) = line.strip_prefix("pub(") {
+            // Rust also permits pub(self) and pub(in crate::parent), not
+            // just the two common crate/super spellings.
+            restricted
+                .split_once(')')
+                .map_or(line, |(_, rest)| rest.trim_start())
+        } else {
+            line.strip_prefix("pub ").unwrap_or(line)
+        };
         let Some(rest) = rest.strip_prefix("mod ") else {
             continue;
         };
@@ -176,6 +179,9 @@ fn declared_submodules_ignores_inline_module_bodies() {
 pub mod real_file;
 mod private_file;
 pub(crate) mod scoped_file;
+pub(self) mod local_file;
+pub(in crate::engine) mod nested_file;
+pub(in crate::engine) mod restricted_inline { }
 #[cfg(test)]
 mod tests {
     fn inner() {}
@@ -186,11 +192,14 @@ mod inline_with_brace { }
     assert!(declared.contains("real_file"));
     assert!(declared.contains("private_file"));
     assert!(declared.contains("scoped_file"));
+    assert!(declared.contains("local_file"));
+    assert!(declared.contains("nested_file"));
     // `mod tests { .. }` and `mod inline_with_brace { }` are inline bodies,
     // not file-backed declarations. Counting them would let an orphan named
     // `tests.rs` slip through beside any file with a test module.
     assert!(!declared.contains("tests"));
     assert!(!declared.contains("inline_with_brace"));
+    assert!(!declared.contains("restricted_inline"));
 }
 
 /// A module with submodules is `foo.rs` beside `foo/`, never `foo/mod.rs`.

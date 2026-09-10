@@ -101,13 +101,11 @@ const LAYERS: &[(&str, u32)] = &[
     // and the engine's typed errors carry them, so a leaf is what keeps the
     // error taxonomy from reaching up into the orchestration layer.
     ("identity", 0),
-    // A kernel library beneath the solvers.
-    ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:
     // `raw_export` names nothing in the crate at all and the reader needs only
     // `resource` for its read limits, so a format module never has to move
-    // when a result type changes. It shares rank 1 with `simd` because neither
-    // references the other.
+    // when a result type changes. It shares rank 1 with `numerics` because
+    // neither references the other.
     ("io", 1),
     // Numerics shared by every analysis: how a derivative is discretized, how
     // large a step may be, where a step may not land, and whether the step
@@ -118,7 +116,11 @@ const LAYERS: &[(&str, u32)] = &[
     // solves against an assembled matrix, so it sits above the layer that
     // defines one, and the rename would have cost five crates a path for no
     // gain.
-    ("numerics", 2),
+    ("numerics", 1),
+    // SIMD acceleration uses the scalar numerical definitions for exceptional
+    // values, unaligned tails and convergence policy. Numerics stays independent
+    // of the accelerator so native and browser fallbacks have the same meaning.
+    ("simd", 2),
     // Simulation configuration. Below the solver, the device models and the
     // circuit store, all of which read a tolerance or a dialect flag and used
     // to reach up into `engine` to do it.
