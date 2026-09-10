@@ -61,7 +61,7 @@ pub(crate) fn depletion_charge_and_capacitance(
         // ln(1+x) = x to working precision, but rounding a subnormal V/Phi
         // before multiplying can lose digits or erase a representable charge.
         let exponent = if below_knee {
-            junction_product(&[grading - 1.0, voltage], &[potential], 0.0)
+            crate::numerics::scaled_exp_product(&[grading - 1.0, voltage], &[potential], 0.0)
         } else {
             (grading - 1.0) * forward_coefficient
         };
@@ -72,12 +72,12 @@ pub(crate) fn depletion_charge_and_capacitance(
         };
         if below_knee {
             (
-                junction_product(&[capacitance, voltage, integral], &[], 0.0),
-                junction_product(&[grading, voltage], &[potential], 0.0),
+                crate::numerics::scaled_exp_product(&[capacitance, voltage, integral], &[], 0.0),
+                crate::numerics::scaled_exp_product(&[grading, voltage], &[potential], 0.0),
             )
         } else {
             (
-                junction_product(
+                crate::numerics::scaled_exp_product(
                     &[capacitance, potential, forward_coefficient, integral],
                     &[],
                     0.0,
@@ -95,17 +95,17 @@ pub(crate) fn depletion_charge_and_capacitance(
             } else {
                 exponent.exp_m1() / exponent
             };
-            junction_product(&[-capacitance, potential, log, integral], &[], 0.0)
+            crate::numerics::scaled_exp_product(&[-capacitance, potential, log, integral], &[], 0.0)
         } else if exponent > 700.0 {
             // expm1(a) = exp(a)*(1-exp(-a)); keep exp(a) scaled until
             // multiplication by C0*Phi/(1-M) has restored the final range.
-            junction_product(
+            crate::numerics::scaled_exp_product(
                 &[capacitance, potential, (-exponent).exp_m1()],
                 &[1.0 - grading],
                 exponent,
             )
         } else {
-            junction_product(
+            crate::numerics::scaled_exp_product(
                 &[-capacitance, potential, exponent.exp_m1()],
                 &[1.0 - grading],
                 0.0,
@@ -113,7 +113,7 @@ pub(crate) fn depletion_charge_and_capacitance(
         };
         (charge, -grading * log)
     };
-    let slope = junction_product(&[capacitance], &[], slope_exponent);
+    let slope = crate::numerics::scaled_exp_product(&[capacitance], &[], slope_exponent);
     if below_knee {
         (charge, slope)
     } else {
@@ -133,12 +133,12 @@ pub(crate) fn depletion_charge_and_capacitance(
             };
         // Form each integral directly from the model coefficient. Reusing a
         // rounded subnormal capacitance here would magnify its lost digits.
-        let linear_charge = junction_product(
+        let linear_charge = crate::numerics::scaled_exp_product(
             &[capacitance, offset_scale, offset_fraction],
             &[],
             slope_exponent,
         );
-        let quadratic_charge = junction_product(
+        let quadratic_charge = crate::numerics::scaled_exp_product(
             &[
                 capacitance,
                 offset_scale,
@@ -151,7 +151,7 @@ pub(crate) fn depletion_charge_and_capacitance(
             &[potential, 1.0 - forward_coefficient],
             slope_exponent,
         );
-        let slope_change = junction_product(
+        let slope_change = crate::numerics::scaled_exp_product(
             &[capacitance, grading, offset_scale, offset_fraction],
             &[potential, 1.0 - forward_coefficient],
             slope_exponent,
@@ -161,89 +161,6 @@ pub(crate) fn depletion_charge_and_capacitance(
             slope + slope_change,
         )
     }
-}
-
-/// Evaluate a product/quotient times exp(exponent), retaining the ordinary
-/// arithmetic path unless an intermediate loses range or subnormal precision.
-#[inline]
-fn junction_product(
-    factors: &[crate::Value],
-    divisors: &[crate::Value],
-    exponent: crate::Value,
-) -> crate::Value {
-    if factors.contains(&0.0) {
-        return 0.0;
-    }
-    let exponential = exponent.exp();
-    let mut product = exponential;
-    let mut ordinary = exponential.is_normal();
-    for &factor in factors {
-        product *= factor;
-        ordinary &= product.is_normal();
-    }
-    for &divisor in divisors {
-        product /= divisor;
-        ordinary &= product.is_normal();
-    }
-    if ordinary {
-        product
-    } else {
-        scaled_junction_product(factors, divisors, exponent, exponential)
-    }
-}
-
-#[cold]
-fn scaled_junction_product(
-    factors: &[crate::Value],
-    divisors: &[crate::Value],
-    exponent: crate::Value,
-    exponential: crate::Value,
-) -> crate::Value {
-    if exponent.is_nan()
-        || factors.iter().any(|value| !value.is_finite())
-        || divisors
-            .iter()
-            .any(|value| !value.is_finite() || *value == 0.0)
-    {
-        return crate::Value::NAN;
-    }
-    let mut mantissa = 1.0;
-    let mut power = 0;
-    for &factor in factors {
-        let e = libm::ilogb(factor);
-        mantissa *= libm::scalbn(factor, -e);
-        power += e;
-    }
-    for &divisor in divisors {
-        let e = libm::ilogb(divisor);
-        mantissa /= libm::scalbn(divisor, -e);
-        power -= e;
-    }
-    if exponential.is_normal() {
-        let e = libm::ilogb(exponential);
-        mantissa *= libm::scalbn(exponential, -e);
-        power += e;
-    } else {
-        // No finite input factor can compensate an exponent beyond this
-        // bound. It also keeps conversion/reduction within the integer range.
-        let bound =
-            (factors.len() + divisors.len() + 2) as crate::Value * 1075.0 * std::f64::consts::LN_2;
-        if exponent > bound {
-            return crate::Value::INFINITY.copysign(mantissa);
-        }
-        if exponent < -bound {
-            return 0.0_f64.copysign(mantissa);
-        }
-        let e = (exponent * std::f64::consts::LOG2_E).round() as i32;
-        // Residual of ln(2) after rounding its high part to f64. FMA and the
-        // low part prevent range reduction from discarding significant bits.
-        const LN_2_LOW: crate::Value = 2.319_046_813_846_299_6e-17;
-        let reduced = (-(e as crate::Value)).mul_add(std::f64::consts::LN_2, exponent)
-            - e as crate::Value * LN_2_LOW;
-        mantissa *= reduced.exp();
-        power += e;
-    }
-    libm::scalbn(mantissa, power)
 }
 
 #[cfg(test)]
