@@ -2872,31 +2872,18 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
-        let integration = if dt == 0.0 {
-            rspice_veriloga::vm::IntegrationCoefficients::inactive()
-        } else if dt.is_finite() && dt.abs() > rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR
-        {
-            let inverse_timestep = 1.0 / dt;
-            rspice_veriloga::vm::IntegrationCoefficients {
-                active: true,
-                derivative_scale: coefficients.coeff_g * inverse_timestep,
-                previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
-                older_value_scale: if coefficients.needs_two_history {
-                    coefficients.coeff_v_n_minus_1 * inverse_timestep
-                } else {
-                    0.0
-                },
-                previous_derivative_scale: coefficients.coeff_i_n,
-            }
-        } else {
-            return Err(format!(
-                "Verilog-A devices cannot advance to t={time:.16e}s: {}",
-                rspice_veriloga_runtime::GeneratedDdtTimestepError {
-                    timestep: dt,
-                    floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
-                }
-            ));
-        };
+        let integration = rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+            coefficients.coeff_g,
+            coefficients.coeff_v_n,
+            coefficients.coeff_v_n_minus_1,
+            coefficients.needs_two_history,
+            coefficients.coeff_i_n,
+            dt,
+        )
+        .map(rspice_veriloga::vm::IntegrationCoefficients::from)
+        .map_err(|error| {
+            format!("Verilog-A devices cannot advance to t={time:.16e}s: {error}")
+        })?;
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
             device.try_set_analysis_type(2).map_err(|error| {

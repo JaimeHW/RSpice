@@ -752,19 +752,25 @@ fn newton_work_never_reaches_the_module() {
         ..impossible()
     };
 
+    let mut completed_constrained_runs = 0;
     for (label, config) in [
         ("a one-iteration transient ceiling", starved()),
         ("tolerances no solve can meet", impossible()),
         ("both at once", both()),
     ] {
-        let result = Engine::new(config)
-            .run_tran(&netlist, 200.0e-9, 1.0e-9)
-            .unwrap_or_else(|error| {
+        let result = match Engine::new(config).run_tran(&netlist, 200.0e-9, 1.0e-9) {
+            Ok(result) => {
+                completed_constrained_runs += 1;
+                result
+            }
+            Err(rspice_core::SimulationError::ConvergenceFailed(_)) => continue,
+            Err(error) => {
                 panic!(
                     "with {label} the run must still complete or refuse with a convergence \
                      diagnostic; got: {error}"
                 )
-            });
+            }
+        };
         let observed = digital_points(&result, "qdiv");
         assert_eq!(
             observed.len(),
@@ -785,6 +791,10 @@ fn newton_work_never_reaches_the_module() {
             );
         }
     }
+    assert!(
+        completed_constrained_runs > 0,
+        "at least one constrained run must complete and verify the accepted boundary trace"
+    );
 }
 
 /// **Attack 4, host half.** A stamp that fails leaves a trial that rolls back

@@ -104,6 +104,19 @@ pub struct IntegrationCoefficients {
     pub previous_derivative_scale: f64,
 }
 
+impl From<rspice_veriloga_runtime::GeneratedDdtCoefficients> for IntegrationCoefficients {
+    #[inline]
+    fn from(coefficients: rspice_veriloga_runtime::GeneratedDdtCoefficients) -> Self {
+        Self {
+            active: coefficients.active,
+            derivative_scale: coefficients.derivative_scale,
+            previous_value_scale: coefficients.previous_value_scale,
+            older_value_scale: coefficients.older_value_scale,
+            previous_derivative_scale: coefficients.previous_derivative_scale,
+        }
+    }
+}
+
 impl IntegrationCoefficients {
     pub const fn inactive() -> Self {
         Self {
@@ -128,31 +141,14 @@ impl IntegrationCoefficients {
     /// charge-storing device abruptly becomes a resistor, and the caller sees a
     /// converged, plausible, wrong answer instead of a failure.
     ///
-    /// Below the floor every coefficient is built from `1/dt`, so the
-    /// conductance leaves the model's numeric scale while the history term
-    /// meant to cancel it does not, and what reaches the matrix is roundoff.
+    /// The shared constructor owns the inclusive minimum interval.
     pub fn backward_euler(
         timestep: f64,
     ) -> Result<Self, rspice_veriloga_runtime::GeneratedDdtTimestepError> {
-        if timestep == 0.0 {
-            return Ok(Self::inactive());
-        }
-        if !timestep.is_finite()
-            || timestep.abs() <= rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR
-        {
-            return Err(rspice_veriloga_runtime::GeneratedDdtTimestepError {
-                timestep,
-                floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
-            });
-        }
-        let inverse_timestep = 1.0 / timestep;
-        Ok(Self {
-            active: true,
-            derivative_scale: inverse_timestep,
-            previous_value_scale: inverse_timestep,
-            older_value_scale: 0.0,
-            previous_derivative_scale: 0.0,
-        })
+        rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values(
+            1.0, 1.0, 0.0, false, false, timestep,
+        )
+        .map(Self::from)
     }
 
     /// Validate a solver-provided companion rule before it reaches an
@@ -2190,17 +2186,7 @@ mod tests {
         }
     }
 
-    /// The fourth copy of the `ddt` timestep floor, refusing like the other
-    /// three.
-    ///
-    /// A zero interval is the static-evaluation convention the DC path spells
-    /// on purpose, and stays inactive. Any other interval below the floor is a
-    /// caller asking to integrate over something the rule cannot represent. It
-    /// used to come back as inactive coefficients — the module evaluated with
-    /// no `ddt` contribution at all, which is a different circuit — and now
-    /// carries the shared `GeneratedDdtTimestepError` the generated route,
-    /// `CircuitData::prepare_veriloga_timepoint` and
-    /// `mixed_integration_coefficients` refuse with.
+    /// The VM preserves the shared constructor's static convention and boundary.
     #[test]
     fn a_zero_interval_is_static_and_a_sub_floor_one_is_refused() {
         let floor = rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR;
@@ -2222,14 +2208,15 @@ mod tests {
             "the refusal names both the interval and the floor: {text}"
         );
 
-        // The floor itself is out, one ulp above it is in — the same boundary
-        // the runtime constructor's own pin draws.
-        assert!(IntegrationCoefficients::backward_euler(floor).is_err());
-        assert!(
-            IntegrationCoefficients::backward_euler(floor.next_up())
-                .expect("one ulp above the floor is representable")
-                .active
-        );
+        assert!(IntegrationCoefficients::backward_euler(floor.next_down()).is_err());
+        for timestep in [floor, floor.next_up()] {
+            let coefficients = IntegrationCoefficients::backward_euler(timestep)
+                .expect("the minimum supported interval is inclusive");
+            assert!(coefficients.active);
+            coefficients
+                .validate()
+                .expect("the rule preserves constants");
+        }
     }
 
     #[test]

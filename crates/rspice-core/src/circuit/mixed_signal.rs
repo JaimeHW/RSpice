@@ -73,29 +73,19 @@ fn mixed_integration_coefficients(
     dt: Value,
     coefficients: &crate::numerics::integration::CompanionCoefficients,
 ) -> Result<rspice_veriloga::vm::IntegrationCoefficients, SimulationError> {
-    if dt == 0.0 {
-        return Ok(rspice_veriloga::vm::IntegrationCoefficients::inactive());
-    }
-    if !dt.is_finite() || dt.abs() <= rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR {
-        return Err(SimulationError::Circuit(format!(
-            "mixed Verilog-AMS modules cannot advance to t={time:.16e}s: {}",
-            rspice_veriloga_runtime::GeneratedDdtTimestepError {
-                timestep: dt,
-                floor: rspice_veriloga_runtime::GENERATED_DDT_TIMESTEP_FLOOR,
-            }
-        )));
-    }
-    let inverse_timestep = 1.0 / dt;
-    Ok(rspice_veriloga::vm::IntegrationCoefficients {
-        active: true,
-        derivative_scale: coefficients.coeff_g * inverse_timestep,
-        previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
-        older_value_scale: if coefficients.needs_two_history {
-            coefficients.coeff_v_n_minus_1 * inverse_timestep
-        } else {
-            0.0
-        },
-        previous_derivative_scale: coefficients.coeff_i_n,
+    rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+        coefficients.coeff_g,
+        coefficients.coeff_v_n,
+        coefficients.coeff_v_n_minus_1,
+        coefficients.needs_two_history,
+        coefficients.coeff_i_n,
+        dt,
+    )
+    .map(Into::into)
+    .map_err(|error| {
+        SimulationError::Circuit(format!(
+            "mixed Verilog-AMS modules cannot advance to t={time:.16e}s: {error}"
+        ))
     })
 }
 

@@ -1115,15 +1115,12 @@ pub struct GeneratedDdtCoefficients {
     pub previous_derivative_scale: Value,
 }
 
-/// Smallest transient interval a generated `ddt` companion rule will integrate.
+/// Smallest supported transient interval magnitude for Verilog-A companion rules.
 ///
-/// Below this the rule stops describing a derivative. Every coefficient is
-/// built from `1/dt`, so the conductance leaves the model's own numeric scale
-/// while the history term meant to cancel it does not, and what reaches the
-/// matrix is roundoff. Returning inactive coefficients instead would evaluate
-/// the module with no `ddt` contribution at all: a step this small is exactly
-/// where nothing should change, and dropping the reactive term is where a
-/// charge-storing device abruptly becomes a resistor.
+/// The boundary is inclusive. Smaller nonzero intervals are rejected rather
+/// than returning inactive coefficients, which would drop reactive terms and
+/// evaluate a different circuit. Generated, runtime-compiled, and mixed models
+/// share this constructor and limit.
 pub const GENERATED_DDT_TIMESTEP_FLOOR: Value = 1.0e-20;
 
 /// A transient interval a generated `ddt` companion rule cannot integrate.
@@ -1203,7 +1200,7 @@ impl GeneratedDdtCoefficients {
         if timestep == 0.0 {
             return Ok(Self::inactive());
         }
-        if !timestep.is_finite() || timestep.abs() <= GENERATED_DDT_TIMESTEP_FLOOR {
+        if !timestep.is_finite() || timestep.abs() < GENERATED_DDT_TIMESTEP_FLOOR {
             return Err(GeneratedDdtTimestepError {
                 timestep,
                 floor: GENERATED_DDT_TIMESTEP_FLOOR,
@@ -8728,7 +8725,7 @@ mod fixed_lane_tests {
         for timestep in [
             1.0e-21,
             -1.0e-21,
-            GENERATED_DDT_TIMESTEP_FLOOR,
+            GENERATED_DDT_TIMESTEP_FLOOR.next_down(),
             Value::NAN,
             Value::INFINITY,
         ] {
@@ -8748,18 +8745,34 @@ mod fixed_lane_tests {
             );
         }
 
-        // One ulp above the floor still integrates: the refusal is a floor,
-        // not a band.
-        let above = GeneratedDdtCoefficients::from_companion_values(
-            1.0,
-            1.0,
-            0.0,
-            false,
-            false,
+        for timestep in [
+            GENERATED_DDT_TIMESTEP_FLOOR,
             GENERATED_DDT_TIMESTEP_FLOOR.next_up(),
-        )
-        .expect("a step above the floor is integrable");
-        assert!(above.active);
+        ] {
+            let coefficients = GeneratedDdtCoefficients::from_companion_values(
+                1.0, 1.0, 0.0, false, false, timestep,
+            )
+            .expect("the documented minimum interval is integrable");
+            let mut current = [0.0];
+            let mut derivative = [0.0];
+            let mut valid = [false];
+            let result = rspice_eval_ddt(
+                &mut current,
+                &[0.0],
+                &[0.0],
+                &[true],
+                &mut derivative,
+                &[0.0],
+                &mut valid,
+                coefficients,
+                0,
+                timestep,
+            )
+            .expect("a unit ramp has a finite derivative at the minimum interval");
+            assert!((result - 1.0).abs() <= 2.0 * f64::EPSILON);
+            assert_eq!(current, [timestep]);
+            assert_eq!(valid, [true]);
+        }
     }
 
     #[test]
