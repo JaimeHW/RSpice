@@ -395,7 +395,7 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
 /// form. The editor remains fully functional for the one property the
 /// instance itself owns and preserves every opaque master parameter without
 /// presenting guessed controls.
-fn cell_instance_identity_sheet() -> PropertySheet {
+pub(in crate::workbench::app) fn cell_instance_identity_sheet() -> PropertySheet {
     let mut sheet = PropertySheet::new();
     sheet.add(
         PropertyDefinition::new("name")
@@ -875,6 +875,85 @@ mod tests {
             .then(|| definition.netlist.device_prefix.clone());
         binding.parameter_order = definition.netlist.parameter_order.clone();
         binding
+    }
+
+    #[test]
+    fn validated_save_uses_each_masters_schema_without_borrowing_the_open_dialog() {
+        use crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport;
+
+        let mut state = AppState::default();
+        let first = model_bound_definition();
+        let first_binding = install_definition(&mut state, &first);
+        let mut second = model_bound_definition();
+        second.identity.library = "large_geometry".to_owned();
+        second.identity.binding_id = "large-geometry-v1".to_owned();
+        let width = &mut second.parameter_form.sections[0].fields[0];
+        width.default = SymbolParameterDefault::Number {
+            engineering: "2m".to_owned(),
+            unit: Some("m".to_owned()),
+        };
+        width.constraints.minimum = Some("1m".to_owned());
+        width.constraints.maximum = Some("1".to_owned());
+        let second_binding = install_definition(&mut state, &second);
+        state.schematic.components = vec![
+            Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+                .with_library_cell(first_binding)
+                .with_name_value("M1", "nmos_core"),
+            Component::new(2, ComponentType::CellInstance, Point::new(100, 0))
+                .with_library_cell(second_binding)
+                .with_name_value("M2", "nmos_core"),
+        ];
+        state.schematic.components[0].params = "w=2u l=180n".to_owned();
+
+        for (width, invalid) in [("2m", false), ("2u", true)] {
+            state.schematic.components[1].params = format!("w={width} l=180n");
+            for owner in [None, Some(1), Some(2)] {
+                state.tabbed_property_dialog.close();
+                state.property_registry.clear_cell_instance_sheet();
+                if let Some(owner) = owner {
+                    open_property_editor(&mut state, owner);
+                    assert!(state.tabbed_property_dialog.open);
+                }
+                let original = state.schematic.components.clone();
+                let draft = state.tabbed_property_dialog.values.clone();
+                let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+                let errors = report
+                    .blockers()
+                    .iter()
+                    .filter(|finding| finding.source == "parameters")
+                    .map(|finding| finding.message.as_str())
+                    .collect::<Vec<_>>();
+                if invalid {
+                    assert_eq!(errors.len(), 1, "owner {owner:?}: {errors:?}");
+                    assert!(errors[0].contains("M2 property w:"), "{errors:?}");
+                } else {
+                    assert!(errors.is_empty(), "owner {owner:?}: {errors:?}");
+                }
+                assert_eq!(state.schematic.components, original);
+                assert_eq!(state.tabbed_property_dialog.values, draft);
+            }
+        }
+
+        // Invalid published metadata must not fall back to the other master's
+        // retained form or to an identity-only schema.
+        state.schematic.components[1].params = "w=2m l=180n".to_owned();
+        state
+            .library_manager
+            .get_library_mut(&first.identity.library)
+            .unwrap()
+            .get_cell_mut(&first.identity.cell)
+            .unwrap()
+            .metadata
+            .insert(MODEL_BOUND_SYMBOL_METADATA_KEY.to_owned(), "{".to_owned());
+        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let errors = report
+            .blockers()
+            .iter()
+            .filter(|finding| finding.source == "parameters")
+            .map(|finding| finding.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("M1 property schema:"), "{errors:?}");
     }
 
     #[test]

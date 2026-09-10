@@ -24,7 +24,7 @@
 //! ```
 
 use crate::state::{
-    Component, ComponentType, InstanceMultiplicity, PropertyRegistry, PropertyValue,
+    Component, ComponentType, InstanceMultiplicity, PropertyRegistry, PropertySheet, PropertyValue,
 };
 use crate::state::{format_params_string, parse_params_string};
 use std::collections::HashMap;
@@ -133,6 +133,13 @@ pub fn collect_properties_from_component(
     component: &Component,
     registry: &PropertyRegistry,
 ) -> HashMap<String, PropertyValue> {
+    collect_properties_with_sheet(component, registry.get(component.kind))
+}
+
+fn collect_properties_with_sheet(
+    component: &Component,
+    sheet: Option<&PropertySheet>,
+) -> HashMap<String, PropertyValue> {
     let mut properties = HashMap::new();
 
     // Always include instance name
@@ -141,7 +148,7 @@ pub fn collect_properties_from_component(
         PropertyValue::String(component.name.clone()),
     );
 
-    if let Some(sheet) = registry.get(component.kind)
+    if let Some(sheet) = sheet
         && let Some(def) = sheet.iter().find(|def| def.name == "symbol")
         && let PropertyValue::Enum { options, .. } = &def.default_value
     {
@@ -166,8 +173,7 @@ pub fn collect_properties_from_component(
     // default at this bridge boundary. Once inside a transaction, an explicit
     // empty string remains authored input and is rejected by the PWL editor.
     if component.value.is_empty() && component.kind.is_pwl_source() {
-        if let Some(default) = registry
-            .get(component.kind)
+        if let Some(default) = sheet
             .and_then(|sheet| sheet.iter().find(|def| def.name == primary_prop))
             .map(|def| def.default_value.clone())
         {
@@ -204,7 +210,7 @@ pub fn collect_properties_from_component(
         ] {
             properties.insert(
                 key.to_owned(),
-                property_value_from_schema(component.kind, key, value, registry),
+                property_value_from_schema(key, value, sheet),
             );
         }
     }
@@ -221,7 +227,7 @@ pub fn collect_properties_from_component(
             continue;
         }
 
-        let prop_value = property_value_from_schema(component.kind, &key, value, registry);
+        let prop_value = property_value_from_schema(&key, value, sheet);
 
         properties.insert(key, prop_value);
     }
@@ -249,14 +255,16 @@ pub fn collect_properties_from_component(
 /// used by the interactive property editor without mutating application state.
 /// Keeping this adapter at the property boundary prevents save validation from
 /// drifting into a weaker duplicate of the production editor contract.
+/// The caller supplies this instance's authoritative sheet; a dynamic sheet
+/// retained by another component's open dialog is not validation authority.
 pub(crate) fn validate_component_properties(
     component: &Component,
-    registry: &PropertyRegistry,
+    sheet: Option<&PropertySheet>,
 ) -> Vec<(String, String)> {
     if let Err(error) = crate::state::params_string::validate_parameter_text(&component.params) {
         return vec![("parameters".to_owned(), error)];
     }
-    let Some(sheet) = registry.get(component.kind) else {
+    let Some(sheet) = sheet else {
         return vec![(
             "schema".to_owned(),
             format!(
@@ -265,7 +273,7 @@ pub(crate) fn validate_component_properties(
             ),
         )];
     };
-    let values = collect_properties_from_component(component, registry);
+    let values = collect_properties_with_sheet(component, Some(sheet));
     let mut validator = crate::properties::TabbedPropertyDialogState::default();
     validator.open_for_component(
         component.id,
@@ -470,14 +478,12 @@ fn is_port_contract_property(key: &str) -> bool {
 }
 
 fn property_value_from_schema(
-    kind: ComponentType,
     key: &str,
     value: String,
-    registry: &PropertyRegistry,
+    sheet: Option<&PropertySheet>,
 ) -> PropertyValue {
-    let Some(definition) = registry
-        .get(kind)
-        .and_then(|sheet| sheet.iter().find(|definition| definition.name == key))
+    let Some(definition) =
+        sheet.and_then(|sheet| sheet.iter().find(|definition| definition.name == key))
     else {
         return PropertyValue::Expression(value);
     };
@@ -703,9 +709,9 @@ mod tests {
         let invalid = Component::new(2, ComponentType::Resistor, Point::origin())
             .with_name_value("R2", "1k+");
 
-        assert!(validate_component_properties(&valid, &registry).is_empty());
+        assert!(validate_component_properties(&valid, registry.get(valid.kind)).is_empty());
         assert!(
-            validate_component_properties(&invalid, &registry)
+            validate_component_properties(&invalid, registry.get(invalid.kind))
                 .iter()
                 .any(|(field, _)| field == "r")
         );
@@ -979,10 +985,9 @@ mod pwl_tests {
     fn a_number_field_authored_with_its_unit_stays_a_number() {
         let registry = PropertyRegistry::new();
         let parsed = property_value_from_schema(
-            ComponentType::VoltageSourcePulse,
             "per",
             "1ms".to_owned(),
-            &registry,
+            registry.get(ComponentType::VoltageSourcePulse),
         );
 
         assert_eq!(parsed.as_number(), Some(1e-3));
@@ -1021,7 +1026,7 @@ mod pwl_tests {
             assert!(apply_properties_to_component(&mut component, &values, &registry).is_err());
             assert_eq!(component, original);
             assert_eq!(
-                validate_component_properties(&component, &registry)[0].0,
+                validate_component_properties(&component, registry.get(component.kind))[0].0,
                 "parameters"
             );
         }

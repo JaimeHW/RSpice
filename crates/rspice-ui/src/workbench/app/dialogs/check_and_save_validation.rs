@@ -464,7 +464,7 @@ impl CheckAndSaveValidationReport {
                 key,
                 schematic,
                 &symbol_resolver,
-                &state.property_registry,
+                state,
                 key.eq_ignore_ascii_case(&active_key),
                 &mut findings,
             );
@@ -673,6 +673,29 @@ impl CheckAndSaveValidationReport {
     }
 }
 
+/// Resolve dynamic contracts without replacing the active editor's sheet.
+fn component_property_findings(
+    state: &AppState,
+    component: &crate::state::Component,
+) -> Vec<(String, String)> {
+    use crate::properties::property_bridge::validate_component_properties;
+    use crate::workbench::app::actions::property_edit::{
+        authoritative_component_property_sheet, cell_instance_identity_sheet,
+    };
+
+    if component.kind != crate::state::ComponentType::CellInstance {
+        return validate_component_properties(
+            component,
+            state.property_registry.get(component.kind),
+        );
+    }
+    let sheet = match authoritative_component_property_sheet(state, component) {
+        Ok(sheet) => sheet.unwrap_or_else(cell_instance_identity_sheet),
+        Err(error) => return vec![("schema".to_owned(), error)],
+    };
+    validate_component_properties(component, Some(&sheet))
+}
+
 /// Check one document's naming, parameter and pin contracts.
 ///
 /// `locatable` states whether this document is the one the canvas is showing.
@@ -682,7 +705,7 @@ fn validate_component_contracts(
     document_key: &str,
     schematic: &crate::state::SchematicState,
     symbol_resolver: &SymbolResolver<'_>,
-    property_registry: &crate::state::PropertyRegistry,
+    state: &AppState,
     locatable: bool,
     findings: &mut BTreeMap<String, CheckAndSaveFinding>,
 ) {
@@ -751,10 +774,7 @@ fn validate_component_contracts(
                 .push(component.id);
         }
 
-        for (field, error) in crate::properties::property_bridge::validate_component_properties(
-            component,
-            property_registry,
-        ) {
+        for (field, error) in component_property_findings(state, component) {
             insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -881,6 +901,24 @@ fn digest_bytes(bytes: &[u8]) -> ContentDigest {
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
+
+    #[test]
+    fn hierarchical_instances_validate_without_an_open_property_dialog() {
+        let state = crate::workbench::examples::hierarchy_reference::build().state;
+        assert!(
+            state
+                .property_registry
+                .get(ComponentType::CellInstance)
+                .is_none()
+        );
+        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        let parameters = report
+            .blockers()
+            .iter()
+            .filter(|finding| finding.source == "parameters")
+            .collect::<Vec<_>>();
+        assert!(parameters.is_empty(), "{parameters:?}");
+    }
 
     #[test]
     fn omitted_instances_do_not_reappear_in_validated_save_hierarchy_findings() {
