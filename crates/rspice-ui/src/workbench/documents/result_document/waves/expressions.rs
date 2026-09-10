@@ -606,96 +606,6 @@ pub(super) fn expression_label(expr: &ExprTrace, complex: bool) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::WaveformData;
-
-    #[test]
-    fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
-        let mut state = AppState::default();
-        state.simulation.start_run().add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
-                .with_waveforms(vec![
-                    WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
-                        .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
-                    WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
-                        .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
-                ]),
-        );
-        state.simulation.complete_run();
-        state.ui.results.viewer = super::super::super::ResultViewer::Bode;
-        let digest = state
-            .simulation
-            .active_run()
-            .unwrap()
-            .dataset_content_digest();
-        let policy = state.ui.preferences.result_presentation_policy();
-        let models = cached_models(
-            &state.simulation,
-            &mut state.ui.results,
-            policy.complex_number_display(),
-            &Tokens::default(),
-        );
-        let model = &models[0];
-        let legacy: ExprTrace =
-            serde_json::from_str(r#"{"text":"V(a)-V(b)","visible":true}"#).unwrap();
-        assert!(legacy.complex_policy.is_legacy());
-        assert!(
-            serde_json::to_value(&legacy)
-                .unwrap()
-                .get("complex_policy")
-                .is_none()
-        );
-        state
-            .ui
-            .results
-            .analysis_exprs
-            .insert(model.analysis_key, vec![legacy]);
-        state
-            .ui
-            .results
-            .sync_expression_projection(model.analysis_key, 0);
-        let old = resolve_strip_exprs(&mut state, model, &Tokens::default());
-        assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
-        assert!(old[0].label.starts_with("legacy magnitude"));
-        assert!(
-            state
-                .ui
-                .results
-                .add_expression_trace(
-                    &state.simulation,
-                    model.analysis_key,
-                    "V(a)-V(b)".to_owned()
-                )
-                .unwrap()
-        );
-        let current = resolve_strip_exprs(&mut state, model, &Tokens::default());
-        assert_eq!(current[0].y.as_slice(), &[2.0; 2]);
-        assert_eq!(current[0].label, "mag(V(a)-V(b))");
-        assert_ne!(old[0].cache_key, current[0].cache_key);
-        assert_eq!(
-            state
-                .simulation
-                .active_run()
-                .unwrap()
-                .dataset_content_digest(),
-            digest
-        );
-        assert!(
-            !state
-                .ui
-                .results
-                .add_expression_trace(
-                    &state.simulation,
-                    model.analysis_key,
-                    "V(a)-V(b)".to_owned()
-                )
-                .unwrap()
-        );
-    }
-}
-
 /// Flip a source waveform's quick-view visibility without mutating result data.
 pub(crate) fn toggle_visibility(
     state: &mut AppState,
@@ -820,4 +730,94 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
         append_copied_cursor(&mut text, "B", b, model, interpolation, quantity_policy);
     }
     Some(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::WaveformData;
+
+    #[test]
+    fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
+        let mut state = AppState::default();
+        state.simulation.start_run().add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
+                .with_waveforms(vec![
+                    WaveformData::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                        .with_complex_components("V(a)", vec![1.0; 2], vec![0.0; 2]),
+                    WaveformData::new("|V(b)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
+                        .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
+                ]),
+        );
+        state.simulation.complete_run();
+        state.ui.results.viewer = super::super::super::ResultViewer::Bode;
+        let digest = state
+            .simulation
+            .active_run()
+            .unwrap()
+            .dataset_content_digest();
+        let policy = state.ui.preferences.result_presentation_policy();
+        let models = cached_models(
+            &state.simulation,
+            &mut state.ui.results,
+            policy.complex_number_display(),
+            &Tokens::default(),
+        );
+        let model = &models[0];
+        let legacy: ExprTrace =
+            serde_json::from_str(r#"{"text":"V(a)-V(b)","visible":true}"#).unwrap();
+        assert!(legacy.complex_policy.is_legacy());
+        assert!(
+            serde_json::to_value(&legacy)
+                .unwrap()
+                .get("complex_policy")
+                .is_none()
+        );
+        state
+            .ui
+            .results
+            .analysis_exprs
+            .insert(model.analysis_key, vec![legacy]);
+        state
+            .ui
+            .results
+            .sync_expression_projection(model.analysis_key, 0);
+        let old = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        assert_eq!(old[0].y.as_slice(), &[0.0; 2]);
+        assert!(old[0].label.starts_with("legacy magnitude"));
+        assert!(
+            state
+                .ui
+                .results
+                .add_expression_trace(
+                    &state.simulation,
+                    model.analysis_key,
+                    "V(a)-V(b)".to_owned()
+                )
+                .unwrap()
+        );
+        let current = resolve_strip_exprs(&mut state, model, &Tokens::default());
+        assert_eq!(current[0].y.as_slice(), &[2.0; 2]);
+        assert_eq!(current[0].label, "mag(V(a)-V(b))");
+        assert_ne!(old[0].cache_key, current[0].cache_key);
+        assert_eq!(
+            state
+                .simulation
+                .active_run()
+                .unwrap()
+                .dataset_content_digest(),
+            digest
+        );
+        assert!(
+            !state
+                .ui
+                .results
+                .add_expression_trace(
+                    &state.simulation,
+                    model.analysis_key,
+                    "V(a)-V(b)".to_owned()
+                )
+                .unwrap()
+        );
+    }
 }
