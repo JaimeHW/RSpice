@@ -129,44 +129,108 @@ impl super::SchematicState {
         expected: &Component,
         candidate: Component,
     ) -> Result<Vec<Component>, String> {
-        let index = self
+        self.prepare_component_edits(std::iter::once((expected, candidate)))
+    }
+
+    /// Resolve all targets from their original identities, then publish their
+    /// final names together. A swap must never pass through a duplicate name.
+    pub(crate) fn prepare_component_renames(
+        &self,
+        names: &std::collections::BTreeMap<u64, String>,
+    ) -> Result<Vec<Component>, String> {
+        let edits = self
             .components
             .iter()
-            .position(|component| component.id == expected.id)
-            .ok_or("The selected component no longer exists.")?;
-        if &self.components[index] != expected {
-            return Err("The selected component changed before commit.".to_owned());
+            .filter_map(|expected| {
+                let name = names.get(&expected.id)?;
+                let mut candidate = expected.clone();
+                candidate.name.clone_from(name);
+                Some((expected, candidate))
+            })
+            .collect::<Vec<_>>();
+        if edits.len() != names.len() {
+            return Err("An annotated component no longer exists.".to_owned());
         }
-        if candidate.id != expected.id || candidate.kind != expected.kind {
-            return Err(
-                "A property edit cannot replace the component's identity or type.".to_owned(),
-            );
-        }
+        self.prepare_component_edits(edits)
+    }
+
+    fn prepare_component_edits<'a>(
+        &self,
+        edits: impl IntoIterator<Item = (&'a Component, Component)>,
+    ) -> Result<Vec<Component>, String> {
         let mut components = self.components.clone();
-        components[index] = candidate;
-        if components[index].name == expected.name || expected.kind.spice_prefix().is_empty() {
+        let indices: HashMap<_, _> = self
+            .components
+            .iter()
+            .enumerate()
+            .map(|(index, component)| (component.id, index))
+            .collect();
+        let mut renamed = std::collections::HashSet::new();
+        for (expected, candidate) in edits {
+            let index = *indices
+                .get(&expected.id)
+                .ok_or("The selected component no longer exists.")?;
+            if &self.components[index] != expected {
+                return Err("The selected component changed before commit.".to_owned());
+            }
+            if candidate.id != expected.id || candidate.kind != expected.kind {
+                return Err(
+                    "A property edit cannot replace the component's identity or type.".to_owned(),
+                );
+            }
+            if candidate.name != expected.name && !expected.kind.spice_prefix().is_empty() {
+                candidate.validate_reference_designator(&candidate.name)?;
+                renamed.insert(index);
+            }
+            components[index] = candidate;
+        }
+        if renamed.is_empty() {
             return Ok(components);
         }
-        components[index].validate_reference_designator(&components[index].name)?;
-        let emitted = components[index].emitted_instance_name();
-        if components.iter().enumerate().any(|(other, component)| {
-            other != index
-                && (component.name.eq_ignore_ascii_case(&components[index].name)
-                    || component
-                        .emitted_instance_name()
-                        .eq_ignore_ascii_case(&emitted))
-        }) {
-            return Err(
-                "The renamed component would duplicate an existing SPICE designator.".to_owned(),
+        let mut names = HashMap::new();
+        let mut emitted_names = HashMap::new();
+        for (index, component) in components.iter().enumerate() {
+            insert_alias(&mut names, &component.name, index);
+            insert_alias(
+                &mut emitted_names,
+                &component.emitted_instance_name(),
+                index,
             );
+        }
+        for &index in &renamed {
+            if names.get(&components[index].name.to_ascii_lowercase()) != Some(&Some(index))
+                || emitted_names.get(
+                    &components[index]
+                        .emitted_instance_name()
+                        .to_ascii_lowercase(),
+                ) != Some(&Some(index))
+            {
+                return Err(
+                    "The renamed component would duplicate an existing SPICE designator."
+                        .to_owned(),
+                );
+            }
         }
         // Resolve references using the old identities, but keep the complete
         // edited parameter draft. Preparing from the old component would
         // overwrite simultaneous parameter edits when a reference is remapped.
-        let name = std::mem::replace(&mut components[index].name, expected.name.clone());
+        let names: Vec<_> = renamed
+            .iter()
+            .map(|&index| {
+                (
+                    index,
+                    std::mem::replace(
+                        &mut components[index].name,
+                        self.components[index].name.clone(),
+                    ),
+                )
+            })
+            .collect();
         let references = PreparedCopyReferences::for_operation(&components, "rename")?;
-        components[index].name = name;
-        references.apply_selected(&mut components, |target| target == index);
+        for (index, name) in names {
+            components[index].name = name;
+        }
+        references.apply_selected(&mut components, |target| renamed.contains(&target));
         Ok(components)
     }
 }

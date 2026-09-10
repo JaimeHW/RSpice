@@ -46,6 +46,36 @@ fn parameter(component: &Component, name: &str) -> String {
 }
 
 #[test]
+fn simultaneous_renames_preserve_swapped_windings_and_reject_collisions_atomically() {
+    let state = coupled_selection();
+    let first = component(&state.components, "L1").id;
+    let second = component(&state.components, "L2").id;
+    let voltage = component(&state.components, "V1").id;
+    let names = std::collections::BTreeMap::from([
+        (first, "L2".to_owned()),
+        (second, "L1".to_owned()),
+        (voltage, "V9".to_owned()),
+    ]);
+    let renamed = state.prepare_component_renames(&names).unwrap();
+    assert_eq!(renamed.iter().find(|c| c.id == first).unwrap().name, "L2");
+    assert_eq!(parameter(component(&renamed, "L2"), "coupled_to"), "L1");
+    assert_eq!(parameter(component(&renamed, "K1"), "inductors"), "L2, L1");
+    assert_eq!(parameter(component(&renamed, "F1"), "vref"), "V9");
+    assert_eq!(component(&renamed, "H1").params, "vref=V_external");
+    assert!(
+        state
+            .prepare_component_renames(&std::collections::BTreeMap::from([(
+                first,
+                "l2".to_owned()
+            )]))
+            .is_err()
+    );
+    assert_eq!(component(&state.components, "L1").id, first);
+    assert_eq!(component(&state.components, "L2").id, second);
+    assert!(!state.is_dirty);
+}
+
+#[test]
 fn rename_preparation_rebinds_only_the_target_and_preserves_the_source() {
     let state = coupled_selection();
     for (old, new, owner, parameter_name, expected) in [
