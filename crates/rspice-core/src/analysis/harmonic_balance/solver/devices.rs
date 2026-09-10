@@ -345,9 +345,9 @@ impl NonlinearDeviceInstance {
     /// Instantaneous white-noise intensities s(t) >= 0 in A^2/Hz for each
     /// branch of `noise_branches`, evaluated at one time sample: shot noise
     /// `2q|I|` for junction and transport currents, channel thermal
-    /// `(8/3)kT|gm|` for legacy MOS/JFET channels, and `4kT g(t)` for switch
-    /// resistance. Numerical conductance floors and output conductance are not
-    /// physical channel-noise generators in these Level-1 models.
+    /// the selected MOS channel law or `(8/3)kT|gm|` for JFETs, and
+    /// `4kT g(t)` for switch resistance. Numerical conductance floors
+    /// never enter the physical channel-noise intensity.
     #[cfg(test)]
     pub(super) fn noise_intensities(
         &self,
@@ -378,36 +378,17 @@ impl NonlinearDeviceInstance {
                     id.abs(),
                 ])?])
             }
-            NonlinearDeviceType::Nmos => {
-                let (_, _, _, gm, _, _) = self.mos_operating_point(1.0, node_voltages);
-                let (vj_sb, vj_db) = self.mos_bulk_junctions(1.0, node_voltages);
+            NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => {
+                let p = if self.device_type == NonlinearDeviceType::Nmos {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let (vj_sb, vj_db) = self.mos_bulk_junctions(p, node_voltages);
                 let (i_sb, _) = junction_current(self.params.is, vj_sb, self.params.vt);
                 let (i_db, _) = junction_current(self.params.is2, vj_db, self.params.vt);
                 Ok(vec![
-                    ScaledNonnegative::checked_product(&[
-                        4.0,
-                        k_b,
-                        temperature,
-                        self.params.channel_noise_gamma,
-                        gm.abs(),
-                    ])?,
-                    ScaledNonnegative::checked_product(&[2.0, q_e, i_sb.abs()])?,
-                    ScaledNonnegative::checked_product(&[2.0, q_e, i_db.abs()])?,
-                ])
-            }
-            NonlinearDeviceType::Pmos => {
-                let (_, _, _, gm, _, _) = self.mos_operating_point(-1.0, node_voltages);
-                let (vj_sb, vj_db) = self.mos_bulk_junctions(-1.0, node_voltages);
-                let (i_sb, _) = junction_current(self.params.is, vj_sb, self.params.vt);
-                let (i_db, _) = junction_current(self.params.is2, vj_db, self.params.vt);
-                Ok(vec![
-                    ScaledNonnegative::checked_product(&[
-                        4.0,
-                        k_b,
-                        temperature,
-                        self.params.channel_noise_gamma,
-                        gm.abs(),
-                    ])?,
+                    self.mos_channel_noise_intensity(p, node_voltages, temperature, k_b)?,
                     ScaledNonnegative::checked_product(&[2.0, q_e, i_sb.abs()])?,
                     ScaledNonnegative::checked_product(&[2.0, q_e, i_db.abs()])?,
                 ])
@@ -490,6 +471,53 @@ impl NonlinearDeviceInstance {
     pub(crate) fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
         self.params.gamma = gamma;
         self.params.phi = phi;
+        self
+    }
+
+    fn mos_channel_noise_intensity(
+        &self,
+        p: Value,
+        node_voltages: &[Value],
+        temperature: Value,
+        k_b: Value,
+    ) -> Result<ScaledNonnegative, &'static str> {
+        if let Some(gdsnoi) = self.params.channel_noise_gdsnoi {
+            let vd = self.get_terminal_voltage(node_voltages, 0);
+            let vg = self.get_terminal_voltage(node_voltages, 1);
+            let vs = self.get_terminal_voltage(node_voltages, 2);
+            let vb = self.get_terminal_voltage(node_voltages, 3);
+            let source = if p * (vd - vs) >= 0.0 { vs } else { vd };
+            let (von, _) = self.mos_threshold(p * (source - vb));
+            let overdrive = p * (vg - source) - von;
+            let shape = crate::device::semiconductor::mos_nlev3_noise_shape(
+                overdrive,
+                (vd - vs).abs(),
+                overdrive.max(0.0),
+            )?;
+            ScaledNonnegative::checked_product(&[
+                4.0,
+                k_b,
+                temperature,
+                self.params.channel_noise_gamma,
+                gdsnoi,
+                self.params.kp,
+                overdrive.max(0.0),
+                shape,
+            ])
+        } else {
+            let (_, _, _, gm, _, _) = self.mos_operating_point(p, node_voltages);
+            ScaledNonnegative::checked_product(&[
+                4.0,
+                k_b,
+                temperature,
+                self.params.channel_noise_gamma,
+                gm.abs(),
+            ])
+        }
+    }
+
+    pub(crate) fn with_channel_noise_gdsnoi(mut self, gdsnoi: Option<Value>) -> Self {
+        self.params.channel_noise_gdsnoi = gdsnoi;
         self
     }
 
@@ -647,6 +675,11 @@ impl NonlinearDeviceInstance {
                     || self.params.channel_noise_gamma < 0.0
                 {
                     return Some("MOS channel-noise gamma must be finite and nonnegative");
+                }
+                if let Some(gdsnoi) = self.params.channel_noise_gdsnoi
+                    && (!gdsnoi.is_finite() || gdsnoi < 0.0)
+                {
+                    return Some("MOS NLEV=3 GDSNOI must be finite and nonnegative");
                 }
                 if !self.params.gamma.is_finite() || self.params.gamma < 0.0 {
                     return Some("MOS GAMMA must be finite and nonnegative");
@@ -843,10 +876,9 @@ impl NonlinearDeviceInstance {
     ///
     /// Returns `(eff_d, eff_s, ids, gm, gds, gmbs)` in the swapped polarity
     /// frame; the current absorbed at `eff_d` is `p * ids`. The threshold
-    /// carries the body effect `vth = vto + gamma*(sqrt(phi + vsb) -
-    /// sqrt(phi))` with `vsb` measured from the EFFECTIVE source (the swap
-    /// keeps the device symmetric), clamped at full depletion; `gmbs =
-    /// -dIds/dVth * dVth/dVsb` is the bulk transconductance.
+    /// carries the MOS1 body effect with its forward-bias continuation,
+    /// measured from the EFFECTIVE source. The exact threshold derivative
+    /// determines the bulk transconductance.
     fn mos_operating_point(
         &self,
         p: Value,
@@ -877,23 +909,13 @@ impl NonlinearDeviceInstance {
     /// Body-effect threshold law and its derivative with respect to the
     /// effective source-bulk voltage.
     fn mos_threshold(&self, vsb: Value) -> (Value, Value) {
-        let gamma = self.params.gamma;
-        let phi = self.params.phi;
-        if gamma > 0.0 {
-            let arg = phi + vsb;
-            if arg > 0.0 {
-                let sqrt_arg = arg.sqrt();
-                (
-                    self.params.vth + gamma * (sqrt_arg - phi.sqrt()),
-                    gamma / (2.0 * sqrt_arg),
-                )
-            } else {
-                // Full depletion clamp: threshold pinned, no bulk control.
-                (self.params.vth - gamma * phi.sqrt(), 0.0)
-            }
-        } else {
-            (self.params.vth, 0.0)
-        }
+        crate::device::semiconductor::mos1_threshold(
+            self.params.vth,
+            self.params.gamma,
+            self.params.phi,
+            self.params.phi.sqrt(),
+            -vsb,
+        )
     }
 
     /// Bulk junction voltages in the polarity frame (forward when the bulk
@@ -1716,6 +1738,40 @@ mod tests {
         assert_eq!(exact_zero, ScaledNonnegative::ZERO);
         for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY, -1.0] {
             assert!(ScaledNonnegative::checked_product(&[0.0, invalid]).is_err());
+        }
+    }
+
+    #[test]
+    fn periodic_mos_forward_body_threshold_matches_its_current_derivative() {
+        for p in [1.0, -1.0] {
+            let mos = if p > 0.0 {
+                NonlinearDeviceInstance::nmos(0, 1, 2, 3, 1.0, 1e-3, 0.1)
+            } else {
+                NonlinearDeviceInstance::pmos(0, 1, 2, 3, 1.0, 1e-3, 0.1)
+            }
+            .with_body_effect(0.4, 0.6);
+            for vb in [0.2, 1.1, 1.3] {
+                for inverse in [false, true] {
+                    let mut bias = if inverse {
+                        [0.0, p * 1.4, p * 0.1, p * vb]
+                    } else {
+                        [p * 0.1, p * 1.4, 0.0, p * vb]
+                    };
+                    let (_, _, _, gm, _, gmb) = mos.mos_operating_point(p, &bias);
+                    let threshold = 1.0
+                        + 0.4
+                            * ((0.6_f64.sqrt() - vb / (2.0 * 0.6_f64.sqrt())).max(0.0)
+                                - 0.6_f64.sqrt());
+                    let expected = 1e-3 * 0.1 * (1.4 - threshold - 0.05) * 1.01;
+                    let current = mos.mos_operating_point(p, &bias).2;
+                    assert!((current - expected).abs() < expected * 1e-13);
+                    bias[3] += p * 1e-6;
+                    let hi = mos.mos_operating_point(p, &bias).2;
+                    bias[3] -= p * 2e-6;
+                    let lo = mos.mos_operating_point(p, &bias).2;
+                    assert!(((hi - lo) / 2e-6 - gmb).abs() < gm * 1e-8);
+                }
+            }
         }
     }
 

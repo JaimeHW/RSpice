@@ -95,13 +95,88 @@ impl Mosfet {
         self.gm.abs()
     }
 
-    /// Return the current thermal-noise coefficient used for channel noise.
-    pub(crate) fn channel_thermal_noise_gamma(&self) -> Value {
+    /// Resolve channel-noise parameters once for ordinary and periodic
+    /// analyses. GDSNOI participates only in ngspice MOS1/2/3 NLEV=3.
+    pub(crate) fn channel_noise_parameters(
+        &self,
+        dialect: crate::config::SpiceDialect,
+    ) -> Result<(Value, Option<Value>), &'static str> {
         if self.legacy_bsim_model.is_some() {
-            2.0 / 3.0
-        } else {
-            self.thermal_noise_gamma.max(0.0)
+            return Ok((2.0 / 3.0, None));
         }
+        let gamma = self.thermal_noise_gamma;
+        if !gamma.is_finite() || gamma < 0.0 {
+            return Err("MOS channel noise requires finite nonnegative TNOIA/NOIA and GAMMA_NOISE");
+        }
+        if dialect != crate::config::SpiceDialect::Xyce
+            && matches!(self.level, 1 | 2 | 3 | 6)
+            && !(0..=3).contains(&self.nlev)
+        {
+            return Err("MOS noise requires integer NLEV in 0..=3");
+        }
+        let nlev3 = dialect != crate::config::SpiceDialect::Xyce
+            && matches!(self.level, 1..=3)
+            && self.nlev == 3;
+        if nlev3 && (!self.gdsnoi.is_finite() || self.gdsnoi < 0.0) {
+            return Err("MOS NLEV=3 channel noise requires finite nonnegative GDSNOI");
+        }
+        Ok((gamma, nlev3.then_some(self.gdsnoi)))
+    }
+
+    /// Conductance multiplying 4*k*T in the channel thermal-noise PSD.
+    pub(crate) fn channel_noise_conductance(
+        &self,
+        dialect: crate::config::SpiceDialect,
+    ) -> Result<Value, &'static str> {
+        let (gamma, nlev3) = self.channel_noise_parameters(dialect)?;
+        let conductance = if let Some(gdsnoi) = nlev3 {
+            let p = self.polarity();
+            let vds_m = p * self.eval_vds;
+            let vg_active = p * self.eval_vgs - vds_m.min(0.0);
+            let (von, vdsat) = match self.level {
+                1 => {
+                    let vb_active = p * self.eval_vbs - vds_m.min(0.0);
+                    let (von, _) = crate::device::semiconductor::mos1_threshold(
+                        p * self.vto,
+                        self.gamma,
+                        self.phi,
+                        self.phi.sqrt(),
+                        vb_active,
+                    );
+                    (von, (vg_active - von).max(0.0))
+                }
+                2 => {
+                    let state = self.level2_evaluate(self.eval_vgs, self.eval_vds, self.eval_vbs);
+                    (state.von, state.vdsat)
+                }
+                _ => {
+                    let state = self.mos3_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
+                    (p * state.von, p * state.vdsat)
+                }
+            };
+            let overdrive = vg_active - von;
+            let shape =
+                crate::device::semiconductor::mos_nlev3_noise_shape(overdrive, vds_m.abs(), vdsat)?;
+            crate::numerics::scaled_exp_product(
+                &[
+                    gamma,
+                    gdsnoi,
+                    self.kp,
+                    self.w,
+                    self.multiplicity,
+                    overdrive.max(0.0),
+                    shape,
+                ],
+                &[self.l - 2.0 * self.ld],
+                0.0,
+            )
+        } else {
+            crate::numerics::scaled_exp_product(&[gamma, self.transconductance()], &[], 0.0)
+        };
+        if !conductance.is_finite() || conductance < 0.0 {
+            return Err("MOS channel-noise conductance must be finite and nonnegative");
+        }
+        Ok(conductance)
     }
 
     /// Flicker terms `(coefficient, current, af, ef)` for
@@ -110,6 +185,7 @@ impl Mosfet {
     /// extends that law because ngspice supplies no MOS6 noise callback.
     /// Xyce levels 1/2/3/6 use current^AF divided by W*Leff*Cox²*f.
     /// MOS9 uses that current law with W-2*WD, without XL/XW mask shifts.
+    /// Ngspice MOS3 also uses W-2*WD for its width-dependent NLEV laws.
     /// BSIM1/2 keep their own effective geometry and Cox units.
     pub(crate) fn flicker_noise_source_terms(
         &self,
@@ -158,7 +234,7 @@ impl Mosfet {
                 self.cox
             };
             let leff = self.l - 2.0 * self.ld;
-            let width = if self.level == 9 {
+            let width = if self.level == 9 || (self.level == 3 && !xyce && self.nlev != 0) {
                 self.w - 2.0 * self.mos3_width_narrow
             } else {
                 self.w
@@ -172,7 +248,7 @@ impl Mosfet {
                 } else if self.nlev == 0 {
                     [leff, leff, cox, 1.0]
                 } else {
-                    [self.w, leff, cox, 1.0]
+                    [width, leff, cox, 1.0]
                 };
                 (
                     scaled_exp_product(&[self.kf, self.multiplicity], &divisors, 0.0),
@@ -193,7 +269,7 @@ impl Mosfet {
                 (
                     scaled_exp_product(
                         &[self.kf, gm, gm],
-                        &[self.multiplicity, self.w, leff, cox],
+                        &[self.multiplicity, width, leff, cox],
                         0.0,
                     ),
                     1.0,
@@ -329,6 +405,32 @@ impl Mosfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_noise_parameters_reject_active_invalid_controls() {
+        use crate::config::SpiceDialect;
+        use std::collections::HashMap;
+        for level in [1, 2, 3, 6, 9] {
+            for name in ["TNOIA", "NOIA", "GAMMA_NOISE", "GDSNOI"] {
+                for value in [-1.0, Value::NAN, Value::INFINITY] {
+                    let mut params =
+                        HashMap::from([("LEVEL".into(), level as Value), ("NLEV".into(), 3.0)]);
+                    params.insert(name.into(), value);
+                    let mos = Mosfet::new_nmos("M1".into(), 1, 2, 0, 3).with_params(&params);
+                    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+                        let result = mos.channel_noise_parameters(dialect);
+                        let ignored =
+                            name == "GDSNOI" && (level > 3 || dialect == SpiceDialect::Xyce);
+                        assert_eq!(
+                            result.is_ok(),
+                            ignored,
+                            "L{level} {name}={value} {dialect:?}: {result:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn mos_noise_parameters_retain_authored_exponents_and_reject_active_invalid_values() {

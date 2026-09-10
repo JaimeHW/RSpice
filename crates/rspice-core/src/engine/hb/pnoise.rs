@@ -632,7 +632,7 @@ impl Engine {
 
         let has_nonlinear = periodic_capability::has_exact_periodic_nonlinear_devices(&circuit);
         if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes)?;
         }
         let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
             SimulationError::Circuit(format!(

@@ -879,7 +879,24 @@ impl NoiseSource {
             NoiseSourceType::Flicker => {
                 // Flicker noise: Si = KF * I^AF / f^EF (A²/Hz)
                 if frequency > 0.0 {
-                    self.parameter * self.current.abs().powf(self.af) / frequency.powf(self.ef)
+                    let current_power = self.current.abs().powf(self.af);
+                    let frequency_power = frequency.powf(self.ef);
+                    let numerator = self.parameter * current_power;
+                    let density = numerator / frequency_power;
+                    if current_power.is_normal()
+                        && frequency_power.is_normal()
+                        && numerator.is_normal()
+                        && density.is_normal()
+                    {
+                        density
+                    } else {
+                        self.flicker_density_scaled(
+                            frequency,
+                            current_power,
+                            frequency_power,
+                            density,
+                        )
+                    }
                 } else {
                     0.0 // Avoid division by zero
                 }
@@ -916,6 +933,64 @@ impl NoiseSource {
                 .unwrap_or(Value::NAN),
             NoiseSourceType::Bsim4CorrelatedThermal => 0.0,
         }
+    }
+
+    /// Restore range lost by intermediate powers/products. The common path
+    /// keeps powf accuracy; logarithms are needed only when a power itself
+    /// overflows, underflows or rounds into the subnormal range.
+    #[cold]
+    fn flicker_density_scaled(
+        &self,
+        frequency: Value,
+        current_power: Value,
+        frequency_power: Value,
+        direct: Value,
+    ) -> Value {
+        let current = self.current.abs();
+        if !self.parameter.is_finite()
+            || self.parameter <= 0.0
+            || !current.is_finite()
+            || current == 0.0
+            || !frequency.is_finite()
+            || !self.af.is_finite()
+            || !self.ef.is_finite()
+        {
+            return direct;
+        }
+        if current_power.is_normal() && frequency_power.is_normal() {
+            return crate::numerics::scaled_exp_product(
+                &[self.parameter, current_power],
+                &[frequency_power],
+                0.0,
+            );
+        }
+        let exponent = if self.af == self.ef {
+            // Retain small differences between nearby bases, including an
+            // exactly cancelling ratio whose separate powers overflow.
+            let difference = current - frequency;
+            let log_ratio = if difference.abs() <= frequency * 0.5 {
+                (difference / frequency).ln_1p()
+            } else {
+                current.ln() - frequency.ln()
+            };
+            self.af * log_ratio
+        } else if current == frequency {
+            (self.af - self.ef) * current.ln()
+        } else {
+            let log_current = current.ln();
+            let log_frequency = frequency.ln();
+            let frequency_exponent = self.ef * log_frequency;
+            if frequency_exponent.is_finite() {
+                self.af.mul_add(log_current, -frequency_exponent)
+                    - self.ef.mul_add(log_frequency, -frequency_exponent)
+            } else {
+                // An infinite frequency exponent has no finite rounding
+                // residual. Keep genuine underflow/overflow, not inf-inf from
+                // an attempted compensation of the infinite product.
+                self.af * log_current - frequency_exponent
+            }
+        };
+        crate::numerics::scaled_exp_product(&[self.parameter], &[], exponent)
     }
 
     /// Evaluate a source and require finite, nonnegative PSD evidence.
@@ -1701,6 +1776,77 @@ impl IntegratedNoise {
 #[cfg(test)]
 mod mechanism_tests {
     use super::*;
+
+    #[test]
+    fn flicker_density_preserves_representable_extreme_powers_and_products() {
+        for (kf, current, af, frequency, ef, expected) in [
+            (1e-200, 1e-38, -10.0, 1.0, 1.0, 1e180),
+            (1e200, 1e-200, 2.0, 1.0, 1.0, 1e-200),
+            (1e-200, 1e200, 2.0, 1.0, 1.0, 1e200),
+            (1.0, 1e200, 2.0, 1e200, 2.0, 1.0),
+            (1e-200, 1e-200, 1.0, 1e-200, 1.0, 1e-200),
+            (1e200, 1e200, 1.0, 1e200, 1.0, 1e200),
+            (1e200, 1.0, 1.0, 1e200, 2.0, 1e-200),
+            (1e-200, 1.0, 1.0, 1e-200, 2.0, 1e200),
+            (1e100, 1e-160, 2.0, 1.0, 1.0, 1e-220),
+            (1e-100, 1.0, 1.0, 1e-160, 2.0, 1e220),
+            (1e-300, 1e-200, -3.0, 1e200, 2.0, 1e-100),
+            (1e300, 1e-200, 3.0, 1e200, -2.0, 1e100),
+            (1.0, 1e100, 4.0, 1e100, 3.0, 1e100),
+            (1e-300, 1e100, 1e300, 1e100, 1e300, 1e-300),
+            (1e-200, 1e-100, 1.0, 1e20, 1.0, 1e-320),
+        ] {
+            for current in [current, -current] {
+                let source = NoiseSource::flicker_with_frequency_exponent(
+                    "range".into(),
+                    1,
+                    0,
+                    kf,
+                    af,
+                    ef,
+                    current,
+                );
+                let actual = source.try_spectral_density(frequency, 300.15).unwrap();
+                assert!(
+                    (actual - expected).abs() <= (expected * 3e-13).max(Value::from_bits(1)),
+                    "KF={kf:e} I={current:e} AF={af} f={frequency:e} EF={ef}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
+        let underflow = NoiseSource::flicker_with_frequency_exponent(
+            "underflow".into(),
+            1,
+            0,
+            1.0,
+            1.0,
+            1e308,
+            1.0,
+        );
+        assert_eq!(underflow.try_spectral_density(1e308, 300.15), Ok(0.0));
+        let overflow = NoiseSource::flicker_with_frequency_exponent(
+            "overflow".into(),
+            1,
+            0,
+            1.0,
+            1.0,
+            -1e308,
+            1.0,
+        );
+        assert!(overflow.try_spectral_density(1e308, 300.15).is_err());
+        // Adjacent bases must not cancel merely because their logarithms round
+        // to the same float before multiplying a large exponent.
+        let source = NoiseSource::flicker_with_frequency_exponent(
+            "nearby".into(),
+            1,
+            0,
+            1.0,
+            1e15,
+            1e15,
+            2.0_f64.next_up(),
+        );
+        let expected = 1.248627071539086_f64;
+        assert!((source.spectral_density(2.0, 300.15) - expected).abs() < expected * 2e-15);
+    }
 
     #[test]
     fn invalid_elementary_psd_evidence_is_not_converted_to_zero() {

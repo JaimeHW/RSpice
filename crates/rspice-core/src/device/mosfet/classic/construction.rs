@@ -1115,19 +1115,10 @@ impl Mosfet {
         if let Some(&v) = params.get("EF") {
             self.ef = v;
         }
-        if let Some(v) = params
-            .get("TNOIA")
-            .or_else(|| params.get("NOIA"))
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(v) = params.get("TNOIA").or_else(|| params.get("NOIA")).copied() {
             self.thermal_noise_gamma = (2.0 / 3.0) * v;
         }
-        if let Some(v) = params
-            .get("GAMMA_NOISE")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(v) = params.get("GAMMA_NOISE").copied() {
             self.thermal_noise_gamma = v;
         }
         if let Some(&v) = params.get("NLEV") {
@@ -1138,11 +1129,7 @@ impl Mosfet {
                 -1
             };
         }
-        if let Some(v) = params
-            .get("GDSNOI")
-            .copied()
-            .filter(|v| v.is_finite() && *v >= 0.0)
-        {
+        if let Some(&v) = params.get("GDSNOI") {
             self.gdsnoi = v;
         }
         // Level 6 parameters

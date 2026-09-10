@@ -360,6 +360,77 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn mos_nlev3_channel_noise_at_zero_vds_in_wasm() {
+        let mut config = rspice_core::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = rspice_core::Engine::new(config);
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let deck=rspice_core::Netlist::parse(&format!(
+                "MOS inversion charge noise\nVG g 0 {}\nRL out 0 1k\nM1 out g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u IS=0 NLEV=3 GDSNOI=3)\n.options GMIN=0\n.end\n",p*1.4)).unwrap();
+            let result = engine
+                .run_pnoise_with_abort(
+                    &deck,
+                    1e6,
+                    &[1e4],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let expected =
+                4.0 * 1.380649e-23 * 300.15 * (1e-3 + 3.0 * 0.4e-3) / (1.4e-3_f64).powi(2);
+            assert!((result.output_noise[0] - expected).abs() < expected * 2e-10);
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn extreme_flicker_density_and_mos_port_noise_in_wasm() {
+        use rspice_core::analysis::NoiseSource;
+        for (kf, current, af, frequency, ef, expected) in [
+            (1e-200, 1e-38, -10.0, 1.0, 1.0, 1e180),
+            (1e200, 1e-200, 2.0, 1.0, 1.0, 1e-200),
+            (1e-200, 1e200, 2.0, 1.0, 1.0, 1e200),
+            (1.0, 1e200, 2.0, 1e200, 2.0, 1.0),
+            (1e-200, 1e-200, 1.0, 1e-200, 1.0, 1e-200),
+            (1e100, 1e-160, 2.0, 1.0, 1.0, 1e-220),
+        ] {
+            let source = NoiseSource::flicker_with_frequency_exponent(
+                "range".into(),
+                1,
+                0,
+                kf,
+                af,
+                ef,
+                current,
+            );
+            let density = source.spectral_density(frequency, 300.15);
+            assert!((density - expected).abs() < expected * 3e-13);
+        }
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Extreme MOS noise in WASM\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF=1e-260 AF=-80 NLEV=0)\n.options GMIN=0\n.end\n", p*2.0, p*1.4)).unwrap();
+            let mut config = rspice_core::engine::SimulationConfig::default();
+            config.convergence_config.gmin_target = 0.0;
+            config.convergence_config.junction_gmin_target = 0.0;
+            let port = rspice_core::Engine::new(config)
+                .run_port_noise_correlation_with_abort(
+                    &netlist,
+                    &["VD".into()],
+                    &[1000.0],
+                    300.15,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let expected = 1.355_772_196_661_055_7e136;
+            let density = port[0].current_correlation[0][0].re;
+            assert!((density - expected).abs() < expected * 5e-11);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn classic_mos_signed_flicker_and_xyce_law_in_wasm() {
         use rspice_core::engine::{SimulationConfig, SpiceDialect};
         let abort = rspice_core::abort_signal::NoAbort;
@@ -408,6 +479,34 @@ mod wasm_tests {
                     }
                 }
             }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn mos3_flicker_noise_uses_narrowed_width_in_wasm() {
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            let make = |kf| {
+                rspice_core::Netlist::parse(&format!(
+                    "MOS3 narrowed noise width\nVD d 0 {}\nVG g 0 {}\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=3 VTO={p} KP=100u TOX=20n WD=0.1u LD=0.1u XL=0.2u XW=0.3u KF={kf} AF=0 NLEV=1)\n.options GMIN=0\n.end\n", p*2.0,p*1.4)).unwrap()
+            };
+            let engine = rspice_core::Engine::default();
+            let density = |kf| {
+                engine
+                    .run_port_noise_correlation_with_abort(
+                        &make(kf),
+                        &["VD".into()],
+                        &[1000.0],
+                        300.15,
+                        &rspice_core::abort_signal::NoAbort,
+                    )
+                    .unwrap()[0]
+                    .current_correlation[0][0]
+                    .re
+            };
+            let actual = density(1e-24) - density(0.0);
+            let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+            let expected = 5e-24 / (1000.0 * 1.8e-6 * 0.8e-6 * cox);
+            assert!((actual - expected).abs() < expected * 1e-12);
         }
     }
 

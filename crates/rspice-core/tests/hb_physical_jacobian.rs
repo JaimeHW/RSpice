@@ -282,3 +282,53 @@ M1 out gate 0 0 NMOD W=1u L=1u
         "PAC zero-LAMBDA MOS derivative was {mos}, expected {expected_mos}"
     );
 }
+
+#[test]
+fn forward_body_mos1_gain_matches_the_threshold_derivative_in_ac_and_pac() {
+    for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+        for inverse in [false, true] {
+            for body in [-0.5_f64, 0.2, 1.1, 1.3] {
+                let terminals = if inverse {
+                    "0 gate out bulk"
+                } else {
+                    "out gate 0 bulk"
+                };
+                let deck = format!(
+                    "MOS1 continued body derivative\nVDD supply 0 {}\nVG gate 0 {}\nVB bulk 0 DC {}\nRL supply out 1k\nM1 {terminals} mm W=2u L=1u M=5\n.model mm {kind}(LEVEL=1 VTO={p} KP=100u GAMMA=0.4 PHI=0.6 IS=0)\n.options GMIN=0\n.end\n",
+                    p * 3.0,
+                    p * 1.4,
+                    p * body
+                );
+                let pac = pac_transfer(&deck, "VB", "out");
+                let ac = ac_voltage(
+                    &deck.replace(
+                        &format!("VB bulk 0 DC {}", p * body),
+                        &format!("VB bulk 0 DC {} AC 1", p * body),
+                    ),
+                    "out",
+                );
+                let root = 0.6_f64.sqrt();
+                let barrier = if body <= 0.0 {
+                    (0.6 - body).sqrt()
+                } else {
+                    (root - body / (2.0 * root)).max(0.0)
+                };
+                let threshold = 1.0 + 0.4 * (barrier - root);
+                let slope = if barrier == 0.0 {
+                    0.0
+                } else if body > 0.0 {
+                    0.4 / (2.0 * root)
+                } else {
+                    0.4 / (2.0 * barrier)
+                };
+                let expected = Complex64::new(-(1.4 - threshold) * slope, 0.0);
+                for actual in [ac, pac] {
+                    assert!(
+                        (actual - expected).norm() < 2e-8,
+                        "{kind} inverse={inverse} Vbs={body}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}

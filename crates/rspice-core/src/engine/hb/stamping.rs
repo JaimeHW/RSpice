@@ -23,7 +23,7 @@ impl Engine {
         circuit: &CircuitData,
         solver: &mut HbSolver,
         num_nodes: usize,
-    ) {
+    ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
 
         for diode in &circuit.diodes.devices {
@@ -43,6 +43,11 @@ impl Engine {
         }
 
         for mos in &circuit.mosfets.devices {
+            let (noise_gamma, gdsnoi) = mos
+                .channel_noise_parameters(self.config.spice_dialect)
+                .map_err(|reason| {
+                    SimulationError::Circuit(format!("Noise source '{}:ID': {reason}", mos.name))
+                })?;
             let drain = Self::hb_node_to_solver_index(mos.node_drain, num_nodes);
             let gate = Self::hb_node_to_solver_index(mos.node_gate, num_nodes);
             let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
@@ -73,7 +78,8 @@ impl Engine {
             let instance = instance
                 .with_thermal_voltage(mos.vt)
                 .with_body_effect(mos.gamma, mos.phi)
-                .with_channel_noise_gamma(mos.channel_thermal_noise_gamma())
+                .with_channel_noise_gamma(noise_gamma)
+                .with_channel_noise_gdsnoi(gdsnoi)
                 .with_intrinsic_gate(mos.oxide_capacitance_total())
                 .with_bulk_junctions(
                     DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
@@ -185,6 +191,7 @@ impl Engine {
         for device in circuit.veriloga_devices().iter() {
             solver.add_veriloga_device(device.clone());
         }
+        Ok(())
     }
 
     /// Stamp resistors into HB solver G matrix
