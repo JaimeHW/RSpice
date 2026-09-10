@@ -728,51 +728,6 @@ impl CircuitData {
     }
 
     #[inline]
-    pub(in crate::circuit) fn stamp_coupled_inductors_dc_direct(
-        &self,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-    ) {
-        let mut stamper = StaticMatrixStamper { matrix, rhs };
-        for binding in &self.coupled_inductor_pairs {
-            binding.device.stamp_dc_short(&mut stamper, &mut []);
-        }
-    }
-
-    #[inline]
-    pub(in crate::circuit) fn stamp_coupled_inductors_dc(
-        &self,
-        matrix: &mut TripletMatrix,
-        rhs: &mut [Value],
-    ) {
-        for binding in &self.coupled_inductor_pairs {
-            let br1 = self.get_branch_matrix_index(binding.branch1_ordinal);
-            let br2 = self.get_branch_matrix_index(binding.branch2_ordinal);
-            let device = &binding.device;
-
-            if device.node1_pos > 0 {
-                matrix.push(br1 - 1, device.node1_pos - 1, 1.0);
-                matrix.push(device.node1_pos - 1, br1 - 1, 1.0);
-            }
-            if device.node1_neg > 0 {
-                matrix.push(br1 - 1, device.node1_neg - 1, -1.0);
-                matrix.push(device.node1_neg - 1, br1 - 1, -1.0);
-            }
-            if device.node2_pos > 0 {
-                matrix.push(br2 - 1, device.node2_pos - 1, 1.0);
-                matrix.push(device.node2_pos - 1, br2 - 1, 1.0);
-            }
-            if device.node2_neg > 0 {
-                matrix.push(br2 - 1, device.node2_neg - 1, -1.0);
-                matrix.push(device.node2_neg - 1, br2 - 1, -1.0);
-            }
-
-            rhs[br1 - 1] = 0.0;
-            rhs[br2 - 1] = 0.0;
-        }
-    }
-
-    #[inline]
     pub(in crate::circuit) fn stamp_multi_winding_transformers_dc_direct(
         &self,
         matrix: &mut StaticMatrix,
@@ -816,7 +771,6 @@ impl CircuitData {
         self.capacitors
             .stamp_ic_operating_point_direct(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
-        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
@@ -905,7 +859,6 @@ impl CircuitData {
             self.num_nodes,
             |index| grouped_indices.contains(&index),
         );
-        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
@@ -1021,7 +974,6 @@ impl CircuitData {
         self.capacitors
             .stamp_ic_operating_point_direct(matrix, rhs, num_nodes);
         self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
-        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct_scaled(matrix, rhs, scale, |br_ordinal| num_nodes + br_ordinal);
@@ -1046,8 +998,8 @@ impl CircuitData {
         self.resistor_branches.stamp_all(matrix, rhs, num_nodes);
         self.capacitors
             .stamp_ic_operating_point(matrix, rhs, num_nodes);
+        // Standalone windings own DC incidence; mutual overlays add no DC term.
         self.inductors.stamp_dc_short(matrix, rhs, num_nodes);
-        self.stamp_coupled_inductors_dc(matrix, rhs);
         self.stamp_multi_winding_transformers_dc(matrix, rhs);
         self.voltage_sources.stamp_all(matrix, rhs, num_nodes);
         self.current_sources.stamp_all(rhs);

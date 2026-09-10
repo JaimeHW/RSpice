@@ -1855,6 +1855,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dc_triplet_couplings_do_not_duplicate_winding_equations() {
+        let netlist = crate::netlist::Netlist::parse(
+            "DC mutual flux stamp\nV1 a 0 2\nL1 a n1 2\nR1 n1 0 4\nL2 n2 a 8\nR2 n2 0 16\nL3 a n3 0.5\nR3 n3 0 32\nK12 L1 L2 0.25\nK23 L2 L3 0.125\nK13 L1 L3 0.125\n.end\n"
+        ).unwrap();
+        let circuit = Engine::default().build_circuit(&netlist).unwrap();
+        let mut triplets = circuit.create_matrix();
+        let mut rhs = circuit.create_rhs();
+        circuit.stamp_dc(&mut triplets, &mut rhs);
+        let entry = |row, col| {
+            triplets
+                .entries()
+                .filter(|&(r, c, _)| r == row && c == col)
+                .map(|(_, _, value)| value)
+                .sum::<Value>()
+        };
+        for index in 0..3 {
+            let row = circuit.num_nodes() + circuit.inductors.branch_indices[index] - 1;
+            for (node, sign) in [
+                (circuit.inductors.node_pos[index], 1.0),
+                (circuit.inductors.node_neg[index], -1.0),
+            ] {
+                if node != 0 {
+                    assert_eq!(entry(row, node - 1), sign, "winding {index} KVL");
+                    assert_eq!(entry(node - 1, row), sign, "winding {index} KCL");
+                }
+            }
+        }
+        let mut matrix = triplets.to_static().unwrap();
+        let mut solution = Vec::new();
+        matrix.solve_into(&rhs, &mut solution).unwrap();
+        for &voltage in &solution[..circuit.num_nodes()] {
+            assert!((voltage - 2.0).abs() < 2e-14);
+        }
+        for (index, expected) in [0.5, -0.125, 0.0625].into_iter().enumerate() {
+            let row = circuit.num_nodes() + circuit.inductors.branch_indices[index] - 1;
+            assert!((solution[row] - expected).abs() < 2e-14);
+        }
+        assert!((solution[circuit.num_nodes()] + 0.6875).abs() < 2e-14);
+    }
+
+    #[test]
     fn dc_triplet_voltage_sources_preserve_branch_offsets_and_orientation() {
         for reversed_first in [false, true] {
             for reversed_second in [false, true] {
