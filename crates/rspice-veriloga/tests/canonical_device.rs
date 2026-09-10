@@ -2753,6 +2753,168 @@ for (gain, scale, frequency) in [
 }
 
 #[test]
+fn generated_noise_skips_inactive_integrator_frequency_terms() {
+    for (index, route) in conditional_integrator_routes().into_iter().enumerate() {
+        let source = format!(
+            "module conditional_integrator_noise(p,n); inout p,n; electrical p,n; parameter integer enabled=0; parameter real gain=1; real source,routed; integer k; analog begin source=white_noise(1.0,\"n\"); {route} end endmodule"
+        );
+        let name = format!("conditional integrator noise {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, r#"
+#[derive(Default)]
+struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {
+        assert!(process.active, "the process is outside the routing condition");
+        let mut gain=runtime::GeneratedNoiseComplex::default();
+        for injection in process.injections { gain.re+=injection.gain.re; gain.im+=injection.gain.im; }
+        self.0.push(gain);
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+for enabled in [0.0,1.0,0.0] {
+    instance.set_parameter("enabled",enabled).unwrap();
+    for gain in [1.0,0.0] {
+        instance.set_parameter("gain",gain).unwrap();
+        instance.finalize_parameters().unwrap();
+        for frequency in [0.0,1.0] {
+            runtime::clear_evaluation_error();
+            let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+            let mut capture=Capture::default();
+            let result=instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture);
+            if enabled>0.0 && frequency==0.0 {
+                assert!(result.is_err(), "an executed integral remains singular even with a zero coefficient");
+            } else {
+                result.unwrap();
+                assert_eq!(capture.0.len(),1);
+                let expected=if enabled>0.0 {(0.0,gain/std::f64::consts::TAU)} else {(-1.0,0.0)};
+                assert_eq!((capture.0[0].re,capture.0[0].im),expected);
+                assert!(!ctx.evaluation_failed());
+            }
+        }
+    }
+}
+"#).unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+fn conditional_integrator_routes() -> [&'static str; 4] {
+    [
+        "if(enabled>0) I(p,n)<+gain*idt(source,0.0); else I(p,n)<+source;",
+        "if(enabled>0) routed=gain*idt(source,0.0); else routed=source; I(p,n)<+routed;",
+        "routed=enabled>0 ? gain*idt(source,0.0) : source; I(p,n)<+routed;",
+        "if(enabled>0) routed=gain*idt(source,0.0); else routed=source; for(k=0;k<enabled;k=k+1) source=routed; I(p,n)<+source;",
+    ]
+}
+
+#[test]
+fn generated_ac_skips_inactive_integrator_frequency_terms() {
+    for (index, route) in conditional_integrator_routes().into_iter().enumerate() {
+        let source = format!(
+            "module conditional_integrator_ac(p,n); inout p,n; electrical p,n; parameter integer enabled=0; parameter real gain=1; real source,routed; integer k; analog begin source=V(p,n); {route} end endmodule"
+        );
+        let name = format!("conditional integrator ac {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+runtime::set_dynamic_operators_enabled(false);
+for enabled in [0.0,1.0,0.0] {
+    instance.set_parameter("enabled",enabled).unwrap();
+    for gain in [1.0,0.0] {
+        instance.set_parameter("gain",gain).unwrap();
+        instance.finalize_parameters().unwrap();
+        for omega in [0.0_f64,1.0] {
+            runtime::clear_evaluation_error();
+            let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+            let mut real=[0.0;12];
+            instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut real)});
+            let history=instance.capture_rollback_state();
+            runtime::FREQUENCY_OMEGA.store(omega.to_bits(),std::sync::atomic::Ordering::SeqCst);
+            let mut reactive=[0.0;6];
+            instance.stamp_reactive(&ctx,&mut runtime::GeneratedReactiveStamper {sink:Some(&mut reactive)});
+            assert_eq!(ctx.evaluation_failed(), enabled>0.0 && omega==0.0);
+            if omega>0.0 { assert_eq!(reactive[0], if enabled>0.0 {-gain} else {0.0}); }
+            assert_eq!(instance.capture_rollback_state(),history);
+        }
+    }
+}
+"#).unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_noise_integrator_activity_is_specific_to_each_packed_lane() {
+    let source = "module lane_integrator_noise(p,n); inout p,n; electrical p,n; real a,b; analog begin a=white_noise(1.0,\"a\"); b=white_noise(1.0,\"b\"); I(p,n)<+a+idt(b,0.0); end endmodule";
+    let (state, stamp, noise) = generated_parts(source, "lane integrator noise");
+    run_generated_main("lane integrator noise", &state, &stamp, &noise, r#"
+struct Capture { first_only:bool, gains:Vec<runtime::GeneratedNoiseComplex> }
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {
+        assert!(process.active);
+        assert_eq!(process.injections.len(),1);
+        self.gains.push(process.injections[0].gain);
+        !self.first_only
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (frequency,first_only) in [(0.0,true),(0.0,false),(1.0,false),(0.0,true)] {
+    runtime::clear_evaluation_error();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+    let mut capture=Capture {first_only,gains:Vec::new()};
+    let result=instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture);
+    assert_eq!(result.is_err(),frequency==0.0 && !first_only);
+    assert_eq!((capture.gains[0].re,capture.gains[0].im),(-1.0,0.0));
+    if frequency>0.0 {
+        assert_eq!(capture.gains.len(),2);
+        assert_eq!((capture.gains[1].re,capture.gains[1].im),(0.0,1.0/std::f64::consts::TAU));
+    }
+}
+"#).unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_noise_integrator_activity_survives_frequency_products() {
+    let source = "module product_integrator_noise(p,n); inout p,n; electrical p,n; parameter integer enabled=0; parameter real gain=1; real a,b,routed; analog begin a=white_noise(1.0,\"a\"); b=white_noise(1.0,\"b\"); if(enabled>0) routed=gain*idt(a,0.0); else routed=a; I(p,n)<+V(p,n)*(routed+ddt(routed)+2*b+2*ddt(b))/(1+V(p,n)); end endmodule";
+    let (state, stamp, noise) = generated_parts(source, "product integrator noise");
+    run_generated_main("product integrator noise", &state, &stamp, &noise, r#"
+#[derive(Default)]
+struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {
+        assert!(process.active);
+        assert_eq!(process.injections.len(),1);
+        self.0.push(process.injections[0].gain);
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+for enabled in [0.0,1.0,0.0] {
+    instance.set_parameter("enabled",enabled).unwrap();
+    for gain in [1.0,0.0] {
+        instance.set_parameter("gain",gain).unwrap();
+        instance.finalize_parameters().unwrap();
+        for frequency in [0.0,0.25,2.0] {
+            runtime::clear_evaluation_error();
+            let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+            let mut capture=Capture::default();
+            let result=instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture);
+            if enabled>0.0 && frequency==0.0 { assert!(result.is_err()); continue; }
+            result.unwrap();
+            assert_eq!(capture.0.len(),2);
+            let omega=std::f64::consts::TAU*frequency;
+            let expected=if enabled>0.0 {[-gain/2.0,gain/(2.0*omega)]} else {[-0.5,-0.5*omega]};
+            for (actual,expected) in [(capture.0[0].re,expected[0]),(capture.0[0].im,expected[1]),(capture.0[1].re,-1.0),(capture.0[1].im,-omega)] {
+                assert!((actual-expected).abs()<=1e-12,"{actual} != {expected}");
+            }
+        }
+    }
+}
+"#).unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_grouped_noise_propagates_cancellation() {
     #[derive(Default)]
     struct CancelDuringNoise {
@@ -4783,7 +4945,11 @@ fn run_generated_main(
         .output()
         .map_err(|error| format!("could not run rustc: {error}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        return Err(format!(
+            "rustc exited with {}:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let output = Command::new(&binary)
         .output()
@@ -4791,7 +4957,11 @@ fn run_generated_main(
     if output.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        Err(format!(
+            "generated probe exited with {}:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ))
     }
 }
 

@@ -859,6 +859,7 @@ impl Instance {
 		let node_potentials: [f64; 6] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5])];
 		let branch_flows: [f64; 0] = [];
 		let branch_unknown_flows: [f64; 2] = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1])];
+		use rspice_veriloga_runtime::integer;
 		let A=0f64;
 		let B=1f64;
 		let C=multiplicity;

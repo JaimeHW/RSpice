@@ -858,6 +858,8 @@ struct ModelPlan {
     reactive: Stamps,
     /// Dynamic Jacobian coefficients for models beyond the linear-ddt fast path.
     frequency: Vec<FrequencyEntry>,
+    /// Output positions of the distinct integral-activation flags.
+    frequency_activity: Vec<usize>,
     /// The conduction body cut by invalidation class, or empty when the split
     /// was measured not to be worth taking for this model.
     stages: Vec<Stage>,
@@ -915,6 +917,8 @@ struct FrequencyEntry {
     power: DynamicPower,
     value: ValueId,
     position: usize,
+    active: Option<ValueId>,
+    active_position: Option<usize>,
 }
 
 impl ModelPlan {
@@ -1154,8 +1158,10 @@ impl ModelPlan {
                             equation,
                             unknown,
                             power,
-                            value,
+                            value: value.value,
                             position: 0,
+                            active: value.active,
+                            active_position: None,
                         }),
                 );
             }
@@ -1243,6 +1249,8 @@ impl ModelPlan {
         wanted.extend_from_slice(&reactive_wanted);
         let frequency_start = wanted.len();
         wanted.extend(frequency.iter().map(|entry| entry.value));
+        let frequency_end = wanted.len();
+        wanted.extend(frequency.iter().filter_map(|entry| entry.active));
         let stamp_wanted = wanted.len();
         wanted.extend(activations.iter().flatten().copied());
         let activation_wanted = activations.iter().flatten().count();
@@ -1272,11 +1280,27 @@ impl ModelPlan {
         reactive.remap(&mapped[conduction_wanted..frequency_start]);
         for (entry, value) in frequency
             .iter_mut()
-            .zip(&mapped[frequency_start..stamp_wanted])
+            .zip(&mapped[frequency_start..frequency_end])
         {
             entry.value = *value;
         }
-        frequency.retain(|entry| !matches!(function.value(entry.value).kind, CfgValueKind::RealConstant(value) if value == 0.0));
+        let mut mapped_activity = mapped[frequency_end..stamp_wanted].iter().copied();
+        for entry in &mut frequency {
+            entry.active = entry.active.and_then(|_| {
+                let active = mapped_activity.next().expect("frequency activation");
+                (!matches!(function.value(active).kind, CfgValueKind::RealConstant(1.0)))
+                    .then_some(active)
+            });
+        }
+        frequency.retain(|entry| {
+            !entry.active.is_some_and(|active| {
+                matches!(function.value(active).kind, CfgValueKind::RealConstant(0.0))
+            }) && (entry.power.idt > 0
+                || !matches!(
+                    function.value(entry.value).kind,
+                    CfgValueKind::RealConstant(0.0)
+                ))
+        });
         let activation_end = stamp_wanted + activation_wanted;
         let mut mapped_activations = mapped[stamp_wanted..activation_end].iter().copied();
         let activations = activations
@@ -1327,9 +1351,19 @@ impl ModelPlan {
         let mut outputs = Vec::new();
         let conduction = Stamps::place(conduction, &mut outputs);
         let reactive = Stamps::place(reactive, &mut outputs);
+        let mut frequency_activity = Vec::new();
+        let mut activity_indices = HashMap::new();
         for entry in &mut frequency {
             entry.position = outputs.len();
             outputs.push(entry.value);
+            entry.active_position = entry.active.map(|active| {
+                *activity_indices.entry(active).or_insert_with(|| {
+                    let index = frequency_activity.len();
+                    frequency_activity.push(outputs.len());
+                    outputs.push(active);
+                    index
+                })
+            });
         }
         let activation_positions = activations
             .iter()
@@ -1518,6 +1552,7 @@ impl ModelPlan {
             conduction,
             reactive,
             frequency,
+            frequency_activity,
             stages,
             slots,
             node_count: artifact.mir.nodes.len(),
@@ -2849,6 +2884,14 @@ impl ModelPlan {
                 values[entry.position]
             );
         }
+        for (index, &position) in self.frequency_activity.iter().enumerate() {
+            let at = self.reactive.width() + self.frequency.len() + index;
+            let _ = writeln!(
+                out,
+                "        self.canonical_reactive[{at}] = {};",
+                values[position]
+            );
+        }
         if self.has_newton_tasks() {
             out.push_str("        if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect(\"task evaluation began\").complete_evaluation(); }\n");
         }
@@ -2989,9 +3032,15 @@ impl ModelPlan {
             } else {
                 "1.0"
             };
+            let guard = if let Some(index) = entry.active_position {
+                let active_at = self.reactive.width() + self.frequency.len() + index;
+                format!("cached[{active_at}] != 0.0 && ")
+            } else {
+                String::new()
+            };
             let _ = writeln!(
                 out,
-                "        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[{at}], {scale}, {}, {}) {{",
+                "        if {guard}let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[{at}], {scale}, {}, {}) {{",
                 entry.power.ddt, entry.power.idt
             );
             match row.kind {
@@ -3091,7 +3140,7 @@ impl ModelPlan {
                 math_support.push(format!("arithmetic::{helper}"));
             }
         }
-        if uses_math_helper("integer::") {
+        if body.contains("integer::") {
             math_support.push("integer".to_string());
         }
         if !shared_stages.is_empty() {
@@ -4135,7 +4184,7 @@ impl ModelPlan {
         extensions
             .impl_methods
             .push_str("        Ok(())\n    }\n\n");
-        let reactive = self.reactive.width() + self.frequency.len();
+        let reactive = self.reactive.width() + self.frequency.len() + self.frequency_activity.len();
         if reactive > 0 {
             extensions
                 .after_begin_analysis

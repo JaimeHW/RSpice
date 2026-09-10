@@ -465,7 +465,7 @@ struct GroupedNoiseInjectionPlan {
     descriptor: usize,
     real: Option<usize>,
     reactive: Option<usize>,
-    frequency: Vec<(DynamicPower, usize)>,
+    frequency: Vec<(DynamicPower, usize, Option<usize>)>,
 }
 
 #[derive(Debug)]
@@ -624,6 +624,10 @@ pub(super) fn grouped_noise_extension(
     bindings.idt = "grouped_noise_idt_is_unsupported".into();
     let (body, values) = emit_body(&plan.function, &plan.outputs, &bindings)
         .map_err(|error| unsupported(artifact, format!("grouped noise body: {error}")))?;
+    if body.contains("integer::") {
+        writeln!(out, "        use {}::integer;", options.runtime_path)
+            .expect("write grouped integer import");
+    }
     emit_lines(
         &mut out,
         &body.lines().map(str::to_owned).collect::<Vec<_>>(),
@@ -711,15 +715,42 @@ pub(super) fn grouped_noise_extension(
                 )
                 .expect("write grouped gain");
             } else {
+                let guarded = injection
+                    .frequency
+                    .iter()
+                    .any(|(_, _, active)| active.is_some());
+                let method = if guarded {
+                    "frequency_transfer_with_activation"
+                } else {
+                    "frequency_transfer"
+                };
+                let constant = if guarded {
+                    format!("({real}, 0, 0, true)")
+                } else {
+                    format!("({real}, 0, 0)")
+                };
                 let coefficients = injection
                     .frequency
                     .iter()
-                    .map(|(power, position)| {
-                        format!("({}, {}, {})", values[*position], power.ddt, power.idt)
+                    .map(|(power, position, active)| {
+                        if !guarded {
+                            return format!(
+                                "({}, {}, {})",
+                                values[*position], power.ddt, power.idt
+                            );
+                        }
+                        let active = active.map_or_else(
+                            || "true".into(),
+                            |position| format!("{} != 0.0", values[position]),
+                        );
+                        format!(
+                            "({}, {}, {}, {active})",
+                            values[*position], power.ddt, power.idt
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                writeln!(out, "        let process_{process_index}_gain_{local} = if process_{process_index}_active {{ GeneratedNoiseComplex::frequency_transfer(ctx, &[({real}, 0, 0), {coefficients}], frequency_hz, {rhs_sign:.1} * {multiplicity_scale}) }} else {{ GeneratedNoiseComplex::default() }};")
+                writeln!(out, "        let process_{process_index}_gain_{local} = if process_{process_index}_active {{ GeneratedNoiseComplex::{method}(ctx, &[{constant}, {coefficients}], frequency_hz, {rhs_sign:.1} * {multiplicity_scale}) }} else {{ GeneratedNoiseComplex::default() }};")
                     .expect("write grouped frequency gain");
                 out.push_str("        ctx.check_noise_evaluation()?;\n");
             }
@@ -1011,7 +1042,9 @@ fn plan_grouped_noise(
                 reactive: reactive.map(&mut place),
                 frequency: frequency
                     .iter()
-                    .map(|(power, value)| (*power, place(*value)))
+                    .map(|(power, value)| {
+                        (*power, place(value.value), value.active.map(&mut place))
+                    })
                     .collect(),
             });
         }

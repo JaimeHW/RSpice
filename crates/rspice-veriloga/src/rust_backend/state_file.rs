@@ -1557,7 +1557,7 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 13 preserves primal validation through dynamic noise routing and
 // emits general nonlinear noise frequency coefficients. Earlier artifacts can
 // suppress invalid operator inputs and must not share this semantic identity.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 13;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 14;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

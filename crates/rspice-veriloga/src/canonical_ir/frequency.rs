@@ -40,6 +40,14 @@ pub(crate) enum FrequencyError {
 type Polynomial = BTreeMap<DynamicPower, ValueId>;
 type Powers = BTreeSet<DynamicPower>;
 
+#[derive(Clone)]
+pub(crate) struct FrequencyCoefficient {
+    pub value: ValueId,
+    /// A scalar zero/one value, independent of the numerical coefficient.
+    /// Only integral terms need this guard for zero-frequency substitution.
+    pub active: Option<ValueId>,
+}
+
 /// Append the dynamic coefficients of `roots`, retaining all existing ids.
 /// `primal_count` is the size before AD's scalar `ddx` preparation: source
 /// readbacks are frozen coefficients, but the symbolic operations introduced
@@ -49,7 +57,7 @@ pub(crate) fn expand(
     primal_count: usize,
     roots: &[ValueId],
     control: &dyn PipelineControl,
-) -> Result<Vec<Polynomial>, FrequencyError> {
+) -> Result<Vec<BTreeMap<DynamicPower, FrequencyCoefficient>>, FrequencyError> {
     let source = function.clone();
     let count = source.values.len();
     let mut inputs = vec![Vec::new(); count];
@@ -211,16 +219,303 @@ pub(crate) fn expand(
     builder.function.validate().map_err(|error| {
         FrequencyError::Unsupported(format!("frequency coefficient CFG: {error}"))
     })?;
+    let activity = if roots
+        .iter()
+        .any(|root| powers[usize::from(*root)].iter().any(|power| power.idt > 0))
+    {
+        append_activity(function, &source, primal_count, &powers, control)?
+    } else {
+        vec![Polynomial::new(); count]
+    };
     Ok(roots
         .iter()
         .map(|root| {
             coefficients[usize::from(*root)]
                 .iter()
                 .filter(|(power, _)| **power != DynamicPower::default())
-                .map(|(&power, &value)| (power, value))
+                .map(|(&power, &value)| {
+                    (
+                        power,
+                        FrequencyCoefficient {
+                            value,
+                            active: (power.idt > 0).then(|| activity[usize::from(*root)][&power]),
+                        },
+                    )
+                })
                 .collect()
         })
         .collect())
+}
+
+/// Carry structural presence through the polynomial graph. These flags are
+/// scalar even for packed tangents: a widen inserts absent lanes, and ordinary
+/// scalar CFG simplification can share identical activation across all lanes.
+/// Numerical coefficient zero never supplies an activation flag.
+fn append_activity(
+    function: &mut CfgFunction,
+    source: &CfgFunction,
+    primal_count: usize,
+    powers: &[Powers],
+    control: &dyn PipelineControl,
+) -> Result<Vec<Polynomial>, FrequencyError> {
+    let mut masks = vec![BTreeMap::new(); source.values.len()];
+    let mut constants = Vec::new();
+    let mut push_constant = |constant| {
+        let id = ValueId::from(function.values.len());
+        function.values.push(CfgValue {
+            id,
+            value_type: CfgValueType::Real,
+            kind: CfgValueKind::RealConstant(constant),
+        });
+        constants.push(CfgInstruction { result: id });
+        id
+    };
+    let zero = push_constant(0.0);
+    let one = push_constant(1.0);
+    let mut tracked = vec![false; source.values.len()];
+    for (index, support) in powers.iter().enumerate() {
+        let value = &source.values[index];
+        // Frequency-independent tangents are coefficients, even when their
+        // numerical value happens to be zero. Only routing of dynamic powers
+        // can make an integral absent. In particular, do not replay all the
+        // model's bias-dependent derivative arithmetic as activation logic.
+        tracked[index] = index >= primal_count
+            && dynamic(support)
+            && matches!(
+                value.kind,
+                CfgValueKind::BlockParameter
+                    | CfgValueKind::Select { .. }
+                    | CfgValueKind::SumProductsDiv { .. }
+                    | CfgValueKind::LaneSumProductsDiv { .. }
+                    | CfgValueKind::Binary {
+                        op: CfgBinaryOp::Add
+                            | CfgBinaryOp::Sub
+                            | CfgBinaryOp::Mul
+                            | CfgBinaryOp::Div,
+                        ..
+                    }
+                    | CfgValueKind::LaneBinary { .. }
+                    | CfgValueKind::LaneScalar { .. }
+                    | CfgValueKind::Unary {
+                        op: CfgUnaryOp::Neg,
+                        ..
+                    }
+                    | CfgValueKind::LaneWiden { .. }
+                    | CfgValueKind::LaneExtract { .. }
+            );
+        let lanes = source.lanes_of(value.id).map_or_else(
+            || vec![None],
+            |lanes| lanes.iter().copied().map(Some).collect(),
+        );
+        for &power in support {
+            for &lane in &lanes {
+                let id = if tracked[index] {
+                    let id = ValueId::from(function.values.len());
+                    function.values.push(CfgValue {
+                        id,
+                        value_type: CfgValueType::Real,
+                        kind: CfgValueKind::BlockParameter,
+                    });
+                    id
+                } else {
+                    one
+                };
+                masks[index].insert((power, lane), id);
+            }
+        }
+    }
+    let get = |value: ValueId, power, lane| {
+        let lane = if source.value(value).value_type.shape().is_some() {
+            lane
+        } else {
+            None
+        };
+        masks[usize::from(value)]
+            .get(&(power, lane))
+            .copied()
+            .unwrap_or(zero)
+    };
+    for block in &source.blocks {
+        if control.is_cancelled() {
+            return Err(FrequencyError::Cancelled(PipelineCancelled {
+                phase: PipelinePhase::DerivativeExtraction,
+            }));
+        }
+        let mut instructions = Vec::new();
+        let mut params = Vec::new();
+        for param in &block.params {
+            if tracked[usize::from(*param)] {
+                params.extend(masks[usize::from(*param)].values().copied());
+            }
+        }
+        for instruction in &block.instructions {
+            let value = source.value(instruction.result);
+            if !tracked[usize::from(value.id)] {
+                continue;
+            }
+            for (&(power, lane), &target) in &masks[usize::from(value.id)] {
+                let mut builder = Activity {
+                    function,
+                    instructions: &mut instructions,
+                    zero,
+                    one,
+                };
+                let mut product_sum = |terms: &[(ValueId, ValueId)]| {
+                    let mut sum = zero;
+                    for &(left, right) in terms {
+                        for &a in &powers[usize::from(left)] {
+                            for &b in &powers[usize::from(right)] {
+                                if a.product(b) == power {
+                                    let product = builder.binary(
+                                        CfgBinaryOp::Mul,
+                                        get(left, a, lane),
+                                        get(right, b, lane),
+                                    );
+                                    sum = builder.binary(CfgBinaryOp::Max, sum, product);
+                                }
+                            }
+                        }
+                    }
+                    sum
+                };
+                let result = match &value.kind {
+                    CfgValueKind::Select {
+                        condition,
+                        then_value,
+                        else_value,
+                    } => {
+                        let then_value = get(*then_value, power, lane);
+                        let else_value = get(*else_value, power, lane);
+                        if then_value == else_value {
+                            then_value
+                        } else {
+                            builder.push(CfgValueKind::Select {
+                                condition: *condition,
+                                then_value,
+                                else_value,
+                            })
+                        }
+                    }
+                    CfgValueKind::SumProductsDiv { terms, .. }
+                    | CfgValueKind::LaneSumProductsDiv { terms, .. } => product_sum(terms),
+                    CfgValueKind::Binary { op, left, right }
+                    | CfgValueKind::LaneBinary { op, left, right }
+                    | CfgValueKind::LaneScalar {
+                        op,
+                        input: left,
+                        scalar: right,
+                    } => match op {
+                        CfgBinaryOp::Mul => product_sum(&[(*left, *right)]),
+                        CfgBinaryOp::Div => get(*left, power, lane),
+                        CfgBinaryOp::Add | CfgBinaryOp::Sub => builder.binary(
+                            CfgBinaryOp::Max,
+                            get(*left, power, lane),
+                            get(*right, power, lane),
+                        ),
+                        _ => one, // Frequency-independent derivative arithmetic.
+                    },
+                    CfgValueKind::Unary { input, .. } | CfgValueKind::LaneWiden { input } => {
+                        get(*input, power, lane)
+                    }
+                    CfgValueKind::LaneExtract { input, lane } => get(*input, power, Some(*lane)),
+                    _ => unreachable!("tracked activity instruction"),
+                };
+                // Keep the reserved id for forward edges; the ordinary CFG
+                // optimizer removes this exact copy after all blocks exist.
+                builder.function.values[usize::from(target)].kind =
+                    if let CfgValueKind::RealConstant(value) = builder.function.value(result).kind {
+                        CfgValueKind::RealConstant(value)
+                    } else {
+                        CfgValueKind::Binary {
+                            op: CfgBinaryOp::Mul,
+                            left: result,
+                            right: one,
+                        }
+                    };
+                builder.instructions.push(CfgInstruction { result: target });
+            }
+        }
+        let mut additions = Vec::new();
+        for (target, args) in edges(&block.terminator) {
+            let mut extra = Vec::new();
+            for (&param, &arg) in source.block(target).params.iter().zip(args) {
+                if tracked[usize::from(param)] {
+                    for &(power, lane) in masks[usize::from(param)].keys() {
+                        extra.push(get(arg, power, lane));
+                    }
+                }
+            }
+            additions.push(extra);
+        }
+        let target = &mut function.blocks[usize::from(block.id)];
+        target.params.extend(params);
+        target.instructions.extend(instructions);
+        let mut additions = additions.into_iter();
+        match &mut target.terminator {
+            CfgTerminator::Jump { args, .. } => args.extend(additions.next().unwrap()),
+            CfgTerminator::Branch {
+                then_args,
+                else_args,
+                ..
+            } => {
+                then_args.extend(additions.next().unwrap());
+                else_args.extend(additions.next().unwrap());
+            }
+            _ => {}
+        }
+    }
+    function.blocks[usize::from(source.entry)]
+        .instructions
+        .splice(0..0, constants);
+    function.validate().map_err(|error| {
+        FrequencyError::Unsupported(format!("frequency activation CFG: {error}"))
+    })?;
+    Ok(masks
+        .into_iter()
+        .map(|masks| {
+            masks
+                .into_iter()
+                .filter_map(|((power, lane), value)| lane.is_none().then_some((power, value)))
+                .collect()
+        })
+        .collect())
+}
+
+struct Activity<'a> {
+    function: &'a mut CfgFunction,
+    instructions: &'a mut Vec<CfgInstruction>,
+    zero: ValueId,
+    one: ValueId,
+}
+
+impl Activity<'_> {
+    fn push(&mut self, kind: CfgValueKind) -> ValueId {
+        let id = ValueId::from(self.function.values.len());
+        self.function.values.push(CfgValue {
+            id,
+            value_type: CfgValueType::Real,
+            kind,
+        });
+        self.instructions.push(CfgInstruction { result: id });
+        id
+    }
+
+    fn binary(&mut self, op: CfgBinaryOp, left: ValueId, right: ValueId) -> ValueId {
+        // Every operand is a structural zero/one flag, so these identities
+        // cannot erase a numerical NaN or change signed-zero arithmetic.
+        let constant = |value| match self.function.value(value).kind {
+            CfgValueKind::RealConstant(value) => Some(value),
+            _ => None,
+        };
+        match (op, constant(left), constant(right)) {
+            (CfgBinaryOp::Max, Some(1.0), _) | (CfgBinaryOp::Max, _, Some(1.0)) => self.one,
+            (CfgBinaryOp::Mul, Some(0.0), _) | (CfgBinaryOp::Mul, _, Some(0.0)) => self.zero,
+            (CfgBinaryOp::Max, Some(0.0), _) | (CfgBinaryOp::Mul, Some(1.0), _) => right,
+            (CfgBinaryOp::Max, _, Some(0.0)) | (CfgBinaryOp::Mul, _, Some(1.0)) => left,
+            _ if left == right => left,
+            _ => self.push(CfgValueKind::Binary { op, left, right }),
+        }
+    }
 }
 
 fn edges(terminator: &CfgTerminator) -> Vec<(super::BlockId, &[ValueId])> {

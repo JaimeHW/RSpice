@@ -28,21 +28,57 @@ impl GeneratedNoiseComplex {
         frequency_hz: f64,
         scale: f64,
     ) -> Result<Self, &'static str> {
+        Self::sum_frequency_transfer(coefficients.iter().copied(), frequency_hz, scale)
+    }
+
+    /// Compose only the terms present on the executed analog path. Presence
+    /// is separate from gain so active zero-gain integrals remain singular at DC.
+    pub fn frequency_transfer_with_activation(
+        ctx: &GeneratedEvalContext<'_>,
+        coefficients: &[(f64, u32, u32, bool)],
+        frequency_hz: f64,
+        scale: f64,
+    ) -> Self {
+        Self::sum_frequency_transfer(
+            coefficients.iter().map(|&(value, ddt, idt, active)| {
+                if active {
+                    (value, ddt, idt)
+                } else {
+                    (0.0, 0, 0)
+                }
+            }),
+            frequency_hz,
+            scale,
+        )
+        .unwrap_or_else(|reason| {
+            ctx.report_small_signal_error(reason);
+            Self {
+                re: f64::NAN,
+                im: f64::NAN,
+            }
+        })
+    }
+
+    fn sum_frequency_transfer(
+        coefficients: impl ExactSizeIterator<Item = (f64, u32, u32)> + Clone,
+        frequency_hz: f64,
+        scale: f64,
+    ) -> Result<Self, &'static str> {
         if !frequency_hz.is_finite() || frequency_hz < 0.0 {
             return Err("noise frequency must be finite and nonnegative");
         }
-        if !scale.is_finite() || coefficients.iter().any(|(value, _, _)| !value.is_finite()) {
+        if !scale.is_finite() || coefficients.clone().any(|(value, _, _)| !value.is_finite()) {
             return Err("non-finite noise frequency coefficient or scale");
         }
         // Keep the integral order even when D and I have equal powers.
-        if frequency_hz == 0.0 && coefficients.iter().any(|(_, _, idt)| *idt > 0) {
+        if frequency_hz == 0.0 && coefficients.clone().any(|(_, _, idt)| idt > 0) {
             return Err("idt small-signal transfer is singular at zero frequency");
         }
         let omega =
             ScaledValue::new(frequency_hz).multiply(ScaledValue::new(core::f64::consts::TAU));
         let one = ScaledValue::new(1.0);
         let component = |imaginary: bool| {
-            let terms = coefficients.iter().map(|&(coefficient, ddt, idt)| {
+            let terms = coefficients.clone().map(|(coefficient, ddt, idt)| {
                 let exponent = i64::from(ddt) - i64::from(idt);
                 let phase = exponent.rem_euclid(4);
                 let value = if (phase % 2 == 1) != imaginary {
@@ -77,6 +113,37 @@ impl GeneratedNoiseComplex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn noise_frequency_activity_preserves_errors_only_for_executed_terms() {
+        for (coefficient, active, ddt, idt, frequency, fails) in [
+            (f64::NAN, false, 0, 1, 0.0, false),
+            (0.0, true, 0, 1, 0.0, true),
+            (0.0, true, 1, 1, 0.0, true),
+            (1.0, false, 4, 0, 1e300, false),
+            (f64::NAN, true, 0, 0, 1.0, true),
+            (0.0, true, 0, 1, 1.0, false),
+        ] {
+            let ctx = GeneratedEvalContext::with_analysis(
+                &[0.0],
+                300.15,
+                1,
+                crate::GeneratedAnalysisKind::Noise,
+            );
+            let result = GeneratedNoiseComplex::frequency_transfer_with_activation(
+                &ctx,
+                &[(3.0, 0, 0, true), (coefficient, ddt, idt, active)],
+                frequency,
+                -2.0,
+            );
+            assert_eq!(ctx.evaluation_failed(), fails);
+            if fails {
+                assert!(!result.is_finite());
+            } else {
+                assert_eq!((result.re, result.im), (-6.0, 0.0));
+            }
+        }
+    }
 
     #[test]
     fn noise_frequency_powers_have_the_correct_phase_and_singularity() {
