@@ -19,14 +19,12 @@ use crate::native::abi::{
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_cos, rspice_cosh,
     rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot, rspice_idt_jacobian_native,
-    rspice_idt_state_native, rspice_idtmod_state_native, rspice_integer_operation_native,
-    rspice_laplace_derivative_native, rspice_laplace_step_native,
+    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
-    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
@@ -81,11 +79,6 @@ const PORT_CONNECTED_OFFSET: usize = std::mem::offset_of!(EvalContext, port_conn
 const PORT_CONNECTED_LEN_OFFSET: usize = std::mem::offset_of!(EvalContext, port_connected_len);
 const PARAM_GIVEN_OFFSET: usize = std::mem::offset_of!(EvalContext, param_given);
 const PARAM_GIVEN_LEN_OFFSET: usize = std::mem::offset_of!(EvalContext, param_given_len);
-const STATE_VALUES_OFFSET: usize = std::mem::offset_of!(EvalContext, state_values);
-const STATE_VALUES_LEN_OFFSET: usize = std::mem::offset_of!(EvalContext, state_values_len);
-const STATE_INITIALIZED_OFFSET: usize = std::mem::offset_of!(EvalContext, state_initialized);
-const STATE_INITIALIZED_LEN_OFFSET: usize =
-    std::mem::offset_of!(EvalContext, state_initialized_len);
 const BRANCH_UNKNOWNS_OFFSET: usize = std::mem::offset_of!(EvalContext, branch_unknowns);
 const ANALYSIS_TYPE_OFFSET: usize = std::mem::offset_of!(EvalContext, analysis_type);
 const ANALYSIS_PHASE_OFFSET: usize = std::mem::offset_of!(EvalContext, analysis_phase);
@@ -1730,7 +1723,12 @@ impl FunctionCompiler {
                 table_id,
                 rspice_table_derivative_native as *const () as usize,
             )?,
-            NativeOp::LimitState(state_id) => self.emit_limit_state(prepared, state_id)?,
+            NativeOp::LimitState(state_id) => self.emit_operand_context_helper(
+                prepared,
+                2,
+                state_id,
+                rspice_default_limit_native as *const () as usize,
+            )?,
             NativeOp::LimiterPrevious(state_id) => self.emit_scalar_context_helper(
                 prepared,
                 state_id,
@@ -2444,94 +2442,6 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_limit_state(
-        &mut self,
-        prepared: &PreparedInstruction,
-        state_index: usize,
-    ) -> JitResult<()> {
-        let (value, step) = binary_operands(prepared)?;
-        self.encoder.fmov_d(prepared.result, value);
-
-        self.encoder
-            .ldr_x_unsigned(XReg::X16, self.context_register(), STATE_VALUES_OFFSET)?;
-        let no_state = self.encoder.cbz_placeholder(XReg::X16)?;
-        self.encoder
-            .ldr_x_unsigned(XReg::X17, self.context_register(), STATE_VALUES_LEN_OFFSET)?;
-        self.encoder.mov_u64(XReg::X15, state_index as u64)?;
-        self.encoder.cmp_x(XReg::X17, XReg::X15)?;
-        let state_out_of_range = self
-            .encoder
-            .b_cond_placeholder(Condition::UnsignedLowerOrSame);
-
-        self.encoder.ldr_x_unsigned(
-            XReg::X14,
-            self.context_register(),
-            STATE_INITIALIZED_OFFSET,
-        )?;
-        let no_initialized = self.encoder.cbz_placeholder(XReg::X14)?;
-        self.encoder.ldr_x_unsigned(
-            XReg::X13,
-            self.context_register(),
-            STATE_INITIALIZED_LEN_OFFSET,
-        )?;
-        self.encoder.cmp_x(XReg::X13, XReg::X15)?;
-        let initialized_out_of_range = self
-            .encoder
-            .b_cond_placeholder(Condition::UnsignedLowerOrSame);
-        self.emit_u8_array_load(XReg::X12, XReg::X14, state_index)?;
-        let first_evaluation = self.encoder.cbz_placeholder(XReg::X12)?;
-
-        self.emit_array_load(DReg::D29, XReg::X16, state_index)?;
-        self.encoder
-            .fsub_d(prepared.result, prepared.result, DReg::D29);
-        self.encoder.fcmp_d(prepared.result, prepared.result);
-        let unordered_delta = self.encoder.b_cond_placeholder(Condition::NotEqual);
-        self.encoder.fneg_d(DReg::D30, step);
-        self.encoder
-            .fmax_d(prepared.result, prepared.result, DReg::D30);
-        self.encoder.fmin_d(prepared.result, prepared.result, step);
-        self.encoder
-            .fadd_d(prepared.result, prepared.result, DReg::D29);
-
-        let store_target = self.encoder.position();
-        self.encoder.patch_branch(first_evaluation, store_target)?;
-        self.encoder.patch_branch(unordered_delta, store_target)?;
-        self.emit_array_store(prepared.result, XReg::X16, state_index)?;
-        self.encoder.mov_u64(XReg::X12, 1)?;
-        self.emit_u8_array_store(XReg::X12, XReg::X14, state_index)?;
-        let done = self.encoder.b_placeholder();
-
-        let no_initialized_target = self.encoder.position();
-        self.encoder
-            .patch_branch(no_initialized, no_initialized_target)?;
-        self.emit_void_error_early_return(
-            rspice_native_limit_state_initialized_error as *const () as usize,
-        )?;
-
-        let initialized_bounds_target = self.encoder.position();
-        self.encoder
-            .patch_branch(initialized_out_of_range, initialized_bounds_target)?;
-        self.emit_void_error_early_return(
-            rspice_native_limit_state_bounds_error as *const () as usize,
-        )?;
-
-        let state_bounds_target = self.encoder.position();
-        self.encoder
-            .patch_branch(state_out_of_range, state_bounds_target)?;
-        self.emit_void_error_early_return(
-            rspice_native_limit_state_values_bounds_error as *const () as usize,
-        )?;
-
-        let no_state_target = self.encoder.position();
-        self.encoder.patch_branch(no_state, no_state_target)?;
-        self.emit_void_error_early_return(
-            rspice_native_limit_state_values_error as *const () as usize,
-        )?;
-
-        let done_target = self.encoder.position();
-        self.encoder.patch_branch(done, done_target)
-    }
-
     fn emit_node_voltage_load(&mut self, result: DReg, node: VoltageNode) -> JitResult<()> {
         match node {
             VoltageNode::Terminal(index) => {
@@ -2750,16 +2660,6 @@ impl FunctionCompiler {
             self.encoder.mov_u64(XReg::X11, index as u64)?;
             self.encoder.add_x(XReg::X11, base, XReg::X11)?;
             self.encoder.ldrb_w_unsigned(destination, XReg::X11, 0)
-        }
-    }
-
-    fn emit_u8_array_store(&mut self, source: XReg, base: XReg, index: usize) -> JitResult<()> {
-        if index <= 4095 {
-            self.encoder.strb_w_unsigned(source, base, index)
-        } else {
-            self.encoder.mov_u64(XReg::X11, index as u64)?;
-            self.encoder.add_x(XReg::X11, base, XReg::X11)?;
-            self.encoder.strb_w_unsigned(source, XReg::X11, 0)
         }
     }
 
@@ -3597,6 +3497,28 @@ mod cross_target_contract_tests {
     use crate::native::aarch64::verifier::verify_exact_function;
     use crate::native::expr::{BinaryMathOp, NativeOp, NativeProgram};
     use crate::native::ssa::Program;
+
+    #[test]
+    fn default_limiter_helper_encodes_with_a_live_prefix() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadVariable(0),
+                NativeOp::LoadVariable(1),
+                NativeOp::LoadVariable(2),
+                NativeOp::LimitState(0),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes =
+            compile_value_function(&program).expect("encode the default limiter helper frame");
+        verify_exact_function(&bytes, "default limiter").expect("verify the emitted helper call");
+        let segmented =
+            super::compile_segmented_program(&program).expect("encode a segmented limiter");
+        assert!(!segmented.functions.is_empty());
+    }
 
     fn instruction_occurrences(bytes: &[u8], instruction: &[u8]) -> usize {
         bytes
@@ -5049,6 +4971,9 @@ mod tests {
 
         let mut state_values = [10.0_f64];
         let mut initialized = [1_u8];
+        let mut limiter_active = 0_u8;
+        context.limiter_active = &mut limiter_active;
+        context.limiting_enabled = 1;
         context.state_values = state_values.as_mut_ptr();
         context.state_values_len = state_values.len();
         context.state_initialized = initialized.as_mut_ptr();

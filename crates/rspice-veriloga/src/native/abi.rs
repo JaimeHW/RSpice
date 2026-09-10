@@ -817,12 +817,58 @@ pub unsafe extern "C" fn rspice_limiter_store_native(
         return 0.0;
     };
     let candidate = unsafe { *operands.add(1) };
+    if !proposed.is_finite() || !candidate.is_finite() {
+        context.record_invalid_numeric_result("$limit proposed value and candidate must be finite");
+        return 0.0;
+    }
     unsafe {
         *limiter_active |= u8::from(candidate != proposed);
         *state_value = candidate;
         *initialized = 1;
     }
     candidate
+}
+
+/// Evaluate and publish the default Newton limiter, preserving probe state.
+///
+/// # Safety
+/// `operands` must address two live values (proposal and step). `ctx` must
+/// satisfy the same storage contract as [`rspice_limiter_store_native`].
+#[unsafe(export_name = "rspice_default_limit_native")]
+pub unsafe extern "C" fn rspice_default_limit_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    if ctx.is_null() || operands.is_null() {
+        set_native_context_error_ptr(ctx, "native default limiter missing context or operands");
+        return 0.0;
+    }
+    let context = unsafe { &*ctx };
+    let proposed = unsafe { *operands };
+    if context.limiting_enabled == 0 {
+        return proposed;
+    }
+    let Some((state_value, initialized)) = (unsafe { native_limiter_storage(ctx, state_id) })
+    else {
+        return 0.0;
+    };
+    let previous = if unsafe { *initialized } == 0 {
+        proposed
+    } else {
+        unsafe { *state_value }
+    };
+    let candidate =
+        rspice_veriloga_runtime::arithmetic::default_limit_candidate(proposed, previous, unsafe {
+            *operands.add(1)
+        });
+    if !candidate.is_finite() {
+        context.record_invalid_numeric_result(
+            "$limit requires finite values and a finite nonnegative step",
+        );
+        return 0.0;
+    }
+    unsafe { rspice_limiter_store_native([proposed, candidate].as_ptr(), ctx, state_id) }
 }
 
 #[unsafe(export_name = "rspice_native_current_probe_error")]
@@ -2968,6 +3014,48 @@ mod tests {
             ctx.take_runtime_error().is_none(),
             "probe and small-signal limiter bypass must not require state storage"
         );
+    }
+
+    #[test]
+    fn default_limiter_helper_rejects_invalid_steps_without_publishing() {
+        use super::rspice_default_limit_native;
+        let mut value = [0.0];
+        let mut initialized = [1_u8];
+        let mut active = 0_u8;
+        let mut ctx = empty_eval_context();
+        ctx.state_values = value.as_mut_ptr();
+        ctx.state_values_len = 1;
+        ctx.state_initialized = initialized.as_mut_ptr();
+        ctx.state_initialized_len = 1;
+        ctx.limiter_active = &mut active;
+        ctx.limiting_enabled = 1;
+        for step in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                unsafe { rspice_default_limit_native([1.0, step].as_ptr(), &ctx, 0) },
+                0.0
+            );
+            assert!(
+                ctx.take_runtime_error()
+                    .unwrap()
+                    .contains("finite nonnegative step")
+            );
+            assert_eq!(value, [0.0]);
+            assert_eq!(active, 0);
+        }
+        assert_eq!(
+            unsafe { rspice_default_limit_native([1.0, 0.25].as_ptr(), &ctx, 0) },
+            0.25
+        );
+        assert_eq!(value, [0.25]);
+        assert_eq!(active, 1);
+        ctx.limiting_enabled = 0;
+        assert_eq!(
+            unsafe { rspice_default_limit_native([2.0, -1.0].as_ptr(), &ctx, usize::MAX) },
+            2.0
+        );
+        assert_eq!(value, [0.25]);
+        assert_eq!(active, 1);
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]

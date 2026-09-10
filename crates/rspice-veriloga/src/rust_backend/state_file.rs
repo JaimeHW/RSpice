@@ -1573,7 +1573,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 16 retains generated timestep-control requests and timer-only checkpoints.
 // Version 17 retains generated transient discontinuities and Newton convergence hints.
 // Version 18 applies typed custom-limiter polarity to values, state, and derivatives.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 18;
+// Version 19 supports default limiters and rejects invalid candidates before publication.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 19;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

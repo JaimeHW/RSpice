@@ -2099,7 +2099,9 @@ impl<'a> CfgLowerer<'a> {
             HirExprKind::NamedBranchAccess { kind, name, .. } => {
                 self.named_branch_access(*kind, name, span)
             }
-            HirExprKind::SystemFunction { name, args } => self.system_function(name, args, span),
+            HirExprKind::SystemFunction { name, args } => {
+                self.system_function(expression.id, name, args, span)
+            }
             // A dynamic operator's only spelling. `absdelay(x, d)` reaches the
             // HIR as a `Call`, and this mode substitutes the operator's zero
             // primal and records the noise site, which is what makes
@@ -3123,8 +3125,15 @@ impl<'a> CfgLowerer<'a> {
         })
     }
 
-    fn system_function(&mut self, name: &SmolStr, args: &[ExprId], span: SourceSpanRef) -> ValueId {
+    fn system_function(
+        &mut self,
+        operator: ExprId,
+        name: &SmolStr,
+        args: &[ExprId],
+        span: SourceSpanRef,
+    ) -> ValueId {
         match (name.to_ascii_lowercase().as_str(), args.len()) {
+            ("$limit", 1 | 2) => self.default_limit(operator, args),
             ("$temperature", 0) => self.leaf(
                 LeafKey::Temperature,
                 CfgValueType::Real,
@@ -3192,6 +3201,66 @@ impl<'a> CfgLowerer<'a> {
                 self.real_constant(0.0)
             }
         }
+    }
+
+    fn default_limit(&mut self, operator: ExprId, args: &[ExprId]) -> ValueId {
+        let proposed = self.expr(args[0]);
+        let step = self.optional_argument(args, 1, 0.7);
+        let previous = self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::LimitPrevious { operator, proposed },
+        );
+
+        // Keep the shared runtime's default_limit_candidate arithmetic in scalar
+        // SSA. Selections preserve an unclipped proposal exactly and introduce
+        // no control-flow diamonds. The Limit node owns validation, publication,
+        // the unit proposal tangent, and the affine correction.
+        let delta = self.binary(CfgBinaryOp::Sub, proposed, previous);
+        let negative_step = self.unary(CfgUnaryOp::Neg, step);
+        let upward = self.binary(CfgBinaryOp::Gt, delta, step);
+        let downward = self.binary(CfgBinaryOp::Lt, delta, negative_step);
+        let upper = self.binary(CfgBinaryOp::Add, previous, step);
+        let lower = self.binary(CfgBinaryOp::Sub, previous, step);
+        let falling = self.select_numeric(downward, lower, proposed);
+        let candidate = self.select_numeric(upward, upper, falling);
+        let zero = self.real_constant(0.0);
+        let maximum = self.real_constant(f64::MAX);
+        let mut valid = self.binary(CfgBinaryOp::Ge, step, zero);
+        for operand in [step, proposed, previous] {
+            let magnitude = self.unary(CfgUnaryOp::Abs, operand);
+            let finite = self.binary(CfgBinaryOp::Le, magnitude, maximum);
+            valid = self.binary(CfgBinaryOp::And, valid, finite);
+        }
+        let invalid = self.real_constant(f64::NAN);
+        let candidate = self.select_numeric(valid, candidate, invalid);
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::Limit {
+                operator,
+                proposed,
+                candidate,
+                selector: "$default".into(),
+            },
+        )
+    }
+
+    fn select_numeric(
+        &mut self,
+        condition: ValueId,
+        then_value: ValueId,
+        else_value: ValueId,
+    ) -> ValueId {
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        )
     }
 
     fn simparam(&mut self, args: &[ExprId], span: SourceSpanRef) -> ValueId {

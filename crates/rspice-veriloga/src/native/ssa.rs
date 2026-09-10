@@ -3664,6 +3664,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::TableDerivative(_)
             | NativeOp::LimiterPrevious(_)
             | NativeOp::LimiterStore(_)
+            | NativeOp::LimitState(_)
             | NativeOp::LaplaceState(_)
             | NativeOp::LaplaceStateDerivative(_)
             | NativeOp::ZiState(_)

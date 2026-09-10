@@ -56,6 +56,7 @@ for (proposed,expected) in [(0.0,0.0),(2.0,0.5),(2.0,1.0),(2.0,1.5),(2.0,2.0)] {
  assert_eq!(sink[10],1.0,"limiter callback slope must not replace the proposed-value Jacobian");
  assert!(!ctx.evaluation_failed());
 }
+
 "#;
         let main = if typed {
             main.replace("voltages=[proposed]", "voltages=[-proposed]")
@@ -66,6 +67,88 @@ for (proposed,expected) in [(0.0,0.0),(2.0,0.5),(2.0,1.0),(2.0,1.5),(2.0,2.0)] {
         run_generated_main("limiter callback", &state, &stamp, &noise, &main)
             .unwrap_or_else(|report| panic!("{report}"));
     }
+}
+
+#[test]
+fn generated_default_limit_preserves_state_unit_slope_and_affine_correction() {
+    for (suffix, step) in [(",0.25", 0.25), ("", 0.7)] {
+        let source = format!(
+            "module bounded(p); inout p; electrical p;
+            analog I(p)<+$limit(V(p){suffix}); endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, "default limiter");
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+for (proposed,expected) in [(0.0,0.0),(2.0,{step}),(2.0,2.0*{step})] {{
+ let voltages=[proposed];
+ let ctx=runtime::GeneratedEvalContext {{voltages:&voltages,temperature:300.0}};
+ let mut sink=[0.0;12];
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper {{sink:Some(&mut sink)}});
+ assert_eq!(instance.canonical_limit.previous.as_slice(),[expected]);
+ assert_eq!(instance.limiter_converged(),proposed==expected);
+ assert_eq!(sink[10],1.0,"limiting must preserve a unit Jacobian");
+ assert_eq!(sink[9],proposed,"the corrected linear residual must equal its proposal");
+ assert!(!ctx.evaluation_failed());
+}}
+"#
+        );
+        run_generated_main("default limiter", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_default_limit_rejects_invalid_steps_and_preserves_extreme_proposals() {
+    let source = "module bounded(p); inout p; electrical p; parameter real maxstep=0.25;
+        analog I(p)<+$limit(V(p),maxstep); endmodule";
+    let (state, stamp, noise) = generated_parts(source, "default limiter validation");
+    run_generated_main(
+        "default limiter validation",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+let voltage=[0.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&voltage,temperature:300.0};
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+instance.set_parameter("maxstep",-1.0).unwrap();
+instance.finalize_parameters().unwrap();
+let voltage=[1.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&voltage,temperature:300.0};
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+assert!(ctx.evaluation_failed());
+assert_eq!(instance.canonical_limit.previous.as_slice(),[0.0]);
+runtime::clear_evaluation_error();
+instance.set_parameter("maxstep",0.25).unwrap();
+instance.finalize_parameters().unwrap();
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+assert!(!ctx.evaluation_failed());
+assert_eq!(instance.canonical_limit.previous.as_slice(),[0.25]);
+instance.set_parameter("maxstep",2.0_f64.powi(54)).unwrap();
+instance.finalize_parameters().unwrap();
+instance.canonical_limit.previous[0]=2.0_f64.powi(54);
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+assert!(!ctx.evaluation_failed());
+assert_eq!(instance.canonical_limit.previous.as_slice(),[1.0]);
+assert!(instance.limiter_converged());
+instance.set_parameter("maxstep",f64::MAX).unwrap();
+instance.finalize_parameters().unwrap();
+for proposed in [-f64::MAX,f64::MAX] {
+ instance.canonical_limit.previous[0]=-proposed;
+ let voltage=[proposed];
+ let ctx=runtime::GeneratedEvalContext {voltages:&voltage,temperature:300.0};
+ instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+ assert!(!ctx.evaluation_failed());
+ assert_eq!(instance.canonical_limit.previous.as_slice(),[0.0]);
+ assert!(!instance.limiter_converged());
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
 }
 
 #[test]

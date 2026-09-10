@@ -273,6 +273,9 @@ fn evaluate_stateful_helper(
             (Instruction::TableDerivative(index), 1)
         }
         410 => {
+            if !session.context.evaluation_mode.limiting_enabled() {
+                return Ok(operands[0]);
+            }
             require_limit_state(session, index)?;
             (Instruction::LimitState(index), 2)
         }
@@ -609,6 +612,9 @@ fn limiter_store(
         return Ok(proposed);
     }
     require_limit_state(session, index)?;
+    if !proposed.is_finite() || !candidate.is_finite() {
+        return Err(session.fail("$limit proposed value and candidate must be finite"));
+    }
     session.context.limiter_active |= u8::from(candidate != proposed);
     session.context.state_values[index] = candidate;
     session.context.state_initialized[index] = true;

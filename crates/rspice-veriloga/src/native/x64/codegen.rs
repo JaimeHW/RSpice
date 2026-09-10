@@ -34,14 +34,12 @@ use crate::native::abi::{
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
     rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
+    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
     rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
-    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
-    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
@@ -71,10 +69,6 @@ const PORT_CONNECTED_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connec
 const PORT_CONNECTED_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, port_connected_len) as i32;
 const TEMPERATURE_OFFSET: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
 const TIME_OFFSET: i32 = std::mem::offset_of!(EvalContext, time) as i32;
-const STATE_VALUES_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values) as i32;
-const STATE_INITIALIZED_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_initialized) as i32;
-const STATE_INITIALIZED_LEN_OFFSET: i32 =
-    std::mem::offset_of!(EvalContext, state_initialized_len) as i32;
 const PARAM_GIVEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given) as i32;
 const PARAM_GIVEN_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, param_given_len) as i32;
 const BRANCH_UNKNOWNS_OFFSET: i32 = std::mem::offset_of!(EvalContext, branch_unknowns) as i32;
@@ -83,7 +77,6 @@ const ANALYSIS_PHASE_OFFSET: i32 = std::mem::offset_of!(EvalContext, analysis_ph
 const MFACTOR_OFFSET: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
 const KERNEL_ACTIVE_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, program_active) as i32;
 const KERNEL_JACOBIANS_OFFSET: i32 = std::mem::offset_of!(NativeStampKernelIo, jacobians) as i32;
-const STATE_VALUES_LEN_OFFSET: i32 = std::mem::offset_of!(EvalContext, state_values_len) as i32;
 const ANALYSIS_INITIAL_STEP_OFFSET: i32 =
     std::mem::offset_of!(EvalContext, analysis_initial_step) as i32;
 const ANALYSIS_FINAL_STEP_OFFSET: i32 =
@@ -3398,87 +3391,13 @@ impl FunctionCompiler {
                 detail: format!("limit state requires stack depth 2, found {}", self.depth).into(),
             });
         }
-
-        let value = self.register_stack[self.depth - 2];
-        let step = self.register_stack[self.depth - 1];
-        let state_disp = byte_disp(state_index)?;
-        let initialized_disp = byte_disp_u8(state_index)?;
-        let state_index_i32 = i32::try_from(state_index).map_err(|_| JitError::Encoding {
-            model: MODEL.into(),
-            detail: format!("state index {state_index} exceeds x64 imm32 range").into(),
-        })?;
-
-        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let no_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-
-        self.encoder
-            .mov_r64_m64_base_disp32(Gpr::R11, self.ctx_arg_reg(), STATE_VALUES_LEN_OFFSET);
-        self.encoder.cmp_r64_imm32(Gpr::R11, state_index_i32);
-        let state_values_out_of_range = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-
-        self.encoder.mov_r64_m64_base_disp32(
-            Gpr::R10,
-            self.ctx_arg_reg(),
-            STATE_INITIALIZED_OFFSET,
+        let proposed = self.register_stack[self.depth - 2];
+        self.emit_operand_context_filter_helper_call(
+            proposed,
+            2,
+            state_index,
+            rspice_default_limit_native,
         );
-        self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
-        let no_initialized_flags = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-
-        self.encoder.mov_r64_m64_base_disp32(
-            Gpr::R11,
-            self.ctx_arg_reg(),
-            STATE_INITIALIZED_LEN_OFFSET,
-        );
-        self.encoder.cmp_r64_imm32(Gpr::R11, state_index_i32);
-        let initialized_flags_out_of_range = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-
-        self.encoder
-            .movzx_r32_m8_base_disp32(Gpr::R11, Gpr::R10, initialized_disp);
-        self.encoder.test_r8_r8(Gpr::R11, Gpr::R11);
-        let first_evaluation = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-
-        if self.depth < XMM_STACK.len() {
-            let positive_step = self.scratch_register()?;
-            self.encoder.movsd_xmm_xmm(positive_step, step);
-            self.emit_limit_state_clamp_delta(value, step, state_disp, |compiler, value| {
-                compiler.encoder.minsd_xmm_xmm(value, positive_step);
-            })?;
-        } else {
-            self.encoder.sub_rsp_imm32(WORD_BYTES as i32);
-            self.encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, step);
-            self.emit_limit_state_clamp_delta(value, step, state_disp, |compiler, value| {
-                compiler
-                    .encoder
-                    .minsd_xmm_m64_base_disp32(value, Gpr::Rsp, 0);
-            })?;
-            self.encoder.add_rsp_imm32(WORD_BYTES as i32);
-        }
-
-        self.patch_rel32_to_current(first_evaluation)?;
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, value);
-        self.encoder
-            .mov_m8_base_disp32_imm8(Gpr::R10, initialized_disp, 1);
-        let done_after_initialized_store = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(no_initialized_flags)?;
-        self.emit_limit_state_error_return(rspice_native_limit_state_initialized_error);
-
-        self.patch_rel32_to_current(initialized_flags_out_of_range)?;
-        self.emit_limit_state_error_return(rspice_native_limit_state_bounds_error);
-
-        self.patch_rel32_to_current(state_values_out_of_range)?;
-        self.emit_limit_state_error_return(rspice_native_limit_state_values_bounds_error);
-
-        self.patch_rel32_to_current(no_state)?;
-        self.emit_limit_state_error_return(rspice_native_limit_state_values_error);
-
-        self.patch_rel32_to_current(done_after_initialized_store)?;
         self.drop_stack_values(1)?;
         Ok(())
     }
@@ -3522,32 +3441,6 @@ impl FunctionCompiler {
         );
         self.drop_stack_values(1)?;
         Ok(())
-    }
-
-    fn emit_limit_state_clamp_delta(
-        &mut self,
-        value: Xmm,
-        step: Xmm,
-        state_disp: i32,
-        emit_upper_clamp: impl FnOnce(&mut Self, Xmm),
-    ) -> JitResult<()> {
-        self.encoder
-            .subsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
-        self.encoder.ucomisd_xmm_xmm(value, value);
-        let unordered_delta = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
-        self.encoder.movq_r64_xmm(Gpr::R11, step);
-        self.encoder.btc_r64_imm8(Gpr::R11, 63);
-        self.encoder.movq_xmm_r64(step, Gpr::R11);
-        self.encoder.maxsd_xmm_xmm(value, step);
-        emit_upper_clamp(self, value);
-        self.encoder
-            .addsd_xmm_m64_base_disp32(value, Gpr::Rax, state_disp);
-        self.patch_rel32_to_current(unordered_delta)?;
-        Ok(())
-    }
-
-    fn emit_limit_state_error_return(&mut self, helper: VoidHelper) {
-        self.emit_void_error_return(helper);
     }
 
     fn emit_white_noise(&mut self) -> JitResult<()> {
@@ -9978,14 +9871,6 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile limit state leaf");
-        assert!(
-            !contains_bytes(&bytes, &stack_spill_store_bytes(Xmm::Xmm1)),
-            "limit state with a spare XMM register should not spill the positive step to the stack"
-        );
-        assert!(
-            !contains_bytes(&bytes, &stack_spill_minsd_bytes(Xmm::Xmm0)),
-            "limit state with a spare XMM register should clamp from the XMM scratch copy"
-        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate limit state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -9993,7 +9878,10 @@ mod tests {
 
         let mut state_values = [0.0_f64, 0.0_f64];
         let mut state_initialized = [0_u8, 0_u8];
+        let mut limiter_active = 0_u8;
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.limiter_active = &mut limiter_active;
+        ctx.limiting_enabled = 1;
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
@@ -10099,10 +9987,16 @@ mod tests {
         assert_eq!(state_initialized[1], 1);
         let vars = [f64::NAN];
         let result = f(&ctx, vars.as_ptr());
-        assert!(result.is_nan(), "initialized limit must propagate NaN");
+        assert_eq!(result, 0.0, "invalid proposals must take the error path");
         assert!(
-            state_values[1].is_nan(),
-            "native state should record propagated NaN"
+            ctx.take_runtime_error()
+                .unwrap()
+                .contains("requires finite values"),
+            "invalid proposals must report the numerical failure"
+        );
+        assert_eq!(
+            state_values[1], 1.0,
+            "failed candidates must preserve history"
         );
     }
 
@@ -10119,21 +10013,6 @@ mod tests {
         let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
-        assert!(
-            !contains_bytes(
-                &bytes,
-                &stack_spill_store_bytes(XMM_STACK[XMM_STACK.len() - 1])
-            ),
-            "the positive step should remain in its allocated register; stack adjustment alone is not diagnostic because System V uses an eight-byte helper-call alignment frame"
-        );
-        assert!(
-            !contains_bytes(
-                &bytes,
-                &stack_spill_minsd_bytes(XMM_STACK[XMM_STACK.len() - 2])
-            ),
-            "limit-state clamping should not reload an instruction-local spill"
-        );
-
         let memory =
             ExecutableMemory::allocate(&bytes).expect("allocate full-stack limit state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -10142,7 +10021,10 @@ mod tests {
 
         let mut state_values = [0.0_f64, 10.0_f64];
         let mut state_initialized = [0_u8, 1_u8];
+        let mut limiter_active = 0_u8;
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.limiter_active = &mut limiter_active;
+        ctx.limiting_enabled = 1;
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
@@ -14256,18 +14138,6 @@ mod tests {
         let mut bytes = encoder.into_bytes();
         bytes.truncate(bytes.len() - std::mem::size_of::<i32>());
         bytes
-    }
-
-    fn stack_spill_store_bytes(register: Xmm) -> Vec<u8> {
-        let mut encoder = X64Encoder::new();
-        encoder.movsd_m64_base_disp32_xmm(Gpr::Rsp, 0, register);
-        encoder.into_bytes()
-    }
-
-    fn stack_spill_minsd_bytes(register: Xmm) -> Vec<u8> {
-        let mut encoder = X64Encoder::new();
-        encoder.minsd_xmm_m64_base_disp32(register, Gpr::Rsp, 0);
-        encoder.into_bytes()
     }
 
     fn call_rax_bytes() -> Vec<u8> {

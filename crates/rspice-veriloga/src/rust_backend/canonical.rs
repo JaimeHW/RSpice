@@ -1655,6 +1655,7 @@ impl ModelPlan {
                 HirExprKind::AnalogOperator {
                     op: HirAnalogOperator::Limit { selector, .. },
                 } => selector.as_str(),
+                HirExprKind::SystemFunction { name, .. } if name == "$limit" => "$default",
                 _ => {
                     return Err(accepted_state_shape_error(
                         artifact,
@@ -4029,6 +4030,9 @@ impl ModelPlan {
                     "{pad}let mut limit = |slot: usize, proposed: f64, candidate: f64| -> f64 {{\n\
                      {pad}    if !limiting_enabled {{\n\
                      {pad}        return proposed;\n\
+                     {pad}    }}\n\
+                     {pad}    if !proposed.is_finite() || !candidate.is_finite() {{\n\
+                     {pad}        return ctx.checked_derivative_value(proposed, candidate);\n\
                      {pad}    }}\n\
                      {pad}    limit_state.active |= candidate != proposed;\n\
                      {pad}    limit_state.previous[slot] = candidate;\n\

@@ -1934,6 +1934,47 @@ endmodule
     }
 
     #[test]
+    fn wasm_default_limit_preserves_probe_history_in_automatic_and_postfix_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = "module bounded(p,n,c); inout p,n,c; electrical p,n,c;
+            analog I(p,n)<+$limit(V(p,n),0.25); endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "bounded", postfix);
+            harness.reset();
+            let export = harness.stamp_value_export(0);
+            for (mode, proposed, expected, active) in [
+                (Mode::NewtonLimited, 0.0, 0.0, 0),
+                (Mode::NewtonLimited, 1.0, 0.25, 1),
+                (Mode::StaticProbe, 2.0, 2.0, 1),
+                (Mode::SmallSignal, 2.0, 2.0, 1),
+                (Mode::NewtonLimited, 1.0, 0.5, 1),
+                (Mode::NewtonLimited, 1.0, 0.75, 1),
+                (Mode::NewtonLimited, 1.0, 1.0, 0),
+            ] {
+                let context = harness.store.data_mut().context_mut();
+                context.evaluation_mode = mode;
+                if mode.limiting_enabled() {
+                    context.limiter_active = 0;
+                }
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, proposed);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&export), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    expected,
+                    "postfix={postfix}; mode={mode:?}"
+                );
+                assert_eq!(
+                    harness.store.data_mut().context_mut().limiter_active,
+                    active
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wasm_reactive_stamping_holds_external_derivative_coefficients_at_the_bias_point() {
         use super::abi::FRAME_RESULT_OFFSET;
         for (expression, capacitances) in [

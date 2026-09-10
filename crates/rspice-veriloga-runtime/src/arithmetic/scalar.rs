@@ -19,6 +19,28 @@ pub enum ArithmeticError {
     },
 }
 
+/// RSpice's default Newton limiter. `previous` is the proposal on the first
+/// evaluation. Invalid operands return NaN; callers must reject that candidate
+/// before publishing history. Probe evaluations bypass the limiter entirely.
+///
+/// Return an unclipped proposal exactly, avoiding cancellation in
+/// `previous + (proposed - previous)`. An overflowing difference still selects
+/// the correct direction, and a clipped step stays between finite endpoints.
+#[inline]
+pub fn default_limit_candidate(proposed: f64, previous: f64, step: f64) -> f64 {
+    if !proposed.is_finite() || !previous.is_finite() || !step.is_finite() || step < 0.0 {
+        return f64::NAN;
+    }
+    let delta = proposed - previous;
+    if delta > step {
+        previous + step
+    } else if delta < -step {
+        previous - step
+    } else {
+        proposed
+    }
+}
+
 /// Evaluate `(a * b) / (c * d)` with one final binary64 rounding.
 /// Finite, nonzero factors never overflow or underflow an intermediate product.
 /// Zero numerators retain the quotient sign. Zero denominator factors and
@@ -991,6 +1013,26 @@ fn encode_f64(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_limiter_preserves_exact_proposals_and_finite_extreme_steps() {
+        use super::default_limit_candidate as limit;
+        for (proposed, previous, step, expected) in [
+            (1.0, 2.0_f64.powi(54), 2.0_f64.powi(54), 1.0_f64),
+            (-0.0, 1.0, 1.0, -0.0),
+            (f64::MAX, -f64::MAX, f64::MAX, 0.0),
+            (-f64::MAX, f64::MAX, f64::MAX, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                limit(proposed, previous, step).to_bits(),
+                expected.to_bits()
+            );
+        }
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(limit(0.0, 0.0, bad).is_nan());
+        }
+    }
+
     use super::*;
 
     #[test]

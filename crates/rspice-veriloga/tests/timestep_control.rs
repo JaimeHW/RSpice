@@ -473,6 +473,81 @@ endmodule
 }
 
 #[test]
+fn default_limit_preserves_probe_history_and_reports_clipping() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as EvaluationMode;
+
+    let mut device = compile_device(
+        "DEFAULT",
+        "module bounded(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+$limit(V(p,n),0.25); endmodule",
+    );
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device
+            .try_evaluate_with_mode(EvaluationMode::NewtonLimited)
+            .unwrap(),
+        vec![0.0]
+    );
+    device.update_voltages(&[1.0]);
+    assert_eq!(
+        device
+            .try_evaluate_with_mode(EvaluationMode::NewtonLimited)
+            .unwrap(),
+        vec![0.25]
+    );
+    assert!(!device.limiter_converged());
+    let mut reference = device.clone();
+    for mode in [EvaluationMode::StaticProbe, EvaluationMode::SmallSignal] {
+        device.update_voltages(&[2.0]);
+        assert_eq!(device.try_evaluate_with_mode(mode).unwrap(), vec![2.0]);
+        assert!(!device.limiter_converged());
+    }
+    device.update_voltages(&[1.0]);
+    for expected in [0.5, 0.75, 1.0] {
+        assert_eq!(
+            device
+                .try_evaluate_with_mode(EvaluationMode::NewtonLimited)
+                .unwrap(),
+            vec![expected]
+        );
+        assert_eq!(
+            reference
+                .try_evaluate_with_mode(EvaluationMode::NewtonLimited)
+                .unwrap(),
+            vec![expected]
+        );
+        assert_eq!(device.limiter_converged(), expected == 1.0);
+    }
+}
+
+#[test]
+fn default_limit_recovers_after_an_invalid_step_without_changing_history() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
+    let mut device = compile_device(
+        "STEP",
+        "module bounded(p,n); inout p,n; electrical p,n;
+        parameter real maxstep=0.25; analog I(p,n)<+$limit(V(p,n),maxstep); endmodule",
+    );
+    device.update_voltages(&[0.0]);
+    assert_eq!(
+        device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
+        vec![0.0]
+    );
+    device.update_voltages(&[1.0]);
+    assert!(device.try_set_parameter("maxstep", -1.0).unwrap());
+    assert!(device.try_evaluate_with_mode(Mode::NewtonLimited).is_err());
+    assert_eq!(
+        device.try_evaluate_with_mode(Mode::StaticProbe).unwrap(),
+        vec![1.0]
+    );
+    assert!(device.try_set_parameter("maxstep", 0.25).unwrap());
+    assert_eq!(
+        device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
+        vec![0.25]
+    );
+}
+
+#[test]
 fn default_limit_recommendations_preserve_argument_effects_and_guards() {
     let source = r#"
 module fallback_effect(p,n);

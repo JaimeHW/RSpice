@@ -411,6 +411,7 @@ impl A64Encoder {
         self.load_store_unsigned(0x3940_0000, reg(destination), base, byte_offset, 1)
     }
 
+    #[cfg(test)]
     pub(crate) fn strb_w_unsigned(
         &mut self,
         source: XReg,
@@ -590,10 +591,12 @@ impl A64Encoder {
         self.fp_binary(0x1E60_1800, destination, left, right);
     }
 
+    #[cfg(test)]
     pub(crate) fn fmax_d(&mut self, destination: DReg, left: DReg, right: DReg) {
         self.fp_binary(0x1E60_4800, destination, left, right);
     }
 
+    #[cfg(test)]
     pub(crate) fn fmin_d(&mut self, destination: DReg, left: DReg, right: DReg) {
         self.fp_binary(0x1E60_5800, destination, left, right);
     }

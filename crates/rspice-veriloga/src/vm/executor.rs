@@ -721,6 +721,29 @@ impl<'a> Vm<'a> {
                 let step_limit = self.pop()?;
                 let new_value = self.pop()?;
 
+                if !self.context.evaluation_mode.limiting_enabled() {
+                    self.stack.push(new_value);
+                    return Ok(());
+                }
+
+                let previous = if self.context.state_initialized.get(*idx) == Some(&true) {
+                    *self
+                        .context
+                        .state_values
+                        .get(*idx)
+                        .ok_or(VmError::InvalidInstruction("limiter history is missing"))?
+                } else {
+                    new_value
+                };
+                let limited_value = rspice_veriloga_runtime::arithmetic::default_limit_candidate(
+                    new_value, previous, step_limit,
+                );
+                if !limited_value.is_finite() {
+                    return Err(VmError::InvalidNumericResult(
+                        "$limit requires finite values and a finite nonnegative step".into(),
+                    ));
+                }
+
                 if self.context.state_values.len() <= *idx
                     || self.context.state_values_prev.len() <= *idx
                     || self.context.state_values_older.len() <= *idx
@@ -732,15 +755,7 @@ impl<'a> Vm<'a> {
                     self.context.allocate_states(*idx + 1);
                 }
 
-                let limited_value = if self.context.state_initialized[*idx] {
-                    let prev_value = self.context.state_values[*idx];
-                    let delta = new_value - prev_value;
-                    let limited_delta = delta.clamp(-step_limit, step_limit);
-                    prev_value + limited_delta
-                } else {
-                    new_value
-                };
-
+                self.context.limiter_active |= u8::from(limited_value != new_value);
                 self.context.state_values[*idx] = limited_value;
                 self.context.state_initialized[*idx] = true;
                 self.stack.push(limited_value);
@@ -2242,5 +2257,41 @@ mod tests {
         assert_eq!(context.state_candidate_valid, vec![0; 3]);
         context.advance_state().unwrap();
         assert_eq!(context.state_values[2].to_bits(), 5.0_f64.to_bits());
+    }
+
+    #[test]
+    fn default_limiter_rejects_invalid_operands_without_publishing_history() {
+        let mut context = VmContext::default();
+        let evaluate = |context: &mut VmContext, proposed, step| {
+            execute_with_context(
+                context,
+                vec![
+                    Instruction::PushConst(proposed),
+                    Instruction::PushConst(step),
+                    Instruction::LimitState(0),
+                ],
+            )
+        };
+        assert_eq!(evaluate(&mut context, 0.0, 0.25).unwrap(), 0.0);
+        for (proposed, step) in [
+            (1.0, -1.0),
+            (1.0, f64::NAN),
+            (1.0, f64::INFINITY),
+            (f64::INFINITY, 0.25),
+            (f64::NAN, 0.25),
+        ] {
+            assert!(matches!(
+                evaluate(&mut context, proposed, step),
+                Err(VmError::InvalidNumericResult(_))
+            ));
+            assert_eq!(context.state_values[0], 0.0);
+            assert_eq!(context.limiter_active, 0);
+        }
+        assert_eq!(evaluate(&mut context, 1.0, 0.25).unwrap(), 0.25);
+        assert_eq!(context.limiter_active, 1);
+        context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
+        assert_eq!(evaluate(&mut context, 1.0, -1.0).unwrap(), 1.0);
+        assert_eq!(context.state_values[0], 0.25);
+        assert_eq!(context.limiter_active, 1);
     }
 }
