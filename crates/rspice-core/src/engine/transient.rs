@@ -375,7 +375,6 @@ use state_advanced_mos::Bsim4CompanionStep;
 use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBreakpointScheduling};
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
-pub(in crate::engine) use vbic::VbicSnapshotTolerances;
 
 mod breakpoints;
 mod checkpoint;
@@ -435,9 +434,7 @@ pub use fft::transient_fft_window_coherent_gain;
 
 mod history;
 use history::*;
-pub(in crate::engine) use history::{
-    BjtTransientHistory, JfetTransientHistory, VbicCachedSnapshotReuse,
-};
+pub(in crate::engine) use history::{BjtTransientHistory, JfetTransientHistory};
 
 #[derive(Debug, Clone, Copy)]
 struct DerivedTransientBranchCurrent {
@@ -6382,7 +6379,6 @@ impl Engine {
                         dt,
                         &transient_system_context,
                         &mut vbic_snapshot_cache,
-                        VbicCachedSnapshotReuse::NewtonBypass,
                         !nonlinear_state_matches_new_solution,
                         0.0,
                     )?;
@@ -6849,7 +6845,6 @@ impl Engine {
                                 dt,
                                 &transient_system_context,
                                 &mut vbic_snapshot_cache,
-                                VbicCachedSnapshotReuse::SeedOnly,
                                 true,
                                 0.0,
                                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
@@ -7569,7 +7564,6 @@ impl Engine {
                     },
                     &bjt_history,
                     &vbic_snapshot_cache,
-                    self.voltage_abstol(),
                     NgspiceTruncationTolerances {
                         reltol: transient_lte_reltol,
                         current_abstol: self.current_abstol(),
@@ -8337,7 +8331,6 @@ impl Engine {
                             },
                             &bjt_history,
                             &vbic_snapshot_cache,
-                            self.voltage_abstol(),
                             NgspiceTruncationTolerances {
                                 reltol: transient_lte_reltol,
                                 current_abstol: self.current_abstol(),
@@ -9076,7 +9069,6 @@ impl Engine {
                             xyce_excluded_indices: &xyce_lte_excluded_indices,
                         },
                         &vbic_snapshot_cache,
-                        self.voltage_abstol(),
                         NgspiceTruncationTolerances {
                             reltol: transient_lte_reltol,
                             current_abstol: self.current_abstol(),

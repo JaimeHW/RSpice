@@ -1348,7 +1348,6 @@ impl Engine {
         dt: Value,
         ctx: &TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-        vbic_reuse: VbicCachedSnapshotReuse,
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
     ) -> Result<(), SimulationError> {
@@ -1361,7 +1360,6 @@ impl Engine {
             dt,
             ctx,
             vbic_snapshot_cache,
-            vbic_reuse,
             refresh_nonlinear,
             extra_diag_gmin,
             crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
@@ -1379,7 +1377,6 @@ impl Engine {
         dt: Value,
         ctx: &TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-        vbic_reuse: VbicCachedSnapshotReuse,
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
@@ -1533,9 +1530,6 @@ impl Engine {
             },
             ctx.bjt_history,
             vbic_snapshot_cache,
-            vbic_reuse,
-            self.voltage_abstol(),
-            self.voltage_reltol(),
             ctx.xyce_one_step_order2,
         )?;
         Self::stamp_jfet_transient_companions(
@@ -2494,7 +2488,6 @@ impl Engine {
                 dt,
                 ctx,
                 vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 refresh_nonlinear,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -2702,7 +2695,6 @@ D2 in out DMOD
                 dt,
                 &ctx,
                 &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -2739,7 +2731,6 @@ D2 in out DMOD
                 dt,
                 &ctx,
                 &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -2845,7 +2836,6 @@ M1 d g 0 0 NM W=10u L=1u
                 dt,
                 &ctx,
                 &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 false,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -3380,7 +3370,6 @@ Q1 C B E 0 QN
                 dt,
                 &ctx,
                 &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
             )
@@ -3412,7 +3401,6 @@ Q1 C B E 0 QN
                     dt,
                     &ctx,
                     &mut vbic_snapshot_cache,
-                    VbicCachedSnapshotReuse::SeedOnly,
                     true,
                     0.0,
                 )
@@ -3432,7 +3420,6 @@ Q1 C B E 0 QN
                     dt,
                     &ctx,
                     &mut vbic_snapshot_cache,
-                    VbicCachedSnapshotReuse::SeedOnly,
                     true,
                     0.0,
                 )
@@ -3562,7 +3549,6 @@ Q1 C B E 0 QN
                 1e9,
                 ctx,
                 vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
             )
@@ -3589,7 +3575,6 @@ Q1 C B E 0 QN
                 dt,
                 ctx,
                 vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
             )
@@ -3668,7 +3653,6 @@ Q1 C B E 0 QN
                 1e9,
                 ctx,
                 vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
             )
@@ -3686,7 +3670,6 @@ Q1 C B E 0 QN
                 dt,
                 ctx,
                 vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
                 true,
                 0.0,
             )

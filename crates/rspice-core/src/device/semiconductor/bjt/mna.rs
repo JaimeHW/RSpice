@@ -1567,7 +1567,7 @@ mod tests {
         let mut bjt = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params);
 
         assert!(
-            !bjt.has_vbic_thermal_state(),
+            !bjt.thermal_model_enabled(),
             "internal VBIC self-heating still requires SELFT when no external dt terminal is present"
         );
 
@@ -1579,7 +1579,7 @@ mod tests {
             node
         });
 
-        assert!(bjt.has_vbic_thermal_state());
+        assert!(bjt.thermal_model_enabled());
         assert_eq!(bjt.node_rth, 4);
     }
 

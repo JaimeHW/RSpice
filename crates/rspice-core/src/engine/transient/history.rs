@@ -54,8 +54,6 @@ pub(super) const NGSPICE_NIITER_MIN_ITERATIONS: usize = 100;
 pub(super) const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
 /// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
 pub(super) const MAX_DYNAMIC_TLINE_BREAKPOINTS: usize = 200_000;
-pub(super) const VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL: Value = 1e-15;
-pub(super) const VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL: Value = 1e-12;
 pub(super) const BJT_VBIC_TRUNCATION_BRANCH_COUNT: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
 pub(super) const BJT_VCX_STATE_INDEX: usize = 0;
 pub(super) const BJT_VCI_STATE_INDEX: usize = 1;
@@ -306,21 +304,6 @@ pub(super) struct VbicTransientLinearization {
     pub(super) z_e: [Value; BJT_EXTERNAL_STATE_DIM],
 }
 
-pub(super) type VbicDynamicStateEvaluation = (
-    BjtChargeSnapshot,
-    VbicTransientLinearization,
-    [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    [Value; BJT_INTERNAL_STATE_DIM],
-    Value,
-);
-
-pub(super) type VbicBestEffortSolve = (
-    BjtChargeSnapshot,
-    VbicTransientLinearization,
-    [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
-    Value,
-);
-
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct VbicPredictorLinearBranchState {
     pub(super) vrcx: Value,
@@ -330,12 +313,6 @@ pub(super) struct VbicPredictorLinearBranchState {
     pub(super) vre: Value,
     pub(super) vrbp: Value,
     pub(super) vrs: Value,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::engine) enum VbicCachedSnapshotReuse {
-    SeedOnly,
-    NewtonBypass,
 }
 
 fn validate_history_vector_shapes(

@@ -203,12 +203,7 @@ impl Engine {
         coeff: &CompanionCoefficients,
         dt: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
-        tolerances: VbicSnapshotTolerances,
     ) -> Result<(), SimulationError> {
-        let VbicSnapshotTolerances {
-            voltage_abstol,
-            reltol: voltage_reltol,
-        } = tolerances;
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             // A failed/unsupported dynamic snapshot must never expose the
             // preceding accepted sample's current under a new time point.
@@ -260,13 +255,11 @@ impl Engine {
                 bjt_history.ics_prev[idx] = 0.0;
                 continue;
             }
-            let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
-            let snapshot_reuse_reltol = voltage_reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
             let cached_snapshot = vbic_snapshots
                 .and_then(|cache| cache.get(idx))
                 .copied()
                 .flatten();
-            let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            let Some(snapshot) = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 external,
                 VbicChargeStep {
@@ -278,17 +271,11 @@ impl Engine {
                 },
                 VbicPredictorHistory {
                     internal_prev: bjt_history.dynamic_internal_prev.get(idx),
-                    internal_prev_prev: bjt_history.dynamic_internal_prev_prev.get(idx),
                     linear_prev: bjt_history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
                     previous_dt: bjt_history.accepted_dt_prev,
                 },
                 cached_snapshot,
-                VbicCachedSnapshotReuse::SeedOnly,
-                VbicSnapshotTolerances {
-                    voltage_abstol: snapshot_reuse_abstol,
-                    reltol: snapshot_reuse_reltol,
-                },
             ) else {
                 return Err(SimulationError::Circuit(format!(
                     "BJT '{}' accepted private transient state did not converge for dt={dt:e}",
@@ -771,10 +758,6 @@ impl Engine {
             coeff,
             dt,
             vbic_snapshots,
-            VbicSnapshotTolerances {
-                voltage_abstol,
-                reltol: voltage_reltol,
-            },
         )?;
 
         Self::accept_jfet_history(

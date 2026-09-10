@@ -23,6 +23,7 @@
 //! LTE acceptance machinery.
 
 use super::*;
+use crate::device::NonlinearDevice;
 
 /// Backtracking trials per rescue Newton iteration (smallest fraction 2^-5).
 const RESCUE_LINE_SEARCH_TRIALS: usize = 6;
@@ -32,6 +33,32 @@ const RESCUE_LINE_SEARCH_ARMIJO_C1: Value = 1e-4;
 const RESCUE_GMIN_MAX_REFINEMENTS: usize = 32;
 
 impl Engine {
+    #[inline]
+    fn transient_static_device_convergence_met(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        let criteria = self.device_convergence_criteria();
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated_veriloga_converged = circuit.generated_veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let generated_veriloga_converged = true;
+        #[cfg(feature = "veriloga")]
+        let dynamic_veriloga_converged = circuit.veriloga_devices.all_converged();
+        #[cfg(not(feature = "veriloga"))]
+        let dynamic_veriloga_converged = true;
+
+        circuit.diodes.all_converged(criteria)
+            && circuit.mosfets.all_converged(criteria)
+            && circuit.jfets.iter().all(|jfet| jfet.is_converged(criteria))
+            && circuit.vswitches.iter().all(|sw| sw.is_converged(criteria))
+            && circuit.iswitches.iter().all(|sw| sw.is_converged(criteria))
+            && circuit.xspice_converged(criteria.voltage_tolerance())
+            && circuit.bjts.all_converged(criteria)
+            && dynamic_veriloga_converged
+            && generated_veriloga_converged
+    }
+
     /// Solve one transient step by gmin continuation after plain Newton has
     /// failed. `seed` is the last accepted solution (the most trustworthy
     /// basin point). Returns the converged candidate for `time = t + dt`,
@@ -120,7 +147,7 @@ impl Engine {
             circuit
                 .set_semiconductor_junction_gmin(self.effective_device_junction_gmin(extra_gmin));
             let mut level_converged = false;
-            for level_iter in 0..budget {
+            for _ in 0..budget {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -133,11 +160,6 @@ impl Engine {
                     dt,
                     ctx,
                     vbic_snapshot_cache,
-                    if level_iter == 0 {
-                        VbicCachedSnapshotReuse::SeedOnly
-                    } else {
-                        VbicCachedSnapshotReuse::NewtonBypass
-                    },
                     true,
                     extra_gmin,
                 )?;
@@ -186,7 +208,6 @@ impl Engine {
                     dt,
                     ctx,
                     vbic_snapshot_cache,
-                    VbicCachedSnapshotReuse::NewtonBypass,
                     true,
                     extra_gmin,
                     crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -213,7 +234,6 @@ impl Engine {
                         dt,
                         ctx,
                         vbic_snapshot_cache,
-                        VbicCachedSnapshotReuse::NewtonBypass,
                         true,
                         extra_gmin,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
@@ -250,7 +270,6 @@ impl Engine {
                     dt,
                     ctx,
                     vbic_snapshot_cache,
-                    VbicCachedSnapshotReuse::NewtonBypass,
                     true,
                     extra_gmin,
                 )?;

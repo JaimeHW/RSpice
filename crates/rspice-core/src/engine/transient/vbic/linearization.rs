@@ -760,24 +760,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn solve_vbic_internal_state_from_linearization(
-        linearization: &VbicTransientLinearization,
-        external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
-    ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
-        let mut rhs_internal = linearization.z_i;
-        for (rhs, coupling) in rhs_internal.iter_mut().zip(&linearization.g_ie) {
-            for (conductance, voltage) in coupling.iter().zip(external_voltages) {
-                *rhs -= conductance * voltage;
-            }
-        }
-        crate::numerics::solve_small_dense(
-            &linearization.g_ii,
-            &rhs_internal,
-            BJT_INTERNAL_STATE_DIM,
-        )
-    }
-
-    #[inline]
     pub(in crate::engine::transient) fn solve_vbic_static_core_from_linearization(
         linearization: &VbicTransientLinearization,
         external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
@@ -836,123 +818,11 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_internal_equation_residual_norm(
-        linearization: &VbicTransientLinearization,
-        external_voltages: &[Value; BJT_EXTERNAL_STATE_DIM],
-        internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
-    ) -> Value {
-        crate::numerics::infinity_norm(&Self::vbic_internal_equation_residual(
-            linearization,
-            external_voltages,
-            internal_voltages,
-        ))
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn vbic_internal_equation_residual_objective(
-        residual: &[Value; BJT_INTERNAL_STATE_DIM],
-    ) -> Value {
-        crate::numerics::ScaledL2Norm::from_values(residual).value()
-    }
-
-    #[inline]
-    pub(in crate::engine::transient) fn vbic_dynamic_state_evaluation_residual_objective(
-        evaluation: &VbicDynamicStateEvaluation,
-    ) -> Value {
-        Self::vbic_internal_equation_residual_objective(&evaluation.3)
-    }
-
-    #[inline]
     pub(in crate::engine::transient) fn vbic_dynamic_static_core_residual_norm(
         residual: &[Value; BJT_INTERNAL_STATE_DIM],
     ) -> Value {
         crate::numerics::infinity_norm(&residual[..BJT_STATIC_CORE_STATE_DIM])
     }
-
-    #[inline]
-    pub(in crate::engine::transient) fn refine_vbic_dynamic_static_core_with_fixed_delay(
-        bjt: &crate::device::Bjt,
-        bias: BjtExternalBias,
-        step: VbicChargeStep<'_>,
-        mut current_state: VbicDynamicStateEvaluation,
-        max_iterations: usize,
-    ) -> VbicDynamicStateEvaluation {
-        let BjtExternalBias { vc, vb, ve, vs } = bias;
-        let VbicChargeStep {
-            coeff,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-        } = step;
-        let mut current_objective =
-            Self::vbic_dynamic_state_evaluation_residual_objective(&current_state);
-        for iteration in 0..max_iterations {
-            let static_residual_norm =
-                Self::vbic_dynamic_static_core_residual_norm(&current_state.3);
-            if static_residual_norm < 1e-10 {
-                break;
-            }
-
-            let current_internal = current_state.0.reduction.internal_voltages;
-            let Some(target_internal) = Self::solve_vbic_static_core_from_linearization(
-                &current_state.1,
-                &current_state.0.reduction.external_voltages,
-                &current_internal,
-            ) else {
-                break;
-            };
-            if !target_internal.iter().all(|value| value.is_finite()) {
-                break;
-            }
-            let max_static_delta = (0..BJT_STATIC_CORE_STATE_DIM)
-                .map(|idx| (target_internal[idx] - current_internal[idx]).abs())
-                .fold(0.0_f64, Value::max);
-            if max_static_delta < 1e-12 {
-                break;
-            }
-
-            let target_internal = Self::step_limit_vbic_dynamic_internal_target(
-                current_internal,
-                target_internal,
-                iteration,
-                current_state.4,
-            );
-            let Some(next_state) = Self::improve_vbic_dynamic_internal_state_toward_target(
-                bjt,
-                BjtExternalBias { vc, vb, ve, vs },
-                VbicChargeStep {
-                    coeff,
-                    dt,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                },
-                VbicInternalStateProgress {
-                    current_internal,
-                    current_residual_norm: current_state.4,
-                    current_residual_objective: current_objective,
-                    target_internal,
-                    envelope_reference: current_internal,
-                },
-                12,
-            ) else {
-                break;
-            };
-            let next_objective =
-                Self::vbic_dynamic_state_evaluation_residual_objective(&next_state);
-            if next_objective + 1e-15 >= current_objective {
-                break;
-            }
-            current_state = next_state;
-            current_objective = next_objective;
-        }
-        current_state
-    }
-
-    pub(super) const VBIC_DYNAMIC_BOUNDED_BEST_EFFORT_RESIDUAL_NORM: Value = 5e-2;
-    pub(super) const VBIC_HOMOTOPY_MIN_LAMBDA_STEP: Value = 1e-6;
-    pub(super) const VBIC_CONTINUATION_MIN_TRIAL_STEP: Value = 1.0 / 64.0;
 
     #[inline]
     pub(in crate::engine::transient) fn vbic_reduce_transient_external_system(
@@ -1135,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn vbic_residual_norms_include_invalid_equations_and_retain_finite_objectives() {
+    fn private_bjt_residual_norm_includes_invalid_equations() {
         let mut linearization = VbicTransientLinearization {
             g_ii: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
             g_ie: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -1149,16 +1019,8 @@ mod tests {
         for lane in 0..BJT_INTERNAL_STATE_DIM {
             linearization.z_i = [0.0; BJT_INTERNAL_STATE_DIM];
             linearization.z_i[lane] = Value::NAN;
-            assert_eq!(
-                Engine::vbic_internal_equation_residual_norm(&linearization, &external, &internal),
-                Value::INFINITY
-            );
             let residual =
                 Engine::vbic_internal_equation_residual(&linearization, &external, &internal);
-            assert_eq!(
-                Engine::vbic_internal_equation_residual_objective(&residual),
-                Value::INFINITY
-            );
             assert_eq!(
                 Engine::vbic_dynamic_static_core_residual_norm(&residual),
                 if lane < BJT_STATIC_CORE_STATE_DIM {
@@ -1166,15 +1028,6 @@ mod tests {
                 } else {
                     0.0
                 }
-            );
-        }
-        for scale in [1e-200, 1e200] {
-            let mut residual = [0.0; BJT_INTERNAL_STATE_DIM];
-            residual[0] = 3.0 * scale;
-            residual[1] = 4.0 * scale;
-            assert!(
-                (Engine::vbic_internal_equation_residual_objective(&residual) / scale - 5.0).abs()
-                    < 2e-15
             );
         }
     }

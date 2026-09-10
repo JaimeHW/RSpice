@@ -301,11 +301,6 @@ impl Bjt {
     }
 
     #[inline]
-    pub(crate) fn has_vbic_thermal_state(&self) -> bool {
-        self.thermal_model_enabled()
-    }
-
-    #[inline]
     pub(super) fn vbic_temp_scaled_current(
         nominal: Value,
         r_t: Value,
@@ -507,26 +502,6 @@ impl Bjt {
         *self.thermal_variant_cache.borrow_mut() = saved_cache;
         clone.thermal_variant_cache.borrow_mut().clear();
         clone
-    }
-
-    pub(crate) fn vbic_collector_substrate_charge_homotopy_variant(&self, lambda: Value) -> Self {
-        let scale = lambda.clamp(0.0, 1.0);
-        let mut variant = self.clone_without_thermal_variant_cache();
-        variant.reduced_linearization_cache_valid.set(false);
-        variant.previous_reduced_linearization_valid = false;
-        variant.charge_snapshot_cache_valid.set(false);
-
-        if variant.charge_model != BjtChargeModel::Vbic {
-            return variant;
-        }
-
-        variant.qco_nominal *= scale;
-        variant.cjcp_nominal *= scale;
-        variant.ccso_nominal *= scale;
-        variant.qco *= scale;
-        variant.cjcp *= scale;
-        variant.ccso *= scale;
-        variant
     }
 
     pub(super) fn with_temperature_variant<R>(

@@ -864,9 +864,6 @@ impl Engine {
         stamp: TransientCompanionStamp<'_, '_>,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-        cache_reuse: VbicCachedSnapshotReuse,
-        voltage_abstol: Value,
-        reltol: Value,
         xyce_one_step_order2: bool,
     ) -> Result<(), SimulationError> {
         let TransientCompanionStamp {
@@ -938,10 +935,8 @@ impl Engine {
                 *coeff
             };
             let coeff = &private_coeff;
-            let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
-                Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
             let cached_snapshot = vbic_snapshot_cache.get(idx).copied().flatten();
-            let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            let Some(snapshot) = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 [vc, vb, ve, vs],
                 VbicChargeStep {
@@ -953,17 +948,11 @@ impl Engine {
                 },
                 VbicPredictorHistory {
                     internal_prev: history.dynamic_internal_prev.get(idx),
-                    internal_prev_prev: history.dynamic_internal_prev_prev.get(idx),
                     linear_prev: history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
                     previous_dt: history.accepted_dt_prev,
                 },
                 cached_snapshot,
-                cache_reuse,
-                VbicSnapshotTolerances {
-                    voltage_abstol: snapshot_reuse_abstol,
-                    reltol: snapshot_reuse_reltol,
-                },
             ) else {
                 vbic_snapshot_cache[idx] = None;
                 return Err(SimulationError::Circuit(format!(

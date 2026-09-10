@@ -4016,9 +4016,6 @@ impl Engine {
                 },
                 bjt_history,
                 bjt_snapshot_cache,
-                super::transient::VbicCachedSnapshotReuse::SeedOnly,
-                self.voltage_abstol(),
-                self.voltage_reltol(),
                 false,
             )?;
             Self::stamp_jfet_transient_companions(
@@ -4379,10 +4376,6 @@ impl Engine {
                     &coeff,
                     dt,
                     Some(bjt_snapshot_cache),
-                    super::transient::VbicSnapshotTolerances {
-                        voltage_abstol: self.voltage_abstol(),
-                        reltol: self.voltage_reltol(),
-                    },
                 )?;
                 Self::accept_jfet_history(circuit, jfet_history, &new_solution, &coeff, dt, false);
             }

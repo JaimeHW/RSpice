@@ -446,11 +446,8 @@ mod tests {
     fn step_norm_and_bank_rose_are_independent_of_absolute_scale() {
         for scale in [1e-300, 1e-200, 1.0, 1e200, 1e307] {
             let norm = ScaledL2Norm::between(&[0.0; 2], &[3.0 * scale, 4.0 * scale]);
-            let magnitude = norm.value();
-            assert!(
-                (magnitude / scale - 5.0).abs() < 2e-15,
-                "scale={scale}: {magnitude}"
-            );
+            let ratio = norm.ratio(ScaledL2Norm::between(&[0.0; 2], &[scale, 0.0]));
+            assert!((ratio - 5.0).abs() < 2e-15, "scale={scale}: {ratio}");
             let mut state = NewtonDampingState::default();
             Engine::update_bank_rose_alpha(&mut state, norm);
             Engine::update_bank_rose_alpha(

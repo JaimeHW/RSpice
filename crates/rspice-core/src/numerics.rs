@@ -368,14 +368,6 @@ pub(crate) struct ScaledL2Norm {
 }
 
 impl ScaledL2Norm {
-    pub(crate) fn from_values(values: &[Value]) -> Self {
-        let mut norm = Self::default();
-        for value in values {
-            norm.accumulate(value.abs(), 1.0);
-        }
-        norm
-    }
-
     pub(crate) fn between(old: &[Value], new: &[Value]) -> Self {
         let mut norm = Self::default();
         for (&a, &b) in old.iter().zip(new) {
@@ -403,10 +395,6 @@ impl ScaledL2Norm {
         } else if magnitude != 0.0 {
             self.squared_sum += weight * (magnitude / self.scale).powi(2);
         }
-    }
-
-    pub(crate) fn value(self) -> Value {
-        self.scale * self.squared_sum.sqrt()
     }
 
     pub(crate) fn ratio(self, previous: Self) -> Value {
@@ -740,16 +728,13 @@ mod tests {
         for scale in [Value::from_bits(1), 1e-300, 1e-200, 1.0, 1e200, 1e307] {
             let values = [3.0 * scale, -4.0 * scale];
             assert_eq!(infinity_norm(&values), 4.0 * scale);
-            assert!((ScaledL2Norm::from_values(&values).value() / scale - 5.0).abs() < 2e-15);
         }
         assert_eq!(infinity_norm(&[]), 0.0);
-        assert_eq!(ScaledL2Norm::from_values(&[]).value(), 0.0);
         for lane in 0..10 {
             for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
                 let mut values = [1.0; 10];
                 values[lane] = invalid;
                 assert_eq!(infinity_norm(&values), Value::INFINITY);
-                assert_eq!(ScaledL2Norm::from_values(&values).value(), Value::INFINITY);
             }
         }
     }

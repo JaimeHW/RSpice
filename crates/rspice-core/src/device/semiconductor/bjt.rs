@@ -245,17 +245,8 @@ impl BranchLinearization {
 pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
-pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 11;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct VbicTransientConvergenceState {
-    pub voltages: [Value; VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT],
-    pub currents: [Value; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT],
-    pub d_currents_d_internal:
-        [[Value; BJT_INTERNAL_STATE_DIM]; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT],
-}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BjtChargeBranch {

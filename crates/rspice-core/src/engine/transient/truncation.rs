@@ -989,7 +989,6 @@ impl Engine {
         step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        voltage_abstol: Value,
         tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
         let TruncationStep {
@@ -1036,12 +1035,10 @@ impl Engine {
             let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
             let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
             let candidate_external = [vc, vb, ve, vs];
-            let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
-            let snapshot_reuse_reltol = reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
             // A failed snapshot resolution is not a benign absence of charge:
             // the charge state genuinely cannot be formed at this bias, so
             // falling back to the generic estimator is the correct answer.
-            let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            let snapshot = Self::resolve_legacy_bjt_transient_snapshot(
                 bjt,
                 candidate_external,
                 VbicChargeStep {
@@ -1053,17 +1050,11 @@ impl Engine {
                 },
                 VbicPredictorHistory {
                     internal_prev: history.dynamic_internal_prev.get(idx),
-                    internal_prev_prev: history.dynamic_internal_prev_prev.get(idx),
                     linear_prev: history.dynamic_linear_prev.get(idx),
                     linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
                     previous_dt: history.accepted_dt_prev,
                 },
                 vbic_snapshot_cache.get(idx).copied().flatten(),
-                VbicCachedSnapshotReuse::SeedOnly,
-                VbicSnapshotTolerances {
-                    voltage_abstol: snapshot_reuse_abstol,
-                    reltol: snapshot_reuse_reltol,
-                },
             )?;
 
             // Take the charge from the model, not from the snapshot's branch
@@ -1141,7 +1132,6 @@ impl Engine {
         step: TruncationStep,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        voltage_abstol: Value,
         tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
         let TruncationStep {
@@ -1188,7 +1178,6 @@ impl Engine {
             },
             history,
             vbic_snapshot_cache,
-            voltage_abstol,
             NgspiceTruncationTolerances {
                 reltol,
                 current_abstol,
@@ -2676,7 +2665,6 @@ impl Engine {
         vdmos_history: &VdmosTransientHistory,
         ekv26_history: &Ekv26TransientHistory,
         suppress_gate_charge: bool,
-        voltage_abstol: Value,
         tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
         let TruncationStep {
@@ -2746,7 +2734,6 @@ impl Engine {
                 },
                 bjt_history,
                 vbic_snapshot_cache,
-                voltage_abstol,
                 NgspiceTruncationTolerances {
                     reltol,
                     current_abstol,
@@ -3153,7 +3140,6 @@ impl Engine {
         bsim4_history: &Bsim4TransientHistory,
         voltage_lte: VoltageLteConfig<'_>,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        voltage_abstol: Value,
         tolerances: NgspiceTruncationTolerances,
     ) -> Option<TrapezoidalOrderTrial> {
         let VoltageLteConfig {
@@ -3200,7 +3186,6 @@ impl Engine {
                 vdmos_history,
                 ekv26_history,
                 false,
-                voltage_abstol,
                 NgspiceTruncationTolerances {
                     reltol,
                     current_abstol,
@@ -3852,7 +3837,6 @@ Q1 n n 0 0 qmod
                 },
                 &history,
                 &[],
-                1.0e-9,
                 NgspiceTruncationTolerances {
                     reltol: 1.0e-3,
                     current_abstol: 1.0e-12,
@@ -3908,7 +3892,6 @@ Q1 n n 0 0 qmod
             },
             &history,
             &[],
-            1.0e-9,
             NgspiceTruncationTolerances {
                 reltol: 1.0e-3,
                 current_abstol: 1.0e-12,
@@ -4768,7 +4751,6 @@ M1 d g s 0 VTRUNC W=1 L=1u
             &vdmos_history,
             &ekv26_history,
             false,
-            1.0e-9,
             NgspiceTruncationTolerances {
                 reltol: 1.0e-3,
                 current_abstol: 1.0e-12,
@@ -4858,7 +4840,6 @@ VB b 0 -1
             &vdmos_history,
             &ekv26_history,
             false,
-            1.0e-9,
             NgspiceTruncationTolerances {
                 reltol: 1.0e-3,
                 current_abstol: 1.0e-12,
@@ -4939,7 +4920,6 @@ J1 d g s PS area=1
             &vdmos_history,
             &ekv26_history,
             true,
-            1.0e-9,
             NgspiceTruncationTolerances {
                 reltol: 1.0e-3,
                 current_abstol: 1.0e-12,
