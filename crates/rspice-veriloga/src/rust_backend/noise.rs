@@ -2131,6 +2131,9 @@ endmodule
             "I(p,n) <+ white_noise(1.0 + ddt(V(p,n)), \"psd\");",
             "if (ddt(V(p,n)) > 0.0) I(p,n) <+ white_noise(1.0, \"guard\");",
             "source = white_noise(1.0, \"nested\"); I(p,n) <+ ddt(ddt(source));",
+            "I(p,n) <+ ddt(ddt(white_noise(1.0, \"nested\")));",
+            "I(p,n) <+ ddt(white_noise(1.0 + ddt(V(p,n)), \"psd\"));",
+            "I(p,n) <+ ddt(white_noise(1.0, \"a\") * white_noise(1.0, \"b\"));",
         ] {
             let artifact = crate::VerilogACompiler::default()
                 .compile_canonical_ir(&format!(

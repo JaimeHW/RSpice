@@ -2753,6 +2753,67 @@ for (gain, scale, frequency) in [
 }
 
 #[test]
+fn generated_direct_dynamic_noise_matches_assigned_routing() {
+    for contribution in ["I", "V"] {
+        for assigned in [false, true] {
+            let body = if assigned {
+                format!(
+                    "source=white_noise(2.0/V(p,n),\"same\"); {contribution}(p,n)<+ddt(3.0*source)+white_noise(5.0,\"same\");"
+                )
+            } else {
+                format!(
+                    "{contribution}(p,n)<+ddt(3.0*white_noise(2.0/V(p,n),\"same\"))+white_noise(5.0,\"same\");"
+                )
+            };
+            let source = format!(
+                "module direct_dynamic_noise(p,n); inout p,n; electrical p,n; parameter real enabled=1; real source; analog if(enabled>0) begin {body} end endmodule"
+            );
+            let name = format!("direct dynamic noise {contribution} assigned={assigned}");
+            let (state, stamp, noise) = generated_parts(&source, &name);
+            let sign = if contribution == "I" { -1.0 } else { 1.0 };
+            run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+#[derive(Default)]
+struct Capture(Vec<(usize, f64, f64, f64)>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {{
+    fn visit_process(&mut self, index: usize, process: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {{
+        if process.active {{
+            assert_eq!(process.injections.len(), 1);
+            let gain=process.injections[0].gain;
+            self.0.push((index,process.psd,gain.re,gain.im));
+        }}
+        true
+    }}
+}}
+assert_eq!(device::noise::GROUPED_NOISE_PROCESSES.len(), 2, "equal labels must not merge distinct calls");
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext {{voltages:&[2.0,0.0],temperature:300.15}};
+for frequency in [0.0,1.0,17.0] {{
+    let mut capture=Capture::default();
+    instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture).unwrap();
+    assert_eq!(capture.0.len(),2);
+    for (index,psd,re,im) in capture.0 {{
+        let (expected_psd,expected_re,expected_im)=if index==0 {{
+            (1.0,0.0,{sign:?}*3.0*std::f64::consts::TAU*frequency)
+        }} else {{ (5.0,{sign:?},0.0) }};
+        assert_eq!(psd,expected_psd);
+        assert_eq!(re,expected_re);
+        assert!((im-expected_im).abs() <= expected_im.abs()*1e-14);
+    }}
+}}
+instance.set_parameter("enabled",0.0).unwrap();
+instance.finalize_parameters().unwrap();
+let disabled=runtime::GeneratedEvalContext {{voltages:&[0.0,0.0],temperature:300.15}};
+let mut capture=Capture::default();
+instance.evaluate_noise_processes_at_frequency(&disabled,1.0,&mut capture).unwrap();
+assert!(capture.0.is_empty(), "disabled sources must not evaluate their singular PSD");
+assert!(!disabled.evaluation_failed());
+"#)).unwrap_or_else(|report| panic!("{name}: {report}"));
+        }
+    }
+}
+
+#[test]
 fn generated_grouped_noise_retains_static_and_reactive_paths_in_one_contribution() {
     let (state, stamp, noise) = generated_parts(
         r#"

@@ -1,13 +1,12 @@
-//! Extraction of the small-signal noise plan from HIR and MIR.
+//! Static noise-source projection from HIR and MIR.
 //!
-//! Noise functions appear inside ordinary contribution expressions, but in
-//! `.noise` they behave as separate sources injected at the originating
-//! branch. [`CanonicalNoiseSourcePlan::from_hir_and_mir`] lifts them out into
-//! an explicit plan: each source records its injection endpoints, its kind
-//! (white, flicker, or table), and the activation guard it inherited from the
-//! control flow it sat under, so a conditionally-contributed source stays
-//! conditional. It mutates both models because the lifted expressions must be
-//! removed from the time-domain equations they came from.
+//! [`CanonicalNoiseSourcePlan::from_hir_and_mir`] records directly contributed
+//! static sources, their injection endpoints, magnitudes, and activation guards.
+//! This projection serves the source-wise noise API. Assigned process reuse and
+//! frequency-dependent routing require the grouped CFG noise plan, which reads
+//! the original HIR/MIR and preserves process identity and complex transfer gains.
+//! Original expressions remain intact; extraction only appends expressions for
+//! the static magnitudes and guards to the shared expression arena.
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -553,6 +552,13 @@ fn extract_expression(
                     sources,
                 )?;
             }
+            Ok(())
+        }
+        HirExprKind::Call { name, args } if name == "ddt" && args.len() == 1 => {
+            // A derivative's j*omega transfer cannot be represented by a static
+            // PSD. Keep the original expression for grouped noise lowering,
+            // exactly as when its noise process is read through an assignment.
+            // Grouped lowering validates routing and metadata before emission.
             Ok(())
         }
         _ => Err(unsupported("nonlinear or dynamic position")),

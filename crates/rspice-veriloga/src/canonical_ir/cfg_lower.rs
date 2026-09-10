@@ -1453,7 +1453,7 @@ impl<'a> CfgLowerer<'a> {
         self.static_guard_conditions.contains(&expression)
     }
 
-    /// Lower whatever noise the contribution's expression carries.
+    /// Lower the contribution's static source-wise noise projection.
     ///
     /// The walk is the one `noise::extract_expression` performs on the folded
     /// statements, and it has to stay the one: the amplitude a source is scaled
@@ -1684,6 +1684,10 @@ impl<'a> CfgLowerer<'a> {
                     return;
                 }
                 self.noise_conditional(contribution, condition, then_expr, else_expr, amplitude);
+            }
+            HirExprKind::Call { name, args } if name == "ddt" && args.len() == 1 => {
+                // Match the static HIR projection: grouped process lowering
+                // retains this derivative and its frequency-dependent gain.
             }
             _ => self.unsupported_noise(span, "nonlinear or dynamic position"),
         }

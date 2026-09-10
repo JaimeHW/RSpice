@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use thiserror::Error;
 
-use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType};
+use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType, HirExprKind};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
 use crate::metrics::PipelineMetrics;
@@ -217,7 +217,9 @@ impl RuntimeCompileReport {
                 canonical: canonical_module.to_owned(),
             });
         }
-        if self.abi != RuntimeAbiSummary::from_artifact(&self.canonical_ir) {
+        if self.abi != RuntimeAbiSummary::from_artifact(&self.canonical_ir)
+            || self.abi.noise_source_count != self.model.noise_sources.len()
+        {
             return Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch);
         }
 
@@ -298,6 +300,8 @@ pub struct RuntimeAbiSummary {
     pub module_name: SmolStr,
     pub analog_ports: Vec<RuntimeAbiPort>,
     pub parameters: Vec<RuntimeAbiParameter>,
+    /// Distinct structural processes, including assigned and filtered sources.
+    /// Reusing one process at multiple injections does not increase this count.
     pub noise_source_count: usize,
     pub state_variable_count: usize,
     pub internal_node_count: usize,
@@ -334,7 +338,16 @@ impl RuntimeAbiSummary {
                     aliases: parameter.aliases.clone(),
                 })
                 .collect(),
-            noise_source_count: artifact.noise_sources.sources.len(),
+            noise_source_count: artifact
+                .hir
+                .expressions
+                .iter()
+                .filter_map(|expression| match expression.kind {
+                    HirExprKind::NoiseSource { process_id, .. } => Some(process_id),
+                    _ => None,
+                })
+                .collect::<BTreeSet<_>>()
+                .len(),
             state_variable_count: artifact
                 .hir
                 .variables

@@ -27,6 +27,67 @@ fn compiler() -> VerilogACompiler {
 }
 
 #[test]
+fn runtime_noise_count_tracks_processes_and_checks_both_artifacts() {
+    for (body, expected) in [
+        (
+            "source=white_noise(1,\"same\"); I(p,n)<+source; V(q,n)<+2*source;",
+            1,
+        ),
+        (
+            "I(p,n)<+ddt(white_noise(1,\"same\"))+white_noise(2,\"same\");",
+            2,
+        ),
+        ("for(i=0;i<3;i=i+1) I(p,n)<+white_noise(1,\"same\");", 3),
+        ("source=white_noise(1,\"unused\"); I(p,n)<+V(p,n);", 1),
+        ("if(0) I(p,n)<+white_noise(1,\"disabled\");", 1),
+    ] {
+        let source = format!(
+            "module noise_count(p,n,q); inout p,n,q; electrical p,n,q; integer i; real source; analog begin {body} end endmodule"
+        );
+        let qualifications = RuntimeQualificationOptions {
+            generated_rust: true,
+            native_x64_jit: cfg!(all(
+                feature = "native",
+                any(
+                    target_arch = "x86_64",
+                    all(
+                        target_arch = "aarch64",
+                        any(target_os = "macos", target_os = "linux", windows)
+                    )
+                )
+            )),
+            ..RuntimeQualificationOptions::NONE
+        }
+        .rejecting_interpreter_fallback();
+        let report = compiler()
+            .compile_runtime_with_qualifications(&source, None, qualifications)
+            .unwrap_or_else(|error| panic!("{body}: {error}"));
+        assert_eq!(report.abi.noise_source_count, expected, "{body}");
+        assert_eq!(report.model.noise_sources.len(), expected, "{body}");
+        report.validate_integrity().unwrap();
+        // Runtime Wasm availability additionally needs browser startup checks;
+        // verify the model compiler product independently on this host.
+        #[cfg(feature = "wasm-jit")]
+        rspice_veriloga::wasm_jit::compile_model_value_module(&report.model, &report.canonical_ir)
+            .unwrap_or_else(|error| panic!("{body}: {error}"));
+
+        let mut missing_process = report.clone();
+        missing_process.model.noise_sources.pop();
+        assert!(matches!(
+            missing_process.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch)
+        ));
+        // Derive the expected count from canonical identities so mutating the
+        // compiled vector and its reported count together cannot hide the loss.
+        missing_process.abi.noise_source_count -= 1;
+        assert!(matches!(
+            missing_process.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch)
+        ));
+    }
+}
+
+#[test]
 fn runtime_integrity_rejects_modified_digital_control_flow() {
     let mut report = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,
