@@ -5685,6 +5685,20 @@ impl<'a> GeneratedReactiveStamper<'a> {
         ddt: u32,
         idt: u32,
     ) -> Option<Value> {
+        self.scaled_frequency_coefficient(ctx, coefficient, 1.0, ddt, idt)
+    }
+
+    /// Compose the frequency action and instance scale before the final
+    /// binary64 conversion. Neither partial product is a publication boundary.
+    #[inline]
+    pub fn scaled_frequency_coefficient(
+        &self,
+        ctx: &GeneratedEvalContext<'_>,
+        coefficient: Value,
+        scale: Value,
+        ddt: u32,
+        idt: u32,
+    ) -> Option<Value> {
         if ctx.evaluation_failed() {
             return None;
         }
@@ -5694,6 +5708,8 @@ impl<'a> GeneratedReactiveStamper<'a> {
             Some("idt small-signal transfer is singular at zero frequency")
         } else if !coefficient.is_finite() {
             Some("non-finite frequency coefficient")
+        } else if !scale.is_finite() {
+            Some("non-finite frequency scaling factor")
         } else {
             None
         };
@@ -5702,13 +5718,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return None;
         }
         let exponent = i64::from(ddt) - i64::from(idt);
-        let Ok(exponent) = i32::try_from(exponent) else {
-            ctx.report_small_signal_error(
-                "integration order exceeds the frequency evaluator range",
-            );
-            return None;
-        };
-        let mut value = Self::scale_frequency_coefficient(coefficient, self.omega, exponent);
+        let mut value = Self::scale_frequency_coefficient(coefficient, scale, self.omega, exponent);
         if !value.is_finite() {
             ctx.report_small_signal_error("frequency response overflows");
             return None;
@@ -5719,26 +5729,60 @@ impl<'a> GeneratedReactiveStamper<'a> {
         Some(value)
     }
 
-    fn scale_frequency_coefficient(value: Value, omega: Value, exponent: i32) -> Value {
-        if value == 0.0 || !value.is_finite() {
-            return value;
+    #[inline]
+    fn scale_frequency_coefficient(
+        value: Value,
+        scale: Value,
+        omega: Value,
+        exponent: i64,
+    ) -> Value {
+        if exponent == 0 || value == 0.0 || scale == 0.0 {
+            return value * scale;
         }
-        match exponent {
-            0 => return value,
-            1 => return value * omega,
-            -1 => return value / omega,
-            _ => {}
+        if omega == 0.0 {
+            // Negative powers were rejected before reaching this helper.
+            return 0.0_f64.copysign(value * scale);
         }
-        let factor = omega.powi(exponent);
-        if factor.is_finite() && factor != 0.0 {
-            return value * factor;
+        let partial = match exponent {
+            1 => value * omega,
+            -1 => value / omega,
+            _ => {
+                let Ok(power) = i32::try_from(exponent) else {
+                    return Self::wide_frequency_coefficient(value, scale, omega, exponent);
+                };
+                let factor = omega.powi(power);
+                if !factor.is_normal() {
+                    return Self::wide_frequency_coefficient(value, scale, omega, exponent);
+                }
+                value * factor
+            }
+        };
+        let result = partial * scale;
+        if partial.is_normal() && result.is_normal() {
+            result
+        } else {
+            Self::wide_frequency_coefficient(value, scale, omega, exponent)
         }
-        // Split a power that alone over/underflows, so a coefficient can
-        // bring it into range (1e-300 * (1e200)^2, for example). Halving bounds
-        // the recursion to 32 levels even for extreme operator orders.
-        let half = exponent / 2;
-        let value = Self::scale_frequency_coefficient(value, omega, half);
-        Self::scale_frequency_coefficient(value, omega, exponent - half)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn wide_frequency_coefficient(
+        value: Value,
+        scale: Value,
+        omega: Value,
+        exponent: i64,
+    ) -> Value {
+        use arithmetic::ScaledValue;
+        // A difference of two u32 orders always has magnitude at most u32::MAX.
+        let power = ScaledValue::new(omega).powu(exponent.unsigned_abs() as u32);
+        let coefficient = ScaledValue::new(value);
+        let value = if exponent < 0 {
+            coefficient.divide(power)
+        } else {
+            coefficient.multiply(power)
+        };
+        value.multiply_binary64(scale)
     }
 
     /// One dynamic current Jacobian entry. REAL selects the matrix component;
@@ -5949,11 +5993,12 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 return;
             }
 
-            let derivative_scale = self.omega * derivative_scale;
+            let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+                .multiply(arithmetic::ScaledValue::new(derivative_scale));
             let width = cache.axis_count();
             let slots_ready = width != 0 && cache.slots.len() == width * width;
             for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -5977,7 +6022,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 .copied()
                 .zip(branch_derivatives.iter().copied())
             {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -6006,9 +6051,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         }
 
-        let derivative_scale = self.omega * derivative_scale;
+        let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+            .multiply(arithmetic::ScaledValue::new(derivative_scale));
         for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -6021,7 +6067,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             .copied()
             .zip(branch_derivatives.iter().copied())
         {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -6099,11 +6145,12 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 return;
             }
 
-            let derivative_scale = self.omega * derivative_scale;
+            let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+                .multiply(arithmetic::ScaledValue::new(derivative_scale));
             let width = cache.axis_count();
             let slots_ready = width != 0 && cache.slots.len() == width * width;
             for (node, derivative) in node_derivatives.iter().copied().enumerate() {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -6121,7 +6168,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 );
             }
             for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -6147,9 +6194,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         }
 
-        let derivative_scale = self.omega * derivative_scale;
+        let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+            .multiply(arithmetic::ScaledValue::new(derivative_scale));
         for (node, derivative) in node_derivatives.iter().copied().enumerate() {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -6158,7 +6206,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             }
         }
         for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -6186,11 +6234,12 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 return;
             }
 
-            let derivative_scale = self.omega * derivative_scale;
+            let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+                .multiply(arithmetic::ScaledValue::new(derivative_scale));
             let width = cache.axis_count();
             let slots_ready = width != 0 && cache.slots.len() == width * width;
             for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -6212,7 +6261,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 .copied()
                 .zip(branch_derivatives.iter().copied())
             {
-                let derivative = derivative_scale * derivative;
+                let derivative = derivative_scale.multiply_binary64(derivative);
                 if derivative == 0.0 {
                     continue;
                 }
@@ -6238,9 +6287,10 @@ impl<'a> GeneratedReactiveStamper<'a> {
             return;
         }
 
-        let derivative_scale = self.omega * derivative_scale;
+        let derivative_scale = arithmetic::ScaledValue::new(self.omega)
+            .multiply(arithmetic::ScaledValue::new(derivative_scale));
         for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -6253,7 +6303,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
             .copied()
             .zip(branch_derivatives.iter().copied())
         {
-            let derivative = derivative_scale * derivative;
+            let derivative = derivative_scale.multiply_binary64(derivative);
             if derivative == 0.0 {
                 continue;
             }
@@ -7847,6 +7897,144 @@ mod fixed_lane_tests {
         ] {
             assert_eq!(rspice_min(left, right).to_bits(), minimum.to_bits());
             assert_eq!(rspice_max(left, right).to_bits(), maximum.to_bits());
+        }
+    }
+
+    #[test]
+    fn frequency_coefficients_keep_multiplicity_inside_the_range_boundary() {
+        let structure = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&structure);
+        for (coefficient, scale, omega, ddt, idt, expected) in [
+            (1e200, 1e-200, 1e200, 1, 0, 1e200),
+            (1e-200, 1e200, 1e-200, 1, 0, 1e-200),
+            (1e200, 1e200, 1e-200, 1, 0, 1e200),
+            (1e-200, 1e-200, 1e200, 1, 0, 1e-200),
+            (1e200, 1e-300, 1e200, 2, 0, -1e300),
+            (1e-200, 1e300, 1e-200, 2, 0, -1e-300),
+            (1e200, 1e-200, 1e-200, 0, 1, -1e200),
+            (1e-200, 1e200, 1e200, 0, 1, -1e-200),
+            (2.0, 3.0, 1.0, u32::MAX, 0, -6.0),
+            (2.0, 3.0, 1.0, 0, u32::MAX, 6.0),
+        ] {
+            let ctx =
+                GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
+            let stamper = GeneratedReactiveStamper::new(&mut matrix, 1, omega);
+            let actual = stamper
+                .scaled_frequency_coefficient(&ctx, coefficient, scale, ddt, idt)
+                .expect("the fully scaled coefficient is finite");
+            assert!(
+                (actual / expected - 1.0).abs() <= 8.0 * f64::EPSILON,
+                "{coefficient} * {scale} * (j{omega})^({ddt}-{idt}): {actual} != {expected}"
+            );
+            assert!(!ctx.evaluation_failed());
+        }
+        for (scale, omega, ddt, idt) in [
+            (f64::NAN, 1.0, 1, 0),
+            (f64::INFINITY, 1.0, 1, 0),
+            (0.0, 0.0, 1, 1),
+            (1e200, 1e200, 2, 0),
+        ] {
+            let ctx =
+                GeneratedEvalContext::with_analysis(&[0.0], 300.15, 1, GeneratedAnalysisKind::Ac);
+            assert!(
+                GeneratedReactiveStamper::new(&mut matrix, 1, omega)
+                    .scaled_frequency_coefficient(&ctx, 1.0, scale, ddt, idt)
+                    .is_none()
+            );
+            assert!(matches!(
+                ctx.take_evaluation_error(),
+                Some(GeneratedEvaluationError::SmallSignal { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn reactive_dense_stamps_preserve_frequency_scale_range_for_every_mapping() {
+        let entries = (0..3)
+            .flat_map(|row| (0..3).map(move |col| (row, col, 0.0)))
+            .collect::<Vec<_>>();
+        let structure = StaticMatrix::from_triplets(3, 3, &entries).unwrap();
+        let nodes = [1, 2];
+        let branches = [1];
+        let mut cache = GeneratedStaticStampCache::default();
+        cache.link(&structure, &nodes, &branches, 2);
+        for (omega, scale, derivative, expected) in [
+            (1e200, 1e200, 1e-200, 1e200),
+            (1e-200, 1e-200, 1e200, 1e-200),
+            (1e200, 1e-200, 1e200, 1e200),
+            (1e-200, 1e200, 1e-200, 1e-200),
+            (1e200, 1e200, 0.0, 0.0),
+        ] {
+            for api in 0..3 {
+                for cached in [false, true] {
+                    let mut matrix = ComplexMatrix::from_real_structure(&structure);
+                    let mut stamper = match (api, cached) {
+                        (0, false) => GeneratedReactiveStamper::new(&mut matrix, 2, omega),
+                        (0, true) => GeneratedReactiveStamper::new_with_static_cache(
+                            &mut matrix,
+                            2,
+                            omega,
+                            &cache,
+                        ),
+                        (_, false) => GeneratedReactiveStamper::new_with_local_maps(
+                            &mut matrix,
+                            &nodes,
+                            &branches,
+                            2,
+                            omega,
+                        ),
+                        (_, true) => {
+                            GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+                                &mut matrix,
+                                &nodes,
+                                &branches,
+                                2,
+                                omega,
+                                &cache,
+                            )
+                        }
+                    };
+                    match api {
+                        0 => stamper.stamp_current_reactive_dense(
+                            Some(1),
+                            Some(2),
+                            &[1],
+                            &[derivative],
+                            &[1],
+                            &[-0.5 * derivative],
+                            scale,
+                        ),
+                        1 => stamper.stamp_current_reactive_dense_local(
+                            Some(0),
+                            Some(1),
+                            &[derivative, 0.0],
+                            &[-0.5 * derivative],
+                            scale,
+                        ),
+                        _ => stamper.stamp_current_reactive_indexed_dense_local(
+                            Some(0),
+                            Some(1),
+                            &[0],
+                            &[derivative],
+                            &[0],
+                            &[-0.5 * derivative],
+                            scale,
+                        ),
+                    }
+                    let values = matrix.to_dense_imag();
+                    for (row, col, sign) in [(0, 0, 1.0), (1, 0, -1.0), (0, 2, -0.5), (1, 2, 0.5)] {
+                        let actual = values[row][col];
+                        if expected == 0.0 {
+                            assert_eq!(actual, 0.0);
+                        } else {
+                            assert!(
+                                (actual / (sign * expected) - 1.0).abs() <= 8.0 * f64::EPSILON,
+                                "api={api}, cached={cached}: {values:?}, expected={expected}"
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 

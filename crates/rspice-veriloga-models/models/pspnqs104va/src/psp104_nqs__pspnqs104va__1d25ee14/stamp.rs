@@ -37429,575 +37429,575 @@ impl Instance {
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let multiplicity = self.multiplicity;
         let cached = &*self.canonical_reactive;
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[0], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[0], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[1], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[1], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[2], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[2], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[3], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[3], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[4], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[4], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[5], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[5], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[6], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[6], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[7], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[7], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[8], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[8], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[9], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[9], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[10], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[10], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[11], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[11], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[12], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[12], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(7, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[13], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[13], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[14], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[14], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[15], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[15], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[16], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[16], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[17], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[17], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[18], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[18], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[19], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[19], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[20], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[20], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[21], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[21], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[22], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[22], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[23], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[23], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[24], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[24], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[25], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[25], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(9, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[26], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[26], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[27], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[27], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[28], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[28], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[29], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[29], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[30], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[30], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[31], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[31], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[32], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[32], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[33], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[33], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[34], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[34], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[35], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[35], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[36], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[36], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[37], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[37], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[38], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[38], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(11, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[39], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[39], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[40], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[40], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[41], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[41], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[42], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[42], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[43], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[43], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[44], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[44], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[45], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[45], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[46], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[46], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[47], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[47], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[48], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[48], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[49], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[49], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[50], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[50], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[51], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[51], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(13, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[52], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[52], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[53], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[53], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[54], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[54], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[55], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[55], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[56], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[56], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[57], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[57], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[58], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[58], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[59], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[59], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[60], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[60], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[61], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[61], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[62], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[62], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[63], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[63], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[64], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[64], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(15, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[65], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[65], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[66], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[66], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[67], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[67], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[68], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[68], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[69], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[69], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[70], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[70], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[71], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[71], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[72], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[72], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[73], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[73], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[74], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[74], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[75], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[75], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[76], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[76], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[77], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[77], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(17, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[78], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[78], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[79], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[79], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[80], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[80], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[81], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[81], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[82], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[82], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[83], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[83], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[84], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[84], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[85], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[85], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[86], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[86], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[87], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[87], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[88], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[88], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[89], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[89], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[90], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[90], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(19, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[91], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[91], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[92], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[92], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[93], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[93], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[94], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[94], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[95], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[95], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[96], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[96], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[97], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[97], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[98], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[98], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[99], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[99], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[100], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[100], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[101], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[101], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[102], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[102], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[103], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[103], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(21, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[104], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[104], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[105], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[105], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[106], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[106], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[107], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[107], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[108], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[108], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[109], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[109], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[110], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[110], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[111], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[111], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[112], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[112], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[113], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[113], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[114], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[114], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[115], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[115], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[116], 0, 1) {
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[116], 1.0, 0, 1) {
             stamper.stamp_potential_frequency_local::<false>(23, GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[117], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[117], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[118], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[118], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[119], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[119], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[120], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[120], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[121], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(12, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[121], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[122], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(13, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[122], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[123], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(14, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[123], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[124], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(15, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[124], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[125], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(16, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[125], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[126], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(17, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[126], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[127], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(18, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[127], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[128], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(19, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[128], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[129], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(20, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[129], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[130], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[130], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[131], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[131], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[132], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[132], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[133], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[133], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[134], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(12, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[134], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[135], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(13, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[135], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[136], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(14, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[136], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[137], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(15, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[137], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[138], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(16, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[138], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[139], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(17, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[139], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[140], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(18, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[140], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[141], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(19, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[141], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[142], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(20, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[142], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(8), Some(6), GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[143], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[143], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[144], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[144], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[145], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[145], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[146], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[146], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[147], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(12, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[147], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(12, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[148], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(13, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[148], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(13, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[149], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(14, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[149], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(14, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[150], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(15, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[150], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(15, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[151], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(16, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[151], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(16, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[152], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(17, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[152], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(17, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[153], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(18, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[153], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(18, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[154], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(19, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[154], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(19, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[155], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(20, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[155], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(20, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[156], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[156], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[157], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[157], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[158], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[158], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[159], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[159], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[160], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[160], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[161], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[161], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[162], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[162], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[163], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[163], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(8), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[164], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(10), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[164], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(10), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[165], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(10), Some(6), GeneratedDerivative::node(10, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[165], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(10), Some(6), GeneratedDerivative::node(10, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[166], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[166], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[167], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[167], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[168], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(10, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[168], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(10, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[169], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(11, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[169], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(11), Some(7), GeneratedDerivative::node(11, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[170], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(4, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[170], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(4, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[171], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[171], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[172], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[172], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[173], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[173], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[174], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[174], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(4), None, GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[175], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(4, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[175], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(4, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[176], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[176], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[177], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[177], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[178], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[178], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[179], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[179], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(6), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[180], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(4, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[180], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(4, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[181], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[181], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[182], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[182], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[183], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[183], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[184], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[184], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(5), Some(7), GeneratedDerivative::node(8, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[185], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(4, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[185], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(4, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[186], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(5, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[186], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(5, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[187], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(6, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[187], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(6, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[188], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(7, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[188], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(7, value));
         }
-        if let Some(value) = stamper.frequency_coefficient(ctx, cached[189], 1, 0) {
-            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(8, multiplicity * value));
+        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[189], multiplicity, 1, 0) {
+            stamper.stamp_current_frequency_local::<false>(Some(7), Some(6), GeneratedDerivative::node(8, value));
         }
     }
 

@@ -2958,16 +2958,21 @@ impl ModelPlan {
                 ("branch", entry.unknown - self.node_count)
             };
             let real = (entry.power.ddt % 2) == (entry.power.idt % 2);
+            let scale = if matches!(row.kind, MirEquationKind::Current) {
+                "multiplicity"
+            } else {
+                "1.0"
+            };
             let _ = writeln!(
                 out,
-                "        if let Some(value) = stamper.frequency_coefficient(ctx, cached[{at}], {}, {}) {{",
+                "        if let Some(value) = stamper.scaled_frequency_coefficient(ctx, cached[{at}], {scale}, {}, {}) {{",
                 entry.power.ddt, entry.power.idt
             );
             match row.kind {
                 MirEquationKind::Current => {
                     let _ = writeln!(
                         out,
-                        "            stamper.stamp_current_frequency_local::<{real}>({}, {}, GeneratedDerivative::{axis}({unknown}, multiplicity * value));",
+                        "            stamper.stamp_current_frequency_local::<{real}>({}, {}, GeneratedDerivative::{axis}({unknown}, value));",
                         optional_node(row.pos),
                         optional_node(row.neg)
                     );

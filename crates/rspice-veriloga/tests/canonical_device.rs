@@ -1025,6 +1025,31 @@ assert!(!device::state::Instance::ONE_STEP_DAE_SPLIT_SAFE);
 }
 
 #[test]
+fn generated_dynamic_coefficients_apply_multiplicity_before_range_conversion() {
+    let (state, stamp, noise) = generated_parts(
+        "module scaled_dynamic(p,n); inout p,n; electrical p,n; parameter real gain=1.0; analog I(p,n)<+gain*sin(ddt(V(p,n))); endmodule",
+        "scaled dynamic coefficient",
+    );
+    run_generated_main("scaled dynamic coefficient", &state, &stamp, &noise, r#"
+runtime::set_dynamic_operators_enabled(false);
+for (gain, scale, w) in [(1e200_f64, 1e-200, 1e200_f64), (1e-200, 1e200, 1e-200)] {
+    let mut instance = device::state::Instance::new(&[0,1]);
+    instance.set_parameter("gain", gain).unwrap();
+    instance.set_multiplicity(scale).unwrap();
+    instance.finalize_parameters().unwrap();
+    let ctx = runtime::GeneratedEvalContext { voltages: &[0.5,0.0], temperature: 300.15 };
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper::default());
+    runtime::FREQUENCY_OMEGA.store(w.to_bits(), std::sync::atomic::Ordering::SeqCst);
+    let mut response = [0.0;6];
+    instance.stamp_reactive(&ctx, &mut runtime::GeneratedReactiveStamper { sink: Some(&mut response) });
+    assert!((response[0]/w - 1.0).abs() <= 8.0*f64::EPSILON, "{gain}, {scale}, {w}: {response:?}");
+    assert_eq!(response[3], 0.0);
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report| panic!("scaled dynamic coefficient: {report}"));
+}
+
+#[test]
 fn generated_dynamic_coefficients_follow_loop_and_branch_merges() {
     for (index, (body, expected)) in [
         ("real x,y; integer k; analog begin x=ddt(V(p,n)); y=0; for(k=0;k<3;k=k+1) y=y+(k+1)*sin(x); I(p,n)<+y; end", "6.0*w"),
@@ -6150,14 +6175,14 @@ pub mod runtime {
     }
 
     impl GeneratedReactiveStamper<'_> {
-        pub fn frequency_coefficient(&self, ctx: &GeneratedEvalContext<'_>, coefficient: Value, ddt: u32, idt: u32) -> Option<Value> {
+        pub fn scaled_frequency_coefficient(&self, ctx: &GeneratedEvalContext<'_>, coefficient: Value, scale: Value, ddt: u32, idt: u32) -> Option<Value> {
             let omega = f64::from_bits(FREQUENCY_OMEGA.load(std::sync::atomic::Ordering::SeqCst));
             if !omega.is_finite() || omega < 0.0 || (omega == 0.0 && idt > 0) {
                 ctx.report_initialization_error(0);
                 return None;
             }
             let power = ddt as i32 - idt as i32;
-            let value = coefficient * omega.powi(power);
+            let value = (coefficient * scale) * omega.powi(power);
             Some(if power.rem_euclid(4) >= 2 { -value } else { value })
         }
 

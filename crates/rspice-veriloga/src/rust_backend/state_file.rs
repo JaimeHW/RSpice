@@ -1554,9 +1554,9 @@ fn finalize_checkpoint_identity_with_compatibility(
     Ok(())
 }
 
-// Version 9 resolves simulator queries from the runtime environment, including
-// parameter defaults, selected fallbacks and their derivatives.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 9;
+// Version 10 composes frequency response and instance multiplicity before
+// converting reactive coefficients to the matrix's binary64 representation.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 10;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

@@ -1,6 +1,7 @@
 //! Range-protected complex arithmetic shared by filters and AC evaluation.
 
 use num_complex::Complex64;
+use rspice_veriloga_runtime::arithmetic::ScaledValue as Component;
 use rspice_veriloga_runtime::arithmetic::{ArithmeticError, sum_products, sum_products_ratio};
 
 fn ordinary_product_sum(pairs: [(f64, f64); 2]) -> Option<f64> {
@@ -89,189 +90,6 @@ pub(crate) fn divide_complex(left: Complex64, right: Complex64) -> Complex64 {
     Complex64::new(quotient(real), quotient(imaginary))
 }
 
-/// A binary64 significand with a separate exponent for AC intermediates.
-/// Values in the normal binary64 range retain their ordinary representation.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Component {
-    value: f64,
-    exponent: i64,
-}
-
-impl Component {
-    #[inline]
-    fn new(value: f64) -> Self {
-        Self { value, exponent: 0 }
-    }
-
-    fn normalized(self) -> (f64, i64) {
-        if self.value == 0.0 || !self.value.is_finite() {
-            return (self.value, 0);
-        }
-        let (value, adjustment) = if self.value.is_subnormal() {
-            (self.value * 18014398509481984.0, -54)
-        } else {
-            (self.value, 0)
-        };
-        let bits = value.to_bits();
-        let exponent = ((bits >> 52) & 0x7ff) as i64 - 1023 + adjustment;
-        let significand = f64::from_bits((bits & 0x800f_ffff_ffff_ffff) | (1023_u64 << 52));
-        match self.exponent.checked_add(exponent) {
-            Some(exponent) => (significand, exponent),
-            None => (f64::NAN, 0),
-        }
-    }
-
-    fn scaled(value: f64, exponent: i64) -> Self {
-        let (value, exponent) = Self { value, exponent }.normalized();
-        if value == 0.0 || !value.is_finite() {
-            return Self::new(value);
-        }
-        if (-1022..=1023).contains(&exponent) {
-            return Self::new(value * f64::from_bits(((exponent + 1023) as u64) << 52));
-        }
-        Self { value, exponent }
-    }
-
-    #[inline]
-    fn binary64(self) -> f64 {
-        if self.exponent == 0 || self.value == 0.0 || !self.value.is_finite() {
-            return self.value;
-        }
-        let (value, exponent) = self.normalized();
-        if exponent > 1023 {
-            return f64::INFINITY.copysign(value);
-        }
-        if exponent < -1075 {
-            return 0.0_f64.copysign(value);
-        }
-        if exponent < -1022 {
-            // The first product is exact; only the final subnormal conversion
-            // rounds, including the half-minimum tie at exponent -1075.
-            return (value * f64::MIN_POSITIVE)
-                * f64::from_bits(((exponent + 1022 + 1023) as u64) << 52);
-        }
-        value * f64::from_bits(((exponent + 1023) as u64) << 52)
-    }
-
-    #[inline]
-    fn neg(self) -> Self {
-        Self {
-            value: -self.value,
-            ..self
-        }
-    }
-
-    #[inline]
-    fn add(self, other: Self) -> Self {
-        if self.exponent == 0 && other.exponent == 0 {
-            let sum = self.value + other.value;
-            if sum.is_finite() || !self.value.is_finite() || !other.value.is_finite() {
-                return Self::new(sum);
-            }
-        }
-        Self::product_sum(self, Self::new(1.0), other, Self::new(1.0))
-    }
-
-    #[inline]
-    fn mul(self, other: Self) -> Self {
-        if self.exponent == 0 && other.exponent == 0 {
-            let product = self.value * other.value;
-            if product.is_normal()
-                || self.value == 0.0
-                || other.value == 0.0
-                || !self.value.is_finite()
-                || !other.value.is_finite()
-            {
-                return Self::new(product);
-            }
-        }
-        let (a, ae) = self.normalized();
-        let (b, be) = other.normalized();
-        match ae.checked_add(be) {
-            Some(exponent) => Self::scaled(a * b, exponent),
-            None => Self::new(f64::NAN),
-        }
-    }
-
-    #[inline]
-    fn div(self, other: Self) -> Self {
-        if self.exponent == 0 && other.exponent == 0 {
-            let quotient = self.value / other.value;
-            if quotient.is_normal()
-                || self.value == 0.0
-                || other.value == 0.0
-                || !self.value.is_finite()
-                || !other.value.is_finite()
-            {
-                return Self::new(quotient);
-            }
-        }
-        let (a, ae) = self.normalized();
-        let (b, be) = other.normalized();
-        match ae.checked_sub(be) {
-            Some(exponent) => Self::scaled(a / b, exponent),
-            None => Self::new(f64::NAN),
-        }
-    }
-
-    #[inline]
-    fn product_sum(a: Self, b: Self, c: Self, d: Self) -> Self {
-        if (a.exponent | b.exponent | c.exponent | d.exponent) == 0 {
-            if let Some(value) = ordinary_product_sum([(a.value, b.value), (c.value, d.value)]) {
-                return Self::new(value);
-            }
-        }
-        Self::wide_product_sum(a, b, c, d)
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn wide_product_sum(a: Self, b: Self, c: Self, d: Self) -> Self {
-        if [a, b, c, d].iter().any(|x| !x.value.is_finite()) {
-            return Self::new(a.binary64() * b.binary64() + c.binary64() * d.binary64());
-        }
-        let (a, ae) = a.normalized();
-        let (b, be) = b.normalized();
-        let (c, ce) = c.normalized();
-        let (d, de) = d.normalized();
-        let (Some(ab), Some(cd)) = (ae.checked_add(be), ce.checked_add(de)) else {
-            return Self::new(f64::NAN);
-        };
-        let common = if a == 0.0 || b == 0.0 {
-            cd
-        } else if c == 0.0 || d == 0.0 {
-            ab
-        } else {
-            ab.max(cd)
-        };
-        let align = |value: f64, exponent: i64| {
-            if value == 0.0 {
-                return value;
-            }
-            let shift = exponent.saturating_sub(common);
-            if shift < -1074 {
-                0.0_f64.copysign(value)
-            } else if shift < -1022 {
-                value * f64::from_bits(1_u64 << (shift + 1074))
-            } else {
-                value * f64::from_bits(((shift + 1023) as u64) << 52)
-            }
-        };
-        let first = if a == 0.0 || b == 0.0 {
-            (a * b, 1.0)
-        } else {
-            (align(a, ab), b)
-        };
-        let second = if c == 0.0 || d == 0.0 {
-            (c * d, 1.0)
-        } else {
-            (align(c, cd), d)
-        };
-        let value = arithmetic_value(sum_products([first, second].into_iter()));
-        Self::scaled(value, common)
-    }
-}
-
 /// Complex AC value whose components can cross binary64 range boundaries
 /// independently. Conversion is deferred across arithmetic and assignments.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -301,17 +119,17 @@ impl FrequencyValue {
 
     #[inline]
     pub(crate) fn is_real(self) -> bool {
-        self.imaginary.value == 0.0
+        self.imaginary.is_zero()
     }
 
     #[inline]
     pub(crate) fn is_finite(self) -> bool {
-        self.real.value.is_finite() && self.imaginary.value.is_finite()
+        self.real.is_finite() && self.imaginary.is_finite()
     }
 
     #[inline]
     pub(crate) fn has_regular_components(self) -> bool {
-        (self.real.exponent | self.imaginary.exponent) == 0
+        self.real.is_regular() && self.imaginary.is_regular()
     }
 
     #[inline]
@@ -325,8 +143,8 @@ impl FrequencyValue {
     #[inline]
     pub(crate) fn multiply(self, other: Self) -> Self {
         if self.has_regular_components() && other.has_regular_components() {
-            let a = Complex64::new(self.real.value, self.imaginary.value);
-            let b = Complex64::new(other.real.value, other.imaginary.value);
+            let a = Complex64::new(self.real.binary64(), self.imaginary.binary64());
+            let b = Complex64::new(other.real.binary64(), other.imaginary.binary64());
             let value = multiply_complex(a, b);
             if Self::regular_result(value, a, b) {
                 return Self::from_complex(value);
@@ -342,7 +160,7 @@ impl FrequencyValue {
             real: Component::product_sum(
                 self.real,
                 other.real,
-                self.imaginary.neg(),
+                self.imaginary.negated(),
                 other.imaginary,
             ),
             imaginary: Component::product_sum(
@@ -357,8 +175,8 @@ impl FrequencyValue {
     #[inline]
     pub(crate) fn divide(self, other: Self) -> Self {
         if self.has_regular_components() && other.has_regular_components() {
-            let a = Complex64::new(self.real.value, self.imaginary.value);
-            let b = Complex64::new(other.real.value, other.imaginary.value);
+            let a = Complex64::new(self.real.binary64(), self.imaginary.binary64());
+            let b = Complex64::new(other.real.binary64(), other.imaginary.binary64());
             let value = divide_complex(a, b);
             if Self::regular_result(value, a, b) {
                 return Self::from_complex(value);
@@ -372,34 +190,34 @@ impl FrequencyValue {
     fn divide_wide(self, other: Self) -> Self {
         if !self.is_finite()
             || !other.is_finite()
-            || (other.real.value == 0.0 && other.imaginary.value == 0.0)
+            || (other.real.is_zero() && other.imaginary.is_zero())
         {
             return Self::from_complex(divide_complex(self.binary64(), other.binary64()));
         }
-        if other.imaginary.value == 0.0 {
+        if other.imaginary.is_zero() {
             return Self {
-                real: self.real.div(other.real),
-                imaginary: self.imaginary.div(other.real),
+                real: self.real.divide(other.real),
+                imaginary: self.imaginary.divide(other.real),
             };
         }
-        if other.real.value == 0.0 {
+        if other.real.is_zero() {
             return Self {
-                real: self.imaginary.div(other.imaginary),
-                imaginary: self.real.neg().div(other.imaginary),
+                real: self.imaginary.divide(other.imaginary),
+                imaginary: self.real.negated().divide(other.imaginary),
             };
         }
         let denominator =
             Component::product_sum(other.real, other.real, other.imaginary, other.imaginary);
         Self {
             real: Component::product_sum(self.real, other.real, self.imaginary, other.imaginary)
-                .div(denominator),
+                .divide(denominator),
             imaginary: Component::product_sum(
                 self.imaginary,
                 other.real,
-                self.real.neg(),
+                self.real.negated(),
                 other.imaginary,
             )
-            .div(denominator),
+            .divide(denominator),
         }
     }
 }
@@ -409,8 +227,8 @@ impl std::ops::Neg for FrequencyValue {
     #[inline]
     fn neg(self) -> Self {
         Self {
-            real: self.real.neg(),
-            imaginary: self.imaginary.neg(),
+            real: self.real.negated(),
+            imaginary: self.imaginary.negated(),
         }
     }
 }
@@ -420,8 +238,8 @@ impl std::ops::Add for FrequencyValue {
     #[inline]
     fn add(self, other: Self) -> Self {
         Self {
-            real: self.real.add(other.real),
-            imaginary: self.imaginary.add(other.imaginary),
+            real: self.real.plus(other.real),
+            imaginary: self.imaginary.plus(other.imaginary),
         }
     }
 }
@@ -442,8 +260,8 @@ impl std::ops::Mul<f64> for FrequencyValue {
             return self;
         }
         Self {
-            real: self.real.mul(Component::new(other)),
-            imaginary: self.imaginary.mul(Component::new(other)),
+            real: self.real.multiply(Component::new(other)),
+            imaginary: self.imaginary.multiply(Component::new(other)),
         }
     }
 }

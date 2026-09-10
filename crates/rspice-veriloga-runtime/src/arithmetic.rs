@@ -2,6 +2,10 @@
 //! Shared by sampled filters and derivative evaluation; intermediate products
 //! may exceed the binary64 range without discarding a finite final result.
 
+mod scaled;
+#[doc(hidden)]
+pub use scaled::ScaledValue;
+
 /// Failure to evaluate or represent an arithmetic result as a finite binary64 value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArithmeticError {
