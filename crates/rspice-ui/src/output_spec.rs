@@ -1,7 +1,7 @@
 //! Shared output specification parsing/evaluation helpers.
 //!
-//! These helpers are used by both the legacy services simulation runner and
-//! the engine bridge path to keep sensitivity/output behavior identical.
+//! The engine bridge resolves voltage and branch-current probes here.
+//! Parameter replay and sensitivity arithmetic belong to rspice-core.
 
 use num_complex::Complex64;
 use rspice_core::Value;
@@ -45,29 +45,6 @@ fn parse_ascii_function_call<'a>(input: &'a str, prefix: &str) -> Option<&'a str
 #[inline]
 pub(crate) fn is_branch_current_output(output_var: &str) -> bool {
     parse_branch_current_name(output_var).is_some()
-}
-
-pub(crate) const SENSITIVITY_RELATIVE_PERTURBATION: Value = 0.01;
-pub(crate) const SENSITIVITY_MIN_DELTA: Value = 1e-12;
-pub(crate) const SENSITIVITY_NORMALIZATION_EPSILON: Value = 1e-15;
-
-#[inline]
-pub(crate) fn sensitivity_delta(param_value: Value) -> Value {
-    (param_value.abs() * SENSITIVITY_RELATIVE_PERTURBATION).max(SENSITIVITY_MIN_DELTA)
-}
-
-#[inline]
-pub(crate) fn normalized_sensitivity(
-    raw_sensitivity: Value,
-    param_value: Value,
-    nominal_output: Value,
-) -> Option<Value> {
-    if nominal_output.abs() > SENSITIVITY_NORMALIZATION_EPSILON {
-        let normalized = (param_value / nominal_output) * raw_sensitivity;
-        normalized.is_finite().then_some(normalized)
-    } else {
-        None
-    }
 }
 
 pub(crate) fn collect_sensitivity_parameters(
@@ -348,87 +325,4 @@ mod tests {
             Some(OutputVoltageSpec { pos: 1, neg: None })
         );
     }
-}
-
-/// What the shared finite-difference driver can reject, for a caller to map
-/// into its own error type.
-///
-/// The driver cannot construct `ServiceRunError` or `SimulationError` — they
-/// live above this layer — so it names the condition and lets the caller
-/// phrase it. The `Display` strings are the ones both callers used before this
-/// was shared, and both still produce them verbatim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SensitivityMathError {
-    /// The abort signal fired.
-    Aborted,
-    /// The parameter being swept is not a finite number.
-    NonFiniteParameter,
-    /// A perturbed evaluation returned a non-finite output.
-    NonFinitePerturbation,
-    /// The central difference itself is non-finite.
-    NonFiniteDerivative,
-}
-
-impl SensitivityMathError {
-    /// The exact message each condition carried before the two copies were
-    /// merged. Changing one of these changes what the user reads.
-    pub(crate) fn message(self) -> &'static str {
-        match self {
-            Self::Aborted => "Sensitivity run was aborted",
-            Self::NonFiniteParameter => "Sensitivity parameter value must be finite",
-            Self::NonFinitePerturbation => "Sensitivity perturbation produced non-finite outputs",
-            Self::NonFiniteDerivative => "Sensitivity finite-difference derivative is non-finite",
-        }
-    }
-}
-
-/// Central-difference derivative of `evaluate_output` at `param_value`.
-///
-/// This was implemented twice -- once in `services::simulation_runner` and
-/// once in `simulation::engine_bridge` -- identically down to the message
-/// strings, differing only in error type. Nothing kept the two in step, and
-/// they had already diverged by one abort poll.
-///
-/// The abort signal is polled before the first evaluation, between the two
-/// perturbations, and again before the derivative is returned, so a
-/// cancellation cannot be swallowed by an in-flight engine call.
-pub(crate) fn finite_difference_derivative<E, F>(
-    param_value: Value,
-    abort: &dyn rspice_core::abort_signal::AbortSignal,
-    mut evaluate_output: F,
-) -> Result<Value, E>
-where
-    F: FnMut(Value) -> Result<Value, E>,
-    E: From<SensitivityMathError>,
-{
-    let aborted = |abort: &dyn rspice_core::abort_signal::AbortSignal| abort.is_aborted();
-
-    if aborted(abort) {
-        return Err(SensitivityMathError::Aborted.into());
-    }
-    if !param_value.is_finite() {
-        return Err(SensitivityMathError::NonFiniteParameter.into());
-    }
-
-    let delta = sensitivity_delta(param_value);
-    let plus = evaluate_output(param_value + delta)?;
-    if aborted(abort) {
-        return Err(SensitivityMathError::Aborted.into());
-    }
-    let minus = evaluate_output(param_value - delta)?;
-    if aborted(abort) {
-        return Err(SensitivityMathError::Aborted.into());
-    }
-    if !plus.is_finite() || !minus.is_finite() {
-        return Err(SensitivityMathError::NonFinitePerturbation.into());
-    }
-
-    let derivative = (plus - minus) / (2.0 * delta);
-    if !derivative.is_finite() {
-        return Err(SensitivityMathError::NonFiniteDerivative.into());
-    }
-    if aborted(abort) {
-        return Err(SensitivityMathError::Aborted.into());
-    }
-    Ok(derivative)
 }
