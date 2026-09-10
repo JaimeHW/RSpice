@@ -26,6 +26,12 @@ pub(crate) fn independent_source_card(
     node_names: [&str; 2],
     instance_name: &str,
 ) -> Result<String, Vec<String>> {
+    crate::state::params_string::validate_parameter_text(&component.params).map_err(|error| {
+        vec![format!(
+            "{}: invalid parameter text: {error}",
+            component.name
+        )]
+    })?;
     let schematic = SchematicState::default();
     let mut generator = NetlistGenerator::new(&schematic);
     let nodes = [node_names[0].to_owned(), node_names[1].to_owned()];
@@ -41,6 +47,20 @@ pub(crate) fn independent_source_card(
 }
 
 impl<'a> NetlistGenerator<'a> {
+    pub(super) fn validate_instance_parameters(&mut self) -> bool {
+        for component in &self.schematic.components {
+            if let Err(error) =
+                crate::state::params_string::validate_parameter_text(&component.params)
+            {
+                self.errors.push(format!(
+                    "{}: invalid parameter text: {error}",
+                    component.name
+                ));
+            }
+        }
+        self.errors.is_empty()
+    }
+
     pub(super) fn generate_instances(&mut self) {
         self.lines.push("* Circuit netlist".to_string());
 

@@ -89,8 +89,23 @@ fn parse_entry(input: &str, start: usize) -> Result<(ParameterEntry<'_>, usize),
             .take_while(|ch| ch.is_whitespace())
             .map(char::len_utf8)
             .sum::<usize>();
-    if value_start == input.len() || input[value_start..].starts_with(',') {
-        return Err(format!("Parameter '{key}' has no value."));
+    let followed_by_assignment = value_start > equals + 1
+        && input[value_start..].find('=').is_some_and(|index| {
+            let tail = &input[value_start..];
+            !tail[index + 1..].starts_with('=')
+                && !tail[..index].ends_with(['<', '>', '!', '='])
+                && valid_parameter_name(tail[..index].trim_end())
+        });
+    if value_start == input.len() || input[value_start..].starts_with(',') || followed_by_assignment
+    {
+        return Ok((
+            ParameterEntry {
+                raw: &input[start..equals + 1],
+                key,
+                value: Some(""),
+            },
+            equals + 1,
+        ));
     }
     let end =
         value_end(input, value_start).map_err(|error| format!("Parameter '{key}': {error}"))?;
@@ -159,8 +174,23 @@ pub(crate) fn valid_parameter_name(name: &str) -> bool {
     let Some(first) = bytes.next() else {
         return false;
     };
-    (first.is_ascii_alphabetic() || first == b'_')
+    if (first.is_ascii_alphabetic() || first == b'_')
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return true;
+    }
+    if name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
+        return false;
+    }
+    // Keep the common CDF names allocation-free; extended names follow the
+    // engine's identifier grammar, rather than a narrower UI-only alphabet.
+    rspice_core::netlist::lexer::tokenize(name).is_ok_and(|tokens| {
+        tokens.len() == 2
+            && matches!(
+                tokens[0].kind,
+                rspice_core::netlist::lexer::TokenKind::Ident(_)
+            )
+    })
 }
 
 /// Lookup view of complete assignments. Keys are case-insensitive and the
@@ -176,7 +206,9 @@ pub fn parse_params_string(params: &str) -> HashMap<String, String> {
         let value = entry
             .value
             .map_or_else(|| "1".to_owned(), decode_parameter_value);
-        if !value.is_empty() {
+        if value.is_empty() {
+            result.remove(&entry.key.to_lowercase());
+        } else {
             result.insert(entry.key.to_lowercase(), value);
         }
     }
@@ -412,8 +444,6 @@ mod tests {
             r#"good=1 note="a\""#,
             "good=1 expr={a + b",
             "good=1 list=[1 2)",
-            "good=1 note=",
-            "good=1 note=, next=2",
             "good=1 note='a'b",
             "good=1 =2",
         ] {
@@ -436,5 +466,38 @@ mod tests {
     #[test]
     fn arithmetic_after_parentheses_remains_part_of_the_expression_value() {
         assert_eq!(parse_params_string("expr=(a+b)*2 w=2u")["expr"], "(a+b)*2");
+    }
+
+    #[test]
+    fn empty_overrides_do_not_consume_the_next_assignment_or_become_flags() {
+        let params = "file=wave.csv td=0 r= tscale=1 vscale=1 toffset=0 voffset=0 tail=";
+        validate_parameter_text(params).unwrap();
+        let parsed = parse_params_string(params);
+        assert!(!parsed.contains_key("r"));
+        assert!(!parsed.contains_key("tail"));
+        assert_eq!(parsed["tscale"], "1");
+        assert_eq!(
+            parse_params_string("note= , other=2"),
+            HashMap::from([("other".to_owned(), "2".to_owned())])
+        );
+        assert!(parse_params_string("m=2 m=").is_empty());
+        for expression in ["a==b", "a!=b", "a<=b", "a>=b", "(a+b)*2"] {
+            assert_eq!(
+                parse_params_string(&format!("expr= {expression} next=2"))["expr"],
+                expression
+            );
+        }
+    }
+
+    #[test]
+    fn extended_parameter_names_follow_the_engine_identifier_grammar() {
+        for key in ["model.corner", "scope:gain"] {
+            let text = set_parameter_value("w=1", key, "2").unwrap();
+            validate_parameter_text(&text).unwrap();
+            assert_eq!(parse_params_string(&text)[key], "2");
+        }
+        for key in ["", "x y", "a=b", "\"quoted\"", "1.0"] {
+            assert!(!valid_parameter_name(key), "{key}");
+        }
     }
 }

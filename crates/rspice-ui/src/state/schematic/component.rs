@@ -671,19 +671,27 @@ impl Component {
     /// their own `m` parameter untouched — there it really is a device
     /// parameter on the card.
     pub fn adopt_params_multiplicity(&mut self) {
-        if self.kind != ComponentType::CellInstance {
+        if self.kind != ComponentType::CellInstance || self.multiplicity.is_some() {
             return;
         }
-        let mut params = crate::state::parse_params_string(&self.params);
+        if crate::state::params_string::validate_parameter_text(&self.params).is_err() {
+            return;
+        }
+        let params = crate::state::parse_params_string(&self.params);
         let Some(authored) = params.get(InstanceMultiplicity::PARAMETER_NAME) else {
             return;
         };
         let Ok(multiplicity) = InstanceMultiplicity::parse(authored) else {
             return;
         };
-        self.multiplicity = Some(multiplicity);
-        params.remove(InstanceMultiplicity::PARAMETER_NAME);
-        self.params = crate::state::format_params_string(&params);
+        if let Ok(updated) = crate::state::params_string::set_parameter_value(
+            &self.params,
+            InstanceMultiplicity::PARAMETER_NAME,
+            "",
+        ) {
+            self.multiplicity = Some(multiplicity);
+            self.params = updated;
+        }
     }
 
     /// Rename a source parameter this app once spelled differently from the
@@ -705,14 +713,29 @@ impl Component {
         ) {
             return;
         }
-        let mut params = crate::state::parse_params_string(&self.params);
-        let Some(modulating) = params.remove("fs") else {
+        if crate::state::params_string::validate_parameter_text(&self.params).is_err() {
             return;
-        };
+        }
+        let params = crate::state::parse_params_string(&self.params);
+        if !params.contains_key("fs") {
+            return;
+        }
         // An explicit `fm=` wins: it is the current spelling, and a document
         // carrying both was written by something that already knew the new one.
-        params.entry("fm".to_owned()).or_insert(modulating);
-        self.params = crate::state::format_params_string(&params);
+        let mut parts = Vec::new();
+        for entry in crate::state::params_string::parameter_entries(&self.params) {
+            let Ok(entry) = entry else {
+                return;
+            };
+            if entry.key.eq_ignore_ascii_case("fs") {
+                if !params.contains_key("fm") {
+                    parts.push(format!("fm{}", &entry.raw[entry.key.len()..]));
+                }
+            } else {
+                parts.push(entry.raw.to_owned());
+            }
+        }
+        self.params = parts.join(" ");
     }
 
     /// Create a component with name and value
@@ -1499,6 +1522,42 @@ mod tests {
         let decoded: Component = ron::from_str(&encoded).expect("deserialize");
         assert!(decoded.stimulus_provenance.is_none());
         assert_eq!(decoded, source);
+    }
+
+    #[test]
+    fn legacy_parameter_migrations_preserve_invalid_text_and_existing_typed_multiplicity() {
+        for (kind, params) in [
+            (ComponentType::CellInstance, "m=2 note='unterminated"),
+            (ComponentType::CellInstance, "m=2 M=3"),
+            (ComponentType::VoltageSourceSffm, "fs=1k note='unterminated"),
+            (ComponentType::VoltageSourceSffm, "fs=1k FS=2k"),
+        ] {
+            let mut component = Component::new(1, kind, Point::origin());
+            component.params = params.to_owned();
+            let decoded: Component =
+                ron::from_str(&ron::ser::to_string(&component).unwrap()).unwrap();
+            assert_eq!(decoded.params, params);
+            assert!(decoded.multiplicity.is_none());
+        }
+        let mut component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        component.params = "m=2".to_owned();
+        component.multiplicity = Some(InstanceMultiplicity::parse("3").unwrap());
+        let decoded: Component =
+            serde_json::from_str(&serde_json::to_string(&component).unwrap()).unwrap();
+        assert_eq!(decoded, component);
+    }
+
+    #[test]
+    fn valid_parameter_migrations_preserve_raw_neighbors() {
+        let mut instance = Component::new(1, ComponentType::CellInstance, Point::origin());
+        instance.params = r#"note="a  b" m=2 off expr={a + f(b,c)}"#.to_owned();
+        let decoded: Component = ron::from_str(&ron::ser::to_string(&instance).unwrap()).unwrap();
+        assert_eq!(decoded.params, r#"note="a  b" off expr={a + f(b,c)}"#);
+        assert_eq!(decoded.multiplicity.unwrap().value(), 2.0);
+        let mut source = Component::new(2, ComponentType::VoltageSourceSffm, Point::origin());
+        source.params = r#"note="a  b" fs=1k path='C:\my data'"#.to_owned();
+        let decoded: Component = ron::from_str(&ron::ser::to_string(&source).unwrap()).unwrap();
+        assert_eq!(decoded.params, r#"note="a  b" fm=1k path='C:\my data'"#);
     }
 
     #[test]

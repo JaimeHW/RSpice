@@ -156,6 +156,7 @@ pub(crate) fn bind_component_model_from_catalog(
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
+    app.state.commit_inline_component_edit()?;
     validate_component_model_catalog_binding(&app.state, component_id, library_name, model_name)?;
     let component = app
         .state
@@ -191,32 +192,19 @@ pub(crate) fn bind_component_model_from_catalog(
         ));
     }
 
-    let mut params = crate::state::parse_params_string(&component.params);
-    let model_unchanged = params
-        .get("model")
-        .is_some_and(|current| current.eq_ignore_ascii_case(model_name));
-    let provider_unchanged = params
-        .get("model_library")
-        .is_some_and(|current| current.eq_ignore_ascii_case(&effective.library));
-    if model_unchanged && provider_unchanged {
-        return Ok(());
-    }
-    let before = crate::state::SchematicSnapshot::capture(&app.state.schematic);
-    let target = app
-        .state
-        .schematic
-        .components
-        .iter_mut()
-        .find(|candidate| candidate.id == component_id)
-        .expect("the selected component was resolved above");
-    params.insert("model".to_owned(), model_name.to_owned());
-    params.insert("model_library".to_owned(), effective.library);
-    target.params = crate::state::format_params_string(&params);
-    app.state.schematic.is_dirty = true;
-    app.state.schematic.bump_topology_version();
+    let params =
+        crate::state::params_string::set_parameter_value(&component.params, "model", model_name)
+            .and_then(|text| {
+                crate::state::params_string::set_parameter_value(
+                    &text,
+                    "model_library",
+                    &effective.library,
+                )
+            })?;
+    let mut candidate = component.clone();
+    candidate.params = params;
     app.state
-        .schematic
-        .commit_undo_from(before, "bind instance model");
+        .edit_component_transaction(&component, candidate, "bind instance model")?;
     app.invalidate_simulation_preflight();
     Ok(())
 }

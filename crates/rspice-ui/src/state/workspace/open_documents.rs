@@ -526,9 +526,19 @@ impl ProjectWorkspace {
                             component.value.clone_from(value);
                         }
                         if let Some(section) = &replacement.model_section {
-                            let mut params = crate::state::parse_params_string(&component.params);
-                            params.insert("model_section".to_owned(), section.clone());
-                            component.params = crate::state::format_params_string(&params);
+                            let object =
+                                crate::state::SchematicObjectKey::new(cell_view_key, component.id)?;
+                            component.params = crate::state::params_string::set_parameter_value(
+                                &component.params,
+                                "model_section",
+                                section,
+                            )
+                            .map_err(|reason| {
+                                crate::state::DesignManagementError::InvalidReplacementParameters {
+                                    object,
+                                    reason,
+                                }
+                            })?;
                         }
                     }
                 }
@@ -1859,6 +1869,146 @@ mod tests {
         assert_ne!(
             crossing[0].pos, crossing[1].pos,
             "the pair lands in the two sheets' separate coordinate namespaces"
+        );
+    }
+    #[test]
+    fn design_management_projection_applies_active_variant_and_annotation() {
+        use crate::state::{ComponentType, Point, SchematicState};
+        use std::collections::BTreeMap;
+
+        use crate::state::{
+            AnnotationObject, AnnotationPosition, AssemblyVariantDraft, ComponentSubstitution,
+            ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope,
+            SchematicObjectKey, VariantInheritance, VariantObjectOverride,
+            VariantQualificationPlan, VariantQualificationState,
+        };
+
+        let mut workspace = ProjectWorkspace::default();
+        let key = CellViewRef::default_top().key();
+        let mut schematic = SchematicState::default();
+        let substituted = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
+        let omitted = schematic.add_component(ComponentType::Capacitor, Point::new(20, 10));
+        let variant = workspace
+            .design_management
+            .variants_mut()
+            .create(AssemblyVariantDraft {
+                name: "Automotive".to_owned(),
+                parent_id: None,
+                inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+                qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+                overrides: BTreeMap::from([
+                    (
+                        SchematicObjectKey::new(&key, substituted)
+                            .expect("scoped substituted identity"),
+                        VariantObjectOverride::Substitute {
+                            replacement: ComponentSubstitution {
+                                library: "qualified".to_owned(),
+                                cell: "resistor_aecq".to_owned(),
+                                view: "schematic".to_owned(),
+                                value_override: Some("2 kohm".to_owned()),
+                                model_section: Some("automotive".to_owned()),
+                                port_equivalence_digest: Some(ContentDigest::from_bytes([9; 32])),
+                                qualification: VariantQualificationState::Current,
+                            },
+                        },
+                    ),
+                    (
+                        SchematicObjectKey::new(&key, omitted).expect("scoped omitted identity"),
+                        VariantObjectOverride::DoNotPopulate {
+                            approval_reference: "ECO-104".to_owned(),
+                        },
+                    ),
+                ]),
+            })
+            .expect("create governed variant");
+        workspace
+            .design_management
+            .variants_mut()
+            .set_active(variant)
+            .expect("activate variant");
+
+        let request = RenumberRequest {
+            scope: RenumberScope::WholeProject,
+            order: RenumberOrder::HierarchyThenCoordinates,
+            protected_references: ProtectedReferencePolicy::RetainLockedAndExternalIds,
+            protected_reviewed: false,
+            objects: vec![AnnotationObject {
+                object: SchematicObjectKey::new(&key, substituted)
+                    .expect("scoped annotation identity"),
+                current_reference: "R42".to_owned(),
+                device_family: "R".to_owned(),
+                sheet_id: None,
+                hierarchy_path: "/top".to_owned(),
+                position: AnnotationPosition { x: 10, y: 10 },
+                connectivity_order: Some(1),
+                locked: false,
+                external: false,
+                imported: false,
+            }],
+        };
+        let preview = workspace
+            .design_management
+            .annotation()
+            .preview_renumbering(&request)
+            .expect("preview annotation");
+        workspace
+            .design_management
+            .annotation_mut()
+            .commit_renumbering(&preview, &request)
+            .expect("commit annotation receipt");
+
+        let projected = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .expect("materialize variant and annotation");
+        assert!(
+            projected
+                .components
+                .iter()
+                .all(|component| component.id != omitted)
+        );
+        assert!(
+            projected
+                .connections
+                .iter()
+                .all(|connection| connection.component_id != omitted)
+        );
+        let component = projected
+            .components
+            .iter()
+            .find(|component| component.id == substituted)
+            .expect("substituted component");
+        let binding = component
+            .library_cell
+            .as_ref()
+            .expect("qualified cell binding");
+        assert_eq!(binding.library, "qualified");
+        assert_eq!(binding.cell, "resistor_aecq");
+        assert_eq!(component.value, "2 kohm");
+        assert!(component.params.contains("model_section=automotive"));
+        assert_eq!(component.name, "R1");
+
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == substituted)
+            .unwrap()
+            .params = "note='unterminated".to_owned();
+        let error = workspace
+            .materialize_design_management_schematic(&key, &schematic)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::state::DesignManagementError::InvalidReplacementParameters { .. }
+        ));
+        assert!(error.to_string().contains("unterminated"));
+        assert_eq!(
+            schematic
+                .components
+                .iter()
+                .find(|component| component.id == substituted)
+                .unwrap()
+                .params,
+            "note='unterminated"
         );
     }
 }

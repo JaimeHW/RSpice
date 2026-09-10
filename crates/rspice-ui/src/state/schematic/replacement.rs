@@ -569,6 +569,9 @@ pub(crate) fn parse_replacement_parameters_strict(
         let value = entry
             .value
             .ok_or_else(|| malformed(format!("parameter '{}' is missing '='", entry.key)))?;
+        if value.is_empty() {
+            return Err(malformed(format!("parameter '{}' has no value", entry.key)));
+        }
         let key = entry.key.to_ascii_lowercase();
         if result.insert(key.clone(), value.to_owned()).is_some() {
             return Err(malformed(format!(

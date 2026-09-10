@@ -128,6 +128,11 @@ pub enum DesignManagementError {
     MissingReplacement(SchematicObjectKey),
     #[error("object {0} replacement is not qualified")]
     UnqualifiedReplacement(SchematicObjectKey),
+    #[error("object {object} replacement parameters cannot be applied: {reason}")]
+    InvalidReplacementParameters {
+        object: SchematicObjectKey,
+        reason: String,
+    },
     #[error("annotation reserved range {first}..{last} is invalid")]
     InvalidAnnotationRange { first: u32, last: u32 },
     #[error("annotation reserved range must name at least one prefix")]

@@ -7,6 +7,83 @@
 
 use super::*;
 
+fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
+    use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
+    let mut app = RSpiceApp::test_instance();
+    app.state.model_library_manager.clear();
+    let mut library = ModelLibrary::new("models");
+    library.add_model(DeviceModel::new("junction", ModelType::Diode));
+    app.state.model_library_manager.add_library(library);
+    app.state.schematic.components.clear();
+    let id = app
+        .state
+        .schematic
+        .add_component(ComponentType::Diode, crate::state::Point::origin());
+    app.state.schematic.components[0].params = params.to_owned();
+    app.state.schematic.clear_undo_history();
+    app.state.schematic.is_dirty = false;
+    (app, id)
+}
+
+#[test]
+fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomically() {
+    let original = r#"off note="a  b" expr={a + f(b,c)}"#;
+    let (mut app, id) = catalog_test_diode(original);
+    bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
+    assert_eq!(
+        app.state.schematic.components[0].params,
+        format!("{original} model=junction model_library=models")
+    );
+    assert!(app.state.schematic.undo());
+    assert_eq!(app.state.schematic.components[0].params, original);
+    assert!(!app.state.schematic.can_undo());
+
+    let (mut app, id) = catalog_test_diode("note='unterminated");
+    let before = app.state.schematic.components[0].clone();
+    assert!(
+        bind_component_model_from_catalog(&mut app, id, "models", "junction")
+            .unwrap_err()
+            .contains("unterminated")
+    );
+    assert_eq!(app.state.schematic.components[0], before);
+    assert!(!app.state.schematic.is_dirty);
+    assert!(!app.state.schematic.can_undo());
+}
+
+#[test]
+fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication() {
+    use crate::workbench::state::{InlineEditField, InlineEditSession};
+    let (mut app, id) = catalog_test_diode(r#"note="a  b""#);
+    let expected = app.state.schematic.components[0].clone();
+    let mut candidate = expected.clone();
+    candidate.name = "D42".to_owned();
+    let authority = app.state.inline_edit_authority();
+    app.state.workbench.inline_edit.begin(InlineEditSession {
+        expected: expected.clone(),
+        field: InlineEditField::Instance,
+        authority,
+        description: "rename instance".to_owned(),
+        buffer: "invalid name".to_owned(),
+        candidate: None,
+        error: Some("Invalid name".to_owned()),
+        widget: None,
+    });
+    assert!(bind_component_model_from_catalog(&mut app, id, "models", "junction").is_err());
+    assert_eq!(app.state.schematic.components[0], expected);
+    app.state
+        .workbench
+        .inline_edit
+        .set_draft("D42".to_owned(), Ok(candidate));
+    bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
+    assert_eq!(app.state.schematic.components[0].name, "D42");
+    assert!(
+        app.state.schematic.components[0]
+            .params
+            .starts_with(r#"note="a  b" "#)
+    );
+    assert!(app.state.workbench.inline_edit.session().is_none());
+}
+
 #[test]
 fn catalog_binding_uses_the_resolved_project_global_provider() {
     use crate::state::model_library::{DeviceModel, ModelConsumerScope, ModelLibrary, ModelType};

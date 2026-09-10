@@ -623,6 +623,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn netlist_generation_never_discards_malformed_parameters_after_editor_metadata() {
+        for params in ["model_library=vendor note='unterminated", "temp=27 TEMP=85"] {
+            let mut schematic = SchematicState::default();
+            let mut component = Component::new(1, ComponentType::Resistor, Point::origin());
+            component.name = "R1".to_owned();
+            component.value = "1k".to_owned();
+            component.params = params.to_owned();
+            schematic.components.push(component);
+            let mut generator = NetlistGenerator::new(&schematic);
+            let deck = generator.generate();
+            assert!(
+                generator
+                    .errors()
+                    .iter()
+                    .any(|error| error.contains("R1: invalid parameter text"))
+            );
+            assert!(!deck.lines().any(|line| line.starts_with("R1 ")));
+            assert_eq!(schematic.components[0].params, params);
+        }
+    }
+
+    #[test]
+    fn standalone_source_preview_reports_parameter_errors_instead_of_a_simplified_card() {
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin());
+        component.name = "V1".to_owned();
+        component.value = "2".to_owned();
+        component.params = "ac=1 note='unterminated".to_owned();
+        let errors =
+            crate::simulation::netlist_gen::independent_source_card(&component, ["in", "0"], "V1")
+                .unwrap_err();
+        assert!(errors[0].contains("unterminated"));
+    }
+
+    #[test]
     fn pwl_delay_and_repeat_are_present_in_the_canonical_source_specification() {
         let schematic = SchematicState::default();
         let generator = NetlistGenerator::new(&schematic);
