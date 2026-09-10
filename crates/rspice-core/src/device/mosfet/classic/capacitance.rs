@@ -528,11 +528,6 @@ impl Mosfet {
         }
     }
 
-    /// Return the cached drain current at the converged operating point.
-    pub(crate) fn drain_current(&self) -> Value {
-        self.id
-    }
-
     #[inline]
     pub(in crate::device::mosfet::classic) fn cached_eval_branch_voltages(
         &self,

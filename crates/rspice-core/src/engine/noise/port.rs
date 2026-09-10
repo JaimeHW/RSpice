@@ -277,7 +277,7 @@ impl Engine {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
             correlated: mut correlated_noise_sources,
-        } = Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        } = Self::try_collect_noise_sources(&circuit, &dc_solution, self.config.spice_dialect)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
             &mut correlated_noise_sources,

@@ -233,3 +233,92 @@ fn the_mosfet_and_bipolar_mechanisms_are_the_model_s_own() {
         }
     }
 }
+
+#[test]
+fn classic_mos_signed_noise_reaches_output_and_port_analyses() {
+    use rspice_core::analysis::{NoiseContributionProbe, noise::NoisePhysicalConstants};
+    use rspice_core::engine::SpiceDialect;
+    for dialect in [
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+    ] {
+        let constants = if dialect == SpiceDialect::Xyce {
+            NoisePhysicalConstants::XYCE_7_10
+        } else {
+            NoisePhysicalConstants::MODERN
+        };
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (kind, p) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+            for nlev in 0..=3 {
+                for (af, ef) in [(-0.5, -0.25), (0.0, 0.0), (1.3, 1.2)] {
+                    let make = |kf, port| {
+                        let load = if port {
+                            format!("VD d 0 {}", p * 2.0)
+                        } else {
+                            format!("VDD supply 0 {}\nRL supply d 1k", p * 3.0)
+                        };
+                        Netlist::parse(&format!(
+                            "Classic MOS noise transport\n{load}\nVIN g 0 DC {} AC 1\nM1 d g 0 0 mm W=2u L=1u M=5\n.model mm {kind}(VTO={p} KP=100u TOX=20n IS=0 KF={kf} AF={af} EF={ef} NLEV={nlev})\n.options GMIN=0 RELTOL=1e-9 ABSTOL=1e-14 VNTOL=1e-11\n.end\n", p*1.4)).unwrap()
+                    };
+                    let frequencies = [1000.0, 10_000.0];
+                    let output = engine
+                        .run_noise_named_with_input_source(
+                            &make(1e-24, false),
+                            "d",
+                            None,
+                            "VIN",
+                            &frequencies,
+                            300.15,
+                        )
+                        .unwrap();
+                    let port = engine
+                        .run_port_noise_correlation(
+                            &make(1e-24, true),
+                            &["VD".into()],
+                            &frequencies,
+                            300.15,
+                        )
+                        .unwrap();
+                    let quiet = engine
+                        .run_port_noise_correlation(
+                            &make(0.0, true),
+                            &["VD".into()],
+                            &frequencies,
+                            300.15,
+                        )
+                        .unwrap();
+                    let cox = 3.9 * 8.854_214_871e-12 / 20e-9;
+                    for (i, &f) in frequencies.iter().enumerate() {
+                        // Independent square-law saturation: Id=16 uA,
+                        // gm=80 uS per instance; five independent instances.
+                        let expected = if dialect == SpiceDialect::Xyce {
+                            5e-24 * (16e-6_f64).powf(af) / (f * 2e-12 * cox * cox)
+                        } else {
+                            match nlev {
+                                0 => 5e-24 * (16e-6_f64).powf(af) / (f.powf(ef) * 1e-12 * cox),
+                                1 => 5e-24 * (16e-6_f64).powf(af) / (f.powf(ef) * 2e-12 * cox),
+                                _ => 5e-24 * (80e-6_f64).powi(2) / (f.powf(af) * 2e-12 * cox),
+                            }
+                        };
+                        let contribution = |name| {
+                            output[i]
+                                .contribution(&NoiseContributionProbe::parse(name).unwrap())
+                                .unwrap()
+                        };
+                        let measured = contribution("DNO(M1,FN)") / contribution("DNO(RL)")
+                            * (4.0 * constants.boltzmann * 300.15 / 1000.0);
+                        let port_measured = port[i].current_correlation[0][0].re
+                            - quiet[i].current_correlation[0][0].re;
+                        for actual in [measured, port_measured] {
+                            assert!(
+                                (actual - expected).abs() < expected * 2e-7,
+                                "{dialect:?} {kind} NLEV={nlev} AF={af} EF={ef} f={f}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
