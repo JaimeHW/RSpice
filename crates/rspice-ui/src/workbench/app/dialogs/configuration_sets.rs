@@ -141,8 +141,14 @@ impl Default for ConfigurationSetsDialogState {
 
 #[derive(Debug, Clone)]
 struct ConfigurationReceiptCache {
-    key: String,
+    key: ConfigurationReceiptCacheKey,
     value: ConfigurationReceiptView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigurationReceiptCacheKey {
+    design: crate::state::workspace::DesignProjectionKey,
+    publication: crate::product::ContentDigest,
 }
 
 impl ConfigurationSetsDialogState {
@@ -951,6 +957,20 @@ struct ConfigurationReceiptView {
     bindings: Vec<crate::state::ResolvedHierarchyBinding>,
 }
 
+impl ConfigurationReceiptView {
+    fn blocked(overrides: usize, diagnostic: String) -> Self {
+        Self {
+            resolved: "Unavailable".to_owned(),
+            overrides,
+            incompatible: 0,
+            netlist_digest: "generation blocked".to_owned(),
+            status: "generation blocked".to_owned(),
+            diagnostic: Some(diagnostic),
+            bindings: Vec::new(),
+        }
+    }
+}
+
 fn selected_configuration_receipt(
     dialog: &mut ConfigurationSetsDialogState,
     workspace: &crate::state::ProjectWorkspace,
@@ -967,8 +987,9 @@ fn selected_configuration_receipt(
         id,
         dialog.draft.as_ref(),
     );
-    if let Some(cached) = dialog.receipt_cache.as_ref()
-        && cached.key == key
+    if let Some(key) = key.as_ref()
+        && let Some(cached) = dialog.receipt_cache.as_ref()
+        && &cached.key == key
     {
         return Some(cached.value.clone());
     }
@@ -980,7 +1001,7 @@ fn selected_configuration_receipt(
         id,
         dialog.draft.as_ref(),
     );
-    dialog.receipt_cache = Some(ConfigurationReceiptCache {
+    dialog.receipt_cache = key.map(|key| ConfigurationReceiptCache {
         key,
         value: value.clone(),
     });
@@ -994,41 +1015,18 @@ fn configuration_receipt_cache_key(
     active_schematic: &crate::state::SchematicState,
     id: ConfigurationSetId,
     draft: Option<&ConfigurationSetDefinition>,
-) -> String {
-    let mut digest = Sha256::new();
-    digest.update(id.to_string());
-    if let Some(configuration) = workspace.configuration_sets.find(id) {
-        digest.update(configuration.revision().to_le_bytes());
-        digest.update(configuration.semantic_digest().to_string());
-    }
-    if let Some(draft) = draft
-        && let Ok(bytes) = serde_json::to_vec(draft)
-    {
-        digest.update(bytes);
-    }
-    digest.update(workspace.active_view.key());
-    digest.update(active_schematic.topology_version().to_le_bytes());
-    digest.update(libraries.revision().to_le_bytes());
-    if let Ok(bytes) = serde_json::to_vec(model_libraries) {
-        digest.update(bytes);
-    }
-    let mut buffer_versions = workspace
-        .schematic_buffers
-        .iter()
-        .map(|(key, schematic)| (key.as_str(), schematic.topology_version()))
-        .collect::<Vec<_>>();
-    buffer_versions.sort_unstable_by(|left, right| left.0.cmp(right.0));
-    for (key, version) in buffer_versions {
-        digest.update(key);
-        digest.update(version.to_le_bytes());
-    }
-    digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+) -> Option<ConfigurationReceiptCacheKey> {
+    let design =
+        workspace.design_projection_key(libraries, &workspace.active_view, active_schematic)?;
+    // The receipt adds the selected draft and dependency-expansion environment
+    // to the projection's content authority. Topology counters cannot describe
+    // a live value edit or an active-variant change.
+    let publication = serde_json::to_vec(&(id, draft, &workspace.project, model_libraries)).ok()?;
+    Some(ConfigurationReceiptCacheKey {
+        design,
+        publication: crate::product::ContentDigest::from_bytes(Sha256::digest(publication).into()),
+    })
 }
-
 fn configuration_receipt(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
@@ -1040,24 +1038,23 @@ fn configuration_receipt(
     let projected = match projected_configuration_workspace(workspace, id, draft) {
         Ok(projected) => projected,
         Err(error) => {
-            return ConfigurationReceiptView {
-                resolved: "0 / 0".to_owned(),
-                overrides: draft.map_or(0, |value| value.overrides.len()),
-                incompatible: 0,
-                netlist_digest: "generation blocked".to_owned(),
-                status: "generation blocked".to_owned(),
-                diagnostic: Some(error),
-                bindings: Vec::new(),
-            };
+            return ConfigurationReceiptView::blocked(
+                draft.map_or(0, |value| value.overrides.len()),
+                error,
+            );
         }
     };
-    let resolution = projected.resolve_hierarchy_with_active(
+    let configuration = projected.configuration_sets.find(id);
+    let overrides = configuration.map_or(0, |value| value.overrides().len());
+    let inspection = match projected.inspect_design_projection(
         libraries,
         &workspace.active_view,
         active_schematic,
-    );
-    let configuration = projected.configuration_sets.find(id);
-    let overrides = configuration.map_or(0, |value| value.overrides().len());
+    ) {
+        Ok(inspection) => inspection,
+        Err(error) => return ConfigurationReceiptView::blocked(overrides, error.to_string()),
+    };
+    let resolution = inspection.hierarchy_resolution();
     let fallback = resolution
         .bindings
         .iter()
@@ -1086,8 +1083,7 @@ fn configuration_receipt(
         )
     };
     let (netlist_digest, diagnostic) = if resolution.is_valid() {
-        match configuration_netlist_digest(&projected, libraries, active_schematic, model_libraries)
-        {
+        match configuration_netlist_digest(&projected, libraries, &inspection, model_libraries) {
             Ok(digest) => (digest, None),
             Err(error) => {
                 status = "generation blocked".to_owned();
@@ -1150,18 +1146,14 @@ fn projected_configuration_workspace(
 fn configuration_netlist_digest(
     workspace: &crate::state::ProjectWorkspace,
     libraries: &crate::state::LibraryManager,
-    active_schematic: &crate::state::SchematicState,
+    projection: &crate::state::workspace::DesignProjection,
     model_libraries: &crate::state::ModelLibraryManager,
 ) -> Result<String, String> {
-    let projection = workspace
-        .configuration_execution_projection(libraries, &workspace.active_view, active_schematic)
-        .map_err(|error| error.to_string())?;
     let root = projection
         .root_schematic()
         .ok_or_else(|| "configuration root schematic is unavailable".to_owned())?;
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_execution_projection(
-        libraries,
-        &projection,
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_design_projection(
+        libraries, projection,
     );
     let generated =
         crate::simulation::netlist_gen::generate_netlist_hierarchical(root, &[], &hierarchy);
@@ -2155,5 +2147,4 @@ fn unique_configuration_name(catalog: &ConfigurationSetCatalog, stem: &str) -> S
 }
 
 #[cfg(test)]
-#[path = "configuration_sets/tests.rs"]
 mod tests;

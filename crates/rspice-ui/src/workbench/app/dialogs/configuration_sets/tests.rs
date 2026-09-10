@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod variants;
+
 #[test]
 fn keyboard_configuration_activation_does_not_insert_its_space() {
     for label in ["New configuration", "Clone"] {

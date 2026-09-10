@@ -178,12 +178,18 @@ impl CheckAndSaveValidationReport {
         // contracts are statements about these; nothing hierarchy-derived is.
         let mut buffers = state.workspace.schematic_buffers.clone();
         buffers.insert(active_view.key(), state.schematic.clone());
-        let resolution = state.workspace.resolve_hierarchy_with_active(
+        let inspection = state.workspace.inspect_design_projection(
             &state.library_manager,
             &active_view,
             &state.schematic,
         );
-        for binding in &resolution.bindings {
+        let execution_projection = inspection
+            .clone()
+            .and_then(|projection| projection.into_execution());
+        let hierarchy_bindings = inspection.as_ref().map_or(&[][..], |projection| {
+            projection.hierarchy_resolution().bindings.as_slice()
+        });
+        for binding in hierarchy_bindings {
             if !binding.status.is_resolved() {
                 insert_finding(
                     &mut findings,
@@ -239,11 +245,6 @@ impl CheckAndSaveValidationReport {
             .key()
             .eq_ignore_ascii_case(&active_key);
 
-        let execution_projection = state.workspace.configuration_execution_projection(
-            &state.library_manager,
-            &active_view,
-            &state.schematic,
-        );
         // Every hierarchy-derived check below reads this one projection. Where
         // it does not resolve, its error is the whole finding: re-deriving the
         // same checks from the live editor buffers would seal a receipt for a
@@ -880,6 +881,30 @@ fn digest_bytes(bytes: &[u8]) -> ContentDigest {
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
+
+    #[test]
+    fn omitted_instances_do_not_reappear_in_validated_save_hierarchy_findings() {
+        let mut state = crate::workbench::examples::hierarchy_reference::build().state;
+        let baseline = CheckAndSaveValidationReport::collect(&state).unwrap();
+        assert!(
+            baseline
+                .blockers()
+                .iter()
+                .all(|finding| finding.source != "hierarchy")
+        );
+        crate::workbench::examples::hierarchy_reference::omit_missing_instance(&mut state);
+        let authored = serde_json::to_value(&state.schematic).unwrap();
+        let report = CheckAndSaveValidationReport::collect(&state).unwrap();
+        assert!(
+            report
+                .blockers()
+                .iter()
+                .all(|finding| finding.source != "hierarchy"),
+            "{:?}",
+            report.blockers()
+        );
+        assert_eq!(serde_json::to_value(&state.schematic).unwrap(), authored);
+    }
 
     #[test]
     fn validation_is_deterministic_and_stales_after_design_change() {

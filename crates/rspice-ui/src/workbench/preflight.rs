@@ -267,11 +267,14 @@ fn collect_report(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
     let root_reference = state.workspace.simulation_root_reference();
-    let execution_projection = state.workspace.configuration_execution_projection(
+    let inspection = state.workspace.inspect_design_projection(
         &state.library_manager,
         &state.workspace.active_view,
         &state.schematic,
     );
+    let execution_projection = inspection
+        .clone()
+        .and_then(|projection| projection.into_execution());
 
     match &execution_projection {
         Err(error) => blockers.push(PreflightIssue {
@@ -298,13 +301,10 @@ fn collect_report(state: &AppState) -> PreflightReport {
         Ok(_) => {}
     }
 
-    let hierarchy_resolution = state.workspace.resolve_hierarchy_with_active(
-        &state.library_manager,
-        &state.workspace.active_view,
-        &state.schematic,
-    );
-    for binding in hierarchy_resolution
-        .bindings
+    let hierarchy_bindings = inspection.as_ref().map_or(&[][..], |projection| {
+        projection.hierarchy_resolution().bindings.as_slice()
+    });
+    for binding in hierarchy_bindings
         .iter()
         .filter(|binding| !binding.status.is_resolved())
     {
@@ -328,8 +328,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
             remediation: PreflightRemediation::DesignChecks,
         });
     }
-    for binding in hierarchy_resolution
-        .bindings
+    for binding in hierarchy_bindings
         .iter()
         .filter(|binding| binding.used_review_fallback)
     {
@@ -343,7 +342,7 @@ fn collect_report(state: &AppState) -> PreflightReport {
     // than it reads. It blocks nothing — the run will proceed — but starting
     // one without saying so leaves the author reading a policy the executed
     // hierarchy does not follow.
-    for binding in &hierarchy_resolution.bindings {
+    for binding in hierarchy_bindings {
         for warning in &binding.warnings {
             advisories.push(PreflightAdvisory::from(format!(
                 "Configuration warning for {}: {warning}",

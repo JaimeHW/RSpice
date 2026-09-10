@@ -65,16 +65,18 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     };
 
-    let resolution = app.state.workspace.resolve_hierarchy_with_active(
+    let inspection = app.state.workspace.inspect_design_projection(
         &app.state.library_manager,
         &app.state.workspace.active_view,
         &app.state.schematic,
     );
-    let projection = app.state.workspace.configuration_execution_projection(
-        &app.state.library_manager,
-        &app.state.workspace.active_view,
-        &app.state.schematic,
-    );
+    let resolution = inspection
+        .as_ref()
+        .ok()
+        .map(|projection| projection.hierarchy_resolution());
+    let projection = inspection
+        .clone()
+        .and_then(|projection| projection.into_execution());
     let projection_state = projection_facts(projection.as_ref());
     let definition = configuration.definition();
 
@@ -100,18 +102,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
                         definition.overrides.as_slice(),
                         projection.as_ref().ok().map(|value| value.plan()),
                     );
-                    validation_panel(
-                        ui,
-                        &configuration,
-                        &projection_state,
-                        resolution.resolved_instances,
-                        resolution.total_instances,
-                        resolution
-                            .bindings
-                            .iter()
-                            .filter(|binding| binding.used_review_fallback)
-                            .count(),
-                    );
+                    validation_panel(ui, &configuration, &projection_state, resolution);
                 },
             );
         });
@@ -129,18 +120,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             definition.overrides.as_slice(),
             projection.as_ref().ok().map(|value| value.plan()),
         );
-        validation_panel(
-            ui,
-            &configuration,
-            &projection_state,
-            resolution.resolved_instances,
-            resolution.total_instances,
-            resolution
-                .bindings
-                .iter()
-                .filter(|binding| binding.used_review_fallback)
-                .count(),
-        );
+        validation_panel(ui, &configuration, &projection_state, resolution);
     }
 }
 
@@ -849,13 +829,11 @@ fn validation_panel(
     ui: &mut Ui,
     configuration: &ConfigurationSet,
     projection: &ProjectionState,
-    resolved_instances: usize,
-    total_instances: usize,
-    reviewed_fallbacks: usize,
+    resolution: Option<&crate::state::workspace::HierarchyResolution>,
 ) {
     let t = Tokens::get(ui.ctx());
     let valid = matches!(projection, ProjectionState::Executable(_))
-        && resolved_instances == total_instances;
+        && resolution.is_some_and(crate::state::workspace::HierarchyResolution::is_valid);
     section_header(
         ui,
         "Execution validation",
@@ -865,13 +843,31 @@ fn validation_panel(
     dense_property_row(
         ui,
         "Hierarchy",
-        &format!("{resolved_instances} / {total_instances} instances resolved"),
+        &resolution.map_or_else(
+            || "Unavailable".to_owned(),
+            |resolution| {
+                format!(
+                    "{} / {} instances resolved",
+                    resolution.resolved_instances, resolution.total_instances
+                )
+            },
+        ),
         true,
     );
     dense_property_row(
         ui,
         "Reviewed fallbacks",
-        &reviewed_fallbacks.to_string(),
+        &resolution.map_or_else(
+            || "Unavailable".to_owned(),
+            |resolution| {
+                resolution
+                    .bindings
+                    .iter()
+                    .filter(|binding| binding.used_review_fallback)
+                    .count()
+                    .to_string()
+            },
+        ),
         true,
     );
     dense_property_row(
@@ -1040,6 +1036,101 @@ fn short_digest(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::state::ConfigurationPlatform;
+
+    #[test]
+    fn the_configuration_surface_counts_only_the_populated_variant() {
+        for width in [640.0, 1280.0] {
+            let mut app = RSpiceApp::test_instance();
+            app.state = crate::workbench::examples::hierarchy_reference::build().state;
+            crate::workbench::examples::hierarchy_reference::omit_missing_instance(&mut app.state);
+            let projection = app
+                .state
+                .workspace
+                .design_projection(
+                    &app.state.library_manager,
+                    &app.state.workspace.active_view,
+                    &app.state.schematic,
+                )
+                .unwrap();
+            let expected = projection.hierarchy_resolution();
+            let authored = app.state.workspace.resolve_hierarchy_with_active(
+                &app.state.library_manager,
+                &app.state.workspace.active_view,
+                &app.state.schematic,
+            );
+            assert_ne!(authored.total_instances, expected.total_instances);
+            let label = format!(
+                "Hierarchy: {} / {} instances resolved",
+                expected.resolved_instances, expected.total_instances
+            );
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 2400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| configuration(ui, &mut app));
+                },
+            );
+            let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+            assert!(
+                nodes
+                    .iter()
+                    .any(|(_, node)| node.value() == Some(label.as_str())),
+                "the {width}px surface must state {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_hierarchy_metrics_are_not_rendered_as_zero_counts() {
+        let fixture = crate::workbench::examples::hierarchy_reference::build();
+        let configuration = fixture.state.workspace.configuration_sets.active().unwrap();
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(480.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    validation_panel(
+                        ui,
+                        configuration,
+                        &ProjectionState::Blocked("Invalid annotation".to_owned()),
+                        None,
+                    )
+                });
+            },
+        );
+        let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.value() == Some("Hierarchy: Unavailable"))
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.value() == Some("Reviewed fallbacks: Unavailable"))
+        );
+        assert!(
+            !nodes
+                .iter()
+                .any(|(_, node)| node.value().is_some_and(|label| label.contains("0 / 0")))
+        );
+    }
 
     fn override_row(path: &str, view: &str, section: Option<&str>) -> ConfigurationSetOverride {
         ConfigurationSetOverride {

@@ -322,13 +322,9 @@ impl ProjectWorkspace {
         active_schematic: &SchematicState,
     ) -> Result<Arc<DesignProjection>, ConfigurationExecutionPlanError> {
         let inputs = self.design_inputs(active_reference, active_schematic);
-        let key = inputs.as_ref().map(|inputs| DesignProjectionKey {
-            root: self.simulation_root_reference(),
-            active_key: inputs.active_key.clone(),
-            design_epoch: inputs.design_epoch(),
-            library_revision: libraries.revision(),
-            project_revision: self.project.revision(),
-        });
+        let key = inputs
+            .as_ref()
+            .map(|inputs| self.projection_key(libraries, inputs));
         if let Some(key) = key.as_ref() {
             let cached = self.design_projection_cache.borrow();
             if let Some(projection) = cached.as_ref()
@@ -348,6 +344,33 @@ impl ProjectWorkspace {
             *self.design_projection_cache.borrow_mut() = Some(Arc::clone(&projection));
         }
         Ok(projection)
+    }
+
+    /// Exact in-memory design authority for derived presentation caches.
+    /// Callers must also include any inputs their own derived value adds.
+    /// A non-serializable authority cannot acquire a cache identity.
+    pub(crate) fn design_projection_key(
+        &self,
+        libraries: &LibraryManager,
+        active_reference: &CellViewRef,
+        active_schematic: &SchematicState,
+    ) -> Option<DesignProjectionKey> {
+        self.design_inputs(active_reference, active_schematic)
+            .map(|inputs| self.projection_key(libraries, &inputs))
+    }
+
+    fn projection_key(
+        &self,
+        libraries: &LibraryManager,
+        inputs: &DesignInputs,
+    ) -> DesignProjectionKey {
+        DesignProjectionKey {
+            root: self.simulation_root_reference(),
+            active_key: inputs.active_key.clone(),
+            design_epoch: inputs.design_epoch(),
+            library_revision: libraries.revision(),
+            project_revision: self.project.revision(),
+        }
     }
 
     /// Freeze the live editor projection and its exact-path execution plan as

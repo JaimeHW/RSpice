@@ -151,6 +151,53 @@ pub(crate) fn build() -> HierarchyReference {
     }
 }
 
+/// Retain a deliberately unavailable authored dependency while excluding it
+/// from the active circuit. Workflow tests share this same variant boundary.
+#[cfg(test)]
+pub(crate) fn omit_missing_instance(state: &mut AppState) -> u64 {
+    let component = state.schematic.add_library_cell_component(
+        Point::new(1200, 600),
+        LibraryCellInstance::new("missing_library", "omitted_master", "schematic"),
+    );
+    activate_variant_override(
+        state,
+        crate::state::SchematicObjectKey::new(&state.workspace.active_view.key(), component)
+            .unwrap(),
+        crate::state::VariantObjectOverride::DoNotPopulate {
+            approval_reference: "reviewed omission".to_owned(),
+        },
+    );
+    component
+}
+
+#[cfg(test)]
+pub(crate) fn activate_variant_override(
+    state: &mut AppState,
+    object: crate::state::SchematicObjectKey,
+    change: crate::state::VariantObjectOverride,
+) {
+    use crate::state::{AssemblyVariantDraft, VariantInheritance, VariantQualificationPlan};
+
+    let variant = state
+        .workspace
+        .design_management
+        .variants_mut()
+        .create(AssemblyVariantDraft {
+            name: "Populated circuit".to_owned(),
+            parent_id: None,
+            inheritance: VariantInheritance::OverrideChangedObjectsOnly,
+            qualification_plan: VariantQualificationPlan::InvalidateAffectedTests,
+            overrides: std::collections::BTreeMap::from([(object, change)]),
+        })
+        .unwrap();
+    state
+        .workspace
+        .design_management
+        .variants_mut()
+        .set_active(variant)
+        .unwrap();
+}
+
 /// Create the cells and views the design refers to. `user` already exists as
 /// the bootstrapped project library; `vendor` is added beside it.
 ///

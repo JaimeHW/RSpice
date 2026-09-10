@@ -6,6 +6,8 @@
 
 use super::*;
 
+mod variants;
+
 fn blocker_report(observed: &str) -> PreflightReport {
     PreflightReport {
         project_revision: 7,
