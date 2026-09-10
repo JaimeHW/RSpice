@@ -635,6 +635,48 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn retained_flicker_modulation_bandwidth_in_wasm() {
+        for branch_form in [false, true] {
+            let option = if branch_form {
+                ".options device zeroresistancetol=2\n"
+            } else {
+                ""
+            };
+            let deck = rspice_core::Netlist::parse(&format!(
+                "High-harmonic flicker\nI1 0 out SIN(0 1 10)\nR1 out 0 RM 1\n.model RM R(KF=1 AF=2 EF=1)\n{option}.end\n"
+            )).unwrap();
+            let engine = rspice_core::Engine::default();
+            let hb = engine
+                .run_hb_with_abort(
+                    &deck,
+                    rspice_core::analysis::harmonic_balance::HbConfig::new(1.0).with_harmonics(16),
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let result = engine
+                .run_pnoise_from_hb_with_abort(
+                    &deck,
+                    &[0.25],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &hb.operating_point,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let actual = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            let expected = 0.25 * (1.0 / 9.75 + 1.0 / 10.25);
+            assert!((actual / expected - 1.0).abs() < 2e-12);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn signed_resistor_flicker_folding_in_wasm() {
         for branch_form in [false, true] {
             let option = if branch_form {

@@ -536,6 +536,10 @@ impl Engine {
         };
         let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
         self.hb_validate_config(&hb_config)?;
+        // A retained HB orbit can contain drive harmonics well beyond the
+        // conversion window. Preserve that complete basis for source
+        // modulation and account for its actual storage requirement.
+        let op_harmonics = hb_config.num_harmonics;
         if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }

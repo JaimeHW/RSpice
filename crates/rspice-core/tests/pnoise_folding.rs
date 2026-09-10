@@ -142,6 +142,49 @@ fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_con
 }
 
 #[test]
+fn retained_pnoise_preserves_modulation_above_the_conversion_window() {
+    for branch_form in [false, true] {
+        let option = if branch_form {
+            ".options device zeroresistancetol=2\n"
+        } else {
+            ""
+        };
+        let deck = Netlist::parse(&format!(
+            "High-harmonic flicker\nI1 0 out SIN(0 1 10)\nR1 out 0 RM 1\n.model RM R(KF=1 AF=2 EF=1)\n{option}.end\n"
+        )).unwrap();
+        let engine = Engine::default();
+        let hb = engine
+            .run_hb(&deck, HbConfig::new(1.0).with_harmonics(16))
+            .unwrap();
+        for sidebands in [0, 2] {
+            let result = engine
+                .run_pnoise_from_hb_with_abort(
+                    &deck,
+                    &[0.25],
+                    "out",
+                    None,
+                    None,
+                    sidebands,
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let actual = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            let expected = 0.25 * (1.0 / 9.75 + 1.0 / 10.25);
+            assert!(
+                (actual / expected - 1.0).abs() < 2e-12,
+                "branch={branch_form}, K={sidebands}: {actual} vs {expected}"
+            );
+        }
+    }
+}
+
+#[test]
 fn pnoise_flicker_sums_sidebands_before_rounding() {
     let small_amplitude = 2.0_f64.powi(-26);
     for (bias, first, second, kf, expected) in [
