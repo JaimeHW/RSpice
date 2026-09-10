@@ -1,19 +1,17 @@
 use super::*;
-use crate::circuit::ThermalResistorState;
+use crate::circuit::{ResistorFlickerNoise, ThermalResistorState};
 
 /// Resolve the resnoise.c flicker-noise terms for a resistor instance:
-/// `(coefficient, AF, EF)` where the density is
-/// `coefficient·|I|^AF / f^EF`, with the model KF and the effective noise
-/// area `(L − 2·SHORT)^LF · (W − 2·NARROW)^WF` (1.0 when no geometry is
-/// given, per ressetup.c) and `M^(1-AF)` folded into the coefficient for the
-/// total instance current. Returns `None`
-/// when the model carries no KF.
+/// Keep a binary scale for KF, effective noise area and M^(1-AF). Geometry
+/// applies only when an instance specifies L or W (ressetup.c); the missing
+/// dimension comes from its model default, or 10 um. Exact KF=0 disables
+/// the mechanism; malformed active controls must not silently disable it.
 pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     netlist: &Netlist,
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
-) -> Result<Option<(f64, f64, f64)>, SimulationError> {
+) -> Result<Option<ResistorFlickerNoise>, SimulationError> {
     let Some(model_name) = model_name else {
         return Ok(None);
     };
@@ -26,51 +24,69 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
         instance_params,
         temperature_kelvin,
     )?;
-    let Some(kf) =
-        resolve_model_param(model_def, &["KF"], &eval_ctx)?.filter(|v| v.is_finite() && *v > 0.0)
-    else {
-        return Ok(None);
-    };
-    let af = resolve_model_param(model_def, &["AF"], &eval_ctx)?
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(1.0);
-    let ef = resolve_model_param(model_def, &["EF"], &eval_ctx)?
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(1.0);
-    let lf = resolve_model_param(model_def, &["LF"], &eval_ctx)?
-        .filter(|v| v.is_finite())
-        .unwrap_or(1.0);
-    let wf = resolve_model_param(model_def, &["WF"], &eval_ctx)?
-        .filter(|v| v.is_finite())
-        .unwrap_or(1.0);
-    let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
-    let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
-
-    let length = resolve_instance_or_model_param(
-        instance_params,
-        &["L", "LENGTH"],
-        Some(model_def),
-        &["L", "LENGTH"],
-        &eval_ctx,
-    )?;
-    let width = resolve_instance_or_model_param(
-        instance_params,
-        &["W", "WIDTH"],
-        Some(model_def),
-        &["W", "WIDTH", "DEFW"],
-        &eval_ctx,
-    )?;
-    let eff_noise_area = if length.is_some() || width.is_some() {
-        let l_eff = (length.unwrap_or(0.0) - 2.0 * short).max(0.0);
-        let w_eff = (width.unwrap_or(0.0) - 2.0 * narrow).max(0.0);
-        let area = l_eff.powf(lf) * w_eff.powf(wf);
-        if area.is_finite() && area > 0.0 {
-            area
-        } else {
-            return Ok(None);
+    let parameter = |names: &[&str], default: f64| -> Result<f64, SimulationError> {
+        if let Some((name, value)) = model_def.string_params.iter().find(|(name, _)| {
+            names
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        }) {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor model '{model_name}' flicker parameter {name} must be numeric, got '{value}'"
+            )));
         }
+        let value = resolve_model_param(model_def, names, &eval_ctx)?.unwrap_or(default);
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor model '{model_name}' flicker parameter {} must be finite, got {value}",
+                names[0]
+            )));
+        }
+        Ok(value)
+    };
+    let kf = parameter(&["KF"], 0.0)?;
+    if kf < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor model '{model_name}' flicker KF must be nonnegative, got {kf}"
+        )));
+    }
+    if kf == 0.0 {
+        return Ok(None);
+    }
+    let af = parameter(&["AF"], 1.0)?;
+    let ef = parameter(&["EF"], 1.0)?;
+    let length = instance_param(instance_params, &["L", "LENGTH"]);
+    let width = instance_param(instance_params, &["W", "WIDTH"]);
+    let (l_eff, lf, w_eff, wf) = if length.is_some() || width.is_some() {
+        let length = match length {
+            Some(value) => value,
+            None => parameter(&["L", "LENGTH"], 10e-6)?,
+        };
+        let width = match width {
+            Some(value) => value,
+            None => parameter(&["W", "WIDTH", "DEFW"], 10e-6)?,
+        };
+        let l_eff = (-2.0_f64).mul_add(parameter(&["SHORT"], 0.0)?, length);
+        let w_eff = (-2.0_f64).mul_add(parameter(&["NARROW"], 0.0)?, width);
+        for (label, value) in [
+            ("L", length),
+            ("W", width),
+            ("L-2*SHORT", l_eff),
+            ("W-2*NARROW", w_eff),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Resistor model '{model_name}' flicker geometry {label} must be finite and positive, got {value}"
+                )));
+            }
+        }
+        (
+            l_eff,
+            parameter(&["LF"], 1.0)?,
+            w_eff,
+            parameter(&["WF"], 1.0)?,
+        )
     } else {
-        1.0
+        (1.0, 0.0, 1.0, 0.0)
     };
 
     // resnoise.c evaluates M * KF * |I_total/M|^AF / area. The circuit
@@ -81,23 +97,27 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
             "Resistor model '{model_name}' flicker noise has invalid multiplicity M={multiplicity}"
         )));
     }
-    let coefficient = if multiplicity == 1.0 || af == 1.0 {
-        kf / eff_noise_area
-    } else if af == 2.0 {
-        let (mantissa, exponent) =
-            crate::numerics::product_binary_normalization(&[kf], &[eff_noise_area, multiplicity]);
-        libm::scalbn(mantissa, exponent)
+    let powers = [(l_eff, -lf), (w_eff, -wf), (multiplicity, 1.0 - af)];
+    let factors = powers.map(|(base, exponent)| base.powf(exponent));
+    let (coefficient, binary_scale) = if factors.iter().all(|value| value.is_normal()) {
+        crate::numerics::product_binary_normalization(
+            &[kf, factors[0], factors[1], factors[2]],
+            &[],
+        )
     } else {
-        let (mantissa, exponent) =
-            crate::numerics::product_binary_normalization(&[kf], &[eff_noise_area]);
-        crate::numerics::scaled_power_law(mantissa, exponent, multiplicity, 1.0 - af, 1.0, 0.0)
+        crate::numerics::power_product_binary_normalization(kf, 0, &powers)
     };
     if !coefficient.is_finite() || coefficient <= 0.0 {
         return Err(SimulationError::Circuit(format!(
-            "Resistor model '{model_name}' nonzero flicker coefficient is outside the supported finite range after geometry and M scaling"
+            "Resistor model '{model_name}' nonzero flicker coefficient exceeds the retained binary exponent range after geometry and M scaling"
         )));
     }
-    Ok(Some((coefficient, af, ef)))
+    Ok(Some(ResistorFlickerNoise {
+        coefficient,
+        binary_scale,
+        af,
+        ef,
+    }))
 }
 
 fn resolve_resistor_model_level(

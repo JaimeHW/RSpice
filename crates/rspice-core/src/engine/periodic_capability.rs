@@ -1440,7 +1440,12 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
             if !circuit.resistors.noisy[index] {
                 continue;
             }
-            if let Some((coefficient, af, ef)) = flicker
+            if let Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af,
+                ef,
+            }) = flicker
                 && *coefficient != 0.0
                 && *af != 2.0
             {
@@ -1453,7 +1458,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
                 gaps.push(CapabilityGap::new(
                     F::Resistor,
                     format!(
-                        "resistor '{name}' flicker noise (coefficient={coefficient}, AF={af}, EF={ef})"
+                        "resistor '{name}' flicker noise (coefficient={coefficient}*2^{binary_scale}, AF={af}, EF={ef})"
                     ),
                 ));
             }
@@ -1464,7 +1469,12 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
             if !circuit.resistor_branches.noisy[index] {
                 continue;
             }
-            if let Some((coefficient, af, ef)) = flicker
+            if let Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af,
+                ef,
+            }) = flicker
                 && *coefficient != 0.0
                 && *af != 2.0
             {
@@ -1477,7 +1487,7 @@ pub(in crate::engine) fn cyclostationary_noise_gaps(circuit: &CircuitData) -> Ve
                 gaps.push(CapabilityGap::new(
                     F::ResistorBranch,
                     format!(
-                        "branch-form resistor '{name}' cyclostationary flicker noise (coefficient={coefficient}, AF={af}, EF={ef})"
+                        "branch-form resistor '{name}' cyclostationary flicker noise (coefficient={coefficient}*2^{binary_scale}, AF={af}, EF={ef})"
                     ),
                 ));
             }

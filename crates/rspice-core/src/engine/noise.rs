@@ -2597,7 +2597,12 @@ impl Engine {
             }
             noise_sources.push(source);
 
-            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i)
+            if let Some(&Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af,
+                ef,
+            })) = circuit.resistors.flicker.get(i)
                 && coefficient != 0.0
             {
                 let v_pos = Self::noise_node_voltage(dc_solution, stamp.pp.row);
@@ -2609,27 +2614,27 @@ impl Engine {
                     .copied()
                     .unwrap_or(0.0)
                     * (v_pos - v_neg);
-                if current != 0.0 {
+                if current != 0.0 || af <= 0.0 {
                     // The flicker source belongs to whichever device owns the
                     // thermal stamp beside it, under the resistive family's FN.
                     // Naming it `r1:flicker` made it a device of its own, so a
                     // `DNO(R1)` sum silently left the model card's 1/f out of
                     // the total it was asked for.
                     let device = owner.map_or(name.as_str(), |identity| identity.device.as_str());
-                    noise_sources.push(
-                        NoiseSource::flicker_with_frequency_exponent(
-                            device.to_string(),
-                            stamp.pp.row,
-                            stamp.nn.row,
-                            coefficient,
-                            af,
-                            ef,
-                            current,
-                        )
-                        .with_identity(
-                            crate::analysis::NoiseSourceIdentity::mechanism(device, "FN"),
-                        ),
+                    let mut source = NoiseSource::flicker_with_frequency_exponent(
+                        device.to_string(),
+                        stamp.pp.row,
+                        stamp.nn.row,
+                        coefficient,
+                        af,
+                        ef,
+                        current,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(device, "FN"),
                     );
+                    source.parameter_exponent = binary_scale;
+                    noise_sources.push(source);
                 }
             }
         }
@@ -2666,7 +2671,12 @@ impl Engine {
             }
             noise_sources.push(source);
 
-            if let Some((coefficient, af, ef)) = circuit.resistor_branches.flicker[i]
+            if let Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af,
+                ef,
+            }) = circuit.resistor_branches.flicker[i]
                 && coefficient != 0.0
             {
                 let branch_ordinal = circuit.resistor_branches.branch_indices[i];
@@ -2690,19 +2700,19 @@ impl Engine {
                         "Noise source '{name}:FN' branch current is non-finite ({current:e})"
                     )));
                 }
-                if current != 0.0 {
-                    noise_sources.push(
-                        NoiseSource::flicker_with_frequency_exponent(
-                            name.clone(),
-                            np,
-                            nn,
-                            coefficient,
-                            af,
-                            ef,
-                            current,
-                        )
-                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(name, "FN")),
-                    );
+                if current != 0.0 || af <= 0.0 {
+                    let mut source = NoiseSource::flicker_with_frequency_exponent(
+                        name.clone(),
+                        np,
+                        nn,
+                        coefficient,
+                        af,
+                        ef,
+                        current,
+                    )
+                    .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(name, "FN"));
+                    source.parameter_exponent = binary_scale;
+                    noise_sources.push(source);
                 }
             }
         }

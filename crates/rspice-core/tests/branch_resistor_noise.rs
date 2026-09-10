@@ -240,6 +240,154 @@ fn branch_form_noise_honors_quiet_dtemp_and_absolute_temp_precedence() {
 }
 
 #[test]
+fn resistor_flicker_preserves_signed_exponents_and_zero_current_contract() {
+    for branch_form in [false, true] {
+        let tolerance = if branch_form { 10 } else { 0 };
+        for af in [-1.0_f64, 0.0, 1.0] {
+            for ef in [-1.0_f64, 0.0, 1.0] {
+                for voltage in [0.0_f64, 2.0] {
+                    let deck = Netlist::parse(&format!("Signed resistor flicker\nVP p 0 {voltage}\nR1 p 0 RM 1\n.model RM R(KF=1 AF={af} EF={ef})\n.options device zeroresistancetol={tolerance}\n.end\n")).unwrap();
+                    let result = Engine::default().run_port_noise_correlation(
+                        &deck,
+                        &["VP".into()],
+                        &[10.0],
+                        TEMPERATURE,
+                    );
+                    if voltage == 0.0 && af < 0.0 {
+                        assert!(result.is_err(), "zero-current negative AF is singular");
+                    } else {
+                        let expected =
+                            voltage.powf(af) / 10.0_f64.powf(ef) + 4.0 * K_BOLTZMANN * TEMPERATURE;
+                        assert_relative(
+                            result.unwrap()[0].current_correlation[0][0].re,
+                            expected,
+                            2e-12,
+                            "signed resistor noise law",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn resistor_flicker_geometry_uses_instance_presence_and_dimension_defaults() {
+    for (instance, model, area) in [
+        ("", "L=2u W=3u", 1.0),
+        ("L=2u", "", 2e-11),
+        ("W=3u", "", 3e-11),
+        ("L=2u", "DEFW=3u", 6e-12),
+        ("W=3u", "L=2u", 6e-12),
+        ("L=2u W=3u", "SHORT=.25u NARROW=.5u", 3e-12),
+        ("L=2 W=4", "LF=-1 WF=.5", 1.0),
+    ] {
+        for branch_form in [false, true] {
+            let tolerance = if branch_form { 10 } else { 0 };
+            let deck = Netlist::parse(&format!("Resistor noise geometry\nVP p 0 1\nR1 p 0 RM 1 {instance}\n.model RM R(KF=1e-6 AF=2 EF=1 {model})\n.options device zeroresistancetol={tolerance}\n.end\n")).unwrap();
+            let actual = Engine::default()
+                .run_port_noise_correlation(&deck, &["VP".into()], &[10.0], TEMPERATURE)
+                .unwrap()[0]
+                .current_correlation[0][0]
+                .re;
+            assert_relative(
+                actual,
+                1e-7 / area + 4.0 * K_BOLTZMANN * TEMPERATURE,
+                2e-12,
+                "resistor effective noise area",
+            );
+        }
+    }
+}
+
+#[test]
+fn resistor_flicker_rejects_malformed_active_controls() {
+    for (name, value) in [
+        ("KF", -1.0),
+        ("KF", f64::NAN),
+        ("AF", f64::NAN),
+        ("EF", f64::INFINITY),
+        ("LF", f64::NAN),
+        ("WF", f64::INFINITY),
+        ("SHORT", 2.0),
+        ("NARROW", 2.0),
+    ] {
+        let mut deck = Netlist::parse(
+            "Resistor invalid noise\nR1 out 0 RM 1 L=1 W=1\n.model RM R(KF=1 AF=2 EF=1)\n.end\n",
+        )
+        .unwrap();
+        let model = deck
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("RM"))
+            .unwrap();
+        model
+            .params
+            .retain(|(key, _)| !key.eq_ignore_ascii_case(name));
+        model.params.push((name.into(), value));
+        let error = Engine::default()
+            .build_circuit(&deck)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(name),
+            "{name}={value} must be diagnosed: {error}"
+        );
+    }
+    for controls in ["KF=\"bad\"", "KF=1 AF=\"bad\""] {
+        let deck = Netlist::parse(&format!(
+            "String noise controls\nR1 out 0 RM 1\n.model RM R({controls})\n.end\n"
+        ))
+        .unwrap();
+        assert!(Engine::default().build_circuit(&deck).is_err());
+    }
+    let disabled = Netlist::parse("Disabled resistor noise\nR1 out 0 RM 1 L=1 W=1\n.model RM R(KF=0 AF=\"unused\" SHORT=2)\n.end\n").unwrap();
+    assert!(
+        Engine::default()
+            .build_circuit(&disabled)
+            .unwrap()
+            .resistor_storage()
+            .flicker[0]
+            .is_none()
+    );
+}
+
+#[test]
+fn resistor_flicker_retains_coefficients_beyond_binary64() {
+    // Direct KF/area or M^(1-AF) arithmetic loses range; the final port
+    // current PSD remains finite and is dominated by the flicker mechanism.
+    for (resistance, instance, model, frequency, flicker, conductance) in [
+        (1.0, "M=1e300", "KF=1e-300 AF=2", 1e-300, 1e300, 1e300_f64),
+        (1.0, "M=1e-200", "KF=1e200 AF=2", 1.0, 1.0, 1e-200),
+        (
+            1e200,
+            "L=1e-100 W=1e-100",
+            "KF=1e200 AF=2",
+            1.0,
+            1.0,
+            1e-200,
+        ),
+        (
+            1.0,
+            "L=2 W=4",
+            "KF=1 AF=2 LF=1e308 WF=-5e307",
+            1.0,
+            1.0,
+            1.0,
+        ),
+    ] {
+        let deck = Netlist::parse(&format!("Scaled resistor flicker\nVP p 0 1\nR1 p 0 RM {resistance} {instance}\n.model RM R({model})\n.end\n")).unwrap();
+        let actual = Engine::default()
+            .run_port_noise_correlation(&deck, &["VP".into()], &[frequency], TEMPERATURE)
+            .unwrap()[0]
+            .current_correlation[0][0]
+            .re;
+        let expected = flicker + 4.0 * K_BOLTZMANN * TEMPERATURE * conductance;
+        assert_relative(actual, expected, 2e-12, "scaled resistor port noise");
+    }
+}
+
+#[test]
 fn resistor_flicker_multiplicity_counts_independent_parallel_instances() {
     for af in [1.0_f64, 1.3, 2.0] {
         for multiplicity in [0.2, 5.0] {

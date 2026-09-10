@@ -565,6 +565,43 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn resistor_flicker_parameter_and_scale_contract_in_wasm() {
+        for (m, kf, frequency) in [(1e300, 1e-300, 1e-300), (1e-200, 1e200, 1e200)] {
+            let deck = rspice_core::Netlist::parse(&format!("Scaled resistor flicker\nI1 0 out {m}\nR1 out 0 RM 1 M={m}\n.model RM R(KF={kf} AF=2 EF=2)\n.end\n")).unwrap();
+            let result = rspice_core::Engine::default()
+                .run_pnoise_with_abort(
+                    &deck,
+                    1000.0,
+                    &[frequency],
+                    "out",
+                    None,
+                    None,
+                    0,
+                    &rspice_core::abort_signal::NoAbort,
+                )
+                .unwrap();
+            let flicker = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            assert!((flicker - 1.0).abs() < 2e-12);
+        }
+        let deck = rspice_core::Netlist::parse("Zero-current flat amplitude\nVP p 0 0\nR1 p 0 RM 1\n.model RM R(KF=1 AF=0 EF=-1)\n.end\n").unwrap();
+        let noise = rspice_core::Engine::default()
+            .run_port_noise_correlation_with_abort(
+                &deck,
+                &["VP".into()],
+                &[10.0],
+                300.15,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        assert!((noise[0].current_correlation[0][0].re - 10.0).abs() < 2e-12);
+    }
+
+    #[wasm_bindgen_test]
     fn signed_resistor_flicker_folding_in_wasm() {
         for branch_form in [false, true] {
             let option = if branch_form {

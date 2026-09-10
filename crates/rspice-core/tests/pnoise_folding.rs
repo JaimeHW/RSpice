@@ -142,6 +142,31 @@ fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_con
 }
 
 #[test]
+fn pnoise_resistor_flicker_retains_coefficient_scale() {
+    for (m, kf, frequency, tolerance) in
+        [(1e300, 1e-300, 1e-300, 1.0), (1e-200, 1e200, 1e200, 1e201)]
+    {
+        for branch_form in [false, true] {
+            let tolerance = if branch_form { tolerance } else { 0.0 };
+            let deck = Netlist::parse(&format!("Scaled periodic flicker\nI1 0 out {m}\nR1 out 0 RM 1 M={m}\n.model RM R(KF={kf} AF=2 EF=2)\n.options device zeroresistancetol={tolerance}\n.end\n")).unwrap();
+            let result = Engine::default()
+                .run_pnoise(&deck, 1000.0, &[frequency], "out", None, None, 0)
+                .unwrap();
+            let flicker = result
+                .contributors
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("r1 flicker"))
+                .unwrap()
+                .1[0];
+            assert!(
+                (flicker - 1.0).abs() < 2e-12,
+                "M={m}, branch={branch_form}: {flicker}"
+            );
+        }
+    }
+}
+
+#[test]
 fn pnoise_resistor_flicker_retains_signed_current_modulation() {
     let offsets = [250.0_f64, 1250.0];
     for branch_form in [false, true] {

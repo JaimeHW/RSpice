@@ -791,7 +791,12 @@ impl Engine {
                 flicker: None,
             });
 
-            if let Some((coefficient, 2.0, exponent)) = circuit.resistors.flicker[i]
+            if let Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af: 2.0,
+                ef: exponent,
+            }) = circuit.resistors.flicker[i]
                 && coefficient != 0.0
             {
                 // AF=2 models a resistance fluctuation multiplied by SIGNED
@@ -833,7 +838,9 @@ impl Engine {
                     node_pos,
                     node_neg,
                     psd: vec![Complex64::default()],
-                    binary_scale_exponent: density.exponent,
+                    binary_scale_exponent: density.exponent.checked_add(binary_scale).ok_or_else(|| {
+                        SimulationError::Circuit(format!("pnoise resistor '{name}' coefficient exceeds the retained binary exponent range"))
+                    })?,
                     flicker: Some(PeriodicFlickerNoise {
                         coefficient: density.mantissa,
                         exponent,
@@ -884,7 +891,12 @@ impl Engine {
                 binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
             });
-            if let Some((coefficient, 2.0, exponent)) = circuit.resistor_branches.flicker[i]
+            if let Some(crate::circuit::ResistorFlickerNoise {
+                coefficient,
+                binary_scale,
+                af: 2.0,
+                ef: exponent,
+            }) = circuit.resistor_branches.flicker[i]
                 && coefficient != 0.0
             {
                 let branch = circuit.resistor_branches.branch_indices[i]
@@ -924,7 +936,7 @@ impl Engine {
                         num_nodes,
                     ),
                     psd: vec![Complex64::default()],
-                    binary_scale_exponent: 0,
+                    binary_scale_exponent: binary_scale,
                     flicker: Some(PeriodicFlickerNoise {
                         coefficient,
                         exponent,

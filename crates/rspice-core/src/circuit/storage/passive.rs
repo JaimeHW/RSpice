@@ -202,6 +202,16 @@ impl ThermalResistorState {
     }
 }
 
+/// Resolved resistor flicker law `coefficient * 2^binary_scale * |I|^af / f^ef`
+/// for total instance current, including geometry and parallel multiplicity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResistorFlickerNoise {
+    pub coefficient: Value,
+    pub binary_scale: i32,
+    pub af: Value,
+    pub ef: Value,
+}
+
 /// Resistor storage (SoA layout for cache efficiency)
 #[derive(Debug, Default, Clone)]
 pub struct Resistors {
@@ -224,11 +234,8 @@ pub struct Resistors {
     /// Per-instance noise enable (ngspice `noisy`, default on): a quiet
     /// resistor produces neither thermal nor flicker noise.
     pub noisy: Vec<bool>,
-    /// Per-instance flicker noise as `(coefficient, AF, EF)` for a density
-    /// of `coefficient·|I|^AF / f^EF`, with the model KF, multiplicity
-    /// folding, and effective noise area pre-folded into the coefficient
-    /// (resnoise.c semantics).
-    pub flicker: Vec<Option<(Value, Value, Value)>>,
+    /// Per-instance flicker noise with a retained coefficient scale.
+    pub flicker: Vec<Option<ResistorFlickerNoise>>,
     /// Optional Xyce LEVEL=2 thermal state aligned with the resistor arrays.
     pub thermal: Vec<Option<ThermalResistorState>>,
 }
@@ -361,9 +368,9 @@ impl Resistors {
     }
 
     /// Set the flicker-noise terms of the most recently added resistor.
-    pub fn set_last_flicker_noise(&mut self, coefficient: Value, af: Value, ef: Value) {
+    pub fn set_last_flicker_noise(&mut self, noise: ResistorFlickerNoise) {
         if let Some(slot) = self.flicker.last_mut() {
-            *slot = Some((coefficient, af, ef));
+            *slot = Some(noise);
         }
     }
 
@@ -453,9 +460,8 @@ pub struct ResistorBranches {
     pub(crate) absolute_noise_temperatures: Vec<Option<Value>>,
     /// Per-instance `NOISY`/`NOISE` switch. The deterministic default is on.
     pub(crate) noisy: Vec<bool>,
-    /// Resolved resistor flicker metadata `(coefficient, AF, EF)`, with model
-    /// multiplicity and effective noise area already folded into coefficient.
-    pub(crate) flicker: Vec<Option<(Value, Value, Value)>>,
+    /// Resolved resistor flicker metadata with a retained coefficient scale.
+    pub(crate) flicker: Vec<Option<ResistorFlickerNoise>>,
     /// Pre-baked CSC indices: [br->np, np->br, br->nn, nn->br, br->br].
     csc_indices: Vec<[Option<CscIndex>; 5]>,
 }
@@ -542,9 +548,9 @@ impl ResistorBranches {
     }
 
     /// Set resolved flicker metadata for the newest branch-form resistor.
-    pub(crate) fn set_last_flicker_noise(&mut self, coefficient: Value, af: Value, ef: Value) {
+    pub(crate) fn set_last_flicker_noise(&mut self, noise: ResistorFlickerNoise) {
         if let Some(slot) = self.flicker.last_mut() {
-            *slot = Some((coefficient, af, ef));
+            *slot = Some(noise);
         }
     }
 

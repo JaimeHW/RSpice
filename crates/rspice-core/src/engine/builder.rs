@@ -3487,15 +3487,13 @@ fn add_generated_xspice_auto_bridge_resistor(
         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
             circuit.resistor_branches.set_last_noisy(noisy != 0.0);
         }
-        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+        if let Some(flicker) = resolve_resistor_flicker_noise(
             generated,
             model.as_deref(),
             instance_params,
             temperature,
         )? {
-            circuit
-                .resistor_branches
-                .set_last_flicker_noise(coefficient, af, ef);
+            circuit.resistor_branches.set_last_flicker_noise(flicker);
         }
     } else {
         circuit.resistors.add_with_small_signal_and_reported(
@@ -3519,15 +3517,13 @@ fn add_generated_xspice_auto_bridge_resistor(
         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
             circuit.resistors.set_last_noisy(noisy != 0.0);
         }
-        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+        if let Some(flicker) = resolve_resistor_flicker_noise(
             generated,
             model.as_deref(),
             instance_params,
             temperature,
         )? {
-            circuit
-                .resistors
-                .set_last_flicker_noise(coefficient, af, ef);
+            circuit.resistors.set_last_flicker_noise(flicker);
         }
     }
     Ok(())
@@ -5162,15 +5158,13 @@ impl Engine {
                         if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
                             circuit.resistor_branches.set_last_noisy(noisy != 0.0);
                         }
-                        if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+                        if let Some(flicker) = resolve_resistor_flicker_noise(
                             netlist,
                             model.as_deref(),
                             instance_params,
                             self.config.temperature,
                         )? {
-                            circuit
-                                .resistor_branches
-                                .set_last_flicker_noise(coefficient, af, ef);
+                            circuit.resistor_branches.set_last_flicker_noise(flicker);
                         }
                         continue;
                     }
@@ -5219,15 +5213,13 @@ impl Engine {
                     }
                     // Model-card flicker noise (resnoise.c), folded with the
                     // effective noise area at build time.
-                    if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+                    if let Some(flicker) = resolve_resistor_flicker_noise(
                         netlist,
                         model.as_deref(),
                         instance_params,
                         self.config.temperature,
                     )? {
-                        circuit
-                            .resistors
-                            .set_last_flicker_noise(coefficient, af, ef);
+                        circuit.resistors.set_last_flicker_noise(flicker);
                     }
                 }
                 ElementKind::Capacitor {
