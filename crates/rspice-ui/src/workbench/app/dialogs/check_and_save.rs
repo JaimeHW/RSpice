@@ -46,6 +46,7 @@ struct CheckAndSavePreconditions<'a> {
     project: &'a str,
     revision: &'a str,
     source_current: bool,
+    saved_snapshot: bool,
     authority_resolved: bool,
     dependencies_enumerated: bool,
 }
@@ -125,7 +126,7 @@ impl RSpiceApp {
             return;
         };
         let project = self.state.workspace.project.display_name().to_owned();
-        let revision = self.state.workspace.project.revision().get().to_string();
+        let revision = report.project_revision().to_string();
         let note_error = revision_note_error(&self.state.dialogs.check_and_save.revision_note);
         let displayed_note_error = self
             .state
@@ -157,6 +158,7 @@ impl RSpiceApp {
             project: &project,
             revision: &revision,
             source_current,
+            saved_snapshot: save_receipt.is_some(),
             authority_resolved,
             dependencies_enumerated,
         };
@@ -902,8 +904,12 @@ fn preconditions_panel(
         ui.set_width(ui.available_width());
         ui.set_min_height(height);
         ui.spacing_mut().item_spacing.y = 0.0;
+        // A successful publication changes the accepted generation itself.
+        // Its completed receipt describes the validated snapshot, including
+        // when newer working edits remain outside that saved snapshot.
+        let source_valid = preconditions.saved_snapshot || preconditions.source_current;
         let passed = [
-            preconditions.source_current,
+            source_valid,
             preconditions.authority_resolved,
             preconditions.dependencies_enumerated,
         ]
@@ -911,11 +917,27 @@ fn preconditions_panel(
         .filter(|passed| *passed)
         .count();
         let status = format!("{passed} / 3");
-        section_heading(ui, "Preconditions", Some((&status, passed == 3)));
+        section_heading(
+            ui,
+            if preconditions.saved_snapshot {
+                "Saved snapshot"
+            } else {
+                "Preconditions"
+            },
+            Some((&status, passed == 3)),
+        );
         fact_row(ui, "Project", preconditions.project);
         fact_row(ui, "Revision", preconditions.revision);
         fact_row(ui, "Change boundary", "owned source + dependency graph");
-        checklist_row(ui, "Source revision current", preconditions.source_current);
+        checklist_row(
+            ui,
+            if preconditions.saved_snapshot {
+                "Saved source validated"
+            } else {
+                "Source revision current"
+            },
+            source_valid,
+        );
         checklist_row(ui, "Permissions resolved", preconditions.authority_resolved);
         checklist_row(
             ui,
@@ -924,8 +946,12 @@ fn preconditions_panel(
         );
         checklist_row(
             ui,
-            "Commit produces an auditable result",
-            preconditions.source_current
+            if preconditions.saved_snapshot {
+                "Validated revision recorded"
+            } else {
+                "Commit produces an auditable result"
+            },
+            source_valid
                 && preconditions.authority_resolved
                 && preconditions.dependencies_enumerated
                 && report.can_save(),
@@ -964,9 +990,14 @@ fn section_heading(ui: &mut Ui, label: &str, status: Option<(&str, bool)>) {
             if passed { t.color.ok } else { t.color.err },
         );
     }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(label);
+        if let Some((status, _)) = status {
+            node.set_value(status);
+        }
     });
 }
 
@@ -1143,6 +1174,8 @@ fn checklist_row(ui: &mut Ui, label: &str, passed: bool) {
             t.color.err
         },
     );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
         node.set_value(if passed { "pass" } else { "blocked" });

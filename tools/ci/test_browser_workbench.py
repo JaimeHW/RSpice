@@ -12,12 +12,29 @@ import urllib.request
 from unittest.mock import Mock
 
 from browser_workbench import WorkbenchBrowser, controls
-from check_browser_workbench import verify_checkpoint, verify_recovery_copy
+from check_browser_workbench import verify_checkpoint, verify_clock_rejection, verify_recovery_copy
 from check_browser_release import ReleaseHandler, playground_result, startup_ready, verify_worker_urls
 from check_wasm_jit_browser import qualification_worker
 
 
 class BrowserWorkbenchTests(unittest.TestCase):
+    def test_clock_failure_requires_the_matching_error_and_retained_editable_draft(self):
+        def snapshot(error="Review update could not be timestamped: clock unavailable",
+                     draft="Retained reply", role="multilineTextInput"):
+            bounds = {"x0": 0, "y0": 0, "x1": 100, "y1": 20}
+            return {"tree": {"tree": {"root": 1}, "nodes": [
+                [1, {"role": "window", "properties": {"children": [2, 3]}}],
+                [2, {"role": "label", "properties": {"bounds": bounds, "value": error}}],
+                [3, {"role": role, "properties": {"bounds": bounds, "value": draft}}],
+            ]}}
+
+        verify_clock_rejection(snapshot(), "Review update", "Retained reply")
+        for change in ({"error": "Review update published"},
+                       {"error": "Project checkpoint could not be timestamped: clock unavailable"},
+                       {"draft": ""}, {"draft": "Changed reply"}, {"role": "label"}):
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                verify_clock_rejection(snapshot(**change), "Review update", "Retained reply")
+
     def test_solved_notice_requires_finite_rendered_measurements(self):
         valid = {"points": 630, "errors": [], "traces": [{"points": 630, "finite": True}]}
         self.assertEqual(playground_result(Mock(script=Mock(return_value=valid))), valid)

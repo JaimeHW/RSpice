@@ -66,7 +66,9 @@ def controls(snapshot):
             result.append({
                 "id": str(identity), "role": node["role"],
                 "label": properties.get("label", ""),
+                "description": properties.get("description", ""),
                 "value": properties.get("value", ""),
+                "toggled": properties.get("toggled"),
                 "actions": node.get("actions", 0),
                 "center": (transform[0] * x + transform[2] * y + transform[4],
                            transform[1] * x + transform[3] * y + transform[5]),
@@ -244,7 +246,7 @@ class WorkbenchBrowser:
 
         return wait_for(current, "a fresh rendered-control snapshot", 90)
 
-    def click(self, label, role=None, *, keyboard=()):
+    def click(self, label, role=None, *, keyboard=(), offset=(0, 0)):
         candidates = [control for control in controls(self.snapshot())
                       if control["label"] == label and (role is None or control["role"] == role)]
         if len(candidates) != 1:
@@ -254,7 +256,7 @@ class WorkbenchBrowser:
             const r = document.getElementById('rspice_canvas').getBoundingClientRect();
             return {x: r.x, y: r.y, ratio: devicePixelRatio};
         """)
-        x, y = (round(canvas[axis] + point[i] / canvas["ratio"])
+        x, y = (round(canvas[axis] + point[i] / canvas["ratio"] + offset[i])
                 for i, axis in enumerate(("x", "y")))
         self.record_input("click", label=label, role=role, node=candidates[0]["id"], x=x, y=y,
                           keyboard=keyboard)

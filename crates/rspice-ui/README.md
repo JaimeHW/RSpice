@@ -186,6 +186,19 @@ python3 tools/ci/check_browser_engine_recovery.py --web-root crates/rspice-ui/we
 Append `--software-webgpu` to use Chrome's SwiftShader WebGPU adapter for
 functional CI. This does not qualify physical GPU support or performance.
 
+The workbench journey injects invalid wall-clock readings while posting and
+resolving reviews, creating checkpoints, saving validated revisions and
+publishing model-validation receipts and provider decisions. It checks retained
+drafts and reads durable project bytes independently, then
+retries with a valid clock and reloads the saved history. Forward and backward
+clock adjustments also exercise the displayed ages. The validated-save case
+temporarily makes the OS file picker unavailable to exercise normal OPFS
+publication; it does not qualify OS picker or external-file permission behavior.
+Model validation checks both Save all and active-model Save, retained receipt
+bytes after clock failures, and successful retry without unrelated project edits.
+The provider workflow imports actual source folders, retains multiline audit
+reasons through failed publication, and saves and reloads replacement decisions.
+
 The engine recovery check delays the first worker module response, queues an
 authored deck, fails that response, and retries startup through the status bar.
 It verifies terminal failure, a successful rerun, and its analytic operating
