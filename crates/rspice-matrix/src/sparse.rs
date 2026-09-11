@@ -2063,8 +2063,11 @@ impl StaticMatrix {
             // tiny fraction of the gross (a feedback amplifier accepts a
             // wrong-basin operating point), so the relative part stays on
             // the net.
-            const CANCELLATION_NOISE_TERMS: Value = 256.0;
-            let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * row_ax_gross;
+            let noise_floor = self.residual_rounding_floor(row, solution, row_ax_gross);
+            if !noise_floor.is_finite() {
+                visit(row, Value::INFINITY);
+                continue;
+            }
             let scale = safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
             let normalized = if residual == 0.0 {
                 0.0
@@ -2075,6 +2078,24 @@ impl StaticMatrix {
         }
 
         Ok(())
+    }
+
+    #[inline]
+    fn residual_rounding_floor(&self, row: usize, point: &[Value], gross: Value) -> Value {
+        const ROUNDING_FACTOR: Value = 256.0 * Value::EPSILON;
+        if gross.is_finite() {
+            return ROUNDING_FACTOR * gross;
+        }
+        // Finite opposing terms can overflow their gross sum while the net
+        // and rounding floor remain representable. Scale before summing only
+        // on this exceptional path; ordinary rows retain their exact arithmetic.
+        let mut floor = 0.0;
+        for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1] {
+            let term = self.values[self.residual_layout.csc_idx[position]]
+                * point[self.residual_layout.col_idx[position]];
+            floor += ROUNDING_FACTOR * term.abs();
+        }
+        floor
     }
 
     /// Scale an explicitly evaluated residual without forming `A*x-b`.
@@ -2167,7 +2188,8 @@ impl StaticMatrix {
                     * rounding_point[self.residual_layout.col_idx[position]])
                     .abs();
             }
-            if !gross.is_finite() {
+            let noise_floor = self.residual_rounding_floor(row, rounding_point, gross);
+            if !noise_floor.is_finite() {
                 visit(row, Value::INFINITY);
                 continue;
             }
@@ -2177,7 +2199,7 @@ impl StaticMatrix {
             } else {
                 1e-12
             };
-            let scale = abstol + 256.0 * Value::EPSILON * gross + reltol * value.abs();
+            let scale = abstol + noise_floor + reltol * value.abs();
             visit(
                 row,
                 if *value == 0.0 {
@@ -6649,6 +6671,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn residual_scaling_handles_overflowing_gross_cancellation() {
+        let matrix = StaticMatrix::from_triplets(1, 2, &[(0, 0, 1e308), (0, 1, -1e308)]).unwrap();
+        let point = [1.0, 1.0];
+        let residual = 1e300;
+        let expected = residual / (2.0 * (256.0 * Value::EPSILON * 1e308) + 1e-3 * residual);
+        let affine = matrix
+            .scaled_residual_inf_norm_by_row(&point, &[residual], 1e-3, |_| 0.0)
+            .unwrap();
+        let explicit = matrix
+            .scaled_explicit_residual_inf_norm_by_row(&[residual], &point, 1e-3, |_| 0.0)
+            .unwrap();
+        for norm in [affine, explicit] {
+            assert!(
+                (norm - expected).abs() < 1e-10,
+                "finite cancellation must retain a rejected residual: {norm}, expected {expected}"
+            );
+        }
+        assert_eq!(
+            matrix
+                .scaled_residual_inf_norm_by_row(&point, &[0.0], 1e-3, |_| 0.0)
+                .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            matrix
+                .scaled_explicit_residual_inf_norm_by_row(&[0.0], &point, 1e-3, |_| 0.0)
+                .unwrap(),
+            0.0
+        );
     }
 
     #[test]
