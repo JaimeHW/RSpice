@@ -891,6 +891,7 @@ impl Engine {
     ///
     /// Computes dVout/dparam using finite differences.
     /// Useful for design optimization and tolerance analysis.
+    /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
     pub fn run_sensitivity(
         &self,
         netlist: &Netlist,
@@ -938,6 +939,7 @@ impl Engine {
     /// Expressions are replayed for each trial, using the shared refinement
     /// driver. `runs` includes solver runs already consumed by the enclosing
     /// study; nominal and attempted refinement runs consume the same budget.
+    /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
     #[allow(clippy::too_many_arguments)]
     pub fn run_output_sensitivity_with_abort(
         &self,
@@ -1035,6 +1037,7 @@ impl Engine {
     /// Expressions are replayed for each trial, using the shared refinement
     /// driver. `runs` includes solver runs already consumed by the enclosing
     /// study; nominal and attempted refinement runs consume the same budget.
+    /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
     #[allow(clippy::too_many_arguments)]
     pub fn run_output_sensitivity_ac_with_abort(
         &self,

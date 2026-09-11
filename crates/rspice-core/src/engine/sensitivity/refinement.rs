@@ -9,6 +9,7 @@ use rspice_veriloga_runtime::arithmetic::ScaledValue;
 
 const RELATIVE_AGREEMENT: Value = 1e-4;
 const MAX_REFINEMENTS: usize = 12;
+const ARITHMETIC_ROUNDOFF: Value = 64.0 * Value::EPSILON;
 
 struct Sample {
     coordinate: Value,
@@ -110,8 +111,114 @@ fn agrees(left: Value, right: Value, roundoff: ScaledValue) -> bool {
     error.is_zero() || (!tolerance.is_zero() && error.divide(tolerance).binary64().abs() <= 1.0)
 }
 
+/// Require observable probe changes to exceed the arithmetic noise relative to
+/// the requested agreement. Keep evidence of variation: a larger step landing
+/// on an equal value must not turn an unresolved response into a false zero.
+fn response_resolved(
+    pair: &Pair,
+    nominal: &[Complex64],
+    observed: &mut [[bool; 2]],
+    reserve: Value,
+    abort: &dyn AbortSignal,
+) -> Result<bool, SimulationError> {
+    let mut resolved = true;
+    for (index, nominal) in nominal.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        for (component, has_varied) in observed[index].iter_mut().enumerate() {
+            let nominal = component_value(*nominal, component);
+            let values = [pair.positive.as_ref(), pair.negative.as_ref()]
+                .into_iter()
+                .flatten()
+                .map(|sample| component_value(sample.values[index], component));
+            let scale = values
+                .clone()
+                .map(Value::abs)
+                .fold(nominal.abs(), Value::max);
+            let mut response: Value = 0.0;
+            for value in values {
+                let change = difference(value, nominal);
+                if !change.is_zero() {
+                    *has_varied = true;
+                    response =
+                        response.max(change.divide(ScaledValue::new(scale)).binary64().abs());
+                }
+            }
+            resolved &=
+                !*has_varied || response >= reserve * ARITHMETIC_ROUNDOFF / RELATIVE_AGREEMENT;
+        }
+    }
+    Ok(resolved)
+}
+
+/// Check expanded stencils against the original nearby response. Interpolate
+/// changes from the nominal value so a large baseline does not cancel the
+/// evidence, and retain exponents in both the weights and the noise bound.
+fn preserves_nearby_response(
+    coordinate: Value,
+    nominal: Value,
+    anchor: &Pair,
+    samples: &[Option<&Sample>],
+    index: usize,
+    component: usize,
+) -> bool {
+    for nearby in [anchor.positive.as_ref(), anchor.negative.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let actual = component_value(nearby.values[index], component);
+        let mut prediction = ScaledValue::new(0.0);
+        let mut noise_weight = ScaledValue::new(1.0);
+        let mut scale = nominal.abs().max(actual.abs());
+        for (i, sample) in samples.iter().enumerate() {
+            let Some(sample) = sample else { continue };
+            if samples[..i]
+                .iter()
+                .flatten()
+                .any(|earlier| earlier.coordinate == sample.coordinate)
+            {
+                continue;
+            }
+            let mut weight = difference(nearby.coordinate, coordinate)
+                .divide(difference(sample.coordinate, coordinate));
+            for (j, other) in samples.iter().enumerate() {
+                let Some(other) = other else { continue };
+                if other.coordinate == sample.coordinate
+                    || samples[..j]
+                        .iter()
+                        .flatten()
+                        .any(|earlier| earlier.coordinate == other.coordinate)
+                {
+                    continue;
+                }
+                weight = weight.multiply(
+                    difference(nearby.coordinate, other.coordinate)
+                        .divide(difference(sample.coordinate, other.coordinate)),
+                );
+            }
+            let value = component_value(sample.values[index], component);
+            scale = scale.max(value.abs());
+            prediction = prediction.plus(weight.multiply(difference(value, nominal)));
+            // copysign retains the sign even if binary64 conversion underflows.
+            noise_weight = noise_weight
+                .plus(weight.multiply(ScaledValue::new(1.0_f64.copysign(weight.binary64()))));
+        }
+        let error = prediction.plus(difference(nominal, actual));
+        let tolerance = ScaledValue::new(scale)
+            .multiply(ScaledValue::new(ARITHMETIC_ROUNDOFF))
+            .multiply(noise_weight);
+        let relative_error = error.divide(tolerance).binary64().abs();
+        if !error.is_zero() && (!relative_error.is_finite() || relative_error > 1.0) {
+            return false;
+        }
+    }
+    true
+}
+
 impl Engine {
-    /// Compare central and one-sided estimates over successively halved steps.
+    /// Resolve observed probe changes before comparing successively halved
+    /// central and one-sided stencils. An explicit step is an initial guess.
     /// This is a numerical consistency check, not a proof of model regularity.
     /// The nominal run is counted by the caller; all attempted trials share its
     /// counter, including failed physical-domain/convergence evaluations.
@@ -185,7 +292,48 @@ impl Engine {
         };
 
         let mut outer = sample_pair(step)?;
+        let mut anchor = None;
+        let mut observed = vec![[false; 2]; nominal.len()];
+        // A tiny step at a zero-valued parameter can lose the response beneath
+        // a nonzero probe baseline. Enlarge before fitting instead of allowing
+        // the roundoff floor to excuse an inaccurate derivative. Reserve three
+        // doublings to fit two resolved stencils, including a one-sided fit.
+        for expansion in 0..MAX_REFINEMENTS - 3 {
+            let reserve = if expansion == 0 { 16.0 } else { 1.0 };
+            if response_resolved(&outer, nominal, &mut observed, reserve, abort)? {
+                break;
+            }
+            let larger = step * 2.0;
+            if !larger.is_finite()
+                || (outer.positive.as_ref().is_none() && outer.negative.as_ref().is_none())
+            {
+                break;
+            }
+            step = larger;
+            let previous = std::mem::replace(&mut outer, sample_pair(step)?);
+            if anchor.is_none() {
+                anchor = Some(previous);
+            }
+        }
         let mut older = Pair::default();
+        let mut prepared = [None, None];
+        if anchor.is_some()
+            && (step * 8.0).is_finite()
+            && response_resolved(&outer, nominal, &mut observed, 1.0, abort)?
+        {
+            // Measure the smallest response directly instead of assuming its
+            // rate of decay. Reuse it and the next larger pair while refining;
+            // smooth stationary responses can decay faster than quadratically.
+            let first_inner = sample_pair(step * 2.0)?;
+            let next_outer = sample_pair(step * 4.0)?;
+            older = sample_pair(step * 8.0)?;
+            prepared = [
+                Some(first_inner),
+                Some(std::mem::replace(&mut outer, next_outer)),
+            ];
+            step *= 4.0;
+        }
+        let mut prepared = prepared.into_iter().flatten();
         let mut previous_one_sided: Option<(bool, Vec<Complex64>)> = None;
         for _ in 0..MAX_REFINEMENTS {
             step *= 0.5;
@@ -203,9 +351,12 @@ impl Engine {
             {
                 break;
             }
-            let inner = sample_pair(step)?;
+            let inner = match prepared.next() {
+                Some(pair) => pair,
+                None => sample_pair(step)?,
+            };
             let mut candidate = Vec::with_capacity(nominal.len());
-            let mut qualified = true;
+            let mut qualified = response_resolved(&inner, nominal, &mut observed, 1.0, abort)?;
             let mut one_sided_direction = None;
             let mut all_extrapolated = true;
             for (index, nominal_value) in nominal.iter().enumerate() {
@@ -223,6 +374,16 @@ impl Engine {
                         inner.positive.as_ref(),
                         inner.negative.as_ref(),
                     ];
+                    if let Some(anchor) = &anchor {
+                        qualified &= preserves_nearby_response(
+                            coordinate,
+                            nominal_value,
+                            anchor,
+                            &samples,
+                            index,
+                            component,
+                        );
+                    }
                     let scale = samples
                         .iter()
                         .flatten()
@@ -236,7 +397,7 @@ impl Engine {
                         .map(|sample| (sample.coordinate - coordinate).abs())
                         .fold(Value::INFINITY, Value::min);
                     let roundoff = ScaledValue::new(scale)
-                        .multiply(ScaledValue::new(64.0 * Value::EPSILON))
+                        .multiply(ScaledValue::new(ARITHMETIC_ROUNDOFF))
                         .divide(ScaledValue::new(spacing));
                     let fit = |a: Option<&Sample>, b: Option<&Sample>| {
                         estimate(coordinate, nominal_value, a, b, index, component).map_err(
@@ -285,14 +446,20 @@ impl Engine {
                             (Some(_), None)
                                 if older.positive.outside_domain()
                                     && outer.positive.outside_domain()
-                                    && inner.positive.outside_domain() =>
+                                    && inner.positive.outside_domain()
+                                    && anchor
+                                        .as_ref()
+                                        .is_none_or(|pair| pair.positive.outside_domain()) =>
                             {
                                 Some(false)
                             }
                             (None, Some(_))
                                 if older.negative.outside_domain()
                                     && outer.negative.outside_domain()
-                                    && inner.negative.outside_domain() =>
+                                    && inner.negative.outside_domain()
+                                    && anchor
+                                        .as_ref()
+                                        .is_none_or(|pair| pair.negative.outside_domain()) =>
                             {
                                 Some(true)
                             }
@@ -358,6 +525,192 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::abort_signal::NoAbort;
+
+    #[test]
+    fn refinement_resolves_small_responses_without_a_probe_scale_floor() {
+        for scale in [1e-200, 1.0, 1e200] {
+            for one_sided in [false, true] {
+                let mut largest: Value = 0.0;
+                let value = Engine::default()
+                    .refine_sensitivity(
+                        "small response",
+                        0.0,
+                        1e-12,
+                        &[Complex64::new(scale, 0.0)],
+                        &mut 1,
+                        &NoAbort,
+                        |point| {
+                            largest = largest.max(point.abs());
+                            if one_sided && point < 0.0 {
+                                Err(SimulationError::ParameterDomain(
+                                    "nonnegative parameter".into(),
+                                ))
+                            } else {
+                                Ok(vec![Complex64::new(scale * (1.0 + point), 0.0)])
+                            }
+                        },
+                    )
+                    .unwrap();
+                assert!(
+                    (value[0].re / scale - 1.0).abs() < 1e-5,
+                    "scale={scale}, one_sided={one_sided}: {value:?}"
+                );
+                assert!(
+                    largest > 1e-12,
+                    "the weak response must trigger a larger step"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn refinement_expansion_cannot_replace_a_local_slope_with_a_distant_branch() {
+        let result = Engine::default().refine_sensitivity(
+            "nearby branch",
+            0.0,
+            1e-12,
+            &[Complex64::new(1.0, 0.0)],
+            &mut 1,
+            &NoAbort,
+            |point| {
+                Ok(vec![Complex64::new(
+                    1.0 + if point.abs() <= 1e-12 {
+                        point
+                    } else {
+                        2.0 * point
+                    },
+                    0.0,
+                )])
+            },
+        );
+        assert!(
+            result.is_err(),
+            "the expanded stencil crossed the local branch: {result:?}"
+        );
+    }
+
+    #[test]
+    fn refinement_expansion_preserves_nearby_trial_failure_evidence() {
+        let result = Engine::default().refine_sensitivity(
+            "nearby failed trial",
+            0.0,
+            1e-12,
+            &[Complex64::new(1.0, 0.0)],
+            &mut 1,
+            &NoAbort,
+            |point| {
+                if point < -1e-12 {
+                    Err(SimulationError::ParameterDomain("outer domain".into()))
+                } else if point < 0.0 {
+                    Err(SimulationError::ConvergenceFailed(20))
+                } else {
+                    Ok(vec![Complex64::new(1.0 + point, 0.0)])
+                }
+            },
+        );
+        assert!(
+            result.is_err(),
+            "nearby failures remain unresolved: {result:?}"
+        );
+    }
+
+    #[test]
+    fn refinement_resolves_a_smooth_stationary_response_above_a_baseline() {
+        for one_sided in [false, true] {
+            let result = Engine::default().refine_sensitivity(
+                "stationary response",
+                0.0,
+                1e-4,
+                &[Complex64::new(1.0, 0.0)],
+                &mut 1,
+                &NoAbort,
+                |point| {
+                    if one_sided && point < 0.0 {
+                        Err(SimulationError::ParameterDomain(
+                            "nonnegative parameter".into(),
+                        ))
+                    } else {
+                        Ok(vec![Complex64::new(1.0 + point.powi(3), 0.0)])
+                    }
+                },
+            );
+            assert!(result.is_ok(), "one_sided={one_sided}: {result:?}");
+            assert!(result.unwrap()[0].re.abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn refinement_does_not_erase_a_weak_response_when_larger_samples_are_equal() {
+        let result = Engine::default().refine_sensitivity(
+            "localized response",
+            0.0,
+            1e-12,
+            &[Complex64::new(1.0, 0.0)],
+            &mut 1,
+            &NoAbort,
+            |point| {
+                Ok(vec![Complex64::new(
+                    if point.abs() <= 1e-12 {
+                        1.0 + point
+                    } else {
+                        1.0
+                    },
+                    0.0,
+                )])
+            },
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("could not resolve")
+        );
+    }
+
+    #[test]
+    fn refinement_expansion_observes_run_limits_and_fatal_failures() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.resource_limits.max_batch_runs = 5;
+        let mut evaluations = 0;
+        let error = Engine::new(config)
+            .refine_sensitivity(
+                "expansion budget",
+                0.0,
+                1e-12,
+                &[Complex64::new(1.0, 0.0)],
+                &mut 1,
+                &NoAbort,
+                |point| {
+                    evaluations += 1;
+                    Ok(vec![Complex64::new(1.0 + point, 0.0)])
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(error, SimulationError::ResourceLimit(_)));
+        assert_eq!(evaluations, 4);
+
+        let mut evaluations = 0;
+        let error = Engine::default()
+            .refine_sensitivity(
+                "expansion cancellation",
+                0.0,
+                1e-12,
+                &[Complex64::new(1.0, 0.0)],
+                &mut 1,
+                &NoAbort,
+                |point| {
+                    evaluations += 1;
+                    if evaluations == 3 {
+                        Err(SimulationError::Aborted)
+                    } else {
+                        Ok(vec![Complex64::new(1.0 + point, 0.0)])
+                    }
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(error, SimulationError::Aborted));
+        assert_eq!(evaluations, 3, "stop before the next expansion trial");
+    }
 
     #[test]
     fn refinement_checks_multiple_scales_and_directional_consistency() {

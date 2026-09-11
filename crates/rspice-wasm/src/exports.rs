@@ -406,6 +406,37 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_resolves_zero_model_parameter_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        use rspice_core::analysis::AcSensitivityOutput;
+        let netlist = rspice_core::Netlist::parse(
+            "MOS body effect\nVG gate 0 DC 2 AC 1\nVD drain 0 2\nVB body 0 -1\n\
+             M1 drain gate 0 body NM W=1u L=1u\n.model NM NMOS(LEVEL=1 VTO=1 KP=1m GAMMA=0 PHI=0.6)\n.end\n",
+        ).unwrap();
+        let engine = rspice_core::Engine::default();
+        let output = AcSensitivityOutput::BranchCurrent("VD".into());
+        let filters = ["NM:GAMMA".to_owned()];
+        let dc = engine
+            .run_sensitivity_dc_complete_with_abort(&netlist, output.clone(), &filters, &NoAbort)
+            .unwrap();
+        let ac = engine
+            .run_sensitivity_ac_complete_with_abort(
+                &netlist,
+                output,
+                &[1.0, 1e9],
+                &filters,
+                &NoAbort,
+            )
+            .unwrap();
+        let expected = 1e-3 * (1.6_f64.sqrt() - 0.6_f64.sqrt());
+        assert!((dc.get("NM:GAMMA").unwrap().absolute / expected - 1.0).abs() < 1e-5);
+        for value in &ac.get("NM:GAMMA").unwrap().absolute {
+            assert!((value.re / expected - 1.0).abs() < 1e-5);
+            assert_eq!(value.im, 0.0);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_refinement_and_finite_boundary_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         let engine = rspice_core::Engine::default();

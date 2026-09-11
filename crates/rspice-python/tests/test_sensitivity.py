@@ -51,6 +51,22 @@ class TestSensitivity:
         with pytest.raises(rspice.SimulationError, match="last trial failure"):
             engine.run_sensitivity_ac(netlist, "out", "gain", 0.0, [1.0])
 
+    def test_zero_model_parameter_sensitivity_resolves_body_effect(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "MOS body effect\nVG gate 0 DC 2 AC 1\nVD drain 0 2\nVB body 0 -1\n"
+            "M1 drain gate 0 body NM W=1u L=1u\n"
+            ".model NM NMOS(LEVEL=1 VTO=1 KP=1m GAMMA=0 PHI=0.6)\n.end\n"
+        )
+        expected = 1e-3 * (np.sqrt(1.6) - np.sqrt(0.6))
+        dc = engine.run_sensitivity_dc_complete(
+            netlist, "VD", filters=["NM:GAMMA"], output_is_current=True
+        )
+        ac = engine.run_sensitivity_ac_complete(
+            netlist, "VD", [1.0, 1e9], filters=["NM:GAMMA"], output_is_current=True
+        )
+        assert dc.get("NM:GAMMA").absolute == pytest.approx(expected, rel=1e-5)
+        assert ac.get("NM:GAMMA").absolute == pytest.approx([expected + 0j] * 2, rel=1e-5)
+
     def test_parameter_ac_magnitude_sensitivity_uses_the_nominal_phasor(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "AC null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n"

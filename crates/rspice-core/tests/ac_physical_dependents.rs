@@ -97,6 +97,26 @@ fn sensitivity_refinement_rejects_a_hidden_parameter_kink() {
 }
 
 #[test]
+fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
+    let netlist = Netlist::parse(
+        "Nearby branch\n.param gain=0\nV1 in 0 DC 1 AC 1\n\
+         E1 out 0 in 0 {1+if(abs(gain)<=1e-12,gain,2*gain)}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    for result in [
+        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+            .map(|values| values[0]),
+    ] {
+        let error = result.expect_err("a distant slope cannot replace unresolved local evidence");
+        assert!(error.to_string().contains("could not resolve"), "{error}");
+    }
+}
+
+#[test]
 fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
     let netlist = Netlist::parse(
         "MOS boundary\nVG gate 0 2\nVD drain 0 2\nVB body 0 -1\n\
@@ -117,6 +137,73 @@ fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
         1e-9,
         "MOS boundary derivative",
     );
+}
+
+#[test]
+fn sensitivity_refinement_resolves_zero_mos_body_effect() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::AcSensitivityOutput;
+    let source = "MOS body effect\n.param effect=0\nVG gate 0 DC 2 AC 1\nVD drain 0 2\nVB body 0 -1\n\
+         M1 drain gate 0 body NM W=1u L=1u\n.model NM NMOS(LEVEL=1 VTO=1 KP=1m GAMMA=0 PHI=0.6)\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let engine = physical_engine();
+    let output = AcSensitivityOutput::BranchCurrent("VD".into());
+    let filters = ["NM:GAMMA".to_owned()];
+    let dc = engine
+        .run_sensitivity_dc_complete(&netlist, output.clone(), &filters)
+        .unwrap();
+    let ac = engine
+        .run_sensitivity_ac_complete(&netlist, output.clone(), &[1.0, 1e9], &filters)
+        .unwrap();
+    // In saturation Id = KP/2*(Vgs-Vto-gamma*body_shift)^2 and gm = KP*(Vgs-Vth).
+    // Vgs-Vto=1, so these two source-current derivatives have the same value.
+    let expected = 1e-3 * (1.6_f64.sqrt() - 0.6_f64.sqrt());
+    assert_relative(
+        dc.get("NM:GAMMA").unwrap().absolute,
+        expected,
+        1e-5,
+        "DC body effect sensitivity",
+    );
+    for derivative in &ac.get("NM:GAMMA").unwrap().absolute {
+        assert_relative(derivative.re, expected, 1e-5, "AC body effect sensitivity");
+        assert_eq!(derivative.im, 0.0);
+    }
+    let parameterized = Netlist::parse(&source.replace("GAMMA=0", "GAMMA={effect}")).unwrap();
+    for delta in [None, Some(1e-3)] {
+        let mut runs = 0;
+        let dc = engine
+            .run_output_sensitivity_with_abort(
+                &parameterized,
+                output.clone(),
+                "effect",
+                0.0,
+                delta,
+                &mut runs,
+                &NoAbort,
+            )
+            .unwrap();
+        let ac = engine
+            .run_output_sensitivity_ac_with_abort(
+                &parameterized,
+                output.clone(),
+                "effect",
+                0.0,
+                &[1.0, 1e9],
+                delta,
+                &mut runs,
+                &NoAbort,
+            )
+            .unwrap();
+        assert_relative(dc, expected, 1e-5, "authored DC body effect sensitivity");
+        for derivative in ac {
+            assert_relative(
+                derivative,
+                -expected,
+                1e-5,
+                "authored AC magnitude body effect sensitivity",
+            );
+        }
+    }
 }
 
 #[test]
