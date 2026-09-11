@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 49 exposes indirect source activation to runtime topology guards.
 /// Version 48 validates indirect constraint controls, left sides, and uniqueness.
 /// Version 47 retains normalized repeat counts and repeated event subscriptions.
 /// Version 46 executes computed event expressions and runtime bit indices.
@@ -50,7 +51,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 48;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 49;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

@@ -2,9 +2,9 @@
 //!
 //! `V(x): lhs == rhs` adds an unknown source on the target branch whose
 //! value the Newton solve picks so the constraint holds — the ideal-opamp
-//! idiom. Pins are closed-form: a follower copies its input, a divider
-//! feedback sets a gain of 2, an implicit transcendental equation solves
-//! to ln(2), a flow-target constraint regulates a node, and a disabled
+//! idiom. A follower copies its input, divider feedback sets a gain of 2,
+//! a transcendental constraint solves to its unique root in (0, 1),
+//! a flow-target constraint regulates a node, and a disabled
 //! constraint opens the branch.
 #![cfg(feature = "veriloga")]
 

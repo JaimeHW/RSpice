@@ -4224,22 +4224,6 @@ impl SemanticAnalyzer {
 
         let residual = Self::binary_expr(BinaryOp::Sub, lhs, rhs);
 
-        // Guard fallback: the constraint is replaced by I(branch) = 0
-        let fallback = Expression::BranchAccess(match &stmt.branch {
-            BranchAccess::Nodes { pos, neg, span, .. } => BranchAccess::Nodes {
-                access: "I".into(),
-                kind: Some(AccessKind::Flow),
-                pos: pos.clone(),
-                neg: neg.clone(),
-                span: *span,
-            },
-            BranchAccess::Branch { name, span, .. } => BranchAccess::Branch {
-                access: "I".into(),
-                kind: Some(AccessKind::Flow),
-                name: name.clone(),
-                span: *span,
-            },
-        });
         let site = self.next_analog_site();
         let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Contribution(AnalyzedContribution {
@@ -4253,7 +4237,11 @@ impl SemanticAnalyzer {
             expr_type: ValueType::Real,
             span: stmt.span,
         }));
-        let expression = self.apply_guard(residual, fallback);
+        // The ordinary static-guard pass must see a zero fallback so it can
+        // deactivate this source. Structural stamping then pins the unused
+        // current with one identity row; a synthetic I(branch) fallback would
+        // hide the activation guard and disagree with the structured CFG.
+        let expression = self.apply_guard(residual, Self::number_expr(0.0, stmt.span));
 
         module.contributions.push(AnalyzedContribution {
             branch: branch_name,

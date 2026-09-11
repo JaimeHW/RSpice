@@ -137,6 +137,34 @@ fn indirect_validation_requires_an_access_on_the_equation_left_side() {
 }
 
 #[test]
+fn guarded_indirect_sources_stamp_active_constraints_and_inactive_identity_rows() {
+    let model = compile(
+        "module gated(p,n); inout p,n; electrical p,n;
+        parameter integer en=1; analog if(en) V(p,n): V(p,n)==3; endmodule",
+    );
+    let mut device = model.device("X", &[1, 0]);
+    assert!(model.stamp_programs[0].static_condition.is_some());
+    device.set_branch_current_indices(&[2]);
+    for enabled in [1.0, 0.0, 1.0] {
+        assert!(device.set_parameter("en", enabled));
+        device.try_resolve_parameter_defaults().unwrap();
+        for bias in [[0.25, 0.0], [3.0, -0.00275]] {
+            let mut matrix = [[0.0; 2]; 2];
+            let mut rhs = [0.0; 2];
+            device
+                .try_stamp(&bias, |r, c, v| matrix[r][c] += v, |r, v| rhs[r] += v)
+                .unwrap();
+            assert_eq!(
+                matrix,
+                [[0.0, enabled], [enabled, 1.0 - enabled]],
+                "en={enabled}, bias={bias:?}"
+            );
+            assert_eq!(rhs, [0.0, 3.0 * enabled], "en={enabled}, bias={bias:?}");
+        }
+    }
+}
+
+#[test]
 fn ideal_opamp_compiles_with_one_branch_unknown() {
     // V(out): V(inp, inn) == 0 — the classic ideal-opamp idiom
     let model = compile(

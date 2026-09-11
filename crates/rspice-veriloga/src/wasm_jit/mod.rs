@@ -2282,6 +2282,43 @@ endmodule
     }
 
     #[test]
+    fn wasm_indirect_sources_export_analysis_constant_activation_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+
+        let source = "module gated(p,n); inout p,n; electrical p,n;
+            parameter integer en=1;
+            analog if(en) V(p,n): V(p,n)==3;
+            endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "gated", postfix);
+            harness.reset();
+            let condition = harness
+                .executable
+                .export(WasmJitExecutableEntry::StaticCondition(0))
+                .expect("indirect source exposes its structural activation condition")
+                .to_owned();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.25);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+            for enabled in [1.0, 0.0, 1.0] {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize, enabled);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&condition), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    enabled,
+                    "postfix={postfix}, enabled={enabled}"
+                );
+                if enabled != 0.0 {
+                    let residual = harness.stamp_value_export(0);
+                    assert_eq!(harness.call(&residual), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), -2.75);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn wasm_potential_sources_preserve_branch_identity_in_both_plans() {
         use super::abi::{
             FRAME_BRANCH_UNKNOWNS_LEN_OFFSET, FRAME_BRANCH_UNKNOWNS_PTR_OFFSET, FRAME_RESULT_OFFSET,
