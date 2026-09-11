@@ -227,7 +227,7 @@ pub(super) fn parse_resistor(
                                     DeferrableValue::Resolved(param_value),
                                 );
                             } else {
-                                upsert_passive_instance_param(
+                                upsert_instance_param(
                                     ElementParamSink {
                                         instance_params: &mut instance_params,
                                         deferred_params: &mut deferred_params,
@@ -264,7 +264,7 @@ pub(super) fn parse_resistor(
                                     DeferrableValue::Deferred(expr),
                                 );
                             } else {
-                                upsert_passive_instance_param(
+                                upsert_instance_param(
                                     ElementParamSink {
                                         instance_params: &mut instance_params,
                                         deferred_params: &mut deferred_params,
@@ -468,28 +468,28 @@ struct PassiveTail {
     deferred_params: Vec<(String, String)>,
 }
 
-/// Store one passive instance parameter. Resolved and deferred forms share a
+/// Store one scalar instance parameter. Resolved and deferred forms share a
 /// single namespace so replacing an assignment cannot leave stale state in
 /// the other representation.
-fn upsert_passive_instance_param(sink: ElementParamSink<'_>, name: &str, value: DeferrableValue) {
-    let name = if name.eq_ignore_ascii_case("MULT") {
-        "M"
-    } else {
-        name
-    };
+fn upsert_instance_param(
+    sink: ElementParamSink<'_>,
+    name: impl Into<String>,
+    value: DeferrableValue,
+) {
+    let mut name = name.into();
+    if name.eq_ignore_ascii_case("MULT") {
+        name.clear();
+        name.push('M');
+    }
     let ElementParamSink {
         instance_params,
         deferred_params,
     } = sink;
-    instance_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
-    deferred_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    instance_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+    deferred_params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
     match value {
-        DeferrableValue::Resolved(value) => {
-            instance_params.push((name.to_string(), value));
-        }
-        DeferrableValue::Deferred(expression) => {
-            deferred_params.push((name.to_string(), expression));
-        }
+        DeferrableValue::Resolved(value) => instance_params.push((name, value)),
+        DeferrableValue::Deferred(expression) => deferred_params.push((name, expression)),
     }
 }
 
@@ -527,7 +527,7 @@ fn upsert_passive_scalar_tc(
     } = sink;
     let index = usize::from(name.eq_ignore_ascii_case("TC2"));
     if !vector_given[index] {
-        upsert_passive_instance_param(
+        upsert_instance_param(
             ElementParamSink {
                 instance_params,
                 deferred_params,
@@ -602,7 +602,7 @@ fn parse_passive_tc_assignment(
         Some(second)
     };
 
-    upsert_passive_instance_param(
+    upsert_instance_param(
         ElementParamSink {
             instance_params,
             deferred_params,
@@ -612,7 +612,7 @@ fn parse_passive_tc_assignment(
     );
     vector_given[0] = true;
     if let Some(second) = second {
-        upsert_passive_instance_param(
+        upsert_instance_param(
             ElementParamSink {
                 instance_params,
                 deferred_params,
@@ -914,7 +914,7 @@ fn parse_passive_tail(
                                     DeferrableValue::Resolved(param_value),
                                 );
                             } else {
-                                upsert_passive_instance_param(
+                                upsert_instance_param(
                                     ElementParamSink {
                                         instance_params: &mut tail.instance_params,
                                         deferred_params: &mut tail.deferred_params,
@@ -951,7 +951,7 @@ fn parse_passive_tail(
                                     DeferrableValue::Deferred(expr),
                                 );
                             } else {
-                                upsert_passive_instance_param(
+                                upsert_instance_param(
                                     ElementParamSink {
                                         instance_params: &mut tail.instance_params,
                                         deferred_params: &mut tail.deferred_params,
@@ -4414,18 +4414,27 @@ pub(super) fn parse_diode(
                 stream.advance();
 
                 if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
-                    instance_params.push(("OFF".to_string(), 1.0));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "OFF",
+                        DeferrableValue::Resolved(1.0),
+                    );
                     continue;
                 }
 
                 if stream.consume(&TokenKind::Equals) {
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(value)) => {
-                            instance_params.push((name_upper, value));
-                        }
-                        Some(DeferrableValue::Deferred(expr)) => {
-                            deferred_params.push((name_upper, expr));
-                        }
+                        Some(value) => upsert_instance_param(
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
+                            name_upper,
+                            value,
+                        ),
                         None => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
@@ -4442,7 +4451,14 @@ pub(super) fn parse_diode(
                 if !area_positional_seen
                     && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
                 {
-                    instance_params.push(("AREA".to_string(), parsed));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(parsed),
+                    );
                     area_positional_seen = true;
                     continue;
                 }
@@ -4464,7 +4480,14 @@ pub(super) fn parse_diode(
             }
             TokenKind::Number(v) => {
                 if !area_positional_seen {
-                    instance_params.push(("AREA".to_string(), *v));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(*v),
+                    );
                     area_positional_seen = true;
                     stream.advance();
                     continue;
@@ -4477,7 +4500,14 @@ pub(super) fn parse_diode(
             }
             _ => {
                 if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    instance_params.push(("AREA".to_string(), value));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(value),
+                    );
                     area_positional_seen = true;
                     continue;
                 }
@@ -4620,7 +4650,14 @@ pub(super) fn parse_bjt(
                 stream.advance();
 
                 if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
-                    instance_params.push(("OFF".to_string(), 1.0));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "OFF",
+                        DeferrableValue::Resolved(1.0),
+                    );
                     continue;
                 }
 
@@ -4642,12 +4679,14 @@ pub(super) fn parse_bjt(
                     }
 
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(value)) => {
-                            instance_params.push((name_upper, value));
-                        }
-                        Some(DeferrableValue::Deferred(expr)) => {
-                            deferred_params.push((name_upper, expr));
-                        }
+                        Some(value) => upsert_instance_param(
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
+                            name_upper,
+                            value,
+                        ),
                         None => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
@@ -4661,7 +4700,14 @@ pub(super) fn parse_bjt(
                 if !area_positional_seen
                     && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
                 {
-                    instance_params.push(("AREA".to_string(), parsed));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(parsed),
+                    );
                     area_positional_seen = true;
                     continue;
                 }
@@ -4684,7 +4730,14 @@ pub(super) fn parse_bjt(
             TokenKind::Number(v) => {
                 // Optional positional area scaling.
                 if !area_positional_seen {
-                    instance_params.push(("AREA".to_string(), *v));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(*v),
+                    );
                     area_positional_seen = true;
                     stream.advance();
                     continue;
@@ -4697,7 +4750,14 @@ pub(super) fn parse_bjt(
             }
             _ => {
                 if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    instance_params.push(("AREA".to_string(), value));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(value),
+                    );
                     area_positional_seen = true;
                     continue;
                 }
@@ -4823,7 +4883,14 @@ pub(super) fn parse_mosfet(
     let mut instance_params = Vec::new();
     let mut deferred_params = Vec::new();
     if tail_off_flag {
-        instance_params.push(("OFF".to_string(), 1.0));
+        upsert_instance_param(
+            ElementParamSink {
+                instance_params: &mut instance_params,
+                deferred_params: &mut deferred_params,
+            },
+            "OFF",
+            DeferrableValue::Resolved(1.0),
+        );
     }
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -4838,7 +4905,14 @@ pub(super) fn parse_mosfet(
                 stream.advance();
 
                 if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
-                    instance_params.push(("OFF".to_string(), 1.0));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "OFF",
+                        DeferrableValue::Resolved(1.0),
+                    );
                     continue;
                 }
 
@@ -4860,12 +4934,14 @@ pub(super) fn parse_mosfet(
                     }
 
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(value)) => {
-                            instance_params.push((name_upper, value));
-                        }
-                        Some(DeferrableValue::Deferred(expr)) => {
-                            deferred_params.push((name_upper, expr));
-                        }
+                        Some(value) => upsert_instance_param(
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
+                            name_upper,
+                            value,
+                        ),
                         None => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
@@ -4966,10 +5042,14 @@ fn parse_ic_vector(
             defer_simple_param_refs,
             element_label,
         )?;
-        match value {
-            DeferrableValue::Resolved(value) => instance_params.push(((*label).to_string(), value)),
-            DeferrableValue::Deferred(expr) => deferred_params.push(((*label).to_string(), expr)),
-        }
+        upsert_instance_param(
+            ElementParamSink {
+                instance_params: &mut *instance_params,
+                deferred_params: &mut *deferred_params,
+            },
+            *label,
+            value,
+        );
 
         if !stream.consume(&TokenKind::Comma) {
             return Ok(());
@@ -5191,12 +5271,14 @@ pub(super) fn parse_fet_instance_params(
                     }
 
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(DeferrableValue::Resolved(value)) => {
-                            instance_params.push((name_upper, value));
-                        }
-                        Some(DeferrableValue::Deferred(expr)) => {
-                            deferred_params.push((name_upper, expr));
-                        }
+                        Some(value) => upsert_instance_param(
+                            ElementParamSink {
+                                instance_params: &mut instance_params,
+                                deferred_params: &mut deferred_params,
+                            },
+                            name_upper,
+                            value,
+                        ),
                         None => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
@@ -5211,14 +5293,28 @@ pub(super) fn parse_fet_instance_params(
                 }
 
                 if name_upper == "OFF" {
-                    instance_params.push(("OFF".to_string(), 1.0));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "OFF",
+                        DeferrableValue::Resolved(1.0),
+                    );
                     continue;
                 }
 
                 if !area_positional_seen
                     && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
                 {
-                    instance_params.push(("AREA".to_string(), parsed));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(parsed),
+                    );
                     area_positional_seen = true;
                     continue;
                 }
@@ -5233,7 +5329,14 @@ pub(super) fn parse_fet_instance_params(
             }
             _ => {
                 if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    instance_params.push(("AREA".to_string(), value));
+                    upsert_instance_param(
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                        "AREA",
+                        DeferrableValue::Resolved(value),
+                    );
                     area_positional_seen = true;
                     continue;
                 }

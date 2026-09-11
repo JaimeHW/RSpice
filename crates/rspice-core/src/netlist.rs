@@ -6399,6 +6399,149 @@ mod tests {
     }
 
     #[test]
+    fn semiconductor_reassignments_replace_numeric_and_deferred_fields() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for nested in [false, true] {
+                for (device, model, value_key, ic_keys) in [
+                    ("D1 d 0 m", "d", "AREA", ["IC", "IC"]),
+                    ("Q1 c b 0 m", "npn", "AREA", ["IC_VBE", "IC_VCE"]),
+                    ("M1 d g s b m", "nmos", "W", ["IC_VDS", "IC_VGS"]),
+                    ("J1 d g s m", "njf", "AREA", ["IC_VDS", "IC_VGS"]),
+                    ("Z1 d g s m", "nmf", "AREA", ["IC_VDS", "IC_VGS"]),
+                ] {
+                    let mut cases = vec![
+                        (
+                            format!("{value_key}=2 {value_key}=3"),
+                            vec![(value_key, 3.0)],
+                        ),
+                        (
+                            format!("{value_key}={{q}} {value_key}=3"),
+                            vec![(value_key, 3.0)],
+                        ),
+                        (
+                            format!("{value_key}=3 {value_key}={{q}}"),
+                            vec![(value_key, 4.0)],
+                        ),
+                        ("M=2 MULT={q}".into(), vec![("M", 4.0)]),
+                        ("MULT={q} M=3".into(), vec![("M", 3.0)]),
+                        ("OFF OFF=0".into(), vec![("OFF", 0.0)]),
+                        ("OFF=0 OFF".into(), vec![("OFF", 1.0)]),
+                        ("IC=1 IC={q}".into(), vec![(ic_keys[0], 4.0)]),
+                        ("IC={q} IC=1".into(), vec![(ic_keys[0], 1.0)]),
+                    ];
+                    if model != "nmos" {
+                        cases.push(("2 AREA={q}".into(), vec![("AREA", 4.0)]));
+                        cases.push(("AREA={q} 2".into(), vec![("AREA", 2.0)]));
+                    }
+                    if model != "d" {
+                        cases.extend([
+                            (
+                                "IC=1,2 IC=-{q},+{q}".into(),
+                                vec![(ic_keys[0], -4.0), (ic_keys[1], 4.0)],
+                            ),
+                            (
+                                "IC=-{q},+{q} IC=1,2".into(),
+                                vec![(ic_keys[0], 1.0), (ic_keys[1], 2.0)],
+                            ),
+                            (
+                                "IC=1,2 IC={q}".into(),
+                                vec![(ic_keys[0], 4.0), (ic_keys[1], 2.0)],
+                            ),
+                        ]);
+                    }
+                    for (fields, expected) in cases {
+                        let body = format!("{device} {fields}\n.model m {model}");
+                        let source = if nested {
+                            format!(
+                                "Scoped assignments\nX1 cell q=4\n.subckt cell q=9\n{body}\n.ends\n.end"
+                            )
+                        } else {
+                            format!("Root assignments\n.param q=4\n{body}\n.end")
+                        };
+                        let netlist = Netlist::parse_with_options(
+                            &source,
+                            NetlistParseOptions {
+                                expression_dialect: dialect,
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                        let flattened = flatten_netlist(&netlist).unwrap();
+                        let (numeric, deferred) = match &flattened[0].kind {
+                            ElementKind::Diode {
+                                instance_params,
+                                deferred_params,
+                                ..
+                            }
+                            | ElementKind::Bjt {
+                                instance_params,
+                                deferred_params,
+                                ..
+                            }
+                            | ElementKind::Mosfet {
+                                instance_params,
+                                deferred_params,
+                                ..
+                            }
+                            | ElementKind::Jfet {
+                                instance_params,
+                                deferred_params,
+                                ..
+                            }
+                            | ElementKind::Mesfet {
+                                instance_params,
+                                deferred_params,
+                                ..
+                            } => (instance_params, deferred_params),
+                            other => panic!("unexpected device: {other:?}"),
+                        };
+                        assert!(deferred.is_empty());
+                        assert_eq!(
+                            numeric.len(),
+                            expected.len(),
+                            "{dialect:?} nested={nested}: {device} {fields}"
+                        );
+                        for (name, value) in expected {
+                            assert_eq!(
+                                numeric
+                                    .iter()
+                                    .find(|(key, _)| key == name)
+                                    .map(|(_, value)| *value),
+                                Some(value),
+                                "{dialect:?} nested={nested}: {device} {fields}"
+                            );
+                        }
+                    }
+                }
+                // The winning AREA and M must reach the actual diode equation.
+                let current = |fields: &str| {
+                    let device = format!("D1 d 0 m {fields}\n.model m d (IS=1p)");
+                    let body = if nested {
+                        format!("X1 d cell q=4\n.subckt cell d q=9\n{device}\n.ends")
+                    } else {
+                        device
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &format!(
+                            "Physical assignment values\n.param q=4\nV1 d 0 0.6\n{body}\n.end"
+                        ),
+                        NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    crate::engine::Engine::default()
+                        .run_dc_op(&netlist)
+                        .unwrap()
+                        .branch_currents[0]
+                };
+                assert_eq!(current("AREA=2 AREA={q} M=2 MULT=3"), current("AREA=4 M=3"));
+            }
+        }
+    }
+
+    #[test]
     fn signed_ic_vectors_resolve_in_instance_scope() {
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             for nested in [false, true] {
