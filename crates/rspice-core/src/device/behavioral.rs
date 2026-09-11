@@ -184,9 +184,10 @@ impl BehavioralReferenceError {
 }
 
 #[derive(Clone, Copy)]
-enum DerivativeTarget {
+enum DerivativeTarget<'a> {
     Node(usize),
     Branch(usize),
+    NodeDirection(&'a [Derivative]),
     Time,
 }
 
@@ -199,7 +200,7 @@ struct BehavioralDerivativeContext<'a> {
     temperature: Value,
     gmin: Value,
     expression_dialect: ExpressionDialect,
-    target: DerivativeTarget,
+    target: DerivativeTarget<'a>,
 }
 
 /// Compiled behavioral voltage source
@@ -1012,7 +1013,7 @@ fn analytic_expression_partial(
     node_values: &[Value],
     branch_values: &[Value],
     environment: BehavioralEnvironment,
-    target: DerivativeTarget,
+    target: DerivativeTarget<'_>,
 ) -> Option<Value> {
     let BehavioralEnvironment {
         time,
@@ -1103,6 +1104,37 @@ pub(crate) fn compiled_expression_branch_partial(
             expression_dialect,
         },
         DerivativeTarget::Branch(branch_index),
+    )
+}
+
+/// Propagate a caller-supplied direction through expression-local scalar
+/// leaves. Keep the derivative exponent until the owning consumer converts it.
+pub(crate) fn compiled_expression_node_direction(
+    expr: &Expr,
+    program: &CompiledExpr,
+    node_values: &[Value],
+    node_directions: &[Derivative],
+    environment: BehavioralEnvironment,
+) -> Option<(Value, Derivative)> {
+    if node_values.len() != program.node_map.len()
+        || node_directions.len() != node_values.len()
+        || !program.branch_map.is_empty()
+    {
+        return None;
+    }
+    eval_behavioral_expr_with_derivative(
+        expr,
+        &BehavioralDerivativeContext {
+            program,
+            node_values,
+            branch_values: &[],
+            time: environment.time,
+            frequency: environment.frequency,
+            temperature: environment.temperature,
+            gmin: environment.gmin,
+            expression_dialect: environment.expression_dialect,
+            target: DerivativeTarget::NodeDirection(node_directions),
+        },
     )
 }
 
@@ -1238,8 +1270,8 @@ pub fn evaluate_parameter_directional_derivative(
             ));
         }
     }
-    let node_values = vec![target_value; program.node_map.len()];
-    let target = program
+    let node_values = [target_value];
+    program
         .node_map
         .iter()
         .find_map(|(name, &index)| (name == "__RSPICE_DDX_TARGET").then_some(index))
@@ -1252,22 +1284,23 @@ pub fn evaluate_parameter_directional_derivative(
                     .expect("non-empty target set")
             )
         })?;
-    let context = BehavioralDerivativeContext {
-        program: &program,
-        node_values: &node_values,
-        branch_values: &[],
-        time: parameters.get("TIME").unwrap_or(0.0),
-        frequency: parameters.get("FREQ").unwrap_or(0.0),
-        temperature: parameters.get("TEMP").unwrap_or(27.0),
-        gmin: parameters.get("GMIN").unwrap_or(crate::constants::GMIN),
-        expression_dialect: parameters.expression_dialect(),
-        target: DerivativeTarget::Node(target),
-    };
-    eval_behavioral_expr_with_derivative_at_boundary(&ast, &context)
-        .map(|(_, derivative)| derivative)
-        .ok_or_else(|| {
-            "directional output derivative could not be evaluated analytically".to_string()
-        })
+    compiled_expression_node_direction(
+        &ast,
+        &program,
+        &node_values,
+        &[1.0.into()],
+        BehavioralEnvironment {
+            time: parameters.get("TIME").unwrap_or(0.0),
+            frequency: parameters.get("FREQ").unwrap_or(0.0),
+            temperature: parameters.get("TEMP").unwrap_or(27.0),
+            gmin: parameters.get("GMIN").unwrap_or(crate::constants::GMIN),
+            expression_dialect: parameters.expression_dialect(),
+        },
+    )
+    .map(|(_, derivative)| {
+        normalize_expression_boundary(derivative.binary64(), parameters.expression_dialect())
+    })
+    .ok_or_else(|| "directional output derivative could not be evaluated analytically".to_string())
 }
 
 fn eval_behavioral_expr_with_derivative_at_boundary(
@@ -1380,8 +1413,9 @@ fn eval_behavioral_expr_with_derivative(
             let idx = *context.program.node_map.get(name)?;
             let value = *context.node_values.get(idx)?;
             let derivative = match context.target {
-                DerivativeTarget::Node(target_idx) if target_idx == idx => 1.0,
-                _ => 0.0,
+                DerivativeTarget::Node(target_idx) if target_idx == idx => 1.0.into(),
+                DerivativeTarget::NodeDirection(direction) => *direction.get(idx)?,
+                _ => 0.0.into(),
             };
             derivative_pair(value, derivative)
         }
@@ -3458,6 +3492,91 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn expression_directions_preserve_weighted_and_retained_parameter_derivatives() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, values, directions, expected_value, expected_derivative) in [
+                (
+                    "1+1e-8*v(p)+1e200*v(q)",
+                    [0.0, 0.0],
+                    [2.0.into(), (-1e-208).into()],
+                    1.0,
+                    1e-8,
+                ),
+                (
+                    "1+1e-200*v(q)",
+                    [0.0, 0.0],
+                    [0.0.into(), Derivative::from(1e200) * 1e200],
+                    1.0,
+                    1e200,
+                ),
+                (
+                    "if(v(p)>0,v(q)*v(q),v(q))",
+                    [-1.0, 3.0],
+                    [0.0.into(), 2.0.into()],
+                    3.0,
+                    2.0,
+                ),
+                (
+                    "if(v(p)>0,v(q)*v(q),v(q))",
+                    [1.0, 3.0],
+                    [0.0.into(), 2.0.into()],
+                    9.0,
+                    12.0,
+                ),
+            ] {
+                let ast = crate::expr::parse_expression_strict(expression).unwrap();
+                let program = compile(&ast);
+                let mut inputs = vec![0.0; program.node_map.len()];
+                let mut incoming = vec![0.0.into(); inputs.len()];
+                for (name, index) in &program.node_map {
+                    let parameter = if name.eq_ignore_ascii_case("p") { 0 } else { 1 };
+                    inputs[*index] = values[parameter];
+                    incoming[*index] = directions[parameter];
+                }
+                let (value, derivative) = compiled_expression_node_direction(
+                    &ast,
+                    &program,
+                    &inputs,
+                    &incoming,
+                    BehavioralEnvironment {
+                        time: 0.0,
+                        frequency: 0.0,
+                        temperature: 27.0,
+                        gmin: crate::constants::GMIN,
+                        expression_dialect: dialect,
+                    },
+                )
+                .unwrap();
+                assert_eq!(value, expected_value, "{dialect:?} {expression}");
+                assert!(
+                    (derivative.binary64() / expected_derivative - 1.0).abs() < 2e-15,
+                    "{dialect:?} {expression}: {:?}, expected {expected_derivative}",
+                    derivative
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ddx_aliases_share_one_parameter_direction() {
+        let mut parameters = crate::netlist::ParamContext::new();
+        parameters.set_expression_dialect(ExpressionDialect::Xyce);
+        parameters.set("a", 0.0);
+        parameters.set("b", 0.0);
+        let targets = ["a".to_owned(), "B".to_owned()];
+        let expression = "1+1e-8*(a+b)";
+        let derivative =
+            evaluate_parameter_directional_derivative(expression, &parameters, &targets).unwrap();
+        assert!((derivative / 2e-8 - 1.0).abs() < 2e-15);
+        parameters.set("b", 1.0);
+        assert!(
+            evaluate_parameter_directional_derivative(expression, &parameters, &targets)
+                .unwrap_err()
+                .contains("different values")
+        );
     }
 
     #[test]
