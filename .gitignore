@@ -114,6 +114,7 @@ __pycache__/
 # session scratch, not product documentation, and go stale the moment the code
 # moves. Shipped docs live in README.md, SECURITY.md, the per-crate READMEs,
 # and security/.
+/audits/
 /*_AUDIT.md
 /*_IMPLEMENTATION_PLAN.md
 /*_IMPLEMENTATION_PROMPT.md
