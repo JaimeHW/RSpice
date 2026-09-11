@@ -31,8 +31,8 @@ impl Bjt {
         [["CTE", "TVJE"], ["CTC", "TVJC"], ["CTS", "TVJS"]];
     pub(crate) const LEGACY_GRADING_TEMPERATURE_PARAMS: [[&str; 2]; 3] =
         [["TMJE1", "TMJE2"], ["TMJC1", "TMJC2"], ["TMJS1", "TMJS2"]];
-    // Early voltages, current knees, transit times/knee, collector/emitter R.
-    pub(crate) const LEGACY_LINEAR_TEMPERATURE_PARAMS: [[&str; 2]; 10] = [
+    // Early voltages, current knees, transit times/knee and series resistances.
+    pub(crate) const LEGACY_LINEAR_TEMPERATURE_PARAMS: [[&str; 2]; 12] = [
         ["TVAF1", "TVAF2"],
         ["TVAR1", "TVAR2"],
         ["TIKF1", "TIKF2"],
@@ -43,6 +43,8 @@ impl Bjt {
         ["TITF1", "TITF2"],
         ["TRC1", "TRC2"],
         ["TRE1", "TRE2"],
+        ["TRB1", "TRB2"],
+        ["TRM1", "TRM2"],
     ];
 
     pub(crate) fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
@@ -55,7 +57,7 @@ impl Bjt {
             .chain(Self::LEGACY_LINEAR_TEMPERATURE_PARAMS.iter())
             .flatten()
             .copied()
-            .chain(["TLEV", "TLEVC", "TRC", "TRE"])
+            .chain(["TLEV", "TLEVC", "TRC", "TRE", "TRB"])
     }
 
     #[inline]
@@ -75,6 +77,10 @@ impl Bjt {
             return Ok(());
         }
         let delta_t = self.temperature - self.tnom.max(1.0);
+        let base = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|j| j.base_resistance);
         for (index, (value, nominal)) in [
             (self.vaf, mapping.nominal_early[0]),
             (self.var, mapping.nominal_early[1]),
@@ -86,6 +92,14 @@ impl Bjt {
             (self.itf, mapping.nominal_transit[2]),
             (self.rcx, self.rcx_nominal),
             (self.re, self.re_nominal),
+            (
+                base.map_or(0.0, |r| r.operating[0]),
+                base.map_or(0.0, |r| r.nominal[0]),
+            ),
+            (
+                base.map_or(0.0, |r| r.operating[1]),
+                base.map_or(0.0, |r| r.nominal[1]),
+            ),
         ]
         .into_iter()
         .enumerate()
@@ -1407,6 +1421,55 @@ impl Bjt {
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
         self.refresh_legacy_linear_temperature(delta_t);
+        self.refresh_legacy_base_resistance(delta_t, ratio);
+    }
+
+    fn refresh_legacy_base_resistance(&mut self, delta_t: Value, ratio: Value) {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            return;
+        }
+        let Some(junctions) = &mut self.legacy_junction_params else {
+            return;
+        };
+        let Some(base) = &mut junctions.base_resistance else {
+            return;
+        };
+        let scale = |resistance, exponent: Value| {
+            crate::numerics::scaled_exp_product(
+                &[resistance],
+                &[self.area, self.m],
+                exponent * ratio.ln(),
+            )
+        };
+        let [whole, minimum] = base.nominal;
+        // Preserve the existing RBX/RBI power extensions when no polynomial
+        // was authored. An explicit zero polynomial overrides its extension.
+        let minimum = scale(minimum, self.xrbx);
+        let whole = if self.xrbx == self.xrbi {
+            scale(whole, self.xrbi)
+        } else {
+            minimum + scale(whole - base.nominal[1], self.xrbi)
+        };
+        base.operating = [whole, minimum];
+        if !self.xyce_compatibility
+            && let Some(mapping) = &junctions.temperature_parameters
+        {
+            for index in 0..2 {
+                if let Some(coefficients) = mapping.linear_coefficients[10 + index] {
+                    let multiplier = 1.0 + Self::legacy_polynomial_delta(coefficients, delta_t);
+                    base.operating[index] = crate::numerics::scaled_exp_product(
+                        &[base.nominal[index], multiplier],
+                        &[self.area, self.m],
+                        0.0,
+                    );
+                }
+            }
+        }
+        self.rb = base.operating[0];
+        // RBI marks the private branch and supplies a predictor scale. Its
+        // actual conductance uses both mapped parameters in irbi_branch.
+        self.rbi = base.operating[0].max(base.operating[1]);
+        self.rbx = 0.0;
     }
 
     fn refresh_legacy_linear_temperature(&mut self, delta_t: Value) {
@@ -1577,6 +1640,9 @@ impl Bjt {
         match self.charge_model {
             BjtChargeModel::LegacyGummelPoon => self.apply_legacy_spice_model_defaults(),
             BjtChargeModel::Vbic => self.apply_vbic_model_defaults(),
+        }
+        if let Some(junctions) = &mut self.legacy_junction_params {
+            junctions.base_resistance = None;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
             && let Some(v) = legacy_irb
@@ -1865,9 +1931,23 @@ impl Bjt {
         }
         if let Some(rb) = legacy_rb {
             if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-                let rbm = legacy_rbm.unwrap_or(rb).min(rb);
-                self.rbx = rbm;
-                self.rbi = (rb - rbm).max(0.0);
+                let rbm = legacy_rbm.unwrap_or(rb);
+                let varying_temperature = ["TRB", "TRB1", "TRB2", "TRM1", "TRM2"]
+                    .iter()
+                    .any(|name| params.contains_key(*name));
+                if rb > 0.0 && (rbm != rb || varying_temperature) {
+                    self.legacy_junction_params
+                        .get_or_insert_with(Default::default)
+                        .base_resistance = Some(LegacyBaseResistance {
+                        nominal: [rb, rbm],
+                        operating: [rb, rbm],
+                    });
+                    self.rbx = 0.0;
+                    self.rbi = rb.max(rbm);
+                } else {
+                    self.rbx = rb;
+                    self.rbi = 0.0;
+                }
                 self.rbx_nominal = self.rbx;
                 self.rbi_nominal = self.rbi;
                 self.rb = rb;
@@ -1878,10 +1958,10 @@ impl Bjt {
                 self.rbi_nominal = self.rbi;
                 self.rb = self.rbx;
             }
-        } else if let Some(rbm) = legacy_rbm
-            && self.charge_model == BjtChargeModel::LegacyGummelPoon
-        {
-            self.rbx = rbm;
+        } else if legacy_rbm.is_some() && self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            // RB=0 (including omission) aliases base-prime to the base in
+            // bjtsetup.c. RBM alone cannot introduce a resistance branch.
+            self.rbx = 0.0;
             self.rbi = 0.0;
             self.rbx_nominal = self.rbx;
             self.rbi_nominal = self.rbi;
@@ -2354,6 +2434,7 @@ impl Bjt {
                         let alias = match first {
                             "TRC1" => "TRC",
                             "TRE1" => "TRE",
+                            "TRB1" => "TRB",
                             _ => first,
                         };
                         let first = params.get(first).or_else(|| params.get(alias)).copied();
@@ -2429,12 +2510,9 @@ impl Bjt {
         self.node_emitter = internal_node;
     }
 
-    /// Clear the constant part of the base resistance after the builder
-    /// externalizes it onto a real circuit resistor. The bias-dependent
-    /// part (`rbi`, nonzero only when the card gives `RBM < RB`) stays on
-    /// the device; `rb` tracks the remaining internal total so downstream
-    /// reporting stays consistent. The nominal is cleared too so a later
-    /// temperature refresh cannot resurrect the internal copy.
+    /// Clear a constant base resistance after builder externalization. Varying
+    /// GP resistance is retained as one private branch and is not externalized.
+    /// Clear the nominal too so temperature refresh cannot restore a duplicate.
     pub fn clear_base_constant_resistance(&mut self) {
         self.rbx = 0.0;
         self.rbx_nominal = 0.0;
@@ -3669,12 +3747,66 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rbm_partitions_base_resistance() {
+    fn legacy_rbm_retains_one_physical_base_resistance() {
         let bjt = model_with(&[("RB", 50.0), ("RBM", 10.0)]);
 
         assert_eq!(bjt.rb, 50.0);
-        assert_eq!(bjt.rbx, 10.0);
-        assert_eq!(bjt.rbi, 40.0);
+        assert_eq!(bjt.rbx, 0.0);
+        assert_eq!(bjt.rbi, 50.0);
+        assert_eq!(
+            bjt.legacy_junction_params
+                .as_ref()
+                .unwrap()
+                .base_resistance
+                .unwrap()
+                .nominal,
+            [50.0, 10.0]
+        );
+        for fields in [vec![("RBM", 10.0)], vec![("RB", 0.0), ("RBM", 10.0)]] {
+            let disabled = model_with(&fields);
+            assert_eq!((disabled.rbx, disabled.rbi), (0.0, 0.0));
+        }
+    }
+
+    #[test]
+    fn legacy_base_temperature_refresh_preserves_whole_and_minimum_resistance() {
+        for rbm in [20.0, 120.0, 180.0] {
+            let mut bjt = model_with(&[
+                ("RB", 120.0),
+                ("RBM", rbm),
+                ("TRB", -0.005),
+                ("TRB2", 1e-5),
+                ("TRM1", 0.002),
+                ("TRM2", -5e-6),
+            ])
+            .with_instance_params(&[("AREA".into(), 2.0), ("M".into(), 3.0)]);
+            for temperature in [233.15, 343.15, 300.15, 343.15] {
+                bjt.set_temperature(temperature);
+                bjt.validate_legacy_temperature_parameters().unwrap();
+                let dt = temperature - 300.15;
+                let rb = 20.0 * (1.0 - 0.005 * dt + 1e-5 * dt * dt);
+                let rbm = rbm / 6.0 * (1.0 + 0.002 * dt - 5e-6 * dt * dt);
+                let linearized = BjtLinearization {
+                    qb: 0.7,
+                    ..Default::default()
+                };
+                let branch = bjt.irbi_branch(linearized, 0.1, 0.0);
+                let expected = (rbm + (rb - rbm) / 0.7).recip();
+                assert!((branch.current / (0.1 * expected) - 1.0).abs() < 2e-14);
+                assert_eq!(bjt.rbx, 0.0);
+            }
+        }
+        // RB must survive cancellation against a much larger minimum at QB=1.
+        let bjt = model_with(&[("RB", 1e-200), ("RBM", 1.0)]);
+        let branch = bjt.irbi_branch(
+            BjtLinearization {
+                qb: 1.0,
+                ..Default::default()
+            },
+            1e-200,
+            0.0,
+        );
+        assert!((branch.current - 1.0).abs() < 1e-14);
     }
 
     #[test]

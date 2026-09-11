@@ -6317,14 +6317,10 @@ impl Engine {
                                 );
                             }
                         }
-                        // The constant base part is RBM, which ngspice
-                        // defaults to RB (bjttemp.c) so the folded remainder
-                        // is zero for common cards. Junction limiting moves
-                        // with the topology: the device update applies
-                        // pnjlim to its junction state against the previous
-                        // iterate (bjtload.c's discipline at the prime
-                        // nodes), and the engine-side external scale clamp
-                        // skips GP devices.
+                        // Constant RB stays on the fast circuit-resistor path.
+                        // A varying RB/RBM pair shares one private physical
+                        // branch so temperature and noise use the whole law.
+                        // The device owns junction limiting in both topologies.
                         if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
                             let bint_name = format!("{}.__bint", element.name);
                             let bint = circuit.get_or_create_node(&bint_name);

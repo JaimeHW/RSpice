@@ -637,6 +637,15 @@ struct LegacyCurrentScale {
     thermal_exponent: Value,
 }
 
+/// Whole and minimum base resistance share one physical GP branch. Keeping
+/// their nominals separate permits independent temperature mapping without
+/// interpreting a negative difference as a second physical resistor.
+#[derive(Debug, Clone, Copy)]
+struct LegacyBaseResistance {
+    nominal: [Value; 2],
+    operating: [Value; 2],
+}
+
 #[derive(Debug, Clone)]
 struct LegacyTemperatureParameters {
     emission_coefficients: [[Value; 2]; 5],
@@ -649,7 +658,7 @@ struct LegacyTemperatureParameters {
     junction_coefficients: [[Value; 2]; 3],
     grading_coefficients: [[Value; 2]; 3],
     nominal_grading: [Value; 3],
-    linear_coefficients: [Option<[Value; 2]>; 10],
+    linear_coefficients: [Option<[Value; 2]>; 12],
     nominal_early: [Value; 2],
     nominal_transit: [Value; 3],
 }
@@ -666,6 +675,7 @@ struct LegacyJunctionParameters {
     substrate_current: Value,
     current_scales: Option<Box<[Option<LegacyCurrentScale>; 6]>>,
     temperature_parameters: Option<Box<LegacyTemperatureParameters>>,
+    base_resistance: Option<LegacyBaseResistance>,
 }
 
 /// BJT device using the Ebers-Moll model
@@ -791,7 +801,8 @@ pub struct Bjt {
     pub re: Value,
     /// Extrinsic base resistance (RBX)
     pub rbx: Value,
-    /// Intrinsic base resistance (RBI)
+    /// Intrinsic base resistance (RBI); for a varying GP base branch this
+    /// is its positive predictor scale, while RB/RBM determine conductance.
     pub rbi: Value,
     /// Base current at which the intrinsic legacy GP base resistance is
     /// reduced to one half (IRB/JRB/IOB).

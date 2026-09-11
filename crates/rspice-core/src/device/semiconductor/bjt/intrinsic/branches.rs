@@ -197,7 +197,7 @@ impl Bjt {
     /// given, it uses the analytic high-current base-spreading law from the
     /// original SPICE BJT model:
     ///
-    /// `R(I_B) = 3 R_BPI (tan(z)-z)/(z tan(z)^2)`
+    /// `R(I_B) = R_BM + 3 (R_B - R_BM) (tan(z)-z)/(z tan(z)^2)`
     ///
     /// with `z = (-1 + sqrt(1 + 14.59025 I_B/I_RB)) /
     /// (2.4317 sqrt(I_B/I_RB))`.  Xyce freezes this operating-point
@@ -209,43 +209,44 @@ impl Bjt {
         linearized: BjtLinearization,
         rb: Value,
     ) -> Value {
-        let qb = linearized.qb.max(1e-12);
-        if self.charge_model != BjtChargeModel::LegacyGummelPoon
-            || !self.irb.is_finite()
-            || self.irb <= 0.0
-        {
-            return qb / rb;
-        }
-
-        // `linearized.ib` is signed in terminal orientation.  Xyce evaluates
-        // its IRB argument using the model-oriented base current, which is
-        // positive for a forward-biased NPN or PNP device.
-        let model_base_current = self.polarity() * linearized.ib;
-        let xjr_b = self.irb;
-        let arg1 = if model_base_current.is_finite() && xjr_b.is_finite() {
-            (model_base_current / xjr_b).max(1e-9)
+        let [whole, minimum] = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|j| j.base_resistance)
+            .map_or([rb, 0.0], |r| r.operating);
+        let factor = if self.irb > 0.0 {
+            let current = self.polarity() * linearized.ib;
+            if !current.is_finite() {
+                return Value::NAN;
+            }
+            let ratio = (current / self.irb).max(1e-9);
+            // Rationalize the small-current expression and scale its large
+            // argument so finite currents divided by tiny IRB can reach the
+            // spreading-law limit without overflowing intermediate products.
+            let root = ratio.sqrt();
+            let z = if ratio < 1.0 {
+                14.59025 * root / (2.4317 * ((1.0 + 14.59025 * ratio).sqrt() + 1.0))
+            } else {
+                ((14.59025 + ratio.recip()).sqrt() - root.recip()) / 2.4317
+            };
+            if z.abs() < 1e-3 {
+                let square = z * z;
+                1.0 - square * (4.0 / 15.0 + square * 4.0 / 105.0)
+            } else {
+                let tangent = z.tan();
+                3.0 * (tangent - z) / (z * tangent * tangent)
+            }
         } else {
-            1e-9
+            linearized.qb.max(1e-12).recip()
         };
-        let sqrt_arg = (1.0 + 14.59025 * arg1).max(1e-18).sqrt();
-        let sqrt_arg1 = arg1.sqrt().max(1e-18);
-        let z = (-1.0 + sqrt_arg) / (2.4317 * sqrt_arg1);
-        let tan_z = z.tan();
-        let denominator = z * tan_z * tan_z;
-        let resistance = if z.is_finite()
-            && tan_z.is_finite()
-            && denominator.is_finite()
-            && denominator.abs() > 1e-18
-        {
-            rb * 3.0 * (tan_z - z) / denominator
+        // A convex blend preserves a small whole RB when RBM is much larger;
+        // subtracting RBM again at factor=1 would lose the authored RB.
+        let resistance = if (0.0..=1.0).contains(&factor) {
+            whole * factor + minimum * (1.0 - factor)
         } else {
-            rb
+            minimum + (whole - minimum) * factor
         };
-        if resistance.is_finite() && resistance > 1e-12 {
-            1.0 / resistance
-        } else {
-            1.0 / rb
-        }
+        resistance.recip()
     }
 
     pub(in crate::device::semiconductor::bjt) fn ibep_branch(

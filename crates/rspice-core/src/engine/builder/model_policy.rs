@@ -810,7 +810,7 @@ pub(super) fn validate_bjt_model_level(
             "IS", "ISE", "JLE", "IBEN", "ISC", "JLC", "IBCN", "XTB", "TB", "TCB", "TNF", "CJE",
             "CJC", "CJS", "CJCP", "CCS", "CSUB", "MJE", "ME", "MJC", "MC", "MJS", "MS", "ESUB",
             "VAF", "VA", "VBF", "VAR", "VB", "VRB", "BV", "VEF", "VER", "IKF", "IK", "JBF", "IKR",
-            "JBR", "IRB", "JRB", "IOB", "TF", "TR", "ITF", "JTF", "RC", "RE",
+            "JBR", "IRB", "JRB", "IOB", "TF", "TR", "ITF", "JTF", "RC", "RE", "RB", "RBM",
         ] {
             let authored = params.contains_key(name)
                 || expr_params

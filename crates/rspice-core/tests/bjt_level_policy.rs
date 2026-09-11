@@ -4320,7 +4320,7 @@ fn legacy_transport_temperature_controls_validate_domains() {
     for name in [
         "TVAF1", "TVAF2", "TVAR1", "TVAR2", "TIKF1", "TIKF2", "TIKR1", "TIKR2", "TIRB1", "TIRB2",
         "TTF1", "TTF2", "TTR1", "TTR2", "TITF1", "TITF2", "TRC1", "TRC2", "TRC", "TRE1", "TRE2",
-        "TRE",
+        "TRE", "TRB", "TRB1", "TRB2", "TRM1", "TRM2",
     ] {
         let mut deck =
             Netlist::parse("Invalid transport coefficient\nQ1 0 0 0 qm\n.model qm NPN\n.end")
@@ -4361,9 +4361,12 @@ fn legacy_transport_temperature_controls_validate_domains() {
         ("ITF", "TITF1"),
         ("RC", "TRC1"),
         ("RE", "TRE1"),
+        ("RB", "TRB1"),
+        ("RBM", "TRM1"),
     ] {
+        let base = if name == "RBM" { "RB=2" } else { "" };
         for coefficient in [-2.0, 1e308] {
-            let deck = Netlist::parse(&format!("Invalid mapped transport\nQ1 0 0 0 qm TEMP=29\n.model qm NPN({name}=1 {field}={coefficient})\n.end")).unwrap();
+            let deck = Netlist::parse(&format!("Invalid mapped transport\nQ1 0 0 0 qm TEMP=29\n.model qm NPN({base} {name}=1 {field}={coefficient})\n.end")).unwrap();
             assert!(
                 engine
                     .run_dc_op(&deck)
@@ -4373,7 +4376,7 @@ fn legacy_transport_temperature_controls_validate_domains() {
             );
         }
         let deck = Netlist::parse(&format!(
-            "Invalid nominal transport\nQ1 0 0 0 qm\n.model qm NPN({name}=-1 {field}=0)\n.end"
+            "Invalid nominal transport\nQ1 0 0 0 qm\n.model qm NPN({base} {name}=-1 {field}=0)\n.end"
         ))
         .unwrap();
         assert!(
@@ -5325,4 +5328,208 @@ fn private_bjt_transient_reports_unresolvable_charge_instead_of_using_dc() {
         error.contains("Q1") && error.contains("private transient state did not converge"),
         "{error}"
     );
+}
+
+#[test]
+fn legacy_base_resistance_temperature_matches_ngspice_dc_ac_noise_and_transient() {
+    use rspice_core::Complex64;
+    // Warning-free ngspice46 outputs at -40/70 C. Columns: DC IC/IB,
+    // complex V(base)/IC at 1MHz, total/RB noise amplitudes at 1MHz.
+    let references = [
+        [
+            [
+                -1.3547813045592424e-05,
+                -1.7377877205900644e-07,
+                0.9986674889676806,
+                -0.0207220433540703,
+                -0.000670235368586839,
+                0.00011074645695757605,
+                1.1344844652024594e-09,
+                7.04951921840306e-12,
+            ],
+            [
+                -0.022818273769924347,
+                -0.00029202644306478703,
+                0.4293406586213592,
+                -0.18184025655053856,
+                -0.29263787403366176,
+                0.15199161269456854,
+                1.0851571084413812e-09,
+                2.417345982809464e-10,
+            ],
+        ],
+        [
+            [
+                -1.3546713703094801e-05,
+                -1.7376465033872024e-07,
+                0.9986478063388414,
+                -0.020718643808600924,
+                -0.0006700424333023116,
+                0.00011165757418738491,
+                1.1344731437934336e-09,
+                8.687764628421081e-12,
+            ],
+            [
+                -0.021670576304192835,
+                -0.00027730790788946073,
+                0.4721158522445638,
+                -0.16329299723213767,
+                -0.2684373737785993,
+                0.14281121345086936,
+                1.1047494408739524e-09,
+                3.3843614937214943e-10,
+            ],
+        ],
+        [
+            [
+                -1.35475633298367e-05,
+                -1.737755643115707e-07,
+                0.9986630172813276,
+                -0.02072127586528824,
+                -0.0006701917607594112,
+                0.00011095346181328234,
+                1.1344818932804378e-09,
+                7.453353285997418e-12,
+            ],
+            [
+                -0.021642327862481103,
+                -0.0002769456590465359,
+                0.4731510221759345,
+                -0.1628536962950831,
+                -0.2678554476398883,
+                0.1425852027934405,
+                1.1052278106816368e-09,
+                3.40251313789768e-10,
+            ],
+        ],
+    ];
+    let cases = [
+        (
+            "RB=120 RBM=20 TRB1=.002 TRB2=1e-5 TRM1=-.001 TRM2=1e-5 IRB=1e-5",
+            20.0,
+            [0.002, 1e-5],
+            [-0.001, 1e-5],
+            1e-5,
+        ),
+        (
+            "RB=120 TRB=-.005 TRB2=1e-5 TRM1=.002 TRM2=-5e-6 IRB=1e-5",
+            120.0,
+            [-0.005, 1e-5],
+            [0.002, -5e-6],
+            1e-5,
+        ),
+        ("RB=120 RBM=180", 180.0, [0.0, 0.0], [0.0, 0.0], 0.0),
+    ];
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let engine = Engine::new(config.clone());
+    for ((fields, rbm, rb_tc, rbm_tc, irb), reference) in cases.into_iter().zip(references) {
+        for (temperature, reference) in [-40.0, 70.0].into_iter().zip(reference) {
+            let dt = temperature - 27.0;
+            let rb = 120.0 * (1.0 + dt * (rb_tc[0] + dt * rb_tc[1]));
+            let rbm = rbm * (1.0 + dt * (rbm_tc[0] + dt * rbm_tc[1]));
+            let mapped = format!("RB={rb} RBM={rbm} IRB={irb}");
+            for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+                let make = |fields: &str| {
+                    format!(
+                        "Whole base resistance temperature\nVC c 0 {}\nVD drive 0 {} AC 1\nRIN drive b 100\nQ1 c b 0 qm AREA=2 M=3\n.model qm {kind}(IS=1e-14 BF=80 VAF=50 VAR=20 CJE=2p CJC=3p XCJC=.35 TF=2n KF=1e-12 AF=1 SUBS=1 {fields})\n.temp {temperature}\n.options GMIN=0 RELTOL=1e-10 ABSTOL=1e-18\n.end",
+                        polarity,
+                        polarity * 0.65,
+                    )
+                };
+                let text = make(fields);
+                let deck = Netlist::parse(&text).unwrap();
+                let dc = engine.run_dc_op(&deck).unwrap();
+                for (index, name) in ["VC", "VD"].into_iter().enumerate() {
+                    let actual = dc.branch_current_named(name).unwrap();
+                    let expected = polarity * reference[index];
+                    assert!(
+                        (actual / expected - 1.0).abs() < 5e-5,
+                        "{kind} {fields} T={temperature} DC {name}: {actual:e} vs {expected:e}"
+                    );
+                }
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                let base = ac[0]
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("b"))
+                    .unwrap();
+                let collector = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("VC"))
+                    .unwrap();
+                for (actual, pair) in [
+                    (ac[0].voltages[base], &reference[2..4]),
+                    (ac[0].currents[collector], &reference[4..6]),
+                ] {
+                    let expected = Complex64::new(pair[0], pair[1]);
+                    assert!(
+                        (actual - expected).norm() < expected.norm() * 5e-5,
+                        "{kind} {fields} T={temperature} AC: {actual:?} vs {expected:?}"
+                    );
+                }
+                let noise = engine
+                    .run_noise_named_with_input_source(
+                        &deck,
+                        "b",
+                        None,
+                        "VD",
+                        &[1e6],
+                        temperature + 273.15,
+                    )
+                    .unwrap();
+                let rb_noise: f64 = noise[0]
+                    .contributions
+                    .iter()
+                    .filter(|s| {
+                        s.identity.device.eq_ignore_ascii_case("Q1")
+                            && s.identity.mechanism.as_deref() == Some("RB")
+                    })
+                    .map(|s| s.output_contribution)
+                    .sum();
+                for (actual, expected) in [
+                    (noise[0].output_noise_density, reference[6].powi(2)),
+                    (rb_noise, reference[7].powi(2)),
+                ] {
+                    assert!(
+                        (actual / expected - 1.0).abs() < 5e-5,
+                        "{kind} {fields} T={temperature} noise: {actual:e} vs {expected:e}"
+                    );
+                }
+                if temperature == 70.0 {
+                    let mut config = config.clone();
+                    config.integration_method =
+                        rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
+                    config.locked_time_grid = Some(std::sync::Arc::new(
+                        (0..=20).map(|i| f64::from(i) * 1e-9).collect(),
+                    ));
+                    let engine = Engine::new(config);
+                    let ramp = |text: &str| {
+                        Netlist::parse(&text.replace(
+                            &format!("VD drive 0 {} AC 1", polarity * 0.65),
+                            &format!(
+                                "VD drive 0 PWL(0 {} 20n {})",
+                                polarity * 0.65,
+                                polarity * 0.67
+                            ),
+                        ))
+                        .unwrap()
+                    };
+                    let actual = engine.run_tran(&ramp(&text), 20e-9, 1e-9).unwrap();
+                    let equivalent = engine.run_tran(&ramp(&make(&mapped)), 20e-9, 1e-9).unwrap();
+                    assert_eq!(actual.time, equivalent.time);
+                    for name in ["VC", "VD"] {
+                        for (a, b) in actual
+                            .try_branch_current_waveform_named(name)
+                            .unwrap()
+                            .iter()
+                            .zip(equivalent.try_branch_current_waveform_named(name).unwrap())
+                        {
+                            assert!((a - b).abs() <= b.abs() * 1e-8 + 1e-14);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
