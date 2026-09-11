@@ -852,6 +852,14 @@ fn finalize_generic_switch_family_params(
     Ok(())
 }
 
+fn xspice_creation_error(context: String, error: crate::xspice::CmError) -> SimulationError {
+    let message = format!("{context}: {error}");
+    match error {
+        crate::xspice::CmError::ParameterDomain { .. } => SimulationError::ParameterDomain(message),
+        _ => SimulationError::Circuit(message),
+    }
+}
+
 fn validate_level1_mos_authored_parameters(
     element_name: &str,
     model_name: &str,
@@ -884,9 +892,14 @@ fn validate_level1_mos_authored_parameters(
                 _ => value.is_finite() && (0.0..1.0).contains(value),
             };
             if !valid {
-                return Err(SimulationError::Circuit(format!(
+                let message = format!(
                     "MOSFET '{element_name}' model '{model_name}' requires Level-1 parameter {name} to be {requirement}, got {value}"
-                )));
+                );
+                return Err(if value.is_finite() {
+                    SimulationError::ParameterDomain(message)
+                } else {
+                    SimulationError::Circuit(message)
+                });
             }
         }
     }
@@ -908,9 +921,14 @@ fn validate_level1_mos_authored_parameters(
             value.is_finite() && *value >= 0.0
         };
         if !valid {
-            return Err(SimulationError::Circuit(format!(
+            let message = format!(
                 "MOSFET '{element_name}' model '{model_name}' requires instance parameter {name} to be {requirement}, got {value}"
-            )));
+            );
+            return Err(if value.is_finite() {
+                SimulationError::ParameterDomain(message)
+            } else {
+                SimulationError::Circuit(message)
+            });
         }
     }
     Ok(())
@@ -3805,10 +3823,13 @@ fn add_generated_xspice_auto_bridge_instance(
         },
     )
     .map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to create generated XSPICE auto-bridge '{}': {}",
-            element.name, e
-        ))
+        xspice_creation_error(
+            format!(
+                "Failed to create generated XSPICE auto-bridge '{}'",
+                element.name
+            ),
+            e,
+        )
     })?;
 
     instance.set_temperature(temperature);
@@ -4313,10 +4334,13 @@ fn add_planned_xspice_auto_bridge(
         },
     )
     .map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to create generated XSPICE auto-bridge '{}': {}",
-            instance_name, e
-        ))
+        xspice_creation_error(
+            format!(
+                "Failed to create generated XSPICE auto-bridge '{}'",
+                instance_name
+            ),
+            e,
+        )
     })?;
 
     instance.set_temperature(temperature);
@@ -8499,10 +8523,10 @@ impl Engine {
                         },
                     )
                     .map_err(|e| {
-                        SimulationError::Circuit(format!(
-                            "Failed to create XSPICE instance '{}': {}",
-                            element.name, e
-                        ))
+                        xspice_creation_error(
+                            format!("Failed to create XSPICE instance '{}'", element.name),
+                            e,
+                        )
                     })?;
 
                     instance.set_temperature(self.config.temperature);

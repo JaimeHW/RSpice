@@ -16,9 +16,30 @@ struct Sample {
 }
 
 #[derive(Default)]
+enum Trial {
+    Sample(Sample),
+    OutsideDomain,
+    #[default]
+    Unresolved,
+}
+
+impl Trial {
+    fn as_ref(&self) -> Option<&Sample> {
+        match self {
+            Self::Sample(sample) => Some(sample),
+            Self::OutsideDomain | Self::Unresolved => None,
+        }
+    }
+
+    fn outside_domain(&self) -> bool {
+        matches!(self, Self::OutsideDomain)
+    }
+}
+
+#[derive(Default)]
 struct Pair {
-    positive: Option<Sample>,
-    negative: Option<Sample>,
+    positive: Trial,
+    negative: Trial,
 }
 
 #[derive(Clone, Copy)]
@@ -121,12 +142,12 @@ impl Engine {
         }
         let mut last_failure = None;
         let mut sample_pair = |step: Value| -> Result<Pair, SimulationError> {
-            let mut sample = |candidate: Value| -> Result<Option<Sample>, SimulationError> {
+            let mut sample = |candidate: Value| -> Result<Trial, SimulationError> {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 if !candidate.is_finite() || candidate == coordinate {
-                    return Ok(None);
+                    return Ok(Trial::OutsideDomain);
                 }
                 *runs = runs.saturating_add(1);
                 self.ensure_batch_runs(*runs)?;
@@ -141,14 +162,19 @@ impl Engine {
                                 "Sensitivity parameter '{name}' returned an invalid probe trace at {candidate}"
                             )));
                         }
-                        Ok(Some(Sample {
+                        Ok(Trial::Sample(Sample {
                             coordinate: candidate,
                             values,
                         }))
                     }
                     Err(error) => {
+                        let domain = matches!(error, SimulationError::ParameterDomain(_));
                         last_failure = Some(format!("at {candidate}: {error}"));
-                        Ok(None)
+                        Ok(if domain {
+                            Trial::OutsideDomain
+                        } else {
+                            Trial::Unresolved
+                        })
                     }
                 }
             };
@@ -257,12 +283,16 @@ impl Engine {
                     } else {
                         let direction = match (left, right) {
                             (Some(_), None)
-                                if outer.positive.is_none() && inner.positive.is_none() =>
+                                if older.positive.outside_domain()
+                                    && outer.positive.outside_domain()
+                                    && inner.positive.outside_domain() =>
                             {
                                 Some(false)
                             }
                             (None, Some(_))
-                                if outer.negative.is_none() && inner.negative.is_none() =>
+                                if older.negative.outside_domain()
+                                    && outer.negative.outside_domain()
+                                    && inner.negative.outside_domain() =>
                             {
                                 Some(true)
                             }
@@ -316,7 +346,7 @@ impl Engine {
             outer = inner;
         }
         Err(SimulationError::Circuit(format!(
-            "Sensitivity parameter '{name}' could not resolve a derivative: one-sided or refined estimates disagree, or distinct finite coordinates are exhausted (possible discontinuity or insufficient numerical precision){}",
+            "Sensitivity parameter '{name}' could not resolve a derivative: trial failures do not establish a parameter boundary, estimates disagree, or distinct finite coordinates are exhausted (possible discontinuity or insufficient numerical precision){}",
             last_failure
                 .map(|failure| format!("; last trial failure {failure}"))
                 .unwrap_or_default()
@@ -382,7 +412,7 @@ mod tests {
                 &NoAbort,
                 |point| {
                     if point < 0.0 {
-                        Err(SimulationError::Circuit(
+                        Err(SimulationError::ParameterDomain(
                             "negative physical parameter".to_owned(),
                         ))
                     } else {
@@ -408,6 +438,62 @@ mod tests {
                 assert!((result.unwrap()[0].re / 1000.0 - 1.0).abs() < 1e-12);
             }
         }
+    }
+
+    #[test]
+    fn refinement_does_not_treat_failed_trials_as_parameter_boundaries() {
+        for (failure, direction) in
+            (0..4).flat_map(|failure| [-1.0, 1.0].map(|side| (failure, side)))
+        {
+            let result = Engine::default().refine_sensitivity(
+                "failed trial",
+                0.0,
+                1e-3,
+                &[Complex64::new(0.0, 0.0)],
+                &mut 1,
+                &NoAbort,
+                |point| {
+                    if direction * point < 0.0 {
+                        Err(match failure {
+                            0 => SimulationError::ConvergenceFailed(20),
+                            1 => SimulationError::Solver(
+                                crate::solver::SolverError::ConvergenceFailed(20),
+                            ),
+                            2 => SimulationError::Circuit("device evaluation failed".into()),
+                            _ => SimulationError::Netlist("parameter replay failed".into()),
+                        })
+                    } else {
+                        Ok(vec![Complex64::new(point, 0.0)])
+                    }
+                },
+            );
+            assert!(result.is_err(), "failure {failure} produced {result:?}");
+        }
+    }
+
+    #[test]
+    fn refinement_recovers_two_sided_samples_after_failed_outer_trials() {
+        let mut failures = 0;
+        let value = Engine::default()
+            .refine_sensitivity(
+                "retry",
+                0.0,
+                1e-3,
+                &[Complex64::new(0.0, 0.0)],
+                &mut 1,
+                &NoAbort,
+                |point| {
+                    if point < -1e-4 {
+                        failures += 1;
+                        Err(SimulationError::ConvergenceFailed(20))
+                    } else {
+                        Ok(vec![Complex64::new(point, 0.0)])
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(failures, 4);
+        assert!((value[0].re - 1.0).abs() < 1e-12);
     }
 
     #[test]

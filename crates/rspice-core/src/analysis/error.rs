@@ -39,6 +39,8 @@ pub enum SimulationErrorCode {
     ResourceLimit,
     /// Circuit construction or device evaluation failed.
     CircuitError,
+    /// A finite parameter value violates a declared numerical domain.
+    ParameterDomain,
     /// A behavioral expression names an invalid node or branch-current operand.
     BehavioralReferenceError,
     /// The numerical solver failed.
@@ -76,6 +78,7 @@ impl SimulationErrorCode {
             Self::InvalidConfiguration => "invalid_configuration",
             Self::ResourceLimit => "resource_limit",
             Self::CircuitError => "circuit_error",
+            Self::ParameterDomain => "parameter_domain",
             Self::BehavioralReferenceError => "behavioral_reference_error",
             Self::SolverError => "solver_error",
             Self::NetlistError => "netlist_error",
@@ -663,6 +666,13 @@ pub enum SimulationError {
     #[error("Circuit error: {0}")]
     Circuit(String),
 
+    /// A finite parameter or resolved physical quantity violates a numerical
+    /// constraint. Unlike an evaluation/convergence failure, this establishes
+    /// that the trial point is outside the model's admitted parameter domain.
+    /// Do not use this for arithmetic overflow, missing input, or solver errors.
+    #[error("Parameter domain error: {0}")]
+    ParameterDomain(String),
+
     #[error(transparent)]
     BehavioralReference(Box<crate::device::BehavioralReferenceError>),
 
@@ -810,6 +820,11 @@ impl SimulationError {
             ),
             Self::Circuit(_) => (
                 SimulationErrorCode::CircuitError,
+                SimulationErrorCategory::Simulation,
+                false,
+            ),
+            Self::ParameterDomain(_) => (
+                SimulationErrorCode::ParameterDomain,
                 SimulationErrorCategory::Simulation,
                 false,
             ),

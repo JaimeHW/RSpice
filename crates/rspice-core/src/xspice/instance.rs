@@ -69,7 +69,7 @@ fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
         && checked_value < min
         && !spec.min_is_soft
     {
-        return Err(CmError::InvalidParameter {
+        return Err(CmError::ParameterDomain {
             name: spec.name.clone(),
             message: format!("value {value} is below minimum {min}"),
         });
@@ -79,7 +79,7 @@ fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
         && checked_value > max
         && !spec.max_is_soft
     {
-        return Err(CmError::InvalidParameter {
+        return Err(CmError::ParameterDomain {
             name: spec.name.clone(),
             message: format!("value {value} is above maximum {max}"),
         });
@@ -3584,6 +3584,28 @@ mod tests {
     }
 
     #[test]
+    fn numeric_parameter_domains_distinguish_hard_bounds_soft_bounds_and_nonfinite_values() {
+        let mut spec = ParamSpec::real("gain", 0.0).with_range(0.0, 1.0);
+        for value in [-1.0, 2.0] {
+            assert!(matches!(
+                validate_numeric_param(&spec, value),
+                Err(CmError::ParameterDomain { .. })
+            ));
+        }
+        spec.min_is_soft = true;
+        spec.max_is_soft = true;
+        for value in [-1.0, 0.0, 1.0, 2.0] {
+            validate_numeric_param(&spec, value).unwrap();
+        }
+        for value in [Value::NAN, Value::NEG_INFINITY, Value::INFINITY] {
+            assert!(matches!(
+                validate_numeric_param(&spec, value),
+                Err(CmError::InvalidParameter { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn instance_rejects_out_of_range_known_numeric_parameter() {
         let rounded = XspiceInstance::new(
             "AparamRounded",
@@ -3613,7 +3635,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            CmError::InvalidParameter { ref name, .. } if name == "ic"
+            CmError::ParameterDomain { ref name, .. } if name == "ic"
         ));
     }
 

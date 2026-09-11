@@ -77,7 +77,8 @@ fn sensitivity_three_point(
 }
 
 /// Fatal study failures stop before another perturbation is attempted;
-/// physical-domain failures remain available to the one-sided fallback.
+/// recoverable failures can be retried at smaller steps. Only typed domain
+/// violations can justify one-sided estimates in the refinement driver.
 fn sensitivity_trial<T>(
     sample: Result<T, SimulationError>,
 ) -> Result<Result<T, SimulationError>, SimulationError> {
@@ -86,6 +87,7 @@ fn sensitivity_trial<T>(
             if !matches!(
                 &error,
                 SimulationError::Circuit(_)
+                    | SimulationError::ParameterDomain(_)
                     | SimulationError::Netlist(_)
                     | SimulationError::Solver(_)
                     | SimulationError::ConvergenceFailed(_)

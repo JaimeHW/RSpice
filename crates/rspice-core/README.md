@@ -381,7 +381,13 @@ These checks provide numerical consistency evidence, not a proof of model
 regularity or an independent bound on operating-point solver error.
 
 At physical or finite-range boundaries the driver compares successive one-sided
-quadratic stencils. Domain/solver failures remain candidates for a smaller step;
+quadratic stencils. Only explicit `ParameterDomain` errors or exhausted finite
+coordinates establish a boundary. Unclassified circuit, netlist and solver
+failures can trigger smaller trials but cannot justify a one-sided derivative.
+Capacitor values, authored Level-1 MOS bounds and XSPICE hard numeric bounds retain this distinction;
+soft bounds remain evaluable so clamping is subject to the directional checks.
+Other model constraints need typed domain diagnostics to admit boundary studies.
+Domain/solver failures remain candidates for a smaller step;
 cancellation, resource limits and other typed fatal errors stop immediately.
 Every attempted trial consumes the shared batch-run budget, including failures.
 An ordinary central study uses a nominal solve plus four perturbations; further

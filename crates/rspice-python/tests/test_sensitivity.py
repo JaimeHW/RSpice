@@ -40,6 +40,17 @@ class TestSensitivity:
                 assert engine.run_sensitivity(netlist, "out", "gain", nominal) == pytest.approx(expected, rel=1e-5)
                 assert engine.run_sensitivity_ac(netlist, "out", "gain", nominal, [1.0]) == pytest.approx([expected], rel=1e-5)
 
+    def test_parameter_sensitivity_does_not_infer_domains_from_trial_failures(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Invalid trial\n.param gain=0\nV1 in 0 DC 1 AC 1\n"
+            "E1 out 0 in 0 {1+gain}\nVFAIL conflict 0 1\n"
+            "RFAIL conflict 0 {if(gain<0,0,1)}\n.end\n"
+        )
+        with pytest.raises(rspice.SimulationError, match="last trial failure"):
+            engine.run_sensitivity(netlist, "out", "gain", 0.0)
+        with pytest.raises(rspice.SimulationError, match="last trial failure"):
+            engine.run_sensitivity_ac(netlist, "out", "gain", 0.0, [1.0])
+
     def test_parameter_ac_magnitude_sensitivity_uses_the_nominal_phasor(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "AC null\n.param gain=1\nV1 in 0 AC 1 60\nE1 out 0 in 0 {gain}\n.end\n"

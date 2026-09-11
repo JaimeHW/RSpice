@@ -1,6 +1,22 @@
 use rspice_core::{Engine, Netlist, SimulationConfig, SpiceDialect};
 
 #[test]
+fn negative_explicit_capacitance_cannot_select_a_model_default() {
+    for element in ["C1 in 0 -1n", "C1 in 0 -1n CM", "C1 in 0 CM C=-1n"] {
+        let source =
+            format!("Invalid capacitance\nV1 in 0 1\n{element}\n.model CM C(C=1n)\n.end\n");
+        let netlist = Netlist::parse(&source).unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("negative capacitance");
+        assert!(
+            matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
+            "{element}: {error}"
+        );
+    }
+}
+
+#[test]
 fn invalid_model_expressions_cannot_silently_select_passive_defaults() {
     let models = [
         (

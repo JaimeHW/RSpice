@@ -97,6 +97,51 @@ fn sensitivity_refinement_rejects_a_hidden_parameter_kink() {
 }
 
 #[test]
+fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
+    let netlist = Netlist::parse(
+        "MOS boundary\nVG gate 0 2\nVD drain 0 2\nVB body 0 -1\n\
+         M1 drain gate 0 body NM W=1u L=1u\n.model NM NMOS(LEVEL=1 VTO=1 KP=0 GAMMA=0 PHI=0.6)\n.end\n",
+    ).unwrap();
+    let result = physical_engine()
+        .run_sensitivity_dc_complete(
+            &netlist,
+            rspice_core::analysis::AcSensitivityOutput::BranchCurrent("VD".into()),
+            &["NM:KP".into()],
+        )
+        .unwrap();
+    // The source supplies Id = KP/2 * (Vgs - Vto)^2 at gamma=0.
+    let expected = -0.5;
+    assert_relative(
+        result.get("NM:KP").unwrap().absolute,
+        expected,
+        1e-9,
+        "MOS boundary derivative",
+    );
+}
+
+#[test]
+fn sensitivity_refinement_rejects_unclassified_circuit_failures() {
+    let netlist = Netlist::parse(
+        "Invalid trial\n.param gain=0\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {1+gain}\n\
+         VFAIL conflict 0 1\nRFAIL conflict 0 {if(gain<0,0,1)}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    for result in [
+        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+            .map(|values| values[0]),
+    ] {
+        let error = result.expect_err("an inconsistent circuit does not establish a domain bound");
+        let message = error.to_string();
+        assert!(message.contains("could not resolve"), "{message}");
+        assert!(message.contains("last trial failure"), "{message}");
+    }
+}
+
+#[test]
 fn sensitivity_refinement_resolves_curvature_and_smooth_stationary_points() {
     let engine = physical_engine();
     for (expression, nominal, expected) in [

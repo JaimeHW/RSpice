@@ -18,6 +18,9 @@ pub type CmResult<T> = Result<T, CmError>;
 pub enum CmError {
     /// Invalid parameter value
     InvalidParameter { name: String, message: String },
+    /// A finite numeric value violates a hard parameter bound. Evaluation,
+    /// arithmetic, type and shape failures must use their other error variants.
+    ParameterDomain { name: String, message: String },
     /// Port type mismatch
     PortTypeMismatch {
         port: String,
@@ -41,7 +44,8 @@ pub enum CmError {
 impl fmt::Display for CmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CmError::InvalidParameter { name, message } => {
+            CmError::InvalidParameter { name, message }
+            | CmError::ParameterDomain { name, message } => {
                 write!(f, "Invalid parameter '{}': {}", name, message)
             }
             CmError::PortTypeMismatch {

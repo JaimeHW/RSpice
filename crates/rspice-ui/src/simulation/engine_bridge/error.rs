@@ -117,6 +117,7 @@ impl EngineBridge {
             // They keep their full message, which already names the capability
             // token, the coordinate, or the artifact that failed.
             other @ (rspice_core::SimulationError::UnsupportedCapability(_)
+            | rspice_core::SimulationError::ParameterDomain(_)
             | rspice_core::SimulationError::MaterializationMismatch(_)
             | rspice_core::SimulationError::PersistenceIncompatible(_)
             | rspice_core::SimulationError::OutputCommitFailed(_)) => {

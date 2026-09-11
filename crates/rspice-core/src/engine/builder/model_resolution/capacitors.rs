@@ -52,8 +52,8 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
 
     let mut capacitance = instance_param(instance_params, &["C", "CAP", "VALUE"]);
-    let explicit_capacitance_given = capacitance.is_some() || (value.is_finite() && value >= 0.0);
-    if capacitance.is_none() && value.is_finite() && value >= 0.0 {
+    let explicit_capacitance_given = capacitance.is_some() || value.is_finite();
+    if capacitance.is_none() && value.is_finite() {
         capacitance = Some(value);
     }
 
@@ -238,9 +238,15 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         resolved *= mult;
     }
 
-    if !resolved.is_finite() || resolved < 0.0 {
+    if !resolved.is_finite() {
         return Err(SimulationError::Circuit(format!(
             "Capacitor '{}' resolved to invalid capacitance {}",
+            element_name, resolved
+        )));
+    }
+    if resolved < 0.0 {
+        return Err(SimulationError::ParameterDomain(format!(
+            "Capacitor '{}' resolved to negative capacitance {}",
             element_name, resolved
         )));
     }

@@ -328,6 +328,7 @@ fn expected_descriptor(
         }
         SimulationError::ResourceLimit(_) => (Code::ResourceLimit, Category::ResourceLimit, false),
         SimulationError::Circuit(_) => (Code::CircuitError, Category::Simulation, false),
+        SimulationError::ParameterDomain(_) => (Code::ParameterDomain, Category::Simulation, false),
         SimulationError::BehavioralReference(_) => {
             (Code::BehavioralReferenceError, Category::Simulation, false)
         }
@@ -386,6 +387,7 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             limit: 1,
         }),
         SimulationError::Circuit("device stamp failed".to_string()),
+        SimulationError::ParameterDomain("capacitance must be nonnegative".to_string()),
         SimulationError::BehavioralReference(Box::new(
             rspice_core::device::BehavioralReferenceError {
                 owner_name: "b2".to_string(),
@@ -454,7 +456,7 @@ fn every_variant_round_trips_through_its_descriptor() {
 
     // Only the two resource-limit spellings share a code, so the sample set
     // must have produced one code per variant it contains.
-    assert_eq!(seen_codes.len(), 16, "codes covered: {seen_codes:?}");
+    assert_eq!(seen_codes.len(), 17, "codes covered: {seen_codes:?}");
 
     for category in SimulationErrorCategory::ALL {
         assert!(

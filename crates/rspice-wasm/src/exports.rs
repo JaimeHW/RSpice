@@ -352,6 +352,22 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_does_not_infer_domains_from_trial_failures_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        let netlist = rspice_core::Netlist::parse(
+            "Invalid trial\n.param gain=0\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {1+gain}\n\
+             VFAIL conflict 0 1\nRFAIL conflict 0 {if(gain<0,0,1)}\n.end\n",
+        )
+        .unwrap();
+        let engine = rspice_core::Engine::default();
+        let dc = engine.run_sensitivity_with_abort(&netlist, 2, "gain", 0.0, None, &NoAbort);
+        let ac =
+            engine.run_sensitivity_ac_with_abort(&netlist, 2, "gain", 0.0, &[1.0], None, &NoAbort);
+        assert!(dc.unwrap_err().to_string().contains("last trial failure"));
+        assert!(ac.unwrap_err().to_string().contains("last trial failure"));
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_refinement_and_finite_boundary_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         let engine = rspice_core::Engine::default();
