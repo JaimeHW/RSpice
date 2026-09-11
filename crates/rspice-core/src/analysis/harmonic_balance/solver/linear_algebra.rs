@@ -87,12 +87,24 @@ impl HbSolver {
     }
 
     pub(super) fn map_linear_solve_error(error: SolverError) -> HbError {
+        Self::map_linear_solve_error_with_context(error, "HB linear solve")
+    }
+
+    pub(super) fn map_linear_solve_error_with_context(
+        error: SolverError,
+        context: &str,
+    ) -> HbError {
         match error {
             SolverError::SingularMatrix | SolverError::PivotGrowth => HbError::SingularMatrix,
-            SolverError::InvalidCircuit(message) => {
-                HbError::InvalidCircuit(format!("HB linear solve: {message}"))
+            SolverError::ConvergenceFailed(_) | SolverError::InaccurateSolution(_) => {
+                HbError::LinearConvergenceFailed(format!("{context}: {error}"))
             }
-            error => HbError::InvalidCircuit(format!("HB linear solve failed: {error}")),
+            SolverError::InvalidCircuit(message) => {
+                HbError::InvalidCircuit(format!("{context}: {message}"))
+            }
+            SolverError::OutOfMemory | SolverError::Overflow => {
+                HbError::LinearSolveFailed(format!("{context}: {error}"))
+            }
         }
     }
 }
@@ -104,6 +116,33 @@ mod tests {
 
     fn solver() -> HbSolver {
         HbSolver::new(HbConfig::new(1.0e9), 1)
+    }
+
+    #[test]
+    fn linear_failure_policy_preserves_diagnostics_and_excludes_fatal_errors() {
+        for error in [
+            SolverError::ConvergenceFailed(7),
+            SolverError::InaccurateSolution(1e-8),
+        ] {
+            let cause = error.to_string();
+            let mapped = HbSolver::map_linear_solve_error_with_context(error, "exact 258x258 step");
+            assert!(mapped.is_convergence_failure(), "{mapped}");
+            assert!(mapped.to_string().contains(&cause));
+            assert!(mapped.to_string().contains("exact 258x258 step"));
+        }
+        for error in [SolverError::OutOfMemory, SolverError::Overflow] {
+            let cause = error.to_string();
+            let mapped = HbSolver::map_linear_solve_error(error);
+            assert!(!mapped.is_convergence_failure(), "{mapped}");
+            assert!(mapped.to_string().contains(&cause));
+        }
+        let malformed = HbSolver::map_linear_solve_error(SolverError::InvalidCircuit(
+            "malformed operator".to_owned(),
+        ));
+        assert!(matches!(malformed, HbError::InvalidCircuit(_)));
+        assert!(!malformed.is_convergence_failure());
+        assert!(malformed.to_string().contains("malformed operator"));
+        assert!(!HbError::Aborted.is_convergence_failure());
     }
 
     #[test]

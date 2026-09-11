@@ -704,6 +704,8 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
+        state.converged = false;
+        let iteration_start = state.total_iterations;
         let tol = self.config.tolerance;
         let abstol = self.config.abstol;
 
@@ -736,8 +738,11 @@ impl HbSolver {
                             }
                         }
                     }
+                    for spectrum in &mut state.mna_branch_currents {
+                        spectrum[1..].fill(Complex64::ZERO);
+                    }
                 }
-                Err(HbError::ConvergenceFailed { .. } | HbError::SingularMatrix) => {}
+                Err(error) if error.is_convergence_failure() => {}
                 Err(err) => return Err(err),
             }
             // If the DC seed does not converge, continue with the existing
@@ -829,80 +834,20 @@ impl HbSolver {
             }
         }
 
-        // Step 3: Try source stepping
-        // Scale sources from 0 to full, using previous converged solution as starting point
-        let mut source_stepper = SourceStepper::new();
-        let mut total_iterations = 0; // Reset for source stepping
-        let max_total_iter = self.config.max_iterations * 20;
-
-        // Reset state to zero - with sources=0, solution=0 trivially
-        for node in 0..self.num_nodes {
-            if node < state.x.len() {
-                for k in 0..state.x[node].len() {
-                    state.x[node][k] = Complex64::new(0.0, 0.0);
-                }
-            }
-        }
-        for spectrum in &mut state.mna_branch_currents {
-            spectrum.fill(Complex64::new(0.0, 0.0));
-        }
-
-        while !source_stepper.is_complete() && total_iterations < max_total_iter {
-            let factor = source_stepper.factor();
-
-            // Don't reset state.x - keep converged solution from previous source level
-
-            // Try Newton at this source level (using previous solution as starting point)
-            let converged = self.newton_inner_loop(
-                state,
-                HbNewtonLimits {
-                    gmin: target_gmin,
-                    max_iterations: self.config.max_iterations / 2,
-                    tol: tol * 10.0,
-                    abstol,
-                    source_scale: factor,
-                },
-                abort,
-            )?;
-
-            total_iterations += state.iteration;
-
-            if converged {
-                // Keep state.x as-is for next step (converged solution)
-                source_stepper.advance_on_success();
-            } else {
-                if !source_stepper.reduce_on_failure() {
-                    break;
-                }
-            }
-        }
-
-        // If source stepping completed, do final Newton with original sources
-        if source_stepper.is_complete()
-            && self.newton_inner_loop(
-                state,
-                HbNewtonLimits {
-                    gmin: target_gmin,
-                    max_iterations: self.config.max_iterations,
-                    tol,
-                    abstol,
-                    source_scale: 1.0,
-                },
-                abort,
-            )?
-        {
+        // Step 3: Retry from certified lower source strengths.
+        if self.solve_source_stepping(state, abort)? {
             state.converged = true;
-            state.iteration = total_iterations;
             return Ok(());
         }
 
-        // Step 4: Try pseudo-transient
-        // Add damping capacitors to each node and integrate to steady-state
+        // Step 4: Conductance continuation using the pseudo-transient timestep
+        // schedule. Only the final physical zero-GMIN solve can be accepted.
         let mut ptran = PseudoTransient::new();
-        let mut ptran_iterations = 0;
+        let ptran_start = state.total_iterations;
         let max_ptran_iter = self.config.max_iterations * 5;
 
-        while !ptran.is_complete() && ptran_iterations < max_ptran_iter {
+        while !ptran.is_complete() && state.total_iterations - ptran_start < max_ptran_iter {
+            let remaining = max_ptran_iter - (state.total_iterations - ptran_start);
             // Pseudo-transient adds G_eq = C_pseudo/dt to each node diagonal
             // This damps oscillations and helps find DC solution
             let ptran_gmin = target_gmin + ptran.conductance(0);
@@ -911,7 +856,7 @@ impl HbSolver {
                 state,
                 HbNewtonLimits {
                     gmin: ptran_gmin,
-                    max_iterations: self.config.max_iterations / 4,
+                    max_iterations: (self.config.max_iterations / 4).max(1).min(remaining),
                     // Relaxed tolerance during stepping.
                     tol: tol * 100.0,
                     abstol,
@@ -919,8 +864,6 @@ impl HbSolver {
                 },
                 abort,
             )?;
-
-            ptran_iterations += state.iteration;
 
             if converged {
                 ptran.advance_on_success();
@@ -946,14 +889,79 @@ impl HbSolver {
             )?
         {
             state.converged = true;
-            state.iteration = total_iterations + ptran_iterations;
             return Ok(());
         }
 
         Err(HbError::ConvergenceFailed {
-            iterations: total_iterations + ptran_iterations,
+            iterations: state.total_iterations - iteration_start,
             residual: state.residual_norm,
         })
+    }
+
+    /// Source continuation keeps the complete last accepted MNA state when a
+    /// trial fails; rejected node and branch updates must never seed a retry.
+    fn solve_source_stepping(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool, HbError> {
+        let mut stepper = SourceStepper::new();
+        let iteration_start = state.total_iterations;
+        let max_iterations = self.config.max_iterations * 20;
+        for spectrum in state.x.iter_mut().chain(&mut state.mna_branch_currents) {
+            spectrum.fill(Complex64::ZERO);
+        }
+        let mut checkpoint = HbNewtonCheckpoint {
+            node_voltages: state.x.clone(),
+            branch_currents: state.mna_branch_currents.clone(),
+        };
+        while !stepper.is_complete()
+            && !stepper.is_exhausted()
+            && state.total_iterations - iteration_start < max_iterations
+        {
+            let remaining = max_iterations - (state.total_iterations - iteration_start);
+            if self.newton_inner_loop(
+                state,
+                HbNewtonLimits {
+                    gmin: 0.0,
+                    max_iterations: (self.config.max_iterations / 2).max(1).min(remaining),
+                    tol: self.config.tolerance * 10.0,
+                    abstol: self.config.abstol,
+                    source_scale: stepper.factor(),
+                },
+                abort,
+            )? {
+                checkpoint.node_voltages.clone_from(&state.x);
+                checkpoint
+                    .branch_currents
+                    .clone_from(&state.mna_branch_currents);
+                stepper.advance_on_success();
+            } else {
+                state.x.clone_from(&checkpoint.node_voltages);
+                state
+                    .mna_branch_currents
+                    .clone_from(&checkpoint.branch_currents);
+                if !stepper.reduce_on_failure() {
+                    break;
+                }
+            }
+        }
+        // Even a completed relaxed homotopy must pass the original tolerances.
+        if stepper.is_complete() {
+            self.newton_inner_loop(
+                state,
+                HbNewtonLimits {
+                    gmin: 0.0,
+                    max_iterations: self.config.max_iterations,
+                    tol: self.config.tolerance,
+                    abstol: self.config.abstol,
+                    source_scale: 1.0,
+                },
+                abort,
+            )
+        } else {
+            Ok(false)
+        }
     }
 
     /// Inner Newton iteration loop at a fixed GMIN level
@@ -992,19 +1000,19 @@ impl HbSolver {
             // and restores quadratic convergence; the Toeplitz-only complex
             // path remains selectable for A/B comparison and for the large-
             // system Krylov fast path.
-            let delta_x = if self.config.use_exact_jacobian {
-                match self.solve_jacobian_system_exact(state, gmin, abort) {
-                    Ok(dx) => dx,
-                    Err(HbError::SingularMatrix) => return Ok(false),
-                    Err(err) => return Err(err),
-                }
+            let correction = if self.config.use_exact_jacobian {
+                self.solve_jacobian_system_exact(state, gmin, abort)
             } else {
                 let jacobian = self.build_full_jacobian_with_gmin(state, gmin)?;
-                match self.solve_jacobian_system(&jacobian, state) {
-                    Ok(dx) => dx,
-                    Err(HbError::SingularMatrix) => return Ok(false),
-                    Err(err) => return Err(err),
+                self.solve_jacobian_system(&jacobian, state)
+            };
+            let delta_x = match correction {
+                Ok(dx) => dx,
+                Err(error) if error.is_convergence_failure() => {
+                    log::debug!("HB Newton correction rejected: {error}");
+                    return Ok(false);
                 }
+                Err(error) => return Err(error),
             };
 
             // 5. Apply line search for robust convergence
@@ -1020,7 +1028,7 @@ impl HbSolver {
                 abort,
             ) {
                 Ok(()) => {}
-                Err(HbError::SingularMatrix) => return Ok(false),
+                Err(error) if error.is_convergence_failure() => return Ok(false),
                 Err(err) => return Err(err),
             }
         }
@@ -2045,11 +2053,14 @@ impl HbSolver {
                     );
                 }
                 Err(error) => {
-                    return Err(HbError::InvalidCircuit(format!(
-                        "HB exact {size}x{size} matrix-free Newton step is uncertified after {} \
-                         iterations (reported normwise relative residual {:.3e}): {error}",
-                        outcome.iterations, outcome.relative_residual
-                    )));
+                    return Err(Self::map_linear_solve_error_with_context(
+                        error,
+                        &format!(
+                            "HB exact {size}x{size} matrix-free Newton step is uncertified after {} \
+                             iterations (reported normwise relative residual {:.3e})",
+                            outcome.iterations, outcome.relative_residual
+                        ),
+                    ));
                 }
             }
         }
@@ -3131,6 +3142,112 @@ mod exact_matrix_free_tests {
                 .iter()
                 .any(|value| value.norm() > 0.0)
         );
+    }
+
+    #[test]
+    fn source_continuation_restores_failed_node_and_branch_trials() {
+        for budget in [1, 4] {
+            let mut config = HbConfig::new(1e6).with_harmonics(1);
+            config.max_iterations = budget;
+            let mut solver = HbSolver::new(config, 1);
+            solver.add_conductance(0, 0, 1.0);
+            let source = solver
+                .try_add_named_voltage_source_branch_harmonics(1, 0, 1e-3, &[], "V1")
+                .unwrap();
+            solver
+                .try_add_periodic_voltage_source_branch(1, 0, source, 1, "V1")
+                .unwrap();
+            let mut state = HbSolverState::new(1, 1);
+            state.try_prepare_mna_branches(1, 1).unwrap();
+            let converged = solver.solve_source_stepping(&mut state, &NoAbort).unwrap();
+            if budget == 1 {
+                // Every nonzero trial updates both coordinates but exhausts
+                // its inner budget before certification. Keep only the seed.
+                assert!(!converged);
+                assert!(state.total_iterations > 1 && state.total_iterations <= 20);
+                assert_eq!(state.x[0][0], Complex64::ZERO);
+                assert_eq!(state.mna_branch_currents[0][0], Complex64::ZERO);
+            } else {
+                assert!(converged);
+                assert!((state.x[0][0].re - 1e-3).abs() < 1e-14);
+                assert!((state.mna_branch_currents[0][0].re + 1e-3).abs() < 1e-14);
+                assert!(state.rows_converged_with_branch_tolerances(
+                    solver.config.tolerance,
+                    solver.config.abstol,
+                    solver.voltage_abstol
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn failed_hb_continuation_counts_single_iteration_trials_and_clears_convergence() {
+        let mut config = HbConfig::new(1e6).with_harmonics(1);
+        config.max_iterations = 1;
+        let mut solver = HbSolver::new(config, 1);
+        // This diode has no avalanche branch. A reverse current greater than
+        // its saturation current has no physical equilibrium, even though its
+        // nonlinear registry and matrix structure are valid.
+        solver.add_diode(1, 0, 1e-12, 1.0);
+        solver.add_dc_source(0, -1e-3);
+        let mut state = HbSolverState::new(1, 1);
+        state.total_iterations = 11; // earlier retained solve work is not this attempt
+        state.converged = true;
+        let error = solver
+            .solve_newton_with_abort_seed_policy(&mut state, &NoAbort, HbDcSeedPolicy::Disabled)
+            .unwrap_err();
+        let HbError::ConvergenceFailed { iterations, .. } = error else {
+            panic!("expected exhausted convergence strategies, got {error}");
+        };
+        assert!(!state.converged);
+        assert_eq!(iterations, state.total_iterations - 11);
+        assert!(
+            iterations > 6 && iterations <= 31,
+            "unbounded or skipped trials: {iterations}"
+        );
+    }
+
+    #[test]
+    fn uncertified_krylov_step_allows_gmin_retry_without_applying_the_candidate() {
+        // Above the automatic Krylov threshold, no dense fallback can hide the
+        // inconsistent zero-conductance equation. A GMIN trial is solvable.
+        let nodes = super::super::krylov::KRYLOV_AUTO_THRESHOLD.div_ceil(3);
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), nodes);
+        solver.add_dc_source(0, 1e-6);
+        let mut state = HbSolverState::new(nodes, 1);
+        let limits = HbNewtonLimits {
+            gmin: 0.0,
+            max_iterations: 2,
+            tol: 1e-6,
+            abstol: 1e-12,
+            source_scale: 1.0,
+        };
+        assert!(
+            !solver
+                .newton_inner_loop(&mut state, limits, &NoAbort)
+                .expect("an uncertified correction must allow continuation")
+        );
+        assert_eq!(state.total_iterations, 1);
+        assert!(state.x.iter().flatten().all(|&v| v == Complex64::ZERO));
+
+        assert!(
+            solver
+                .newton_inner_loop(
+                    &mut state,
+                    HbNewtonLimits {
+                        gmin: 1e-3,
+                        ..limits
+                    },
+                    &NoAbort
+                )
+                .expect("a regularized trial solves without accepting the rejected candidate")
+        );
+        assert!((state.x[0][0].re - 1e-3).abs() < 1e-14);
+        assert!(state.rows_converged_with_branch_tolerances(
+            limits.tol,
+            limits.abstol,
+            solver.voltage_abstol
+        ));
     }
 
     #[test]

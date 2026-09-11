@@ -171,12 +171,9 @@ impl HbSolver {
 
         // Use SourceStepper for DC sources
         let mut source_stepper = SourceStepper::new();
-        let max_steps = 50;
-        let mut step_count = 0;
 
-        while !source_stepper.is_complete() && step_count < max_steps {
+        while !source_stepper.is_complete() && !source_stepper.is_exhausted() {
             let factor = source_stepper.factor();
-            step_count += 1;
             let checkpoint = self.capture_dc_checkpoint(state)?;
 
             if self.dc_newton_inner_loop(
@@ -218,7 +215,7 @@ impl HbSolver {
 
         // DC solve failed - return what we have
         Err(HbError::ConvergenceFailed {
-            iterations: step_count,
+            iterations: source_stepper.steps(),
             residual: state.residual_norm,
         })
     }
@@ -356,7 +353,11 @@ impl HbSolver {
 
             let delta_x = match self.solve_real_linear_system(&jacobian, &neg_residual) {
                 Ok(d) => d,
-                Err(_) => return Ok(false), // Singular Jacobian
+                Err(error) if error.is_convergence_failure() => {
+                    log::debug!("HB DC Newton correction rejected: {error}");
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
             };
 
             // Line search with DC voltage limiting
@@ -1426,6 +1427,39 @@ mod linear_solve_tests {
         );
         let jac = solver.build_dc_jacobian(&state, 0.2).unwrap();
         assert_eq!([jac[0][0], jac[1][1], jac[2][2]], [-0.2, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn dc_newton_propagates_nonfinite_jacobian_instead_of_retrying_it() {
+        let mut solver = solver();
+        // Each stamp and the residual at zero are finite; their summed
+        // Jacobian overflows and must remain a fatal assembly error.
+        solver.add_conductance(0, 0, 1e308);
+        solver.add_conductance(0, 0, 1e308);
+        solver.add_dc_source(0, 1e-6);
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+        let error = solver
+            .dc_newton_inner_loop(
+                &mut state,
+                HbNewtonLimits {
+                    gmin: 0.0,
+                    max_iterations: 2,
+                    tol: 1e-6,
+                    abstol: 1e-12,
+                    source_scale: 1.0,
+                },
+                &NoAbort,
+            )
+            .expect_err("a nonfinite Jacobian cannot enter continuation");
+        assert!(matches!(error, HbError::InvalidCircuit(_)), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("coefficient (0, 0) is non-finite"),
+            "{error}"
+        );
+        assert_eq!(state.iteration, 0);
+        assert_eq!(state.x[0][0], Complex64::ZERO);
     }
 
     #[test]

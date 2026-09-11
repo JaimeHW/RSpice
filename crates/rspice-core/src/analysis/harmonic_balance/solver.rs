@@ -127,6 +127,10 @@ pub enum HbError {
     ConvergenceFailed { iterations: usize, residual: Value },
     /// Matrix is singular
     SingularMatrix,
+    /// A finite linear correction could not be certified. Continuation may retry it.
+    LinearConvergenceFailed(String),
+    /// A linear solve failed for a reason that continuation cannot repair.
+    LinearSolveFailed(String),
     /// Invalid circuit configuration
     InvalidCircuit(String),
     /// Invalid numerical solver configuration.
@@ -150,10 +154,24 @@ impl std::fmt::Display for HbError {
                 )
             }
             Self::SingularMatrix => write!(f, "Singular Jacobian matrix"),
+            Self::LinearConvergenceFailed(msg) => write!(f, "Linear convergence failed: {msg}"),
+            Self::LinearSolveFailed(msg) => write!(f, "Linear solve failed: {msg}"),
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
             Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
             Self::FftError(msg) => write!(f, "FFT error: {}", msg),
         }
+    }
+}
+
+impl HbError {
+    /// Only numerical convergence failures may enter the HB continuation ladder.
+    fn is_convergence_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::ConvergenceFailed { .. }
+                | Self::SingularMatrix
+                | Self::LinearConvergenceFailed(_)
+        )
     }
 }
 

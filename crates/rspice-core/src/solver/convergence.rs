@@ -51,11 +51,13 @@ pub const PTRAN_MAX_STEPS: usize = 100;
 pub struct SourceStepper {
     /// Current source scaling factor (0 to 1)
     current_factor: Value,
+    /// Last source factor whose Newton solve actually converged.
+    accepted_factor: Option<Value>,
     /// Step size for increasing factor
     step_size: Value,
     /// Minimum step size before giving up
     min_step: Value,
-    /// Number of steps taken
+    /// Number of attempted solves, including failures.
     steps: usize,
     /// Maximum steps allowed
     max_steps: usize,
@@ -68,6 +70,7 @@ impl SourceStepper {
     pub fn new() -> Self {
         Self {
             current_factor: 0.0,
+            accepted_factor: None,
             step_size: SOURCE_STEP_INITIAL,
             min_step: SOURCE_STEP_MIN,
             steps: 0,
@@ -82,13 +85,19 @@ impl SourceStepper {
         self.current_factor
     }
 
-    /// Check if stepping is complete (factor reached 1.0)
+    /// Check if Newton has converged at full source strength.
     #[inline]
     pub fn is_complete(&self) -> bool {
         self.complete
     }
 
-    /// Get number of steps taken
+    /// Whether the source-step solve budget has been consumed.
+    #[inline]
+    pub fn is_exhausted(&self) -> bool {
+        self.steps >= self.max_steps
+    }
+
+    /// Get the number of attempted solves, including failures.
     #[inline]
     pub fn steps(&self) -> usize {
         self.steps
@@ -97,47 +106,44 @@ impl SourceStepper {
     /// Called when Newton-Raphson converged at current factor
     /// Advances to next step
     pub fn advance_on_success(&mut self) {
-        if self.complete {
+        if self.complete || self.is_exhausted() {
             return;
         }
-
-        self.current_factor += self.step_size;
         self.steps += 1;
-
-        // Check if we've reached the end
-        if self.current_factor >= 1.0 {
-            self.current_factor = 1.0;
-            self.complete = true;
-            return;
+        if self.accepted_factor.is_some() {
+            self.step_size *= SOURCE_STEP_FACTOR;
         }
-
-        // Increase step size for next iteration (successful path)
-        self.step_size = (self.step_size * SOURCE_STEP_FACTOR).min(1.0 - self.current_factor);
+        self.accepted_factor = Some(self.current_factor);
+        self.complete = self.current_factor == 1.0;
+        if !self.complete {
+            self.step_size = self.step_size.min(1.0 - self.current_factor);
+            self.current_factor += self.step_size;
+        }
     }
 
-    /// Called when Newton-Raphson failed at current step
-    /// Reduces step size and tries again
-    /// Returns false if step size is too small (give up)
+    /// Called when Newton-Raphson failed at the current trial factor.
+    /// Retry halfway between the last accepted factor and this failed trial.
+    /// Returns false when there is no accepted seed or no retry budget remains.
     pub fn reduce_on_failure(&mut self) -> bool {
-        if self.steps >= self.max_steps {
+        if self.complete || self.is_exhausted() {
             return false;
         }
-
-        // Reduce step size
-        self.step_size *= 0.5;
-
-        if self.step_size < self.min_step {
-            return false; // Give up
+        self.steps += 1;
+        let Some(accepted) = self.accepted_factor else {
+            return false;
+        };
+        self.step_size = (self.current_factor - accepted) * 0.5;
+        if self.is_exhausted() || self.step_size < self.min_step {
+            return false;
         }
-
-        // Back up to previous factor
-        self.current_factor = (self.current_factor - self.step_size).max(0.0);
+        self.current_factor = accepted + self.step_size;
         true
     }
 
     /// Reset for a new solve attempt
     pub fn reset(&mut self) {
         self.current_factor = 0.0;
+        self.accepted_factor = None;
         self.step_size = SOURCE_STEP_INITIAL;
         self.steps = 0;
         self.complete = false;
@@ -313,5 +319,67 @@ impl PseudoTransient {
 impl Default for PseudoTransient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod source_step_tests {
+    use super::*;
+
+    #[test]
+    fn failed_source_trials_stay_between_the_accepted_and_failed_factors() {
+        let mut stepper = SourceStepper::new();
+        stepper.advance_on_success(); // accepted zero, trial 0.1
+        stepper.advance_on_success(); // accepted 0.1, trial 0.3
+        assert!(stepper.reduce_on_failure());
+        assert!((stepper.factor() - 0.2).abs() < 1e-15);
+        assert!(stepper.reduce_on_failure());
+        assert!((stepper.factor() - 0.15).abs() < 1e-15);
+        stepper.advance_on_success(); // accepted 0.15, grow the successful increment
+        assert!((stepper.factor() - 0.25).abs() < 1e-15);
+        assert_eq!(stepper.steps(), 5);
+    }
+
+    #[test]
+    fn full_source_trial_is_certified_before_completion_and_can_backtrack() {
+        let mut stepper = SourceStepper::new();
+        while stepper.factor() < 1.0 {
+            stepper.advance_on_success();
+        }
+        assert!(!stepper.is_complete());
+        assert!(stepper.reduce_on_failure());
+        assert!((stepper.factor() - 0.85).abs() < 1e-15);
+        while !stepper.is_complete() {
+            assert!(!stepper.is_exhausted());
+            stepper.advance_on_success();
+        }
+        assert_eq!(stepper.factor(), 1.0);
+        assert!(!stepper.reduce_on_failure());
+    }
+
+    #[test]
+    fn source_step_budget_counts_failed_trials_and_reset_discards_the_old_seed() {
+        let mut stepper = SourceStepper::new();
+        assert!(
+            !stepper.reduce_on_failure(),
+            "zero-source failure has no earlier solution"
+        );
+        stepper.reset();
+        stepper.advance_on_success();
+        // Repeatedly fail a larger step, then accept its half. Progress remains
+        // possible but must not bypass the total-attempt bound.
+        while !stepper.is_exhausted() {
+            if !stepper.reduce_on_failure() {
+                break;
+            }
+            stepper.advance_on_success();
+        }
+        assert!(stepper.is_exhausted());
+        assert_eq!(stepper.steps(), SOURCE_MAX_STEPS);
+        assert!(!stepper.is_complete());
+        stepper.reset();
+        assert_eq!(stepper.factor(), 0.0);
+        assert_eq!(stepper.steps(), 0);
+        assert!(!stepper.reduce_on_failure());
     }
 }
