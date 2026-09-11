@@ -4060,17 +4060,36 @@ fn a_local_shadowing_a_parameter_is_not_folded_into_a_select() {
 }
 
 #[test]
-fn overflowing_digital_indices_report_errors_without_panicking_or_clamping() {
-    for section in [
-        "reg q; initial q[-64'sh8000000000000000] = 1'b1;",
-        "reg q, seen; initial seen = q[-64'sh8000000000000000];",
-        "parameter real idx = 1e30; reg q; initial q[idx] = 1'b1;",
-        "parameter real idx = -1e30; reg q, seen; initial seen = q[idx];",
+fn digital_index_boundaries_do_not_panic_or_clamp() {
+    for (section, diagnostic) in [
+        ("reg q; initial q[-64'sh8000000000000000] = 1'b1;", "select"),
+        (
+            "parameter real idx = 1e30; reg q; initial q[idx] = 1'b1;",
+            "select",
+        ),
+        (
+            "parameter real idx = -1e30; reg q, seen; initial seen = q[idx];",
+            "real value",
+        ),
     ] {
         let error = VerilogACompiler::default()
             .compile_canonical_ir(&digital_module(section))
-            .expect_err("an unrepresentable constant index must be refused");
-        assert!(error.to_string().contains("select"), "{section}: {error}");
+            .expect_err("unsupported index forms must fail explicitly");
+        assert!(error.to_string().contains(diagnostic), "{section}: {error}");
+    }
+    // Negating the minimum signed 64-bit value wraps at its declared width.
+    // Read indices now execute as digital expressions: the wrapped value
+    // selects the minimum bound exactly, or yields X on a different range.
+    for (bounds, expected) in [
+        ("0:0", "x"),
+        ("64'sh8000000000000000:64'sh8000000000000000", "1"),
+    ] {
+        let mut harness = Harness::new(&format!(
+            "reg [{bounds}] q; reg seen; initial seen=q[-64'sh8000000000000000];"
+        ));
+        harness.set("q", "1");
+        expect_finished(harness.run());
+        assert_eq!(harness.get("seen"), expected);
     }
 }
 
