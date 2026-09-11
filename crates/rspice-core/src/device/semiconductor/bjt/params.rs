@@ -2475,7 +2475,7 @@ impl Bjt {
     pub fn clear_collector_series_resistance(&mut self) {
         self.rcx = 0.0;
         self.rcx_nominal = 0.0;
-        self.rc = 0.0;
+        self.rc = self.rci;
     }
 
     /// Move the authored collector lead onto the builder-created series

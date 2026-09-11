@@ -5533,3 +5533,136 @@ fn legacy_base_resistance_temperature_matches_ngspice_dc_ac_noise_and_transient(
         }
     }
 }
+
+#[test]
+fn legacy_private_collector_preserves_external_bc_storage_and_checkpoint() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let times: Vec<_> = (0..=20).map(|i| f64::from(i) * 5e-9).collect();
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: dialect,
+                integration_method: method,
+                convergence_config: ConvergenceConfig {
+                    gmin_target: 0.0,
+                    junction_gmin_target: 0.0,
+                    voltage_reltol: 1e-10,
+                    voltage_abstol: 1e-12,
+                    current_abstol: 1e-18,
+                    ..Default::default()
+                },
+                locked_time_grid: Some(std::sync::Arc::new(times.clone())),
+                ..Default::default()
+            });
+            for (kind, polarity, subs) in [("NPN", 1.0, 1), ("PNP", -1.0, -1)] {
+                for (base, rb) in [("RB=120", 20.0), ("RBX=50 RBI=70", 20.0)] {
+                    let sources = |suffix: &str| {
+                        format!(
+                            "VC{suffix} c{suffix} 0 PWL(0 0 100n {}) AC .3\nVB{suffix} b{suffix} 0 PWL(0 0 100n {}) AC 1\nVE{suffix} e{suffix} 0 0 AC .2\nVS{suffix} s{suffix} 0 PWL(0 0 100n {}) AC .4\n",
+                            0.03 * polarity,
+                            0.1 * polarity,
+                            -0.02 * polarity,
+                        )
+                    };
+                    // Zero grading and IS make an independent linear R/C oracle.
+                    // The external BC branch bypasses RB, while CBE and CBC do not.
+                    let substrate_connection = if subs == 1 { "ci" } else { "bi" };
+                    let deck = Netlist::parse(&format!(
+                        "Private collector charge\n{}{}Q1 c b e s qm AREA=2 M=3\n.model qm {kind}(LEVEL=1 IS=0 {base} RCX=60 RCI=120 RE=30 RS=90 CJE=1n CJC=2n CJS=3n MJE=0 MJC=0 MJS=0 XCJC=.25 SUBS={subs})\n\
+                         RCref cr ci 30\nRBref br bi {rb}\nREref er ei 5\nRSref sr si 15\nCBE bi ei 6n\nCBC bi ci 3n\nCBX br ci 9n\nCS si {substrate_connection} 18n\n\
+                         .save @Q1[ib] @Q1[ic] @Q1[ie] @Q1[is] I(VB) I(VC) I(VE) I(VS) I(VBr) I(VCr) I(VEr) I(VSr)\n.end",
+                        sources(""), sources("r"),
+                    )).unwrap();
+                    let ac = engine.run_ac(&deck, &[1e3, 1e6, 1e9]).unwrap();
+                    for point in &ac {
+                        let current = |name: &str| {
+                            point.currents[point
+                                .branch_names
+                                .iter()
+                                .position(|n| n.eq_ignore_ascii_case(name))
+                                .unwrap()]
+                        };
+                        for source in ["VB", "VC", "VE", "VS"] {
+                            let actual = current(source);
+                            let expected = current(&format!("{source}r"));
+                            assert!(
+                                (actual - expected).norm() < 1e-10 * expected.norm() + 1e-15,
+                                "{dialect:?} {kind} {base} f={} {source}: {actual:?} vs {expected:?}",
+                                point.frequency
+                            );
+                        }
+                    }
+                    let check_resume = dialect == SpiceDialect::Ngspice
+                        && method == IntegrationMethod::Trapezoidal
+                        && kind == "NPN"
+                        && base == "RBX=50 RBI=70";
+                    let (tran, checkpoints) = if check_resume {
+                        engine
+                            .run_tran_checkpoint_schedule_with_startup_mode(
+                                &deck,
+                                100e-9,
+                                5e-9,
+                                TransientStartupMode::OperatingPoint,
+                                &[50e-9],
+                            )
+                            .unwrap()
+                    } else {
+                        (engine.run_tran(&deck, 100e-9, 5e-9).unwrap(), Vec::new())
+                    };
+                    for (source, parameter) in
+                        [("VB", "IB"), ("VC", "IC"), ("VE", "IE"), ("VS", "IS")]
+                    {
+                        let actual = tran.try_branch_current_waveform_named(source).unwrap();
+                        let expected = tran
+                            .try_branch_current_waveform_named(&format!("{source}r"))
+                            .unwrap();
+                        let device = tran.try_device_op_waveform_named("Q1", parameter).unwrap();
+                        for ((a, b), q) in actual.iter().zip(expected).zip(device) {
+                            assert!(
+                                (a - b).abs() < 1e-8 * b.abs() + 1e-12,
+                                "{dialect:?} {method:?} {kind} {base} {source}: {a:e} vs {b:e}"
+                            );
+                            assert!(
+                                (q + a).abs() < 1e-8 * a.abs() + 1e-12,
+                                "{dialect:?} {method:?} {kind} {base} {parameter}: {q:e} vs source {a:e}"
+                            );
+                        }
+                    }
+                    if check_resume {
+                        let checkpoint = TransientCheckpoint::from_bytes(
+                            &checkpoints[0]
+                                .checkpoint
+                                .to_bytes(TransientCheckpointEncoding::Packed)
+                                .unwrap(),
+                        )
+                        .unwrap();
+                        let (resumed, _) = engine
+                            .run_tran_resume(&deck, &checkpoint, 100e-9, 5e-9)
+                            .unwrap();
+                        let seam = tran
+                            .time
+                            .iter()
+                            .position(|t| *t == resumed.time[0])
+                            .unwrap();
+                        assert_eq!(resumed.time, tran.time[seam..]);
+                        for parameter in ["IB", "IC", "IE", "IS"] {
+                            assert_eq!(
+                                resumed
+                                    .try_device_op_waveform_named("Q1", parameter)
+                                    .unwrap(),
+                                &tran.try_device_op_waveform_named("Q1", parameter).unwrap()
+                                    [seam..]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

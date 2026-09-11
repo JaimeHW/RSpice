@@ -1077,7 +1077,7 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     hasher.update(domain);
     // Native GP split transport, substrate currents and junction geometry
     // must not resume state captured under earlier constitutive laws.
-    hash_field(&mut hasher, "native_bjt_junction_area_law", 9_u8);
+    hash_field(&mut hasher, "native_bjt_junction_area_law", 10_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);

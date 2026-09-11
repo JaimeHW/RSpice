@@ -1,6 +1,14 @@
-//! VBIC dynamic charge reduction and charge-snapshot construction.
+//! BJT dynamic charge reduction, charge snapshots, and private noise ports.
 
 use super::*;
+
+/// A thermal source on the private GP network. Endpoints use the same
+/// internal/external coordinates as the charge and residual operators.
+pub(crate) struct LegacyBjtThermalNoise {
+    pub mechanism: &'static str,
+    pub conductance: Value,
+    pub terminals: [(Option<usize>, Option<usize>); 2],
+}
 
 impl Bjt {
     /// Convert model-oriented VBIC charge and its voltage gradients to a
@@ -665,6 +673,13 @@ impl Bjt {
         }
     }
 
+    /// The four-terminal reduction must retain the authored base when an
+    /// external BC charge connects it to a privately solved collector. Moving
+    /// RBX outside would require a fifth external terminal in that reduction.
+    pub(crate) fn can_externalize_legacy_base_lead(&self) -> bool {
+        !(Self::series_active(self.rci) && self.cjc != 0.0 && self.xcjc != 1.0)
+    }
+
     fn legacy_external_bc_base_node(&self) -> Option<NodeId> {
         // Standard GP's collector lead is already a circuit node. Keep a
         // nonstandard private RCI extension in its existing reduced system.
@@ -852,28 +867,88 @@ impl Bjt {
         ]
     }
 
-    pub(crate) fn legacy_private_base_noise(
+    pub(crate) fn legacy_private_resistance_noise(
         &self,
         snapshot: &BjtChargeSnapshot,
-    ) -> Option<(Value, [(Option<usize>, Option<usize>); 2])> {
-        if !self.uses_legacy_gummel_poon() || !Self::series_active(self.rbi) {
-            return None;
-        }
+    ) -> [LegacyBjtThermalNoise; 7] {
         let v = snapshot.reduction.internal_voltages;
         let (linearized, _) = self.linearize_currents_with_branches(
             v[IDX_VBI] - v[IDX_VEI],
             v[IDX_VBX] - v[IDX_VEI],
             v[IDX_VBI] - v[IDX_VCI],
         );
-        let conductance = self
-            .irbi_branch(linearized, v[IDX_VBX], v[IDX_VBI])
-            .d_internal[IDX_VBX];
-        let base = if Self::series_active(self.rbx) {
+        let constant = |resistance| {
+            if Self::series_active(resistance) {
+                self.guarded_series_resistance(resistance).recip()
+            } else {
+                0.0
+            }
+        };
+        let collector_outer = if Self::series_active(self.rcx) {
+            (Some(IDX_VCX), None)
+        } else {
+            (None, Some(EXT_C))
+        };
+        let base_outer = if Self::series_active(self.rbx) {
             (Some(IDX_VBX), None)
         } else {
             (None, Some(EXT_B))
         };
-        Some((conductance, [base, (Some(IDX_VBI), None)]))
+        let source = |mechanism, conductance, pos, neg| LegacyBjtThermalNoise {
+            mechanism,
+            conductance,
+            terminals: [pos, neg],
+        };
+        [
+            source(
+                "RC",
+                constant(self.rcx),
+                (None, Some(EXT_C)),
+                collector_outer,
+            ),
+            // RCI is an existing GP extension using the Kull epi branch. Its
+            // self-conductance is supplied by that same physical branch law.
+            source(
+                "RC",
+                self.irci_branch_with_self_conductance(v[IDX_VCX], v[IDX_VCI], v[IDX_VBI])
+                    .1,
+                collector_outer,
+                self.legacy_charge_collector_terminal(),
+            ),
+            source("RB", constant(self.rbx), (None, Some(EXT_B)), base_outer),
+            source(
+                "RB",
+                self.irbi_branch(linearized, v[IDX_VBX], v[IDX_VBI])
+                    .d_internal[IDX_VBX],
+                base_outer,
+                self.legacy_charge_base_terminal(),
+            ),
+            source(
+                "RE",
+                constant(self.re),
+                (None, Some(EXT_E)),
+                self.legacy_charge_emitter_terminal(),
+            ),
+            source(
+                "RS",
+                constant(self.rs),
+                (None, Some(EXT_S)),
+                self.legacy_charge_substrate_terminal(),
+            ),
+            source(
+                "RBP",
+                if Self::series_active(self.rbp) {
+                    self.parasitic_transport_state(
+                        v[IDX_VBX], v[IDX_VBI], v[IDX_VCI], v[IDX_VBP], v[IDX_VSI],
+                    )
+                    .qbp / self.guarded_series_resistance(self.rbp)
+                } else {
+                    0.0
+                },
+                collector_outer,
+                (Some(IDX_VBP), None),
+            ),
+        ]
     }
 
     #[inline]

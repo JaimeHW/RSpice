@@ -6321,7 +6321,12 @@ impl Engine {
                         // A varying RB/RBM pair shares one private physical
                         // branch so temperature and noise use the whole law.
                         // The device owns junction limiting in both topologies.
-                        if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
+                        // XCJC must stay on the authored base when its other
+                        // end belongs to the private collector network.
+                        if bjt.rbx.is_finite()
+                            && bjt.rbx > 0.0
+                            && bjt.can_externalize_legacy_base_lead()
+                        {
                             let bint_name = format!("{}.__bint", element.name);
                             let bint = circuit.get_or_create_node(&bint_name);
                             let rb_name = format!("{}.__rb", element.name);

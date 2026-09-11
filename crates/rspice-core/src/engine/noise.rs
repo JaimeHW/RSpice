@@ -2890,7 +2890,10 @@ impl Engine {
                         })?,
                 )
                 .ok_or_else(|| SimulationError::Circuit("BJT noise node count overflow".into()))?;
-            if terminals.iter().any(|terminal| terminal.0.is_some()) {
+            // Substrate-only resistance also owns a private noise block,
+            // even when C/B/E all collapse directly onto circuit nodes.
+            let has_private_noise = bjt.has_intrinsic_state_unknowns();
+            if has_private_noise {
                 private_bjts.push(bjt_index);
             }
             let nodes = [
@@ -2907,7 +2910,7 @@ impl Engine {
             };
             let [collector, base, emitter] = terminals.map(node);
             let frozen_snapshot = bjt_snapshots.get(bjt_index).and_then(Option::as_ref);
-            if bjt.rbi > 0.0 {
+            if has_private_noise {
                 let voltage = |id| Self::noise_node_voltage(dc_solution, id);
                 let snapshot = frozen_snapshot.copied().unwrap_or_else(|| {
                     bjt.charge_snapshot(
@@ -2917,20 +2920,25 @@ impl Engine {
                         voltage(nodes[3]),
                     )
                 });
-                if let Some((conductance, terminals)) = bjt.legacy_private_base_noise(&snapshot)
-                    && let Some(resistance) = Self::noise_resistance_from_conductance(
-                        &format!("{}:RB", bjt.name),
-                        conductance,
+                for branch in bjt.legacy_private_resistance_noise(&snapshot) {
+                    let Some(resistance) = Self::noise_resistance_from_conductance(
+                        &format!("{}:{}", bjt.name, branch.mechanism),
+                        branch.conductance,
                     )?
-                {
+                    else {
+                        continue;
+                    };
                     let mut source = NoiseSource::thermal(
                         bjt.name.clone(),
-                        node(terminals[0]),
-                        node(terminals[1]),
+                        node(branch.terminals[0]),
+                        node(branch.terminals[1]),
                         resistance,
                     )
                     .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "RB"),
+                        crate::analysis::NoiseSourceIdentity::mechanism(
+                            &bjt.name,
+                            branch.mechanism,
+                        ),
                     );
                     source.temperature_offset = bjt.noise_temperature_offset;
                     noise_sources.push(source);

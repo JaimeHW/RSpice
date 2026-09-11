@@ -1012,3 +1012,123 @@ fn legacy_bjt_base_noise_matches_explicit_network_and_port_correlation() {
         }
     }
 }
+
+#[test]
+fn legacy_private_resistor_noise_matches_full_port_covariance() {
+    use rspice_core::config::SpiceDialect;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for (kind, subs) in [("NPN", 1), ("PNP", -1)] {
+            for substrate_only in [false, true] {
+                let (resistances, reference, mechanisms) = if substrate_only {
+                    let connection = if subs == 1 { "c" } else { "b" };
+                    (
+                        "RS=90",
+                        format!("RS s si 15\nCBE b e 6n\nCBC b c 12n\nCS si {connection} 18n"),
+                        vec!["RS"],
+                    )
+                } else {
+                    let connection = if subs == 1 { "ci" } else { "bi" };
+                    (
+                        "RCX=60 RCI=120 RBX=50 RBI=70 RE=30 RS=90",
+                        format!(
+                            "RC c ci 30\nRB b bi 20\nRE e ei 5\nRS s si 15\nCBE bi ei 6n\nCBC bi ci 3n\nCBX b ci 9n\nCS si {connection} 18n"
+                        ),
+                        vec!["RC", "RB", "RE", "RS"],
+                    )
+                };
+                let model = format!(
+                    "Q1 c b e s qm AREA=2 M=3\n.model qm {kind}(LEVEL=1 IS=0 {resistances} CJE=1n CJC=2n CJS=3n MJE=0 MJC=0 MJS=0 XCJC=.25 SUBS={subs})"
+                );
+                let make = |body: &str, sources: &str| {
+                    Netlist::parse(&format!("Private resistor noise\n{sources}\n{body}\n.end"))
+                        .unwrap()
+                };
+                let sources = "VB b 0 0 AC 1\nVC c 0 0\nVE e 0 0\nVS s 0 0";
+                let ports = ["VB", "VC", "VE", "VS"].map(String::from);
+                let frequencies = [1e3, 1e6, 1e9];
+                for temperature in [233.15, 343.15] {
+                    let actual = engine
+                        .run_port_noise_correlation(
+                            &make(&model, sources),
+                            &ports,
+                            &frequencies,
+                            temperature,
+                        )
+                        .unwrap();
+                    let expected = engine
+                        .run_port_noise_correlation(
+                            &make(&reference, sources),
+                            &ports,
+                            &frequencies,
+                            temperature,
+                        )
+                        .unwrap();
+                    for (a, b) in actual.iter().zip(expected) {
+                        for (row_a, row_b) in
+                            a.current_correlation.iter().zip(b.current_correlation)
+                        {
+                            for (a, b) in row_a.iter().zip(row_b) {
+                                assert!(
+                                    (*a - b).norm() < b.norm() * 1e-9 + 1e-34,
+                                    "{dialect:?} {kind} substrate_only={substrate_only} T={temperature}: {a:?} vs {b:?}"
+                                );
+                            }
+                        }
+                    }
+                    let sources =
+                        "VIN drive 0 0 AC 1\nRIN drive b 1000\nVC c 0 0\nVE e 0 0\nVS s 0 0";
+                    let actual = engine
+                        .run_noise_named_with_input_source(
+                            &make(&model, sources),
+                            "b",
+                            None,
+                            "VIN",
+                            &frequencies,
+                            temperature,
+                        )
+                        .unwrap();
+                    let expected = engine
+                        .run_noise_named_with_input_source(
+                            &make(&reference, sources),
+                            "b",
+                            None,
+                            "VIN",
+                            &frequencies,
+                            temperature,
+                        )
+                        .unwrap();
+                    for (a, b) in actual.iter().zip(expected) {
+                        assert!(
+                            (a.output_noise_density / b.output_noise_density - 1.0).abs() < 1e-9
+                        );
+                        for mechanism in &mechanisms {
+                            let actual: f64 = a
+                                .contributions
+                                .iter()
+                                .filter(|s| {
+                                    s.identity.device.eq_ignore_ascii_case("Q1")
+                                        && s.identity.mechanism.as_deref() == Some(mechanism)
+                                })
+                                .map(|s| s.output_contribution)
+                                .sum();
+                            let expected: f64 = b
+                                .contributions
+                                .iter()
+                                .filter(|s| s.identity.device.eq_ignore_ascii_case(mechanism))
+                                .map(|s| s.output_contribution)
+                                .sum();
+                            assert!(
+                                (actual - expected).abs() < expected.abs() * 1e-9 + 1e-34,
+                                "{dialect:?} {kind} {mechanism}: {actual:e} vs {expected:e}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

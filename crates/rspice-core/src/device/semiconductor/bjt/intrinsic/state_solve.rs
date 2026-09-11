@@ -103,7 +103,7 @@ impl Bjt {
     }
 
     #[inline]
-    pub(in crate::device::semiconductor::bjt) fn has_intrinsic_state_unknowns(&self) -> bool {
+    pub(crate) fn has_intrinsic_state_unknowns(&self) -> bool {
         Self::series_active(self.rcx)
             || Self::series_active(self.rci)
             || Self::series_active(self.rbx)
