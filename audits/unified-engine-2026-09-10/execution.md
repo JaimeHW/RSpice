@@ -692,6 +692,57 @@ passive instance assignment replacement and expression evaluation during
 netlist parsing. The checks above ran before those last parser-only commits;
 the acceptance implementation is unchanged by that integration.
 
+## MS05 increment: reversible external resources join acceptance
+
+The acceptance barrier now journals registered shared XSPICE resources as well
+as circuit-owned contexts and event state. A resource exposes an observational
+capture and an exact restore contract. Checked access captures once per resource
+registration across settle passes, before its first use; it also enlists resources
+registered after the candidate snapshot. Ordinary resource access cannot bypass
+transactional registrations. Existing memory/cache resources retain their
+copy-on-write behavior.
+
+On refusal, every captured resource is restored in reverse acquisition order,
+including when another provider's restore fails or panics. Diagnostics retain
+the original candidate failure and identify each failed instance/resource.
+A failed restore poisons the resource registration. A separate permanent circuit
+failure is shared with existing in-memory circuit clones, so reading the error,
+restoring owned state, or losing a newly created registration cannot authorize
+another simulation of uncertain external state. Freshly built circuits have a
+fresh failure latch; pure native-SPICE circuits allocate no resource latch.
+
+Reversible `d_cosim` registers its runtime through this contract and joins the
+outer circuit transaction. Its probes still restore immediately, and standalone
+calls retain their local undo image. Output processing now belongs inside the
+same local transaction as initialize/startup/step; an invalid output-delay
+parameter previously could fail after a successful external advance without
+restoring that advance. Successful outer acceptance releases the images only
+after the joint HDL and XSPICE promotion completes.
+
+Eight focused checks passed before the final permanent-circuit-failure addition:
+the two existing mixed/XSPICE acceptance cases extended with real shared-resource
+state, three existing reversible-cosim contract cases, two new cosim cases for
+outer rollback/commit and output-processing failure, and one journal case for
+reverse restoration, provider failure/panic and invalidation across context
+clones. The acceptance cases check resources created during the first candidate,
+multiple accesses capturing once, a later HDL or XSPICE refusal, and successful
+retry. The two final acceptance checks also passed after incorporating concurrent
+`19d7b65c1`, `8faed906e` and `03c84e746` parser changes. They additionally cover
+failed restoration of a newly registered resource and repeated refusal through
+an earlier circuit clone. Only these affected cases were rerun after the final
+failure-latch change; all runs used the core library with the `veriloga` feature.
+
+This remains an acceptance-protocol increment. The mixed fixture uses supplied
+candidates and does not yet qualify the required whole-circuit feedback solve.
+Irreversible `d_process`/cosim providers, deferred external effects, native-SPICE
+reactive/controller acceptance, the typed graph and one scheduling authority
+remain MS05 work. Successful circuit cloning is not an external-resource restart
+image; persistent/replayable resource checkpoints remain MS10 work. No broad
+suite, platform execution, generator refresh, performance qualification or
+Spectre reference run was performed. Compiler/artifact schemas are unchanged.
+The user has confirmed that no licensed reference installation is available;
+commercial readiness and vendor parity remain unproven.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;

@@ -58,6 +58,7 @@ pub mod ifspec;
 mod instance;
 mod metadata;
 mod registry;
+mod resource_transaction;
 // Exact counters for the settle loop's dispatch and copy-on-write structures,
 // read by the `engine::xspice_settle_ratchet` CI ratchet. Rank 9 because its
 // writers are this module's `instance` and `event` (rank 9) and
@@ -116,6 +117,10 @@ pub(crate) use instance::{
     XspiceInstanceCheckpoint,
 };
 pub use registry::CodeModelRegistry;
+pub use resource_transaction::TransactionalContextResource;
+pub(crate) use resource_transaction::{
+    ResourceEntry, ResourceTransaction, ResourceTransactionScope,
+};
 pub use traits::{
     CmError, CmResult, CodeModel, ParamSpec, ParamType, PortDirection, PortSpec, PortType,
     XspiceCheckpointSupport,

@@ -1807,6 +1807,28 @@ impl XspiceInstance {
         Ok(())
     }
 
+    /// Attach the circuit journal only for this call, including error recovery.
+    pub(crate) fn evaluate_with_resource_transaction(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        analysis: AnalysisType,
+        phase: EvaluationPhase,
+        transaction: Option<&super::ResourceTransaction>,
+        owner: usize,
+    ) -> CmResult<()> {
+        self.context
+            .set_resource_transaction(transaction.map(|transaction| {
+                super::ResourceTransactionScope {
+                    transaction: transaction.clone(),
+                    owner,
+                }
+            }));
+        let result = self.evaluate(time, timestep, analysis, phase);
+        self.context.set_resource_transaction(None);
+        result
+    }
+
     /// Evaluate the code model
     ///
     /// # Arguments

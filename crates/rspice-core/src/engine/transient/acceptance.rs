@@ -1,7 +1,7 @@
 //! The acceptance barrier for XSPICE and compiled analog/mixed participants.
 //! Native SPICE history and solver-controller acceptance remain in the parent
 //! stepper, along with observation and analog-task publication. External
-//! resources used by code models still require their own transaction contract.
+//! reversible resources join this barrier through registered undo images.
 
 use super::*;
 
@@ -38,6 +38,7 @@ impl Engine {
                             coefficients,
                             xyce_one_step_order2,
                         },
+                        rollback.as_ref().map(|snapshot| snapshot.resources()),
                     )
                     .map_err(|error| {
                         SimulationError::Circuit(format!(
@@ -86,15 +87,25 @@ impl Engine {
             }
             Ok((discontinuity, static_history))
         })();
-        if result.is_err()
-            && let Some(rollback) = rollback
-        {
-            circuit.restore_xspice_acceptance(rollback);
-            for (index, value) in projected.into_iter().rev() {
-                solution[index] = value;
+        match (result, rollback) {
+            (Ok(value), rollback) => {
+                if let Some(rollback) = rollback {
+                    rollback.resources().commit();
+                }
+                Ok(value)
+            }
+            (Err(error), rollback) => {
+                for (index, value) in projected.into_iter().rev() {
+                    solution[index] = value;
+                }
+                if let Some(rollback) = rollback
+                    && let Err(restore) = circuit.restore_xspice_acceptance(rollback)
+                {
+                    return Err(SimulationError::Circuit(format!("{error}; {restore}")));
+                }
+                Err(error)
             }
         }
-        result
     }
 }
 
@@ -105,12 +116,37 @@ mod tests {
     use crate::xspice::verilog::MixedSignalHost;
     use crate::xspice::{
         CmContext, CmError, CmResult, CodeModel, ParamSpec, PortConnection, PortSpec, PortType,
-        XspiceInstance,
+        TransactionalContextResource, XspiceInstance,
     };
     use rspice_veriloga::{VerilogACompiler, device::VerilogADevice};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct ProbeResource {
+        value: Mutex<u64>,
+        captures: AtomicUsize,
+        fail_restore: AtomicBool,
+    }
+
+    impl TransactionalContextResource for ProbeResource {
+        fn capture_transaction_state(&self) -> CmResult<Vec<u8>> {
+            self.captures.fetch_add(1, Ordering::Relaxed);
+            Ok(self.value.lock().unwrap().to_le_bytes().to_vec())
+        }
+        fn restore_transaction_state(&self, state: &[u8]) -> CmResult<()> {
+            if self.fail_restore.load(Ordering::Relaxed) {
+                return Err(CmError::EvaluationError(
+                    "injected external restore failure".into(),
+                ));
+            }
+            *self.value.lock().unwrap() = u64::from_le_bytes(state.try_into().unwrap());
+            Ok(())
+        }
+    }
 
     struct StatefulProbe {
+        resource: Arc<ProbeResource>,
         fail: bool,
         voltage: bool,
         ports: Vec<PortSpec>,
@@ -130,6 +166,22 @@ mod tests {
             Ok(())
         }
         fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            if ctx.evaluation_phase() == crate::xspice::EvaluationPhase::AcceptedStep {
+                if ctx
+                    .transactional_resource::<ProbeResource>("external")?
+                    .is_none()
+                {
+                    // Exercise registration during a candidate, after the
+                    // owned context rollback snapshot has already been taken.
+                    ctx.set_transactional_resource("external", self.resource.clone());
+                }
+                let resource = ctx
+                    .transactional_resource::<ProbeResource>("external")?
+                    .unwrap();
+                *resource.value.lock().unwrap() += 1;
+                // Multiple accesses must retain the original undo image.
+                ctx.transactional_resource::<ProbeResource>("external")?;
+            }
             ctx.set_state(0, ctx.state_prev(0) + 1.0);
             ctx.set_output(
                 "out",
@@ -156,6 +208,7 @@ mod tests {
         crate::CircuitData,
         crate::solver::StaticMatrix,
         Vec<Value>,
+        Vec<Arc<ProbeResource>>,
     ) {
         let engine = Engine::new(crate::SimulationConfig::default());
         let deck =
@@ -200,8 +253,12 @@ mod tests {
         );
         circuit.begin_veriloga_analysis(2).unwrap();
         circuit.start_mixed_digital_execution().unwrap();
+        let mut resources = Vec::new();
         for index in 0..2 {
+            let resource = Arc::new(ProbeResource::default());
+            resources.push(resource.clone());
             let model = StatefulProbe {
+                resource,
                 fail: fail_xspice && index == 1,
                 voltage: index == 0,
                 ports: vec![
@@ -235,7 +292,7 @@ mod tests {
         let n = circuit.matrix_size();
         let entries: Vec<_> = (0..n).map(|i| (i, i, 1e-3)).collect();
         let matrix = crate::solver::StaticMatrix::from_triplets(n, n, &entries).unwrap();
-        (engine, circuit, matrix, vec![0.0; n])
+        (engine, circuit, matrix, vec![0.0; n], resources)
     }
 
     fn step(
@@ -267,7 +324,7 @@ mod tests {
 
     #[test]
     fn acceptance_barrier_restores_earlier_models_when_a_later_mixed_candidate_fails() {
-        let (engine, mut circuit, mut matrix, mut solution) = fixture(false);
+        let (engine, mut circuit, mut matrix, mut solution, resources) = fixture(false);
         step(&engine, &mut circuit, &mut matrix, &mut solution, 0.0, 0.0).unwrap();
         let checkpoint = circuit.clone();
         let before: Vec<_> = circuit
@@ -277,6 +334,10 @@ mod tests {
             .collect();
         let p = circuit.get_node_by_name("p").unwrap() - 1;
         let adc = circuit.get_node_by_name("adc").unwrap() - 1;
+        let resource_before: Vec<_> = resources
+            .iter()
+            .map(|resource| *resource.value.lock().unwrap())
+            .collect();
         let bad = circuit.get_node_by_name("bad").unwrap() - 1;
         solution[p] = 1.0;
         solution[adc] = 0.6;
@@ -317,6 +378,21 @@ mod tests {
             calls, 0,
             "a failed barrier must not publish the observer's pending finish"
         );
+        assert_eq!(
+            resource_before,
+            resources
+                .iter()
+                .map(|resource| *resource.value.lock().unwrap())
+                .collect::<Vec<_>>(),
+            "external resources must restore with the owned context"
+        );
+        for resource in &resources {
+            assert_eq!(
+                resource.captures.load(Ordering::Relaxed),
+                2,
+                "each barrier captures once even with multiple accesses"
+            );
+        }
         solution[bad] = 0.0;
         for replay in 0..2 {
             if replay == 1 {
@@ -349,12 +425,90 @@ mod tests {
 
     #[test]
     fn acceptance_barrier_restores_xspice_state_and_events_before_reporting_failure() {
-        let (engine, mut circuit, mut matrix, mut solution) = fixture(true);
+        let (
+            initial_engine,
+            mut initial_circuit,
+            mut initial_matrix,
+            mut initial_solution,
+            initial_resources,
+        ) = fixture(true);
+        let bad = initial_circuit.get_node_by_name("bad").unwrap() - 1;
+        initial_solution[bad] = 2.0;
+        step(
+            &initial_engine,
+            &mut initial_circuit,
+            &mut initial_matrix,
+            &mut initial_solution,
+            0.0,
+            0.0,
+        )
+        .unwrap_err();
+        assert!(
+            initial_resources
+                .iter()
+                .all(|resource| *resource.value.lock().unwrap() == 0),
+            "new resources enlisted after the initial snapshot must also roll back"
+        );
+        // A failed restore of a newly registered resource must remain fatal
+        // even after the registration itself disappears in owned-state undo.
+        initial_resources[0]
+            .fail_restore
+            .store(true, Ordering::Relaxed);
+        let mut earlier_clone = initial_circuit.clone();
+        let error = step(
+            &initial_engine,
+            &mut initial_circuit,
+            &mut initial_matrix,
+            &mut initial_solution,
+            0.0,
+            0.0,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("A1")
+                && message.contains("A0 resource 'external'")
+                && message.contains("injected external restore failure"),
+            "{message}"
+        );
+        assert_eq!(
+            *initial_resources[1].value.lock().unwrap(),
+            0,
+            "a failed provider restore cannot prevent another resource's restoration"
+        );
+        for circuit in [&mut initial_circuit, &mut earlier_clone] {
+            for _ in 0..2 {
+                assert!(
+                    circuit
+                        .take_xspice_evaluation_error()
+                        .unwrap()
+                        .contains("A0 resource 'external'")
+                );
+            }
+            assert!(
+                step(
+                    &initial_engine,
+                    circuit,
+                    &mut initial_matrix,
+                    &mut initial_solution,
+                    0.0,
+                    0.0
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("resource rollback failed")
+            );
+        }
+        let (engine, mut circuit, mut matrix, mut solution, resources) = fixture(true);
         step(&engine, &mut circuit, &mut matrix, &mut solution, 0.0, 0.0).unwrap();
         let before: Vec<_> = circuit
             .xspice_instances
             .iter()
             .map(|instance| instance.checkpoint_state())
+            .collect();
+        let resource_before: Vec<_> = resources
+            .iter()
+            .map(|resource| *resource.value.lock().unwrap())
             .collect();
         let bad = circuit.get_node_by_name("bad").unwrap() - 1;
         solution[bad] = 2.0;
@@ -383,6 +537,21 @@ mod tests {
             assert_eq!(host.read_digital("q").unwrap(), "0");
             assert!(!host.trial_active());
         }
+        assert_eq!(
+            resource_before,
+            resources
+                .iter()
+                .map(|resource| *resource.value.lock().unwrap())
+                .collect::<Vec<_>>(),
+            "external resources must restore with the owned context"
+        );
+        for resource in &resources {
+            assert_eq!(
+                resource.captures.load(Ordering::Relaxed),
+                2,
+                "each barrier captures once even with multiple accesses"
+            );
+        }
         solution[bad] = 0.0;
         step(
             &engine,
@@ -394,5 +563,8 @@ mod tests {
         )
         .unwrap();
         assert!(circuit.take_xspice_evaluation_error().is_none());
+        for (resource, before) in resources.iter().zip(resource_before) {
+            assert_eq!(*resource.value.lock().unwrap(), before + 1);
+        }
     }
 }

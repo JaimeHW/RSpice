@@ -8,7 +8,9 @@
 //! propagates the device's own breakpoint requests back to the integrator.
 
 use super::*;
-use crate::xspice::{EventInputKind, XspiceEventInputs, XspiceInstanceCheckpoint};
+use crate::xspice::{
+    EventInputKind, ResourceTransaction, XspiceEventInputs, XspiceInstanceCheckpoint,
+};
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -20,6 +22,13 @@ pub(crate) struct XspiceAcceptanceRollback {
     values: SharedXspiceEventValues,
     queue: SharedXspiceEventQueue,
     error: Option<String>,
+    resources: ResourceTransaction,
+}
+
+impl XspiceAcceptanceRollback {
+    pub(crate) fn resources(&self) -> &ResourceTransaction {
+        &self.resources
+    }
 }
 
 /// Accepted Verilog-A state carried between circuits rebuilt for adjacent DC
@@ -274,6 +283,8 @@ impl CircuitData {
 
     /// Add an XSPICE code model instance and update derived circuit metadata.
     pub(crate) fn add_xspice_instance(&mut self, instance: XspiceInstance) {
+        self.xspice_resource_failure
+            .get_or_insert_with(|| Arc::new(std::sync::OnceLock::new()));
         self.xspice_has_event_driven_devices |= instance
             .ports()
             .iter()
@@ -575,6 +586,29 @@ impl CircuitData {
         phase: crate::xspice::EvaluationPhase,
         companion: XspiceCompanionPolicy<'_>,
     ) -> crate::xspice::CmResult<()> {
+        self.try_evaluate_xspice_with_resources(
+            time, timestep, solution, analysis, phase, companion, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_evaluate_xspice_with_resources(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        solution: &[Value],
+        analysis: crate::xspice::AnalysisType,
+        phase: crate::xspice::EvaluationPhase,
+        companion: XspiceCompanionPolicy<'_>,
+        resources: Option<&ResourceTransaction>,
+    ) -> crate::xspice::CmResult<()> {
+        if let Some(error) = self
+            .xspice_resource_failure
+            .as_ref()
+            .and_then(|failure| failure.get())
+        {
+            return Err(crate::xspice::CmError::EvaluationError(error.clone()));
+        }
         let XspiceCompanionPolicy {
             coefficients,
             xyce_one_step_order2,
@@ -729,7 +763,9 @@ impl CircuitData {
                     return Err(crate::xspice::CmError::EvaluationError(message));
                 }
 
-                if let Err(e) = instance.evaluate(time, timestep, analysis, phase) {
+                if let Err(e) = instance.evaluate_with_resource_transaction(
+                    time, timestep, analysis, phase, resources, index,
+                ) {
                     let message = format!("{}: {}", instance.name, e);
                     if self.xspice_evaluation_error.is_none() {
                         self.xspice_evaluation_error = Some(message.clone());
@@ -824,10 +860,14 @@ impl CircuitData {
         }
     }
 
-    /// Return and clear the first XSPICE evaluation error recorded during
-    /// this analysis, if any.
+    /// Return a permanent resource failure, or consume the first recoverable
+    /// XSPICE evaluation error recorded during this analysis.
     pub(crate) fn take_xspice_evaluation_error(&mut self) -> Option<String> {
-        self.xspice_evaluation_error.take()
+        self.xspice_resource_failure
+            .as_ref()
+            .and_then(|failure| failure.get())
+            .cloned()
+            .or_else(|| self.xspice_evaluation_error.take())
     }
 
     /// Fill a reusable snapshot of committed event-driven digital node values.
@@ -967,14 +1007,16 @@ impl CircuitData {
         timestep: Value,
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
+        resources: Option<&ResourceTransaction>,
     ) -> crate::xspice::CmResult<()> {
-        self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
+        self.try_evaluate_xspice_with_resources(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::AcceptedStep,
             companion,
+            resources,
         )
     }
 
@@ -984,14 +1026,39 @@ impl CircuitData {
             values: self.xspice_event_values.clone(),
             queue: self.xspice_event_queue.clone(),
             error: self.xspice_evaluation_error.clone(),
+            resources: ResourceTransaction::default(),
         }
     }
 
-    pub(crate) fn restore_xspice_acceptance(&mut self, rollback: XspiceAcceptanceRollback) {
+    pub(crate) fn restore_xspice_acceptance(
+        &mut self,
+        rollback: XspiceAcceptanceRollback,
+    ) -> crate::xspice::CmResult<()> {
         self.xspice_instances = rollback.instances;
         self.xspice_event_values = rollback.values;
         self.xspice_event_queue = rollback.queue;
         self.xspice_evaluation_error = rollback.error;
+        let failures = rollback.resources.rollback();
+        if failures.is_empty() {
+            return Ok(());
+        }
+        let details: Vec<_> = failures
+            .into_iter()
+            .map(|failure| {
+                let owner = self
+                    .xspice_instances
+                    .get(failure.owner)
+                    .map(|instance| instance.name.as_str())
+                    .unwrap_or("unknown instance");
+                format!("{owner} resource '{}': {}", failure.key, failure.detail)
+            })
+            .collect();
+        let error = format!("XSPICE resource rollback failed: {}", details.join("; "));
+        let failure = self
+            .xspice_resource_failure
+            .get_or_insert_with(|| Arc::new(std::sync::OnceLock::new()));
+        let _ = failure.set(error.clone());
+        Err(crate::xspice::CmError::EvaluationError(error))
     }
 
     /// Standalone XSPICE acceptance has the same failure contract as the joint
@@ -1006,12 +1073,21 @@ impl CircuitData {
     ) -> crate::xspice::CmResult<()> {
         let rollback = self.capture_xspice_acceptance();
         if let Err(error) = self.evaluate_xspice_transient_timestep_with_coefficients(
-            time, timestep, voltages, companion,
+            time,
+            timestep,
+            voltages,
+            companion,
+            Some(rollback.resources()),
         ) {
-            self.restore_xspice_acceptance(rollback);
+            if let Err(restore) = self.restore_xspice_acceptance(rollback) {
+                return Err(crate::xspice::CmError::EvaluationError(format!(
+                    "{error}; {restore}"
+                )));
+            }
             return Err(error);
         }
         self.accept_xspice_timestep();
+        rollback.resources().commit();
         Ok(())
     }
 

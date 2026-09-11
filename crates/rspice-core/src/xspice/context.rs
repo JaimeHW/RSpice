@@ -3,7 +3,10 @@
 //! Provides the runtime context passed to code models during evaluation.
 //! Handles port value access, parameter lookup, and state management.
 
-use super::{CmError, CmResult, DigitalValue, PortType};
+use super::{
+    CmError, CmResult, DigitalValue, PortType, ResourceEntry, ResourceTransactionScope,
+    TransactionalContextResource,
+};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::{Complex64, Value};
 use std::any::Any;
@@ -414,6 +417,7 @@ impl OutputValue {
 #[derive(Clone, Default)]
 struct ContextResources {
     values: HashMap<String, Arc<dyn Any + Send + Sync>>,
+    transactional: HashMap<String, Arc<ResourceEntry>>,
 }
 
 impl fmt::Debug for ContextResources {
@@ -535,6 +539,7 @@ pub struct CmContext {
     output_analog_transitions: HashMap<String, AnalogTransition>,
     /// Host/runtime resources owned by the model instance.
     resources: ContextResources,
+    resource_transaction: Option<ResourceTransactionScope>,
 
     //-------------------------------------------------------------------------
     // Event Scheduling
@@ -640,6 +645,7 @@ impl CmContext {
             input_analog_vector_transitions: HashMap::new(),
             output_analog_transitions: HashMap::new(),
             resources: ContextResources::default(),
+            resource_transaction: None,
             pending_events: Vec::new(),
             pending_real_events: Vec::new(),
             inertial_outputs: HashMap::new(),
@@ -2013,14 +2019,79 @@ impl CmContext {
     where
         T: Any + Send + Sync + 'static,
     {
-        self.resources.values.insert(key.into(), resource);
+        let key = key.into();
+        self.resources.transactional.remove(&key);
+        self.resources.values.insert(key, resource);
     }
 
-    /// Fetch a typed host resource from the model context.
+    /// Register a reversible shared resource. Fetch it with
+    /// `transactional_resource` so circuit acceptance can capture its undo image.
+    /// Register each independently mutable resource once; aliases must share the
+    /// registration rather than independently journal the same external state.
+    pub fn set_transactional_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
+    where
+        T: TransactionalContextResource,
+    {
+        let key = key.into();
+        self.resources.values.insert(key.clone(), resource.clone());
+        self.resources
+            .transactional
+            .insert(key, Arc::new(ResourceEntry::new(resource)));
+    }
+
+    /// Access a registered resource, capturing it once before the first access
+    /// in an acceptance transaction. Failed restoration permanently invalidates
+    /// the registration, including registrations in cloned contexts.
+    /// Unregistered resources retain their existing access behavior.
+    pub fn transactional_resource<T>(&self, key: &str) -> CmResult<Option<Arc<T>>>
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        let Some(resource) = self
+            .resources
+            .values
+            .get(key)
+            .and_then(|resource| Arc::clone(resource).downcast::<T>().ok())
+        else {
+            return Ok(None);
+        };
+        if let Some(entry) = self.resources.transactional.get(key) {
+            entry
+                .check_healthy()
+                .map_err(|error| CmError::EvaluationError(format!("{key}: {error}")))?;
+            if let Some(scope) = &self.resource_transaction {
+                scope
+                    .transaction
+                    .enlist(scope.owner, key, entry.clone())
+                    .map_err(|error| CmError::EvaluationError(format!("{key}: {error}")))?;
+            }
+        }
+        Ok(Some(resource))
+    }
+
+    pub(crate) fn set_resource_transaction(&mut self, scope: Option<ResourceTransactionScope>) {
+        self.resource_transaction = scope;
+    }
+
+    pub(crate) fn has_resource_transaction(&self) -> bool {
+        self.resource_transaction.is_some()
+    }
+
+    pub(crate) fn poison_transactional_resource(&self, key: &str, reason: String) {
+        if let Some(entry) = self.resources.transactional.get(key) {
+            entry.poison(reason);
+        }
+    }
+
+    /// Fetch an ordinary typed resource. Transactional registrations require
+    /// `transactional_resource` so capture and restore errors can be reported.
     pub fn resource<T>(&self, key: &str) -> Option<Arc<T>>
     where
         T: Any + Send + Sync + 'static,
     {
+        if self.resources.transactional.contains_key(key) {
+            return None;
+        }
         self.resources
             .values
             .get(key)
@@ -2032,6 +2103,9 @@ impl CmContext {
     where
         T: Any + Send + Sync + 'static,
     {
+        if self.resources.transactional.contains_key(key) {
+            return None;
+        }
         self.resources
             .values
             .get_mut(key)
@@ -2044,6 +2118,9 @@ impl CmContext {
     where
         T: Any + Send + Sync + Clone + 'static,
     {
+        if self.resources.transactional.contains_key(key) {
+            return None;
+        }
         let resource = self.resources.values.get_mut(key)?;
         if Arc::strong_count(resource) == 1 {
             return Arc::get_mut(resource).and_then(|resource| resource.downcast_mut::<T>());

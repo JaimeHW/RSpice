@@ -639,6 +639,10 @@ pub struct CircuitData {
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.
     pub(crate) xspice_evaluation_error: Option<String>,
+    /// A provider that cannot roll back invalidates this circuit and its
+    /// in-memory clones. Unlike an evaluation error, this failure is not cleared
+    /// by observation or candidate restoration. Allocated only for XSPICE circuits.
+    pub(crate) xspice_resource_failure: Option<Arc<std::sync::OnceLock<String>>>,
 
     // Verilog-A devices (feature-gated)
     #[cfg(feature = "veriloga")]
