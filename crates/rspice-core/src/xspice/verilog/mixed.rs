@@ -1116,6 +1116,10 @@ impl MixedSignalHost {
         self.analog.visit_equation_abstols(current_abstol, visit);
     }
 
+    pub(crate) fn one_step_dae_split_safe(&self) -> bool {
+        self.analog.one_step_dae_split_safe()
+    }
+
     pub(crate) fn requires_nodeset_phase(&self) -> bool {
         self.analog.requires_nodeset_phase()
     }

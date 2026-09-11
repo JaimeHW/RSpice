@@ -572,12 +572,15 @@ impl CircuitData {
             } else {
                 group.settle(&mut digital, voltages)?;
             }
+            // Only HDL equations and their physical D/A bridges receive this
+            // weight. Enrolled XSPICE stamps above already apply their policy.
+            let weight = if companion.xyce_one_step_order2 { 0.5 } else { 1.0 };
             for host in group.hosts.iter_mut() {
                 let stamped = host.stamp(voltages, |row, col, value| {
-                    if matrix.get_index(row, col).is_some() { matrix.add(row, col, value); }
+                    if matrix.get_index(row, col).is_some() { matrix.add(row, col, weight * value); }
                     else { log::debug!("mixed Verilog-AMS stamp ({row}, {col}) missing from matrix topology"); }
                 }, |row, value| {
-                    if let Some(slot) = rhs.get_mut(row) { *slot += value; }
+                    if let Some(slot) = rhs.get_mut(row) { *slot += weight * value; }
                 });
                 named(host, stamped)?;
             }

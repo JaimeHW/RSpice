@@ -2058,6 +2058,42 @@ integration increment. Other MS08 analyses, the wider MS00–MS15 requirements,
 platform qualification and licensed-reference comparison remain open. The
 user has confirmed that no reference installation is available yet.
 
+## Enable qualified runtime and mixed OneStep assembly
+
+Circuit dispatch now combines the compiler eligibility of every runtime
+Verilog-A instance and mixed host with the existing generated-model contract.
+Eligible circuits may select Xyce OneStep order two. A failed model proof keeps
+the circuit on ordinary trapezoidal/Gear companions. The existing separate
+DDT/internal-state rules and settled static-history capture remain the common
+policy for runtime and mixed analog equations.
+
+Mixed host equation and physical DAC matrix/RHS stamps now receive the external
+one-half weight when that policy is active. Shared XSPICE contributions already
+apply their own policy and are left at that existing weight. Static F history
+remains unweighted, preventing either double-weighted shared participants or
+an unweighted mixed device inside a weighted circuit equation.
+
+The accepted-history fixture now asserts whole-circuit eligibility and exact
+weighted/unweighted mixed current, Jacobian and DAC loading at both digital
+event boundaries. Its ordinary and distinct-state companion cases, rollback
+and checkpoint replay passed in 0.01 seconds after a 1m50s build. Log:
+target/unified-mixed-fixes/one-step-mixed-history.log.
+
+Two existing actual-deck regressions passed through the enabled path: mixed
+RC/DDT/initialized-IDT behavior matches native equations and analytic final
+values under Xyce and Ngspice (0.06 seconds); shared HDL/XSPICE off-grid event
+causality survives rejected analog steps (2.82 seconds). Build: 1m03s. Log:
+target/unified-mixed-fixes/one-step-mixed-circuits.log. No full suite or redundant
+rerun of the unchanged backend handoff was performed. The subsequent compiler
+noise-proof restriction does not change eligibility of these noise-free decks.
+
+This completes the guarded runtime/mixed OneStep integration increment, with
+conservative model qualification. It does not close all transient device/state
+combinations, MS08 DC/AC/noise or dependent analyses, other MS00–MS15 packages,
+shipping-platform qualification, or vendor parity. No licensed reference
+installation is currently available. Main through 0aa31414f adds separate native
+BJT HB/PAC work without overlapping this increment or its generator inputs.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2066,10 +2102,11 @@ and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
 dependencies and feedback convergence. Close the recorded mixed real/integer
-comparison refusal under MS06. Prove the complete F/Q equation split and
-apply the external weight to mixed stamps before qualifying that integration
-path; settled mixed static-history capture and companion-policy handoff are
-implemented.
+comparison refusal under MS06. Extend model/state/circuit qualification of the
+now-enabled conservative OneStep path and preserve correct readbacks while
+improving eligibility of compiler-created flow temporaries. Settled static
+history, distinct companion rules, compiler proof and mixed weighting are
+implemented; other MS08 analyses and their qualification remain open.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

@@ -539,6 +539,7 @@ mod tests {
         host.add_dac_bridge("q", 0, (bridge, 0), 0.0, 1.0, 2.0)
             .unwrap();
         circuit.add_mixed_signal_host(host).unwrap();
+        assert!(circuit.veriloga_one_step_dae_split_safe());
         circuit.begin_veriloga_analysis(2).unwrap();
         circuit.start_mixed_digital_execution().unwrap();
         let size = circuit.matrix_size();
@@ -594,13 +595,21 @@ mod tests {
                         .unwrap();
                     let slot = matrix.get_index(mixed - 1, mixed - 1).unwrap();
                     let jacobian = matrix.values_mut()[slot.offset()];
+                    let weight = if weighted { 0.5 } else { 1.0 };
                     assert!(
-                        (jacobian - (2.0 * (digital + 1.0) + ddt_gain + idt_gain)).abs() < 1e-12
+                        (jacobian - weight * (2.0 * (digital + 1.0) + ddt_gain + idt_gain)).abs()
+                            < 1e-12
                     );
                     let expected = 2.0 * (digital + 1.0) * voltage
                         + ddt_gain * (voltage - prior_voltage)
                         + integral;
-                    assert!((jacobian * voltage - probe_rhs[mixed - 1] - expected).abs() < 1e-12);
+                    assert!(
+                        (jacobian * voltage - probe_rhs[mixed - 1] - weight * expected).abs()
+                            < 1e-12
+                    );
+                    let bridge_slot = matrix.get_index(bridge - 1, bridge - 1).unwrap();
+                    assert_eq!(matrix.values_mut()[bridge_slot.offset()], weight * 0.5);
+                    assert_eq!(probe_rhs[bridge - 1], weight * 0.5 * digital);
                     assert_eq!(
                         circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
                         digital_before
