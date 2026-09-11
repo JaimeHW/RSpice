@@ -251,8 +251,8 @@ impl Engine {
         // thermal), so reserve their full block; legacy Gummel-Poon devices
         // keep the reduced 4-terminal pattern.
         for bjt in &circuit.bjts.devices {
-            if bjt.vbic_mna_promoted() {
-                let nodes = bjt.vbic_mna_coupling_nodes();
+            if bjt.mna_promoted() {
+                let nodes = bjt.mna_coupling_nodes();
                 for &row in &nodes {
                     for &col in &nodes {
                         if row > 0 && col > 0 {
@@ -260,7 +260,7 @@ impl Engine {
                         }
                     }
                 }
-                if let Some(branch) = bjt.vbic_rbi_branch_matrix_node(circuit.num_nodes()) {
+                if let Some(branch) = bjt.mna_rbi_branch_matrix_node(circuit.num_nodes()) {
                     for node in [
                         bjt.node_bx,
                         bjt.node_bi,

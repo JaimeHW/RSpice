@@ -265,15 +265,18 @@ impl Engine {
                     bjt.name
                 )));
             }
-            let (charges, internal, linear, voltages, lead_currents) = if bjt.vbic_mna_promoted() {
-                let (branches, internal, _) = bjt.vbic_mna_charge_state_at_solution(solution);
-                (
-                    branches.map(|branch| branch.charge),
-                    internal,
-                    None,
-                    [vb - ve, vb - vc, vc - vs],
-                    None,
-                )
+            let (charges, internal, linear, voltages, mut lead_currents) = if bjt.mna_promoted() {
+                let (branches, internal, _) = bjt.mna_charge_state_at_solution(solution);
+                let mut charges = branches.map(|branch| branch.charge);
+                if let Some(charge) = bjt.legacy_external_bc_charge(solution) {
+                    charges[BJT_QBCX_BRANCH_INDEX] = charge.charge;
+                }
+                let voltages = if bjt.uses_legacy_gummel_poon() {
+                    bjt.mna_junction_voltages(solution)
+                } else {
+                    [vb - ve, vb - vc, vc - vs]
+                };
+                (charges, internal, None, voltages, None)
             } else {
                 let cached = vbic_snapshots
                     .and_then(|cache| cache.get(idx))
@@ -350,6 +353,19 @@ impl Engine {
                     },
                 )
             });
+            if bjt.uses_legacy_gummel_poon() && bjt.mna_promoted() {
+                let mut terminal = bjt.mna_terminal_currents_at_solution(solution);
+                let (branches, _, _) = bjt.mna_charge_state_at_solution(solution);
+                for (branch, current) in branches.iter().zip(currents) {
+                    if let Some(index) = branch.pos_external {
+                        terminal[index] += current;
+                    }
+                    if let Some(index) = branch.neg_external {
+                        terminal[index] -= current;
+                    }
+                }
+                lead_currents = Some(terminal);
+            }
             if !charges
                 .iter()
                 .chain(currents.iter())

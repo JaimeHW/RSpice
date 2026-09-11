@@ -1,12 +1,12 @@
-//! MNA promotion of the VBIC internal, thermal, and excess-phase states.
+//! Shared MNA topology for Gummel-Poon and VBIC internal states.
 //!
 //! ngspice solves the VBIC network by making every internal state a matrix
 //! unknown (vbicsetup.c); RSpice mirrors that topology here. The circuit
-//! builder allocates the internal nodes through [`Bjt::assign_vbic_internal_nodes`],
+//! builder allocates the internal nodes through [`Bjt::assign_mna_internal_nodes`],
 //! aliasing collapsed states onto their parent nodes exactly like ngspice
 //! collapses zero-resistance branches, and the device then participates in
-//! the global Newton iteration through [`Bjt::update_vbic_mna`] and
-//! [`Bjt::stamp_vbic_mna`] instead of nesting a private solver inside each
+//! the global Newton iteration through [`Bjt::update_mna`] and
+//! [`Bjt::stamp_mna`] instead of nesting a private solver inside each
 //! evaluation.
 //!
 //! Sign conventions: the intrinsic residual rows built by
@@ -47,13 +47,58 @@ impl Bjt {
         !self.uses_vbic_dynamic_charges() || self.vbic_noise_enabled
     }
 
-    /// Matrix-node incidence of each structurally present electrical VBIC charge.
+    /// Matrix-node incidence of each structurally present electrical BJT charge.
     /// Constant offsets in charge do not create a shooting coordinate, and
     /// collapsed/disabled states retain no independent voltage difference.
-    pub(crate) fn vbic_electrical_charge_storage_nodes(
+    pub(crate) fn electrical_charge_storage_nodes(
         &self,
     ) -> [Option<(NodeId, NodeId)>; BJT_DYNAMIC_CHARGE_COUNT - 3] {
-        if !self.vbic_mna_promoted() {
+        if self.uses_legacy_gummel_poon() {
+            let nodes = self.external_terminal_nodes();
+            let node = |terminal: (Option<usize>, Option<usize>)| {
+                terminal.1.map(|index| nodes[index]).or_else(|| {
+                    terminal
+                        .0
+                        .filter(|_| self.mna_promoted())
+                        .map(|index| self.mna_internal_node(index))
+                })
+            };
+            let pair = |a, b| node(a).zip(node(b)).filter(|(a, b)| a != b);
+            let base = self.legacy_charge_base_terminal();
+            let collector = self.legacy_charge_collector_terminal();
+            let gmin_charge = self.xyce_compatibility && self.nonlinear_branch_gmin() != 0.0;
+            let forward_storage = self.is != 0.0
+                || self.legacy_current_scale(LegacyCurrent::Forward).is_some()
+                || gmin_charge;
+            let reverse_storage = self.legacy_reverse_saturation_current() != 0.0
+                || self.legacy_current_scale(LegacyCurrent::Reverse).is_some()
+                || gmin_charge;
+            let mut storage = [None; BJT_DYNAMIC_CHARGE_COUNT - 3];
+            if self.cje != 0.0 || self.cbeo != 0.0 || (self.tf != 0.0 && forward_storage) {
+                storage[0] = pair(base, self.legacy_charge_emitter_terminal());
+            }
+            if self.cjc * self.xcjc != 0.0
+                || self.cbco != 0.0
+                || (self.tr != 0.0 && reverse_storage)
+            {
+                storage[2] = pair(base, collector);
+            }
+            if self.cjc != 0.0 && self.xcjc != 1.0 {
+                storage[3] = self
+                    .legacy_external_bc_charge_nodes()
+                    .map(|[a, b]| (a, b))
+                    .or_else(|| pair((None, Some(EXT_B)), collector))
+                    .filter(|(a, b)| a != b);
+            }
+            if self.cjcp != 0.0 {
+                storage[7] = pair(
+                    self.legacy_charge_substrate_connection_terminal(),
+                    self.legacy_charge_substrate_terminal(),
+                );
+            }
+            return storage;
+        }
+        if !self.mna_promoted() {
             return [None; BJT_DYNAMIC_CHARGE_COUNT - 3];
         }
         let active = [
@@ -84,9 +129,15 @@ impl Bjt {
         })
     }
 
-    pub(super) fn capture_promoted_vbic_checkpoint(
-        &self,
-    ) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
+    fn mna_checkpoint_runtime_tag(&self) -> &'static str {
+        if self.uses_legacy_gummel_poon() {
+            GP_MNA_ACCEPTED_NONLINEAR_RUNTIME_TAG
+        } else {
+            VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG
+        }
+    }
+
+    pub(super) fn capture_mna_checkpoint(&self) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
         let mut values = Vec::with_capacity(VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
         self.checkpoint_push_evaluation_state(&mut values);
         values.push(self.junction_gmin);
@@ -145,44 +196,46 @@ impl Bjt {
         debug_assert_eq!(values.len(), VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
         let checkpoint = AcceptedBjtNonlinearCheckpoint {
             instance_name: self.name.clone(),
-            runtime_tag: VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
-            legacy_junction_limited: false,
+            runtime_tag: self.mna_checkpoint_runtime_tag().to_string(),
+            legacy_junction_limited: self.uses_legacy_gummel_poon() && self.legacy_junction_limited,
             reduced_linearization_valid: false,
-            previous_reduced_linearization_valid: false,
+            previous_reduced_linearization_valid: self.uses_legacy_gummel_poon()
+                && self.previous_reduced_linearization_valid,
             charge_snapshot_valid: false,
             state_values: values,
         };
-        self.validate_promoted_vbic_checkpoint(&checkpoint)?;
+        self.validate_mna_checkpoint(&checkpoint)?;
         Ok(checkpoint)
     }
 
-    pub(super) fn validate_promoted_vbic_checkpoint(
+    pub(super) fn validate_mna_checkpoint(
         &self,
         checkpoint: &AcceptedBjtNonlinearCheckpoint,
     ) -> Result<(), String> {
         if checkpoint.instance_name != self.name
-            || checkpoint.runtime_tag != VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG
+            || checkpoint.runtime_tag != self.mna_checkpoint_runtime_tag()
         {
             return Err(format!(
-                "BJT '{}' promoted VBIC checkpoint instance/runtime mismatch",
+                "BJT '{}' promoted BJT checkpoint instance/runtime mismatch",
                 self.name
             ));
         }
         if checkpoint.state_values.len() != VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
             return Err(format!(
-                "BJT '{}' promoted VBIC checkpoint shape mismatch: captured {}, expected {}",
+                "BJT '{}' promoted BJT checkpoint shape mismatch: captured {}, expected {}",
                 self.name,
                 checkpoint.state_values.len(),
                 VBIC_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
             ));
         }
-        if checkpoint.legacy_junction_limited
+        if (!self.uses_legacy_gummel_poon()
+            && (checkpoint.legacy_junction_limited
+                || checkpoint.previous_reduced_linearization_valid))
             || checkpoint.reduced_linearization_valid
-            || checkpoint.previous_reduced_linearization_valid
             || checkpoint.charge_snapshot_valid
         {
             return Err(format!(
-                "BJT '{}' promoted VBIC checkpoint contains reduced-runtime cache flags",
+                "BJT '{}' promoted BJT checkpoint contains reduced-runtime cache flags",
                 self.name
             ));
         }
@@ -191,7 +244,7 @@ impl Bjt {
             || values[BJT_ACCEPTED_SCALAR_VALUE_COUNT] < 0.0
         {
             return Err(format!(
-                "BJT '{}' promoted VBIC checkpoint contains non-finite state or invalid junction GMIN",
+                "BJT '{}' promoted BJT checkpoint contains non-finite state or invalid junction GMIN",
                 self.name
             ));
         }
@@ -203,7 +256,7 @@ impl Bjt {
             || (flags[1] != 0.0 && flags[0] == 0.0)
         {
             return Err(format!(
-                "BJT '{}' promoted VBIC checkpoint contains invalid cache status",
+                "BJT '{}' promoted BJT checkpoint contains invalid cache status",
                 self.name
             ));
         }
@@ -218,8 +271,14 @@ impl Bjt {
         let template = BjtDynamicReduction::default();
         let expected_delay = self.vbic_delay_static_branches(&template);
         let expected_thermal = self.vbic_delay_static_thermal_branch(&template);
-        let expected_charge =
-            self.dynamic_charge_branches_from_inputs(&template, BjtDynamicChargeInputs::default());
+        let expected_charge = if self.uses_legacy_gummel_poon() {
+            self.legacy_dynamic_charge_branches(
+                template.external_voltages,
+                template.internal_voltages,
+            )
+        } else {
+            self.dynamic_charge_branches_from_inputs(&template, BjtDynamicChargeInputs::default())
+        };
         for (branch, data) in values[branch_start..values.len() - 1]
             .chunks_exact(BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT)
             .enumerate()
@@ -239,7 +298,7 @@ impl Bjt {
                     && !(value >= 0.0 && value.fract() == 0.0 && value < dimension as Value)
                 {
                     return Err(format!(
-                        "BJT '{}' promoted VBIC branch {branch} endpoint {lane} is outside its runtime topology",
+                        "BJT '{}' promoted BJT branch {branch} endpoint {lane} is outside its runtime topology",
                         self.name
                     ));
                 }
@@ -248,7 +307,7 @@ impl Bjt {
                 || (endpoints[1] >= 0.0 && endpoints[3] >= 0.0)
             {
                 return Err(format!(
-                    "BJT '{}' promoted VBIC branch {branch} selects both internal and external endpoints",
+                    "BJT '{}' promoted BJT branch {branch} selects both internal and external endpoints",
                     self.name
                 ));
             }
@@ -281,7 +340,7 @@ impl Bjt {
                 .is_some_and(|expected| endpoints != expected.map(Self::checkpoint_endpoint_value))
             {
                 return Err(format!(
-                    "BJT '{}' promoted VBIC branch {branch} endpoint topology mismatch",
+                    "BJT '{}' promoted BJT branch {branch} endpoint topology mismatch",
                     self.name
                 ));
             }
@@ -292,10 +351,7 @@ impl Bjt {
     /// Restore the complete cached MNA evaluation without recomputing it.
     /// Derivative caches can precede the current junction GMIN or limiter
     /// policy; reconstructing them at a new bias would change the first load.
-    pub(super) fn restore_promoted_vbic_checkpoint(
-        &mut self,
-        checkpoint: &AcceptedBjtNonlinearCheckpoint,
-    ) {
+    pub(super) fn restore_mna_checkpoint(&mut self, checkpoint: &AcceptedBjtNonlinearCheckpoint) {
         let values = &checkpoint.state_values;
         let mut cursor = 0;
         self.checkpoint_restore_evaluation_state(values, &mut cursor);
@@ -372,42 +428,48 @@ impl Bjt {
         self.mna_rbi_current = values[cursor];
         cursor += 1;
         self.reduced_linearization_cache_valid.set(false);
-        self.previous_reduced_linearization_valid = false;
+        self.previous_reduced_linearization_valid = checkpoint.previous_reduced_linearization_valid;
+        self.legacy_junction_limited = checkpoint.legacy_junction_limited;
         self.charge_snapshot_cache_valid.set(false);
         debug_assert_eq!(cursor, values.len());
     }
 
-    /// True once the builder has promoted this instance's VBIC states to MNA
+    /// True once the builder has promoted this instance's internal states to MNA
     /// unknowns.
     #[inline]
-    pub(crate) fn vbic_mna_promoted(&self) -> bool {
-        self.vbic_mna_promoted
+    pub(crate) fn mna_promoted(&self) -> bool {
+        self.mna_promoted
     }
 
-    pub(crate) fn needs_vbic_rbi_branch(&self) -> bool {
-        self.vbic_mna_promoted() && Self::series_active(self.rbi)
+    pub(crate) fn needs_mna_rbi_branch(&self) -> bool {
+        self.mna_promoted() && Self::series_active(self.rbi)
     }
 
-    pub(crate) fn assign_vbic_rbi_branch(&mut self, branch: NodeId) {
-        self.vbic_rbi_branch = Some(branch);
+    pub(crate) fn assign_mna_rbi_branch(&mut self, branch: NodeId) {
+        self.mna_rbi_branch = Some(branch);
     }
 
-    pub(crate) fn vbic_rbi_branch_matrix_node(&self, num_nodes: usize) -> Option<NodeId> {
-        self.vbic_rbi_branch.map(|branch| num_nodes + branch)
+    pub(crate) fn mna_rbi_branch_matrix_node(&self, num_nodes: usize) -> Option<NodeId> {
+        self.mna_rbi_branch.map(|branch| num_nodes + branch)
     }
 
-    pub(crate) fn resolve_vbic_rbi_branch(&mut self, num_nodes: usize) {
-        self.vbic_rbi_matrix_node = self.vbic_rbi_branch_matrix_node(num_nodes).unwrap_or(0);
+    pub(crate) fn resolve_mna_rbi_branch(&mut self, num_nodes: usize) {
+        self.mna_rbi_matrix_node = self.mna_rbi_branch_matrix_node(num_nodes).unwrap_or(0);
     }
 
     /// RBI/qb and its partials for the explicit-current constitutive row.
     /// Taking ratios before multiplying keeps very large qb derivatives
     /// from underflowing through an intermediate 1/qb^2.
-    fn vbic_rbi_resistance(
-        &self,
-        linearized: BjtLinearization,
-        vrth: Value,
-    ) -> BranchLinearization {
+    fn mna_rbi_resistance(&self, linearized: BjtLinearization, vrth: Value) -> BranchLinearization {
+        if self.uses_legacy_gummel_poon() {
+            return BranchLinearization {
+                current: self.legacy_gp_base_resistance(
+                    linearized,
+                    self.guarded_series_resistance(self.rbi),
+                ),
+                ..Default::default()
+            };
+        }
         let qb = linearized.qb.max(1e-12);
         let bare = |model: &Bjt| model.guarded_series_resistance(model.rbi);
         let mut resistance = BranchLinearization {
@@ -440,7 +502,7 @@ impl Bjt {
     /// older VBIC retains ngspice's emitter injection for RBP and its
     /// omission of RS/Iccp and extrinsic B-E flicker from the total spectrum.
     pub(crate) fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
-        if !self.uses_vbic_dynamic_charges() || !self.vbic_mna_promoted() {
+        if !self.uses_vbic_dynamic_charges() || !self.mna_promoted() {
             return None;
         }
         let eval = self.mna_eval?;
@@ -494,8 +556,8 @@ impl Bjt {
                     "RBI",
                     self.node_bx,
                     self.node_bi,
-                    if self.vbic_rbi_branch.is_some() {
-                        self.vbic_rbi_resistance(eval.linearized, self.vrth)
+                    if self.mna_rbi_branch.is_some() {
+                        self.mna_rbi_resistance(eval.linearized, self.vrth)
                             .current
                             .recip()
                     } else {
@@ -605,8 +667,12 @@ impl Bjt {
     /// so each retains exactly one matrix column; disabled states (thermal
     /// without self-heating, excess phase without TD) stay at ground and all
     /// of their stamps drop.
-    pub fn assign_vbic_internal_nodes(&mut self, mut alloc: impl FnMut(&str) -> NodeId) {
+    pub fn assign_vbic_internal_nodes(&mut self, alloc: impl FnMut(&str) -> NodeId) {
         debug_assert!(self.uses_vbic_dynamic_charges());
+        self.assign_mna_internal_nodes(alloc);
+    }
+
+    pub(crate) fn assign_mna_internal_nodes(&mut self, mut alloc: impl FnMut(&str) -> NodeId) {
         self.node_cx = if Self::series_active(self.rcx) {
             alloc("cx")
         } else {
@@ -653,20 +719,38 @@ impl Bjt {
         } else {
             0
         };
-        if self.td > 0.0 {
+        // The excess-phase network belongs to the VBIC charge model.
+        if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
             self.node_xf1 = alloc("xf1");
             self.node_xf2 = alloc("xf2");
         } else {
             self.node_xf1 = 0;
             self.node_xf2 = 0;
         }
-        self.vbic_mna_promoted = true;
+        self.mna_promoted = true;
+    }
+
+    /// Physical GP junction voltages for accepted charge history.
+    pub(crate) fn mna_junction_voltages(&self, solution: &[Value]) -> [Value; 3] {
+        let value = |(internal, external): (Option<usize>, Option<usize>)| {
+            let node = internal
+                .map(|index| self.mna_internal_node(index))
+                .or_else(|| external.map(|index| self.external_terminal_nodes()[index]))
+                .unwrap_or(0);
+            Self::node_voltage(solution, node)
+        };
+        [
+            Self::node_voltage(solution, self.node_bi) - Self::node_voltage(solution, self.node_ei),
+            Self::node_voltage(solution, self.node_bi) - Self::node_voltage(solution, self.node_ci),
+            value(self.legacy_charge_substrate_connection_terminal())
+                - value(self.legacy_charge_substrate_terminal()),
+        ]
     }
 
     /// Matrix node for a dynamic internal state index (collapsed states alias
     /// their parent node; disabled states map to ground).
     #[inline]
-    pub(crate) fn vbic_internal_node(&self, idx: usize) -> NodeId {
+    pub(crate) fn mna_internal_node(&self, idx: usize) -> NodeId {
         match idx {
             IDX_VCX => self.node_cx,
             IDX_VCI => self.node_ci,
@@ -687,7 +771,7 @@ impl Bjt {
     /// currents (via `external_terminal_branches` and the active rows), so
     /// they must not be stamped separately.
     #[inline]
-    fn vbic_internal_row_active(&self, idx: usize) -> bool {
+    fn mna_internal_row_active(&self, idx: usize) -> bool {
         match idx {
             IDX_VCX => Self::series_active(self.rcx),
             IDX_VCI => Self::series_active(self.rci),
@@ -712,7 +796,7 @@ impl Bjt {
 
     /// All matrix nodes this device couples once promoted, for sparsity
     /// reservations. Zero entries are ground/disabled and must be skipped.
-    pub(crate) fn vbic_mna_coupling_nodes(&self) -> [NodeId; EXTERNAL_DIM + DYNAMIC_INTERNAL_DIM] {
+    pub(crate) fn mna_coupling_nodes(&self) -> [NodeId; EXTERNAL_DIM + DYNAMIC_INTERNAL_DIM] {
         [
             self.node_collector,
             self.node_base,
@@ -734,7 +818,7 @@ impl Bjt {
     /// Internal state (including excess phase) at the current linearization
     /// point, in dynamic-state index order.
     #[inline]
-    pub(crate) fn vbic_mna_internal_state(&self) -> [Value; BJT_INTERNAL_STATE_DIM] {
+    pub(crate) fn mna_internal_state(&self) -> [Value; BJT_INTERNAL_STATE_DIM] {
         [
             self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
             self.vxf1, self.vxf2,
@@ -743,7 +827,7 @@ impl Bjt {
 
     /// External terminal voltages at the current linearization point.
     #[inline]
-    pub(crate) fn vbic_mna_external_state(&self) -> [Value; EXTERNAL_DIM] {
+    pub(crate) fn mna_external_state(&self) -> [Value; EXTERNAL_DIM] {
         [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext]
     }
 
@@ -786,7 +870,7 @@ impl Bjt {
 
     /// This instance's whole read of a solution vector: its four terminal
     /// voltages followed by its ten internal states, before limiting.
-    fn vbic_mna_solution_bias(
+    fn mna_solution_bias(
         &self,
         voltages: &[Value],
     ) -> [Value; EXTERNAL_DIM + BJT_INTERNAL_STATE_DIM] {
@@ -809,7 +893,7 @@ impl Bjt {
         ]
     }
 
-    fn update_vbic_mna_from_solution(&mut self, voltages: &[Value], apply_limiting: bool) {
+    fn update_mna_from_solution(&mut self, voltages: &[Value], apply_limiting: bool) {
         // Device update and matrix load are separate solver phases, so one
         // Newton iterate reaches this device twice: once when its candidate is
         // tested for device convergence and again when that same candidate is
@@ -821,8 +905,9 @@ impl Bjt {
         // legacy Gummel-Poon path holds the same invariant through its
         // reduced-linearization cache; the promoted path returns before that
         // guard and needs its own.
-        let candidate = self.vbic_mna_solution_bias(voltages);
-        let rbi_current = Self::node_voltage(voltages, self.vbic_rbi_matrix_node);
+        let previous_iteration_available = self.mna_eval.is_some();
+        let candidate = self.mna_solution_bias(voltages);
+        let rbi_current = Self::node_voltage(voltages, self.mna_rbi_matrix_node);
         if apply_limiting
             && self.mna_eval.is_some()
             && self.mna_limited_from.get() == Some(candidate)
@@ -832,17 +917,18 @@ impl Bjt {
             // current on the next Newton iteration. Once limiting is inactive,
             // compare the repeated evaluation against itself so the old voltage
             // delta cannot keep this exact candidate permanently unconverged.
-            if self.vbic_mna_internal_state() == candidate[EXTERNAL_DIM..] {
-                self.remember_vbic_iteration();
+            if self.mna_internal_state() == candidate[EXTERNAL_DIM..] {
+                self.remember_mna_iteration();
             }
             return;
         }
         self.mna_limited_from
             .set(apply_limiting.then_some(candidate));
-        self.remember_vbic_iteration();
+        self.remember_mna_iteration();
         self.mna_rbi_current = rbi_current;
 
-        let [vc, vb, ve, vs] = [candidate[0], candidate[1], candidate[2], candidate[3]];
+        let [mut vc, mut vb, mut ve, mut vs] =
+            [candidate[0], candidate[1], candidate[2], candidate[3]];
         let mut raw = [0.0; INTERNAL_DIM];
         raw.copy_from_slice(&candidate[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
         let previous = [
@@ -852,14 +938,59 @@ impl Bjt {
         if apply_limiting {
             self.vbic_startup_load_pending = false;
         }
-        let mut state = match (startup_load, apply_limiting) {
-            (true, _) => self
-                .vbic_startup_load_internal_state(raw)
-                .unwrap_or_else(|| self.limit_vbic_internal_state_to_previous(raw, previous)),
-            (false, true) => self.limit_vbic_internal_state_to_previous(raw, previous),
-            (false, false) => raw,
+        self.legacy_junction_limited = false;
+        let mut state = if self.uses_legacy_gummel_poon() {
+            let mut state = raw;
+            if apply_limiting
+                && (self.uses_legacy_junction_limiting()
+                    || (self.initial_off && !previous_iteration_available))
+            {
+                let limited = self.limit_legacy_terminal_state_against_iterate(
+                    self.intrinsic_state_from_internal_vector(raw),
+                    previous_iteration_available,
+                );
+                state = [
+                    limited.vcx,
+                    limited.vci,
+                    limited.vbx,
+                    limited.vbi,
+                    limited.vei,
+                    limited.vbp,
+                    limited.vsi,
+                    limited.vrth,
+                ];
+                let before = self.legacy_nonlinear_branch_voltages(raw);
+                let after = self.legacy_nonlinear_branch_voltages(state);
+                self.legacy_junction_limited = (before.vbe - after.vbe).abs() > 1e-12
+                    || (before.vbc - after.vbc).abs() > 1e-12
+                    || (before.vsub - after.vsub).abs() > 1e-12;
+                // Collapsed intrinsic and terminal coordinates share the limited
+                // anchor; the correction stamp retains the raw matrix candidate.
+                if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
+                    vc = state[IDX_VCI];
+                }
+                if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) {
+                    vb = state[IDX_VBI];
+                }
+                if !Self::series_active(self.re) {
+                    ve = state[IDX_VEI];
+                }
+                if !self.has_substrate_resistance() {
+                    vs = state[IDX_VSI];
+                }
+            }
+            state
+        } else {
+            match (startup_load, apply_limiting) {
+                (true, _) => self
+                    .vbic_startup_load_internal_state(raw)
+                    .unwrap_or_else(|| self.limit_vbic_internal_state_to_previous(raw, previous)),
+                (false, true) => self.limit_vbic_internal_state_to_previous(raw, previous),
+                (false, false) => raw,
+            }
         };
         self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
+        self.eval_anchor = [vc, vb, ve, vs];
 
         let eval = self.evaluate_state_with_rbi_current(
             BjtNodeVoltages {
@@ -876,7 +1007,7 @@ impl Bjt {
                 vsi: state[IDX_VSI],
             },
             state[IDX_VRTH],
-            self.vbic_rbi_branch.map(|_| rbi_current),
+            self.mna_rbi_branch.map(|_| rbi_current),
         );
         let terminal_currents = self.external_terminal_branches(eval);
 
@@ -902,7 +1033,7 @@ impl Bjt {
         self.isub = terminal_currents[EXT_S].current;
         self.intrinsic_linearization = eval.linearized;
         self.mna_eval = Some(eval);
-        self.refresh_vbic_mna_dynamic_state();
+        self.refresh_mna_dynamic_state();
         self.reduced_linearization_cache_valid.set(false);
         self.charge_snapshot_cache_valid.set(false);
     }
@@ -911,11 +1042,14 @@ impl Bjt {
     /// voltages from the global solution, apply ngspice junction limiting
     /// against the previous iterate (vbicload.c:656-670), and evaluate the
     /// branch system once at the limited bias.
-    pub(super) fn update_vbic_mna(&mut self, voltages: &[Value]) {
-        self.update_vbic_mna_from_solution(voltages, true);
+    pub(super) fn update_mna(&mut self, voltages: &[Value]) {
+        self.update_mna_from_solution(voltages, true);
     }
 
-    fn remember_vbic_iteration(&mut self) {
+    fn remember_mna_iteration(&mut self) {
+        if self.uses_legacy_gummel_poon() {
+            self.previous_reduced_linearization_valid = self.mna_eval.is_some();
+        }
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
         self.vcx_prev = self.vcx;
@@ -938,15 +1072,23 @@ impl Bjt {
     /// Newton iterations must keep the ngspice limited companion, but residual
     /// probes must evaluate the physical candidate voltage itself so stalled
     /// limiter states are rejected and true operating-point roots are accepted.
-    pub(crate) fn update_vbic_mna_static_probe(&mut self, voltages: &[Value]) {
-        self.update_vbic_mna_from_solution(voltages, false);
+    pub(crate) fn update_mna_static_probe(&mut self, voltages: &[Value]) {
+        self.update_mna_from_solution(voltages, false);
     }
 
     /// Recompute the dynamic charge branches and excess-phase rows at the
-    /// limited bias just written by `update_vbic_mna`.
-    fn refresh_vbic_mna_dynamic_state(&mut self) {
-        let internal = self.vbic_mna_internal_state();
-        let external = self.vbic_mna_external_state();
+    /// limited bias just written by `update_mna`.
+    fn refresh_mna_dynamic_state(&mut self) {
+        let internal = self.mna_internal_state();
+        let external = self.mna_external_state();
+        if self.uses_legacy_gummel_poon() {
+            self.mna_charge_cache
+                .set(self.legacy_dynamic_charge_branches(external, internal));
+            self.mna_charge_cache_valid.set(true);
+            self.mna_delay_branches = [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT];
+            self.mna_delay_thermal = BjtCurrentBranch::default();
+            return;
+        }
         let (branches, inputs, d_itzf_d_vrth) =
             self.vbic_dynamic_charge_state_at_bias(external, internal, None);
         self.mna_charge_cache.set(branches);
@@ -970,21 +1112,28 @@ impl Bjt {
 
     /// Dynamic charge branches plus their linearization-point voltages, for
     /// the engine's transient companion and AC passes. Valid after `update`.
-    pub(crate) fn vbic_mna_charge_state(
+    pub(crate) fn mna_charge_state(
         &self,
     ) -> (
         [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
         [Value; BJT_INTERNAL_STATE_DIM],
         [Value; EXTERNAL_DIM],
     ) {
-        let internal = self.vbic_mna_internal_state();
-        let external = self.vbic_mna_external_state();
+        let internal = self.mna_internal_state();
+        let external = self.mna_external_state();
         if !self.mna_charge_cache_valid.get() {
-            let (branches, _, _) = self.vbic_dynamic_charge_state_at_bias(external, internal, None);
+            let branches = self.dynamic_charge_branches_at_bias(external, internal);
             self.mna_charge_cache.set(branches);
             self.mna_charge_cache_valid.set(true);
         }
         (self.mna_charge_cache.get(), internal, external)
+    }
+
+    pub(crate) fn mna_internal_state_at_solution(
+        &self,
+        voltages: &[Value],
+    ) -> [Value; BJT_INTERNAL_STATE_DIM] {
+        std::array::from_fn(|index| Self::node_voltage(voltages, self.mna_internal_node(index)))
     }
 
     /// Charge branches evaluated directly at a solution vector (history
@@ -992,7 +1141,7 @@ impl Bjt {
     /// bias is read raw: aliased states share their parent solution entry,
     /// and accepted/candidate points are evaluated where they stand rather
     /// than at a limited iterate.
-    pub(crate) fn vbic_mna_charge_state_at_solution(
+    pub(crate) fn mna_charge_state_at_solution(
         &self,
         voltages: &[Value],
     ) -> (
@@ -1001,45 +1150,57 @@ impl Bjt {
         [Value; EXTERNAL_DIM],
     ) {
         let external = self.external_terminal_voltages(voltages);
-        let internal = [
-            Self::node_voltage(voltages, self.node_cx),
-            Self::node_voltage(voltages, self.node_ci),
-            Self::node_voltage(voltages, self.node_bx),
-            Self::node_voltage(voltages, self.node_bi),
-            Self::node_voltage(voltages, self.node_ei),
-            Self::node_voltage(voltages, self.node_bp),
-            Self::node_voltage(voltages, self.node_si),
-            Self::node_voltage(voltages, self.node_rth),
-            Self::node_voltage(voltages, self.node_xf1),
-            Self::node_voltage(voltages, self.node_xf2),
-        ];
-        let (branches, _, _) = self.vbic_dynamic_charge_state_at_bias(external, internal, None);
+        let internal = self.mna_internal_state_at_solution(voltages);
+        let branches = self.dynamic_charge_branches_at_bias(external, internal);
         (branches, internal, external)
+    }
+
+    pub(crate) fn mna_terminal_currents_at_solution(
+        &self,
+        solution: &[Value],
+    ) -> [Value; EXTERNAL_DIM] {
+        let v = self.mna_solution_bias(solution);
+        let eval = self.evaluate_state_with_rbi_current(
+            BjtNodeVoltages {
+                vc: v[0],
+                vb: v[1],
+                ve: v[2],
+                vs: v[3],
+                vcx: v[EXTERNAL_DIM + IDX_VCX],
+                vci: v[EXTERNAL_DIM + IDX_VCI],
+                vbx: v[EXTERNAL_DIM + IDX_VBX],
+                vbi: v[EXTERNAL_DIM + IDX_VBI],
+                vei: v[EXTERNAL_DIM + IDX_VEI],
+                vbp: v[EXTERNAL_DIM + IDX_VBP],
+                vsi: v[EXTERNAL_DIM + IDX_VSI],
+            },
+            v[EXTERNAL_DIM + IDX_VRTH],
+            self.mna_rbi_branch
+                .map(|_| Self::node_voltage(solution, self.mna_rbi_matrix_node)),
+        );
+        self.external_terminal_branches(eval)
+            .map(|branch| branch.current)
     }
 
     /// Stamp the full promoted static system: the four terminal KCL rows, the
     /// active internal KCL rows, and the excess-phase algebraic rows, all
     /// linearized at the limited bias from the last `update`.
-    pub(in crate::device::semiconductor::bjt) fn stamp_vbic_mna(
+    pub(in crate::device::semiconductor::bjt) fn stamp_mna(
         &self,
         stamper: &mut impl MatrixStamper,
     ) {
-        self.stamp_vbic_mna_at(stamper, None);
+        self.stamp_mna_at(stamper, None);
     }
 
     /// Stamp J and -F directly for a Newton correction at `anchor`. If the
     /// cached evaluation was junction-limited, retain J*(limited-anchor).
     /// This avoids subtracting large absolute-voltage companions to recover
     /// small physical currents at steep thermal slopes.
-    pub(crate) fn stamp_vbic_mna_correction(
-        &self,
-        stamper: &mut impl MatrixStamper,
-        anchor: &[Value],
-    ) {
-        self.stamp_vbic_mna_at(stamper, Some(anchor));
+    pub(crate) fn stamp_mna_correction(&self, stamper: &mut impl MatrixStamper, anchor: &[Value]) {
+        self.stamp_mna_at(stamper, Some(anchor));
     }
 
-    fn stamp_vbic_mna_at(&self, stamper: &mut impl MatrixStamper, anchor: Option<&[Value]>) {
+    fn stamp_mna_at(&self, stamper: &mut impl MatrixStamper, anchor: Option<&[Value]>) {
         let Some(eval) = self.mna_eval else {
             return;
         };
@@ -1057,8 +1218,8 @@ impl Bjt {
             vsi: self.vsi,
             vrth: self.vrth,
         };
-        let [vc, vb, ve, vs] = self.vbic_mna_external_state();
-        let mut internal = self.vbic_mna_internal_state();
+        let [vc, vb, ve, vs] = self.mna_external_state();
+        let mut internal = self.mna_internal_state();
         let mut external = [vc, vb, ve, vs];
         let internal_nodes: [NodeId; INTERNAL_DIM] = [
             self.node_cx,
@@ -1073,7 +1234,7 @@ impl Bjt {
         let external_nodes = self.external_terminal_nodes();
         if let Some(anchor) = anchor {
             for (index, voltage) in internal.iter_mut().enumerate() {
-                *voltage -= Self::node_voltage(anchor, self.vbic_internal_node(index));
+                *voltage -= Self::node_voltage(anchor, self.mna_internal_node(index));
             }
             for (voltage, node) in external.iter_mut().zip(external_nodes) {
                 *voltage -= Self::node_voltage(anchor, node);
@@ -1090,7 +1251,7 @@ impl Bjt {
             |row| row.source(static_internal, &external),
         );
         for row in 0..INTERNAL_DIM {
-            if !self.vbic_internal_row_active(row) {
+            if !self.mna_internal_row_active(row) {
                 continue;
             }
             let sign = Self::vbic_residual_row_sign(row);
@@ -1128,8 +1289,8 @@ impl Bjt {
             stamper.stamp_rhs(row_node, source);
         }
 
-        if self.vbic_rbi_matrix_node != 0 {
-            self.stamp_vbic_rbi_current(stamper, eval.linearized, &internal, &external, anchor);
+        if self.mna_rbi_matrix_node != 0 {
+            self.stamp_mna_rbi_current(stamper, eval.linearized, &internal, &external, anchor);
         }
 
         // Excess-phase network: algebraic xf rows plus the xf2-controlled
@@ -1149,7 +1310,7 @@ impl Bjt {
         }
     }
 
-    fn stamp_vbic_rbi_current(
+    fn stamp_mna_rbi_current(
         &self,
         stamper: &mut impl MatrixStamper,
         linearized: BjtLinearization,
@@ -1157,7 +1318,7 @@ impl Bjt {
         external: &[Value; EXTERNAL_DIM],
         anchor: Option<&[Value]>,
     ) {
-        let branch = self.vbic_rbi_matrix_node;
+        let branch = self.mna_rbi_matrix_node;
         let current = self.mna_rbi_current;
         let coordinate = current - anchor.map_or(0.0, |point| Self::node_voltage(point, branch));
         // The ordinary KCL/heat stamp already includes the evaluated current.
@@ -1174,19 +1335,31 @@ impl Bjt {
 
         // Vbx - Vbi - (RBI/qb)*I = 0. The temperature and charge-control
         // partials use the solved current, not an unresolvable voltage drop.
-        let resistance = self.vbic_rbi_resistance(linearized, self.vrth);
+        let resistance = self.mna_rbi_resistance(linearized, self.vrth);
         let mut equation = Self::scale_branch(resistance, -current);
         equation.current += self.vbx - self.vbi;
         equation.d_internal[IDX_VBX] += 1.0;
         equation.d_internal[IDX_VBI] -= 1.0;
         for (index, derivative) in equation.d_internal.iter().copied().enumerate() {
             if derivative != 0.0 {
-                stamper.stamp(branch, self.vbic_internal_node(index), derivative);
+                stamper.stamp(branch, self.mna_internal_node(index), derivative);
             }
         }
         stamper.stamp(branch, branch, -resistance.current);
-        let source = equation.source(internal[..INTERNAL_DIM].try_into().unwrap(), external)
-            - resistance.current * coordinate;
+        // Cancel the linear voltage and R*I terms algebraically. Reconstructing
+        // J*x-F and then subtracting R*I leaves a fictitious voltage source
+        // even for constant R, which prevents tight residual convergence.
+        let resistance_gradient = BranchLinearization {
+            current: 0.0,
+            ..resistance
+        };
+        let source = -current
+            * resistance_gradient.source(internal[..INTERNAL_DIM].try_into().unwrap(), external)
+            + anchor.map_or(0.0, |point| {
+                resistance.current * Self::node_voltage(point, branch)
+                    - (Self::node_voltage(point, self.node_bx)
+                        - Self::node_voltage(point, self.node_bi))
+            });
         stamper.stamp_rhs(branch, source);
     }
 
@@ -1213,7 +1386,7 @@ impl Bjt {
                 if branch.d_internal[col] != 0.0 {
                     stamper.stamp(
                         row_node,
-                        self.vbic_internal_node(col),
+                        self.mna_internal_node(col),
                         sign * branch.d_internal[col],
                     );
                 }
@@ -1228,13 +1401,13 @@ impl Bjt {
 
         if let Some(idx) = branch.pos_internal {
             stamp_side(
-                self.vbic_internal_node(idx),
+                self.mna_internal_node(idx),
                 Self::vbic_residual_row_sign(idx),
             );
         }
         if let Some(idx) = branch.neg_internal {
             stamp_side(
-                self.vbic_internal_node(idx),
+                self.mna_internal_node(idx),
                 -Self::vbic_residual_row_sign(idx),
             );
         }
@@ -1411,15 +1584,15 @@ mod tests {
                     .into_iter()
                     .enumerate()
                 {
-                    let node = bjt.vbic_internal_node(index);
+                    let node = bjt.mna_internal_node(index);
                     if node != 0 {
                         bias[node - 1] = p * value;
                     }
                 }
                 bias[bjt.node_xf1 - 1] = 1e-4;
                 bias[bjt.node_xf2 - 1] = 2e-4;
-                bjt.update_vbic_mna_static_probe(&bias);
-                let internal = bjt.vbic_mna_internal_state();
+                bjt.update_mna_static_probe(&bias);
+                let internal = bjt.mna_internal_state();
                 let (physical, _) = bjt.intrinsic_state_residual_jacobian(
                     bias[0],
                     bias[1],
@@ -1429,8 +1602,8 @@ mod tests {
                 );
                 let mut expected = vec![0.0; bias.len()];
                 for (index, value) in physical.into_iter().enumerate() {
-                    if bjt.vbic_internal_row_active(index) {
-                        expected[bjt.vbic_internal_node(index) - 1] +=
+                    if bjt.mna_internal_row_active(index) {
+                        expected[bjt.mna_internal_node(index) - 1] +=
                             Bjt::vbic_residual_row_sign(index) * value;
                     }
                 }
@@ -1450,7 +1623,7 @@ mod tests {
                 {
                     for (index, sign) in [(branch.pos_internal, 1.0), (branch.neg_internal, -1.0)] {
                         if let Some(index) = index {
-                            let node = bjt.vbic_internal_node(index);
+                            let node = bjt.mna_internal_node(index);
                             if node != 0 {
                                 expected[node - 1] +=
                                     sign * Bjt::vbic_residual_row_sign(index) * branch.current;
@@ -1459,7 +1632,7 @@ mod tests {
                     }
                 }
                 let mut direct = DenseStamper::new(bias.len());
-                bjt.stamp_vbic_mna_correction(&mut direct, &bias);
+                bjt.stamp_mna_correction(&mut direct, &bias);
                 for (row, (&rhs, &physical)) in direct.b.iter().zip(&expected).enumerate() {
                     assert!(
                         (rhs + physical).abs() < 1e-12 * physical.abs() + 1e-15,
@@ -1468,7 +1641,7 @@ mod tests {
                     );
                 }
                 let mut companion = DenseStamper::new(bias.len());
-                bjt.stamp_vbic_mna(&mut companion);
+                bjt.stamp_mna(&mut companion);
                 assert_eq!(direct.a, companion.a);
                 assert!(
                     companion
@@ -1499,7 +1672,7 @@ mod tests {
         });
         let mut v = vec![0.0; next - 1];
         v[2] = 20.0;
-        bjt.update_vbic_mna_static_probe(&v);
+        bjt.update_mna_static_probe(&v);
         let noise = bjt.vbic_noise_operating_model().unwrap();
         assert_eq!(noise.absolute_temperature, Some(325.15));
         assert!(
@@ -1551,10 +1724,10 @@ mod tests {
         assert!(qbp > 1.05);
         let irbp = bjt.irbp_branch(0.7, 0.7, 0.1, 0.1, 0.05, 0.0);
         assert!((irbp.current - (-0.05 / 100.0) * qbp).abs() < 1e-15);
-        let (charges, _, _) = bjt.vbic_mna_charge_state_at_solution(&bias);
+        let (charges, _, _) = bjt.mna_charge_state_at_solution(&bias);
         assert!((charges[4].charge - 2e-9 * ifp).abs() < 1e-22);
         assert!(!charges[7].is_active());
-        assert_eq!(bjt.vbic_electrical_charge_storage_nodes()[7], None);
+        assert_eq!(bjt.electrical_charge_storage_nodes()[7], None);
         assert_eq!(bjt.node_si, 0);
     }
 
@@ -1597,8 +1770,8 @@ mod tests {
     fn assert_promoted_stamp_matches_finite_difference_jacobian(level: Value) {
         let mut bjt = diffamp_pnp(level);
         bjt.set_vbic_external_thermal_node(14);
-        bjt.assign_vbic_rbi_branch(1);
-        bjt.resolve_vbic_rbi_branch(14);
+        bjt.assign_mna_rbi_branch(1);
+        bjt.resolve_mna_rbi_branch(14);
         let n = 15;
 
         // Bias near the diffamp PNP operating point with the b-c junction at
@@ -1622,7 +1795,7 @@ mod tests {
         assign(&mut v, bjt.node_xf1, 2.05e-5);
         assign(&mut v, bjt.node_xf2, 2.05e-5);
         assign(&mut v, bjt.node_rth, 20.0);
-        assign(&mut v, bjt.vbic_rbi_matrix_node, -1e-5);
+        assign(&mut v, bjt.mna_rbi_matrix_node, -1e-5);
 
         // Settle the limiter anchor at the bias so pnjlim stays inactive for
         // the FD probes. Handing the same candidate to `update` twice cannot do
@@ -1632,10 +1805,10 @@ mod tests {
         // iterate equal to the candidate, pnjlim is inactive and the anchor
         // lands exactly on `v`.
         bjt.update(&v);
-        bjt.update_vbic_mna_static_probe(&v);
+        bjt.update_mna_static_probe(&v);
         bjt.update(&v);
         let mut base = DenseStamper::new(n);
-        bjt.stamp_vbic_mna(&mut base);
+        bjt.stamp_mna(&mut base);
         let f0 = base.residual(&v);
 
         let h = 1e-7;
@@ -1645,7 +1818,7 @@ mod tests {
             vp[col] += h;
             bjt.update(&vp);
             let mut pert = DenseStamper::new(n);
-            bjt.stamp_vbic_mna(&mut pert);
+            bjt.stamp_mna(&mut pert);
             let f1 = pert.residual(&vp);
             // Restore the limiter anchor for the next probe.
             bjt.update(&v);
@@ -1704,15 +1877,14 @@ mod tests {
         assign(&mut v, bjt.node_xf1, 2.05e-5);
         assign(&mut v, bjt.node_xf2, 2.05e-5);
 
-        let (base_branches, base_internal, base_external) =
-            bjt.vbic_mna_charge_state_at_solution(&v);
+        let (base_branches, base_internal, base_external) = bjt.mna_charge_state_at_solution(&v);
 
         let h = 1e-7;
         for col in 0..n {
             let mut vp = v.clone();
             vp[col] += h;
             let (pert_branches, pert_internal, pert_external) =
-                bjt.vbic_mna_charge_state_at_solution(&vp);
+                bjt.mna_charge_state_at_solution(&vp);
 
             for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
                 if !base_branches[branch_idx].is_active() {
@@ -1784,10 +1956,10 @@ mod tests {
 
         bjt.update(&settled);
         bjt.update(&settled);
-        let previous = bjt.vbic_mna_internal_state();
+        let previous = bjt.mna_internal_state();
 
         bjt.update(&candidate);
-        let once = bjt.vbic_mna_internal_state();
+        let once = bjt.mna_internal_state();
         assert!(
             (once[IDX_VBI] - previous[IDX_VBI]).abs() > 1e-6,
             "the candidate must engage the limiter for this to test anything"
@@ -1795,7 +1967,7 @@ mod tests {
 
         bjt.update(&candidate);
         assert_eq!(
-            bjt.vbic_mna_internal_state(),
+            bjt.mna_internal_state(),
             once,
             "re-evaluating an identical candidate moved the limited bias"
         );
@@ -1805,7 +1977,7 @@ mod tests {
         // further on the second pass is the whole defect.
         let mut raw = [0.0; INTERNAL_DIM];
         raw.copy_from_slice(
-            &bjt.vbic_mna_solution_bias(&candidate)[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM],
+            &bjt.mna_solution_bias(&candidate)[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM],
         );
         let mut once_internal = [0.0; INTERNAL_DIM];
         once_internal.copy_from_slice(&once[..INTERNAL_DIM]);
@@ -1817,9 +1989,9 @@ mod tests {
 
         // After the matrix load, identical voltages belong to a new Newton
         // iteration and must be allowed to advance the limited state.
-        bjt.stamp_vbic_mna(&mut DenseStamper::new(n));
+        bjt.stamp_mna(&mut DenseStamper::new(n));
         bjt.update(&candidate);
-        assert_eq!(&bjt.vbic_mna_internal_state()[..INTERNAL_DIM], &twice);
+        assert_eq!(&bjt.mna_internal_state()[..INTERNAL_DIM], &twice);
     }
 
     /// The junction limiter is defined on branch voltages; a promoted instance
@@ -1917,7 +2089,7 @@ mod tests {
         }
 
         off.update(&v);
-        let state = off.vbic_mna_internal_state();
+        let state = off.mna_internal_state();
         assert!(
             (state[IDX_VBI] - state[IDX_VEI]).abs() < 1e-9,
             "OFF instance loaded with vbei = {:.4} V",
@@ -1934,7 +2106,7 @@ mod tests {
         let mut next_iterate = v.clone();
         next_iterate[off.node_base - 1] = 0.84;
         off.update(&next_iterate);
-        let second = off.vbic_mna_internal_state();
+        let second = off.mna_internal_state();
         assert!(
             (second[IDX_VBI] - second[IDX_VEI]).abs() > 1e-6,
             "the OFF load must apply once, not pin the instance off for the solve"

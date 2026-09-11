@@ -6261,36 +6261,10 @@ impl Engine {
                         bjt.set_vbic_external_thermal_node(external_thermal);
                     }
 
-                    // Legacy GP: externalize the constant collector,
-                    // emitter, and base resistances onto real internal
-                    // nodes (the diode/JFET/MOSFET pattern), so their
-                    // thermal noise rides the resistor walk and junction
-                    // noise injects at the true internal terminals.
-                    // Values are taken after model, instance, and
-                    // temperature application, and the zeroed device
-                    // fields collapse the matching internal states, so
-                    // the solved system is identical. Only the
-                    // bias-dependent base part (qb-modulated, ngspice
-                    // BJTgx, nonzero when RBM < RB) stays folded.
-                    // VBIC instances solve their internal states as MNA
-                    // unknowns (ngspice vbicsetup.c topology); allocate the
-                    // non-collapsed internal nodes now so the matrix builder
-                    // reserves the coupled block.
-                    if bjt.uses_vbic_dynamic_charges() {
-                        bjt.assign_vbic_internal_nodes(|suffix| {
-                            circuit.get_or_create_node(&format!(
-                                "{}.__{}.internal",
-                                element.name, suffix
-                            ))
-                        });
-                        if bjt.needs_vbic_rbi_branch() {
-                            let branch = circuit.allocate_branch_named(&format!(
-                                "{}.__irbi.internal",
-                                element.name
-                            ));
-                            bjt.assign_vbic_rbi_branch(branch);
-                        }
-                    } else if bjt.uses_legacy_gummel_poon() {
+                    // Constant GP lead resistances use the circuit-resistor
+                    // path, including its thermal noise. The remaining
+                    // intrinsic states share the BJT MNA allocation below.
+                    if bjt.uses_legacy_gummel_poon() {
                         if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
                             let cint_name = format!("{}.__cint", element.name);
                             let cint = circuit.get_or_create_node(&cint_name);
@@ -6338,6 +6312,22 @@ impl Engine {
                                     bjt.noise_temperature_offset,
                                 );
                             }
+                        }
+                    }
+
+                    if bjt.uses_vbic_dynamic_charges() || bjt.has_intrinsic_state_unknowns() {
+                        bjt.assign_mna_internal_nodes(|suffix| {
+                            circuit.get_or_create_node(&format!(
+                                "{}.__{}.internal",
+                                element.name, suffix
+                            ))
+                        });
+                        if bjt.needs_mna_rbi_branch() {
+                            let branch = circuit.allocate_branch_named(&format!(
+                                "{}.__irbi.internal",
+                                element.name
+                            ));
+                            bjt.assign_mna_rbi_branch(branch);
                         }
                     }
 

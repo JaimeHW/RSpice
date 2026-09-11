@@ -232,11 +232,17 @@ pub(in crate::engine) struct BjtTransientHistory {
 
 pub(super) const BJT_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
     "legacy-gummel-poon-transient-history-v2";
+pub(super) const GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG: &str =
+    "promoted-gummel-poon-transient-history-v1";
 pub(super) const VBIC_TRANSIENT_HISTORY_RUNTIME_TAG: &str = "promoted-vbic-transient-history-v1";
 
 fn bjt_history_runtime_tag(bjt: &crate::device::Bjt) -> &'static str {
-    if bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted() {
-        VBIC_TRANSIENT_HISTORY_RUNTIME_TAG
+    if bjt.mna_promoted() {
+        if bjt.uses_legacy_gummel_poon() {
+            GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG
+        } else {
+            VBIC_TRANSIENT_HISTORY_RUNTIME_TAG
+        }
     } else {
         BJT_TRANSIENT_HISTORY_RUNTIME_TAG
     }
@@ -505,7 +511,7 @@ impl Engine {
                 ));
             }
             if !(bjt.uses_legacy_gummel_poon()
-                || (bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted()))
+                || (bjt.uses_vbic_dynamic_charges() && bjt.mna_promoted()))
             {
                 return Err(format!(
                     "BJT '{}' transient history is not checkpointable; its runtime requires a legacy Gummel-Poon or promoted VBIC history contract",

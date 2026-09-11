@@ -615,7 +615,7 @@ mod tests {
                     config.transient_nonlinear_rhstol = Some(rise * m * 1e-13);
                     let engine = Engine::new(config);
                     let circuit = engine.build_circuit(&netlist).unwrap();
-                    assert!(circuit.bjts.devices[0].vbic_mna_promoted());
+                    assert!(circuit.bjts.devices[0].mna_promoted());
                     let result = engine
                         .run_tran_with_startup_mode(
                             &netlist,

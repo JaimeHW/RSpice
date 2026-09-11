@@ -2893,7 +2893,7 @@ impl Engine {
             // Substrate-only resistance also owns a private noise block,
             // even when C/B/E all collapse directly onto circuit nodes.
             let has_private_noise = bjt.has_intrinsic_state_unknowns();
-            if has_private_noise {
+            if has_private_noise && !bjt.mna_promoted() {
                 private_bjts.push(bjt_index);
             }
             let nodes = [
@@ -2905,22 +2905,37 @@ impl Engine {
             let node = |terminal: (Option<usize>, Option<usize>)| {
                 terminal.0.map_or_else(
                     || nodes[terminal.1.expect("physical noise terminal")],
-                    |index| offset + index + 1,
+                    |index| {
+                        if bjt.mna_promoted() {
+                            bjt.mna_internal_node(index)
+                        } else {
+                            offset + index + 1
+                        }
+                    },
                 )
             };
             let [collector, base, emitter] = terminals.map(node);
-            let frozen_snapshot = bjt_snapshots.get(bjt_index).and_then(Option::as_ref);
+            let noise_internal = if bjt.mna_promoted() {
+                Some(bjt.mna_internal_state_at_solution(dc_solution))
+            } else {
+                bjt_snapshots
+                    .get(bjt_index)
+                    .and_then(Option::as_ref)
+                    .map(|s| s.reduction.internal_voltages)
+            };
             if has_private_noise {
                 let voltage = |id| Self::noise_node_voltage(dc_solution, id);
-                let snapshot = frozen_snapshot.copied().unwrap_or_else(|| {
+                let internal = noise_internal.unwrap_or_else(|| {
                     bjt.charge_snapshot(
                         voltage(nodes[0]),
                         voltage(nodes[1]),
                         voltage(nodes[2]),
                         voltage(nodes[3]),
                     )
+                    .reduction
+                    .internal_voltages
                 });
-                for branch in bjt.legacy_private_resistance_noise(&snapshot) {
+                for branch in bjt.legacy_private_resistance_noise(internal) {
                     let Some(resistance) = Self::noise_resistance_from_conductance(
                         &format!("{}:{}", bjt.name, branch.mechanism),
                         branch.conductance,
@@ -2944,7 +2959,7 @@ impl Engine {
                     noise_sources.push(source);
                 }
             }
-            let (ic, ib, _) = frozen_snapshot.map_or_else(
+            let (ic, ib, _) = noise_internal.map_or_else(
                 || bjt.noise_branch_currents(),
                 |snapshot| bjt.legacy_noise_branch_currents_at_state(snapshot),
             );

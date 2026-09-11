@@ -1075,9 +1075,9 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(domain);
-    // Native GP split transport, substrate currents and junction geometry
-    // must not resume state captured under earlier constitutive laws.
-    hash_field(&mut hasher, "native_bjt_junction_area_law", 10_u8);
+    // Native GP transport, junction geometry and physical state topology
+    // must not resume state captured under earlier constitutive/runtime laws.
+    hash_field(&mut hasher, "native_bjt_junction_area_law", 11_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -3264,6 +3264,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
         &checkpoint.bjt_runtime_tags,
         &[
             super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+            super::GP_MNA_TRANSIENT_HISTORY_RUNTIME_TAG,
             super::VBIC_TRANSIENT_HISTORY_RUNTIME_TAG,
         ],
         budget,

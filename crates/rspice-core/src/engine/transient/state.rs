@@ -349,7 +349,7 @@ impl Engine {
             // terminal differences a node-space seed can reach. Moving the
             // external terminals alone would leave that instance half seeded,
             // which is worse than leaving the vector unread.
-            let (ic_vbe, ic_vce) = if bjt.vbic_mna_promoted() {
+            let (ic_vbe, ic_vce) = if bjt.uses_vbic_dynamic_charges() {
                 (None, None)
             } else {
                 bjt.transient_initial_condition().unwrap_or((None, None))
@@ -365,6 +365,26 @@ impl Engine {
                     (bjt.node_collector, bjt.node_emitter, ic_vce),
                     // MODEUIC seeds vbx=IC(VBE)-IC(VCE), before RBM too.
                     external_base_seed,
+                    (
+                        bjt.node_bx,
+                        bjt.node_ei,
+                        if bjt.mna_promoted() { ic_vbe } else { None },
+                    ),
+                    (
+                        bjt.node_bi,
+                        bjt.node_ei,
+                        if bjt.mna_promoted() { ic_vbe } else { None },
+                    ),
+                    (
+                        bjt.node_cx,
+                        bjt.node_ei,
+                        if bjt.mna_promoted() { ic_vce } else { None },
+                    ),
+                    (
+                        bjt.node_ci,
+                        bjt.node_ei,
+                        if bjt.mna_promoted() { ic_vce } else { None },
+                    ),
                 ],
             );
             let solution = seeded.as_ref();
@@ -376,12 +396,20 @@ impl Engine {
             let vbc = vb - vc;
             let vcs = vc - vs;
 
-            if bjt.vbic_mna_promoted() {
-                // Promoted VBIC: the internal states are part of the solved
+            if bjt.mna_promoted() {
+                // Promoted BJT: the internal states are part of the solved
                 // operating point, so the charge history seeds directly from
                 // the solution vector with no nested snapshot solve.
-                let (branches, internal, _) = bjt.vbic_mna_charge_state_at_solution(solution);
-                let charge_values = branches.map(|branch| branch.charge);
+                let (branches, internal, _) = bjt.mna_charge_state_at_solution(solution);
+                let mut charge_values = branches.map(|branch| branch.charge);
+                if let Some(charge) = bjt.legacy_external_bc_charge(solution) {
+                    charge_values[BJT_QBCX_BRANCH_INDEX] = charge.charge;
+                }
+                let [vbe, vbc, vcs] = if bjt.uses_legacy_gummel_poon() {
+                    bjt.mna_junction_voltages(solution)
+                } else {
+                    [vbe, vbc, vcs]
+                };
                 history.vbe_prev.push(vbe);
                 history.vbe_prev_prev.push(vbe);
                 history.ibe_prev.push(0.0);
@@ -890,47 +918,6 @@ impl Engine {
             let ve = Self::node_voltage(voltages, bjt.node_emitter);
             let vs = Self::node_voltage(voltages, bjt.node_substrate);
 
-            if bjt.vbic_mna_promoted() {
-                // Promoted VBIC: per-branch charge companions on the actual
-                // internal nodes (ngspice NIintegrate discipline), evaluated
-                // and linearized at the limited bias cached by the device
-                // update for this Newton iterate.
-                if charge_factor <= 0.0 {
-                    continue;
-                }
-                let (branches, internal, external) = bjt.vbic_mna_charge_state();
-                let mut stamper = StaticMatrixChargeStamper {
-                    matrix: &mut *matrix,
-                    rhs: &mut *rhs,
-                };
-                for (branch_idx, branch) in branches.iter().enumerate() {
-                    if !branch.is_active() {
-                        continue;
-                    }
-                    let cq = Self::jfet_companion_ccap(
-                        coeff,
-                        dt,
-                        branch.charge,
-                        BranchChargeHistory {
-                            q_prev: history.charge_q_prev[idx][branch_idx],
-                            q_prev_prev: history.charge_q_prev_prev[idx][branch_idx],
-                            cq_prev: history.charge_cq_prev[idx][branch_idx],
-                        },
-                    );
-                    let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
-                    Self::stamp_vbic_mna_charge_branch(
-                        &mut stamper,
-                        bjt,
-                        branch,
-                        polarity * charge_factor,
-                        polarity * cq,
-                        &internal,
-                        &external,
-                    );
-                }
-                continue;
-            }
-
             if charge_factor <= 0.0 {
                 continue;
             }
@@ -962,6 +949,56 @@ impl Engine {
                     source,
                 );
             }
+            if bjt.mna_promoted() {
+                // Promoted BJT: per-branch charge companions on the actual
+                // internal nodes (ngspice NIintegrate discipline), evaluated
+                // and linearized at the limited bias cached by the device
+                // update for this Newton iterate.
+                let (branches, internal, external) = bjt.mna_charge_state();
+                let mut stamper = StaticMatrixChargeStamper {
+                    matrix: &mut *matrix,
+                    rhs: &mut *rhs,
+                };
+                for (branch_idx, branch) in branches.iter().enumerate() {
+                    if !branch.is_active() {
+                        continue;
+                    }
+                    let cq = Self::jfet_companion_ccap(
+                        coeff,
+                        dt,
+                        branch.charge,
+                        BranchChargeHistory {
+                            q_prev: history.charge_q_prev[idx][branch_idx],
+                            q_prev_prev: history.charge_q_prev_prev[idx][branch_idx],
+                            cq_prev: history.charge_cq_prev[idx][branch_idx],
+                        },
+                    );
+                    if !cq.is_finite()
+                        || branch
+                            .d_internal
+                            .iter()
+                            .chain(&branch.d_external)
+                            .any(|value| !(charge_factor * value).is_finite())
+                    {
+                        return Err(SimulationError::Circuit(format!(
+                            "BJT '{}' transient charge {branch_idx} is nonfinite for dt={dt:e}",
+                            bjt.name,
+                        )));
+                    }
+                    let polarity = bjt.charge_branch_polarity(branch_idx);
+                    Self::stamp_vbic_mna_charge_branch(
+                        &mut stamper,
+                        bjt,
+                        branch,
+                        polarity * charge_factor,
+                        polarity * cq,
+                        &internal,
+                        &external,
+                    );
+                }
+                continue;
+            }
+
             // Schur elimination must follow the OneStep static/history split.
             // The private equations are half a trapezoidal companion; reducing
             // a BE companion first and then halving only its DC stamp changes
@@ -1076,7 +1113,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Stamp one promoted VBIC charge branch as a Norton companion on its
+    /// Stamp one promoted BJT charge branch as a Norton companion on its
     /// actual matrix nodes. Charge branches use the standard MNA orientation:
     /// the integrated current `cq` leaves the positive node and enters the
     /// negative node, with conductance `ag0 * dq/dv` across every coupled
@@ -1123,7 +1160,7 @@ impl Engine {
             for col in 0..BJT_INTERNAL_STATE_DIM {
                 let g = ag0 * branch.d_internal[col];
                 if g != 0.0 {
-                    stamper.stamp(row, bjt.vbic_internal_node(col), sign * g);
+                    stamper.stamp(row, bjt.mna_internal_node(col), sign * g);
                 }
             }
             for (derivative, node) in branch
@@ -1142,11 +1179,11 @@ impl Engine {
 
         let pos = branch
             .pos_internal
-            .map(|idx| bjt.vbic_internal_node(idx))
+            .map(|idx| bjt.mna_internal_node(idx))
             .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
         let neg = branch
             .neg_internal
-            .map(|idx| bjt.vbic_internal_node(idx))
+            .map(|idx| bjt.mna_internal_node(idx))
             .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
         if let Some(row) = pos {
             stamp_row(row, 1.0);

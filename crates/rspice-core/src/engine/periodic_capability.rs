@@ -427,7 +427,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Inapplicable,
             noise: Absent("periodic BJT noise sources need the exact periodic BJT residual"),
             pss_state: Restricted(
-                "MNA-promoted VBIC electrical charge states without self-heating or excess-phase delay",
+                "native BJT electrical charge states without self-heating or excess-phase delay",
             ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1232,7 +1232,7 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                             .bjts
                             .devices
                             .iter()
-                            .any(|bjt| !bjt.vbic_mna_promoted())
+                            .any(|bjt| !bjt.mna_promoted() && bjt.has_intrinsic_state_unknowns())
                         {
                             gaps.push(CapabilityGap::new(
                                 family,
@@ -1243,9 +1243,9 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                             .bjts
                             .devices
                             .iter()
-                            .any(|bjt| bjt.node_rth != 0 || bjt.node_xf1 != 0 || bjt.node_xf2 != 0)
+                            .any(|bjt| bjt.node_rth != 0 || bjt.td > 0.0 || bjt.node_xf1 != 0 || bjt.node_xf2 != 0)
                         {
-                            gaps.push(CapabilityGap::new(family, "VBIC thermal and excess-phase shooting-state units and constraints"));
+                            gaps.push(CapabilityGap::new(family, "BJT thermal and excess-phase shooting-state units and constraints"));
                         }
                     }
                     F::CoupledInductorPair => {
@@ -1625,11 +1625,14 @@ mod tests {
     }
 
     #[test]
-    fn vbic_shooting_admission_keeps_unqualified_state_families_gated() {
+    fn bjt_shooting_admission_keeps_unqualified_state_families_gated() {
         for (model, supported) in [
             ("NPN LEVEL=4", true),
             ("PNP LEVEL=4", true),
-            ("NPN", false),
+            ("NPN", true),
+            ("NPN RB=100 RBM=20 CJE=1n", true),
+            ("PNP RB=100 RBM=20 CJE=1n", true),
+            ("NPN TD=1n", false),
             ("NPN LEVEL=4 TD=1n", false),
             ("NPN LEVEL=4 SELFT=1 RTH=100 CTH=1n", false),
         ] {

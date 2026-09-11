@@ -1580,11 +1580,29 @@ impl Engine {
         omega: Value,
         include_delay_branches: bool,
     ) -> Result<(), SimulationError> {
-        if bjt.vbic_mna_promoted() {
+        // XCJC is attached to the authored base, before externalized RBM.
+        // Its collector terminal is a real node, so stamp this branch directly.
+        if let Some(charge) = bjt.legacy_external_bc_charge(op_voltages) {
+            let admittance = Complex64::new(0.0, omega * charge.capacitance);
+            if !admittance.im.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' has nonfinite external BC capacitance",
+                    bjt.name
+                )));
+            }
+            for (row, sign) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
+                for (col, polarity) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
+                    if row > 0 && col > 0 {
+                        matrix.add(row - 1, col - 1, sign * polarity * admittance);
+                    }
+                }
+            }
+        }
+        if bjt.mna_promoted() {
             // Promoted BJT: the internal states are matrix unknowns, so each
             // charge branch stamps jw*C directly on its own nodes alongside
             // the promoted static real part - no dense Schur reduction.
-            let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(op_voltages);
+            let (branches, _, _) = bjt.mna_charge_state_at_solution(op_voltages);
             let external_nodes = [
                 bjt.node_collector,
                 bjt.node_base,
@@ -1609,7 +1627,20 @@ impl Engine {
                     continue;
                 }
 
-                let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
+                if !branch.charge.is_finite()
+                    || branch
+                        .d_internal
+                        .iter()
+                        .chain(&branch.d_external)
+                        .any(|value| !(omega * value).is_finite())
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "BJT '{}' AC charge {branch_idx} is nonfinite at {} Hz",
+                        bjt.name,
+                        omega / (2.0 * PI),
+                    )));
+                }
+                let polarity = bjt.charge_branch_polarity(branch_idx);
                 let mut stamp_row = |row: NodeId, sign: Value| {
                     let sign = sign * polarity;
                     if row == 0 {
@@ -1617,7 +1648,7 @@ impl Engine {
                     }
                     for col in 0..BJT_INTERNAL_STATE_DIM {
                         let c = branch.d_internal[col];
-                        let col_node = bjt.vbic_internal_node(col);
+                        let col_node = bjt.mna_internal_node(col);
                         if c != 0.0 && col_node > 0 {
                             matrix.add_imag(row - 1, col_node - 1, sign * omega * c);
                         }
@@ -1636,11 +1667,11 @@ impl Engine {
 
                 let pos = branch
                     .pos_internal
-                    .map(|idx| bjt.vbic_internal_node(idx))
+                    .map(|idx| bjt.mna_internal_node(idx))
                     .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
                 let neg = branch
                     .neg_internal
-                    .map(|idx| bjt.vbic_internal_node(idx))
+                    .map(|idx| bjt.mna_internal_node(idx))
                     .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
                 if let Some(row) = pos {
                     stamp_row(row, 1.0);
@@ -1658,24 +1689,6 @@ impl Engine {
             Self::ac_node_voltage(op_voltages, bjt.node_emitter),
             Self::ac_node_voltage(op_voltages, bjt.node_substrate),
         ];
-        // XCJC is attached to the authored base, before externalized RBM.
-        // Its collector terminal is a real node, so stamp this branch directly.
-        if let Some(charge) = bjt.legacy_external_bc_charge(op_voltages) {
-            let admittance = Complex64::new(0.0, omega * charge.capacitance);
-            if !admittance.im.is_finite() {
-                return Err(SimulationError::Circuit(format!(
-                    "BJT '{}' has nonfinite external BC capacitance",
-                    bjt.name
-                )));
-            }
-            for (row, sign) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
-                for (col, polarity) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
-                    if row > 0 && col > 0 {
-                        matrix.add(row - 1, col - 1, sign * polarity * admittance);
-                    }
-                }
-            }
-        }
         let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
         let BjtAcChargeBlocks {
             ii: c_ii,
@@ -2198,8 +2211,8 @@ impl Engine {
                 frequency_hz,
                 physical_analysis,
             )?;
-            if include_vbic_dynamic_stamp {
-                for bjt in &circuit.bjts.devices {
+            for bjt in &circuit.bjts.devices {
+                if include_vbic_dynamic_stamp || bjt.uses_legacy_gummel_poon() {
                     Self::stamp_bjt_dynamic_ac(
                         ac_matrix,
                         bjt,

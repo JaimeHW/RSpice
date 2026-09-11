@@ -168,7 +168,7 @@ impl Bjt {
             // (or dIB/dV when IRB is present) back into this branch; the
             // compact-model junction derivatives already carry the complete
             // GP charge dependence.
-            let conductance = self.legacy_gp_base_resistance_conductance(linearized, rb);
+            let conductance = self.legacy_gp_base_resistance(linearized, rb).recip();
             branch.current = conductance * vrbi;
             branch.d_internal[IDX_VBX] = conductance;
             branch.d_internal[IDX_VBI] = -conductance;
@@ -190,7 +190,7 @@ impl Bjt {
         branch
     }
 
-    /// Return the legacy Gummel-Poon intrinsic base-resistance conductance.
+    /// Return the physical legacy Gummel-Poon intrinsic base resistance.
     ///
     /// Xyce's `N_DEV_BJT.C` computes the conductance from the operating-point
     /// base charge when IRB/JRB/IOB is absent.  When one of those aliases is
@@ -204,7 +204,7 @@ impl Bjt {
     /// conductance in the Newton Jacobian, so only the voltage-difference
     /// derivatives are returned by `irbi_branch`.
     #[inline]
-    fn legacy_gp_base_resistance_conductance(
+    pub(in crate::device::semiconductor::bjt) fn legacy_gp_base_resistance(
         &self,
         linearized: BjtLinearization,
         rb: Value,
@@ -241,12 +241,11 @@ impl Bjt {
         };
         // A convex blend preserves a small whole RB when RBM is much larger;
         // subtracting RBM again at factor=1 would lose the authored RB.
-        let resistance = if (0.0..=1.0).contains(&factor) {
+        if (0.0..=1.0).contains(&factor) {
             whole * factor + minimum * (1.0 - factor)
         } else {
             minimum + (whole - minimum) * factor
-        };
-        resistance.recip()
+        }
     }
 
     pub(in crate::device::semiconductor::bjt) fn ibep_branch(
@@ -861,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_gp_irb_resistance_law_reduces_forward_conductance() {
+    fn legacy_gp_irb_resistance_law_reduces_forward_resistance() {
         let mut no_irb = Bjt::new_npn("no_irb".to_string(), 1, 2, 3);
         no_irb.rbi = 96.0;
         let linearized = BjtLinearization {
@@ -869,15 +868,15 @@ mod tests {
             qb: 1.0,
             ..BjtLinearization::default()
         };
-        let baseline = no_irb.legacy_gp_base_resistance_conductance(linearized, no_irb.rbi);
+        let baseline = no_irb.legacy_gp_base_resistance(linearized, no_irb.rbi);
 
         let mut with_irb = no_irb;
         with_irb.irb = 1.0e-3;
-        let reduced = with_irb.legacy_gp_base_resistance_conductance(linearized, with_irb.rbi);
+        let reduced = with_irb.legacy_gp_base_resistance(linearized, with_irb.rbi);
 
         assert!(baseline.is_finite() && reduced.is_finite());
         assert!(
-            reduced > baseline,
+            reduced < baseline,
             "IRB must reduce the effective resistance"
         );
     }
@@ -895,7 +894,7 @@ mod tests {
             ..BjtLinearization::default()
         };
 
-        let conductance = pnp.legacy_gp_base_resistance_conductance(linearized, pnp.rbi);
-        assert!(conductance.is_finite() && conductance > 0.0);
+        let resistance = pnp.legacy_gp_base_resistance(linearized, pnp.rbi);
+        assert!(resistance.is_finite() && resistance > 0.0);
     }
 }

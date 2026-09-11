@@ -3091,13 +3091,13 @@ mod tests {
                         // Exercise the cache used by the promoted MNA path,
                         // at its prescribed internal voltages, without a
                         // separate reduced internal operating-point solve.
-                        bjt.vbic_mna_charge_state().0
+                        bjt.mna_charge_state().0
                     } else {
                         bjt.charge_snapshot(1.8, 0.7, 0.0, 0.0).branches
                     }
                 };
                 if promoted {
-                    model.update_vbic_mna_static_probe(&bias);
+                    model.update_mna_static_probe(&bias);
                 } else {
                     model.update(&bias);
                 }
@@ -3110,7 +3110,7 @@ mod tests {
                 let mut fresh = make();
                 fresh.set_temperature(340.15);
                 if promoted {
-                    fresh.update_vbic_mna_static_probe(&bias);
+                    fresh.update_mna_static_probe(&bias);
                 } else {
                     fresh.update(&bias);
                 }

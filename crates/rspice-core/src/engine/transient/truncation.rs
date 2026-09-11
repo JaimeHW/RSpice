@@ -926,14 +926,14 @@ impl Engine {
         let mut found_branch = false;
 
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            if !bjt.vbic_mna_promoted() {
+            if !bjt.uses_vbic_dynamic_charges() || !bjt.mna_promoted() {
                 continue;
             }
 
             // Promoted VBIC: the candidate solution carries the internal node
             // voltages, so the charges evaluate directly at the candidate
             // bias (ngspice VBICtrunc CKTterr over the charge states).
-            let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(candidate_solution);
+            let (branches, _, _) = bjt.mna_charge_state_at_solution(candidate_solution);
 
             for (branch_idx, branch) in branches
                 .iter()
@@ -1030,46 +1030,57 @@ impl Engine {
                 continue;
             }
 
-            let vc = Self::node_voltage(candidate_solution, bjt.node_collector);
-            let vb = Self::node_voltage(candidate_solution, bjt.node_base);
-            let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
-            let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
-            let candidate_external = [vc, vb, ve, vs];
-            // A failed snapshot resolution is not a benign absence of charge:
-            // the charge state genuinely cannot be formed at this bias, so
-            // falling back to the generic estimator is the correct answer.
-            let snapshot = Self::resolve_legacy_bjt_transient_snapshot(
-                bjt,
-                candidate_external,
-                BjtChargeStep {
-                    coeff: &coeff,
-                    dt,
-                    q_prev: &history.charge_q_prev[idx],
-                    q_prev_prev: &history.charge_q_prev_prev[idx],
-                    cq_prev: &history.charge_cq_prev[idx],
-                },
-                BjtPredictorHistory {
-                    internal_prev: history.dynamic_internal_prev.get(idx),
-                    linear_prev: history.dynamic_linear_prev.get(idx),
-                    linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
-                    previous_dt: history.accepted_dt_prev,
-                },
-                vbic_snapshot_cache.get(idx).copied().flatten(),
-            )?;
+            let charges = if bjt.mna_promoted() {
+                let (branches, _, _) = bjt.mna_charge_state_at_solution(candidate_solution);
+                [
+                    branches[BJT_QBE_BRANCH_INDEX].charge,
+                    branches[BJT_QBC_BRANCH_INDEX].charge,
+                    branches[BJT_QBCP_BRANCH_INDEX].charge,
+                ]
+            } else {
+                let vc = Self::node_voltage(candidate_solution, bjt.node_collector);
+                let vb = Self::node_voltage(candidate_solution, bjt.node_base);
+                let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
+                let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
+                let candidate_external = [vc, vb, ve, vs];
+                // A failed snapshot resolution is not a benign absence of charge:
+                // the charge state genuinely cannot be formed at this bias, so
+                // falling back to the generic estimator is the correct answer.
+                let snapshot = Self::resolve_legacy_bjt_transient_snapshot(
+                    bjt,
+                    candidate_external,
+                    BjtChargeStep {
+                        coeff: &coeff,
+                        dt,
+                        q_prev: &history.charge_q_prev[idx],
+                        q_prev_prev: &history.charge_q_prev_prev[idx],
+                        cq_prev: &history.charge_cq_prev[idx],
+                    },
+                    BjtPredictorHistory {
+                        internal_prev: history.dynamic_internal_prev.get(idx),
+                        linear_prev: history.dynamic_linear_prev.get(idx),
+                        linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
+                        previous_dt: history.accepted_dt_prev,
+                    },
+                    vbic_snapshot_cache.get(idx).copied().flatten(),
+                )?;
 
-            // Take the charge from the model, not from the snapshot's branch
-            // topology. A legacy charge branch is only given terminals once its
-            // capacitance is positive, so reading `branch.charge` would skip a
-            // chargeless instance entirely; the accepted step commits the model
-            // charge for these branches whatever their topology, and BJTtrunc
-            // runs CKTterr on every one of them without inspecting the
-            // capacitance. Deriving them here exactly as the commit path does
-            // keeps the walk on the stream the commit wrote.
-            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
-                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
-            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
-                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
-            );
+                // Take the charge from the model, not from the snapshot's branch
+                // topology. A legacy charge branch is only given terminals once its
+                // capacitance is positive, so reading `branch.charge` would skip a
+                // chargeless instance entirely; the accepted step commits the model
+                // charge for these branches whatever their topology, and BJTtrunc
+                // runs CKTterr on every one of them without inspecting the
+                // capacitance. Deriving them here exactly as the commit path does
+                // keeps the walk on the stream the commit wrote.
+                let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                    Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+                let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
+                    legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+                );
+
+                [legacy_charges.qbe, legacy_charges.qbc, legacy_charges.qcs]
+            };
 
             // Match ngspice's legacy BJT CKTterr coverage: qbe, qbc, qsub,
             // and true qbcx only when an internal collector-resistance branch
@@ -1077,9 +1088,9 @@ impl Engine {
             // legacy backend, so it is integrated but not used as a separate
             // truncation limiter.
             for (branch_idx, q_curr) in [
-                (BJT_QBE_BRANCH_INDEX, legacy_charges.qbe),
-                (BJT_QBC_BRANCH_INDEX, legacy_charges.qbc),
-                (BJT_QBCP_BRANCH_INDEX, legacy_charges.qcs),
+                (BJT_QBE_BRANCH_INDEX, charges[0]),
+                (BJT_QBC_BRANCH_INDEX, charges[1]),
+                (BJT_QBCP_BRANCH_INDEX, charges[2]),
             ] {
                 if !q_curr.is_finite() {
                     continue;

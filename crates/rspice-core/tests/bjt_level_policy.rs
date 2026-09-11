@@ -5116,8 +5116,18 @@ fn legacy_private_base_ac_reduction_conserves_nonlinear_terminal_current() {
                 for subs in [1, -1] {
                     let deck=Netlist::parse(&format!("Private BJT KCL\nVC c 0 {p}\nVB b 0 DC {} AC 1\nVE e 0 0\nVS s 0 {}\nQ1 c b e s mm AREA=5 M=3\n.model mm {kind}(IS=1e-14 BF=100 BR=2 VAF=40 VAR=20 IKF=1m IKR=2m SUBS={subs} RC=20 RB=30 RBM=10 RE=10 CJE=1p CJC=2p CJS=3p TF=1n TR=2n)\n.end\n",p*0.65,p*(-0.2))).unwrap();
                     for ac in engine.run_ac(&deck, &[1.0, 1e3, 1e6, 1e9]).unwrap() {
-                        let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
-                        let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+                        // Sum the four terminal probes, excluding independent
+                        // currents inside the promoted device (such as RBI).
+                        let terminals = ["VC", "VB", "VE", "VS"].map(|name| {
+                            let index = ac
+                                .branch_names
+                                .iter()
+                                .position(|branch| branch.eq_ignore_ascii_case(name))
+                                .unwrap();
+                            ac.currents[index]
+                        });
+                        let sum = terminals.iter().copied().sum::<rspice_core::Complex64>();
+                        let scale = terminals.iter().map(|i| i.norm()).sum::<f64>();
                         assert!(
                             sum.norm() < 2e-11 * scale,
                             "{dialect:?} {kind} SUBS={subs} GMIN={gmin}: terminal sum={sum:?}, scale={scale}"
@@ -5186,7 +5196,7 @@ fn private_bjt_ac_reduction_errors_instead_of_dropping_invalid_charge() {
     let deck=Netlist::parse("Invalid private BJT AC\nVC c 0 0\nVB b 0 0 AC 1\nQ1 c b 0 mm\n.model mm NPN(IS=0 RB=1k RBM=100 CJE=1e308 MJE=0)\n.end\n").unwrap();
     let error = engine.run_ac(&deck, &[1e6]).unwrap_err().to_string();
     assert!(
-        error.contains("Q1") && error.contains("AC private-state reduction"),
+        error.contains("Q1") && error.contains("AC charge"),
         "{error}"
     );
 }
@@ -5263,14 +5273,20 @@ fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
     config.convergence_config.residual_reltol = 1e-9;
     config.transient_nonlinear_abstol = Some(1e-12);
     config.transient_nonlinear_reltol = Some(1e-9);
-    config.transient_nonlinear_rhstol = Some(1e-220);
+    // The promoted RBI constitutive equation is in volts. RHSTOL below its
+    // floating-point rounding error demands accidental exact cancellation;
+    // voltage/update tolerances and the physical current assertions below
+    // qualify accuracy independently of instance size.
+    config.transient_nonlinear_rhstol = Some(1e-12);
     for nox in [false, true] {
         config.transient_nonlinear_nox = Some(nox);
         let engine = Engine::new(config.clone());
         for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            // Start at exact zero bias: this qualifies transient integration,
+            // independently of Xyce's intentionally coarser DC stopping rule.
             let sources = format!(
                 "Private nonlinear BJT\nVC c 0 {polarity}\nVB b 0 PWL(0 {} 50n {})\n",
-                polarity * 0.5,
+                0.0,
                 polarity * 0.7
             );
             // With no Early or high-injection effects, RB remains 5k even
@@ -5296,7 +5312,9 @@ fn xyce_private_bjt_transient_matches_explicit_base_resistor() {
                 ))
                 .unwrap();
                 for (form, deck) in [("private", &private), ("explicit", &scaled_explicit)] {
-                    let actual = engine.run_tran(deck, 100e-9, 0.05e-9).unwrap();
+                    let actual = engine
+                        .run_tran(deck, 100e-9, 0.05e-9)
+                        .unwrap_or_else(|e| panic!("NOX={nox} {form} {kind} M={scale:e}: {e}"));
                     assert_eq!(actual.time, expected.time);
                     for branch in ["VB", "VC"] {
                         let a = actual.try_branch_current_waveform_named(branch).unwrap();
@@ -5325,7 +5343,7 @@ fn private_bjt_transient_reports_unresolvable_charge_instead_of_using_dc() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("Q1") && error.contains("private transient state did not converge"),
+        error.contains("Q1") && error.contains("transient charge"),
         "{error}"
     );
 }

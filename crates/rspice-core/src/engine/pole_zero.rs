@@ -430,12 +430,12 @@ impl Engine {
                 continue;
             }
 
-            if bjt.vbic_mna_promoted() {
+            if bjt.mna_promoted() {
                 // Promoted VBIC: the internal states are matrix unknowns and
                 // the static linearization is already in the base G matrix,
                 // so only the charge derivatives join the C descriptor, on
                 // their actual system rows/columns.
-                let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(op_voltages);
+                let (branches, _, _) = bjt.mna_charge_state_at_solution(op_voltages);
                 let external_nodes = [
                     bjt.node_collector,
                     bjt.node_base,
@@ -451,7 +451,7 @@ impl Engine {
                     // in small-signal analysis (vbicacld.c XQxf stamps), and
                     // its CEamp pole set carries the corresponding xf Bessel
                     // pair at (-3 +- j*sqrt(3))/(2*TD).
-                    let polarity = bjt.vbic_charge_branch_polarity(branch_idx);
+                    let polarity = bjt.charge_branch_polarity(branch_idx);
                     let mut stamp_row = |row: crate::NodeId, sign: Value| {
                         let sign = sign * polarity;
                         let Some(row_idx) = Self::optional_system_index(row) else {
@@ -461,7 +461,7 @@ impl Engine {
                             let c = branch.d_internal[col];
                             if c != 0.0
                                 && let Some(col_idx) =
-                                    Self::optional_system_index(bjt.vbic_internal_node(col))
+                                    Self::optional_system_index(bjt.mna_internal_node(col))
                             {
                                 c_matrix.add(row_idx, col_idx, sign * c);
                             }
@@ -482,11 +482,11 @@ impl Engine {
 
                     let pos = branch
                         .pos_internal
-                        .map(|idx| bjt.vbic_internal_node(idx))
+                        .map(|idx| bjt.mna_internal_node(idx))
                         .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
                     let neg = branch
                         .neg_internal
-                        .map(|idx| bjt.vbic_internal_node(idx))
+                        .map(|idx| bjt.mna_internal_node(idx))
                         .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
                     if let Some(row) = pos {
                         stamp_row(row, 1.0);

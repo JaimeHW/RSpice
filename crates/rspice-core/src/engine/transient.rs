@@ -3180,7 +3180,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             if !(bjt.uses_legacy_gummel_poon()
-                || (bjt.uses_vbic_dynamic_charges() && bjt.vbic_mna_promoted()))
+                || (bjt.uses_vbic_dynamic_charges() && bjt.mna_promoted()))
             {
                 push(
                     TransientCheckpointBlockerSource::JunctionHistory,

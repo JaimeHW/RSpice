@@ -843,6 +843,23 @@ impl Bjt {
             return false;
         }
 
+        // Preserve the internal bias accuracy formerly supplied by the
+        // private solve. Absolute current tolerances alone lose this accuracy
+        // for small AREA/M. Direct GP keeps the native dialect's stopping rule.
+        if self.mna_promoted() {
+            let tolerance = criteria.voltage_tolerance().min(1e-10);
+            for (current, previous) in [
+                (self.vbe, self.vbe_prev),
+                (self.vbc, self.vbc_prev),
+                (self.vsi, self.vsi_prev),
+            ] {
+                let rounding = 64.0 * Value::EPSILON * current.abs().max(previous.abs());
+                if !current.is_finite() || (current - previous).abs() > tolerance + rounding {
+                    return false;
+                }
+            }
+        }
+
         if self.xyce_compatibility {
             // Xyce's native GP BJT contributes to allDevicesConverged only
             // through origFlag: the device is converged once pnjlim leaves
@@ -1017,11 +1034,11 @@ impl Bjt {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
-        if self.vbic_mna_promoted() {
+        if self.mna_promoted() {
             // The promoted static system (terminal rows, internal KCL rows,
             // and excess-phase algebraic rows) is the small-signal real part;
             // AC stampers ignore the rhs source terms.
-            self.stamp_vbic_mna(matrix);
+            self.stamp_mna(matrix);
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);

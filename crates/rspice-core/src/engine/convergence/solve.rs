@@ -106,11 +106,7 @@ impl Engine {
         // nanoamperes. Preserve those small currents by solving for increments.
         // Thermal derivatives near an Early-voltage cutoff can also make
         // absolute companions too large to retain physical branch currents.
-        circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.vbic_mna_promoted())
+        circuit.bjts.devices.iter().any(|bjt| bjt.mna_promoted())
     }
 
     pub(in crate::engine::convergence) fn solve_direct_dc_correction(
@@ -2396,8 +2392,7 @@ mod correction_constraint_tests {
                     }),
             }
             .unwrap_or_else(|error| panic!("{route}: {error}"));
-            let [_, _, _, _, _, ci, _, bi, ei, ..] =
-                circuit.bjts.devices[0].vbic_mna_coupling_nodes();
+            let [_, _, _, _, _, ci, _, bi, ei, ..] = circuit.bjts.devices[0].mna_coupling_nodes();
             // Independently solved with 80-digit arithmetic; these intrinsic
             // voltages also determine the series and terminal DC currents.
             for (node, expected) in [

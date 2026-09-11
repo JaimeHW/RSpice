@@ -1322,8 +1322,8 @@ impl CircuitData {
     ) {
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         for bjt in &self.bjts.devices {
-            if bjt.vbic_mna_promoted() {
-                bjt.stamp_vbic_mna_correction(&mut stamper, anchor);
+            if bjt.mna_promoted() {
+                bjt.stamp_mna_correction(&mut stamper, anchor);
             }
         }
     }
@@ -1346,7 +1346,7 @@ impl CircuitData {
         }
         if defer_vbic {
             for bjt in &self.bjts.devices {
-                if !bjt.vbic_mna_promoted() {
+                if !bjt.mna_promoted() {
                     bjt.stamp_direct(matrix, rhs, voltages);
                 }
             }

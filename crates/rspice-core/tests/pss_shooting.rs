@@ -15,6 +15,86 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn gummel_poon_pss_private_charge_matches_ac_poles_and_floquet() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    let tau = 1e3 * 150e-12;
+    let wt = std::f64::consts::TAU * F0 * tau;
+    let amplitude = 0.01 / (1.0 + wt * wt).sqrt();
+    let multiplier = (-1.0 / (F0 * tau)).exp();
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for (base, output) in [("RB=1k RBM=20", "Q1.__bi.internal"), ("RB=1k", "Q1.__bint")] {
+            let netlist = Netlist::parse(&format!(
+                "GP periodic charge\nV1 in 0 DC {} SIN({} {} 1meg) AC 1\nQ1 0 in 0 qm AREA=2 M=3\n.model qm {kind}(LEVEL=1 IS=0 {base} CJE=100p CJC=200p MJE=0 MJC=0 XCJC=.25)\n.end",
+                -p, -p, 0.01*p,
+            )).unwrap();
+            let ac = engine.run_ac(&netlist, &[F0]).unwrap();
+            let out = ac[0]
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(output))
+                .unwrap();
+            assert!((0.01 * ac[0].voltages[out].norm() / amplitude - 1.0).abs() < 1e-10);
+            let input = ac[0]
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("in"))
+                .unwrap()
+                + 1;
+            let poles = engine
+                .run_pz_ports(&netlist, input, None, out + 1, None, false, true, true)
+                .unwrap();
+            assert_eq!(poles.poles.len(), 1, "{kind} {base}: {:?}", poles.poles);
+            assert!((poles.poles[0].re * tau + 1.0).abs() < 1e-9);
+            assert!(poles.poles[0].im.abs() * tau < 1e-9);
+            let mut previous_error = f64::INFINITY;
+            for points in [256, 512] {
+                let point = engine
+                    .run_pss_operating_point_with_abort(
+                        &netlist,
+                        PssConfig::new(F0)
+                            .with_points_per_period(points)
+                            .with_tstab_periods(0)
+                            .with_tolerance(1e-10),
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("{kind} {base} N={points}: {error}"));
+                assert_eq!(point.shooting_state_basis(), ["Q:Q1:qbe"]);
+                let result = &point.analysis().result;
+                let out = result
+                    .node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(output))
+                    .unwrap()
+                    + 1;
+                let error = (result.harmonics(out, 1)[1].magnitude / amplitude - 1.0).abs();
+                assert!(
+                    error < previous_error,
+                    "{kind} {base} N={points}: {error} vs {previous_error}"
+                );
+                previous_error = error;
+                assert!(error < 0.002);
+                for (&time, &actual) in result.time.iter().zip(&result.waveforms[out - 1].values) {
+                    let phase = std::f64::consts::TAU * F0 * time;
+                    let expected =
+                        -p + p * 0.01 * (phase.sin() - wt * phase.cos()) / (1.0 + wt * wt);
+                    assert!(
+                        (actual - expected).abs() < 0.002 * amplitude,
+                        "{kind} {base} N={points} t={time}: {actual} vs {expected}"
+                    );
+                }
+                assert_eq!(point.analysis().floquet_multipliers.len(), 1);
+                assert!(
+                    (point.analysis().floquet_multipliers[0].re / multiplier - 1.0).abs() < 0.001
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn classic_jfet_pss_charge_matches_rc_ac_and_floquet_under_refinement() {
     for (kind, polarity) in [("NJF", 1.0), ("PJF", -1.0)] {
         let netlist = Netlist::parse(&format!(

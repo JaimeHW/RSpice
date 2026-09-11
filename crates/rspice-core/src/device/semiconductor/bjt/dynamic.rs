@@ -14,8 +14,8 @@ impl Bjt {
     /// Convert model-oriented VBIC charge and its voltage gradients to a
     /// physical branch current. Thermal and delay states are polarity independent.
     #[inline]
-    pub(crate) fn vbic_charge_branch_polarity(&self, branch: usize) -> Value {
-        if branch < IDX_QCTH {
+    pub(crate) fn charge_branch_polarity(&self, branch: usize) -> Value {
+        if self.uses_vbic_dynamic_charges() && branch < IDX_QCTH {
             self.polarity()
         } else {
             1.0
@@ -624,13 +624,29 @@ impl Bjt {
         (branches, base_inputs, d_itzf_d_vrth)
     }
 
+    pub(super) fn dynamic_charge_branches_at_bias(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
+        if self.uses_legacy_gummel_poon() {
+            self.legacy_dynamic_charge_branches(external, internal)
+        } else {
+            self.vbic_dynamic_charge_state_at_bias(external, internal, None)
+                .0
+        }
+    }
+
     pub(super) fn charge_snapshot_from_base(
         &self,
         base: BjtReducedLinearization,
     ) -> BjtChargeSnapshot {
         let mut template = self.dynamic_reduction_template(base);
         if !self.uses_vbic_dynamic_charges() {
-            let branches = self.legacy_dynamic_charge_branches(&template);
+            let branches = self.legacy_dynamic_charge_branches(
+                template.external_voltages,
+                template.internal_voltages,
+            );
             return BjtChargeSnapshot {
                 reduction: template,
                 branches,
@@ -725,10 +741,10 @@ impl Bjt {
 
     pub(super) fn legacy_dynamic_charge_branches(
         &self,
-        reduction: &BjtDynamicReduction,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
         let mut branches = [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT];
-        let internal = &reduction.internal_voltages;
         let vbe = internal[IDX_VBI] - internal[IDX_VEI];
         let vbc = internal[IDX_VBI] - internal[IDX_VCI];
         let collector_terminal = self.legacy_charge_collector_terminal();
@@ -738,14 +754,14 @@ impl Bjt {
         let substrate_connection_terminal = self.legacy_charge_substrate_connection_terminal();
         let terminal_voltage = |terminal: (Option<usize>, Option<usize>)| -> Value {
             if let Some(idx) = terminal.0 {
-                reduction.internal_voltages[idx]
+                internal[idx]
             } else if let Some(idx) = terminal.1 {
-                reduction.external_voltages[idx]
+                external[idx]
             } else {
                 0.0
             }
         };
-        let vbx = reduction.external_voltages[EXT_B] - terminal_voltage(collector_terminal);
+        let vbx = external[EXT_B] - terminal_voltage(collector_terminal);
         let vcs =
             terminal_voltage(substrate_connection_terminal) - terminal_voltage(substrate_terminal);
         let charges = self.legacy_transient_charge_state_with_vbx(vbe, vbc, vbx, vcs);
@@ -847,9 +863,8 @@ impl Bjt {
     /// Frozen-time shot and flicker currents follow the private transient bias.
     pub(crate) fn legacy_noise_branch_currents_at_state(
         &self,
-        snapshot: &BjtChargeSnapshot,
+        v: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> (Value, Value, Value) {
-        let v = snapshot.reduction.internal_voltages;
         let (linearized, _) = self.linearize_currents_with_branches(
             v[IDX_VBI] - v[IDX_VEI],
             v[IDX_VBX] - v[IDX_VEI],
@@ -869,9 +884,8 @@ impl Bjt {
 
     pub(crate) fn legacy_private_resistance_noise(
         &self,
-        snapshot: &BjtChargeSnapshot,
+        v: [Value; BJT_INTERNAL_STATE_DIM],
     ) -> [LegacyBjtThermalNoise; 7] {
-        let v = snapshot.reduction.internal_voltages;
         let (linearized, _) = self.linearize_currents_with_branches(
             v[IDX_VBI] - v[IDX_VEI],
             v[IDX_VBX] - v[IDX_VEI],
@@ -1091,7 +1105,10 @@ impl Bjt {
         let reduction = self.dynamic_reduction_for_internal_state(vc, vb, ve, vs, internal);
 
         if !self.uses_vbic_dynamic_charges() {
-            let branches = self.legacy_dynamic_charge_branches(&reduction);
+            let branches = self.legacy_dynamic_charge_branches(
+                reduction.external_voltages,
+                reduction.internal_voltages,
+            );
             return BjtChargeSnapshot {
                 reduction,
                 branches,
@@ -1584,12 +1601,18 @@ mod tests {
             .collect();
         let mut bjt = Bjt::new_npn("q".into(), 1, 1, 1).with_params(&params);
         let reduction = BjtDynamicReduction::default();
-        let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+        let branches = bjt.legacy_dynamic_charge_branches(
+            reduction.external_voltages,
+            reduction.internal_voltages,
+        );
         assert!(!branches[0].is_active());
         assert!(!branches[2].is_active());
         assert!(branches[7].is_active());
         bjt.rbi = 1.0;
-        let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+        let branches = bjt.legacy_dynamic_charge_branches(
+            reduction.external_voltages,
+            reduction.internal_voltages,
+        );
         assert!(branches[0].is_active());
         assert!(branches[2].is_active());
         assert!(branches[7].is_active());
@@ -1636,7 +1659,10 @@ mod tests {
                 reduction.internal_voltages[IDX_VCI] = vbe;
                 reduction.external_voltages[EXT_B] = vbe;
                 reduction.external_voltages[EXT_C] = vbe;
-                let branches = bjt.legacy_dynamic_charge_branches(&reduction);
+                let branches = bjt.legacy_dynamic_charge_branches(
+                    reduction.external_voltages,
+                    reduction.internal_voltages,
+                );
                 assert!(
                     branches[0].is_active(),
                     "bias={bias}: charge branch disappeared"

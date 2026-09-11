@@ -288,7 +288,7 @@ impl PssStateBasis {
         }
         for (device, bjt) in circuit.bjts.devices.iter().enumerate() {
             for (charge, nodes) in bjt
-                .vbic_electrical_charge_storage_nodes()
+                .electrical_charge_storage_nodes()
                 .into_iter()
                 .enumerate()
             {
@@ -362,7 +362,17 @@ impl PssStateBasis {
                 VoltageBranch::Bjt { device, charge, .. } => {
                     const NAMES: [&str; 8] =
                         ["qbe", "qbex", "qbc", "qbcx", "qbep", "qbeo", "qbco", "qbcp"];
-                    format!("Q:{}:{}", circuit.bjts.devices[device].name, NAMES[charge])
+                    let bjt = &circuit.bjts.devices[device];
+                    let name = if bjt.uses_legacy_gummel_poon() {
+                        match charge {
+                            3 => "qbx",
+                            7 => "qcs",
+                            _ => NAMES[charge],
+                        }
+                    } else {
+                        NAMES[charge]
+                    };
+                    format!("Q:{}:{}", bjt.name, name)
                 }
                 VoltageBranch::Jfet { device, charge, .. } => {
                     format!(

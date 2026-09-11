@@ -590,7 +590,7 @@ impl Engine {
         const VCE_SAT: Value = 0.2; // Saturation voltage
 
         for bjt in &circuit.bjts.devices {
-            if bjt.is_initially_off() || bjt.vbic_mna_promoted() {
+            if bjt.is_initially_off() || bjt.mna_promoted() {
                 continue;
             }
 
@@ -744,9 +744,7 @@ impl Engine {
         };
 
         for bjt in &circuit.bjts.devices {
-            if bjt.is_initially_off()
-                || bjt.vbic_mna_promoted()
-                || !bjt.uses_legacy_junction_limiting()
+            if bjt.is_initially_off() || bjt.mna_promoted() || !bjt.uses_legacy_junction_limiting()
             {
                 continue;
             }
@@ -819,7 +817,7 @@ impl Engine {
         }
 
         for bjt in &circuit.bjts.devices {
-            if !bjt.vbic_mna_promoted() {
+            if !bjt.mna_promoted() {
                 continue;
             }
 

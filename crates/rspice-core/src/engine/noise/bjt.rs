@@ -177,8 +177,11 @@ mod tests {
             crate::SimulationConfig::default()
                 .with_spice_dialect(crate::config::SpiceDialect::Ngspice),
         );
-        let deck = Netlist::parse("Frozen private base\nVB b 0 0\nVC c 0 0\nQ1 c b 0 qm\n.model qm NPN(IS=0 RB=100 RBM=0 CJE=1n MJE=0 CJC=2n MJC=0 XCJC=1)\n.end").unwrap();
+        let deck = Netlist::parse("Frozen private base\nVB b 0 0\nVC c 0 0\nQ1 c b 0 qm\n.model qm NPN(IS=0 CJE=1n MJE=0 CJC=2n MJC=0 XCJC=1)\n.end").unwrap();
         let mut circuit = engine.build_circuit(&deck).unwrap();
+        // Exercise the direct/programmatic private-state API. Netlist-built
+        // variable base resistances now use real matrix nodes instead.
+        circuit.bjts.devices[0].rbi = 100.0;
         let solution = vec![0.0; circuit.matrix_size()];
         circuit.set_semiconductor_junction_gmin(0.0);
         circuit.update_nonlinear(&solution);

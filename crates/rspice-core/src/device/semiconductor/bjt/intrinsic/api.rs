@@ -100,7 +100,7 @@ impl Bjt {
 
     /// Stamp using O(1) direct indexing (call after link)
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
-        if self.vbic_mna_promoted() {
+        if self.mna_promoted() {
             // The promoted system spans the internal nodes, so it stamps
             // through the position-mapped path instead of the 3x3 linkage.
             struct PromotedStamper<'a> {
@@ -123,7 +123,7 @@ impl Bjt {
                 }
             }
             let mut stamper = PromotedStamper { matrix, rhs };
-            self.stamp_vbic_mna(&mut stamper);
+            self.stamp_mna(&mut stamper);
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);

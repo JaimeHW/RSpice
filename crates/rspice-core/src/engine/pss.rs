@@ -2200,7 +2200,7 @@ impl Engine {
                 .iter()
                 .all(|diode| !diode.has_charge_storage())
             && circuit.bjts.devices.iter().all(|bjt| {
-                bjt.vbic_electrical_charge_storage_nodes()
+                bjt.electrical_charge_storage_nodes()
                     .iter()
                     .all(Option::is_none)
             })

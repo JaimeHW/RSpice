@@ -8,6 +8,135 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    // ngspice 46, identical NPN card below: TRAP, RELTOL=1e-9,
+    // ABSTOL=1e-18, CHGTOL=1e-22, GMIN=0, max step 0.1 ns.
+    // Linear interpolation at eight phases of the settled 19--20 us cycle:
+    // [intrinsic VBE, I(VC), I(VB)]. No private RSpice solver supplies this oracle.
+    let reference = [
+        [
+            6.30578767042357602e-1,
+            -2.98997251485324980e-4,
+            -1.41771813619889610e-5,
+        ],
+        [
+            6.46714289880719662e-1,
+            -4.89399659214451318e-4,
+            -1.89337801930940490e-5,
+        ],
+        [
+            6.58914686737243738e-1,
+            -6.93674739233193999e-4,
+            -1.70222715296312860e-5,
+        ],
+        [
+            6.60355903066060068e-1,
+            -7.23571014206733447e-4,
+            -7.55605874014792859e-6,
+        ],
+        [
+            6.50928684442999894e-1,
+            -5.57669368421028606e-4,
+            2.57948906010152257e-6,
+        ],
+        [
+            6.35716106317155916e-1,
+            -3.55988591001042383e-4,
+            5.87537526912878170e-6,
+        ],
+        [
+            6.22950573595932755e-1,
+            -2.36858621669185071e-4,
+            1.77974652209541728e-6,
+        ],
+        [
+            6.20579689520069921e-1,
+            -2.17246220750473361e-4,
+            -6.21136165965052330e-6,
+        ],
+    ];
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = Netlist::parse(&format!(
+            "Nonlinear GP periodic reference\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 qm\n.model qm {kind}(IS=1e-14 BF=100 VAF=50 IKF=1m RB=2k RBM=100 CJE=30p CJC=20p TF=2n XCJC=.4)\n.end\n",
+            p*1.2, p*0.65, p*0.65, p*0.03,
+        )).unwrap();
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let (analysis, state) = engine
+            .run_pss_with_continuation_state(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(512)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-10),
+            )
+            .unwrap_or_else(|error| panic!("{kind} periodic solve: {error}"));
+        let node = analysis
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("Q1.__bi.internal"))
+            .unwrap();
+        for (phase, expected) in reference.iter().enumerate() {
+            let actual = p * analysis.result.waveforms[node].values[phase * 64];
+            assert!(
+                (actual - expected[0]).abs() < 4e-6,
+                "{kind} PSS phase={phase}/8: {actual} vs {}",
+                expected[0]
+            );
+        }
+        let (continued, checkpoint) = engine
+            .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-9)
+            .unwrap();
+        let traces = [
+            continued
+                .try_voltage_waveform_named("Q1.__bi.internal")
+                .unwrap(),
+            continued.try_branch_current_waveform_named("VC").unwrap(),
+            continued.try_branch_current_waveform_named("VB").unwrap(),
+        ];
+        for (phase, expected) in reference.iter().enumerate() {
+            let time = phase as f64 / (8.0 * F0);
+            let hi = continued.time.partition_point(|&t| t < time);
+            let lo = hi.saturating_sub(1);
+            let fraction = if lo == hi {
+                0.0
+            } else {
+                (time - continued.time[lo]) / (continued.time[hi] - continued.time[lo])
+            };
+            for (column, tolerance) in [4e-6, 5e-8, 5e-9].into_iter().enumerate() {
+                let trace = traces[column];
+                let actual = p * (trace[lo] + fraction * (trace[hi] - trace[lo]));
+                assert!(
+                    (actual - expected[column]).abs() < tolerance,
+                    "{kind} continuation phase={phase}/8 column={column}: {actual} vs {}",
+                    expected[column]
+                );
+            }
+        }
+        let (direct, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 1e-9)
+            .unwrap();
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&netlist, &restored, 1.2e-6, 1e-9)
+                .unwrap();
+            assert_eq!(resumed.time, direct.time);
+            assert_eq!(resumed.voltages, direct.voltages);
+            assert_eq!(resumed.branch_currents, direct.branch_currents);
+        }
+    }
+}
+
+#[test]
 fn nonlinear_descriptor_preserves_physical_transient_continuation() {
     let deck=Netlist::parse("Implicit nonlinear continuation\nV1 src 0 SIN(0.6 0.1 1)\nR1 src in 100\nR2 in 0 200\nD1 in 0 DM\n.model DM D(IS=1e-12)\nE1 out 0 in 0 2\nCout out 0 1u\n.end\n").unwrap();
     let engine = Engine::default();
