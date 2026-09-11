@@ -384,6 +384,37 @@ mod tests {
     }
 
     #[test]
+    fn limited_private_base_companion_conserves_terminal_current() {
+        let params = [("RB", 120.0), ("RBM", 20.0), ("IRB", 1e-5)]
+            .map(|(name, value)| (name.to_owned(), value))
+            .into_iter()
+            .collect();
+        for xyce in [false, true] {
+            for polarity in [1.0, -1.0] {
+                let mut bjt = if polarity > 0.0 {
+                    Bjt::new_npn("q".into(), 1, 2, 3)
+                } else {
+                    Bjt::new_pnp("q".into(), 1, 2, 3)
+                }
+                .with_params(&params);
+                bjt.set_xyce_compatibility(xyce);
+                let bias = [5.0 * polarity, 0.6 * polarity, 0.0];
+                bjt.update(&bias);
+                assert!(bjt.legacy_junction_limited_for_trace());
+                let mut stamp = DenseStamper::new(3);
+                bjt.stamp_nonlinear(&bias, &mut stamp, &mut []);
+                // A three-terminal transistor cannot create net charge,
+                // even when its private base state is junction-limited.
+                for probe in [bias, [0.0; 3], [0.1, -0.2, 0.3]] {
+                    let currents = stamp.residual(&probe);
+                    let scale = currents.iter().map(|i| i.abs()).sum::<Value>();
+                    assert!(currents.iter().sum::<Value>().abs() <= 1e-12 * scale + 1e-18);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn limited_legacy_bjt_direct_stamp_matches_generic_companion_anchor() {
         assert_limited_direct_stamp_matches_generic(
             Bjt::new_npn("qn".to_string(), 1, 2, 3),

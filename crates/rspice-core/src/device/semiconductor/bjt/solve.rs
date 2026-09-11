@@ -918,9 +918,30 @@ impl Bjt {
         ve: Value,
         vs: Value,
     ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
-        let mut rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        let reduced = self.reduced_linearization(vc, vb, ve, vs);
+        let mut rows = reduced.g_reduced;
         let anchor = self.companion_anchor(vc, vb, ve, vs);
         let mut currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
+        if self.uses_legacy_gummel_poon() && self.has_intrinsic_state_unknowns() {
+            // Junction limiting can move a private node away from internal
+            // KCL. Schur reduction must eliminate that residual as well as
+            // its Jacobian: Fe_reduced = Fe - Gei * Gii^-1 * Fi. Evaluate Fi
+            // directly at the companion anchor, avoiding cancellation of
+            // absolute-voltage products in Gi * V - zi.
+            let [ac, ab, ae, asub] = anchor;
+            let (residual, _) =
+                self.intrinsic_state_residual_jacobian(ac, ab, ae, asub, reduced.internal_voltages);
+            let correction =
+                crate::numerics::solve_small_dense(&reduced.g_ii, &residual, INTERNAL_DIM)
+                    .unwrap_or([Value::NAN; INTERNAL_DIM]);
+            for (current, row) in currents.iter_mut().zip(&reduced.g_ei) {
+                *current -= row
+                    .iter()
+                    .zip(&correction)
+                    .map(|(g, dv)| g * dv)
+                    .sum::<Value>();
+            }
+        }
         let reference = self.project_legacy_tied_terminal_system(&mut rows, &mut currents);
         let mut rhs = [0.0; EXTERNAL_DIM];
         for row in 0..EXTERNAL_DIM {
