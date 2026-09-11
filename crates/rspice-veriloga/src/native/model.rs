@@ -2056,6 +2056,7 @@ mod tests {
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
             idtmod_origins: std::ptr::null_mut(),
+            state_integration: std::ptr::null(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

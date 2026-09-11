@@ -2285,6 +2285,92 @@ endmodule
     }
 
     #[test]
+    fn distinct_integration_rules_wasm_preserve_weighted_derivatives_and_full_states() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::{IntegrationCoefficients as Rule, VerilogAEvaluationMode as Mode};
+        let source = include_str!("../../tests/fixtures/distinct_integration_rules.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "distinct_companions", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian_export = harness.jacobian_export(0, 0);
+            let derivative = Rule::backward_euler(0.25).unwrap();
+            let trapezoidal = Rule {
+                previous_derivative_scale: 1.0,
+                ..derivative
+            };
+            for (time, voltage, state_rule, current, jacobian, static_current) in [
+                (0.0, 2.0, Rule::inactive(), 11.0, 3.0, 11.0),
+                (0.5, 4.0, trapezoidal, 42.4, 14.7, 18.4),
+                (1.0, 8.0, trapezoidal, 81.84, 14.7, 33.84),
+                (
+                    1.5,
+                    16.0,
+                    Rule::backward_euler(0.5).unwrap(),
+                    148.0 + 23.68 / 3.0,
+                    15.0 + 1.0 / 3.0,
+                    52.0 + 23.68 / 3.0,
+                ),
+            ] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(if time == 0.0 { 0.0 } else { 0.5 });
+                context
+                    .try_set_integration_rules(
+                        if time == 0.0 {
+                            Rule::inactive()
+                        } else {
+                            derivative
+                        },
+                        state_rule,
+                    )
+                    .unwrap();
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                assert!(
+                    (actual - current).abs() < 1e-11,
+                    "postfix={postfix}, t={time}: current={actual}, expected={current}"
+                );
+                assert_eq!(harness.call(&jacobian_export), 0);
+                let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                assert!(
+                    (actual - jacobian).abs() < 1e-12,
+                    "postfix={postfix}, t={time}: jacobian={actual}, expected={jacobian}"
+                );
+                if time != 0.0 {
+                    let context = harness.store.data_mut().context_mut();
+                    let filters = format!("{:?}", context.laplace_filters);
+                    let states = context.state_values.clone();
+                    let valid = context.state_candidate_valid.clone();
+                    context.evaluation_mode = Mode::StaticDaeProbe;
+                    context.begin_stateful_evaluation();
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    assert!(
+                        (harness.read_f64(FRAME_RESULT_OFFSET as usize) - static_current).abs()
+                            < 1e-11
+                    );
+                    assert_eq!(harness.call(&jacobian_export), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 2.0);
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(format!("{:?}", context.laplace_filters), filters);
+                    assert_eq!(context.state_values, states);
+                    assert_eq!(context.state_candidate_valid, valid);
+                    context.advance_state().unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn static_dae_wasm_laplace_retains_candidate_and_direct_jacobian() {
         use super::abi::FRAME_RESULT_OFFSET;
         use crate::vm::VerilogAEvaluationMode as Mode;

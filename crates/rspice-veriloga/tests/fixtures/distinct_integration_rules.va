@@ -1,0 +1,7 @@
+module distinct_companions(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p,n) <+ 2.0*V(p,n) + ddt(3.0*V(p,n))
+        + idt(V(p,n), 5.0) + idtmod(V(p,n), 0.0, 10.0, 0.0)
+        + laplace_nd(V(p,n), '{1.0}, '{1.0,1.0});
+endmodule

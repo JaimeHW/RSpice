@@ -4012,6 +4012,16 @@ impl VerilogADevice {
         self.context.try_set_integration_coefficients(coefficients)
     }
 
+    /// Keep derivative stamps and internal states on their solver-selected
+    /// companion rules without losing candidate rollback or OP promotion.
+    pub fn try_set_integration_rules(
+        &mut self,
+        derivative: crate::vm::IntegrationCoefficients,
+        state: crate::vm::IntegrationCoefficients,
+    ) -> Result<(), VmError> {
+        self.context.try_set_integration_rules(derivative, state)
+    }
+
     /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
     pub fn set_analysis_type(&mut self, analysis: u8) {
         self.try_set_analysis_type(analysis).unwrap_or_else(|err| {
@@ -5891,6 +5901,7 @@ impl VerilogADevice {
             },
             state_older_candidate_len: context.state_older_candidate.len(),
             idtmod_origins: &mut context.idtmod_origins,
+            state_integration: context.state_integration_coefficients_ref(),
             prelude_slots: if context.prelude_slots.is_empty() {
                 std::ptr::null_mut()
             } else {
@@ -9066,6 +9077,91 @@ mod static_dae_device_tests {
             assert_eq!(callbacks, 0);
             assert_eq!(format!("{:?}", device.context), before);
             device.context.advance_state().unwrap();
+        }
+    }
+
+    #[test]
+    fn distinct_integration_rules_native_preserve_weighted_derivatives_and_full_states() {
+        use crate::vm::IntegrationCoefficients as Rule;
+        let source = include_str!("../tests/fixtures/distinct_integration_rules.va");
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "DISTINCT",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        let derivative = Rule::backward_euler(0.25).unwrap();
+        let trapezoidal = Rule {
+            previous_derivative_scale: 1.0,
+            ..derivative
+        };
+        // At DC the integral initial conditions are 5 and 0; the filter is 2.
+        // The two transient trapezoidal points have integral pairs (6.5,1.5)
+        // and (9.5,4.5), filter states 2.4 and 3.84, and ddt currents 24 and 48.
+        // The final point changes only the state rule to BE and crosses a wrap.
+        for (time, voltage, state_rule, current, jacobian, static_current) in [
+            (0.0, 2.0, Rule::inactive(), 11.0, 3.0, 11.0),
+            (0.5, 4.0, trapezoidal, 42.4, 14.7, 18.4),
+            (1.0, 8.0, trapezoidal, 81.84, 14.7, 33.84),
+            (
+                1.5,
+                16.0,
+                Rule::backward_euler(0.5).unwrap(),
+                148.0 + 23.68 / 3.0,
+                15.0 + 1.0 / 3.0,
+                52.0 + 23.68 / 3.0,
+            ),
+        ] {
+            device.set_time(time);
+            device.set_timestep(if time == 0.0 { 0.0 } else { 0.5 });
+            device
+                .try_set_integration_rules(
+                    if time == 0.0 {
+                        Rule::inactive()
+                    } else {
+                        derivative
+                    },
+                    state_rule,
+                )
+                .unwrap();
+            let (mut actual_jacobian, mut rhs) = (0.0, 0.0);
+            device
+                .try_stamp(
+                    &[voltage],
+                    |_, _, value| actual_jacobian += value,
+                    |_, value| rhs += value,
+                )
+                .unwrap();
+            assert!(
+                (actual_jacobian - jacobian).abs() < 1e-12,
+                "t={time}: jacobian={actual_jacobian}, expected={jacobian}"
+            );
+            assert!(
+                (actual_jacobian * voltage - rhs - current).abs() < 1e-11,
+                "t={time}: current={}, expected={current}",
+                actual_jacobian * voltage - rhs
+            );
+            if time != 0.0 {
+                let before = format!("{:?}", device.context);
+                let (mut static_jacobian, mut static_rhs) = (0.0, 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[voltage],
+                        |_, _, value| static_jacobian += value,
+                        |_, value| static_rhs += value,
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(static_jacobian, 2.0);
+                assert!((static_jacobian * voltage - static_rhs - static_current).abs() < 1e-11);
+                assert_eq!(format!("{:?}", device.context), before);
+                device.context.advance_state().unwrap();
+            }
         }
     }
 

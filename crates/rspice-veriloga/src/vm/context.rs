@@ -398,6 +398,9 @@ pub struct VmContext {
     timestep: f64,
     /// Companion coefficients selected by the transient solver.
     integration: IntegrationCoefficients,
+    /// Internal integrators and filters may need a full companion while ddt
+    /// stamps participate in an externally weighted F/Q equation.
+    state_integration: Option<IntegrationCoefficients>,
     /// Lookup tables for $table_model interpolation
     pub lookup_tables: Vec<LookupTable>,
     /// Delay buffers for absdelay function
@@ -485,6 +488,7 @@ impl Default for VmContext {
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
+            state_integration: None,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -628,6 +632,7 @@ impl VmContext {
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
+            state_integration: None,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -682,6 +687,7 @@ impl VmContext {
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
+            state_integration: None,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -736,6 +742,7 @@ impl VmContext {
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
+            state_integration: None,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -1662,6 +1669,16 @@ impl VmContext {
         self.integration
     }
 
+    /// Companion used by internal integral and state-space filter states.
+    #[inline]
+    pub fn state_integration_coefficients(&self) -> IntegrationCoefficients {
+        *self.state_integration_coefficients_ref()
+    }
+
+    pub(crate) fn state_integration_coefficients_ref(&self) -> &IntegrationCoefficients {
+        self.state_integration.as_ref().unwrap_or(&self.integration)
+    }
+
     /// Current transient timestep.
     #[inline]
     pub fn timestep(&self) -> f64 {
@@ -1687,7 +1704,7 @@ impl VmContext {
             .map_err(|error| VmError::InvalidRuntimeConfiguration(error.to_string()))?;
         coefficients.validate()?;
         self.timestep = dt;
-        self.apply_integration_coefficients(coefficients);
+        self.apply_integration_coefficients(coefficients, coefficients);
         Ok(())
     }
 
@@ -1705,13 +1722,34 @@ impl VmContext {
         &mut self,
         coefficients: IntegrationCoefficients,
     ) -> Result<(), VmError> {
+        self.try_set_integration_rules(coefficients, coefficients)
+    }
+
+    /// Select derivative-stamp and internal-state companions atomically.
+    /// They share one physical analysis/timepoint and must both be active or
+    /// both inactive. Changing either invalidates candidates made by the old rule.
+    pub fn try_set_integration_rules(
+        &mut self,
+        derivative: IntegrationCoefficients,
+        state: IntegrationCoefficients,
+    ) -> Result<(), VmError> {
+        derivative.validate()?;
+        state.validate()?;
+        if derivative.active != state.active {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "derivative and state integration rules must share the active analysis".into(),
+            ));
+        }
         self.numerical_evaluation_valid = false;
-        coefficients.validate()?;
-        self.apply_integration_coefficients(coefficients);
+        self.apply_integration_coefficients(derivative, state);
         Ok(())
     }
 
-    fn apply_integration_coefficients(&mut self, coefficients: IntegrationCoefficients) {
+    fn apply_integration_coefficients(
+        &mut self,
+        coefficients: IntegrationCoefficients,
+        state: IntegrationCoefficients,
+    ) {
         if !self.integration.active && coefficients.active {
             // The DC operating-point evaluation establishes each operator's
             // current state but is not an accepted transient step.  Promote
@@ -1765,7 +1803,8 @@ impl VmContext {
             for filter in &mut self.laplace_filters {
                 filter.promote_operating_point_candidate();
             }
-        } else if self.integration != coefficients {
+        } else if self.integration != coefficients || self.state_integration_coefficients() != state
+        {
             for origin in self.idtmod_origins.values_mut() {
                 origin.candidate = None;
             }
@@ -1784,6 +1823,7 @@ impl VmContext {
             }
         }
         self.integration = coefficients;
+        self.state_integration = (state != coefficients).then_some(state);
     }
 
     /// Reset timer scheduling before a fresh device evaluation.
@@ -2331,6 +2371,57 @@ mod tests {
             Err(VmError::InvalidRuntimeConfiguration(message))
                 if message.contains("must sum to the derivative scale")
         ));
+    }
+
+    #[test]
+    fn distinct_integration_rules_validate_and_invalidate_as_one_update() {
+        let mut context = VmContext::with_states(0, 1);
+        let derivative = IntegrationCoefficients::backward_euler(0.25).unwrap();
+        let state = IntegrationCoefficients {
+            previous_derivative_scale: 1.0,
+            ..derivative
+        };
+        context
+            .try_set_integration_rules(derivative, state)
+            .unwrap();
+        context.state_values[0] = 7.0;
+        context.state_values_prev[0] = 3.0;
+        context.state_initialized[0] = true;
+        context.state_candidate_valid[0] = INTEGRATION_CANDIDATE_VALID;
+        context.numerical_evaluation_valid = true;
+        let before = format!("{context:?}");
+        let invalid = IntegrationCoefficients {
+            derivative_scale: f64::NAN,
+            ..state
+        };
+        for (ddt, integral) in [
+            (derivative, invalid),
+            (invalid, state),
+            (derivative, IntegrationCoefficients::inactive()),
+            (IntegrationCoefficients::inactive(), state),
+        ] {
+            assert!(context.try_set_integration_rules(ddt, integral).is_err());
+            assert_eq!(format!("{context:?}"), before);
+        }
+        // Changing only the internal-state rule invalidates its old candidate.
+        let be = IntegrationCoefficients::backward_euler(0.5).unwrap();
+        context.try_set_integration_rules(derivative, be).unwrap();
+        assert_eq!(context.integration_coefficients(), derivative);
+        assert_eq!(context.state_integration_coefficients(), be);
+        assert!(!context.numerical_evaluation_valid);
+        assert_eq!(
+            context.state_candidate_valid,
+            vec![super::INTEGRATION_CANDIDATE_IDLE]
+        );
+        assert_eq!(context.state_values, vec![3.0]);
+        // Existing APIs select the same rule for both families.
+        context
+            .try_set_integration_coefficients(derivative)
+            .unwrap();
+        assert_eq!(context.state_integration_coefficients(), derivative);
+        context.try_set_timestep(0.5).unwrap();
+        assert_eq!(context.integration_coefficients(), be);
+        assert_eq!(context.state_integration_coefficients(), be);
     }
 
     #[test]

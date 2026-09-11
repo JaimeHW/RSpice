@@ -143,6 +143,13 @@ fn integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients {
     }
 }
 
+fn state_integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients {
+    // The owning VM lends this stable field for the synchronous native call.
+    unsafe { ctx.state_integration.as_ref() }
+        .copied()
+        .unwrap_or_else(|| integration_coefficients(ctx))
+}
+
 fn event_integer_operand(name: &str, value: f64) -> Result<i32, String> {
     let converted = real_to_integer(value)
         .map_err(|error| format!("{name} integer conversion failed: {error}"))?;
@@ -485,6 +492,9 @@ pub struct EvalContext {
     pub static_dae_probe: u8,
     /// Exclusive circular-integrator history, borrowed from the owning VM.
     pub idtmod_origins: *mut std::collections::BTreeMap<usize, crate::vm::IdtModState>,
+    /// Borrowed internal-state companion for this dispatch. Null uses the
+    /// derivative fields above, preserving single-rule helper callers.
+    pub state_integration: *const IntegrationCoefficients,
 }
 
 impl EvalContext {
@@ -552,6 +562,7 @@ impl EvalContext {
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
             idtmod_origins: std::ptr::null_mut(),
+            state_integration: std::ptr::null(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
@@ -1333,7 +1344,7 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 
     let filters =
         unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
-    let coefficients = integration_coefficients(ctx);
+    let coefficients = state_integration_coefficients(ctx);
     let result = if ctx.static_dae_probe != 0 {
         filters[filter_id].static_dae_output(input)
     } else if ctx.analysis_type == 2 && coefficients.active {
@@ -1407,7 +1418,7 @@ pub unsafe extern "C" fn rspice_laplace_derivative_native(
         std::slice::from_raw_parts(ctx.laplace_filters.cast_const(), ctx.laplace_filters_len)
     };
     let filter = &filters[filter_id];
-    let coefficients = integration_coefficients(ctx);
+    let coefficients = state_integration_coefficients(ctx);
     let result = if ctx.static_dae_probe != 0 {
         filter
             .static_dae_input_action(input_derivative)
@@ -1841,13 +1852,7 @@ unsafe fn rspice_integral_state_native(
             *ctx.state_candidate_valid.add(state_id) = 0;
         }
         (
-            GeneratedDdtCoefficients {
-                active: ctx.integration_active != 0,
-                derivative_scale: ctx.integration_derivative_scale,
-                previous_value_scale: ctx.integration_previous_value_scale,
-                older_value_scale: ctx.integration_older_value_scale,
-                previous_derivative_scale: ctx.integration_previous_derivative_scale,
-            },
+            state_integration_coefficients(ctx).into(),
             GeneratedIdtAcceptedHistory {
                 initialized: unsafe { *ctx.state_initialized.add(state_id) != 0 },
                 integral_previous: unsafe { *ctx.state_prev.add(state_id) },
@@ -1998,8 +2003,9 @@ pub unsafe extern "C" fn rspice_idt_jacobian_native(
         );
     }
     let ctx = unsafe { &*ctx };
-    if ctx.static_dae_probe == 0 && ctx.integration_active != 0 {
-        (unsafe { *operands }) / ctx.integration_derivative_scale
+    let coefficients = state_integration_coefficients(ctx);
+    if ctx.static_dae_probe == 0 && coefficients.active {
+        (unsafe { *operands }) / coefficients.derivative_scale
     } else {
         0.0
     }
@@ -3076,7 +3082,8 @@ mod tests {
         );
         assert_eq!(offset_of!(EvalContext, static_dae_probe), 520);
         assert_eq!(offset_of!(EvalContext, idtmod_origins), 528);
-        assert_eq!(size_of::<EvalContext>(), 536);
+        assert_eq!(offset_of!(EvalContext, state_integration), 536);
+        assert_eq!(size_of::<EvalContext>(), 544);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -3598,6 +3605,7 @@ mod tests {
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
             idtmod_origins: std::ptr::null_mut(),
+            state_integration: std::ptr::null(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

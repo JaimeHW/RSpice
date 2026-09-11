@@ -1915,6 +1915,49 @@ arrays, two-domain state ownership and the remaining MS06/MS04 requirements
 retain their existing open status. No Spectre or production qualification is
 inferred from this correction.
 
+## Separate derivative and internal-state companion rules
+
+VmContext and VerilogADevice now accept a checked pair of companion rules.
+DDT stamps use the derivative rule; IDT, IDTMod and Laplace states and their
+Jacobians use the internal-state rule. The existing single-rule and timestep
+APIs continue to set both families together. Both proposed rules validate before
+any candidate or numerical-validity state changes, and a change to either rule
+invalidates the previous candidate. An inactive/active mismatch is refused.
+
+Native dispatch borrows the state rule through an appended context pointer;
+existing offsets stay fixed and the layout is now 544 bytes. Helper-only callers
+with a null pointer retain the existing derivative-field fallback. VM and Wasm
+helpers select the state bank directly. This is synchronous runtime state, not
+a change to persisted accepted-history payloads.
+
+The shared distinct_integration_rules.va fixture combines conductance, DDT,
+IDT, IDTMod and a first-order Laplace filter. Starting at DC, the two half-second
+steps use a doubled backward-difference DDT rule and a full trapezoidal state
+rule. Expected DDT currents are 24 and 48; the two integral pairs are (6.5,1.5)
+and (9.5,4.5); filter states are 2.4 and 3.84. The final step changes only the
+state rule to backward Euler, checks its different Jacobian factors and crosses
+an IDTMod wrap. Static observations hold the internal states and retain only
+the conductance Jacobian without mutating candidates.
+
+Actual native and Wasm exports (automatic and forced-postfix Wasm plans) passed
+the authored-model checks in 0.01 seconds after a 48.96-second build. The new
+context test initially expected zero for the idle marker; the existing marker
+is two. After correcting that test expectation and qualifying its constant,
+the invalid-update/state-invalidation and native-layout cases passed in 0.00
+seconds after a 6.79-second build. Logs: target/unified-mixed-fixes/
+distinct-integration-rules.log and distinct-integration-rules-final.log.
+No broad suite was run.
+
+The authoritative generator regenerated all 43 built-ins. Generated source
+and bundle identity are unchanged; the generator digest is now
+1b129951d5a218a01b0659fa2cc18a140e181edec2e3cd6b7d67bc24d4901fb2.
+Log: target/unified-mixed-fixes/distinct-integration-rules-generator.log.
+
+This completes the backend coefficient-bank prerequisite. Core solver policy
+handoff, whole-equation F/Q capability proof and weighted mixed assembly still
+need completion before enabling the guarded OneStep path. Other MS08 analyses,
+the remaining MS00–MS15 packages and vendor/platform qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -1923,8 +1966,9 @@ and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
 dependencies and feedback convergence. Close the recorded mixed real/integer
-comparison refusal under MS06 and include mixed contributions in Xyce static
-history before qualifying that integration path.
+comparison refusal under MS06. Connect the distinct derivative/state rules to
+the solver policy and qualify the complete weighted F/Q integration path; the
+settled mixed static-history capture prerequisite is implemented.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

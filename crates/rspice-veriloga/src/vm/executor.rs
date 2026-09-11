@@ -639,7 +639,7 @@ impl<'a> Vm<'a> {
                     }
                     self.context.state_candidate_valid[*idx] = 0;
                     (
-                        self.context.integration_coefficients().into(),
+                        self.context.state_integration_coefficients().into(),
                         GeneratedIdtAcceptedHistory {
                             initialized: self.context.state_initialized[*idx],
                             integral_previous: self.context.state_values_prev[*idx],
@@ -730,7 +730,7 @@ impl<'a> Vm<'a> {
 
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
-                let coefficients = self.context.integration_coefficients();
+                let coefficients = self.context.state_integration_coefficients();
                 let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
                 self.unary_op(|a| {
                     if dynamic && coefficients.active {
@@ -1313,7 +1313,7 @@ impl<'a> Vm<'a> {
             // Stack: [input] -> [filtered_output]
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
-                let coefficients = self.context.integration_coefficients();
+                let coefficients = self.context.state_integration_coefficients();
                 let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
                 let filter = self
                     .context
@@ -1342,7 +1342,7 @@ impl<'a> Vm<'a> {
             // Static DAE observations retain only the direct input action.
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input_derivative = self.pop()?;
-                let coefficients = self.context.integration_coefficients();
+                let coefficients = self.context.state_integration_coefficients();
                 let filter = self
                     .context
                     .laplace_filters
