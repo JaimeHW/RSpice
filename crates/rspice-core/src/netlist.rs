@@ -6399,6 +6399,129 @@ mod tests {
     }
 
     #[test]
+    fn positional_device_area_resolves_complete_expressions_in_instance_scope() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for nested in [false, true] {
+                for (device, model_type) in [
+                    ("D1 a 0 dm", "d"),
+                    ("Q1 c b 0 dm", "npn"),
+                    ("J1 d g 0 dm", "njf"),
+                    ("Z1 d g 0 dm", "nmf"),
+                ] {
+                    for (field, scale, offset) in [
+                        ("{q}", 1.0, 0.0),
+                        ("+{q}", 1.0, 0.0),
+                        ("- {q}", -1.0, 0.0),
+                        ("+ q", 1.0, 0.0),
+                        ("-q", -1.0, 0.0),
+                        ("2*q", 2.0, 0.0),
+                        ("1+q/2", 0.5, 1.0),
+                        ("-2*q", -2.0, 0.0),
+                        ("(q+1)*2", 2.0, 2.0),
+                        ("OFF q", 1.0, 0.0),
+                        ("OFF q*2", 2.0, 0.0),
+                        ("AREA=1 {q}", 1.0, 0.0),
+                        ("{q} AREA=2", 0.0, 2.0),
+                        ("3k/2", 0.0, 1500.0),
+                        ("- 2", 0.0, -2.0),
+                    ] {
+                        let body = format!("{device} {field} M=3\n.model dm {model_type}");
+                        let source = if nested {
+                            format!(
+                                "Scoped positional AREA\nX1 wrapper q=3\nX2 wrapper q=7\n\
+                                 .subckt wrapper q=9\nXinner cell q={{2*q}}\n.ends\n\
+                                 .subckt cell q=11\n{body}\n.ends\n.end"
+                            )
+                        } else {
+                            format!("Root positional AREA\n.param q=4\n{body}\n.end")
+                        };
+                        let netlist = Netlist::parse_with_options(
+                            &source,
+                            NetlistParseOptions {
+                                expression_dialect: dialect,
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap_or_else(|error| panic!("{source}: {error}"));
+                        let flattened = flatten_netlist(&netlist).unwrap();
+                        let q_values: &[f64] = if nested { &[6.0, 14.0] } else { &[4.0] };
+                        assert_eq!(flattened.len(), q_values.len());
+                        for (element, q) in flattened.iter().zip(q_values) {
+                            let (numeric, deferred) = match &element.kind {
+                                ElementKind::Diode {
+                                    instance_params,
+                                    deferred_params,
+                                    ..
+                                }
+                                | ElementKind::Bjt {
+                                    instance_params,
+                                    deferred_params,
+                                    ..
+                                }
+                                | ElementKind::Jfet {
+                                    instance_params,
+                                    deferred_params,
+                                    ..
+                                }
+                                | ElementKind::Mesfet {
+                                    instance_params,
+                                    deferred_params,
+                                    ..
+                                } => (instance_params, deferred_params),
+                                other => panic!("unexpected device: {other:?}"),
+                            };
+                            assert!(deferred.is_empty(), "{source}");
+                            let areas: Vec<_> = numeric
+                                .iter()
+                                .filter(|(key, _)| key == "AREA")
+                                .map(|(_, value)| *value)
+                                .collect();
+                            assert_eq!(areas, [scale * q + offset], "{dialect:?}: {source}");
+                            assert!(numeric.contains(&("M".into(), 3.0)));
+                        }
+                    }
+                    for tail in ["2 3", "{q} {q}", "+q -q"] {
+                        let source = format!(
+                            "Duplicate positional AREA\n.param q=4\n{device} {tail}\n.model dm {model_type}\n.end"
+                        );
+                        assert!(
+                            Netlist::parse_with_options(
+                                &source,
+                                NetlistParseOptions {
+                                    expression_dialect: dialect,
+                                    ..Default::default()
+                                }
+                            )
+                            .is_err(),
+                            "{source}"
+                        );
+                    }
+                }
+            }
+            // Check the actual diode current against the explicit, flattened
+            // reference circuit, including independent sibling bindings.
+            let current = |body: &str| {
+                let netlist = Netlist::parse_with_options(
+                    &format!("Physical AREA\nV1 a 0 0.6\n{body}\n.model dm d (IS=1p)\n.end"),
+                    NetlistParseOptions {
+                        expression_dialect: dialect,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                crate::engine::Engine::default()
+                    .run_dc_op(&netlist)
+                    .unwrap()
+                    .branch_currents[0]
+            };
+            assert_eq!(
+                current("X1 a cell q=3\nX2 a cell q=7\n.subckt cell a q=11\nD1 a 0 dm 2*q\n.ends"),
+                current("D1 a 0 dm 6\nD2 a 0 dm 14")
+            );
+        }
+    }
+
+    #[test]
     fn semiconductor_reassignments_replace_numeric_and_deferred_fields() {
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
             for nested in [false, true] {
@@ -10586,6 +10709,8 @@ mod tests {
             ("", vec![]),
             ("s", vec!["S"]),
             ("[s]", vec!["S"]),
+            ("s 3k/2", vec!["S", "3K/2"]),
+            ("s 2N2222", vec!["S", "2N2222"]),
             ("0 0 0 0 0 0 0", vec!["0"; 7]),
             (
                 "s th cx ci bx bi ei",
@@ -10601,7 +10726,7 @@ mod tests {
                 vec!["S", "1-2", "CX", "3/4", "0", "BI", "0"],
             ),
         ] {
-            for tail in ["2 OFF M=3", "2", "-2", "AREA=2 IC=0.6,1"] {
+            for tail in ["2 OFF M=3", "2", "-2", "4k/2k", "AREA=2 IC=0.6,1"] {
                 let netlist = Netlist::parse(&format!(
                     "BJT optional connections\nQ1 c b e {connections} BC337-25 {tail}\n.model BC337-25 NPN\n.end\n"
                 )).unwrap();

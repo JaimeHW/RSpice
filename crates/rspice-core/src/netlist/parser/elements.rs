@@ -4398,130 +4398,14 @@ pub(super) fn parse_diode(
     // Instance tail: positional AREA, bare OFF keyword, and PARAM=value
     // assignments (AREA/M/PJ/TEMP/DTEMP/IC...), mirroring ngspice's D-line
     // grammar.
-    let mut instance_params = Vec::new();
-    let mut deferred_params = Vec::new();
-    let mut area_positional_seen = false;
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            break;
-        }
-
-        match &stream.peek().kind {
-            TokenKind::Ident(raw_name) => {
-                let raw_name = raw_name.clone();
-                let name_upper = raw_name.to_ascii_uppercase();
-                stream.advance();
-
-                if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "OFF",
-                        DeferrableValue::Resolved(1.0),
-                    );
-                    continue;
-                }
-
-                if stream.consume(&TokenKind::Equals) {
-                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(value) => upsert_instance_param(
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                            name_upper,
-                            value,
-                        ),
-                        None => {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for diode parameter '{}'",
-                                    raw_name
-                                ),
-                            });
-                        }
-                    }
-                    continue;
-                }
-
-                if !area_positional_seen
-                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
-                {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(parsed),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
-                let message = if is_diode_assignment_name(&name_upper)
-                    && token_starts_unassigned_value(&stream.peek().kind, params)
-                {
-                    format!("diode parameter '{}' expected '=' before value", raw_name)
-                } else {
-                    format!(
-                        "Unsupported diode instance token '{}'; expected NAME=value, positional AREA, or OFF",
-                        raw_name
-                    )
-                };
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message,
-                });
-            }
-            TokenKind::Number(v) => {
-                if !area_positional_seen {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(*v),
-                    );
-                    area_positional_seen = true;
-                    stream.advance();
-                    continue;
-                }
-
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Duplicate positional AREA for diode instance".to_string(),
-                });
-            }
-            _ => {
-                if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(value),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "Unsupported diode instance token '{}'; expected NAME=value, positional AREA, or OFF",
-                        stream.peek().kind
-                    ),
-                });
-            }
-        }
-    }
+    let (instance_params, deferred_params) = parse_area_device_instance_params(
+        stream,
+        line_num,
+        params,
+        defer_simple_param_refs,
+        "diode",
+        &[],
+    )?;
 
     elements.push(Element {
         name,
@@ -4567,7 +4451,7 @@ pub(super) fn parse_bjt(
     let mut model = expect_model_name(stream, line_num)?;
     loop {
         match &stream.peek().kind {
-            TokenKind::Ident(next) => {
+            TokenKind::Ident(next) if !bjt_token_starts_numeric_field(&stream.peek().kind) => {
                 let next_upper = next.to_ascii_uppercase();
                 if matches!(stream.peek_n(1).kind, TokenKind::Equals) || next_upper == "OFF" {
                     break;
@@ -4581,11 +4465,11 @@ pub(super) fn parse_bjt(
                     });
                 }
             }
-            TokenKind::Number(_) => {
+            TokenKind::Number(_) | TokenKind::Ident(_) => {
                 // A number after the model is positional AREA. It is a node
                 // only if a further bare model label follows the numeric run.
                 let mut offset = 0;
-                while matches!(stream.peek_n(offset).kind, TokenKind::Number(_)) {
+                while bjt_token_starts_numeric_field(&stream.peek_n(offset).kind) {
                     // A numeric-leading label may span touching tokens,
                     // e.g. 0:1 or 1-2. Look past the same complete label that
                     // expect_node consumes, while respecting field boundaries.
@@ -4620,7 +4504,7 @@ pub(super) fn parse_bjt(
                     break;
                 }
                 nodes.push(model);
-                while matches!(stream.peek().kind, TokenKind::Number(_)) {
+                while bjt_token_starts_numeric_field(&stream.peek().kind) {
                     nodes.push(expect_node(stream, line_num)?);
                 }
                 model = expect_model_name(stream, line_num)?;
@@ -4634,144 +4518,14 @@ pub(super) fn parse_bjt(
         model = expect_model_name(stream, line_num)?;
     }
 
-    let mut instance_params = Vec::new();
-    let mut deferred_params = Vec::new();
-    let mut area_positional_seen = false;
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            break;
-        }
-
-        match &stream.peek().kind {
-            TokenKind::Ident(raw_name) => {
-                let raw_name = raw_name.clone();
-                let name_upper = raw_name.to_ascii_uppercase();
-                stream.advance();
-
-                if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "OFF",
-                        DeferrableValue::Resolved(1.0),
-                    );
-                    continue;
-                }
-
-                if stream.consume(&TokenKind::Equals) {
-                    if name_upper == "IC" {
-                        parse_ic_vector(
-                            stream,
-                            line_num,
-                            params,
-                            defer_simple_param_refs,
-                            BJT_IC_VECTOR,
-                            "BJT",
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                        )?;
-                        continue;
-                    }
-
-                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(value) => upsert_instance_param(
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                            name_upper,
-                            value,
-                        ),
-                        None => {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!("Expected value for BJT parameter '{}'", raw_name),
-                            });
-                        }
-                    }
-                    continue;
-                }
-
-                if !area_positional_seen
-                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
-                {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(parsed),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
-                let message = if is_bjt_assignment_name(&name_upper)
-                    && token_starts_unassigned_value(&stream.peek().kind, params)
-                {
-                    format!("BJT parameter '{}' expected '=' before value", raw_name)
-                } else {
-                    format!(
-                        "Unsupported BJT instance token '{}'; expected NAME=value, positional AREA, or OFF",
-                        raw_name
-                    )
-                };
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message,
-                });
-            }
-            TokenKind::Number(v) => {
-                // Optional positional area scaling.
-                if !area_positional_seen {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(*v),
-                    );
-                    area_positional_seen = true;
-                    stream.advance();
-                    continue;
-                }
-
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Duplicate positional AREA for BJT instance".to_string(),
-                });
-            }
-            _ => {
-                if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(value),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "Unsupported BJT instance token '{}'; expected NAME=value, positional AREA, or OFF",
-                        stream.peek().kind
-                    ),
-                });
-            }
-        }
-    }
+    let (instance_params, deferred_params) = parse_area_device_instance_params(
+        stream,
+        line_num,
+        params,
+        defer_simple_param_refs,
+        "BJT",
+        BJT_IC_VECTOR,
+    )?;
 
     elements.push(Element {
         name,
@@ -5144,6 +4898,17 @@ fn is_diode_assignment_name(name_upper: &str) -> bool {
     )
 }
 
+// The lexer preserves ambiguous engineering-suffixed tokens as identifiers.
+// Recognize the complete numeric field here without mistaking numeric-leading
+// model labels such as 2N2222 for their numeric prefix.
+fn bjt_token_starts_numeric_field(kind: &TokenKind) -> bool {
+    match kind {
+        TokenKind::Number(_) => true,
+        TokenKind::Ident(name) => crate::netlist::lexer::parse_spice_value_complete(name).is_ok(),
+        _ => false,
+    }
+}
+
 fn is_bjt_assignment_name(name_upper: &str) -> bool {
     matches!(
         name_upper,
@@ -5179,8 +4944,14 @@ pub(super) fn parse_jfet(
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_model_name(stream, line_num)?;
-    let (instance_params, deferred_params) =
-        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "JFET")?;
+    let (instance_params, deferred_params) = parse_area_device_instance_params(
+        stream,
+        line_num,
+        params,
+        defer_simple_param_refs,
+        "JFET",
+        FET_IC_VECTOR,
+    )?;
 
     elements.push(Element {
         name,
@@ -5210,8 +4981,14 @@ pub(super) fn parse_mesfet(
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_model_name(stream, line_num)?;
-    let (instance_params, deferred_params) =
-        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "MESFET")?;
+    let (instance_params, deferred_params) = parse_area_device_instance_params(
+        stream,
+        line_num,
+        params,
+        defer_simple_param_refs,
+        "MESFET",
+        FET_IC_VECTOR,
+    )?;
 
     elements.push(Element {
         name,
@@ -5230,127 +5007,120 @@ pub(super) fn parse_mesfet(
 
 type ParsedInstanceParams = (Vec<(String, Value)>, Vec<(String, String)>);
 
-pub(super) fn parse_fet_instance_params(
+// D/Q/J/Z share the same AREA, OFF and named-parameter grammar. Read AREA
+// through the named-value reader too, retaining complete expressions until
+// the actual subcircuit instance owns their evaluation.
+fn parse_area_device_instance_params(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     defer_simple_param_refs: bool,
     element_label: &str,
+    ic_vector: &[&str],
 ) -> Result<ParsedInstanceParams, ParseError> {
     let mut instance_params = Vec::new();
     let mut deferred_params = Vec::new();
     let mut area_positional_seen = false;
 
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    while !stream.is_eof() {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
 
-        match &stream.peek().kind {
-            TokenKind::Ident(raw_name) => {
-                let raw_name = raw_name.clone();
-                let name_upper = raw_name.to_ascii_uppercase();
+        if let TokenKind::Ident(raw_name) = &stream.peek().kind {
+            let raw_name = raw_name.clone();
+            let name_upper = raw_name.to_ascii_uppercase();
+            if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
                 stream.advance();
-
-                if stream.consume(&TokenKind::Equals) {
-                    if name_upper == "IC" {
-                        parse_ic_vector(
-                            stream,
-                            line_num,
-                            params,
-                            defer_simple_param_refs,
-                            FET_IC_VECTOR,
-                            element_label,
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                        )?;
-                        continue;
-                    }
-
-                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
-                        Some(value) => upsert_instance_param(
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                            name_upper,
-                            value,
+                stream.advance();
+                if name_upper == "IC" && !ic_vector.is_empty() {
+                    parse_ic_vector(
+                        stream,
+                        line_num,
+                        params,
+                        defer_simple_param_refs,
+                        ic_vector,
+                        element_label,
+                        ElementParamSink {
+                            instance_params: &mut instance_params,
+                            deferred_params: &mut deferred_params,
+                        },
+                    )?;
+                    continue;
+                }
+                let value = take_deferrable_value(stream, params, defer_simple_param_refs)
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected value for {} parameter '{}'",
+                            element_label, raw_name
                         ),
-                        None => {
-                            return Err(ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for {} parameter '{}'",
-                                    element_label, raw_name
-                                ),
-                            });
-                        }
-                    }
-                    continue;
-                }
-
-                if name_upper == "OFF" {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "OFF",
-                        DeferrableValue::Resolved(1.0),
-                    );
-                    continue;
-                }
-
-                if !area_positional_seen
-                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
-                {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(parsed),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
+                    })?;
+                upsert_instance_param(
+                    ElementParamSink {
+                        instance_params: &mut instance_params,
+                        deferred_params: &mut deferred_params,
+                    },
+                    name_upper,
+                    value,
+                );
+                continue;
+            }
+            if name_upper == "OFF" {
+                stream.advance();
+                upsert_instance_param(
+                    ElementParamSink {
+                        instance_params: &mut instance_params,
+                        deferred_params: &mut deferred_params,
+                    },
+                    "OFF",
+                    DeferrableValue::Resolved(1.0),
+                );
+                continue;
+            }
+            if (is_diode_assignment_name(&name_upper) || is_bjt_assignment_name(&name_upper))
+                && token_starts_unassigned_value(&stream.peek_n(1).kind, params)
+            {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!(
-                        "Unsupported {} instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        "{} parameter '{}' expected '=' before value",
                         element_label, raw_name
                     ),
                 });
             }
-            _ => {
-                if !area_positional_seen && let Some(value) = try_value(stream, params) {
-                    upsert_instance_param(
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                        "AREA",
-                        DeferrableValue::Resolved(value),
-                    );
-                    area_positional_seen = true;
-                    continue;
-                }
-
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "Unsupported {} instance token '{}'; expected NAME=value, positional AREA, or OFF",
-                        element_label,
-                        stream.peek().kind
-                    ),
-                });
-            }
         }
+
+        if !area_positional_seen
+            && let Some(value) = take_deferrable_value(stream, params, defer_simple_param_refs)
+        {
+            upsert_instance_param(
+                ElementParamSink {
+                    instance_params: &mut instance_params,
+                    deferred_params: &mut deferred_params,
+                },
+                "AREA",
+                value,
+            );
+            area_positional_seen = true;
+            continue;
+        }
+
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: if area_positional_seen
+                && token_starts_unassigned_value(&stream.peek().kind, params)
+            {
+                format!("Duplicate positional AREA for {} instance", element_label)
+            } else {
+                format!(
+                    "Unsupported {} instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                    element_label,
+                    stream.peek().kind
+                )
+            },
+        });
     }
 
     Ok((instance_params, deferred_params))
