@@ -6392,7 +6392,9 @@ mod tests {
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
         let mut state_older_candidate = [0.0_f64; 2];
+        let mut idtmod_origins = std::collections::BTreeMap::new();
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.idtmod_origins = &mut idtmod_origins;
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
@@ -9498,7 +9500,9 @@ mod tests {
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
         let mut state_older_candidate = [0.0_f64; 2];
+        let mut idtmod_origins = std::collections::BTreeMap::new();
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.idtmod_origins = &mut idtmod_origins;
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
@@ -9583,6 +9587,22 @@ mod tests {
         assert!(error.contains("modulus must be finite and greater than zero"));
         assert_eq!(state_values[1].to_bits(), 7.0_f64.to_bits());
         assert_eq!(state_older_candidate[1].to_bits(), 8.0_f64.to_bits());
+        assert_eq!(state_candidate_valid[1], 0);
+        assert!(idtmod_origins[&1].candidate.is_none());
+        assert_eq!(idtmod_origins[&1].accepted, Default::default());
+
+        ctx.idtmod_origins = std::ptr::null_mut();
+        assert_eq!(f(&ctx, vars.as_ptr()), 0.0);
+        assert!(
+            ctx.take_runtime_error()
+                .unwrap()
+                .contains("missing circular-integrator origin storage")
+        );
+        assert_eq!(state_candidate_valid[1], 0);
+        ctx.idtmod_origins = &mut idtmod_origins;
+        assert!((f(&ctx, vars.as_ptr()) - 0.4).abs() < 1.0e-12);
+        assert!(idtmod_origins[&1].candidate.is_some());
+        assert_eq!(idtmod_origins[&1].accepted, Default::default());
 
         ctx.state_older_candidate = std::ptr::null_mut();
         ctx.state_older_candidate_len = 0;
@@ -9695,7 +9715,9 @@ mod tests {
             let previous_derivatives = [0.0_f64; 2];
             let mut state_initialized = [1_u8; 2];
             let mut state_older_candidate = [0.0_f64; 2];
+            let mut idtmod_origins = std::collections::BTreeMap::new();
             let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.idtmod_origins = &mut idtmod_origins;
             ctx.timestep = 0.25;
             ctx.state_prev = previous_state.as_ptr();
             ctx.state_older = older_state.as_ptr();
@@ -9796,7 +9818,9 @@ mod tests {
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
+            let mut idtmod_origins = std::collections::BTreeMap::new();
             let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.idtmod_origins = &mut idtmod_origins;
             ctx.timestep = 0.25;
             ctx.integration_derivative_scale = 4.0;
             ctx.integration_previous_value_scale = 4.0;
@@ -9838,7 +9862,9 @@ mod tests {
         let previous_derivatives = [0.0_f64; 2];
         let mut state_initialized = [1_u8; 2];
         let mut state_older_candidate = [0.0_f64; 2];
+        let mut idtmod_origins = std::collections::BTreeMap::new();
         let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.idtmod_origins = &mut idtmod_origins;
         set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_older = older_state.as_ptr();
@@ -14118,6 +14144,7 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            idtmod_origins: std::ptr::null_mut(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

@@ -78,6 +78,52 @@ fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'
 }
 
 #[test]
+fn idtmod_checkpoint_retains_the_integral_when_the_modulus_changes() {
+    let model = write_model(
+        "circular_checkpoint",
+        r#"
+module circular_checkpoint(p, n);
+    inout p, n; electrical p, n;
+    analog V(p,n) <+ idtmod(0.0, 5.0, $abstime < 1.0e-6 ? 2.0 : 3.0);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* circular history across a checkpoint\nX1 out 0 circular_checkpoint\n.va \"{}\" circular_checkpoint\n.end\n",
+        deck_path(&model),
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::default();
+    let continuous = engine.run_tran(&netlist, 1.5e-6, 1.0e-8).unwrap();
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 0.75e-6, 1.0e-8)
+        .unwrap();
+    let checkpoint = TransientCheckpoint::from_text(&checkpoint.to_text()).unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 1.5e-6, 1.0e-8)
+        .unwrap();
+    assert_eq!(
+        node_series(&first.node_names, &first.voltages, "out")
+            .last()
+            .unwrap()
+            .to_bits(),
+        node_series(&resumed.node_names, &resumed.voltages, "out")[0].to_bits(),
+    );
+    for result in [&continuous, &resumed] {
+        let output = node_series(&result.node_names, &result.voltages, "out");
+        for (&time, &voltage) in result.time.iter().zip(output) {
+            let expected = if time < 1.0e-6 { 1.0 } else { 2.0 };
+            assert!(
+                (voltage - expected).abs() < 1.0e-12,
+                "t={time}, V={voltage}"
+            );
+        }
+        assert!((output.last().unwrap() - 2.0).abs() < 1.0e-12);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn model_nodeset_cannot_replace_a_failed_transient_equilibrium() {
     let model = write_model(
         "nodeset_without_equilibrium",

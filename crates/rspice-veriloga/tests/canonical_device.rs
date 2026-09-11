@@ -6870,6 +6870,12 @@ pub mod runtime {
     r#"
         }
         pub use scalar::*;
+        mod circular {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/arithmetic/circular.rs"),
+    r#"
+        }
+        pub use circular::{IdtModOrigin, IdtModOriginCheckpoint};
         mod scaled {
 "#,
     include_str!("../../rspice-veriloga-runtime/src/arithmetic/scaled.rs"),

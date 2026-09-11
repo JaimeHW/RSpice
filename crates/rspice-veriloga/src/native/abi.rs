@@ -483,6 +483,8 @@ pub struct EvalContext {
     /// Observe static DAE terms while retaining the physical analysis code.
     /// Appended so all existing generated-code field offsets stay unchanged.
     pub static_dae_probe: u8,
+    /// Exclusive circular-integrator history, borrowed from the owning VM.
+    pub idtmod_origins: *mut std::collections::BTreeMap<usize, crate::vm::IdtModState>,
 }
 
 impl EvalContext {
@@ -549,6 +551,7 @@ impl EvalContext {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            idtmod_origins: std::ptr::null_mut(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
@@ -1854,6 +1857,25 @@ unsafe fn rspice_integral_state_native(
         )
     };
     let (value, older_candidate) = if wrapped {
+        let mut state = if frozen {
+            None
+        } else {
+            let Some(origins) = (unsafe { ctx.idtmod_origins.as_mut() }) else {
+                return invalid_native_integration_context(
+                    ctx,
+                    operator,
+                    state_id,
+                    "missing circular-integrator origin storage",
+                );
+            };
+            let state = origins.entry(state_id).or_default();
+            state.candidate = None;
+            Some(state)
+        };
+        let origin = state.as_deref().map_or(
+            &rspice_veriloga_runtime::arithmetic::IdtModOrigin::ZERO,
+            |state| &state.accepted,
+        );
         match evaluate_generated_idtmod_candidate(
             coefficients,
             input,
@@ -1861,8 +1883,14 @@ unsafe fn rspice_integral_state_native(
             operands[2],
             operands[3],
             history,
+            origin,
         ) {
-            Ok(candidate) => (candidate.value, candidate.previous),
+            Ok(candidate) => {
+                if let Some(state) = state.take() {
+                    state.candidate = Some(candidate.origin);
+                }
+                (candidate.value, candidate.previous)
+            }
             Err(error) => {
                 return invalid_native_integration_context(
                     ctx,
@@ -3047,7 +3075,8 @@ mod tests {
             offset_of!(NativeRuntimeStatus, failed)
         );
         assert_eq!(offset_of!(EvalContext, static_dae_probe), 520);
-        assert_eq!(size_of::<EvalContext>(), 528);
+        assert_eq!(offset_of!(EvalContext, idtmod_origins), 528);
+        assert_eq!(size_of::<EvalContext>(), 536);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -3568,6 +3597,7 @@ mod tests {
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            idtmod_origins: std::ptr::null_mut(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

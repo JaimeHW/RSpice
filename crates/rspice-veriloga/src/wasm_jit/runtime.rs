@@ -1830,6 +1830,61 @@ mod tests {
     }
 
     #[test]
+    fn idtmod_helper_retains_exact_origin_through_acceptance_and_retry() {
+        let mut context = VmContext::with_states(0, 1);
+        context.analysis_type = 2;
+        context.set_timestep(0.25);
+        let mut session = WasmJitRuntimeSession::new(context);
+        for (modulus, expected) in [(1.0, 0.25), (3.0, (1.0e300_f64 % 3.0) + 0.5)] {
+            session.context_mut().begin_stateful_evaluation();
+            for _ in 0..2 {
+                assert_eq!(
+                    evaluate_helper_with_session(
+                        444,
+                        0,
+                        0,
+                        0,
+                        [1.0, 1.0e300, modulus, 0.0, 0.0],
+                        &[],
+                        Some(&mut session),
+                    )
+                    .unwrap(),
+                    expected
+                );
+            }
+            session.context_mut().advance_state().unwrap();
+        }
+        let accepted = session.context().accepted_checkpoint().unwrap();
+        session.context_mut().begin_stateful_evaluation();
+        assert!(
+            evaluate_helper_with_session(
+                444,
+                0,
+                0,
+                0,
+                [1.0, 1.0e300, 0.0, 0.0, 0.0],
+                &[],
+                Some(&mut session),
+            )
+            .is_err()
+        );
+        assert!(session.take_error().is_some());
+        assert_eq!(
+            session.context().state_values_prev,
+            accepted.state_values_prev
+        );
+        assert_eq!(
+            session.context().state_values_older,
+            accepted.state_values_older
+        );
+        assert_eq!(
+            session.context().idtmod_origins[&0].accepted.checkpoint(),
+            accepted.idtmod_origins[0].1
+        );
+        assert!(session.context().idtmod_origins[&0].candidate.is_none());
+    }
+
+    #[test]
     fn idtmod_helper_preserves_common_branch_history_and_validation() {
         let mut context = VmContext::with_states(0, 1);
         context.state_values_prev[0] = 0.6;

@@ -649,6 +649,13 @@ impl<'a> Vm<'a> {
                     )
                 };
                 let (value, previous) = if wrapped {
+                    let origin = if frozen {
+                        &rspice_veriloga_runtime::arithmetic::IdtModOrigin::ZERO
+                    } else {
+                        let state = self.context.idtmod_origins.entry(*idx).or_default();
+                        state.candidate = None;
+                        &state.accepted
+                    };
                     let candidate = evaluate_generated_idtmod_candidate(
                         coefficients,
                         input,
@@ -656,10 +663,15 @@ impl<'a> Vm<'a> {
                         modulus,
                         offset,
                         history,
+                        origin,
                     )
                     .map_err(|error| {
                         VmError::InvalidNumericResult(format!("idtmod state {idx}: {error}"))
                     })?;
+                    if !frozen {
+                        self.context.idtmod_origins.get_mut(idx).unwrap().candidate =
+                            Some(candidate.origin);
+                    }
                     (candidate.value, candidate.previous)
                 } else {
                     let candidate =

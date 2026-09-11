@@ -6595,6 +6595,7 @@ endmodule
                 context.state_older_candidate.as_mut_ptr()
             },
             state_older_candidate_len: context.state_older_candidate.len(),
+            idtmod_origins: &mut context.idtmod_origins,
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
@@ -7027,6 +7028,7 @@ endmodule
             state_candidate_valid_len: 0,
             state_older_candidate: std::ptr::null_mut(),
             state_older_candidate_len: 0,
+            idtmod_origins: std::ptr::null_mut(),
             prelude_slots,
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),

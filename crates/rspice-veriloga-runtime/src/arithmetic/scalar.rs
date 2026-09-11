@@ -848,7 +848,7 @@ fn checked_product(left: f64, right: f64) -> Result<f64, ArithmeticError> {
     exact_binary_to_f64(&exact.magnitude, exact.negative, -2148)
 }
 
-fn exact_binary_to_f64(
+pub(super) fn exact_binary_to_f64(
     magnitude: &BigMagnitude,
     negative: bool,
     exponent_floor: i32,

@@ -1,6 +1,6 @@
 //! Pure integration candidates and shared circular-integrator history handling.
 
-use super::arithmetic::{sum_products, sum_products_div};
+use super::arithmetic::{IdtModOrigin, sum_products, sum_products_div};
 use super::{GeneratedDdtCoefficients, Value};
 
 /// Accepted history consumed by one generated `idt` candidate evaluation.
@@ -187,70 +187,16 @@ pub fn rspice_eval_idt<const STATE_COUNT: usize>(
 /// History translation is evaluated separately, because `raw - wrapped` may
 /// overflow or lose low bits even when the translated history is representable.
 pub fn idtmod_wrapped_value(raw: f64, modulus: f64, offset: f64) -> Result<f64, &'static str> {
-    if !raw.is_finite() {
-        return Err("integral candidate must be finite");
-    }
-    if !modulus.is_finite() || modulus <= 0.0 {
-        return Err("modulus must be finite and greater than zero");
-    }
-    if !offset.is_finite() {
-        return Err("offset must be finite");
-    }
-    let upper = offset + modulus;
-    if !upper.is_finite() || upper <= offset {
-        return Err("offset and modulus must form a finite, nonempty interval");
-    }
-
-    let mut wrapped = if raw >= offset && raw < upper {
-        raw
-    } else if offset == 0.0 {
-        raw.rem_euclid(modulus)
-    } else {
-        // Binary64 remainders are exact. Reduce each operand before subtracting
-        // so a large raw value cannot swallow the offset, even without overflow.
-        // Determine the wrap branch from an exact sum, then round the complete
-        // result once; separately rounding a positive phase can lose low bits
-        // that a negative offset would otherwise recover.
-        let remainder = raw % modulus;
-        let origin = offset % modulus;
-        let correction = if remainder >= origin {
-            let side =
-                sum_products([(remainder, 1.0), (origin, -1.0), (modulus, -1.0)].into_iter())
-                    .map_err(|_| "cannot determine the circular-integrator wrap branch")?;
-            if side >= 0.0 { -1.0 } else { 0.0 }
-        } else {
-            let side = sum_products([(remainder, 1.0), (origin, -1.0), (modulus, 1.0)].into_iter())
-                .map_err(|_| "cannot determine the circular-integrator wrap branch")?;
-            if side < 0.0 { 2.0 } else { 1.0 }
-        };
-        sum_products(
-            [
-                (offset, 1.0),
-                (remainder, 1.0),
-                (origin, -1.0),
-                (modulus, correction),
-            ]
-            .into_iter(),
-        )
-        .map_err(|_| "wrapped value is not finite")?
-    };
-    if wrapped >= upper {
-        // Addition can round a phase infinitesimally below the modulus to the
-        // exclusive upper endpoint. That point is the lower endpoint.
-        wrapped = offset;
-    }
-    if !wrapped.is_finite() {
-        return Err("wrapped value is not finite");
-    }
-    Ok(wrapped)
+    IdtModOrigin::ZERO.wrapped_value(raw, modulus, offset)
 }
 
 /// Circular-integrator candidate and its previous value on the same wrap branch.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedIdtModCandidate {
     pub value: Value,
     pub previous: Value,
     pub jacobian_scale: Value,
+    pub origin: IdtModOrigin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -291,16 +237,37 @@ pub fn evaluate_generated_idtmod_candidate(
     modulus: Value,
     offset: Value,
     history: GeneratedIdtAcceptedHistory,
+    origin: &IdtModOrigin,
 ) -> Result<GeneratedIdtModCandidate, GeneratedIdtModCandidateError> {
-    let candidate =
-        evaluate_generated_idt_candidate(coefficients, input, initial_condition, history)
-            .map_err(GeneratedIdtModCandidateError::Integral)?;
-    let value = idtmod_wrapped_value(candidate.value, modulus, offset)
+    // Seed the bounded local history before integrating. Adding a small first
+    // increment to a large initial integral would otherwise erase that phase.
+    let mut local_initial = initial_condition;
+    let initial_origin;
+    let origin = if coefficients.active && history.initialized {
+        origin
+    } else if coefficients.active {
+        local_initial = IdtModOrigin::ZERO
+            .wrapped_value(initial_condition, modulus, offset)
+            .map_err(GeneratedIdtModCandidateError::Wrapping)?;
+        initial_origin = IdtModOrigin::ZERO
+            .rebased(initial_condition, local_initial)
+            .map_err(GeneratedIdtModCandidateError::Wrapping)?;
+        &initial_origin
+    } else {
+        &IdtModOrigin::ZERO
+    };
+    let candidate = evaluate_generated_idt_candidate(coefficients, input, local_initial, history)
+        .map_err(GeneratedIdtModCandidateError::Integral)?;
+    let value = origin
+        .wrapped_value(candidate.value, modulus, offset)
+        .map_err(GeneratedIdtModCandidateError::Wrapping)?;
+    let origin = origin
+        .rebased(candidate.value, value)
         .map_err(GeneratedIdtModCandidateError::Wrapping)?;
     let previous = if history.initialized {
         history.integral_previous
     } else {
-        initial_condition
+        local_initial
     };
     // Subtracting the rounded translation can erase the entire local history
     // when the initial integral is large. Cancel first and round only once.
@@ -316,12 +283,47 @@ pub fn evaluate_generated_idtmod_candidate(
         value,
         previous,
         jacobian_scale: candidate.jacobian_scale,
+        origin,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn circular_integral_seeds_local_phase_before_direct_transient() {
+        let candidate = evaluate_generated_idtmod_candidate(
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 4.0,
+                previous_value_scale: 4.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            1.0,
+            1.0e300,
+            1.0,
+            0.0,
+            GeneratedIdtAcceptedHistory {
+                initialized: false,
+                integral_previous: 0.0,
+                integral_older: 0.0,
+                input_previous: 0.0,
+            },
+            &IdtModOrigin::ZERO,
+        )
+        .unwrap();
+        assert_eq!(candidate.value, 0.25);
+        assert_eq!(candidate.previous, 0.0);
+        assert_eq!(
+            candidate
+                .origin
+                .wrapped_value(candidate.value, 3.0, 0.0)
+                .unwrap(),
+            (1.0e300_f64 % 3.0) + 0.25
+        );
+    }
 
     #[test]
     fn circular_integral_preserves_phase_when_offset_subtraction_rounds() {
@@ -338,6 +340,7 @@ mod tests {
                 integral_older: 0.0,
                 input_previous: 0.0,
             },
+            &IdtModOrigin::ZERO,
         )
         .unwrap();
         assert_eq!(candidate.value, 1.0);
@@ -356,6 +359,7 @@ mod tests {
                 integral_older: 0.0,
                 input_previous: 0.0,
             },
+            &IdtModOrigin::ZERO,
         )
         .unwrap();
         assert_eq!(candidate.value, offset);
@@ -462,6 +466,7 @@ mod tests {
                     integral_older: 0.875 - 0.25 * direction,
                     input_previous: direction,
                 };
+                let mut origin = IdtModOrigin::ZERO;
                 for step in 1..=12 {
                     let candidate = evaluate_generated_idtmod_candidate(
                         coefficients,
@@ -470,6 +475,7 @@ mod tests {
                         1.0,
                         0.0,
                         history,
+                        &origin,
                     )
                     .unwrap();
                     assert_eq!(
@@ -480,7 +486,8 @@ mod tests {
                             0.875,
                             1.0,
                             0.0,
-                            history
+                            history,
+                            &origin,
                         )
                         .unwrap()
                     );
@@ -489,6 +496,7 @@ mod tests {
                         (0.875_f64 + 0.25 * direction * f64::from(step)).rem_euclid(1.0)
                     );
                     assert_eq!(candidate.jacobian_scale, derivative_scale.recip());
+                    origin = candidate.origin;
                     history = GeneratedIdtAcceptedHistory {
                         initialized: true,
                         integral_previous: candidate.value,
@@ -523,6 +531,7 @@ mod tests {
                     modulus,
                     offset,
                     history,
+                    &IdtModOrigin::ZERO,
                 )
                 .is_err()
             );
@@ -534,6 +543,7 @@ mod tests {
             1.0,
             -0.5,
             history,
+            &IdtModOrigin::ZERO,
         )
         .unwrap();
         assert_eq!(candidate.value, 0.25);

@@ -295,6 +295,7 @@ mod runtime_checkpoint_codec_tests {
                 state_values_older: vec![-f64::MIN_POSITIVE],
                 state_derivatives_prev: vec![1.0 / 3.0],
                 state_initialized: vec![true],
+                idtmod_origins: Vec::new(),
                 delay_buffers: vec![
                     DelayCheckpoint {
                         configuration: None,
@@ -714,10 +715,53 @@ mod runtime_checkpoint_codec_tests {
     }
 
     #[test]
+    fn circular_origin_payload_round_trips_and_rejects_malformed_history() {
+        use rspice_veriloga_runtime::arithmetic::IdtModOrigin;
+        let mut checkpoint = checkpoint_with_slew_entries();
+        let origin = IdtModOrigin::ZERO
+            .rebased(1.0e300, -0.25)
+            .unwrap()
+            .checkpoint();
+        checkpoint.accepted.idtmod_origins = vec![(0, origin)];
+        let decode = |checkpoint: &VerilogADeviceCheckpoint| {
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &checkpoint.to_words(),
+            )
+        };
+        assert_eq!(decode(&checkpoint).unwrap(), checkpoint);
+        for invalid in 0..5 {
+            let mut malformed = checkpoint.clone();
+            match invalid {
+                0 => malformed.accepted.idtmod_origins[0].0 = 1,
+                1 => malformed
+                    .accepted
+                    .idtmod_origins
+                    .push(malformed.accepted.idtmod_origins[0].clone()),
+                2 => malformed.accepted.idtmod_origins[0].1.exponent = i32::MAX,
+                3 => malformed.accepted.idtmod_origins[0].1.words[0] &= !1,
+                _ => malformed.accepted.idtmod_origins[0].1.words = vec![1; 65],
+            }
+            assert!(
+                decode(&malformed).is_err(),
+                "malformed origin case {invalid}"
+            );
+        }
+        checkpoint.state_version = 10;
+        assert!(
+            decode(&checkpoint)
+                .unwrap_err()
+                .contains("unsupported runtime Verilog-A state version 10")
+        );
+    }
+
+    #[test]
     fn legacy_v9_payload_cannot_restore_missing_limiter_history() {
         let checkpoint = checkpoint_with_slew_entries();
-        let mut words = checkpoint.to_words();
-        words[0] = 9;
+        let mut words = checkpoint.to_words_with_format(9, true, true);
         VerilogADeviceCheckpoint::validate_legacy_v9_words(&words).unwrap();
         assert!(
             VerilogADeviceCheckpoint::from_words(
@@ -737,8 +781,7 @@ mod runtime_checkpoint_codec_tests {
     #[test]
     fn legacy_v8_payload_validates_but_cannot_restore_ambiguous_discontinuity() {
         let checkpoint = checkpoint_with_slew_entries();
-        let mut words = checkpoint.to_words();
-        words[0] = 8;
+        let mut words = checkpoint.to_words_with_format(8, true, true);
         VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).unwrap();
         assert!(
             VerilogADeviceCheckpoint::from_words(
@@ -755,8 +798,7 @@ mod runtime_checkpoint_codec_tests {
         assert!(VerilogADeviceCheckpoint::validate_legacy_v8_words(&words).is_err());
     }
 
-    /// Version 7 is the one legacy payload whose *words* are current: every
-    /// field, in the same order, with the same encoding. What it does not carry
+    /// Versions 7 and 8 use the same fields and encoding. What v7 does not carry
     /// is the numbering — its slot arrays are indexed by the bytecode
     /// generator's per-emission allocation rather than the canonical per-site
     /// one — so the payload has to validate for diagnostics and refuse to
@@ -768,7 +810,7 @@ mod runtime_checkpoint_codec_tests {
         VerilogADeviceCheckpoint::validate_legacy_v7_words(&words)
             .expect("a complete legacy v7 payload validates");
 
-        let current = checkpoint.to_words();
+        let current = checkpoint.to_words_with_format(8, true, true);
         assert_eq!(
             words.len(),
             current.len(),
@@ -1000,7 +1042,8 @@ pub struct VerilogADevice {
 /// Version 8 cannot distinguish an accepted `-1` hint from a time discontinuity.
 /// Version 10 retains each limiter's previous Newton value. Earlier payloads
 /// saved its unused integration history instead, so they cannot resume it.
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 10;
+/// Version 11 retains exact circular-integrator origins when the modulus changes.
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 11;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -1139,6 +1182,18 @@ impl VerilogADeviceCheckpoint {
             encoder.boolean(state.transient_seen);
         }
         encoder.optional_float(self.accepted.timer_event_bound);
+        if state_version >= 11 {
+            encoder.word(self.accepted.idtmod_origins.len() as u64);
+            for (slot, origin) in &self.accepted.idtmod_origins {
+                encoder.word(*slot as u64);
+                encoder.boolean(origin.negative);
+                encoder.word(u64::from(origin.exponent as u32));
+                encoder.word(origin.words.len() as u64);
+                for &word in &origin.words {
+                    encoder.word(word);
+                }
+            }
+        }
         encoder.words
     }
 
@@ -1420,6 +1475,43 @@ impl VerilogADeviceCheckpoint {
             });
         }
         let timer_event_bound = decoder.optional_float("timer event bound")?;
+        let mut idtmod_origins = Vec::new();
+        if state_version >= 11 {
+            let count = decoder.length("idtmod origins", 4)?;
+            if count > state_initialized.len() {
+                return Err("idtmod origin count exceeds the state count".into());
+            }
+            for _ in 0..count {
+                let slot = usize::try_from(decoder.word("idtmod slot")?)
+                    .map_err(|_| "idtmod slot exceeds this platform")?;
+                let negative = decoder.boolean("idtmod origin sign")?;
+                let exponent = decoder.u32("idtmod origin exponent")? as i32;
+                let count = decoder.length("idtmod origin words", 1)?;
+                if count > rspice_veriloga_runtime::arithmetic::IdtModOrigin::MAX_CHECKPOINT_WORDS {
+                    return Err("idtmod origin exceeds the exact history capacity".into());
+                }
+                let mut words = Vec::with_capacity(count);
+                for _ in 0..count {
+                    words.push(decoder.word("idtmod origin word")?);
+                }
+                let origin = rspice_veriloga_runtime::arithmetic::IdtModOriginCheckpoint {
+                    negative,
+                    exponent,
+                    words,
+                };
+                rspice_veriloga_runtime::arithmetic::IdtModOrigin::from_checkpoint(&origin)?;
+                if slot >= state_initialized.len()
+                    || idtmod_origins
+                        .last()
+                        .is_some_and(|(previous, _)| *previous >= slot)
+                {
+                    return Err(
+                        "idtmod checkpoint slots must be ordered, unique, and in range".into(),
+                    );
+                }
+                idtmod_origins.push((slot, origin));
+            }
+        }
         decoder.finish()?;
         Ok(Self {
             instance_name,
@@ -1434,6 +1526,7 @@ impl VerilogADeviceCheckpoint {
                 state_values_older,
                 state_derivatives_prev,
                 state_initialized,
+                idtmod_origins,
                 delay_buffers,
                 transition_filters,
                 slew_filters,
@@ -2915,6 +3008,9 @@ impl VerilogADevice {
 
         let mut scan_program = |program: &crate::codegen::BytecodeProgram| {
             for instruction in &program.instructions {
+                if let Instruction::IdtModState(slot) = instruction {
+                    context.idtmod_origins.entry(*slot).or_default();
+                }
                 match instruction {
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
@@ -5794,6 +5890,7 @@ impl VerilogADevice {
                 context.state_older_candidate.as_mut_ptr()
             },
             state_older_candidate_len: context.state_older_candidate.len(),
+            idtmod_origins: &mut context.idtmod_origins,
             prelude_slots: if context.prelude_slots.is_empty() {
                 std::ptr::null_mut()
             } else {

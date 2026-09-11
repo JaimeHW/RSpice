@@ -10,6 +10,8 @@ mod executor;
 mod filters;
 mod small_signal;
 
+#[doc(hidden)]
+pub use context::IdtModState;
 pub(crate) use context::idtmod_wrapped_value;
 pub use context::{
     CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmAcceptedCheckpoint,

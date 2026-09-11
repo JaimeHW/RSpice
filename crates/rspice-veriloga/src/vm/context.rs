@@ -21,6 +21,16 @@ use crate::codegen::LookupTable;
 use crate::laplace::{LaplaceCheckpoint, StateSpaceFilter};
 use crate::zfilter::ZiCheckpoint;
 use rspice_veriloga_runtime::AnalogAnalysisPhase;
+use rspice_veriloga_runtime::arithmetic::{IdtModOrigin, IdtModOriginCheckpoint};
+use std::collections::BTreeMap;
+
+/// Sparse circular-integrator history shared with native evaluation helpers.
+#[doc(hidden)]
+#[derive(Debug, Clone, Default)]
+pub struct IdtModState {
+    pub(crate) accepted: IdtModOrigin,
+    pub(crate) candidate: Option<IdtModOrigin>,
+}
 
 pub(crate) const INTEGRATION_CANDIDATE_NONE: u8 = 0;
 pub(crate) const INTEGRATION_CANDIDATE_VALID: u8 = 1;
@@ -364,6 +374,7 @@ pub struct VmContext {
     /// its first publication in this evaluation. Repeated primal/AD reads must
     /// all use that same history. Runtime-only; never serialized.
     pub(crate) state_older_candidate: Vec<f64>,
+    pub(crate) idtmod_origins: BTreeMap<usize, IdtModState>,
     /// Per-evaluation slots the CFG route's prelude publishes into.
     ///
     /// One `f64` per distinct value entry output of a plan built through
@@ -431,6 +442,7 @@ pub struct VmAcceptedCheckpoint {
     pub state_values_older: Vec<f64>,
     pub state_derivatives_prev: Vec<f64>,
     pub state_initialized: Vec<bool>,
+    pub idtmod_origins: Vec<(usize, IdtModOriginCheckpoint)>,
     pub delay_buffers: Vec<DelayCheckpoint>,
     pub transition_filters: Vec<TransitionCheckpoint>,
     pub slew_filters: Vec<SlewCheckpoint>,
@@ -469,6 +481,7 @@ impl Default for VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            idtmod_origins: BTreeMap::new(),
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
@@ -611,6 +624,7 @@ impl VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            idtmod_origins: BTreeMap::new(),
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
@@ -664,6 +678,7 @@ impl VmContext {
             state_initialized: Vec::new(),
             state_candidate_valid: Vec::new(),
             state_older_candidate: Vec::new(),
+            idtmod_origins: BTreeMap::new(),
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
@@ -717,6 +732,7 @@ impl VmContext {
             state_initialized: vec![false; num_states],
             state_candidate_valid: vec![0; num_states],
             state_older_candidate: vec![0.0; num_states],
+            idtmod_origins: BTreeMap::new(),
             prelude_slots: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
@@ -900,6 +916,16 @@ impl VmContext {
                 "accepted integration history contains a non-finite value".into(),
             ));
         }
+        for (&slot, origin) in &self.idtmod_origins {
+            if slot >= state_count
+                || (self.state_candidate_valid[slot] == INTEGRATION_CANDIDATE_VALID)
+                    != origin.candidate.is_some()
+            {
+                return Err(invalid(format!(
+                    "idtmod state {slot} candidate origin is inconsistent"
+                )));
+            }
+        }
         for index in 0..state_count {
             if self.state_candidate_valid[index] >= LIMITER_HISTORY_UNINITIALIZED
                 && !self.state_values[index].is_finite()
@@ -992,6 +1018,12 @@ impl VmContext {
                 }
                 INTEGRATION_CANDIDATE_VALID => {}
                 _ => unreachable!("validated integration candidate status"),
+            }
+            if let Some(origin) = self.idtmod_origins.get_mut(&index) {
+                origin.accepted = origin
+                    .candidate
+                    .take()
+                    .expect("validated idtmod candidate origin");
             }
             self.state_values_older[index] = self.state_older_candidate[index];
             self.state_values_prev[index] = self.state_values[index];
@@ -1130,6 +1162,11 @@ impl VmContext {
             state_values_older: self.state_values_older.clone(),
             state_derivatives_prev: self.state_derivatives_prev.clone(),
             state_initialized: self.state_initialized.clone(),
+            idtmod_origins: self
+                .idtmod_origins
+                .iter()
+                .map(|(&slot, state)| (slot, state.accepted.checkpoint()))
+                .collect(),
             delay_buffers: self
                 .delay_buffers
                 .iter()
@@ -1194,6 +1231,30 @@ impl VmContext {
             return Err(invalid(
                 "checkpoint VM/operator shape does not match the device".into(),
             ));
+        }
+        if !self
+            .idtmod_origins
+            .keys()
+            .copied()
+            .eq(checkpoint.idtmod_origins.iter().map(|(slot, _)| *slot))
+        {
+            return Err(invalid(
+                "checkpoint idtmod origin slots do not match the device".into(),
+            ));
+        }
+        for (slot, state) in &checkpoint.idtmod_origins {
+            if *slot >= checkpoint.state_initialized.len() {
+                return Err(invalid(
+                    "checkpoint idtmod origin slot is out of range".into(),
+                ));
+            }
+            let origin = IdtModOrigin::from_checkpoint(state)
+                .map_err(|error| invalid(format!("checkpoint idtmod state {slot}: {error}")))?;
+            if !checkpoint.state_initialized[*slot] && origin != IdtModOrigin::ZERO {
+                return Err(invalid(
+                    "uninitialized idtmod state has a nonzero origin".into(),
+                ));
+            }
         }
         if checkpoint.variables.iter().any(|value| value.is_nan())
             || checkpoint
@@ -1319,6 +1380,15 @@ impl VmContext {
             .clone_from(&checkpoint.state_derivatives_prev);
         self.state_initialized
             .clone_from(&checkpoint.state_initialized);
+        for (slot, state) in &checkpoint.idtmod_origins {
+            let origin = self
+                .idtmod_origins
+                .get_mut(slot)
+                .expect("validated idtmod slot");
+            origin.accepted =
+                IdtModOrigin::from_checkpoint(state).expect("validated idtmod origin");
+            origin.candidate = None;
+        }
         self.state_candidate_valid.fill(0);
         self.state_older_candidate.fill(0.0);
         for (target, state) in self.delay_buffers.iter_mut().zip(&checkpoint.delay_buffers) {
@@ -1388,6 +1458,9 @@ impl VmContext {
         self.state_values_older.fill(0.0);
         self.state_derivatives.fill(0.0);
         self.state_derivatives_prev.fill(0.0);
+        for origin in self.idtmod_origins.values_mut() {
+            *origin = IdtModState::default();
+        }
         self.state_initialized.fill(false);
         self.state_candidate_valid.fill(0);
         self.state_older_candidate.fill(0.0);
@@ -1440,6 +1513,9 @@ impl VmContext {
             self.record_task_effects = false;
             self.numerical_evaluation_valid = false;
             return;
+        }
+        for origin in self.idtmod_origins.values_mut() {
+            origin.candidate = None;
         }
         if self.evaluation_mode.limiting_enabled() {
             self.limiter_active = 0;
@@ -1652,11 +1728,21 @@ impl VmContext {
                     INTEGRATION_CANDIDATE_VALID => {
                         if self.state_values[index].is_finite()
                             && self.state_derivatives[index].is_finite()
+                            && self
+                                .idtmod_origins
+                                .get(&index)
+                                .is_none_or(|origin| origin.candidate.is_some())
                         {
                             self.state_values_prev[index] = self.state_values[index];
                             self.state_values_older[index] = self.state_values[index];
                             self.state_derivatives_prev[index] = self.state_derivatives[index];
                             self.state_initialized[index] = true;
+                            if let Some(origin) = self.idtmod_origins.get_mut(&index) {
+                                origin.accepted = origin
+                                    .candidate
+                                    .take()
+                                    .expect("checked operating-point idtmod origin");
+                            }
                         } else {
                             self.state_values[index] = self.state_values_prev[index];
                             self.state_derivatives[index] = self.state_derivatives_prev[index];
@@ -1666,6 +1752,9 @@ impl VmContext {
                     }
                     _ => {}
                 }
+            }
+            for origin in self.idtmod_origins.values_mut() {
+                origin.candidate = None;
             }
             for filter in &mut self.slew_filters {
                 filter.promote_operating_point_candidate();
@@ -1677,6 +1766,9 @@ impl VmContext {
                 filter.promote_operating_point_candidate();
             }
         } else if self.integration != coefficients {
+            for origin in self.idtmod_origins.values_mut() {
+                origin.candidate = None;
+            }
             // A candidate evaluated with different companion coefficients
             // cannot be accepted under the new integration rule.
             for index in 0..self.state_candidate_valid.len() {

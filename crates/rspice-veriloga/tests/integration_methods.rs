@@ -343,3 +343,108 @@ endmodule
         device.advance_state();
     }
 }
+
+#[test]
+fn idtmod_dynamic_modulus_preserves_accumulated_integral() {
+    use rspice_veriloga::device::VerilogADeviceCheckpoint;
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module dynamic_modulus(p, n, o);
+    inout p, n, o;
+    electrical p, n, o;
+    analog I(p, n) <+ idtmod(0.0, 5.0, V(p, n), V(o, n));
+endmodule
+"#,
+    );
+    // Both explicit acceptance and operating-point promotion must retain 5,
+    // although the visible initial phase is only 1.
+    for accept_operating_point in [false, true] {
+        let mut device = model.device("A1", &[1, 0, 2]);
+        device.set_analysis_type(2);
+        device.set_timestep(0.0);
+        device.update_voltages(&[2.0, 0.0]);
+        assert_close(device.try_evaluate().unwrap()[0], 1.0, "initial phase");
+        if accept_operating_point {
+            device.advance_state();
+        }
+        device.set_time(0.25);
+        device.set_timestep(0.25);
+        for (modulus, offset, expected) in [(3.0, 0.0, 2.0), (4.0, 0.25, 1.0), (2.0, 1.5, 3.0)] {
+            device.update_voltages(&[modulus, offset]);
+            for _ in 0..2 {
+                assert_close(device.try_evaluate().unwrap()[0], expected, "Newton retry");
+                assert!(
+                    device.checkpoint_state().is_err(),
+                    "an in-flight candidate cannot be serialized"
+                );
+            }
+        }
+        device.update_voltages(&[0.0, 0.0]);
+        assert!(device.try_evaluate().is_err());
+        assert!(
+            device.try_advance_state().is_err(),
+            "a failed retry cannot be accepted"
+        );
+        device.update_voltages(&[3.0, 0.0]);
+        assert_close(
+            device.try_evaluate().unwrap()[0],
+            2.0,
+            "retry after invalid modulus",
+        );
+        device.advance_state();
+        let checkpoint = device.checkpoint_state().unwrap();
+        let decoded = VerilogADeviceCheckpoint::from_words(
+            checkpoint.instance_name.clone(),
+            checkpoint.model_name.clone(),
+            checkpoint.source_digest.clone(),
+            checkpoint.shape_identity.clone(),
+            &checkpoint.to_words(),
+        )
+        .unwrap();
+        assert_eq!(decoded, checkpoint);
+        let mut restored = model.device("A1", &[1, 0, 2]);
+        let mut missing = decoded.clone();
+        missing.accepted.idtmod_origins.clear();
+        assert!(restored.validate_checkpoint_state(&missing).is_err());
+        restored.validate_checkpoint_state(&decoded).unwrap();
+        restored.apply_validated_checkpoint_state(&decoded);
+        for candidate in [&mut device, &mut restored] {
+            candidate.set_analysis_type(2);
+            candidate.set_time(0.5);
+            candidate.set_timestep(0.25);
+            candidate.update_voltages(&[2.0, 0.0]);
+            assert_close(
+                candidate.try_evaluate().unwrap()[0],
+                1.0,
+                "checkpoint continuation",
+            );
+            candidate.advance_state();
+            candidate.try_begin_analysis(2).unwrap();
+            candidate.update_voltages(&[4.0, 0.0]);
+            assert_close(candidate.try_evaluate().unwrap()[0], 1.0, "fresh analysis");
+        }
+    }
+}
+
+#[test]
+fn idtmod_direct_transient_retains_small_increments_after_a_large_initial_value() {
+    let model = DeviceFixture::compile(
+        r#"
+module direct_circular(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idtmod(1.0, 1.0e300, V(p, n), 0.0);
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.set_analysis_type(2);
+    for (time, modulus, expected) in [(0.25, 1.0, 0.25), (0.5, 3.0, (1.0e300_f64 % 3.0) + 0.5)] {
+        device.set_time(time);
+        device.set_timestep(0.25);
+        device.update_voltages(&[modulus]);
+        assert_eq!(device.try_evaluate().unwrap()[0], expected);
+        device.advance_state();
+    }
+}
