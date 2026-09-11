@@ -1,0 +1,280 @@
+//! XSPICE participation in the circuit-owned HDL Active region.
+//! Bindings describe original code-model outputs; resolved observations never
+//! become drivers. The owner retains this participant for a complete settle
+//! and includes its circuit state in the same trial as the HDL host.
+use super::*;
+use crate::xspice::DigitalValue;
+use crate::xspice::event_scheduler::EventTarget;
+use crate::xspice::verilog::host::{
+    DigitalActiveExchange, DigitalActiveParticipant, DigitalHost, DigitalRunError,
+};
+use crate::xspice::verilog::store::{DigitalBitChange, ExternalBitDriverId};
+use std::collections::{BTreeSet, VecDeque};
+
+/// Immutable connections between physical circuit node identities and resolved
+/// HDL bit groups. Driver indices match XspiceInstance::schedule_events.
+#[derive(Clone, Debug)]
+pub(crate) struct XspiceDigitalBindings {
+    by_node: BTreeMap<NodeId, usize>,
+    by_net: BTreeMap<usize, NodeId>,
+    drivers: BTreeMap<EventTarget, ExternalBitDriverId>,
+}
+
+impl XspiceDigitalBindings {
+    pub(crate) fn enroll(
+        circuit: &CircuitData,
+        digital: &mut DigitalHost,
+        nets: &[(NodeId, usize)],
+    ) -> Result<Option<Self>, DigitalRunError> {
+        let mut offered = BTreeMap::new();
+        let mut net_ids = BTreeSet::new();
+        for &(node, net) in nets {
+            if node == 0 || offered.insert(node, net).is_some() || !net_ids.insert(net) {
+                return Err(external_error(format!(
+                    "shared XSPICE connections require distinct non-ground circuit nodes and bit groups; node {node}, group {net}"
+                )));
+            }
+        }
+        let mut connected = BTreeSet::new();
+        let mut targets = Vec::new();
+        for instance in &circuit.xspice_instances {
+            instance.for_each_event_input_net(|kind, node| {
+                if kind == EventInputKind::Digital && offered.contains_key(&node) {
+                    connected.insert(node);
+                }
+            });
+            instance.for_each_digital_output_driver(|target| {
+                if offered.contains_key(&target.node_id) {
+                    connected.insert(target.node_id);
+                    targets.push(target);
+                }
+            });
+        }
+        if connected.is_empty() {
+            return Ok(None);
+        }
+        let by_node: BTreeMap<_, _> = connected
+            .into_iter()
+            .map(|node| (node, offered[&node]))
+            .collect();
+        let by_net = by_node.iter().map(|(&node, &net)| (net, node)).collect();
+        targets.sort();
+        let targets: Vec<_> = targets
+            .into_iter()
+            .map(|target| (by_node[&target.node_id], target))
+            .collect();
+        let ids = digital
+            .attach_external_bits(&by_node.values().copied().collect::<Vec<_>>(), &targets)?;
+        Ok(Some(Self {
+            by_node,
+            by_net,
+            drivers: targets
+                .into_iter()
+                .map(|(_, target)| target)
+                .zip(ids)
+                .collect(),
+        }))
+    }
+}
+
+fn external_error(detail: impl Into<String>) -> DigitalRunError {
+    DigitalRunError::ExternalExecution {
+        detail: detail.into(),
+    }
+}
+fn model_error(error: impl std::fmt::Display) -> crate::xspice::CmError {
+    crate::xspice::CmError::EvaluationError(error.to_string())
+}
+
+/// Borrowed code-model side of one candidate. Creating this object does not
+/// advance state. Each callback executes at most one model dispatch wave, then
+/// yields so the HDL host can run newly activated processes before later regions.
+pub(crate) struct XspiceDigitalParticipant<'a> {
+    circuit: &'a mut CircuitData,
+    bindings: &'a XspiceDigitalBindings,
+    solution: &'a [Value],
+    resources: Option<&'a ResourceTransaction>,
+    time: Value,
+    timestep: Value,
+    analysis: crate::xspice::AnalysisType,
+    phase: crate::xspice::EvaluationPhase,
+    coefficients: crate::numerics::integration::CompanionCoefficients,
+    xyce_one_step_order2: bool,
+    wave: Option<XspiceActiveWave>,
+    pending: VecDeque<DigitalBitChange>,
+    initialized: bool,
+}
+
+impl<'a> XspiceDigitalParticipant<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        circuit: &'a mut CircuitData,
+        bindings: &'a XspiceDigitalBindings,
+        solution: &'a [Value],
+        time: Value,
+        timestep: Value,
+        analysis: crate::xspice::AnalysisType,
+        phase: crate::xspice::EvaluationPhase,
+        companion: XspiceCompanionPolicy<'_>,
+        resources: Option<&'a ResourceTransaction>,
+    ) -> Self {
+        Self {
+            circuit,
+            bindings,
+            solution,
+            resources,
+            time,
+            timestep,
+            analysis,
+            phase,
+            coefficients: *companion.coefficients,
+            xyce_one_step_order2: companion.xyce_one_step_order2,
+            wave: None,
+            pending: VecDeque::new(),
+            initialized: false,
+        }
+    }
+}
+
+impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
+    fn settle_active(
+        &mut self,
+        exchange: &mut DigitalActiveExchange<'_>,
+    ) -> Result<bool, DigitalRunError> {
+        let physical = exchange.physical_seconds();
+        if !physical.is_finite() || physical > self.time || physical < self.time - self.timestep {
+            return Err(external_error(format!(
+                "XSPICE Active work at {physical:.16e}s is outside candidate interval [{:.16e}, {:.16e}]s",
+                self.time - self.timestep,
+                self.time,
+            )));
+        }
+        if self.wave.as_ref().is_none_or(|wave| wave.time != physical) {
+            if !self.pending.is_empty()
+                || self.wave.as_ref().is_some_and(|wave| physical < wave.time)
+            {
+                return Err(external_error(
+                    "XSPICE physical time cannot advance with pending shared-net observations or move backwards within one candidate",
+                ));
+            }
+            if let Some(due) = self.circuit.xspice_event_queue.next_event_time()
+                && due < physical
+            {
+                return Err(external_error(format!(
+                    "missed XSPICE breakpoint at {due:.16e}s before shared Active work at {physical:.16e}s"
+                )));
+            }
+            self.wave = Some(
+                self.circuit
+                    .begin_xspice_active_wave(
+                        physical,
+                        self.timestep - (self.time - physical),
+                        self.analysis,
+                        self.phase,
+                        XspiceCompanionPolicy {
+                            coefficients: &self.coefficients,
+                            xyce_one_step_order2: self.xyce_one_step_order2,
+                        },
+                    )
+                    .map_err(|error| external_error(error.to_string()))?,
+            );
+        }
+        self.pending.extend(exchange.take_changes());
+        let wave = self.wave.as_mut().expect("prepared physical Active wave");
+        if !self.initialized {
+            // An undriven shared bit starts at Z. Seed missing observation
+            // entries from the state preceding the first journaled publication,
+            // so an input-only XSPICE endpoint sees an explicit value too.
+            let mut initial = Vec::new();
+            for (&node, &net) in &self.bindings.by_node {
+                if !self
+                    .circuit
+                    .xspice_event_values
+                    .digital_values
+                    .contains_key(&node)
+                {
+                    let value = match self.pending.iter().find(|change| change.net == net) {
+                        Some(change) => change.previous,
+                        None => exchange.read_net(net)?,
+                    };
+                    initial.push((node, value));
+                }
+            }
+            self.circuit
+                .observe_xspice_shared_digital_inputs(wave, &initial);
+            self.initialized = true;
+        }
+        let mut observed = Vec::new();
+        while let Some(change) = self.pending.pop_front() {
+            let Some(&node) = self.bindings.by_net.get(&change.net) else {
+                return Err(external_error(format!(
+                    "unbound XSPICE observation for bit group {}",
+                    change.net
+                )));
+            };
+            observed.push((node, change.value));
+            if self
+                .pending
+                .front()
+                .is_none_or(|next| next.starts_publication)
+            {
+                break;
+            }
+        }
+        self.circuit
+            .observe_xspice_shared_digital_inputs(wave, &observed);
+        let mut resolver = SharedResolver {
+            bindings: self.bindings,
+            exchange,
+        };
+        let more = self
+            .circuit
+            .step_xspice_active_wave_with_resolver(
+                wave,
+                self.solution,
+                self.resources,
+                &mut resolver,
+            )
+            .map_err(|error| external_error(error.to_string()))?;
+        Ok(more || !self.pending.is_empty())
+    }
+}
+
+struct SharedResolver<'a, 'host> {
+    bindings: &'a XspiceDigitalBindings,
+    exchange: &'a mut DigitalActiveExchange<'host>,
+}
+impl XspiceDigitalResolver for SharedResolver<'_, '_> {
+    fn owns(&self, node: NodeId) -> bool {
+        self.bindings.by_node.contains_key(&node)
+    }
+    fn publish(
+        &mut self,
+        drivers: &[(EventTarget, DigitalValue)],
+        resolved: &mut Vec<(NodeId, DigitalValue)>,
+    ) -> crate::xspice::CmResult<()> {
+        let mut bank = Vec::with_capacity(drivers.len());
+        let mut nodes = BTreeSet::new();
+        for (target, value) in drivers {
+            let Some(&id) = self.bindings.drivers.get(target) else {
+                return Err(model_error(format!(
+                    "undeclared XSPICE output driver {}.{}[{}] on shared node {}",
+                    target.instance, target.port_name, target.driver_index, target.node_id,
+                )));
+            };
+            bank.push((id, *value));
+            nodes.insert(target.node_id);
+        }
+        // Validate every original driver before publishing any vector element.
+        self.exchange.drive_many(&bank).map_err(model_error)?;
+        for node in nodes {
+            resolved.push((
+                node,
+                self.exchange
+                    .read_net(self.bindings.by_node[&node])
+                    .map_err(model_error)?,
+            ));
+        }
+        Ok(())
+    }
+}

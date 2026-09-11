@@ -1972,6 +1972,38 @@ impl XspiceInstance {
         }
     }
 
+    /// Enumerate original digital output identities, including vector element
+    /// indices and inverted connections. Inversion belongs to schedule_events;
+    /// an observer or an input alias is never an additional driver.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn for_each_digital_output_driver(
+        &self,
+        mut visit: impl FnMut(super::event_scheduler::EventTarget),
+    ) {
+        for (port, connection) in self.ports.iter().zip(&self.connections) {
+            if !matches!(
+                port.direction,
+                super::PortDirection::Out | super::PortDirection::InOut
+            ) || !matches!(
+                connection,
+                PortConnection::Digital(_)
+                    | PortConnection::DigitalInverted(_)
+                    | PortConnection::DigitalVector(_)
+                    | PortConnection::DigitalVectorMapped(_)
+            ) {
+                continue;
+            }
+            for_each_event_connection_node(connection, |driver_index, node_id| {
+                visit(super::event_scheduler::EventTarget {
+                    node_id,
+                    instance: self.name.clone(),
+                    port_name: port.name.clone(),
+                    driver_index,
+                });
+            });
+        }
+    }
+
     /// Whether an event has reached an input net since the recorded
     /// event-input signature was last confirmed.
     #[inline]

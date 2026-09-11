@@ -1231,6 +1231,54 @@ a non-test build; circuit integration must make them live rather than suppress
 those warnings. This increment is scheduling/driver infrastructure with runtime
 execution evidence, not the completed whole-circuit slice or Spectre parity.
 
+## XSPICE event drains through shared HDL resolution
+
+The circuit adapter now enumerates actual XSPICE digital output ports, retaining
+scalar, mapped/inverted and vector-element driver identities. Its immutable
+binding table enrolls only XSPICE endpoints on the offered HDL bit groups.
+Input observations never become output drivers. Shared event drains publish
+original contributions into the HDL resolver and immediately make the combined
+resolved value available to native XSPICE fanout. Nonshared digital and real
+nodes retain their existing event-drain route.
+
+The borrowed Active participant consumes resolved HDL publication banks and
+runs the production XSPICE dispatch one wave at a time. XSPICE vector output
+banks are published atomically; the original contributions remain separately
+available for rollback and diagnostics. Physical execution time stays distinct
+from the rounded HDL reporting tick, and a missed XSPICE breakpoint is refused
+before its event queue is drained.
+
+The initial focused run passed six cases in 0.07 seconds after an 81 second
+build: two actual routed-inverter cases, the two existing original-driver drain
+cases, and existing model-error and oscillation refusals. The routed cases check
+HDL contention reaching native XSPICE fanout, release before HDL inactive reads,
+and the real gate's 1 ps propagation from a 100.6 ps activation without consuming
+future HDL timers. They also replay cloned digital and XSPICE state. A further
+vector case checks mapped output inversion, independent original driver indices
+on one conductor, release, and atomic vector expression observation. Its first
+compile needed a fixture correction to unwrap the declared optional digital
+input. After integrating remote main through a45d90faf (including the Verilog
+last_crossing/runtime/generator update), all three routed cases passed in 0.01
+seconds after a 109 second build. This includes vector and missed-breakpoint
+checks. Review also removed a redundant model-error wrapper from the two event
+drain refusal paths, preserving their original error types and diagnostics.
+The two affected model-error/oscillation cases then passed in 0.07 seconds after
+a 31 second build. Logs: hdl-xspice-routed.log, hdl-xspice-routed-final.log,
+hdl-xspice-routed-integrated.log and hdl-xspice-routed-errors.log in the owned
+target. The increment changes core and documentation only; generated artifacts
+came from the concurrent last_crossing commit and were not regenerated here.
+
+This is the actual event-drain adapter, but it is not yet attached by the deck
+builder and joint circuit trial. Direct HDL/XSPICE decks remain refused. The
+next change must retain candidate-local code-model state across Active waves,
+wire builder enrollment and circuit rollback/acceptance, include both queues'
+breakpoints, and publish one accepted shared-net snapshot. The existing
+RollbackableProbe phase intentionally suppresses some code-model state changes;
+it must not be relabeled as an accepted evaluation merely to enable feedback.
+The private adapter APIs remain unused in a non-test build until those circuit
+paths are connected. No full-suite, vendor, platform, generator or capacity
+qualification is claimed by this increment.
+
 ## Next implementation work
 
 Attach HDL and XSPICE drivers to resolved event nets under the circuit execution

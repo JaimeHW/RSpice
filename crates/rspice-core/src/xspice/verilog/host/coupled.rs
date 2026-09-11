@@ -29,6 +29,14 @@ impl DigitalActiveExchange<'_> {
     pub(crate) fn physical_seconds(&self) -> f64 {
         self.physical_seconds
     }
+    pub(crate) fn read_net(&self, net: usize) -> Result<DigitalValue, DigitalRunError> {
+        self.host
+            .store
+            .connected_value(net)
+            .ok_or_else(|| DigitalRunError::ExternalExecution {
+                detail: format!("unknown shared digital net {net}"),
+            })
+    }
     pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
     }

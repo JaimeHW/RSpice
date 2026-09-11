@@ -381,3 +381,370 @@ module bank; wire a,b; reg [31:0] glitches; initial glitches=0;
             .contains("after digital execution")
     );
 }
+
+fn routed_inverters() -> crate::CircuitData {
+    let mut circuit = crate::CircuitData::new();
+    for name in ["command", "bus", "response"] {
+        circuit.get_or_create_node(name);
+    }
+    for (name, input, output) in [("Ainv", 1, 2), ("Aobserver", 2, 3)] {
+        let mut instance = XspiceInstance::new(
+            name,
+            Arc::new(crate::xspice::models::DigitalInverter),
+            vec![
+                PortConnection::Digital(input),
+                PortConnection::Digital(output),
+            ],
+            &[("rise_delay".into(), 0.0), ("fall_delay".into(), 0.0)],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        instance.init().unwrap();
+        circuit.add_xspice_instance(instance);
+    }
+    circuit
+}
+
+fn routed_participant<'a>(
+    circuit: &'a mut crate::CircuitData,
+    bindings: &'a super::XspiceDigitalBindings,
+    time: f64,
+    timestep: f64,
+) -> super::XspiceDigitalParticipant<'a> {
+    super::XspiceDigitalParticipant::new(
+        circuit,
+        bindings,
+        &[],
+        time,
+        timestep,
+        crate::xspice::AnalysisType::Transient,
+        crate::xspice::EvaluationPhase::DirectEvaluation,
+        super::XspiceCompanionPolicy {
+            coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            xyce_one_step_order2: false,
+        },
+        None,
+    )
+}
+
+#[test]
+fn coupled_routed_xspice_fanout_reads_combined_contention_and_release() {
+    let mut digital = host(
+        r#"
+module routed;
+ reg own,sampled; wire command,bus,response,trigger;
+ assign command=0; assign bus=own ? 1'b0 : 1'bz;
+ initial begin own=1; sampled=1; end
+ always @(posedge trigger) begin own=0; #0 sampled=response; end
+endmodule
+"#,
+        &["command", "bus", "response"],
+    );
+    let mut circuit = routed_inverters();
+    let bindings =
+        super::XspiceDigitalBindings::enroll(&circuit, &mut digital, &[(1, 0), (2, 1), (3, 2)])
+            .unwrap()
+            .unwrap();
+    digital.prepare_start().unwrap();
+    digital
+        .advance_to_with(
+            0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "x");
+    assert_eq!(
+        bit(&digital, "response"),
+        "x",
+        "native XSPICE fanout must see HDL contention"
+    );
+    assert_eq!(
+        circuit.xspice_event_values.digital_values[&2].state,
+        DigitalState::Unknown
+    );
+    let original = &circuit.xspice_event_values.digital_drivers[&2];
+    assert_eq!(
+        original.len(),
+        1,
+        "a resolved HDL observation must not become an XSPICE driver"
+    );
+    assert_eq!(
+        original[&("Ainv".into(), "out".into(), 0)].state,
+        DigitalState::One
+    );
+    let accepted = (digital.clone(), circuit.clone());
+    let trigger = [(
+        digital.signal("trigger").unwrap(),
+        FourStateValue::splat(1, rspice_veriloga::four_state::FourStateBit::One),
+    )];
+    digital
+        .force_many_from_analog_with(
+            &trigger,
+            0,
+            0.0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "1");
+    assert_eq!(bit(&digital, "response"), "0");
+    assert_eq!(
+        bit(&digital, "sampled"),
+        "0",
+        "XSPICE fanout settles before inactive reads"
+    );
+    assert_eq!(
+        circuit.xspice_event_values.digital_values[&2],
+        DigitalValue::one()
+    );
+    let (mut retry, mut retried_circuit) = accepted;
+    retry
+        .force_many_from_analog_with(
+            &trigger,
+            0,
+            0.0,
+            &mut routed_participant(&mut retried_circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&retry, "sampled"), bit(&digital, "sampled"));
+    assert_eq!(
+        retried_circuit.xspice_event_values.digital_values,
+        circuit.xspice_event_values.digital_values
+    );
+}
+
+#[test]
+fn coupled_routed_delayed_xspice_event_keeps_physical_time_and_future_hdl_timer() {
+    let mut digital = host(
+        r#"
+`timescale 1ns/1ps
+module delayed;
+ reg a,unrelated,future,captured; wire command,bus,response,trigger;
+ assign command=a;
+ initial begin a=0; unrelated=0; future=0; captured=1; #0.101 unrelated=1; #0.001 future=1; end
+ always @(posedge trigger) a=1;
+ always @(negedge bus) captured=future;
+endmodule
+"#,
+        &["command", "bus", "response"],
+    );
+    let mut circuit = routed_inverters();
+    let bindings =
+        super::XspiceDigitalBindings::enroll(&circuit, &mut digital, &[(1, 0), (2, 1), (3, 2)])
+            .unwrap()
+            .unwrap();
+    digital.prepare_start().unwrap();
+    digital
+        .advance_to_with(
+            0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "1");
+    let physical = 100.6e-12;
+    let trigger = [(
+        digital.signal("trigger").unwrap(),
+        FourStateValue::splat(1, rspice_veriloga::four_state::FourStateBit::One),
+    )];
+    digital
+        .force_many_from_analog_with(
+            &trigger,
+            101,
+            physical,
+            &mut routed_participant(&mut circuit, &bindings, physical, physical),
+        )
+        .unwrap();
+    let due = circuit.xspice_event_queue.next_event_time().unwrap();
+    assert!((due - (physical + 1e-12)).abs() < 1e-25);
+    assert_eq!(bit(&digital, "unrelated"), "0");
+    let grid_time = TimeResolution::new(-12)
+        .unwrap()
+        .ticks_to_seconds(101)
+        .unwrap();
+    digital
+        .advance_to_with(
+            101,
+            &mut routed_participant(&mut circuit, &bindings, grid_time, grid_time - physical),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "unrelated"), "1");
+    assert_eq!(bit(&digital, "bus"), "1");
+    let accepted = (digital.clone(), circuit.clone());
+    let (mut missed, mut missed_circuit) = accepted.clone();
+    let late = due + 0.1e-12;
+    let error = missed
+        .force_many_from_analog_with(
+            &[],
+            102,
+            late,
+            &mut routed_participant(&mut missed_circuit, &bindings, late, late - grid_time),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("missed XSPICE breakpoint"));
+    digital
+        .force_many_from_analog_with(
+            &[],
+            102,
+            due,
+            &mut routed_participant(&mut circuit, &bindings, due, due - grid_time),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "0");
+    assert_eq!(bit(&digital, "captured"), "0");
+    assert_eq!(
+        bit(&digital, "future"),
+        "0",
+        "external event must not consume the 102 ps timer"
+    );
+    assert_eq!(circuit.xspice_event_values.digital_event_times[&2], due);
+    let (mut retry, mut retried_circuit) = accepted;
+    retry
+        .force_many_from_analog_with(
+            &[],
+            102,
+            due,
+            &mut routed_participant(&mut retried_circuit, &bindings, due, due - grid_time),
+        )
+        .unwrap();
+    assert_eq!(bit(&retry, "captured"), "0");
+    assert_eq!(
+        retried_circuit.xspice_event_queue.next_event_time(),
+        circuit.xspice_event_queue.next_event_time()
+    );
+}
+
+struct RoutedVector {
+    ports: Vec<crate::xspice::PortSpec>,
+}
+impl crate::xspice::CodeModel for RoutedVector {
+    fn name(&self) -> &str {
+        "routed_vector"
+    }
+    fn ports(&self) -> &[crate::xspice::PortSpec] {
+        &self.ports
+    }
+    fn parameters(&self) -> &[crate::xspice::ParamSpec] {
+        &[]
+    }
+    fn init(&self, _: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+        Ok(())
+    }
+    fn evaluate(&self, ctx: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+        let release = ctx
+            .input_digital("in")
+            .expect("declared digital input")
+            .state
+            == DigitalState::One;
+        let bit = if release {
+            DigitalValue::one()
+        } else {
+            DigitalValue::zero()
+        };
+        ctx.set_output_digital_vector_from_slice(
+            "out",
+            &[
+                if release {
+                    DigitalValue::high_z()
+                } else {
+                    DigitalValue::one()
+                },
+                DigitalValue::one(),
+                bit,
+                bit,
+            ],
+            0.0,
+        );
+        Ok(())
+    }
+}
+
+#[test]
+fn coupled_routed_vector_inversion_driver_release_and_atomic_publication() {
+    use crate::xspice::{DigitalPortConnection, PortSpec, PortType};
+    let mut digital = host(
+        r#"
+module vectors;
+ reg release_driver; reg [31:0] glitches; wire command,bus,left,right,trigger;
+ assign command=release_driver;
+ initial begin release_driver=0; glitches=0; end
+ always @(posedge trigger) release_driver=1;
+ always @(posedge (left^right)) glitches=glitches+1;
+endmodule
+"#,
+        &["command", "bus", "left", "right"],
+    );
+    let mut circuit = crate::CircuitData::new();
+    for name in ["command", "bus", "left", "right"] {
+        circuit.get_or_create_node(name);
+    }
+    let mut instance = XspiceInstance::new(
+        "Avec",
+        Arc::new(RoutedVector {
+            ports: vec![
+                PortSpec::input("in", PortType::Digital),
+                PortSpec::vector_output("out", PortType::Digital),
+            ],
+        }),
+        vec![
+            PortConnection::Digital(1),
+            PortConnection::DigitalVectorMapped(vec![
+                DigitalPortConnection::new(2, false),
+                DigitalPortConnection::new(2, true),
+                DigitalPortConnection::new(3, false),
+                DigitalPortConnection::new(4, false),
+            ]),
+        ],
+        &[],
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
+    instance.init().unwrap();
+    circuit.add_xspice_instance(instance);
+    let bindings = super::XspiceDigitalBindings::enroll(
+        &circuit,
+        &mut digital,
+        &[(1, 0), (2, 1), (3, 2), (4, 3)],
+    )
+    .unwrap()
+    .unwrap();
+    digital.prepare_start().unwrap();
+    digital
+        .advance_to_with(
+            0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "x");
+    assert_eq!(circuit.xspice_event_values.digital_drivers[&2].len(), 2);
+    let trigger = [(
+        digital.signal("trigger").unwrap(),
+        FourStateValue::splat(1, rspice_veriloga::four_state::FourStateBit::One),
+    )];
+    digital
+        .force_many_from_analog_with(
+            &trigger,
+            0,
+            0.0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    assert_eq!(bit(&digital, "bus"), "0");
+    assert_eq!(bit(&digital, "left"), "1");
+    assert_eq!(bit(&digital, "right"), "1");
+    assert_eq!(
+        bit(&digital, "glitches"),
+        "00000000000000000000000000000000"
+    );
+    let drivers = &circuit.xspice_event_values.digital_drivers[&2];
+    assert_eq!(
+        drivers[&("Avec".into(), "out".into(), 0)],
+        DigitalValue::high_z()
+    );
+    assert_eq!(
+        drivers[&("Avec".into(), "out".into(), 1)],
+        DigitalValue::zero()
+    );
+}

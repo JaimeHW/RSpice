@@ -11,6 +11,11 @@
 #[path = "external_models/coupled_tests.rs"]
 mod coupled_tests;
 
+#[cfg(feature = "veriloga")]
+mod coupled;
+#[cfg(feature = "veriloga")]
+pub(crate) use coupled::{XspiceDigitalBindings, XspiceDigitalParticipant};
+
 use super::*;
 use crate::xspice::{
     EventInputKind, ResourceTransaction, XspiceEventInputs, XspiceInstanceCheckpoint,
@@ -116,13 +121,65 @@ struct GeneratedVerilogADcAcceptedState {
 /// iteration, so taking the mutable view first would copy the event world for
 /// every quiet analog step and defeat the sharing the rollback snapshot
 /// depends on.
+#[cfg(test)]
 fn apply_xspice_events_at_or_before(
     event_values: &mut crate::xspice::SharedXspiceEventValues,
     event_queue: &mut crate::xspice::SharedXspiceEventQueue,
     touched_digital_nodes: &mut Vec<NodeId>,
     touched_real_nodes: &mut Vec<NodeId>,
     time: Value,
-) -> Result<bool, crate::xspice::event_scheduler::SchedulerError> {
+) -> crate::xspice::CmResult<bool> {
+    apply_xspice_events_with_resolver(
+        event_values,
+        event_queue,
+        touched_digital_nodes,
+        touched_real_nodes,
+        time,
+        &mut LocalDigitalResolver,
+    )
+}
+
+/// An event drain publishes original drivers through the owner of a shared net.
+/// Local XSPICE nets retain their ordinary resolver. Returned values are input
+/// observations only; the circuit never feeds them back as output contributions.
+pub(super) trait XspiceDigitalResolver {
+    fn owns(&self, node: NodeId) -> bool;
+    fn publish(
+        &mut self,
+        drivers: &[(
+            crate::xspice::event_scheduler::EventTarget,
+            crate::xspice::DigitalValue,
+        )],
+        resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
+    ) -> crate::xspice::CmResult<()>;
+}
+
+struct LocalDigitalResolver;
+impl XspiceDigitalResolver for LocalDigitalResolver {
+    fn owns(&self, _node: NodeId) -> bool {
+        false
+    }
+    fn publish(
+        &mut self,
+        drivers: &[(
+            crate::xspice::event_scheduler::EventTarget,
+            crate::xspice::DigitalValue,
+        )],
+        _resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
+    ) -> crate::xspice::CmResult<()> {
+        debug_assert!(drivers.is_empty());
+        Ok(())
+    }
+}
+
+fn apply_xspice_events_with_resolver(
+    event_values: &mut crate::xspice::SharedXspiceEventValues,
+    event_queue: &mut crate::xspice::SharedXspiceEventQueue,
+    touched_digital_nodes: &mut Vec<NodeId>,
+    touched_real_nodes: &mut Vec<NodeId>,
+    time: Value,
+    resolver: &mut impl XspiceDigitalResolver,
+) -> crate::xspice::CmResult<bool> {
     let mut changed = false;
     touched_digital_nodes.clear();
     touched_real_nodes.clear();
@@ -140,31 +197,47 @@ fn apply_xspice_events_at_or_before(
         real_drivers,
         real_event_times,
     } = event_values.make_mut();
-    event_queue.run_due_events(time, |event| {
-        let node_id = event.node_id;
-        let event_time = event.time;
-        let driver_key = (event.instance, event.port_name, event.driver_index);
-        match event.value {
-            crate::xspice::EventValue::Digital(value) => {
-                digital_drivers
-                    .entry(node_id)
-                    .or_default()
-                    .insert(driver_key, value);
-                let previous_time = digital_event_times.insert(node_id, event_time);
-                changed |= previous_time != Some(event_time);
-                touched_digital_nodes.push(node_id);
+    let mut shared_drivers = Vec::new();
+    event_queue
+        .run_due_events(time, |event| {
+            let node_id = event.node_id;
+            let event_time = event.time;
+            let driver_key = (event.instance, event.port_name, event.driver_index);
+            match event.value {
+                crate::xspice::EventValue::Digital(value) => {
+                    if resolver.owns(node_id) {
+                        shared_drivers.push((
+                            crate::xspice::event_scheduler::EventTarget {
+                                node_id,
+                                instance: driver_key.0.clone(),
+                                port_name: driver_key.1.clone(),
+                                driver_index: driver_key.2,
+                            },
+                            value,
+                        ));
+                    }
+                    digital_drivers
+                        .entry(node_id)
+                        .or_default()
+                        .insert(driver_key, value);
+                    let previous_time = digital_event_times.insert(node_id, event_time);
+                    changed |= previous_time != Some(event_time);
+                    touched_digital_nodes.push(node_id);
+                }
+                crate::xspice::EventValue::Real(value) => {
+                    real_drivers
+                        .entry(node_id)
+                        .or_default()
+                        .insert(driver_key, value);
+                    let previous_time = real_event_times.insert(node_id, event_time);
+                    changed |= previous_time != Some(event_time);
+                    touched_real_nodes.push(node_id);
+                }
             }
-            crate::xspice::EventValue::Real(value) => {
-                real_drivers
-                    .entry(node_id)
-                    .or_default()
-                    .insert(driver_key, value);
-                let previous_time = real_event_times.insert(node_id, event_time);
-                changed |= previous_time != Some(event_time);
-                touched_real_nodes.push(node_id);
-            }
-        }
-    })?;
+        })
+        .map_err(|error| {
+            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(time, &error))
+        })?;
     if touched_digital_nodes.len() > 1 {
         touched_digital_nodes.sort_unstable();
         touched_digital_nodes.dedup();
@@ -174,6 +247,9 @@ fn apply_xspice_events_at_or_before(
         touched_real_nodes.dedup();
     }
     for &node_id in touched_digital_nodes.iter() {
+        if resolver.owns(node_id) {
+            continue;
+        }
         let resolved = digital_drivers
             .get(&node_id)
             .and_then(|drivers| {
@@ -184,6 +260,13 @@ fn apply_xspice_events_at_or_before(
             .unwrap_or_default();
         let previous_value = digital_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
+    }
+    if !shared_drivers.is_empty() {
+        let mut resolved = Vec::new();
+        resolver.publish(&shared_drivers, &mut resolved)?;
+        for (node, value) in resolved {
+            changed |= digital_values.insert(node, value) != Some(value);
+        }
     }
     for &node_id in touched_real_nodes.iter() {
         let resolved = real_drivers
@@ -714,6 +797,21 @@ impl CircuitData {
         solution: &[Value],
         resources: Option<&ResourceTransaction>,
     ) -> crate::xspice::CmResult<bool> {
+        self.step_xspice_active_wave_with_resolver(
+            wave,
+            solution,
+            resources,
+            &mut LocalDigitalResolver,
+        )
+    }
+
+    fn step_xspice_active_wave_with_resolver(
+        &mut self,
+        wave: &mut XspiceActiveWave,
+        solution: &[Value],
+        resources: Option<&ResourceTransaction>,
+        resolver: &mut impl XspiceDigitalResolver,
+    ) -> crate::xspice::CmResult<bool> {
         let time = wave.time;
         let timestep = wave.timestep;
         let analysis = wave.analysis;
@@ -743,12 +841,13 @@ impl CircuitData {
         let pending = &mut self.xspice_dispatch_pending;
         let next_pending = &mut self.xspice_dispatch_next_pending;
         next_pending.fill(false);
-        let mut changed = match apply_xspice_events_at_or_before(
+        let mut changed = match apply_xspice_events_with_resolver(
             event_values,
             event_queue,
             touched_digital_nodes,
             touched_real_nodes,
             time,
+            resolver,
         ) {
             Ok(changed) => changed,
             Err(error) => {
@@ -762,11 +861,14 @@ impl CircuitData {
                     touched_digital_nodes,
                     touched_real_nodes,
                 );
-                let message = xspice_event_settling_message(time, &error);
+                let message = match &error {
+                    crate::xspice::CmError::EvaluationError(message) => message.clone(),
+                    _ => error.to_string(),
+                };
                 if self.xspice_evaluation_error.is_none() {
                     self.xspice_evaluation_error = Some(message.clone());
                 }
-                return Err(crate::xspice::CmError::EvaluationError(message));
+                return Err(error);
             }
         };
         // What the drain just touched is owed an evaluation in *this*
@@ -869,12 +971,13 @@ impl CircuitData {
             if instance.has_pending_events() {
                 instance.schedule_events(event_queue.make_mut(), time);
             }
-            let instance_changed = match apply_xspice_events_at_or_before(
+            let instance_changed = match apply_xspice_events_with_resolver(
                 event_values,
                 event_queue,
                 touched_digital_nodes,
                 touched_real_nodes,
                 time,
+                resolver,
             ) {
                 Ok(changed) => changed,
                 Err(error) => {
@@ -884,11 +987,14 @@ impl CircuitData {
                         touched_digital_nodes,
                         touched_real_nodes,
                     );
-                    let message = xspice_event_settling_message(time, &error);
+                    let message = match &error {
+                        crate::xspice::CmError::EvaluationError(message) => message.clone(),
+                        _ => error.to_string(),
+                    };
                     if self.xspice_evaluation_error.is_none() {
                         self.xspice_evaluation_error = Some(message.clone());
                     }
-                    return Err(crate::xspice::CmError::EvaluationError(message));
+                    return Err(error);
                 }
             };
             // A driver reached these nets whether or not the resolved
