@@ -325,3 +325,160 @@ endmodule
     );
     assert!(err.contains("=="), "got: {err}");
 }
+
+#[test]
+fn indirect_equation_tolerances_follow_the_left_hand_nature() {
+    for (lhs, expected) in [
+        ("V(q,n)", 1e-6),
+        ("I(q,n)", 1e-12),
+        ("I(<q>)", 1e-12),
+        ("idt(V(q,n),0)", 1e-9),
+        ("idt(V(q,n))", 1e-9),
+        ("idt(I(q,n),0)", 1e-14),
+        ("ddt(V(q,n),Current)", 1e-12),
+    ] {
+        let model = compile(&format!(
+            "module tolerances(p,q,n); inout p,q,n; electrical p,q,n;
+            analog V(p,n): {lhs}==I(p,n); endmodule"
+        ));
+        let mut device = model.device("X", &[1, 2, 0]);
+        device.set_branch_current_indices(&(3..3 + model.branch_sources.len()).collect::<Vec<_>>());
+        let mut values = Vec::new();
+        device.visit_equation_abstols(9e-12, |row, tol| values.push((row, tol)));
+        assert_eq!(values, [(3, expected)], "{lhs}");
+    }
+    let model = compile(
+        "nature FineTemperature; units=\"K\"; access=Heat; abstol=2e-8;
+        idt_nature=IntegratedTemperature; endnature
+        nature IntegratedTemperature; units=\"K*s\"; access=HeatIntegral; abstol=3e-10; endnature
+        discipline customthermal; potential FineTemperature; flow Power; enddiscipline
+        module custom(p,q); inout p,q; electrical p; customthermal q;
+        analog V(p): idt(Heat(q),0)==I(p); endmodule",
+    );
+    let mut device = model.device("X", &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+    device.visit_equation_abstols(1e-12, |row, tol| assert_eq!((row, tol), (3, 3e-10)));
+}
+
+#[test]
+fn indirect_equation_tolerances_resolve_parameters_atomically() {
+    let model = compile(
+        "module tolerance(p); inout p; electrical p;
+        parameter real tolerance=2e-9; parameter integer enabled=1;
+        analog if(enabled) V(p): ddt(V(p),tolerance*2)==I(p); endmodule",
+    );
+    let mut device = model.device("X", &[1]);
+    device.set_branch_current_indices(&[2]);
+    for (value, enabled, expected) in [(3e-9, 1.0, 6e-9), (8e-9, 0.0, 1e-12), (0.0, 1.0, 0.0)] {
+        assert!(device.set_parameter("tolerance", value));
+        assert!(device.set_parameter("enabled", enabled));
+        device.try_resolve_parameter_defaults().unwrap();
+        let mut tolerances = Vec::new();
+        device.visit_equation_abstols(1e-12, |row, tol| tolerances.push((row, tol)));
+        assert_eq!(tolerances, [(2, expected)]);
+    }
+    assert!(device.set_parameter("tolerance", -1.0));
+    let error = device.try_resolve_parameter_defaults().unwrap_err();
+    assert!(error.to_string().contains("absolute tolerance"), "{error}");
+    device.visit_equation_abstols(1e-12, |_, tol| assert_eq!(tol, 0.0));
+    assert!(device.set_parameter("tolerance", f64::MAX));
+    assert!(device.try_resolve_parameter_defaults().is_err());
+    assert!(device.set_parameter("tolerance", 1e-9));
+    device.try_resolve_parameter_defaults().unwrap();
+    device.visit_equation_abstols(1e-12, |_, tol| assert_eq!(tol, 2e-9));
+}
+
+#[test]
+fn indirect_equation_tolerances_reject_dynamic_operands() {
+    for tolerance in [
+        "V(p)",
+        "$abstime",
+        "sin(V(p))",
+        "ddt(V(p))",
+        "analysis(\"tran\")",
+    ] {
+        let source = format!(
+            "module bad(p); inout p; electrical p;
+            analog V(p): ddt(V(p),{tolerance})==I(p); endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        assert!(
+            compiler.compile_canonical_ir(&source).is_err(),
+            "{tolerance}"
+        );
+        assert!(compiler.compile(&source).is_err(), "{tolerance}");
+    }
+}
+
+#[test]
+fn indirect_equation_tolerances_survive_hierarchy_parameter_binding() {
+    let source = "module child(p); inout p; electrical p; parameter real tol=1e-9;
+        analog V(p): ddt(V(p),tol)==I(p); endmodule
+        module top(p); inout p; electrical p; parameter real scale=2;
+        child #(.tol(scale*1e-12)) x(p); endmodule";
+    let report = VerilogACompiler::default()
+        .compile_runtime(source, Some("top"))
+        .unwrap();
+    let model = DeviceFixture {
+        model: report.model,
+        canonical_ir: report.canonical_ir,
+    };
+    let mut device = model.device("X", &[1]);
+    device.set_branch_current_indices(&[2]);
+    assert!(device.set_parameter("scale", 3.0));
+    device.try_resolve_parameter_defaults().unwrap();
+    device.visit_equation_abstols(1e-12, |_, tol| assert_eq!(tol, 3e-12));
+}
+
+#[test]
+fn indirect_named_branch_tolerances_include_both_endpoints() {
+    for lhs in ["V(q,r)", "V(pair)"] {
+        let model = compile(&format!(
+            "nature TightVoltage : Voltage; abstol=2e-12; endnature
+            discipline tight; potential TightVoltage; flow Current; enddiscipline
+            module named(p,q,r); inout p,q,r; electrical p,q; tight r;
+            branch(q,r) pair; analog V(p): {lhs}==0; endmodule"
+        ));
+        let mut device = model.device("X", &[1, 2, 3]);
+        device.set_branch_current_indices(&[4]);
+        let mut values = Vec::new();
+        device.visit_equation_abstols(1e-12, |row, tol| values.push((row, tol)));
+        assert_eq!(values, [(4, 2e-12)], "{lhs}");
+    }
+    let model = compile(
+        "nature ColdTemperature : Temperature; abstol=4e-8; endnature
+        discipline cold; potential ColdTemperature; flow Power; enddiscipline
+        module groundprobe(p); inout p; electrical p; cold reference; ground reference;
+        analog V(p): Temp(reference)==I(p); endmodule",
+    );
+    let mut device = model.device("X", &[1]);
+    device.set_branch_current_indices(&[2]);
+    let mut values = Vec::new();
+    device.visit_equation_abstols(1e-12, |row, tol| values.push((row, tol)));
+    assert_eq!(values, [(2, 4e-8)]);
+}
+
+#[test]
+fn indirect_tolerance_resolution_preserves_scope_and_initial_condition_effects() {
+    for (source, expected) in [
+        (
+            "module scope(p); inout p; electrical p; parameter real Current=2e-9;
+          analog V(p): ddt(V(p),Current)==I(p); endmodule",
+            2e-9,
+        ),
+        (
+            "module initial_effect(p); inout p; electrical p; real seen;
+          analog function real initial_value; output observed; real observed;
+          begin observed=7; initial_value=0; end endfunction
+          analog V(p): idt(V(p),initial_value(seen))==I(p); endmodule",
+            1e-9,
+        ),
+    ] {
+        let model = compile(source);
+        let mut device = model.device("X", &[1]);
+        device.set_branch_current_indices(&[2]);
+        let mut values = Vec::new();
+        device.visit_equation_abstols(1e-12, |row, tol| values.push((row, tol)));
+        assert_eq!(values, [(2, expected)]);
+    }
+}

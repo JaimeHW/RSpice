@@ -571,6 +571,11 @@ fn validate_hir_mir_contributions(
                 index
             )));
         }
+        if equation.equation_abstol != contribution.equation_abstol {
+            diagnostics.push(artifact_error(format!(
+                "MIR equation {index} tolerance must match HIR contribution tolerance"
+            )));
+        }
         if equation.span != contribution.span {
             diagnostics.push(artifact_error(format!(
                 "MIR equation {} span must match HIR contribution span",
@@ -861,7 +866,7 @@ fn write_hir_internal_node(out: &mut String, node: &HirInternalNode) {
 fn write_hir_contribution(out: &mut String, contribution: &HirContribution) {
     writeln!(
         out,
-        "contribution id={} branch={} declared={} kind={} expression={} expr_type={} span={}",
+        "contribution id={} branch={} declared={} kind={} expression={} abstol={} expr_type={} span={}",
         contribution.id.index(),
         enc_str(&contribution.branch),
         contribution
@@ -871,6 +876,7 @@ fn write_hir_contribution(out: &mut String, contribution: &HirContribution) {
             .unwrap_or_else(|| "-".to_string()),
         contribution_kind_label(contribution.kind),
         expr_ref_label(Some(&contribution.expression)),
+        expr_ref_label(contribution.equation_abstol.as_ref()),
         value_type_label(contribution.expr_type),
         span_label(contribution.span)
     )
@@ -1022,13 +1028,14 @@ fn write_mir_state_slot(out: &mut String, state_slot: &MirStateSlot) {
 fn write_mir_equation(out: &mut String, equation: &MirEquation) {
     writeln!(
         out,
-        "equation id={} contribution={} branch={} branch_unknown={} kind={} expression={} domains={} span={}",
+        "equation id={} contribution={} branch={} branch_unknown={} kind={} expression={} abstol={} domains={} span={}",
         equation.id.index(),
         equation.contribution.index(),
         branch_ref_label(&equation.branch),
         option_id(equation.branch_unknown.map(|id| id.index())),
         equation_kind_label(equation.kind),
         expr_ref_label(Some(&equation.expression)),
+        expr_ref_label(equation.equation_abstol.as_ref()),
         join_domains(&equation.active_domains),
         span_label(equation.span)
     )

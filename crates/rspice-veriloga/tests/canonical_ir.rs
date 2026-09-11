@@ -4038,3 +4038,26 @@ endmodule
         "the guarded equation reads the snapshot slot the flat list defines"
     );
 }
+
+#[test]
+fn indirect_equation_tolerance_metadata_is_sealed_and_validated() {
+    let original = VerilogACompiler::default()
+        .compile_canonical_ir(
+            "module tol(p); inout p; electrical p; parameter real atol=1e-12;
+        analog V(p): ddt(V(p),atol)==I(p); endmodule",
+        )
+        .unwrap();
+    let mut artifact = original.clone();
+    artifact.mir.equations[0].equation_abstol = None;
+    assert!(artifact.validate().is_err());
+    let mut hir = original.hir.clone();
+    hir.contributions[0].equation_abstol = None;
+    assert!(hir.validate().is_err());
+    let mut mir = original.mir.clone();
+    let id = mir.equations[0].equation_abstol.as_ref().unwrap().id;
+    mir.expressions[usize::from(id)].kind = HirExprKind::SystemFunction {
+        name: "$abstime".into(),
+        args: vec![],
+    };
+    assert!(mir.validate().is_err());
+}

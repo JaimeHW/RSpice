@@ -538,6 +538,7 @@ pub(crate) fn lower<'a>(
                 declared_branch,
                 is_current: true,
                 indirect: false,
+                equation_abstol: None,
                 expression,
                 site,
                 expression_guard: AnalogSiteGuard::None,

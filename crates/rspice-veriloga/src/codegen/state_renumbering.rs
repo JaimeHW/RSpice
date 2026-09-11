@@ -240,6 +240,7 @@ impl StateSlotMapping {
         let mut scans: HashMap<ExprId, CanonicalStateSiteScan> = HashMap::new();
 
         mapping.walk_parameters(model, mir, &layout, &mut scans);
+        mapping.walk_equation_tolerances(model, mir, &layout, &mut scans);
         mapping.walk_noise_sources(model, hir, mir, &layout, &mut scans);
         mapping.pair_assignment_pass(
             &layout,
@@ -529,6 +530,37 @@ impl StateSlotMapping {
                         Pass::Parameter,
                         &label,
                         root,
+                        program,
+                    ),
+                    None => self.note_unrooted_program(Pass::Parameter, &label, program),
+                }
+            }
+        }
+    }
+
+    fn walk_equation_tolerances(
+        &mut self,
+        model: &CompiledModel,
+        mir: &MirModel,
+        layout: &CanonicalStateLayout,
+        scans: &mut HashMap<ExprId, CanonicalStateSiteScan>,
+    ) {
+        for (index, source) in model.branch_sources.iter().enumerate() {
+            if let Some(program) = &source.equation_abstol {
+                let root = mir
+                    .branch_unknowns
+                    .get(index)
+                    .and_then(|branch| mir.equations.get(usize::from(branch.equation)))
+                    .and_then(|equation| equation.equation_abstol.as_ref());
+                let label = format!("branch[{index}].abstol");
+                match root {
+                    Some(root) => self.pair_rooted_program(
+                        mir,
+                        layout,
+                        scans,
+                        Pass::Parameter,
+                        &label,
+                        root.id,
                         program,
                     ),
                     None => self.note_unrooted_program(Pass::Parameter, &label, program),
@@ -1058,7 +1090,7 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         lookup_tables: _,
         internal_nodes: _,
         internal_state_nodes: _,
-        branch_sources: _,
+        branch_sources,
         laplace_filters: _,
         zi_filters: _,
         zi_filter_definitions,
@@ -1080,6 +1112,11 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
         }
     }
 
+    for source in branch_sources {
+        if let Some(program) = &mut source.equation_abstol {
+            visit(program);
+        }
+    }
     for steps in [assignment_steps, noise_assignment_steps] {
         visit_assignment_steps_mut(steps, visit);
     }

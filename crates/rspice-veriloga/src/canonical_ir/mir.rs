@@ -112,6 +112,7 @@ pub struct MirEquation {
     /// Current contributions do not require a potential-source unknown.
     pub branch_unknown: Option<BranchUnknownId>,
     pub kind: MirEquationKind,
+    pub equation_abstol: Option<HirExprRef>,
     pub expression: HirExprRef,
     pub active_domains: Vec<MirAnalysisDomain>,
     pub span: SourceSpanRef,
@@ -219,6 +220,7 @@ impl MirModel {
                 ),
                 branch_unknown: None,
                 kind: MirEquationKind::from(contribution.kind),
+                equation_abstol: contribution.equation_abstol.clone(),
                 expression: contribution.expression.clone(),
                 active_domains: default_active_domains(),
                 span: contribution.span,
@@ -308,6 +310,7 @@ impl MirModel {
             &self.equations,
             &self.expressions,
             &self.nodes,
+            &self.parameters,
         );
 
         if diagnostics.is_empty() {
@@ -1480,6 +1483,7 @@ fn validate_equations(
     equations: &[MirEquation],
     expressions: &[HirExpression],
     nodes: &[MirNode],
+    parameters: &[MirParameterSlot],
 ) {
     for equation in equations {
         if equation.contribution.index() != equation.id.index() {
@@ -1491,6 +1495,28 @@ fn validate_equations(
                 ),
                 equation.span,
             ));
+        }
+
+        if equation.equation_abstol.is_some() != (equation.kind == MirEquationKind::Indirect) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::MirValidation,
+                "indirect equations require an absolute tolerance",
+                equation.span,
+            ));
+        }
+        if let Some(tolerance) = &equation.equation_abstol {
+            validate_expr_ref(diagnostics, "equation tolerance", tolerance, expressions);
+            let parameters = parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str())
+                .collect();
+            if !super::hir::is_parameter_expression(expressions, tolerance.id, &parameters) {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::MirValidation,
+                    "equation tolerance must depend only on parameters and pure arithmetic",
+                    tolerance.span,
+                ));
+            }
         }
 
         validate_expr_ref(

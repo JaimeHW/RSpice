@@ -510,13 +510,19 @@ impl CodeGenerator {
             branch_sources: ir
                 .branch_unknowns
                 .iter()
-                .map(|b| CompiledBranchSource {
-                    declared_name: b.declared_name.clone(),
-                    pos: Self::node_stamp_index(num_terminals, b.pos),
-                    neg: Self::node_stamp_index(num_terminals, b.neg),
-                    indirect: b.indirect,
+                .map(|b| {
+                    Ok(CompiledBranchSource {
+                        declared_name: b.declared_name.clone(),
+                        pos: Self::node_stamp_index(num_terminals, b.pos),
+                        neg: Self::node_stamp_index(num_terminals, b.neg),
+                        indirect: b.indirect,
+                        equation_abstol: b
+                            .equation_abstol
+                            .map(|expr| self.compile_expr(&arena, expr, &emit_ctx))
+                            .transpose()?,
+                    })
                 })
-                .collect(),
+                .collect::<CompileResult<Vec<_>>>()?,
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
             zi_filter_definitions: Vec::new(),

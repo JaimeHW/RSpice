@@ -875,6 +875,16 @@ impl BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
+    pub(crate) fn visit_equation_abstols(
+        &self,
+        num_nodes: usize,
+        current_abstol: Value,
+        visit: impl FnMut(usize, Value),
+    ) {
+        self.kind
+            .visit_equation_abstols(num_nodes, current_abstol, visit);
+    }
+
     fn validate_checkpoint_boundary(&self) -> Result<(), String> {
         let ddt_len = self.dynamic_charge_third_back.len();
         let idt_len = self.dynamic_idt_state_count;

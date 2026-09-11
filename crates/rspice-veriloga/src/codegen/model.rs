@@ -677,6 +677,8 @@ pub struct CompiledBranchSource {
     /// constraint equation, so the structural V(p)-V(n) row entries are
     /// not stamped (the KCL column couplings remain)
     pub indirect: bool,
+    /// Evaluated once after parameter defaults and overrides are resolved.
+    pub equation_abstol: Option<BytecodeProgram>,
 }
 
 /// Jacobian entry

@@ -388,6 +388,9 @@ pub struct AnalyzedContribution {
     /// constraint residual `lhs - rhs` that the unknown source drives to
     /// zero
     pub indirect: bool,
+    /// Absolute tolerance of an indirect equation's left-hand quantity.
+    /// Kept separate from its residual so parameter overrides survive lowering.
+    pub equation_abstol: Option<Expression>,
     pub expression: Expression,
     /// Identity shared with the [`AnalyzedRegion::Contribution`] recorded for
     /// the same `<+`, and the shape by which this copy's `expression` wraps

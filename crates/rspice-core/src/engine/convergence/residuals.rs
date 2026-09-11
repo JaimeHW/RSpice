@@ -3,6 +3,32 @@
 use super::*;
 
 impl Engine {
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn equation_abstols(&self, circuit: &CircuitData) -> Vec<(usize, Value)> {
+        // Sparse branch overrides: ordinary compact-model circuits allocate
+        // nothing. Gather once per residual probe, not once per matrix row.
+        let mut tolerances = Vec::new();
+        let mut visit = |row: usize, abstol| {
+            if let Some(row) = row.checked_sub(1) {
+                tolerances.push((row, abstol));
+            }
+        };
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices.iter() {
+            device.visit_equation_abstols(self.current_abstol(), &mut visit);
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for device in circuit.generated_veriloga_devices.iter() {
+            device.visit_equation_abstols(circuit.num_nodes(), self.current_abstol(), &mut visit);
+        }
+        #[cfg(feature = "veriloga")]
+        for host in &circuit.mixed_signal_hosts {
+            host.visit_equation_abstols(self.current_abstol(), &mut visit);
+        }
+        tolerances.sort_unstable_by_key(|&(row, _)| row);
+        tolerances
+    }
+
     /// Reconstruct the accepted DC equations both with and without the
     /// simulator's final global nodal-conditioning diagonal.
     ///
@@ -389,12 +415,19 @@ impl Engine {
         correction_rhs: &[Value],
     ) -> Option<Value> {
         let rounding_point = Self::operating_point_rounding_point(circuit, solution);
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let equation_abstols = self.equation_abstols(circuit);
         matrix
             .scaled_explicit_residual_inf_norm_by_row(
                 correction_rhs,
                 &rounding_point,
                 self.residual_reltol(),
                 |row| {
+                    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+                    if let Ok(index) = equation_abstols.binary_search_by_key(&row, |&(row, _)| row)
+                    {
+                        return equation_abstols[index].1;
+                    }
                     if row < circuit.num_nodes() {
                         self.current_abstol()
                     } else {
@@ -578,10 +611,16 @@ impl Engine {
         let node_rows = circuit.num_nodes().min(rhs.len());
         let current_abstol = self.current_abstol();
         let voltage_abstol = self.voltage_abstol();
-        // MNA rows before `num_nodes` are KCL equations; branch rows are
-        // voltage constraints for current unknowns.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let equation_abstols = self.equation_abstols(circuit);
+        // Ordinary MNA rows are KCL equations followed by voltage constraints.
+        // Indirect equations retain the physical quantity of their left side.
         matrix
             .scaled_residual_inf_norm_by_row(solution, rhs, self.residual_reltol(), |row| {
+                #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+                if let Ok(index) = equation_abstols.binary_search_by_key(&row, |&(row, _)| row) {
+                    return equation_abstols[index].1;
+                }
                 if row < node_rows {
                     current_abstol
                 } else {
@@ -1109,6 +1148,69 @@ d1 a 0 dcmc
         assert!(
             (fallback_current - current_at_solution).abs() > f64::EPSILON,
             "fallback OP current must be refreshed at the returned vector"
+        );
+    }
+}
+
+#[cfg(all(test, feature = "veriloga"))]
+mod indirect_tolerance_tests {
+    use super::*;
+
+    #[test]
+    fn indirect_current_equations_do_not_pass_voltage_residual_tolerance() {
+        let report = rspice_veriloga::VerilogACompiler::default()
+            .compile_runtime(
+                "module regulator(p); inout p; electrical p; parameter integer enabled=1;
+            analog if(enabled) V(p): I(p)==2e-10; endmodule",
+                None,
+            )
+            .unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "X",
+            report.model,
+            &report.canonical_ir,
+            &[1],
+        )
+        .unwrap();
+        device.set_branch_current_indices(&[2]);
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("p");
+        circuit.allocate_branch_named("X");
+        circuit.add_veriloga_device(device);
+        let mut engine = Engine::default();
+        engine.config.convergence_config.current_abstol = 1e-9;
+        engine.config.convergence_config.voltage_abstol = 1e-6;
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        let residual = [0.0, 2e-10];
+        // The 0.2 nA error must fail the authored 1 pA current equation,
+        // although it is below both global default absolute tolerances.
+        assert!(
+            engine
+                .residual_inf_norm(&circuit, &mut matrix, &[0.0; 2], &residual)
+                .unwrap()
+                > 1.0
+        );
+        assert!(
+            engine
+                .direct_operating_point_residual_norm(&circuit, &matrix, &[0.0; 2], &residual)
+                .unwrap()
+                > 1.0
+        );
+        let device = circuit.veriloga_devices.iter_mut().next().unwrap();
+        assert!(device.set_parameter("enabled", 0.0));
+        device.try_resolve_parameter_defaults().unwrap();
+        // The disabled source pins a current with the simulator current tolerance.
+        assert!(
+            engine
+                .residual_inf_norm(&circuit, &mut matrix, &[0.0; 2], &residual)
+                .unwrap()
+                < 1.0
+        );
+        assert!(
+            engine
+                .direct_operating_point_residual_norm(&circuit, &matrix, &[0.0; 2], &residual)
+                .unwrap()
+                < 1.0
         );
     }
 }

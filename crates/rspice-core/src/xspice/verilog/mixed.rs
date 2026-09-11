@@ -1091,6 +1091,14 @@ impl MixedSignalHost {
             .map_err(analog_error)
     }
 
+    pub(crate) fn visit_equation_abstols(
+        &self,
+        current_abstol: f64,
+        visit: impl FnMut(usize, f64),
+    ) {
+        self.analog.visit_equation_abstols(current_abstol, visit);
+    }
+
     pub(crate) fn requires_nodeset_phase(&self) -> bool {
         self.analog.requires_nodeset_phase()
     }

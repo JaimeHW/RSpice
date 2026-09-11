@@ -127,6 +127,7 @@ impl SemanticAnalyzer {
                 declared_branch: None,
                 is_current: true,
                 indirect: false,
+                equation_abstol: None,
                 expression: residual,
                 site: self.next_analog_site(),
                 expression_guard: AnalogSiteGuard::None,

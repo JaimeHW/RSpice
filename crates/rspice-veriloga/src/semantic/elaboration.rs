@@ -1452,6 +1452,11 @@ fn rewrite_contribution(
             .transpose()?,
         is_current: contribution.is_current,
         indirect: contribution.indirect,
+        equation_abstol: contribution
+            .equation_abstol
+            .as_ref()
+            .map(|expr| rewrite_expression(expr, scope))
+            .transpose()?,
         expression: rewrite_expression(&contribution.expression, scope)?,
         site: base.site(contribution.site)?,
         expression_guard: contribution.expression_guard,

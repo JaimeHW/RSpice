@@ -9999,6 +9999,7 @@ mod tests {
         // itself records an unguarded contribution: the shared site is what
         // pairs the two copies.
         let contribution = AnalyzedContribution {
+            equation_abstol: None,
             branch: "p,n".into(),
             declared_branch: None,
             is_current: true,

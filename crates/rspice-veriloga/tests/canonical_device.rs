@@ -7962,3 +7962,39 @@ for voltage in [1.0,-1.0,1.0] {
     )
     .unwrap_or_else(|error| panic!("{error}"));
 }
+
+#[test]
+fn generated_indirect_tolerances_follow_parameter_updates_and_activation() {
+    let (state, stamp, noise) = generated_parts(
+        "module tolerance(p); inout p; electrical p;
+        parameter real tolerance=2e-9; parameter integer enabled=1;
+        analog if(enabled) V(p): ddt(V(p),tolerance*2)==I(p); endmodule",
+        "indirect tolerances",
+    );
+    run_generated_main(
+        "indirect tolerances",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.set_branch_indices(&[1]);
+let ctx=runtime::GeneratedEvalContext {voltages:&[0.0,0.0],temperature:300.15};
+for (value,enabled,expected) in [(3e-9,1.0,6e-9),(8e-9,0.0,1e-12),(0.0,1.0,0.0)] {
+    instance.set_parameter("tolerance",value).unwrap();
+    instance.set_parameter("enabled",enabled).unwrap();
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    let mut values=Vec::new();
+    instance.visit_equation_abstols(7, 1e-12, |row,tol|values.push((row,tol)));
+    assert_eq!(values,[(8,expected)],"branch ordinal 1 follows seven solver nodes");
+    assert!(!ctx.evaluation_failed());
+}
+assert!(instance.set_parameter("tolerance",-1.0).unwrap_err().contains("absolute tolerance"));
+instance.visit_equation_abstols(7, 1e-12, |_,tol|assert_eq!(tol,0.0));
+assert!(instance.set_parameter("tolerance",f64::MAX).is_err());
+instance.set_parameter("tolerance",1e-9).unwrap();
+instance.visit_equation_abstols(7, 1e-12, |_,tol|assert_eq!(tol,2e-9));
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}

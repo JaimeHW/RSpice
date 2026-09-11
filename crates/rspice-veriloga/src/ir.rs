@@ -436,6 +436,7 @@ pub struct BranchUnknownDef {
     /// constraint equation, so the structural V(p)-V(n) row entries must
     /// not be stamped
     pub indirect: bool,
+    pub equation_abstol: Option<NodeId>,
 }
 
 /// Branch reference
@@ -886,6 +887,23 @@ impl DeviceIR {
                             pos: branch_ref.pos_terminal,
                             neg: branch_ref.neg_terminal,
                             indirect: contrib.indirect,
+                            equation_abstol: contrib
+                                .equation_abstol
+                                .as_ref()
+                                .map(|expression| -> CompileResult<NodeId> {
+                                    let converted = converter.convert(&mut ir.exprs, expression)?;
+                                    if !Self::is_range_parameter_expr(&ir.exprs, converted) {
+                                        return Err(crate::error::CodeGenError::new(
+                                            crate::error::CodeGenErrorKind::InvalidExpression(
+                                                "equation tolerance must depend only on parameters"
+                                                    .into(),
+                                            ),
+                                        )
+                                        .into());
+                                    }
+                                    Ok(converted)
+                                })
+                                .transpose()?,
                         });
                         branch_table.insert(key.clone(), (ordinal, branch_ref.pos_terminal));
                         ordinal

@@ -637,7 +637,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 2;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "cc3df55f8ffd504df899dd8f78f2b96f28308aaf1a32aa02ae833c04d53bc395";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "95754b6e26d43b187eb25d2e1029c1895c6ce03f06b987eafde98bb0e961240a";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -999,6 +999,11 @@ impl Instance {
 			params.values[154] = value;
 		}
 		Ok(())
+	}
+
+	/// Visit one-based MNA rows and tolerances from the latest real stamp.
+	pub fn visit_equation_abstols(&self, num_nodes: usize, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {
+		let _ = (num_nodes, current_abstol, &mut visit);
 	}
 
 	fn commit_parameter_state(&mut self, params: Box<Parameters>, model_params: Box<Parameters>, param_given: Box<[bool; Self::PARAMETER_COUNT]>, model_param_given: Box<[bool; Self::PARAMETER_COUNT]>) {

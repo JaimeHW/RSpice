@@ -305,6 +305,11 @@ pub(super) fn generate_state_file_with_extensions(
         .collect::<Vec<_>>()
         .join(", ");
     let parameter_count = artifact.mir.parameters.len();
+    let has_equation_abstols = artifact
+        .mir
+        .equations
+        .iter()
+        .any(|equation| equation.equation_abstol.is_some());
     let variable_count = artifact.hir.variables.len();
     let event_state_count = artifact
         .hir
@@ -339,6 +344,9 @@ pub(super) fn generate_state_file_with_extensions(
              \x20   pub(crate) event_state_candidate: Box<[f64; {event_state_count}]>,\n"
         ));
     }
+    if has_equation_abstols {
+        writeln!(out, "    pub(crate) equation_active: [bool; {branch_count}],\n    equation_abstols: [f64; {branch_count}],").unwrap();
+    }
     out.push_str(&extensions.instance_fields);
     out.push_str("}\n\n");
     out.push_str("impl Clone for Instance {\n");
@@ -347,6 +355,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        Self {\n");
     out.push_str("            nodes: self.nodes,\n");
     out.push_str("            branches: self.branches,\n");
+    if has_equation_abstols {
+        out.push_str("            equation_active: self.equation_active,\n            equation_abstols: self.equation_abstols,\n");
+    }
     out.push_str("            params: self.params.clone(),\n");
     out.push_str("            model_params: self.model_params.clone(),\n");
     out.push_str("            param_given: self.param_given.clone(),\n");
@@ -469,6 +480,9 @@ pub(super) fn generate_state_file_with_extensions(
             "            event_state_accepted: boxed_zero_f64_array(),\n\
              \x20           event_state_candidate: boxed_zero_f64_array(),\n",
         );
+    }
+    if has_equation_abstols {
+        out.push_str("            equation_active: [false; Self::BRANCH_COUNT],\n            equation_abstols: [0.0; Self::BRANCH_COUNT],\n");
     }
     out.push_str(&extensions.new_initializers);
     out.push_str("        };\n");
@@ -897,7 +911,15 @@ pub(super) fn generate_state_file_with_extensions(
         "        Self::finalize_parameter_vector(params.as_mut(), param_given.as_ref(), false)?;\n",
     );
     out.push_str("        Self::validate_parameter_vector(params.as_ref())?;\n");
+    if has_equation_abstols {
+        out.push_str(
+            "        let equation_abstols = Self::resolve_equation_abstols(params.as_ref())?;\n",
+        );
+    }
     out.push_str("        self.commit_parameter_state(params, model_params, param_given, model_param_given);\n");
+    if has_equation_abstols {
+        out.push_str("        self.equation_abstols = equation_abstols;\n");
+    }
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str("    /// Recompute non-given dependent defaults atomically.\n");
@@ -923,13 +945,24 @@ pub(super) fn generate_state_file_with_extensions(
         "        Self::finalize_parameter_vector(params.as_mut(), param_given.as_ref(), false)?;\n",
     );
     out.push_str("        Self::validate_parameter_vector(params.as_ref())?;\n");
+    if has_equation_abstols {
+        out.push_str(
+            "        let equation_abstols = Self::resolve_equation_abstols(params.as_ref())?;\n",
+        );
+    }
     out.push_str("        self.commit_parameter_state(params, model_params, param_given, model_param_given);\n");
+    if has_equation_abstols {
+        out.push_str("        self.equation_abstols = equation_abstols;\n");
+    }
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     out.push_str(
         "    /// Validate the complete parameter vector after finalizing dependent defaults.\n",
     );
     out.push_str("    pub fn validate_parameters(&self) -> Result<(), String> {\n");
+    if has_equation_abstols {
+        out.push_str("        Self::resolve_equation_abstols(self.params.as_ref())?;\n");
+    }
     out.push_str("        Self::validate_parameter_vector(self.params.as_ref())\n");
     out.push_str("    }\n\n");
     out.push_str("    fn validate_parameter_vector(params: &Parameters) -> Result<(), String> {\n");
@@ -948,6 +981,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        Ok(())\n");
     out.push_str("    }\n\n");
     emit_parameter_finalization_helpers(artifact, parameter_fields, &mut out)?;
+    emit_equation_abstols(artifact, parameter_fields, &mut out)?;
     out.push_str("    fn commit_parameter_state(&mut self, params: Box<Parameters>, model_params: Box<Parameters>, param_given: Box<[bool; Self::PARAMETER_COUNT]>, model_param_given: Box<[bool; Self::PARAMETER_COUNT]>) {\n");
     out.push_str(
         "        let mut changed = boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>();\n",
@@ -1580,7 +1614,7 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 23 resolves declared grounds before allocating solver nodes.
 // Version 24 removes duplicate potential-current unknowns from generated devices.
 // Version 25 retains switched source kinds and their accepted-mode discontinuities.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 25;
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 26;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -2521,6 +2555,49 @@ fn parameter_default_rust_expr(
             parameter.name
         ),
     ))
+}
+
+fn emit_equation_abstols(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &ParameterBindings<'_>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let tolerances = artifact
+        .mir
+        .branch_unknowns
+        .iter()
+        .enumerate()
+        .filter_map(|(index, branch)| {
+            artifact.mir.equations[usize::from(branch.equation)]
+                .equation_abstol
+                .as_ref()
+                .map(|expr| (index, expr))
+        })
+        .collect::<Vec<_>>();
+    out.push_str("    /// Visit one-based MNA rows and tolerances from the latest real stamp.\n");
+    out.push_str("    pub fn visit_equation_abstols(&self, num_nodes: usize, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {\n");
+    if tolerances.is_empty() {
+        out.push_str("        let _ = (num_nodes, current_abstol, &mut visit);\n");
+    } else {
+        for (index, _) in &tolerances {
+            writeln!(out, "        if self.branches[{index}] != 0 {{ visit(num_nodes + self.branches[{index}], if self.equation_active[{index}] {{ self.equation_abstols[{index}] }} else {{ current_abstol }}); }}").unwrap();
+        }
+    }
+    out.push_str("    }\n\n");
+    if !tolerances.is_empty() {
+        out.push_str("    fn resolve_equation_abstols(params: &Parameters) -> Result<[f64; Self::BRANCH_COUNT], String> {\n        let _ = params;\n        let mut values = [0.0f64; Self::BRANCH_COUNT];\n");
+        for (index, expr) in tolerances {
+            let value = lower_parameter_default_expr(
+                artifact,
+                expr.id,
+                parameter_fields,
+                ParameterGivenLowering::Unsupported,
+            )?;
+            writeln!(out, "        values[{index}] = {value};\n        if !values[{index}].is_finite() || values[{index}] < 0.0 {{ return Err(format!(\"indirect equation absolute tolerance must be finite and non-negative, got {{}}\", values[{index}])); }}").unwrap();
+        }
+        out.push_str("        Ok(values)\n    }\n\n");
+    }
+    Ok(())
 }
 
 fn lower_parameter_default_expr(

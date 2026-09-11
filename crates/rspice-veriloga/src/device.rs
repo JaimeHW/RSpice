@@ -944,6 +944,8 @@ pub struct VerilogADevice {
     /// Per branch unknown: whether any potential contribution drives it
     /// (an undriven branch is forced to zero current)
     branch_active: Vec<bool>,
+    /// Parameter-resolved tolerances; zero slots for direct branch equations.
+    branch_equation_abstols: Vec<f64>,
     /// Pre-computed matrix indices for O(1) stamping
     matrix_indices: MatrixIndices,
     /// Preallocated transaction buffer for one matrix-stamp pass. Solver
@@ -2765,6 +2767,7 @@ impl VerilogADevice {
             branch_current_indices: vec![0; num_branch_unknowns],
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
+            branch_equation_abstols: Vec::new(),
             matrix_indices: MatrixIndices::default(),
             stamp_matrix_buffer: Vec::new(),
             stamp_rhs_buffer: Vec::new(),
@@ -3722,8 +3725,32 @@ impl VerilogADevice {
                 .map_err(|error| VmError::ParameterValue(error.to_string()))?;
         }
 
-        // Topology guards depend on final parameter values.
+        let mut equation_abstols = Vec::new();
+        if self
+            .model
+            .branch_sources
+            .iter()
+            .any(|source| source.indirect)
+        {
+            equation_abstols.reserve(self.model.branch_sources.len());
+            for source in &self.model.branch_sources {
+                let value = if let Some(program) = &source.equation_abstol {
+                    let value = Vm::new(&mut self.context).execute(program)?;
+                    if !value.is_finite() || value < 0.0 {
+                        return Err(VmError::InvalidRuntimeConfiguration(format!(
+                            "indirect equation absolute tolerance must be finite and non-negative, got {value}"
+                        )));
+                    }
+                    value
+                } else {
+                    0.0
+                };
+                equation_abstols.push(value);
+            }
+        }
+        // Publish both derived configuration tables only after validation.
         self.try_refresh_static_conditions()?;
+        self.branch_equation_abstols = equation_abstols;
 
         Ok(())
     }
@@ -4791,6 +4818,26 @@ impl VerilogADevice {
     /// Get the circuit node index allocated for a branch-current unknown
     pub fn branch_current_index(&self, ordinal: usize) -> Option<usize> {
         self.branch_current_indices.get(ordinal).copied()
+    }
+
+    /// Visit indirect equation rows from the latest topology evaluation.
+    /// Indices are one-based MNA indices. Disabled equations pin a current.
+    pub fn visit_equation_abstols(&self, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {
+        for (ordinal, &abstol) in self.branch_equation_abstols.iter().enumerate() {
+            if self.model.branch_sources[ordinal].indirect
+                && let Some(row) = self.branch_current_index(ordinal)
+                && row != 0
+            {
+                visit(
+                    row,
+                    if self.branch_active[ordinal] {
+                        abstol
+                    } else {
+                        current_abstol
+                    },
+                );
+            }
+        }
     }
 
     /// Bring the whole named-variable array up to date from the inputs of the
@@ -9385,6 +9432,7 @@ endmodule
             branch_current_indices: vec![0; num_branch_unknowns],
             program_active: vec![true; num_stamp_programs],
             branch_active: vec![true; num_branch_unknowns],
+            branch_equation_abstols: Vec::new(),
             matrix_indices: MatrixIndices::default(),
             stamp_matrix_buffer: Vec::new(),
             stamp_rhs_buffer: Vec::new(),

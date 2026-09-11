@@ -4152,6 +4152,7 @@ impl SemanticAnalyzer {
             declared_branch: declared_branch.clone(),
             is_current,
             indirect: false,
+            equation_abstol: None,
             expression: expression.clone(),
             site,
             expression_guard,
@@ -4166,6 +4167,7 @@ impl SemanticAnalyzer {
             declared_branch,
             is_current,
             indirect: false,
+            equation_abstol: None,
             expression,
             site,
             expression_guard,
@@ -4335,7 +4337,39 @@ impl SemanticAnalyzer {
         let (branch_name, is_current, declared_branch) =
             self.resolve_contribution_target(&stmt.branch, module, stmt.span)?;
 
-        let lhs = self.lower_expression_with_side_effects(&stmt.lhs, module, sink)?;
+        let mut lhs_source = stmt.lhs.clone();
+        if let Expression::Call(call) = &mut lhs_source
+            && call.name == "ddt"
+            && let Some(Expression::Identifier(identifier)) = call.args.get_mut(1)
+            && self.symbols.lookup(&identifier.name).is_none()
+            && let Some(nature) = self.disciplines.get_nature(&identifier.name)
+        {
+            call.args[1] = Self::number_expr(nature.abstol, identifier.span);
+        }
+        // The optional derivative tolerance belongs to the equation, while
+        // ordinary numerical ddt lowering accepts its signal operand only.
+        let explicit_ddt_abstol = if let Expression::Call(call) = &mut lhs_source
+            && call.name == "ddt"
+            && call.args.len() == 2
+        {
+            call.args.pop()
+        } else {
+            None
+        };
+        // Resolve the physical access before implicit integrators introduce
+        // electrical state nodes, which no longer describe the authored units.
+        let lhs = if let Expression::Call(call) = &lhs_source
+            && matches!(call.name.as_str(), "ddt" | "idt" | "idtmod")
+        {
+            self.validate_builtin_call_arity(call)?;
+            Expression::Call(CallExpr {
+                name: call.name.clone(),
+                args: vec![self.lower_expression(&call.args[0])?],
+                span: call.span,
+            })
+        } else {
+            self.lower_expression(&lhs_source)?
+        };
         let valid_lhs = matches!(&lhs, Expression::BranchAccess(_))
             || matches!(&lhs, Expression::Call(call)
                 if matches!(call.name.as_str(), "ddt" | "idt" | "idtmod")
@@ -4348,6 +4382,11 @@ impl SemanticAnalyzer {
                 stmt.lhs.span(),
             )));
         }
+        let equation_abstol = match explicit_ddt_abstol {
+            Some(tolerance) => self.lower_expression(&tolerance)?,
+            None => self.indirect_equation_abstol(&lhs, module)?,
+        };
+        let lhs = self.lower_expression_with_side_effects(&lhs_source, module, sink)?;
         let rhs = self.lower_expression_with_side_effects(&stmt.rhs, module, sink)?;
         for (side, expr) in [("left", &lhs), ("right", &rhs)] {
             let ty = self.infer_type(expr)?;
@@ -4372,6 +4411,7 @@ impl SemanticAnalyzer {
             declared_branch: declared_branch.clone(),
             is_current,
             indirect: true,
+            equation_abstol: Some(equation_abstol.clone()),
             expression: residual.clone(),
             site,
             expression_guard,
@@ -4389,6 +4429,7 @@ impl SemanticAnalyzer {
             declared_branch,
             is_current,
             indirect: true,
+            equation_abstol: Some(equation_abstol),
             expression,
             site,
             expression_guard,
@@ -4397,6 +4438,100 @@ impl SemanticAnalyzer {
         });
 
         Ok(())
+    }
+
+    fn indirect_equation_abstol(
+        &self,
+        lhs: &Expression,
+        module: &AnalyzedModule,
+    ) -> CompileResult<Expression> {
+        let (access, operator) = match lhs {
+            Expression::BranchAccess(access) => (access, None),
+            Expression::Call(call) => {
+                let Some(Expression::BranchAccess(access)) = call.args.first() else {
+                    unreachable!("indirect LHS was validated before tolerance resolution");
+                };
+                (access, Some(call.name.as_str()))
+            }
+            _ => unreachable!("indirect LHS was validated before tolerance resolution"),
+        };
+        let kind = self.resolve_branch_access_kind(access, lhs.span())?;
+        let names = match access {
+            BranchAccess::Nodes { pos, neg, .. } => [Some(pos.as_str()), neg.as_deref()],
+            BranchAccess::Branch { name, .. } => [Some(name.as_str()), None],
+        };
+        let names = if let [Some(name), None] = names
+            && let Some(branch) = module.branches.iter().find(|branch| branch.name == name)
+        {
+            [
+                Some(branch.pos_node.as_str()),
+                Some(branch.neg_node.as_str()),
+            ]
+        } else {
+            names
+        };
+        let mut tolerance: Option<f64> = None;
+        for name in names.into_iter().flatten() {
+            let Some(symbol) = self.symbols.lookup(name) else {
+                continue;
+            };
+            if symbol.attrs.is_ground {
+                continue;
+            }
+            let discipline = symbol.attrs.discipline.as_deref().unwrap_or("electrical");
+            if let Some(value) = self.indirect_discipline_abstol(discipline, kind, operator) {
+                tolerance = Some(tolerance.map_or(value, |current| current.min(value)));
+            }
+        }
+        let tolerance = tolerance
+            .or_else(|| {
+                names
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|name| {
+                        self.symbols
+                            .lookup(name)
+                            .and_then(|symbol| symbol.attrs.discipline.as_deref())
+                            .and_then(|discipline| {
+                                self.indirect_discipline_abstol(discipline, kind, operator)
+                            })
+                    })
+                    .reduce(f64::min)
+            })
+            .or_else(|| self.indirect_discipline_abstol("electrical", kind, operator))
+            .ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidContribution(
+                        "indirect equation has no resolved nature tolerance".into(),
+                    ),
+                    lhs.span(),
+                ))
+            })?;
+        Ok(Self::number_expr(tolerance, lhs.span()))
+    }
+
+    fn indirect_discipline_abstol(
+        &self,
+        discipline: &str,
+        kind: AccessKind,
+        operator: Option<&str>,
+    ) -> Option<f64> {
+        let discipline = self.disciplines.get_discipline(discipline)?;
+        let name = match kind {
+            AccessKind::Potential => &discipline.potential,
+            AccessKind::Flow => &discipline.flow,
+        }
+        .as_deref()?;
+        let nature = self.disciplines.get_nature(name)?;
+        let transformed = match operator {
+            Some("ddt") => nature.ddt_nature.as_deref(),
+            Some("idt" | "idtmod") => nature.idt_nature.as_deref(),
+            _ => None,
+        };
+        Some(match transformed {
+            Some(name) => self.disciplines.get_nature(name)?.abstol,
+            None => nature.abstol,
+        })
     }
 
     /// `$bound_step(max_dt)`: cap the next transient step while the call

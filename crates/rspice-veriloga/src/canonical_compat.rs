@@ -70,6 +70,21 @@ pub(crate) fn validate_canonical_artifact_identity_for_model(
         return Err("canonical switch-branch state layout does not match compiled model".into());
     }
     validate_parameters(model, &artifact.mir)?;
+    if model.branch_sources.len() != artifact.mir.branch_unknowns.len() {
+        return Err("canonical branch count does not match compiled model".into());
+    }
+    for (source, branch) in model
+        .branch_sources
+        .iter()
+        .zip(&artifact.mir.branch_unknowns)
+    {
+        let equation = &artifact.mir.equations[usize::from(branch.equation)];
+        if source.equation_abstol.is_some() != equation.equation_abstol.is_some()
+            || source.indirect != (equation.kind == MirEquationKind::Indirect)
+        {
+            return Err("canonical equation tolerance does not match compiled model".into());
+        }
+    }
     for (index, (equation, stamp)) in artifact
         .mir
         .equations

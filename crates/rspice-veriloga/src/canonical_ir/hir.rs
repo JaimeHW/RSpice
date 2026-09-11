@@ -321,6 +321,7 @@ pub struct HirContribution {
     pub branch: SmolStr,
     pub declared_branch: Option<SmolStr>,
     pub kind: HirContributionKind,
+    pub equation_abstol: Option<HirExprRef>,
     pub expression: HirExprRef,
     pub expr_type: CanonicalValueType,
     pub span: SourceSpanRef,
@@ -709,6 +710,7 @@ struct ExecutedSite {
     value: ExprId,
     value_guard: AnalogSiteGuard,
     index: Option<ExprId>,
+    equation_abstol: Option<ExprId>,
 }
 
 impl ExecutedSite {
@@ -878,12 +880,17 @@ impl HirModel {
             .enumerate()
             .map(|(index, contribution)| {
                 let expression = lowerer.lower_expr(&contribution.expression);
+                let equation_abstol = contribution
+                    .equation_abstol
+                    .as_ref()
+                    .map(|expr| lowerer.lower_expr(expr));
                 executed_sites.insert(
                     contribution.site,
                     ExecutedSite {
                         value: expression.id,
                         value_guard: contribution.expression_guard,
                         index: None,
+                        equation_abstol: equation_abstol.as_ref().map(|expr| expr.id),
                     },
                 );
                 HirContribution {
@@ -891,6 +898,7 @@ impl HirModel {
                     branch: contribution.branch.clone(),
                     declared_branch: contribution.declared_branch.clone(),
                     kind: contribution_kind(contribution.indirect, contribution.is_current),
+                    equation_abstol,
                     expression,
                     expr_type: CanonicalValueType::from(contribution.expr_type),
                     span: SourceSpanRef::from(contribution.span),
@@ -1717,6 +1725,30 @@ impl HirModel {
         let declared_branches = self.declared_branch_names();
 
         for contribution in &self.contributions {
+            if contribution.equation_abstol.is_some()
+                != (contribution.kind == HirContributionKind::Indirect)
+            {
+                diagnostics.push(IrDiagnostic::error(
+                    CompilerPhase::HirValidation,
+                    "indirect contributions require an equation tolerance",
+                    contribution.span,
+                ));
+            }
+            if let Some(tolerance) = &contribution.equation_abstol {
+                self.validate_expr_ref(diagnostics, "equation tolerance", tolerance);
+                let parameters = self
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.name.as_str())
+                    .collect();
+                if !is_parameter_expression(&self.expressions, tolerance.id, &parameters) {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        "equation tolerance must depend only on parameters and pure arithmetic",
+                        tolerance.span,
+                    ));
+                }
+            }
             self.validate_expr_ref(
                 diagnostics,
                 &format!("contribution {} expression", contribution.id.index()),
@@ -2064,7 +2096,10 @@ impl HirModel {
                             contribution.span,
                         ));
                     } else if let Some(flat) = self.contributions.get(index) {
-                        if flat.branch != contribution.branch || flat.kind != contribution.kind {
+                        if flat.branch != contribution.branch
+                            || flat.kind != contribution.kind
+                            || flat.equation_abstol != contribution.equation_abstol
+                        {
                             diagnostics.push(IrDiagnostic::error(
                                 CompilerPhase::HirValidation,
                                 format!(
@@ -2462,6 +2497,7 @@ fn lower_statement(
                     value: expr.id,
                     value_guard: assignment.expression_guard,
                     index: index.as_ref().map(|index| index.id),
+                    equation_abstol: None,
                 },
             );
             HirStatement::Assignment(HirAssignment {
@@ -2482,6 +2518,7 @@ fn lower_statement(
                     value: condition.id,
                     value_guard: loop_statement.condition_guard,
                     index: None,
+                    equation_abstol: None,
                 },
             );
             HirStatement::Loop(HirLoop {
@@ -2578,6 +2615,16 @@ fn lower_region(
                 branch: contribution.branch.clone(),
                 declared_branch: contribution.declared_branch.clone(),
                 kind: contribution_kind(contribution.indirect, contribution.is_current),
+                // Tolerances are immutable configuration expressions, shared
+                // by the authored body and its executed contribution.
+                equation_abstol: executed.and_then(|site| site.equation_abstol).map(|id| {
+                    let expression = &lowerer.expressions[usize::from(id)];
+                    HirExprRef {
+                        id,
+                        kind: hir_expr_kind_label(&expression.kind).into(),
+                        span: expression.span,
+                    }
+                }),
                 expression,
                 expr_type: CanonicalValueType::from(contribution.expr_type),
                 span: SourceSpanRef::from(contribution.span),
@@ -3100,6 +3147,70 @@ fn contribution_kind(indirect: bool, is_current: bool) -> HirContributionKind {
     } else {
         HirContributionKind::Potential
     }
+}
+
+/// Configuration expressions may depend on parameters and pure arithmetic only.
+/// Iterate with a visited set so malformed serialized graphs cannot recurse.
+pub(super) fn is_parameter_expression(
+    expressions: &[HirExpression],
+    root: ExprId,
+    parameters: &HashSet<&str>,
+) -> bool {
+    let mut pending = vec![root];
+    let mut seen = HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(expression) = expressions.get(usize::from(id)) else {
+            return false;
+        };
+        match &expression.kind {
+            HirExprKind::Number { value, .. } if value.is_finite() => {}
+            HirExprKind::Identifier { name } if parameters.contains(name.as_str()) => {}
+            HirExprKind::Unary { operand, .. } => pending.push(*operand),
+            HirExprKind::Binary { left, right, .. } => pending.extend([*left, *right]),
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => pending.extend([*condition, *then_expr, *else_expr]),
+            HirExprKind::Call { name, args }
+                if matches!(
+                    name.as_str(),
+                    "abs"
+                        | "sqrt"
+                        | "exp"
+                        | "ln"
+                        | "log"
+                        | "log10"
+                        | "sin"
+                        | "cos"
+                        | "tan"
+                        | "sinh"
+                        | "cosh"
+                        | "tanh"
+                        | "asin"
+                        | "acos"
+                        | "atan"
+                        | "asinh"
+                        | "acosh"
+                        | "atanh"
+                        | "atan2"
+                        | "hypot"
+                        | "floor"
+                        | "ceil"
+                        | "min"
+                        | "max"
+                        | "pow"
+                ) =>
+            {
+                pending.extend(args)
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {

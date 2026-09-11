@@ -3519,6 +3519,13 @@ impl ModelPlan {
                 .map(|equation| format!("({})", self.activation_expression(*equation, values)))
                 .collect::<Vec<_>>()
                 .join(" || ");
+            if group.kind == MirEquationKind::Indirect {
+                let _ = writeln!(
+                    out,
+                    "        self.equation_active[{}] = {active};",
+                    group.branch
+                );
+            }
             let pos = optional_node(group.pos);
             let neg = optional_node(group.neg);
             let coupling = if group.kind == MirEquationKind::Indirect {

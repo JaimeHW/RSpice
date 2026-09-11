@@ -1408,6 +1408,11 @@ pub(super) fn integration_emission_contexts(model: &CompiledModel) -> Vec<Emissi
         }
     }
 
+    for source in &model.branch_sources {
+        if let Some(program) = &source.equation_abstol {
+            tag_program(&mut tags, program, EmissionContext::Parameter);
+        }
+    }
     tag_assignment_steps(
         &mut tags,
         &model.assignment_steps,

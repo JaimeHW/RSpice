@@ -3070,6 +3070,20 @@ fn write_registry(
         out.push_str("    }\n");
         out.push('\n');
     }
+    out.push_str("    pub fn visit_equation_abstols(&self, num_nodes: usize, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (num_nodes, current_abstol, &mut visit);\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.visit_equation_abstols(num_nodes, current_abstol, &mut visit),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n        }\n");
+    }
+    out.push_str("    }\n\n");
     for (method, empty) in [("limiter_converged", true), ("discontinuity_rising", false)] {
         writeln!(out, "    pub fn {method}(&self) -> bool {{")?;
         if devices.is_empty() {
