@@ -9,6 +9,62 @@ use crate::netlist::SourceDistortionTone;
 const PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
+type SourceValueMapper<'a> = dyn Fn(&str, Value) -> Result<String, ParseError> + 'a;
+
+struct SourceValueMapping<'a> {
+    map: &'a SourceValueMapper<'a>,
+    replacements: std::cell::RefCell<Vec<(std::ops::Range<usize>, String)>>,
+}
+
+struct SourceParseContext<'a> {
+    params: &'a ParamContext,
+    mapping: Option<SourceValueMapping<'a>>,
+}
+
+impl std::ops::Deref for SourceParseContext<'_> {
+    type Target = ParamContext;
+
+    fn deref(&self) -> &Self::Target {
+        self.params
+    }
+}
+
+/// Only values consumed by the source grammar participate in mapping. Source
+/// keywords, PWL paths and PAT bit strings retain their original spelling.
+fn expect_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    context: &SourceParseContext<'_>,
+) -> Result<Value, ParseError> {
+    let Some(mapping) = &context.mapping else {
+        return super::expect_value(stream, line_num, context.params);
+    };
+    skip_commas(stream);
+    let start = stream.peek().span.start;
+    let sign = match stream.peek().kind {
+        TokenKind::Minus => Some("-"),
+        TokenKind::Plus => Some("+"),
+        _ => None,
+    };
+    let token = stream.peek_n(usize::from(sign.is_some()));
+    let end = token.span.end;
+    let expression = match &token.kind {
+        TokenKind::Expression(expression) => expression.as_str(),
+        _ => token.lexeme.as_str(),
+    };
+    let expression = sign.map_or_else(
+        || expression.to_owned(),
+        |sign| format!("{sign}({expression})"),
+    );
+    let value = super::expect_value(stream, line_num, context.params)?;
+    let mapped = (mapping.map)(&expression, value)?;
+    mapping
+        .replacements
+        .borrow_mut()
+        .push((start..end, format!("{{{mapped}}}")));
+    Ok(value)
+}
+
 /// Parse source specification (DC, AC, PULSE, SIN, PWL, PAT, EXP, SFFM, AM,
 /// TRNOISE)
 ///
@@ -19,6 +75,21 @@ pub(super) fn parse_source_spec(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    parse_source_spec_impl(
+        stream,
+        line_num,
+        &SourceParseContext {
+            params,
+            mapping: None,
+        },
+    )
+}
+
+fn parse_source_spec_impl(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     skip_commas(stream);
 
@@ -44,7 +115,7 @@ pub(super) fn parse_source_spec(
                     && !is_source_level_keyword(s)
                     && crate::netlist::lexer::parse_spice_value(s).is_ok() =>
             {
-                let v = try_value(stream, params).expect("numeric-looking source value parses");
+                let v = expect_value(stream, line_num, params)?;
                 if !v.is_finite() {
                     return Err(non_finite_source_value_error(line_num, "DC", "value", v));
                 }
@@ -61,8 +132,7 @@ pub(super) fn parse_source_spec(
                 // Xyce accepts extra unlabeled numeric values after the DC
                 // source level and ignores them unless an AC/transient keyword
                 // gives them meaning.
-                let v =
-                    try_value(stream, params).expect("numeric-looking source tail value parses");
+                let v = expect_value(stream, line_num, params)?;
                 if !v.is_finite() {
                     return Err(non_finite_source_value_error(
                         line_num,
@@ -80,7 +150,7 @@ pub(super) fn parse_source_spec(
                     && !is_source_level_keyword(s)
                     && params.get(s).is_some() =>
             {
-                let v = try_value(stream, params).expect("bound source parameter parses");
+                let v = expect_value(stream, line_num, params)?;
                 if !v.is_finite() {
                     return Err(non_finite_source_value_error(line_num, "DC", "value", v));
                 }
@@ -94,7 +164,7 @@ pub(super) fn parse_source_spec(
                     && !is_source_level_keyword(s)
                     && params.get(s).is_some() =>
             {
-                let v = try_value(stream, params).expect("bound source tail parameter parses");
+                let v = expect_value(stream, line_num, params)?;
                 if !v.is_finite() {
                     return Err(non_finite_source_value_error(
                         line_num,
@@ -332,6 +402,33 @@ pub fn parse_source_spec_text(
     parse_source_spec(&mut stream, line_num, params)
 }
 
+/// Resolve a source once in its lexical scope and retain mapped scalar values
+/// for later sampling. The ordinary parser owns field boundaries and validation.
+pub(in crate::netlist) fn map_source_spec_values(
+    raw: &str,
+    params: &ParamContext,
+    map: &SourceValueMapper<'_>,
+) -> Result<String, ParseError> {
+    let tokens = tokenize(raw).map_err(|error| lex_to_parse_error(error, 0))?;
+    let context = SourceParseContext {
+        params,
+        mapping: Some(SourceValueMapping {
+            map,
+            replacements: Default::default(),
+        }),
+    };
+    parse_source_spec_impl(&mut TokenStream::new(tokens), 0, &context)?;
+    let mut mapped = String::with_capacity(raw.len());
+    let mut cursor = 0;
+    for (span, replacement) in context.mapping.unwrap().replacements.into_inner() {
+        mapped.push_str(&raw[cursor..span.start]);
+        mapped.push_str(&replacement);
+        cursor = span.end;
+    }
+    mapped.push_str(&raw[cursor..]);
+    Ok(mapped)
+}
+
 /// Inspect an independent source's declared data-file dependency, including
 /// deferred statistical or trial-dependent waveforms. Numeric values are not
 /// evaluated; the parser's waveform registry and PWL filename grammar determine
@@ -444,7 +541,7 @@ fn skip_source_value_syntax(stream: &mut TokenStream) -> Result<(), ParseError> 
 fn parse_distortion_source_annotation(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     expected_name: &str,
 ) -> Result<SourceDistortionTone, ParseError> {
     let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -469,7 +566,7 @@ fn parse_distortion_source_annotation(
 fn optional_distortion_value(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     source_name: &str,
     arg_name: &str,
 ) -> Result<Option<Value>, ParseError> {
@@ -544,7 +641,7 @@ impl SourceRfPortBuilder {
 fn consume_source_port_annotation(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     rf_port: &mut SourceRfPortBuilder,
 ) -> Result<(), ParseError> {
     let keyword = expect_ident(stream, line_num)?;
@@ -599,7 +696,7 @@ fn consume_source_port_annotation(
 fn optional_ac_value_or_default(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     arg_name: &str,
     default: Value,
 ) -> Result<Value, ParseError> {
@@ -638,7 +735,7 @@ fn dc_term_is_omitted(stream: &TokenStream) -> bool {
 }
 
 type TransientSourceParser =
-    fn(&mut TokenStream, usize, &ParamContext) -> Result<SourceSpec, ParseError>;
+    fn(&mut TokenStream, usize, &SourceParseContext<'_>) -> Result<SourceSpec, ParseError>;
 
 fn transient_source_parser(keyword: &str) -> Option<TransientSourceParser> {
     Some(match keyword.to_ascii_uppercase().as_str() {
@@ -658,7 +755,7 @@ fn transient_source_parser(keyword: &str) -> Option<TransientSourceParser> {
 fn parse_transient_source_spec_keyword(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<Option<SourceSpec>, ParseError> {
     skip_commas(stream);
     let TokenKind::Ident(keyword) = &stream.peek().kind else {
@@ -676,7 +773,7 @@ fn parse_transient_source_spec_keyword(
 fn parse_trnoise_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -741,7 +838,7 @@ fn parse_trnoise_spec(
 fn parse_trrandom_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
     let distribution =
@@ -809,7 +906,7 @@ fn parse_trrandom_spec(
 fn parse_sffm_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -863,7 +960,7 @@ fn parse_sffm_spec(
 fn parse_am_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -899,7 +996,7 @@ fn parse_am_spec(
 fn parse_pulse_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     // Consume opening paren if present
     let has_paren = stream.consume(&TokenKind::LParen);
@@ -944,7 +1041,7 @@ fn parse_pulse_spec(
 fn parse_sin_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -974,7 +1071,7 @@ fn parse_sin_spec(
 fn parse_pwl_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -1215,7 +1312,7 @@ fn is_pwl_file_delay_key(key: &str) -> bool {
 fn parse_pat_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -1276,7 +1373,7 @@ fn parse_pat_data(stream: &mut TokenStream, line_num: usize) -> Result<String, P
 fn parse_pat_options(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     has_paren: bool,
     repeat_count: &mut i32,
 ) -> Result<(), ParseError> {
@@ -1409,7 +1506,7 @@ fn validate_pat_spec(
 fn source_value_or_default(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     source_name: &str,
     arg_name: &str,
     has_paren: bool,
@@ -1424,7 +1521,7 @@ fn source_value_or_default(
 fn source_optional_value(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     source_name: &str,
     arg_name: &str,
     has_paren: bool,
@@ -1454,7 +1551,7 @@ fn source_optional_value(
 fn expect_finite_source_value(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
     source_name: &str,
     arg_name: &str,
 ) -> Result<Value, ParseError> {
@@ -1513,7 +1610,7 @@ fn validate_pwl_file_scaling(
 fn parse_pwl_timing_options(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<(Value, Option<Value>), ParseError> {
     let mut delay = 0.0;
     let mut repeat_from = None;
@@ -1671,7 +1768,7 @@ fn source_numeric_args_end(stream: &TokenStream, has_paren: bool) -> bool {
 fn parse_exp_spec(
     stream: &mut TokenStream,
     line_num: usize,
-    params: &ParamContext,
+    params: &SourceParseContext<'_>,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
@@ -1705,6 +1802,104 @@ fn is_xyce_ignored_source_instance_parameter(keyword: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_value_mapping_preserves_grammar_scope_and_random_draws() {
+        let mut scope = ParamContext::new();
+        for (name, value) in [
+            ("rv", 100.0),
+            ("local", 50.0),
+            ("pwl", 2.0),
+            ("file", 1.0),
+            ("b10", 42.0),
+        ] {
+            scope.set(name, value);
+        }
+        let preserved = ["RV".to_owned()].into_iter().collect();
+        let prepare = |expression: &str, _: Value| {
+            crate::netlist::expr::prepare_behavioral_expression_preserving_parameters(
+                expression, &scope, &preserved,
+            )
+            .map_err(ParseError::InvalidValue)
+        };
+        let file = map_source_spec_values(
+            "DC -{rv+local} AC {pwl} file PWL(FILE=\"rv-µ.csv\" VSCALE={rv/local})",
+            &scope,
+            &prepare,
+        )
+        .unwrap();
+        let pattern = map_source_spec_values(
+            "PAT({rv+local} 0 0 1n 1n 1u b10 RB=file) DISTOF1 rv file PORTNUM file Z0 local",
+            &scope,
+            &prepare,
+        )
+        .unwrap();
+        let mut sampled = ParamContext::new();
+        sampled.set("rv", 120.0);
+        sampled.set("local", 999.0);
+        let SourceSpec::DcAcTransient {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+            transient,
+        } = parse_source_spec_text(&file, 0, &sampled).unwrap()
+        else {
+            panic!("DC/AC/PWL retained")
+        };
+        assert_eq!(dc_value, -170.0);
+        assert_eq!(ac_magnitude, 2.0);
+        assert_eq!(ac_phase, 1.0_f64.to_radians());
+        let SourceSpec::PwlFile {
+            path, value_scale, ..
+        } = *transient
+        else {
+            panic!("file retained")
+        };
+        assert_eq!(path, "rv-µ.csv");
+        assert_eq!(value_scale, 2.4);
+        let SourceSpec::RfPort { inner, port } =
+            parse_source_spec_text(&pattern, 0, &sampled).unwrap()
+        else {
+            panic!("port retained")
+        };
+        assert_eq!(port.z0, 50.0);
+        let SourceSpec::Distortion { inner, f1, .. } = *inner else {
+            panic!("distortion retained")
+        };
+        assert_eq!(f1.unwrap().magnitude, 120.0);
+        let SourceSpec::Pat { vhi, data, .. } = *inner else {
+            panic!("pattern retained")
+        };
+        assert_eq!(vhi, 170.0);
+        assert_eq!(data, "B10");
+
+        scope.set_random_seed(41);
+        let expected_stream = scope.isolated_random_clone();
+        let expected_noise = eval_expression("agauss(0,1,1)", &expected_stream).unwrap();
+        let mapped =
+            map_source_spec_values("DC {agauss(0,1,1)} AC rv", &scope, &|expression, value| {
+                Ok(if expression.eq_ignore_ascii_case("rv") {
+                    expression.to_owned()
+                } else {
+                    value.to_string()
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            scope.random().next_uniform(),
+            expected_stream.random().next_uniform()
+        );
+        let SourceSpec::DcAc {
+            dc_value,
+            ac_magnitude,
+            ..
+        } = parse_source_spec_text(&mapped, 0, &sampled).unwrap()
+        else {
+            panic!("random DC retained")
+        };
+        assert_eq!(dc_value, expected_noise);
+        assert_eq!(ac_magnitude, 120.0);
+    }
 
     #[test]
     fn source_file_dependencies_do_not_evaluate_deferred_values() {

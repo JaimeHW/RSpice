@@ -2433,16 +2433,6 @@ impl<'a> Flattener<'a> {
             ) if scope.expression_references_spectre_statistics(control_expression) => {
                 *lowered = prepare(control_expression)?;
             }
-            (ElementKind::VoltageSourceDeferred(raw), lowered)
-                if scope.expression_references_spectre_statistics(raw) =>
-            {
-                *lowered = ElementKind::VoltageSourceDeferred(raw.clone());
-            }
-            (ElementKind::CurrentSourceDeferred(raw), lowered)
-                if scope.expression_references_spectre_statistics(raw) =>
-            {
-                *lowered = ElementKind::CurrentSourceDeferred(raw.clone());
-            }
             _ => {}
         }
         Ok(())
@@ -2601,6 +2591,26 @@ impl<'a> Flattener<'a> {
         element_path: &str,
         voltage_source: bool,
     ) -> Result<ElementKind, ParseError> {
+        if scope.expression_references_spectre_statistics(raw_spec) {
+            let prepared =
+                super::parser::map_source_spec_values(raw_spec, scope, &|expression, nominal| {
+                    if scope.expression_references_spectre_statistics(expression) {
+                        self.prepare_spectre_statistical_expression(expression, scope, element_path)
+                    } else {
+                        Ok(nominal.to_string())
+                    }
+                })
+                .map_err(|error| {
+                    ParseError::InvalidValue(format!(
+                        "statistical source specification for element '{element_path}' could not be prepared: {error}"
+                    ))
+                })?;
+            return Ok(if voltage_source {
+                ElementKind::VoltageSourceDeferred(prepared)
+            } else {
+                ElementKind::CurrentSourceDeferred(prepared)
+            });
+        }
         match parse_source_spec_text(raw_spec, 0, scope) {
             Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
             Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
@@ -4440,7 +4450,9 @@ mod tests {
                  R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\n.ends\n\
                  .subckt shadow a b rv=50\n.param local={{2*rv}}\n\
                  R1 a b {{rv}}\nR2 a b {{local}}\nR3 a b {{bare_alias}}\n\
-                 R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n.ends\n\
+                 R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n\
+                 VS sv b DC {{rv+bare_alias}} AC rv local SIN(rv {{bare_alias}} 1k)\n\
+                 IS a b DC {{rv+bare_alias}} AC rv local PWL(0 rv 1m {{rv+bare_alias}})\n.ends\n\
                  .subckt body_shadow a b\n.param rv=60\n\
                  R1 a b {{rv}}\nR2 a b {{bare_alias}}\n\
                  XCH a b shadow rv=80\n.ends\n\
@@ -4527,6 +4539,58 @@ mod tests {
                 failures.push(format!(
                     "{variation_scope:?}: sampled source {actual}, expected {expected}"
                 ));
+            }
+            for (scope, local) in [("X2", 50.0), ("X3", 70.0), ("X4.XCH", 80.0)] {
+                let sampled = sample_for(scope);
+                for (kind, names, dc, magnitudes, phases, specs, peak_time) in [
+                    (
+                        "VS",
+                        &circuit.voltage_sources.names,
+                        &circuit.voltage_sources.dc_values,
+                        &circuit.voltage_sources.ac_magnitudes,
+                        &circuit.voltage_sources.ac_phases,
+                        &circuit.voltage_sources.source_specs,
+                        0.25e-3,
+                    ),
+                    (
+                        "IS",
+                        &circuit.current_sources.names,
+                        &circuit.current_sources.dc_values,
+                        &circuit.current_sources.ac_magnitudes,
+                        &circuit.current_sources.ac_phases,
+                        &circuit.current_sources.source_specs,
+                        1e-3,
+                    ),
+                ] {
+                    let name = format!("{scope}.{kind}");
+                    let index = names
+                        .iter()
+                        .position(|actual| actual.eq_ignore_ascii_case(&name))
+                        .unwrap();
+                    let spec = specs[index].as_ref().unwrap();
+                    let at_time = |time| {
+                        crate::circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                            spec,
+                            time,
+                            1e-9,
+                            1.0,
+                            crate::config::SpiceDialect::Ngspice,
+                        )
+                    };
+                    for (field, actual, expected) in [
+                        ("DC", dc[index], local + 2.0 * sampled),
+                        ("AC magnitude", magnitudes[index], local),
+                        ("AC phase", phases[index], (2.0 * local).to_radians()),
+                        ("waveform start", at_time(0.0), local),
+                        ("waveform peak", at_time(peak_time), local + 2.0 * sampled),
+                    ] {
+                        if !((actual / expected - 1.0).abs() < 1e-14) {
+                            failures.push(format!(
+                                "{variation_scope:?}, {name} {field}: {actual}, expected {expected}"
+                            ));
+                        }
+                    }
+                }
             }
             assert!(failures.is_empty(), "{}", failures.join("\n"));
         }

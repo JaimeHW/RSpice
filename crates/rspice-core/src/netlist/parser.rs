@@ -76,6 +76,7 @@ use laplace_synthesis::*;
 use line::*;
 use pspice_stim::*;
 use scoping::*;
+pub(super) use source_specs::map_source_spec_values;
 use source_specs::parse_source_spec;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
 use state::*;
