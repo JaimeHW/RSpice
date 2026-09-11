@@ -8067,6 +8067,82 @@ mod tests {
     }
 
     #[test]
+    fn model_expressions_preserve_arithmetic_after_numeric_prefixes() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            for nested in [false, true] {
+                for q in [4.0, 6.0] {
+                    let body = "A1 in out gm\nA2 in out cm\n.model gm gain (gain=2*q in_offset=1e-3/q out_offset=-2*q)\n.model cm print_param_types (real_array=[2*q 1e-3/q] complex=<2*q -3*q> complex_array=[<4*q 5*q>])";
+                    let source = if nested {
+                        format!(
+                            "Numeric model expressions\nX1 in out cell q={q}\n.subckt cell in out q=9\n{body}\n.ends\n.end"
+                        )
+                    } else {
+                        format!("Numeric model expressions\n.param q={q}\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let models = if nested {
+                        flatten_netlist_with_models(&netlist).unwrap().scoped_models
+                    } else {
+                        netlist.models
+                    };
+                    let gain = models
+                        .iter()
+                        .find(|model| model.model_type.eq_ignore_ascii_case("gain"))
+                        .unwrap();
+                    for (name, expected) in [
+                        ("GAIN", 2.0 * q),
+                        ("IN_OFFSET", 1e-3 / q),
+                        ("OUT_OFFSET", -2.0 * q),
+                    ] {
+                        let actual = gain
+                            .params
+                            .iter()
+                            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                            .unwrap()
+                            .1;
+                        assert_eq!(actual, expected, "{dialect:?} nested={nested} {name}");
+                    }
+                    let complex = models
+                        .iter()
+                        .find(|model| model.model_type.eq_ignore_ascii_case("print_param_types"))
+                        .unwrap();
+                    let vector = &complex
+                        .real_vector_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("real_array"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(vector, &[2.0 * q, 1e-3 / q]);
+                    let scalar = &complex
+                        .string_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("complex"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(scalar, &format!("<{} {}>", 2.0 * q, -3.0 * q));
+                    let array = &complex
+                        .string_vector_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("complex_array"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(array, &[format!("<{} {}>", 4.0 * q, 5.0 * q)]);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn xspice_subckt_model_scalar_expression_resolves_per_instance() {
         let netlist = Netlist::parse(
             "xspice subckt inline model scalar expression\n\

@@ -763,7 +763,7 @@ fn try_xspice_model_scalar_expression(
     }
 
     let expr = collect_contiguous_expression(stream)?;
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
         return Some(ParsedModelScalarExpression::Resolved(value));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
@@ -1330,7 +1330,7 @@ fn parse_model_complex_component(
             ),
         })?;
 
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
         return Ok(ParsedModelComplexComponent::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
@@ -1545,7 +1545,7 @@ fn parse_model_real_vector_entry(
         ),
     })?;
 
-    let entry = if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+    let entry = if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
         ParsedModelRealVectorEntry::Resolved(sign * value)
     } else if let Some(value) = parse_boolean_literal(&expr) {
         ParsedModelRealVectorEntry::Resolved(sign * value)
