@@ -114,6 +114,50 @@ jobs:
           cargo test --locked -p rspice-conformance --release
           --test execution_corpora -- --test-threads 1
 
+  test-linux-veriloga:
+    name: Test Verilog-A & mixed-signal suites (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      # Every core integration target gated on `veriloga` compiles to an empty
+      # binary under the default feature set, so the core lane above links and
+      # runs nothing for any of them. They are named here, one cargo
+      # invocation, on a runner of their own: the feature changes the core's
+      # resolved graph, so sharing the core lane's runner would mean a second
+      # full rspice-core build inside that job's budget rather than beside it.
+      #
+      # `tools/ci/test_ci_configuration.py` scans the test directory and fails
+      # if a gated target is missing from this list or from the native-JIT step
+      # in `test-linux-native`. The only permitted omissions are the two
+      # optional BSIM4 oracle targets, whose Verilog-A source is not vendored.
+      - name: Test Verilog-A-gated core suites through the bytecode interpreter
+        run: >-
+          cargo test --locked -p rspice-core --features veriloga --no-fail-fast
+          --test connect_module_insertion
+          --test transient_checkpoint
+          --test veriloga_ac
+          --test veriloga_connect_source_closure
+          --test veriloga_dc_lifecycle
+          --test veriloga_hb
+          --test veriloga_indirect
+          --test veriloga_mfactor
+          --test veriloga_mixed_signal_hardening
+          --test veriloga_mixed_signal_regressions
+          --test veriloga_mixed_signal_route
+          --test veriloga_module_timing
+          --test veriloga_noise
+          --test veriloga_noise_process
+          --test veriloga_project_runtime_batch
+          --test veriloga_project_virtual_identity
+          --test veriloga_timestep
+          --test veriloga_transient
+
   test-libraries:
     name: Test workspace libraries & tools (Linux)
     runs-on: ubuntu-latest
@@ -224,8 +268,34 @@ jobs:
         run: |
           cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1
           cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
-      - name: Test Verilog-A core transient suite through the native JIT (Linux x64)
-        run: cargo test --locked -p rspice-core --features veriloga-native --test veriloga_transient -- --test-threads=1
+      # The same gated targets as `test-linux-veriloga`, compiled against the
+      # x64 JIT instead of the bytecode interpreter: the two routes lower the
+      # same modules through different back ends, so a suite that passes on one
+      # proves nothing about the other. `--test-threads=1` is the rule the
+      # native lane already follows -- the JIT maps executable pages per
+      # process -- and it applies to every target in this invocation.
+      - name: Test Verilog-A-gated core suites through the native JIT (Linux x64)
+        run: >-
+          cargo test --locked -p rspice-core --features veriloga-native --no-fail-fast
+          --test connect_module_insertion
+          --test transient_checkpoint
+          --test veriloga_ac
+          --test veriloga_connect_source_closure
+          --test veriloga_dc_lifecycle
+          --test veriloga_hb
+          --test veriloga_indirect
+          --test veriloga_mfactor
+          --test veriloga_mixed_signal_hardening
+          --test veriloga_mixed_signal_regressions
+          --test veriloga_mixed_signal_route
+          --test veriloga_module_timing
+          --test veriloga_noise
+          --test veriloga_noise_process
+          --test veriloga_project_runtime_batch
+          --test veriloga_project_virtual_identity
+          --test veriloga_timestep
+          --test veriloga_transient
+          -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)
