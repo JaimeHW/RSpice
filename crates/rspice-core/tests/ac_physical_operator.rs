@@ -21,6 +21,26 @@ fn solve_one(deck: &str) -> AcResult {
         .expect("one requested AC point")
 }
 
+#[test]
+fn behavioral_ac_transfer_preserves_finite_analytic_ratios() {
+    for (expression, expected) in [
+        ("V(in)/1e200", 1e-200_f64),
+        ("(1e-200*V(in))/1e-200", 1.0),
+        ("atan2(1e200*V(in),1e200)", 0.5),
+        ("atan2(1e-200*V(in),1e-200)", 0.5),
+        ("atan(1e200*V(in))", 1e-200),
+    ] {
+        let point = solve_one(&format!(
+            "Behavioral ratio\nV1 in 0 DC 1 AC 1\nB1 out 0 V={{{expression}}}\n.end\n"
+        ));
+        let actual = voltage(&point, "out");
+        assert!(
+            (actual.re / expected - 1.0).abs() < 1e-12 && actual.im == 0.0,
+            "{expression}: {actual}, expected {expected}"
+        );
+    }
+}
+
 fn voltage(point: &AcResult, node: &str) -> Complex64 {
     let index = point
         .node_names

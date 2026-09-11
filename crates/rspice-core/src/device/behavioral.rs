@@ -1466,7 +1466,10 @@ fn eval_binary_with_derivative(
             } else {
                 Some((
                     left / right,
-                    (d_left * right - left * d_right) / (right * right),
+                    derivative_product_ratio(
+                        [(d_left, right), (-left, d_right)],
+                        [(right, right), (0.0, 0.0)],
+                    ),
                 ))
             }
         }
@@ -1487,6 +1490,46 @@ fn eval_binary_with_derivative(
         BinaryOp::Ne => Some((bool_value((left - right).abs() >= EXPR_ZERO_TOLERANCE), 0.0)),
         BinaryOp::And => Some((bool_value(left != 0.0 && right != 0.0), 0.0)),
         BinaryOp::Or => Some((bool_value(left != 0.0 || right != 0.0), 0.0)),
+    }
+}
+
+/// Keep the ordinary Jacobian arithmetic for normal denominators. Recover the
+/// complete ratio when a squared denominator overflows or becomes subnormal;
+/// the derivative can still be finite even if both numerator and denominator
+/// overflow, or both round to zero. The shared numerator routine also rescues
+/// overflowing or subnormal products on the normal-denominator path.
+fn derivative_product_ratio(
+    numerator: [(Value, Value); 2],
+    denominator: [(Value, Value); 2],
+) -> Value {
+    use rspice_veriloga_runtime::arithmetic::{
+        ArithmeticError, product_sum_div, sum_products_ratio,
+    };
+    let divisor = denominator[0].0 * denominator[0].1 + denominator[1].0 * denominator[1].1;
+    if divisor.is_normal()
+        || numerator
+            .iter()
+            .chain(&denominator)
+            .any(|(a, b)| !a.is_finite() || !b.is_finite())
+    {
+        return product_sum_div(
+            numerator[0].0,
+            numerator[0].1,
+            numerator[1].0,
+            numerator[1].1,
+            divisor,
+        );
+    }
+    match sum_products_ratio(numerator.into_iter(), denominator.into_iter()) {
+        Ok(value) => value,
+        Err(ArithmeticError::Overflow { negative }) => {
+            if negative {
+                Value::NEG_INFINITY
+            } else {
+                Value::INFINITY
+            }
+        }
+        Err(_) => Value::NAN,
     }
 }
 
@@ -1557,15 +1600,23 @@ fn eval_function_with_derivative(
             |x| x.clamp(-1.0, 1.0).acos(),
             |x| -1.0 / (1.0 - x * x).sqrt(),
         ),
-        Function::Atan => unary_derivative(eval_arg(0)?, |x| x.atan(), |x| 1.0 / (1.0 + x * x)),
+        Function::Atan => {
+            let (x, dx) = eval_arg(0)?;
+            Some((
+                x.atan(),
+                derivative_product_ratio([(dx, 1.0), (0.0, 0.0)], [(1.0, 1.0), (x, x)]),
+            ))
+        }
         Function::Atan2 => {
             let (y, dy) = eval_arg(0)?;
             let (x, dx) = eval_arg(1)?;
-            let denom = x * x + y * y;
-            if denom == 0.0 {
+            if x == 0.0 && y == 0.0 {
                 None
             } else {
-                Some((y.atan2(x), (x * dy - y * dx) / denom))
+                Some((
+                    y.atan2(x),
+                    derivative_product_ratio([(x, dy), (-y, dx)], [(x, x), (y, y)]),
+                ))
             }
         }
         Function::Sinh => unary_derivative(eval_arg(0)?, |x| x.sinh(), |x| x.cosh()),
@@ -3395,6 +3446,35 @@ mod tests {
                 assert_eq!(source.explicit_time_derivative(0.0), None);
             }
         }
+    }
+
+    #[test]
+    fn analytic_derivatives_preserve_finite_ratios_across_extreme_scales() {
+        let mut failures = Vec::new();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, expected) in [
+                ("v(in)/1e200", 1e-200_f64),
+                ("v(in)/1e-200", 1e200),
+                ("(1e-200*v(in))/1e-200", 1.0),
+                ("(1e200*v(in))/(1e200*v(in))", 0.0),
+                ("atan2(1e200*v(in),1e200)", 0.5),
+                ("atan2(1e-200*v(in),1e-200)", 0.5),
+                ("atan(1e200*v(in))", 1e-200),
+            ] {
+                let (_, actual) = eval_node_derivative_with_dialect(expression, 1.0, dialect);
+                let accurate = if expected == 0.0 {
+                    actual == 0.0
+                } else {
+                    (actual / expected - 1.0).abs() < 2e-15
+                };
+                if !accurate {
+                    failures.push(format!(
+                        "{dialect:?} {expression}: {actual}, expected {expected}"
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     fn eval_node_derivative(expression: &str, node_value: Value) -> (Value, Value) {
