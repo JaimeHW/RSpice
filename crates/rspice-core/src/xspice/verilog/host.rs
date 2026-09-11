@@ -37,10 +37,9 @@
 //!
 //! # Time
 //!
-//! One tick is one Verilog *time unit*, and this host fixes the unit for the
-//! whole run rather than reading one out of the source. See
-//! [`super::TIME_UNIT_RULING`] for what that decides and why the alternative
-//! was refused rather than guessed.
+//! One tick is the compiled plan's finest elaborated precision. Delay operands
+//! already contain integer design ticks after module-local rounding. The same
+//! precision maps digital events to analog breakpoints.
 //!
 //! # Waking a process
 //!
@@ -111,15 +110,6 @@ pub enum DigitalRunError {
         /// How many analog equations it carries.
         equations: usize,
     },
-    /// The source declares a `` `timescale ``.
-    ///
-    /// See [`super::TIME_UNIT_RULING`]: this host fixes one time unit for the
-    /// whole run, and a directive that says otherwise cannot be honoured, so it
-    /// is refused rather than read and ignored.
-    TimescaleDirective {
-        /// One-based line the directive appears on.
-        line: usize,
-    },
     /// The event kernel refused, most often because a tick did not settle.
     Scheduler(SchedulerError),
     /// The process interpreter refused.
@@ -187,7 +177,7 @@ pub enum DigitalRunError {
     NegativeDelay {
         /// Which process asked.
         process: String,
-        /// The delay it asked for, in time units.
+        /// The delay it asked for, in design ticks.
         delay: i64,
     },
     /// A process finished when its own graph says it cannot.
@@ -235,11 +225,6 @@ impl fmt::Display for DigitalRunError {
                 "module `{module}` has {equations} analog equation(s) as well as digital \
                  processes; run it through MixedSignalHost so its equations are stamped during \
                  transient Newton evaluation"
-            ),
-            Self::TimescaleDirective { line } => write!(
-                f,
-                "line {line} declares a `timescale, which this host cannot honour: {}",
-                super::TIME_UNIT_RULING
             ),
             Self::Scheduler(error) => write!(f, "{error}"),
             Self::Evaluation { process, error } => {
@@ -292,7 +277,7 @@ impl fmt::Display for DigitalRunError {
             ),
             Self::NegativeDelay { process, delay } => write!(
                 f,
-                "process {process} asked to resume {delay} time units after it suspended, \
+                "process {process} asked to resume {delay} design ticks after it suspended, \
                  which is before it suspended"
             ),
             Self::UnexpectedCompletion { process } => write!(

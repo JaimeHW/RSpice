@@ -199,6 +199,22 @@ it must execute that plan on the event scheduler, since the analog model
 alone cannot execute digital behavior. Canonical-IR compilation can lower
 digital processes independently of this option.
 
+Active `` `timescale `` directives now retain module units and precision through
+includes, HDL hierarchy, specialization and canonical transport. `` `resetall ``
+restores the default 1 ns / 1 ns timing and the supported default discipline and
+transition settings. Constant procedural delay expressions, including fractional
+and parenthesized expressions, round at the declaring module's precision before
+checked integer rescaling to the compiled HDL design's finest precision. Integer
+delays use checked integer arithmetic; values above 32 bits are retained without
+clamping. The event host still enforces its exact tick-to-seconds range.
+
+This completes a delay-timing increment, not MS02. Runtime-valued delays,
+min:typ:max selection, complete delayed-assignment semantics, time reporting
+functions and SystemVerilog `timeunit`/`timeprecision` remain open. In particular,
+the existing analog `$realtime` lowering still aliases seconds-valued `$abstime`,
+and timing-related `$simparam` values are not yet bound to these declarations.
+Separate circuit hosts still await one circuit-wide time/scheduling authority.
+
 `strict_mode` and `integration_order` are **reserved**. They participate in
 the compiler-contract identity but currently gate no behavior.
 `integration_order` does not pick the

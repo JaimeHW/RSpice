@@ -96,6 +96,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/specialist.rs",
     "src/stdlib.rs",
     "src/timing_contract.rs",
+    "src/time_scale.rs",
     "src/types.rs",
     "src/virtual_source.rs",
     "src/vm",

@@ -161,11 +161,11 @@ fn unrepresentable_seconds_are_refused() {
 
 #[test]
 fn resolution_range_is_enforced_and_finest_selects_the_finer_precision() {
-    assert!(TimeResolution::new(1).is_err(), "coarser than 1 s");
+    assert!(TimeResolution::new(3).is_err(), "coarser than 100 s");
     assert!(TimeResolution::new(-22).is_err(), "finer than 1e-21 s");
     assert_eq!(
-        TimeResolution::new(1),
-        Err(SchedulerError::UnsupportedResolution { exponent: 1 })
+        TimeResolution::new(3),
+        Err(SchedulerError::UnsupportedResolution { exponent: 3 })
     );
 
     let picoseconds = TimeResolution::new(-12).expect("1 ps");

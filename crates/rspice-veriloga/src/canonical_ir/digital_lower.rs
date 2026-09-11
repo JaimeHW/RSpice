@@ -173,6 +173,13 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     }
 
     let mut diagnostics = Vec::new();
+    let timing = crate::time_scale::DigitalTiming {
+        root: digital.time_scale,
+        precision_exponent: digital.instances.iter().fold(
+            digital.time_scale.precision_exponent(),
+            |precision, instance| precision.min(instance.time_scale.precision_exponent()),
+        ),
+    };
 
     // ------------------------------------------------------------------
     // The elaborated signal table.
@@ -284,6 +291,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &module_scope,
             &digital.constants,
             &mut probes,
+            digital.time_scale,
+            timing.precision_exponent,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -298,6 +307,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             allocate(),
             &mut drivers,
             &mut probes,
+            digital.time_scale,
+            timing.precision_exponent,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -312,6 +323,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 scope,
                 &instance.constants,
                 &mut probes,
+                instance.time_scale,
+                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -326,6 +339,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 allocate(),
                 &mut drivers,
                 &mut probes,
+                instance.time_scale,
+                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -340,6 +355,8 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 allocate(),
                 &mut drivers,
                 &mut probes,
+                instance.time_scale,
+                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -353,6 +370,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
         return Err(diagnostics);
     }
     CanonicalDigitalPlan {
+        timing,
         content_identity: [0; 32],
         signals,
         processes,
@@ -440,8 +458,12 @@ fn lower_continuous_assign(
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
     probes: &mut Vec<DigitalAnalogProbe>,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    precision_exponent: i8,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        time_scale,
+        precision_exponent,
         signals,
         index,
         constants,
@@ -529,6 +551,7 @@ fn lower_continuous_assign(
     Ok(CfgDigitalProcess {
         id,
         kind: DigitalProcessKind::ContinuousAssign,
+        time_scale,
         function,
         static_sensitivity,
         span: assignment.span.into(),
@@ -596,8 +619,12 @@ fn lower_process(
     index: &HashMap<&str, DigitalSignalId>,
     constants: &DigitalConstants,
     probes: &mut Vec<DigitalAnalogProbe>,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    precision_exponent: i8,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        time_scale,
+        precision_exponent,
         signals,
         index,
         constants,
@@ -698,6 +725,7 @@ fn lower_process(
     Ok(CfgDigitalProcess {
         id,
         kind,
+        time_scale,
         function,
         static_sensitivity,
         span: process.span.into(),
@@ -792,6 +820,8 @@ impl Context {
 }
 
 struct ProcessLowerer<'a> {
+    time_scale: crate::time_scale::ModuleTimeScale,
+    precision_exponent: i8,
     signals: &'a [DigitalSignal],
     index: &'a HashMap<&'a str, DigitalSignalId>,
     /// The elaboration-time constants a name in this body may denote.
@@ -1952,28 +1982,75 @@ impl ProcessLowerer<'_> {
         resume
     }
 
-    /// Lower a delay operand, which is an integer number of time units.
+    /// Round at the owning module's precision before scaling to design ticks.
     ///
     /// A leaf, not a block instruction: a constant delay reads nothing, and
     /// the `Wait` that consumes it is the terminator of a block it would
     /// otherwise have to be placed in.
     fn delay(&mut self, expression: &Expression) -> ValueId {
-        let value = match self
-            .constant(expression)
-            .and_then(|value| i32::try_from(value).ok())
-            .filter(|value| *value >= 0)
-        {
-            Some(value) => value,
-            None => {
-                self.error(
-                    "a delay must be a constant integer number of time units in 0..=2147483647",
-                    expression.span(),
-                );
+        let ticks = if self.is_real_expression(expression) {
+            self.constant_delay(expression)
+                .ok_or("a delay must be an elaboration-time numeric constant")
+                .and_then(|units| self.time_scale.delay_ticks(units, self.precision_exponent))
+        } else {
+            self.constant(expression)
+                .ok_or("a delay must be an elaboration-time numeric constant")
+                .and_then(|units| {
+                    self.time_scale
+                        .integer_delay_ticks(units, self.precision_exponent)
+                })
+        };
+        let value = match ticks {
+            Ok(value) => value,
+            Err(detail) => {
+                self.error(detail, expression.span());
                 0
             }
         };
-        self.builder
-            .push_leaf(CfgValueType::Integer, CfgValueKind::IntegerConstant(value))
+        if let Ok(value) = i32::try_from(value) {
+            self.builder
+                .push_leaf(CfgValueType::Integer, CfgValueKind::IntegerConstant(value))
+        } else {
+            self.builder.push_leaf(
+                CfgValueType::FourState { width: 64 },
+                CfgValueKind::FourStateConstant(FourStateValue::from_u64(64, value as u64)),
+            )
+        }
+    }
+
+    fn constant_delay(&self, expression: &Expression) -> Option<f64> {
+        if !self.is_real_expression(expression) {
+            return self.constant(expression).map(|value| value as f64);
+        }
+        match expression {
+            Expression::Number(number) => Some(number.value),
+            Expression::Identifier(identifier)
+                if self.lookup_local(&identifier.name).is_none()
+                    && !self.index.contains_key(identifier.name.as_str()) =>
+            {
+                self.constants.real(&identifier.name)
+            }
+            Expression::Unary(unary) => {
+                let operand = self.constant_delay(&unary.operand)?;
+                match unary.op {
+                    UnaryOp::Neg => Some(-operand),
+                    UnaryOp::Pos => Some(operand),
+                    _ => None,
+                }
+            }
+            Expression::Binary(binary) => {
+                let left = self.constant_delay(&binary.left)?;
+                let right = self.constant_delay(&binary.right)?;
+                match binary.op {
+                    BinaryOp::Add => Some(left + right),
+                    BinaryOp::Sub => Some(left - right),
+                    BinaryOp::Mul => Some(left * right),
+                    BinaryOp::Div => Some(left / right),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Resolve a sensitivity list to signal terms.

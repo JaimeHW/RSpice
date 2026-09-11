@@ -435,6 +435,8 @@ pub struct DigitalWriteTarget {
 /// One `always` or `initial` process, lowered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfgDigitalProcess {
+    /// Owning module's units and precision, retained after hierarchy flattening.
+    pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Dense declaration-ordered identity allocated after elaboration.
     pub id: DigitalProcessId,
     pub kind: DigitalProcessKind,
@@ -550,6 +552,8 @@ pub struct DigitalDriver {
 /// [`CanonicalNoiseSourcePlan`]: super::noise::CanonicalNoiseSourcePlan
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalDigitalPlan {
+    /// Delays in this plan are already rounded and expressed in these ticks.
+    pub timing: crate::time_scale::DigitalTiming,
     /// BLAKE3 identity of the complete lowered plan. Validate after decoding or
     /// editing an artifact, then keep it immutable throughout execution.
     #[serde(default)]

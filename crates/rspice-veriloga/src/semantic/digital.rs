@@ -34,6 +34,7 @@ use std::collections::HashMap;
 /// to report the unsupported construct.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
+    pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Declared nets and variables, in declaration order.
     pub signals: Vec<AnalyzedDigitalSignal>,
     /// Processes with their static sensitivity resolved, in declaration order.
@@ -431,6 +432,7 @@ pub struct AnalyzedContinuousAssign {
 /// their processes and drivers separately addressable.
 #[derive(Debug, Clone)]
 pub struct ElaboratedDigitalInstance {
+    pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Instance path below the compiled module: `g1`, or `u1.g2` when nested.
     ///
     /// The IEEE 1364-2005 section 12.4 hierarchical name, minus the top
@@ -552,6 +554,7 @@ impl SemanticAnalyzer {
     /// branch is caught, and so a digital expression can read an analog
     /// `integer` or `real`.
     pub(super) fn analyze_digital(&mut self, module: &Module, analyzed: &mut AnalyzedModule) {
+        analyzed.digital.time_scale = module.time_scale;
         if !module.has_digital_content() {
             return;
         }
@@ -622,6 +625,7 @@ impl SemanticAnalyzer {
         self.reject_drivers_on_input_ports(module, &continuous_assigns);
 
         analyzed.digital = AnalyzedDigital {
+            time_scale: module.time_scale,
             signals,
             processes,
             continuous_assigns,

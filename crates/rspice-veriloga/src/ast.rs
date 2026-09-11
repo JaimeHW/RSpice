@@ -160,6 +160,8 @@ pub struct DefaultDisciplineDirective {
 /// Module definition
 #[derive(Debug, Clone)]
 pub struct Module {
+    /// Timing declaration in effect where this module begins.
+    pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Module name
     pub name: SmolStr,
     /// Module ports in declaration order
@@ -230,6 +232,7 @@ impl Module {
 
     pub fn new(name: impl Into<SmolStr>, span: Span) -> Self {
         Self {
+            time_scale: crate::time_scale::ModuleTimeScale::default(),
             name: name.into(),
             ports: Vec::new(),
             port_declarations: Vec::new(),

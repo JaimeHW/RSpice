@@ -334,10 +334,8 @@ impl DigitalSuspension {
 pub enum DigitalWaitRequest {
     /// `@(...)`: resume when one of these terms is satisfied.
     Event(Vec<DigitalSensitivityTerm>),
-    /// `#n`: resume after this many time units, counted from the suspension.
-    ///
-    /// Time units, not seconds: converting one to the other needs a
-    /// `timescale`, which the kernel owns.
+    /// Resume after this many ticks of the plan's resolved design precision,
+    /// counted from suspension. Module-local delay rounding is already applied.
     Delay(i64),
 }
 

@@ -413,11 +413,12 @@ fn a_delay_resumes_the_process_that_many_time_units_later() {
 // ===========================================================================
 
 #[test]
-fn a_timescale_directive_is_refused_by_name() {
+fn an_active_timescale_directive_executes() {
     let source = format!("`timescale 1ns/1ps\n{COMBINATIONAL}");
-    let error = run_digital_verilog(
-        &source,
-        &DigitalStimulus {
+    let compiled = CompiledDigitalDesign::compile(&source, None).unwrap();
+    assert_eq!(compiled.time_resolution().seconds_per_tick(), 1e-12);
+    let result = compiled
+        .run(&DigitalStimulus {
             module: None,
             inputs: vec![port("a", 1), port("b", 1)],
             outputs: vec![port("y", 1)],
@@ -425,18 +426,12 @@ fn a_timescale_directive_is_refused_by_name() {
             step: 10,
             settle: 5,
             vectors: vectors(&[&["0", "0"]]),
-        },
-    )
-    .expect_err("the host cannot honour a timescale");
-    assert!(
-        matches!(error, DigitalRunError::TimescaleDirective { line: 1 }),
-        "{error:?}"
-    );
-    assert!(error.to_string().contains("one tick is 1 ns"), "{error}");
+        })
+        .expect("declared timing executes");
+    assert_eq!(result.observations.len(), 1);
 }
 
-/// A commented-out directive is not one. Without this the refusal would fire on
-/// a design that merely mentions it.
+/// A commented-out directive must not alter the compiled timing.
 #[test]
 fn a_commented_timescale_is_not_a_directive() {
     let source = format!("// `timescale 1ns/1ns\n{COMBINATIONAL}");
@@ -1112,10 +1107,12 @@ fn a_stimulus_naming_another_module_is_refused_by_a_compiled_design() {
 /// makes at compile time — which is the point of having a compile half.
 #[test]
 fn the_compile_half_makes_every_pre_run_refusal() {
-    const TIMESCALED: &str = "`timescale 1ns/1ps\nmodule t(a, y);\n  input a;\n  output y;\n  \
+    const TIMESCALED: &str = "`timescale 1ns/1us\nmodule t(a, y);\n  input a;\n  output y;\n  \
                               wire a;\n  assign y = ~a;\nendmodule\n";
     match CompiledDigitalDesign::compile(TIMESCALED, None) {
-        Err(DigitalRunError::TimescaleDirective { line }) => assert_eq!(line, 1),
+        Err(DigitalRunError::Compile { detail }) => {
+            assert!(detail.contains("precision"), "{detail}")
+        }
         other => panic!("expected a timescale refusal, got {other:?}"),
     }
 

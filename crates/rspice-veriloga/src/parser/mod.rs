@@ -30,6 +30,7 @@ pub struct Parser<'a> {
     /// Processes declared so far in the module being parsed, used to hand out
     /// [`DigitalProcessId`]s in declaration order.
     next_process_id: u32,
+    time_scale: crate::time_scale::ModuleTimeScale,
 }
 
 impl<'a> Parser<'a> {
@@ -39,6 +40,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             next_process_id: 0,
+            time_scale: crate::time_scale::ModuleTimeScale::default(),
         }
     }
 
@@ -57,7 +59,14 @@ impl<'a> Parser<'a> {
             // Attribute instances may precede any top-level item
             let attributes = self.parse_attributes()?;
 
-            if self.check_identifier_text("__rspice_default_transition") {
+            if self.check_identifier_text("__rspice_timescale") {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `timescale`".into(),
+                    )));
+                }
+                self.parse_time_scale()?;
+            } else if self.check_identifier_text("__rspice_default_transition") {
                 if !attributes.is_empty() {
                     return Err(self.error(ParseErrorKind::UnexpectedToken(
                         "attributes before `default_transition`".to_string(),
@@ -124,6 +133,36 @@ impl<'a> Parser<'a> {
 
     fn check_identifier_text(&self, expected: &str) -> bool {
         self.check(TokenKind::Identifier) && self.current().text.as_deref() == Some(expected)
+    }
+
+    fn parse_time_scale(&mut self) -> Result<(), ParseError> {
+        fn exponent(parser: &mut Parser<'_>) -> Result<i8, ParseError> {
+            let negative = parser.check(TokenKind::Minus);
+            if negative {
+                parser.advance();
+            }
+            let token = parser.expect(TokenKind::IntegerLiteral)?;
+            let magnitude = token
+                .text
+                .as_deref()
+                .and_then(|value| value.parse::<i8>().ok())
+                .ok_or_else(|| {
+                    parser.error(ParseErrorKind::UnexpectedToken(
+                        "invalid time exponent".into(),
+                    ))
+                })?;
+            Ok(if negative { -magnitude } else { magnitude })
+        }
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+        let unit = exponent(self)?;
+        self.expect(TokenKind::Comma)?;
+        let precision = exponent(self)?;
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Semicolon)?;
+        self.time_scale = crate::time_scale::ModuleTimeScale::new(unit, precision)
+            .map_err(|detail| self.error(ParseErrorKind::UnexpectedToken(detail.into())))?;
+        Ok(())
     }
 
     fn parse_default_transition_directive(
@@ -355,6 +394,7 @@ impl<'a> Parser<'a> {
         // Process identity is per module, so the counter restarts here.
         self.next_process_id = 0;
         let mut module = Module::new(name, start);
+        module.time_scale = self.time_scale;
 
         // Optional port list
         if self.check(TokenKind::LParen) {

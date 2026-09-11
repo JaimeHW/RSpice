@@ -318,6 +318,7 @@ impl DigitalElaborator<'_> {
         // through an input port, which `bind_ports` refuses above.
 
         self.instances.push(ElaboratedDigitalInstance {
+            time_scale: child.digital.time_scale,
             path: path.into(),
             module: instance.module.clone(),
             signals,

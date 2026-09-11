@@ -63,7 +63,7 @@ use rspice_veriloga::vm::IntegrationCoefficients;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 use super::host::DigitalHost;
-use super::{DigitalRunError, TIME_UNIT_EXPONENT, parse_four_state};
+use super::{DigitalRunError, parse_four_state};
 use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::threshold_crossing_time;
@@ -950,7 +950,8 @@ impl MixedSignalHost {
             .collect();
         let max_circuit_node = analog_solver_nodes(&analog).max().unwrap_or(0);
 
-        let resolution = TimeResolution::new(TIME_UNIT_EXPONENT).map_err(DigitalRunError::from)?;
+        let resolution = TimeResolution::new(canonical_ir.digital.timing.precision_exponent)
+            .map_err(DigitalRunError::from)?;
         let max_bridge_iterations = scheduler_limits.max_delta_cycles_per_tick.max(1);
         let mut digital = DigitalHost::new(&canonical_ir.digital, resolution, scheduler_limits);
         // Before `start`, because `start` places every process's first

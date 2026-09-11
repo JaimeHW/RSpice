@@ -1835,7 +1835,7 @@ pub enum DigitalWait {
     /// An empty list would be a process that can never resume; the lowering
     /// refuses one rather than emitting it.
     Event(Vec<DigitalSensitivityTerm>),
-    /// `#delay`: resume after this many time units have elapsed.
+    /// `#delay`: resume after this many resolved design ticks have elapsed.
     ///
     /// The operand is an [`CfgValueType::Integer`] value, evaluated when the
     /// wait is reached rather than when the process starts — `#(n)` where `n`

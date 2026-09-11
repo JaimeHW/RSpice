@@ -52,6 +52,7 @@ impl CanonicalDigitalPlan {
             &mut writer,
             &(
                 CANONICAL_IR_SCHEMA_VERSION,
+                &self.timing,
                 &self.signals,
                 &self.processes,
                 &self.drivers,
@@ -72,6 +73,15 @@ impl CanonicalDigitalPlan {
     }
 
     fn validate_structure(&self) -> IrValidationResult {
+        self.timing.validate().map_err(error)?;
+        for process in &self.processes {
+            process.time_scale.validate().map_err(error)?;
+            if process.time_scale.precision_exponent() < self.timing.precision_exponent {
+                return Err(error(
+                    "digital design precision is coarser than a process's module precision",
+                ));
+            }
+        }
         let mut names = HashSet::new();
         for (index, signal) in self.signals.iter().enumerate() {
             if usize::from(signal.id) != index

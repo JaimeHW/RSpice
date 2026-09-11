@@ -27,8 +27,7 @@
 //!
 //! # The time-unit ruling
 //!
-//! See [`TIME_UNIT_RULING`]. It is a constant rather than a comment because a
-//! caller comparing this against another simulator has to be able to read it.
+//! Each module retains its declared time unit and precision through elaboration.
 //!
 //! Mixed modules are executed through [`MixedSignalHost`], whose trial
 //! transaction aligns the digital event slot with each analog Newton solve.
@@ -61,8 +60,8 @@
 //! * the circuit's queue keys an event by `f64::to_bits(seconds)`, which is
 //!   exact and unquantized because XSPICE event times are chosen by code models
 //!   and by the step controller rather than lying on a declared grid;
-//! * this host keys one by an integer count of the declared time unit, which
-//!   at [`TIME_UNIT_RULING`]'s 1 ns is a coarse grid indeed.
+//! * this host keys one by an integer count of the finest declared precision
+//!   of the compiled HDL design.
 //!
 //! No mapping between the two is exact in both directions, so the choice is
 //! which property to keep, and there is one answer that keeps the right ones
@@ -128,38 +127,8 @@ pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.
 ///
-/// **One tick is one nanosecond, and one Verilog time unit is one tick.**
-///
-/// IEEE 1364-2005 section 19.8 makes the time unit a property of the
-/// `` `timescale `` directive in effect at each module, and section 19.9 lets a
-/// design mix several. Honouring that needs two things this compiler does not
-/// have: a preprocessor that reads the directive, and a per-module scale factor
-/// carried down to every `#delay` so that a `#1` in a `1ns/1ns` module and a
-/// `#1` in a `1ps/1ps` module become different tick counts. The canonical IR
-/// carries the delay as a bare integer of *time units*
-/// ([`DigitalWaitRequest::Delay`]) and there is nowhere in it to put the
-/// factor.
-///
-/// So the directive is refused by name — [`DigitalRunError::TimescaleDirective`]
-/// — rather than read and ignored, which would silently scale every delay in a
-/// `1ps` design by a thousand.
-///
-/// One nanosecond is the choice because it is what the oracle harness's own
-/// generated testbench declares (`` `timescale 1ns/1ns ``), and RSpice owns
-/// that testbench. A unit equal to the precision also makes `#N` exactly `N`
-/// ticks, with no rounding to argue about. The kernel's grid is exact to
-/// `2^51 - 1` ticks, which at this resolution is about twenty-six days of
-/// simulated time.
-///
-/// [`DigitalWaitRequest::Delay`]: rspice_veriloga::canonical_ir::digital_eval::DigitalWaitRequest::Delay
-/// Crate-private because a caller does not need the string: the refusal that
-/// cites it — [`DigitalRunError::TimescaleDirective`] — prints it, and the
-/// documentation above is what a reader comparing this against another
-/// simulator actually has to read.
-pub(crate) const TIME_UNIT_RULING: &str = "one tick is 1 ns; one Verilog time unit is one tick; \
-                                           a `timescale directive is refused rather than applied";
-
-/// Decimal exponent of the tick, as [`TimeResolution`] spells it.
+/// Default scale for existing sources with no explicit declaration.
+#[cfg(test)]
 const TIME_UNIT_EXPONENT: i8 = -9;
 
 /// One port of the design, as a stimulus names it.
@@ -188,7 +157,7 @@ pub struct DigitalPort {
 pub struct DigitalClock {
     /// The input port carrying the clock.
     pub port: String,
-    /// Half period, in time units.
+    /// Half period, in compiled design ticks.
     pub half_period: u64,
 }
 
@@ -209,9 +178,9 @@ pub struct DigitalStimulus {
     pub outputs: Vec<DigitalPort>,
     /// A clock the stimulus drives, if the design has one.
     pub clock: Option<DigitalClock>,
-    /// Time units between successive vectors.
+    /// Design ticks between successive vectors.
     pub step: u64,
-    /// Time units after a vector is applied at which outputs are sampled.
+    /// Design ticks after a vector is applied at which outputs are sampled.
     pub settle: u64,
     /// One entry per vector; each is one four-state spelling per driven input,
     /// most significant bit first, exactly as wide as the port.
@@ -298,21 +267,22 @@ pub struct CompiledDigitalDesign {
     /// refused rather than silently run against this.
     module: String,
     /// Fixed here rather than per run, so two runs of one design cannot be on
-    /// different time bases. See [`TIME_UNIT_RULING`].
+    /// different time bases. See the compiler-resolved module timing.
     resolution: TimeResolution,
 }
 
 impl CompiledDigitalDesign {
+    /// Duration of one stimulus/event tick in this compiled design.
+    pub fn time_resolution(&self) -> TimeResolution {
+        self.resolution
+    }
+
     /// Compile one module of a digital Verilog source.
     ///
     /// Every refusal [`run_digital_verilog`] makes before anything runs is made
-    /// here, in the same order: the `` `timescale `` scan, the front end, and
-    /// the two checks that the module is digital and only digital.
+    /// here: the front end, followed by the checks that the module is digital
+    /// and only digital. Active timing directives are handled by the compiler.
     pub fn compile(source: &str, module: Option<&str>) -> Result<Self, DigitalRunError> {
-        if let Some(line) = first_timescale_directive(source) {
-            return Err(DigitalRunError::TimescaleDirective { line });
-        }
-
         let compiler = VerilogACompiler::new(CompilerOptions::default());
         let artifact = compiler
             .compile_canonical_ir_module(source, module)
@@ -334,8 +304,8 @@ impl CompiledDigitalDesign {
 
         Ok(Self {
             module: artifact.mir.module_name.to_string(),
+            resolution: TimeResolution::new(artifact.digital.timing.precision_exponent)?,
             plan: Arc::new(artifact.digital),
-            resolution: TimeResolution::new(TIME_UNIT_EXPONENT)?,
         })
     }
 
@@ -600,40 +570,4 @@ fn parse_four_state(spelling: &str) -> Option<FourStateValue> {
         });
     }
     Some(FourStateValue::from_bits_msb_first(&bits))
-}
-
-/// The first `` `timescale `` directive in the source, if any.
-///
-/// A textual scan of line starts, deliberately conservative: the directive is
-/// only legal at the start of a line outside a comment, and this host must
-/// refuse it rather than let the lexer decide what to do with a backtick it
-/// does not recognise. A false positive costs a refusal on a source that names
-/// `timescale` at the start of a line after a backtick, which is the directive.
-fn first_timescale_directive(source: &str) -> Option<usize> {
-    let mut in_block_comment = false;
-    for (index, raw) in source.lines().enumerate() {
-        let mut line = raw;
-        if in_block_comment {
-            match line.find("*/") {
-                Some(end) => {
-                    in_block_comment = false;
-                    line = &line[end + 2..];
-                }
-                None => continue,
-            }
-        }
-        let code = line.split("//").next().unwrap_or_default();
-        if let Some(start) = code.find("/*")
-            && !code[start..].contains("*/")
-        {
-            in_block_comment = true;
-        }
-        let trimmed = code.trim_start();
-        if let Some(rest) = trimmed.strip_prefix('`')
-            && rest.trim_start().starts_with("timescale")
-        {
-            return Some(index + 1);
-        }
-    }
-    None
 }

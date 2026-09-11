@@ -157,7 +157,7 @@ impl TimeResolution {
     /// The range is wider than `timescale` allows so that a kernel resolution
     /// refined below the finest declared precision is still representable.
     pub fn new(exponent: i8) -> Result<Self, SchedulerError> {
-        if !(-21..=0).contains(&exponent) {
+        if !(-21..=2).contains(&exponent) {
             return Err(SchedulerError::UnsupportedResolution { exponent });
         }
         Ok(Self { exponent })
@@ -182,7 +182,11 @@ impl TimeResolution {
     /// spellings would put event ticks and analog breakpoints on different
     /// grids.
     pub fn seconds_per_tick(self) -> f64 {
-        SECONDS_PER_TICK[(-self.exponent) as usize]
+        match self.exponent {
+            1 => 10.0,
+            2 => 100.0,
+            _ => SECONDS_PER_TICK[(-self.exponent) as usize],
+        }
     }
 
     /// Convert a tick count to analog seconds.

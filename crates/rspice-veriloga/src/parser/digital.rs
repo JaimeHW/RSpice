@@ -880,19 +880,24 @@ impl Parser<'_> {
         })
     }
 
-    /// The operand of `#`. A parenthesized min:typ:max delay is not part of
-    /// this wave and is refused by name rather than read as its typical value.
+    /// A delay value or a parenthesized delay expression. A min:typ:max tuple
+    /// still requires explicit corner-selection support.
     fn parse_delay_value(&mut self) -> Result<Expression, ParseError> {
         if self.check(TokenKind::LParen) {
-            return Err(ParseError::new(
-                ParseErrorKind::UnsupportedConstruct {
-                    context: "delay control".to_string(),
-                    found: "a parenthesized min:typ:max delay; write a single \
-                            delay expression instead"
-                        .to_string(),
-                },
-                self.current_span(),
-            ));
+            self.advance();
+            let expression = self.parse_expression()?;
+            if self.check(TokenKind::Colon) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "delay control".to_string(),
+                        found: "a min:typ:max delay; write a single delay expression instead"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
+            }
+            self.expect(TokenKind::RParen)?;
+            return Ok(expression);
         }
         self.parse_primary()
     }

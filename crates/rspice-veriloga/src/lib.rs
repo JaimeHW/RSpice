@@ -115,6 +115,7 @@ pub mod semantic;
 pub mod source;
 pub mod specialist;
 pub mod stdlib;
+pub mod time_scale;
 mod timing_contract;
 pub mod types;
 pub mod virtual_source;

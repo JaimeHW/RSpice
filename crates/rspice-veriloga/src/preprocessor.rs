@@ -952,6 +952,50 @@ impl Preprocessor {
                         seen_true.pop();
                         output.push_source("\n", &current_path, line_num + 1);
                     }
+                    "timescale" | "resetall" => {
+                        if include_line {
+                            let timing = if directive == "resetall" {
+                                if !rest.trim().is_empty() {
+                                    return Err(PreprocessorError::new(
+                                        "`resetall takes no operands",
+                                        self.current_file.clone(),
+                                        line_num + 1,
+                                    ));
+                                }
+                                crate::time_scale::ModuleTimeScale::default()
+                            } else {
+                                let expanded = self.expand_macros_at(
+                                    rest.trim(),
+                                    line_num + 1,
+                                    provider.limits().max_expanded_bytes,
+                                )?;
+                                crate::time_scale::ModuleTimeScale::parse(&expanded).map_err(
+                                    |message| {
+                                        PreprocessorError::new(
+                                            message,
+                                            self.current_file.clone(),
+                                            line_num + 1,
+                                        )
+                                    },
+                                )?
+                            };
+                            // Retain stream position through nested includes. Parser
+                            // state applies it to subsequent module declarations.
+                            output.push_source(
+                                &format!(
+                                    "__rspice_timescale ({}, {});",
+                                    timing.unit_exponent(),
+                                    timing.precision_exponent()
+                                ),
+                                &current_path,
+                                line_num + 1,
+                            );
+                            if directive == "resetall" {
+                                output.push_source(&format!("__rspice_default_discipline (); __rspice_default_transition ({});", crate::semantic::SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION), &current_path, line_num + 1);
+                            }
+                        }
+                        output.push_source("\n", &current_path, line_num + 1);
+                    }
                     "default_transition" => {
                         if include_line {
                             if rest.trim().is_empty() {
@@ -1091,6 +1135,8 @@ impl Preprocessor {
                 | "else"
                 | "elsif"
                 | "endif"
+                | "timescale"
+                | "resetall"
                 | "default_transition"
                 | "default_discipline"
         )
