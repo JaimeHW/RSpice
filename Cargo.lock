@@ -5580,7 +5580,6 @@ dependencies = [
  "indexmap",
  "libc",
  "log",
- "nom 8.0.0",
  "num-complex",
  "rspice-veriloga-runtime",
  "serde",

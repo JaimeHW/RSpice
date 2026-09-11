@@ -24,9 +24,6 @@ web-time = "1.1"
 wasm-encoder = { workspace = true, optional = true }
 wasmparser = { workspace = true, optional = true }
 
-# Parsing - using nom for professional-grade parsing
-nom.workspace = true
-
 # Complex arithmetic for the s-domain (Laplace) filter realization.
 num-complex = { workspace = true }
 
