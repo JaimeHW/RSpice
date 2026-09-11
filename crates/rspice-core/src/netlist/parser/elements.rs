@@ -333,11 +333,13 @@ pub(super) fn parse_resistor(
         && model.is_none()
         && instance_params.is_empty()
         && deferred_params.is_empty()
-        && let (Some(capture), Some(direction)) = (parameter_direction, direction)
+        && let (Some(capture), Some(direction), Some(value)) =
+            (parameter_direction, direction, value)
     {
-        capture
-            .elements
-            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+        capture.elements.insert(
+            name.clone(),
+            ElementParameterDirection::Passive { value, direction },
+        );
     }
     let mut nodes = vec![node_pos, node_neg];
     expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
@@ -990,11 +992,13 @@ pub(super) fn parse_capacitor(
         && tail.model.is_none()
         && tail.instance_params.is_empty()
         && tail.deferred_params.is_empty()
-        && let (Some(capture), Some(direction)) = (parameter_direction, tail.direction)
+        && let (Some(capture), Some(direction), Some(value)) =
+            (parameter_direction, tail.direction, tail.value)
     {
-        capture
-            .elements
-            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+        capture.elements.insert(
+            name.clone(),
+            ElementParameterDirection::Passive { value, direction },
+        );
     }
     let mut instance_params = tail.instance_params;
     let mut nodes = vec![node_pos, node_neg];
@@ -1055,11 +1059,13 @@ pub(super) fn parse_inductor(
         && tail.model.is_none()
         && tail.instance_params.is_empty()
         && tail.deferred_params.is_empty()
-        && let (Some(capture), Some(direction)) = (parameter_direction, tail.direction)
+        && let (Some(capture), Some(direction), Some(value)) =
+            (parameter_direction, tail.direction, tail.value)
     {
-        capture
-            .elements
-            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+        capture.elements.insert(
+            name.clone(),
+            ElementParameterDirection::Passive { value, direction },
+        );
     }
     let mut instance_params = tail.instance_params;
     let mut nodes = vec![node_pos, node_neg];

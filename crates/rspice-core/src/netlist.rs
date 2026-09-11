@@ -741,7 +741,10 @@ pub(crate) struct ParameterDirectionCapture {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ElementParameterDirection {
     Gain(crate::expr::Derivative),
-    Passive(crate::expr::Derivative),
+    Passive {
+        value: Value,
+        direction: crate::expr::Derivative,
+    },
     Source {
         dc: crate::expr::Derivative,
         magnitude: crate::expr::Derivative,

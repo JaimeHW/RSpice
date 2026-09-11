@@ -1,5 +1,5 @@
 //! Root-coordinate derivatives of qualified linear physical equations.
-//! Field directions come from the actual parser binding sites, not finite probes.
+//! Field directions come from the actual binding and construction sites.
 
 use super::*;
 use crate::expr::Derivative;
@@ -14,8 +14,13 @@ fn linear_element(kind: &ElementKind) -> bool {
             model,
             instance_params,
             deferred_params,
+        } => {
+            (value_expr.is_some() || (value.is_finite() && *value > 0.0))
+                && model.is_none()
+                && instance_params.is_empty()
+                && deferred_params.is_empty()
         }
-        | ElementKind::Capacitor {
+        ElementKind::Capacitor {
             value,
             value_expr,
             model,
@@ -113,19 +118,19 @@ fn add_element_direction(
         }
     };
     match (&element.kind, direction) {
-        (ElementKind::Resistor { value, .. }, ElementParameterDirection::Passive(direction)) => {
+        (ElementKind::Resistor { .. }, ElementParameterDirection::Passive { value, direction }) => {
             // R*x is the voltage equation when this resistor owns a current unknown.
             if circuit.get_branch_by_name(&element.name).is_some() {
                 let row = branch_row(circuit, &element.name)?;
                 rhs[row] = rhs[row] + times_phasor(direction, solution[row]);
             } else {
                 inject(times_phasor(
-                    -direction / *value / *value,
+                    -direction / value / value,
                     voltage(solution, terminals),
                 ));
             }
         }
-        (ElementKind::Capacitor { .. }, ElementParameterDirection::Passive(direction)) => {
+        (ElementKind::Capacitor { .. }, ElementParameterDirection::Passive { direction, .. }) => {
             if ac {
                 let value = voltage(solution, terminals);
                 inject(times_phasor(
@@ -134,7 +139,7 @@ fn add_element_direction(
                 ));
             }
         }
-        (ElementKind::Inductor { .. }, ElementParameterDirection::Passive(direction)) => {
+        (ElementKind::Inductor { .. }, ElementParameterDirection::Passive { direction, .. }) => {
             if ac {
                 let row = branch_row(circuit, &element.name)?;
                 let value = solution[row];
@@ -257,20 +262,25 @@ impl Engine {
         let Some(capture) = &directed.parameter_direction else {
             return Ok(None);
         };
-        if capture.has_conditionals
-            || !directed.elements.iter().all(|element| {
-                linear_element(&element.kind) && capture.elements.contains_key(&element.name)
-            })
-        {
+        if capture.has_conditionals {
             return Ok(None);
         }
-        *runs = runs.saturating_add(1);
-        self.ensure_batch_runs(*runs)?;
         let engine = self.resolved_for_netlist(&directed);
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let mut prepared = engine.prepare_ac_analysis(&directed, abort)?;
+        let mut circuit = engine.build_circuit_with_abort(&directed, abort)?;
+        let Some(capture) = circuit.parameter_direction.take() else {
+            return Ok(None);
+        };
+        if !directed.elements.iter().all(|element| {
+            linear_element(&element.kind) && capture.elements.contains_key(&element.name)
+        }) {
+            return Ok(None);
+        }
+        *runs = runs.saturating_add(1);
+        self.ensure_batch_runs(*runs)?;
+        let mut prepared = engine.prepare_ac_circuit(&directed, circuit, abort)?;
         let circuit = &prepared.circuit;
         let size = circuit.matrix_size();
         let points = frequencies.unwrap_or(&[0.0]);
@@ -501,6 +511,159 @@ mod tests {
                     (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
                     "{dialect:?}: {body}: AC {ac:e} != {expected_ac:e}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_resistor_sensitivity_preserves_binding_values_and_directions() {
+        let cases = [
+            ("", "1+1e-8*p", "", 1.0, 1e-8),
+            (".param q={1e-8*p}", "1+q", ".param q={2e-8*p}", 1.0, 2e-8),
+            (".func rval(x) {1+1e-8*x}", "rval(p)", "", 1.0, 1e-8),
+            (".param z={sqrt(-1)}", "1+abs(z)*(2+1e-8*p)", "", 3.0, 1e-8),
+            (".param TEMP={27+1e-8*p}", "1+TEMP", "", 28.0, 1e-8),
+            // The eager parameter reader must still use its definition-time value.
+            (".param r={1+1e-8*p}", "r", ".param r={7+9e-8*p}", 1.0, 1e-8),
+        ];
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let engine = Engine::default();
+            for (before, expression, after, resistance, direction) in cases {
+                let netlist = parse(
+                    &format!(
+                        "Deferred scalar resistor\n.param p=0\n{before}\nV1 in 0 DC 1 AC 1\nR1 in out {{{expression}}}\nR2 out 0 1\n{after}\n.end"
+                    ),
+                    dialect,
+                );
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let r1 = circuit
+                    .resistors
+                    .names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("r1"))
+                    .unwrap();
+                assert_eq!(
+                    circuit.resistors.reported_resistances[r1], resistance,
+                    "{dialect:?}: {expression}"
+                );
+                let output = AcSensitivityOutput::Voltage {
+                    positive: circuit.get_node_by_name("out").unwrap(),
+                    negative: None,
+                };
+                let expected = -direction / (1.0 + resistance).powi(2);
+                let mut runs = 0;
+                let dc = engine
+                    .run_output_sensitivity_with_abort(
+                        &netlist,
+                        output.clone(),
+                        "p",
+                        0.0,
+                        None,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                assert_eq!(runs, 1, "DC {expression}");
+                assert!(
+                    (dc / expected - 1.0).abs() < 2e-12,
+                    "{dialect:?}: {expression}: DC {dc:e} != {expected:e}"
+                );
+                runs = 0;
+                let ac = engine
+                    .run_output_sensitivity_ac_with_abort(
+                        &netlist,
+                        output,
+                        "p",
+                        0.0,
+                        &[1.0],
+                        None,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap()[0];
+                assert_eq!(runs, 1, "AC {expression}");
+                assert!(
+                    (ac / expected - 1.0).abs() < 2e-12,
+                    "{dialect:?}: {expression}: AC {ac:e} != {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deferred_resistor_directions_consume_each_random_draw_once() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for mode in [
+                crate::netlist::StatisticalParamMode::Sample,
+                crate::netlist::StatisticalParamMode::Nominal,
+            ] {
+                let netlist = Netlist::parse_with_options(
+                    "Random resistor directions\n.param p=0\nV1 in 0 DC 1 AC 1\nR1 in out {aunif(2,0.25)*(1+1e-8*p)}\nR2 out 0 {aunif(3,0.5)+2e-8*p}\n.end",
+                    crate::netlist::NetlistParseOptions {
+                        expression_dialect: dialect,
+                        statistical_mode: mode,
+                        statistical_seed: Some(581),
+                        ..Default::default()
+                    },
+                ).unwrap();
+                let engine = Engine::default();
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let next_draw = netlist.params.random().next_uniform();
+                let (directed, _) = Engine::replay_parameter_overrides(
+                    &netlist,
+                    &[("P".into(), 0.0)],
+                    Some("p"),
+                    engine.config.resource_limits,
+                    &NoAbort,
+                )
+                .unwrap();
+                let directed_circuit = engine.build_circuit(&directed).unwrap();
+                assert_eq!(
+                    directed_circuit.resistors.reported_resistances,
+                    circuit.resistors.reported_resistances
+                );
+                assert_eq!(
+                    directed.params.random().next_uniform(),
+                    next_draw,
+                    "{dialect:?} {mode:?}"
+                );
+                let resistance = |name: &str| {
+                    let index = circuit
+                        .resistors
+                        .names
+                        .iter()
+                        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    circuit.resistors.reported_resistances[index]
+                };
+                let (r1, r2) = (resistance("r1"), resistance("r2"));
+                let expected = (2e-8 * r1 - 1e-8 * r1 * r2) / (r1 + r2).powi(2);
+                let output = AcSensitivityOutput::Voltage {
+                    positive: circuit.get_node_by_name("out").unwrap(),
+                    negative: None,
+                };
+                for frequencies in [None, Some([1.0].as_slice())] {
+                    let mut runs = 0;
+                    let (nominal, derivative) = engine
+                        .linear_parameter_sensitivity(
+                            &netlist,
+                            &output,
+                            "p",
+                            0.0,
+                            frequencies,
+                            &mut runs,
+                            &NoAbort,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(runs, 1);
+                    assert!((nominal[0].re - r2 / (r1 + r2)).abs() < 2e-14);
+                    assert!(
+                        (derivative[0].re / expected - 1.0).abs() < 2e-12,
+                        "{dialect:?} {mode:?}: {:?} != {expected:e}",
+                        derivative
+                    );
+                }
             }
         }
     }

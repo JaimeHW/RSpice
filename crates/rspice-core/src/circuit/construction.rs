@@ -26,6 +26,7 @@ impl CircuitData {
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),
+            parameter_direction: None,
             resistor_noise_temperature_provenance: None,
             resistor_branches: ResistorBranches::new(),
             capacitors: Capacitors::new(),

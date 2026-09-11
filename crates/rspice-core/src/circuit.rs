@@ -499,6 +499,8 @@ pub struct CircuitData {
 
     // Linear device storage (SoA for cache efficiency)
     pub(crate) resistors: Resistors,
+    /// Selected parameter directions completed at their electrical field owners.
+    pub(crate) parameter_direction: Option<Box<crate::netlist::ParameterDirectionCapture>>,
     /// Exceptional authored absolute `TEMP` provenance, allocated lazily and
     /// kept outside the exhaustively constructible public [`Resistors`] API.
     resistor_noise_temperature_provenance: Option<ResistorNoiseTemperatureProvenance>,

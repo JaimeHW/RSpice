@@ -4801,6 +4801,7 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
+        circuit.parameter_direction = netlist.parameter_direction.clone();
         if netlist
             .options
             .device_pnjmaxi
@@ -5137,6 +5138,7 @@ impl Engine {
                     #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = deferred_params;
 
+                    let authored_value_expr = value_expr.as_deref();
                     let prepared_value_expr = value_expr
                         .as_deref()
                         .map(|expression| {
@@ -5194,10 +5196,75 @@ impl Engine {
                         continue;
                     }
 
+                    // Scalar parameter expressions use the parameter evaluator, which
+                    // preserves complex bindings and function argument evaluation. The
+                    // behavioral expansion above only classifies circuit-state values.
+                    let scalar_primary = authored_value_expr.is_some()
+                        && !value.is_finite()
+                        && model.is_none()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                        && netlist.params.all_parameter_expressions().is_empty()
+                        && netlist.params.all_global_expressions().is_empty();
+                    let mut direction = None;
+                    let primary_value = if scalar_primary {
+                        let mut context = base_eval_context(netlist);
+                        let temp_c = crate::constants::kelvin_to_celsius(self.config.temperature);
+                        for (name, value) in [
+                            ("TEMP", temp_c),
+                            ("TEMPER", temp_c),
+                            (
+                                "VT",
+                                crate::constants::thermal_voltage(self.config.temperature),
+                            ),
+                        ] {
+                            if !context.has_parameter_binding(name) {
+                                context.set(name, value);
+                            }
+                        }
+                        if !context.has_any_parameter_binding("TNOM") {
+                            context.set("TNOM", netlist.options.tnom.unwrap_or(27.0));
+                        }
+                        let (value, tangent) = context
+                            .evaluate_parameter_binding(
+                                authored_value_expr.expect("scalar expression"),
+                            )
+                            .map_err(|error| {
+                                SimulationError::Circuit(format!(
+                                    "Resistor '{}' value expression could not be resolved: {error}",
+                                    element.name
+                                ))
+                            })?;
+                        // Explicit option bindings have not yet retained their directions.
+                        if circuit.parameter_direction.is_some()
+                            && netlist.options.temp.is_none()
+                            && netlist.options.tnom.is_none()
+                            && netlist.options.gmin.is_none()
+                        {
+                            direction = tangent
+                                .transpose()
+                                .map_err(|error| {
+                                    SimulationError::Circuit(format!(
+                                        "Resistor '{}' parameter derivative could not be resolved: {error}",
+                                        element.name
+                                    ))
+                                })?
+                                .map(|direction| direction.re);
+                        }
+                        if value.re.is_nan() || value.re == f64::NEG_INFINITY {
+                            return Err(SimulationError::Circuit(format!(
+                                "Resistor '{}' has invalid resistance {}",
+                                element.name, value.re
+                            )));
+                        }
+                        value.re
+                    } else {
+                        *value
+                    };
                     let resolved = resolve_resistor_effective_parameters(
                         netlist,
                         &element.name,
-                        *value,
+                        primary_value,
                         value_expr,
                         ResistorResolutionContext {
                             model_name: model.as_deref(),
@@ -5206,6 +5273,19 @@ impl Engine {
                             spice_dialect: self.config.spice_dialect,
                         },
                     )?;
+                    if resolved.resistance.is_finite()
+                        && resolved.resistance > 0.0
+                        && let (Some(capture), Some(direction)) =
+                            (&mut circuit.parameter_direction, direction)
+                    {
+                        capture.elements.insert(
+                            element.name.clone(),
+                            crate::netlist::ElementParameterDirection::Passive {
+                                value: resolved.resistance,
+                                direction,
+                            },
+                        );
+                    }
                     let resistance = resolved.resistance;
                     let thermal_state = resolve_resistor_thermal_state(
                         &element.name,
