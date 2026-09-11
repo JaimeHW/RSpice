@@ -851,16 +851,31 @@ fn parse_passive_tail(
                     }
 
                     if name_upper == "IC" {
-                        // Initial conditions stay parse-time values: the IC
-                        // field is plain numeric in the AST.
-                        tail.ic =
-                            Some(try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                                line: line_num,
-                                message: format!(
-                                    "Expected value for {} parameter '{}'",
-                                    element_label, raw_name
-                                ),
-                            })?);
+                        let parsed = take_ic_value(
+                            stream,
+                            line_num,
+                            params,
+                            defer_simple_param_refs,
+                            element_label,
+                        )?;
+                        tail.deferred_params
+                            .retain(|(name, _)| !name.eq_ignore_ascii_case("IC"));
+                        match parsed {
+                            DeferrableValue::Resolved(value) => tail.ic = Some(value),
+                            DeferrableValue::Deferred(expression)
+                                if defer_simple_param_refs
+                                    || params
+                                        .expression_references_spectre_statistics(&expression) =>
+                            {
+                                tail.ic = None;
+                                tail.deferred_params.push(("IC".into(), expression));
+                            }
+                            DeferrableValue::Deferred(expression) => {
+                                return Err(ParseError::InvalidValue(format!(
+                                    "{element_label} IC must resolve to a finite scalar: {expression}"
+                                )));
+                            }
+                        }
                         continue;
                     }
 
@@ -4944,7 +4959,7 @@ fn parse_ic_vector(
         deferred_params,
     } = sink;
     for (idx, label) in labels.iter().enumerate() {
-        let value = take_ic_vector_value(
+        let value = take_ic_value(
             stream,
             line_num,
             params,
@@ -4975,27 +4990,41 @@ fn parse_ic_vector(
     Ok(())
 }
 
-fn take_ic_vector_value(
+fn take_ic_value(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     defer_simple_param_refs: bool,
     element_label: &str,
 ) -> Result<DeferrableValue, ParseError> {
-    if matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
-        return expect_value(stream, line_num, params).map(DeferrableValue::Resolved);
-    }
-
-    take_deferrable_value(stream, params, defer_simple_param_refs).ok_or_else(|| {
-        ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "Expected value for {} IC vector, found {}",
-                element_label,
-                stream.peek().kind
-            ),
+    let parsed = take_deferrable_value(stream, params, true).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Expected value for {} IC, found {}",
+            element_label,
+            stream.peek().kind
+        ),
+    })?;
+    let parsed = match parsed {
+        DeferrableValue::Deferred(expression)
+            if !defer_simple_param_refs
+                && !params.expression_references_spectre_statistics(&expression) =>
+        {
+            match eval_expression(&expression, params) {
+                Ok(value) => DeferrableValue::Resolved(value),
+                Err(_) => DeferrableValue::Deferred(expression),
+            }
         }
-    })
+        parsed => parsed,
+    };
+    if let DeferrableValue::Resolved(value) = &parsed
+        && !value.is_finite()
+    {
+        return Err(ParseError::InvalidValue(format!(
+            "{element_label} IC requires a finite value, got {value}"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn is_mosfet_assignment_name(name_upper: &str) -> bool {

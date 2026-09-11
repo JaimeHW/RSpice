@@ -454,6 +454,8 @@ fn materialize_statistical_element(
     if let Some(replacement) = replacement {
         element.kind = replacement;
     }
+    crate::netlist::materialize_passive_initial_condition(element)
+        .map_err(|error| map_build_parse_error("statistical initial condition", error.into()))?;
     Ok(())
 }
 
@@ -9929,6 +9931,59 @@ mod tests {
             (first - 1000.0).abs() > 1e-9,
             "expected an actual agauss draw, got {first}"
         );
+    }
+
+    #[test]
+    fn statistical_passive_initial_conditions_reach_the_physical_device() {
+        let plan = crate::netlist::SpectreStatisticsPlan {
+            variations: vec![crate::netlist::SpectreVariation {
+                line: 3,
+                scope: crate::netlist::SpectreVariationScope::Process,
+                parameter: "rv".into(),
+                distribution: crate::netlist::SpectreDistribution::Uniform,
+                spread: crate::netlist::SpectreSpread::HalfRange("0.1".into()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = crate::netlist::SpectreStatisticalCoordinate {
+            seed: 831,
+            monte_carlo_run: 2,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        for nested in [false, true] {
+            for override_ic in [false, true] {
+                let body = "C1 c 0 1 IC={rv}\nL1 l 0 1 IC={-rv}\nR1 c 0 1\nR2 l 0 1";
+                let body = if nested {
+                    format!("X1 cell\n.subckt cell\n{body}\n.ends")
+                } else {
+                    body.into()
+                };
+                let directive = if override_ic {
+                    if nested {
+                        ".INITCOND X1:C1 IC=0.75"
+                    } else {
+                        ".INITCOND C1 IC=0.75"
+                    }
+                } else {
+                    ""
+                };
+                let mut netlist = Netlist::parse(&format!(
+                    "Statistical initial conditions\n.param rv=0.5\n.RSPICE_SPECTRE_STAT {}\n{body}\n{directive}\n.end",
+                    plan.encode_internal(),
+                )).unwrap();
+                let expected = plan.sample_process(&netlist.params, &coordinate).unwrap()["RV"];
+                netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+                let circuit = Engine::default().build_circuit(&netlist).unwrap();
+                assert_eq!(
+                    circuit.capacitors.ic[0],
+                    Some(if override_ic { 0.75 } else { expected })
+                );
+                assert_eq!(circuit.inductors.ic[0], Some(-expected));
+                assert_ne!(expected, 0.5);
+            }
+        }
     }
 
     #[test]

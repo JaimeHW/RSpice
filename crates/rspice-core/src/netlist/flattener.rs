@@ -700,7 +700,7 @@ impl<'a> Flattener<'a> {
     fn push_flattened_element(
         &mut self,
         output: &mut Vec<Element>,
-        element: Element,
+        mut element: Element,
     ) -> Result<(), ParseWithAbortError> {
         let requested = output.len().saturating_add(1);
         ResourceLimitError::ensure(
@@ -709,6 +709,7 @@ impl<'a> Flattener<'a> {
             self.config.max_elements,
         )
         .map_err(ParseError::from)?;
+        materialize_passive_initial_condition(&mut element)?;
         let canonical_name = element.name.to_ascii_uppercase();
         if !self.flattened_element_names.insert(canonical_name.clone()) {
             return Err(ParseError::Syntax {
@@ -3324,15 +3325,66 @@ fn canonical_device_initial_condition_name(name: &str) -> String {
     name.trim().replace(':', ".").to_ascii_uppercase()
 }
 
+/// Move a resolved deferred IC into the physical passive's canonical field.
+/// Statistical fields stay deferred until their instance draw is materialized.
+pub(crate) fn materialize_passive_initial_condition(
+    element: &mut Element,
+) -> Result<(), ParseError> {
+    let (initial, numeric, deferred) = match &mut element.kind {
+        ElementKind::Capacitor {
+            initial_voltage,
+            instance_params,
+            deferred_params,
+            ..
+        } => (initial_voltage, instance_params, deferred_params),
+        ElementKind::Inductor {
+            initial_current,
+            instance_params,
+            deferred_params,
+            ..
+        } => (initial_current, instance_params, deferred_params),
+        _ => return Ok(()),
+    };
+    if deferred
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("IC"))
+    {
+        *initial = None;
+    } else {
+        numeric.retain(|(name, value)| {
+            if name.eq_ignore_ascii_case("IC") {
+                *initial = Some(*value);
+                false
+            } else {
+                true
+            }
+        });
+    }
+    if let Some(value) = initial
+        && !value.is_finite()
+    {
+        return Err(ParseError::InvalidValue(format!(
+            "Element '{}' IC requires a finite value, got {value}",
+            element.name
+        )));
+    }
+    Ok(())
+}
+
 fn apply_device_initial_condition_entry(
     element: &mut Element,
     entry: &super::DeviceInitialConditionEntry,
 ) -> Result<(), ParseError> {
     match &mut element.kind {
         ElementKind::Capacitor {
-            initial_voltage, ..
+            initial_voltage,
+            instance_params,
+            deferred_params,
+            ..
         } => {
             require_device_initial_condition_arity(entry, "exactly 1 value", 1, 1)?;
+            instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case("IC"));
+            deferred_params.retain(|(name, _)| !name.eq_ignore_ascii_case("IC"));
             *initial_voltage = Some(entry.values[0]);
         }
         ElementKind::Mosfet {

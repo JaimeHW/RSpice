@@ -274,6 +274,16 @@ impl Engine {
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
         let mut circuit = engine.build_circuit_with_abort(&directed, abort)?;
+        // An enforced IC owns a DC voltage constraint whose direction has not
+        // been captured. A transient-only seed adds no such physical equation.
+        if circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .any(Option::is_some)
+        {
+            return Ok(None);
+        }
         let Some(capture) = circuit.parameter_direction.take() else {
             return Ok(None);
         };
@@ -553,6 +563,52 @@ mod tests {
     }
 
     #[test]
+    fn capacitor_ic_sensitivity_qualifies_the_actual_constraint() {
+        for spice_dialect in [crate::SpiceDialect::Ngspice, crate::SpiceDialect::Xyce] {
+            let engine =
+                Engine::new(crate::SimulationConfig::default().with_spice_dialect(spice_dialect));
+            for nested in [false, true] {
+                let body = "C1 out 0 {1+1e-8*p} IC={p}";
+                let body = if nested {
+                    format!("X1 out cell p={{p}}\n.subckt cell out p=99\n{body}\n.ends")
+                } else {
+                    body.into()
+                };
+                let netlist = parse(
+                    &format!(
+                        "Physical IC qualification\n.param p=0\nI1 0 out AC 1\nR1 out 0 1\n{body}\n.end"
+                    ),
+                    ExpressionDialect::Ngspice,
+                );
+                let mut runs = 0;
+                let result = engine
+                    .linear_parameter_sensitivity(
+                        &netlist,
+                        &AcSensitivityOutput::Voltage {
+                            positive: 1,
+                            negative: None,
+                        },
+                        "p",
+                        0.0,
+                        Some(&[1.0 / std::f64::consts::TAU]),
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                if spice_dialect == crate::SpiceDialect::Xyce {
+                    assert!(result.is_none());
+                    assert_eq!(runs, 0);
+                } else {
+                    let (_, derivative) = result.expect("a seed adds no DC constraint");
+                    assert!((derivative[0].re / -5e-9 - 1.0).abs() < 2e-12);
+                    assert!(derivative[0].im.abs() < 1e-20);
+                    assert_eq!(runs, 1);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn signed_resistor_parameters_use_the_instantiated_scope() {
         let engine = Engine::default();
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
@@ -731,6 +787,7 @@ mod tests {
                     ("{2*(1+3e-8*p)}", "M={4*(1+5e-8*p)}", 8e-8),
                     ("2", "M=1+1e-8*p", 1e-8),
                     ("2", "M=m", 1e-8),
+                    ("2", "M=+ m", 1e-8),
                     ("1", "M={1+1e-8*p} M=2", 0.0),
                     ("1", "M=2 M={1+1e-8*p}", 1e-8),
                     ("1", "M={1+abs(p)} M=1", 0.0),

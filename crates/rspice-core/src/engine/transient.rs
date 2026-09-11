@@ -14580,6 +14580,123 @@ D1 D 0 DMOD
     }
 
     #[test]
+    fn passive_initial_conditions_resolve_per_instance() {
+        for (expression_dialect, spice_dialect) in [
+            (
+                crate::config::ExpressionDialect::Ngspice,
+                SpiceDialect::Ngspice,
+            ),
+            (crate::config::ExpressionDialect::Xyce, SpiceDialect::Xyce),
+        ] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(spice_dialect));
+            for nested in [false, true] {
+                for (capacitance, field, multiplier, constant) in [
+                    ("1", "{q}", 1.0, None),
+                    ("1", "q", 1.0, None),
+                    ("1", "- q", -1.0, None),
+                    ("1", "+ q", 1.0, None),
+                    ("1", "2*q", 2.0, None),
+                    ("1", "{q} IC=0.5", 0.0, Some(0.5)),
+                    ("1", "0.5 IC={q}", 1.0, None),
+                    ("1", "{q} IC=-.25", 0.0, Some(-0.25)),
+                    ("C={1+0*V(c)}", "{q}", 1.0, None),
+                ] {
+                    let body = format!(
+                        "C1 c 0 {capacitance} IC={field}\nL1 l 0 1 IC={field}\nR1 c 0 1\nR2 l 0 1"
+                    );
+                    let source = if nested {
+                        format!(
+                            "Instance initial conditions\nX1 c1 l1 cell q=0.25\nX2 c2 l2 cell q=0.75\n.subckt cell c l q=9\n{body}\n.ends\n.end"
+                        )
+                    } else {
+                        format!("Root initial conditions\n.param q=0.25\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        crate::netlist::NetlistParseOptions {
+                            expression_dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    let q = if nested {
+                        &[0.25, 0.75][..]
+                    } else {
+                        &[0.25][..]
+                    };
+                    for (index, q) in q.iter().enumerate() {
+                        let expected = constant.unwrap_or(q * multiplier);
+                        assert_eq!(
+                            circuit.capacitors.ic[index],
+                            Some(expected),
+                            "{spice_dialect:?}: {field}"
+                        );
+                        assert_eq!(circuit.inductors.ic[index], Some(expected));
+                    }
+                    let result = engine
+                        .run_tran_with_startup_mode(&netlist, 1e-6, 1e-6, TransientStartupMode::Uic)
+                        .unwrap();
+                    for (index, q) in q.iter().enumerate() {
+                        let expected = constant.unwrap_or(q * multiplier);
+                        let node = if nested {
+                            format!("c{}", index + 1)
+                        } else {
+                            "c".into()
+                        };
+                        let branch = if nested {
+                            format!("X{}.L1", index + 1)
+                        } else {
+                            "L1".into()
+                        };
+                        assert_eq!(
+                            result.try_voltage_waveform_named(&node).unwrap()[0],
+                            expected
+                        );
+                        assert_eq!(
+                            result.try_branch_current_waveform_named(&branch).unwrap()[0],
+                            expected
+                        );
+                    }
+                }
+            }
+            // Xyce normalizes non-finite arithmetic results before an IC
+            // consumer sees them; its finite sentinels remain valid scalars.
+            for ic in ["{1e308*1e308}", "missing"] {
+                if expression_dialect == crate::config::ExpressionDialect::Xyce && ic != "missing" {
+                    continue;
+                }
+                assert!(
+                    Netlist::parse_with_options(
+                        &format!("Invalid IC\nC1 c 0 1 IC={ic}\n.end"),
+                        crate::netlist::NetlistParseOptions {
+                            expression_dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .is_err(),
+                    "{expression_dialect:?}: {ic}"
+                );
+            }
+            for value in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                let mut netlist = Netlist::parse("Invalid constructed IC\nC1 c 0 1\n.end").unwrap();
+                let crate::netlist::ElementKind::Capacitor {
+                    initial_voltage, ..
+                } = &mut netlist.elements[0].kind
+                else {
+                    unreachable!()
+                };
+                *initial_voltage = Some(value);
+                let error = engine.build_circuit(&netlist).unwrap_err();
+                assert!(
+                    error.to_string().contains("IC requires a finite value"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn solution_dependent_capacitor_ic_obeys_xyce_and_ngspice_startup_semantics() {
         let non_ground = parse_solution_dependent_capacitor_deck(
             "solution-dependent capacitor IC dialect semantics\n\

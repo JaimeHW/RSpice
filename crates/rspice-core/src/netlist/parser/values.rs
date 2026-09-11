@@ -2255,10 +2255,20 @@ pub(super) fn take_deferrable_value_with_direction(
             TokenKind::Expression(_) => {
                 return take_value_expression_string(stream, params).map(DeferrableValue::Deferred);
             }
-            TokenKind::Minus | TokenKind::Plus
-                if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) =>
-            {
-                return take_value_expression_string(stream, params).map(DeferrableValue::Deferred);
+            TokenKind::Plus | TokenKind::Minus => {
+                if let TokenKind::Ident(expression) | TokenKind::Expression(expression) =
+                    &stream.peek_n(1).kind
+                {
+                    let sign = if matches!(stream.peek().kind, TokenKind::Minus) {
+                        "-"
+                    } else {
+                        "+"
+                    };
+                    let expression = format!("{sign}({expression})");
+                    stream.advance();
+                    stream.advance();
+                    return Some(DeferrableValue::Deferred(expression));
+                }
             }
             TokenKind::Ident(name) => {
                 // Engineering-suffixed numerics ("1u", "2.5k") resolve below;
@@ -2274,16 +2284,25 @@ pub(super) fn take_deferrable_value_with_direction(
             _ => {}
         }
     }
-    if let TokenKind::Ident(name) = &stream.peek().kind
+    let (offset, sign) = match stream.peek().kind {
+        TokenKind::Plus => (1, 1.0),
+        TokenKind::Minus => (1, -1.0),
+        _ => (0, 1.0),
+    };
+    if let TokenKind::Ident(name) = &stream.peek_n(offset).kind
         && let Some(value) = params.get(name)
     {
         if let Some(direction) = direction {
-            *direction = params.parameter_direction(name).map(|tangent| tangent.re);
+            *direction = params
+                .parameter_direction(name)
+                .map(|tangent| tangent.re * sign);
         }
-        stream.advance();
-        return Some(DeferrableValue::Resolved(value));
+        for _ in 0..=offset {
+            stream.advance();
+        }
+        return Some(DeferrableValue::Resolved(value * sign));
     }
-    try_value(stream, params).map(DeferrableValue::Resolved)
+    try_signed_value(stream, params).map(DeferrableValue::Resolved)
 }
 
 /// Take an unbraced arithmetic expression from an instance parameter.

@@ -52,6 +52,7 @@ pub use flattener::{
 };
 pub(crate) use flattener::{
     flatten_netlist_with_models_config_with_abort, flatten_netlist_with_parameter_direction,
+    materialize_passive_initial_condition,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
@@ -6394,6 +6395,67 @@ mod tests {
                 assert!(instance_params.iter().any(|(name, _)| name == "L"));
             }
             _ => unreachable!("first_mosfet only returns MOSFETs"),
+        }
+    }
+
+    #[test]
+    fn signed_ic_vectors_resolve_in_instance_scope() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for nested in [false, true] {
+                for (device, model, labels) in [
+                    ("M1 d g s b m", "nmos", ["IC_VDS", "IC_VGS"]),
+                    ("Q1 c b e m", "npn", ["IC_VBE", "IC_VCE"]),
+                    ("J1 d g s m", "njf", ["IC_VDS", "IC_VGS"]),
+                    ("Z1 d g s m", "nmf", ["IC_VDS", "IC_VGS"]),
+                ] {
+                    let body = format!("{device} IC=- {{q}},+ q\n.model m {model}");
+                    let source = if nested {
+                        format!(
+                            "Scoped signed IC\nX1 cell q=3\n.subckt cell q=9\n{body}\n.ends\n.end"
+                        )
+                    } else {
+                        format!("Root signed IC\n.param q=3\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let flattened = flatten_netlist(&netlist).unwrap();
+                    let (numeric, deferred) = match &flattened[0].kind {
+                        ElementKind::Mosfet {
+                            instance_params,
+                            deferred_params,
+                            ..
+                        }
+                        | ElementKind::Bjt {
+                            instance_params,
+                            deferred_params,
+                            ..
+                        }
+                        | ElementKind::Jfet {
+                            instance_params,
+                            deferred_params,
+                            ..
+                        }
+                        | ElementKind::Mesfet {
+                            instance_params,
+                            deferred_params,
+                            ..
+                        } => (instance_params, deferred_params),
+                        other => panic!("unexpected device: {other:?}"),
+                    };
+                    assert!(deferred.is_empty());
+                    assert_eq!(
+                        numeric,
+                        &[(labels[0].into(), -3.0), (labels[1].into(), 3.0)],
+                        "{dialect:?} nested={nested}: {device}"
+                    );
+                }
+            }
         }
     }
 
