@@ -1623,6 +1623,59 @@ shared accepted static-history assembly, remain MS08 implementation work. The
 absence of a licensed Spectre installation remains recorded; these analytic and
 native-equivalence checks do not establish vendor parity or production readiness.
 
+## Laplace static observations preserve their settled internal state
+
+A Laplace static DAE observation now returns C*x_candidate + D*u, falling back
+to accepted x when no candidate is present. Its Jacobian action is D*du. It
+neither re-integrates the changed input nor substitutes a new DC equilibrium.
+The shared state-space implementation validates structure and operands without
+changing accepted/candidate arrays or flags. VM and native helpers select this
+policy explicitly; the emitted Wasm runtime uses the same VM helper. No context
+ABI, persisted state shape or ordinary integration coefficients changed.
+
+The shared authored fixture combines a conductance, H(s)=(1+2s)/(1+s), and a ddt
+contribution. Its first two backward-Euler internal states are 2/3 and 16/9, so
+static current is exactly 4*V-state, static Jacobian is four, and the ordinary
+transient Jacobian is 29/3. Actual native and emitted Wasm automatic/postfix
+routes exercise both accepted timepoints, repeated observations with changed
+input, and unchanged retained filter/integration state. The native route also
+checks a late invalid contribution publishes no callbacks and leaves the
+original context unchanged. The VM case checks accepted-history fallback,
+invalid value/derivative inputs, and a stateless filter's full direct action.
+
+The fixture also exposed a production compiler refusal: the equation's Jacobian
+retained a Laplace state read but replaced ddt with a stateless coefficient. The
+JIT planner incorrectly correlated that reduced derivative program against all
+state operators in the original equation. Jacobian and limiter-correction
+planning now obtain the already-renumbered state identities from the equation's
+primal program. The valid combined Laplace/ddt equation compiles and executes
+through native and Wasm routes. Native automatic selection uses the compiled
+postfix plan because Laplace block-model lowering is not yet available; no
+interpreter fallback is claimed. Direct generated-Rust Laplace remains an
+existing explicit refusal.
+
+The VM observation case passed in the initial focused selection. The shared
+fixture first needed the required array assignment-pattern syntax, then exposed
+the planner refusal described above; both failures remain in their logs. After
+the planner fix, both native/Wasm cases passed in 0.01 seconds. Their final
+expanded check of ordinary and static Jacobians passed in 0.01 seconds after a
+10.24-second build. No full suite was run. Evidence is in static-dae-laplace.log,
+static-dae-laplace-runtime.log, static-dae-laplace-planner.log and
+static-dae-laplace-final.log under target/unified-mixed-fixes.
+
+The existing emitted-Wasm nonlinear limiter/correction regression passed in
+0.02 seconds using the already-built test binary, covering the other derivative
+route that now reuses primal slot identities. Log: static-dae-laplace-limiter.log.
+The authoritative generator regenerated all 43 built-ins against the final
+compiler sources. Only the manifest generator digest changed, to
+58e15821e5f76b3ea1a56671f386f768f6c73a0b88aff1504abc9ba561bee956.
+Log: static-dae-laplace-generator.log. No generated model source changed.
+
+This completes the retained state-space observation prerequisite. Other filter
+families, complete shared static-history capture, and general runtime/mixed F/Q
+integration remain open. The newly corrected companion guard stays in place.
+Shipping browser/tablet and licensed-reference qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

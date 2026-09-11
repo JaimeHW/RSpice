@@ -1331,7 +1331,9 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     let filters =
         unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
     let coefficients = integration_coefficients(ctx);
-    let result = if ctx.analysis_type == 2 && coefficients.active {
+    let result = if ctx.static_dae_probe != 0 {
+        filters[filter_id].static_dae_output(input)
+    } else if ctx.analysis_type == 2 && coefficients.active {
         filters[filter_id].step_with_integration(input, coefficients)
     } else if ctx.analysis_type == 2 {
         filters[filter_id].dc_candidate(input)
@@ -1356,6 +1358,7 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 /// Active transient integration uses the current companion-rule input
 /// coefficient. Transient operating-point and non-transient analyses use the
 /// DC action, matching the reference VM's `LaplaceStateDerivative` contract.
+/// Static DAE observations hold internal state and use only the direct action.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with a valid EvalContext
@@ -1402,7 +1405,11 @@ pub unsafe extern "C" fn rspice_laplace_derivative_native(
     };
     let filter = &filters[filter_id];
     let coefficients = integration_coefficients(ctx);
-    let result = if ctx.analysis_type == 2 && coefficients.active {
+    let result = if ctx.static_dae_probe != 0 {
+        filter
+            .static_dae_input_action(input_derivative)
+            .map_err(|error| error.to_string())
+    } else if ctx.analysis_type == 2 && coefficients.active {
         match filter.transient_input_gain(coefficients) {
             Ok(gain) => {
                 let result = gain * input_derivative;

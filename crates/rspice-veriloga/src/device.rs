@@ -8749,6 +8749,64 @@ mod static_dae_device_tests {
     use crate::{CompilerOptions, VerilogACompiler, vm::VerilogAEvaluationMode as Mode};
 
     #[test]
+    fn static_dae_native_laplace_retains_candidate_and_direct_jacobian() {
+        let source = include_str!("../tests/fixtures/static_dae_laplace.va");
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "LAPLACE_STATIC",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0, 0],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        device.set_timestep(0.5);
+        // H(s) = 2 - 1/(s+1). Its BE states are 2/3 and 16/9;
+        // static I = 4*V - state, with a Jacobian of exactly four.
+        for (time, voltage, state) in [(0.5, 2.0, 2.0 / 3.0), (1.0, 4.0, 16.0 / 9.0)] {
+            device.set_time(time);
+            let mut dynamic_jacobian = 0.0;
+            device
+                .try_stamp(
+                    &[voltage],
+                    |_, _, value| dynamic_jacobian += value,
+                    |_, _| {},
+                )
+                .unwrap();
+            assert!((dynamic_jacobian - 29.0 / 3.0).abs() < 1e-12);
+            let before = format!("{:?}", device.context);
+            for probe in [voltage, voltage + 1.0, voltage] {
+                let (mut jacobian, mut rhs) = (0.0, 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[probe],
+                        |_, _, value| jacobian += value,
+                        |_, value| rhs += value,
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(jacobian, 4.0);
+                assert!((jacobian * probe - rhs - (4.0 * probe - state)).abs() < 1e-12);
+                assert_eq!(format!("{:?}", device.context), before);
+            }
+            let mut callbacks = 0;
+            device
+                .try_stamp_with_mode(
+                    &[-1.0],
+                    |_, _, _| callbacks += 1,
+                    |_, _| {},
+                    Mode::StaticDaeProbe,
+                )
+                .expect_err("late invalid contribution must fail the observation");
+            assert_eq!(callbacks, 0);
+            assert_eq!(format!("{:?}", device.context), before);
+            device.context.advance_state().unwrap();
+        }
+    }
+
+    #[test]
     fn static_dae_observation_retains_event_bodies_without_replaying_them() {
         let source = include_str!("../tests/fixtures/static_dae_events.va");
         let runtime = VerilogACompiler::new(CompilerOptions::default())

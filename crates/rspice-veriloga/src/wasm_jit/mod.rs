@@ -1662,6 +1662,7 @@ endmodule
                     .family_len(crate::canonical_ir::state::CanonicalStateFamily::CrossDetector),
                 Default::default,
             );
+            context.laplace_filters = report.model.laplace_filters.clone();
             context.variables.resize(report.model.num_variables, 0.0);
             context
                 .configure_event_state_variables(&report.model.event_state_variables)
@@ -2020,6 +2021,65 @@ endmodule
                 harness.call_prelude();
                 assert_eq!(harness.call(&export), 0);
                 assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn static_dae_wasm_laplace_retains_candidate_and_direct_jacobian() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/static_dae_laplace.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_laplace", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            for (time, voltage, state) in [(0.5, 2.0, 2.0 / 3.0), (1.0, 4.0, 16.0 / 9.0)] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(0.5);
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.call(&jacobian), 0);
+                assert!(
+                    (harness.read_f64(FRAME_RESULT_OFFSET as usize) - 29.0 / 3.0).abs() < 1e-12
+                );
+                let context = harness.store.data_mut().context_mut();
+                let before = format!("{:?}", context.laplace_filters);
+                let states = context.state_values.clone();
+                let valid = context.state_candidate_valid.clone();
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                for probe in [voltage, voltage + 1.0, voltage] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, probe);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    let current = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (current - (4.0 * probe - state)).abs() < 1e-12,
+                        "postfix={postfix}, t={time}: current={current}"
+                    );
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 4.0);
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(format!("{:?}", context.laplace_filters), before);
+                    assert_eq!(context.state_values, states);
+                    assert_eq!(context.state_candidate_valid, valid);
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
             }
         }
     }

@@ -1,0 +1,9 @@
+module static_laplace(p, n, c);
+    inout p, n, c;
+    electrical p, n, c;
+    analog begin
+        I(p,n)<+2.0*V(p,n)+laplace_nd(V(p,n),'{1.0,2.0},'{1.0,1.0})
+                +ddt(3.0*V(p,n));
+        if (V(p,n)<0.0) I(p,n)<+sqrt(V(p,n));
+    end
+endmodule

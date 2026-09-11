@@ -1174,42 +1174,33 @@ impl<'a> Vm<'a> {
             // Stack: [input] -> [filtered_output]
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
-                let result = if self.context.analysis_type == 2 {
-                    let coefficients = self.context.integration_coefficients();
-                    if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
-                        let result = if coefficients.active {
-                            filter.step_with_integration(input, coefficients)
-                        } else {
-                            // The transient operating-point pass has no
-                            // integration formula. Solve an equilibrium
-                            // candidate that acceptance can seed as history.
-                            filter.dc_candidate(input)
-                        };
-                        result.map_err(|error| {
-                            VmError::InvalidNumericResult(format!(
-                                "Laplace filter {filter_id}: {error}"
-                            ))
-                        })?
-                    } else {
-                        return Err(VmError::InvalidInstruction("missing laplace filter"));
-                    }
+                let coefficients = self.context.integration_coefficients();
+                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
+                let filter = self
+                    .context
+                    .laplace_filters
+                    .get_mut(*filter_id)
+                    .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
+                let result = if !dynamic {
+                    filter.static_dae_output(input)
+                } else if self.context.analysis_type == 2 && coefficients.active {
+                    filter.step_with_integration(input, coefficients)
+                } else if self.context.analysis_type == 2 {
+                    // Startup solves an equilibrium candidate that acceptance
+                    // seeds as history; a static observation never seeds it.
+                    filter.dc_candidate(input)
                 } else {
-                    // DC and others (s=0)
-                    if let Some(filter) = self.context.laplace_filters.get(*filter_id) {
-                        filter.dc_output(input).map_err(|error| {
-                            VmError::InvalidNumericResult(format!(
-                                "Laplace filter {filter_id}: {error}"
-                            ))
-                        })?
-                    } else {
-                        return Err(VmError::InvalidInstruction("missing laplace filter"));
-                    }
-                };
+                    filter.dc_output(input)
+                }
+                .map_err(|error| {
+                    VmError::InvalidNumericResult(format!("Laplace filter {filter_id}: {error}"))
+                })?;
                 self.stack.push(result);
             }
             // Read-only Laplace Jacobian action. Active transient integration
             // uses the coefficient of the current companion-rule input;
-            // equilibrium and all other analyses use the filter's DC action.
+            // equilibrium and other analyses use the filter's DC action.
+            // Static DAE observations retain only the direct input action.
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input_derivative = self.pop()?;
                 let coefficients = self.context.integration_coefficients();
@@ -1218,7 +1209,15 @@ impl<'a> Vm<'a> {
                     .laplace_filters
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
-                let result = if self.context.analysis_type == 2 && coefficients.active {
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    filter
+                        .static_dae_input_action(input_derivative)
+                        .map_err(|error| {
+                            VmError::InvalidNumericResult(format!(
+                                "Laplace derivative {filter_id}: {error}"
+                            ))
+                        })?
+                } else if self.context.analysis_type == 2 && coefficients.active {
                     let gain = filter.transient_input_gain(coefficients).map_err(|error| {
                         VmError::InvalidNumericResult(format!(
                             "Laplace derivative {filter_id}: {error}"
@@ -2039,6 +2038,89 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_laplace_retains_state_and_direct_input_action() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.set_timestep(0.5);
+        context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::new(vec![vec![-1.0]], vec![1.0], vec![-1.0], 2.0)
+                .unwrap(),
+        );
+        context.begin_stateful_evaluation();
+        let dynamic = execute_with_context(
+            &mut context,
+            vec![Instruction::PushConst(2.0), Instruction::LaplaceState(0)],
+        )
+        .unwrap();
+        assert!((dynamic - 10.0 / 3.0).abs() < 1e-12);
+        context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticDaeProbe;
+        context.begin_stateful_evaluation();
+        // The retained state is 2/3; a changed input affects only D*u.
+        // Commit once between observations to exercise accepted-state fallback.
+        for accepted in [false, true] {
+            if accepted {
+                context.laplace_filters[0].commit();
+            }
+            let before = format!("{:?}", context.laplace_filters);
+            for _ in 0..2 {
+                let value = execute_with_context(
+                    &mut context,
+                    vec![Instruction::PushConst(3.0), Instruction::LaplaceState(0)],
+                )
+                .unwrap();
+                assert!((value - 16.0 / 3.0).abs() < 1e-12);
+                assert_eq!(
+                    execute_with_context(
+                        &mut context,
+                        vec![
+                            Instruction::PushConst(3.0),
+                            Instruction::LaplaceStateDerivative(0),
+                        ]
+                    )
+                    .unwrap(),
+                    6.0
+                );
+            }
+            for instruction in [
+                Instruction::LaplaceState(0),
+                Instruction::LaplaceStateDerivative(0),
+            ] {
+                assert!(
+                    execute_with_context(
+                        &mut context,
+                        vec![Instruction::PushConst(f64::NAN), instruction,]
+                    )
+                    .is_err()
+                );
+            }
+            assert_eq!(format!("{:?}", context.laplace_filters), before);
+        }
+        // A stateless realization still has its full direct action.
+        context
+            .laplace_filters
+            .push(crate::laplace::StateSpaceFilter::new(vec![], vec![], vec![], 3.0).unwrap());
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(4.0), Instruction::LaplaceState(1),]
+            )
+            .unwrap(),
+            12.0
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::LaplaceStateDerivative(1),
+                ]
+            )
+            .unwrap(),
+            6.0
+        );
     }
 
     #[test]

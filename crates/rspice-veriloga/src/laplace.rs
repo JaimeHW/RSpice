@@ -691,6 +691,35 @@ impl StateSpaceFilter {
         Ok(output)
     }
 
+    /// Observe y = C*x + D*u with the settled internal state held fixed.
+    ///
+    /// A static DAE observation removes derivative equations; it must neither
+    /// integrate the input again nor replace the retained state with a DC solve.
+    /// Before candidate evaluation, the accepted state is the available snapshot.
+    pub(crate) fn static_dae_output(&self, input: f64) -> Result<f64, LaplaceError> {
+        self.validate_structure()?;
+        if !input.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(
+                "input must be finite".into(),
+            ));
+        }
+        let state = if self.candidate_valid {
+            &self.state
+        } else {
+            &self.state_prev
+        };
+        checked_state_output(&self.c, state, self.d, input)
+    }
+
+    /// Differentiate only the direct input term of a static DAE observation.
+    pub(crate) fn static_dae_input_action(
+        &self,
+        input_derivative: f64,
+    ) -> Result<f64, LaplaceError> {
+        self.validate_structure()?;
+        checked_product(self.d, input_derivative, "static DAE input action")
+    }
+
     /// Commit the most recently evaluated candidate.
     pub fn commit(&mut self) {
         if self.candidate_valid {

@@ -660,7 +660,12 @@ fn lower_limiter_correction_program(
 ) -> JitResult<NativeProgram> {
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
-        let slots = CanonicalExpressionStateSlots::for_equation(model, mir, equation_id, program)?;
+        let slots = CanonicalExpressionStateSlots::for_equation(
+            model,
+            mir,
+            equation_id,
+            &model.stamp_programs[stamp_index].value_program,
+        )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
             EntryKind::Jacobian,
@@ -684,11 +689,15 @@ fn lower_jacobian_program(
     if let Some(mir) = canonical_mir {
         let equation_id = canonical_equation_id(model, stamp_index)?;
         let axis = canonical_derivative_axis_for_column(model, mir, &jacobian.col_axis)?;
+        // Differentiation removes some state reads (ddt becomes a stateless
+        // coefficient, for example) while retaining others such as Laplace.
+        // Correlate the complete canonical equation with its primal program;
+        // every derivative reads the same already-renumbered operator slots.
         let state_slots = CanonicalExpressionStateSlots::for_equation(
             model,
             mir,
             equation_id,
-            &jacobian.program,
+            &model.stamp_programs[stamp_index].value_program,
         )?;
         return NativeProgram::from_mir_derivative(
             model.name.clone(),
