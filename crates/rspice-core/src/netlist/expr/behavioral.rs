@@ -430,6 +430,18 @@ fn references_defined_function_with_abort(
     if params.function_count() == 0 {
         return Ok(false);
     }
+    any_expression_identifier_with_abort(expression, abort, |name, is_call| {
+        is_call && params.has_function(name)
+    })
+}
+
+/// Visit identifiers in expressions or complete source lines, excluding quoted
+/// strings. The call flag distinguishes function and parameter namespaces.
+pub(super) fn any_expression_identifier_with_abort(
+    expression: &str,
+    abort: &dyn AbortSignal,
+    mut predicate: impl FnMut(&str, bool) -> bool,
+) -> Result<bool, BehavioralPreparationError> {
     let chars = expression.chars().collect::<Vec<_>>();
     let mut index = 0usize;
     while index < chars.len() {
@@ -474,7 +486,7 @@ fn references_defined_function_with_abort(
             }
             index += 1;
         }
-        if chars.get(index) == Some(&'(') && params.has_function(&name) {
+        if predicate(&name, chars.get(index) == Some(&'(')) {
             return Ok(true);
         }
     }

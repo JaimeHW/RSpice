@@ -248,7 +248,7 @@ fn resolve_statistical_deferred_parameters(
 ) -> Result<(), SimulationError> {
     let mut retained = Vec::new();
     for (name, expression) in std::mem::take(deferred) {
-        if !plan.references_parameter(&expression) {
+        if !plan.references_parameter(&expression, context) {
             retained.push((name, expression));
             continue;
         }
@@ -278,7 +278,7 @@ fn resolve_statistical_scalar_expression(
     let Some(source) = expression.as_ref() else {
         return Ok(());
     };
-    if !plan.references_parameter(source) {
+    if !plan.references_parameter(source, context) {
         return Ok(());
     }
     let resolved = crate::netlist::expr::eval_expression(source, context).map_err(|error| {
@@ -415,14 +415,16 @@ fn materialize_statistical_element(
         | ElementKind::GenericSwitch {
             control_expression: expression,
             ..
-        } if plan.references_parameter(expression) => {
+        } if plan.references_parameter(expression, context) => {
             *expression = prepare_behavioral_expression(expression, context).map_err(|error| {
                 SimulationError::Circuit(format!(
                     "Spectre statistical expression for element '{owner}' could not be prepared: {error}"
                 ))
             })?;
         }
-        ElementKind::VoltageSourceDeferred(source) if plan.references_parameter(source) => {
+        ElementKind::VoltageSourceDeferred(source)
+            if plan.references_parameter(source, context) =>
+        {
             let spec = crate::netlist::parse_source_spec_text(source, 0, context).map_err(|error| {
                 SimulationError::Circuit(format!(
                     "Spectre statistical source expression for element '{owner}' could not be materialized: {error}"
@@ -430,7 +432,9 @@ fn materialize_statistical_element(
             })?;
             replacement = Some(ElementKind::VoltageSource(spec));
         }
-        ElementKind::CurrentSourceDeferred(source) if plan.references_parameter(source) => {
+        ElementKind::CurrentSourceDeferred(source)
+            if plan.references_parameter(source, context) =>
+        {
             let spec = crate::netlist::parse_source_spec_text(source, 0, context).map_err(|error| {
                 SimulationError::Circuit(format!(
                     "Spectre statistical source expression for element '{owner}' could not be materialized: {error}"
@@ -470,6 +474,7 @@ fn element_model_name_mut(kind: &mut ElementKind) -> Option<&mut String> {
 fn model_depends_on_statistics(
     model: &crate::netlist::ModelDef,
     plan: &crate::netlist::SpectreStatisticsPlan,
+    context: &crate::netlist::ParamContext,
 ) -> bool {
     let mut affected = plan
         .variations
@@ -480,10 +485,9 @@ fn model_depends_on_statistics(
     while changed {
         changed = false;
         for (name, expression) in &model.expr_params {
-            if expression
-                .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-                .any(|identifier| affected.contains(&identifier.to_ascii_uppercase()))
-                && affected.insert(name.to_ascii_uppercase())
+            if context.expression_references_parameters(expression, |identifier| {
+                affected.contains(&identifier.to_ascii_uppercase())
+            }) && affected.insert(name.to_ascii_uppercase())
             {
                 changed = true;
             }
@@ -590,7 +594,7 @@ fn materialize_spectre_statistics_after_flattening(
         else {
             continue;
         };
-        if !model_depends_on_statistics(&source_model, &plan) {
+        if !model_depends_on_statistics(&source_model, &plan, &context) {
             continue;
         }
         let context_identity = if has_mismatch {
@@ -617,7 +621,7 @@ fn materialize_spectre_statistics_after_flattening(
         if materialized
             .expr_params
             .iter()
-            .any(|(_, expression)| plan.references_parameter(expression))
+            .any(|(_, expression)| plan.references_parameter(expression, &context))
         {
             return Err(SimulationError::Circuit(format!(
                 "Spectre statistical model '{}' for instance '{}' retains an unresolved statistical expression",

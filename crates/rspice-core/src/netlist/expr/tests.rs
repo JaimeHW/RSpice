@@ -2140,6 +2140,42 @@ fn behavioral_preparation_polls_abort_inside_one_large_expression() {
 }
 
 #[test]
+fn statistical_dependencies_follow_function_captures_and_formal_scopes() {
+    let mut ctx = ParamContext::new();
+    ctx.set("rv", 100.0);
+    ctx.mark_spectre_statistical_parameter("rv");
+    ctx.define_function("hidden", vec!["x".into()], "rv*x");
+    ctx.define_function("nested", vec!["x".into()], "hidden(x)+1");
+    ctx.define_function("shadow", vec!["rv".into()], "rv*2");
+    ctx.define_function("wrapper", vec!["rv".into()], "hidden(rv)");
+    ctx.define_function("rv", vec!["x".into()], "x*2");
+    ctx.define_function("recursive", vec!["x".into()], "recursive(x)");
+    for (expression, expected) in [
+        ("RV+1", true),
+        ("hidden(2)", true),
+        ("nested(3)", true),
+        ("R1 out 0 {nested(3)}", true),
+        ("DC {hidden(1)} AC 1", true),
+        ("shadow(3)", false),
+        ("wrapper(3)", true),
+        ("rv(3)", false),
+        ("recursive(3)", false),
+        ("\"rv hidden(2)\"", false),
+        ("irrelevant_rv_suffix+3", false),
+    ] {
+        assert_eq!(
+            ctx.expression_references_spectre_statistics(expression),
+            expected,
+            "{expression}"
+        );
+    }
+    for name in ["#capture", "@capture", "`capture", "$capture"] {
+        ctx.define_function(name, vec!["x".into()], "nested(x)");
+        assert!(ctx.expression_references_spectre_statistics(&format!("{name}(2)")));
+    }
+}
+
+#[test]
 fn polynomial_preparation_can_be_cancelled_before_lowering_finishes() {
     let expression = format!("POLY(1) TIME {}", "0 ".repeat(4096));
     let abort = CountingAbort::new(8);

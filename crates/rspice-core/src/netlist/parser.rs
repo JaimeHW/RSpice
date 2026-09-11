@@ -4001,7 +4001,9 @@ fn resolve_static_model_expression_params_with_abort(
                 // a model parameter before the active operating point exists.
                 if crate::netlist::expr::behavioral_expression_references_runtime_quantity(
                     &expression,
-                ) || state.spectre_statistics.references_parameter(&expression)
+                ) || state
+                    .spectre_statistics
+                    .references_parameter(&expression, &context)
                 {
                     unresolved.push((name, expression));
                     continue;

@@ -281,12 +281,13 @@ impl SpectreStatisticsPlan {
         Ok(())
     }
 
-    pub(crate) fn references_parameter(&self, expression: &str) -> bool {
-        expression_identifiers(expression).any(|identifier| {
-            self.variations
-                .iter()
-                .any(|variation| variation.parameter.eq_ignore_ascii_case(identifier))
-        })
+    pub(crate) fn references_parameter(&self, expression: &str, params: &ParamContext) -> bool {
+        !self.variations.is_empty()
+            && params.expression_references_parameters(expression, |identifier| {
+                self.variations
+                    .iter()
+                    .any(|variation| variation.parameter.eq_ignore_ascii_case(identifier))
+            })
     }
 
     pub(crate) fn sample_process(
@@ -964,17 +965,6 @@ fn inverse_standard_normal_cdf(probability: Value) -> Value {
     let density = libm::exp(-0.5 * value * value) / libm::sqrt(2.0 * std::f64::consts::PI);
     value -= error / (density + 0.5 * value * error);
     value
-}
-
-fn expression_identifiers(expression: &str) -> impl Iterator<Item = &str> {
-    expression
-        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-        .filter(|token| {
-            token
-                .chars()
-                .next()
-                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-        })
 }
 
 fn canonical_parameter(parameter: &str, line: usize) -> Result<String, SpectreStatisticsError> {

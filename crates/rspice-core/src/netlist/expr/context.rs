@@ -577,12 +577,50 @@ impl ParamContext {
     }
 
     pub(crate) fn expression_references_spectre_statistics(&self, expression: &str) -> bool {
-        expression
-            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-            .any(|identifier| {
+        !self.spectre_statistical_parameters.is_empty()
+            && self.expression_references_parameters(expression, |identifier| {
                 self.spectre_statistical_parameters
                     .contains(&identifier.to_ascii_uppercase())
             })
+    }
+
+    /// Conservative dependency check for expressions and source lines. Follow
+    /// each reachable function once without evaluating it or consuming random
+    /// draws. Formals shadow parameter leaves in their own function body, but
+    /// do not shadow a called function's free parameters.
+    pub(crate) fn expression_references_parameters(
+        &self,
+        expression: &str,
+        matches_parameter: impl Fn(&str) -> bool,
+    ) -> bool {
+        let mut pending = vec![(expression, &[] as &[String])];
+        let mut visited = std::collections::HashSet::new();
+        while let Some((expression, formals)) = pending.pop() {
+            let found = super::behavioral::any_expression_identifier_with_abort(
+                expression,
+                &crate::abort_signal::NoAbort,
+                |name, is_call| {
+                    if is_call {
+                        if let Some(function) = self.get_function(name)
+                            && visited.insert(function.name.as_str())
+                        {
+                            pending.push((function.body.as_str(), function.args.as_slice()));
+                        }
+                        false
+                    } else {
+                        !formals
+                            .iter()
+                            .any(|formal| formal.eq_ignore_ascii_case(name))
+                            && matches_parameter(name)
+                    }
+                },
+            )
+            .expect("NoAbort cannot cancel parameter dependency inspection");
+            if found {
+                return true;
+            }
+        }
+        false
     }
 
     /// Set dialect-specific expression-function semantics.

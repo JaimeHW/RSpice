@@ -4382,7 +4382,7 @@ mod tests {
             SpectreDistribution, SpectreSpread, SpectreStatisticalCoordinate,
             SpectreStatisticsPlan, SpectreVariation, SpectreVariationScope,
         };
-        let plan = SpectreStatisticsPlan {
+        let mut plan = SpectreStatisticsPlan {
             variations: vec![SpectreVariation {
                 line: 3,
                 scope: SpectreVariationScope::Process,
@@ -4399,20 +4399,41 @@ mod tests {
             temperature_celsius: 27.0,
             axes: vec![],
         };
-        let mut definitions = String::new();
-        for function_count in [0, 65] {
+        for (variation_scope, function_count) in [
+            (SpectreVariationScope::Process, 0),
+            (SpectreVariationScope::Process, 65),
+            (SpectreVariationScope::Mismatch, 0),
+            (SpectreVariationScope::Mismatch, 65),
+        ] {
+            plan.variations[0].scope = variation_scope;
+            let mut definitions = String::new();
             for index in 0..function_count {
                 definitions.push_str(&format!(".func unused{index}(x) {{x}}\n"));
             }
             let mut netlist = Netlist::parse(&format!(
                 "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
-                 .subckt unit a b\n.param derived={{2*rv}}\n\
-                 R1 a b {{if(rv<1e6,derived,3*rv)}}\n.ends\n\
+                 .func hidden(x) {{rv*x}}\n.func nested(x) {{hidden(x)+1}}\n\
+                 RROOT in 0 {{hidden(2)}}\nVSTAT stat 0 DC {{nested(1)}}\n\
+                 .subckt unit a b\n.param derived={{2*rv}}\n.param indirect={{nested(3)}}\n\
+                 R1 a b {{if(rv<1e6,derived,3*rv)}}\n\
+                 R2 a b {{hidden(2)}}\nR3 a b {{nested(3)}}\nR4 a b {{indirect}}\n\
+                 .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n.ends\n\
                  X1 in 0 unit\nV1 in 0 1\n.end\n",
                 plan.encode_internal()
             ))
             .expect("statistical deck parses");
-            let sample = plan.sample_process(&netlist.params, &coordinate).unwrap()["RV"];
+            let process = plan.sample_process(&netlist.params, &coordinate).unwrap();
+            let sample_for = |identity| {
+                plan.sample_mismatch(&netlist.params, &process, identity, &coordinate)
+                    .unwrap()
+                    .get("RV")
+                    .or_else(|| process.get("RV"))
+                    .copied()
+                    .unwrap()
+            };
+            let sample = sample_for("X1");
+            let root_sample = sample_for("RROOT");
+            let source_sample = sample_for("VSTAT");
             let expected = if sample < 1e6 {
                 2.0 * sample
             } else {
@@ -4422,11 +4443,42 @@ mod tests {
             let circuit = crate::Engine::new(crate::SimulationConfig::default())
                 .build_circuit(&netlist)
                 .expect("sampled hierarchical circuit builds");
-            let actual = circuit.resistors.conductances[0].recip();
-            assert!(
-                (actual / expected - 1.0).abs() < 1e-14,
-                "{function_count} functions: sampled resistance {actual}, expected {expected}"
-            );
+            let mut failures = Vec::new();
+            for (name, expected) in [
+                ("RROOT", 2.0 * root_sample),
+                ("X1.R1", expected),
+                ("X1.R2", 2.0 * sample),
+                ("X1.R3", 3.0 * sample + 1.0),
+                ("X1.R4", 3.0 * sample + 1.0),
+                ("X1.R5", 2.0 * sample),
+            ] {
+                let index = circuit
+                    .resistors
+                    .names
+                    .iter()
+                    .position(|actual| actual.eq_ignore_ascii_case(name))
+                    .expect("resistor exists");
+                let actual = circuit.resistors.conductances[index].recip();
+                if !((actual / expected - 1.0).abs() < 1e-14) {
+                    failures.push(format!(
+                        "{variation_scope:?}, {function_count} extra functions, {name}: sampled resistance {actual}, expected {expected}"
+                    ));
+                }
+            }
+            let source_index = circuit
+                .voltage_sources
+                .names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("VSTAT"))
+                .expect("source exists");
+            let actual = circuit.voltage_sources.dc_values[source_index];
+            let expected = source_sample + 1.0;
+            if !((actual / expected - 1.0).abs() < 1e-14) {
+                failures.push(format!(
+                    "{variation_scope:?}: sampled source {actual}, expected {expected}"
+                ));
+            }
+            assert!(failures.is_empty(), "{}", failures.join("\n"));
         }
     }
 
