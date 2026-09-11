@@ -274,6 +274,25 @@ pub(crate) fn compile_model_plan(
         )?);
     }
 
+    let limiter_corrections = plan
+        .limiter_corrections
+        .iter()
+        .map(|program| {
+            program
+                .as_ref()
+                .map(|program| {
+                    append_value_entry(
+                        &mut image,
+                        &mut entry_starts,
+                        &mut windows_unwind_functions,
+                        &mut value_entries,
+                        program.borrow(),
+                    )
+                })
+                .transpose()
+        })
+        .collect::<JitResult<Vec<_>>>()?;
+
     let mut jacobians = Vec::with_capacity(plan.jacobians.len());
     for row in &plan.jacobians {
         let mut entries = Vec::with_capacity(row.len());
@@ -392,6 +411,7 @@ pub(crate) fn compile_model_plan(
         parameter_defaults,
         static_conditions,
         stamp_values,
+        limiter_corrections,
         jacobians,
         reactive_jacobians,
         noise_psd,
@@ -466,6 +486,7 @@ pub(crate) fn compile_observation_image(
         parameter_defaults: vec![None; model.parameters.len()],
         static_conditions: Vec::new(),
         stamp_values: Vec::new(),
+        limiter_corrections: Vec::new(),
         jacobians: Vec::new(),
         reactive_jacobians: Vec::new(),
         noise_psd: Vec::new(),
@@ -923,6 +944,12 @@ fn validate_compiled_entry_shape(
     )?;
     validate_compiled_entry_count(
         model,
+        "limiter-correction",
+        entries.limiter_corrections.len(),
+        model.stamp_programs.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
         "jacobian stamp",
         entries.jacobians.len(),
         model.stamp_programs.len(),
@@ -966,6 +993,15 @@ fn validate_compiled_entry_shape(
                 model,
                 format!(
                     "static-condition {stamp_index} optional entry does not match compiled guard"
+                ),
+            ));
+        }
+        if entries.limiter_corrections[stamp_index].is_some() != stamp.limiter_correction.is_some()
+        {
+            return Err(compiled_entry_shape_error(
+                model,
+                format!(
+                    "limiter-correction {stamp_index} optional entry does not match compiled program"
                 ),
             ));
         }
@@ -4194,6 +4230,7 @@ endmodule
             value_program: BytecodeProgram {
                 instructions: vec![Instruction::PushConst(0.0)],
             },
+            limiter_correction: None,
             jacobian_programs: vec![JacobianEntry {
                 row: StampIndex::Ground,
                 col: StampIndex::Ground,
@@ -4353,6 +4390,7 @@ endmodule
                 .map(|stamp| stamp.static_condition.as_ref().map(|_| offset))
                 .collect(),
             stamp_values: vec![offset; model.stamp_programs.len()],
+            limiter_corrections: vec![None; model.stamp_programs.len()],
             jacobians: model
                 .stamp_programs
                 .iter()

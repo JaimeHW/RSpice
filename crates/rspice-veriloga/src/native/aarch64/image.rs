@@ -1018,6 +1018,7 @@ mod tests {
             parameter_defaults: vec![Some(parameter_default_entry)],
             static_conditions: vec![Some(static_condition_entry)],
             stamp_values: vec![stamp_value_entry],
+            limiter_corrections: vec![None],
             jacobians: vec![vec![jacobian_entry]],
             reactive_jacobians: vec![vec![reactive_jacobian_entry]],
             noise_psd: vec![noise_psd_entry],

@@ -255,6 +255,7 @@ fn build_model_plan_inner(
     let mut static_condition_branch_unknown_dependencies =
         Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_values = Vec::with_capacity(model.stamp_programs.len());
+    let mut limiter_corrections = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_prior_current_dependencies = Vec::with_capacity(model.stamp_programs.len());
     let mut stamp_value_branch_unknown_dependencies =
@@ -316,11 +317,37 @@ fn build_model_plan_inner(
                 &stamp.value_program,
                 value_limits,
             )?);
-            stamp_value_current_dependencies.push(value.current_pair_dependencies().to_vec());
+            let correction = stamp
+                .limiter_correction
+                .as_ref()
+                .map(|program| {
+                    lower_limiter_correction_program(
+                        model,
+                        canonical_mir,
+                        stamp_index,
+                        program,
+                        value_limits,
+                    )
+                    .map(PlanProgram::Postfix)
+                })
+                .transpose()?;
+            // The residual and its affine correction are evaluated at the
+            // same program point. Their combined reads govern dispatch order.
+            let reads = |read: fn(&PlanProgram) -> &[usize]| {
+                let mut indices = read(&value).to_vec();
+                if let Some(correction) = &correction {
+                    indices.extend_from_slice(read(correction));
+                    indices.sort_unstable();
+                    indices.dedup();
+                }
+                indices
+            };
+            stamp_value_current_dependencies.push(reads(PlanProgram::current_pair_dependencies));
             stamp_value_prior_current_dependencies
-                .push(value.prior_current_dependencies().to_vec());
+                .push(reads(PlanProgram::prior_current_dependencies));
             stamp_value_branch_unknown_dependencies
-                .push(value.branch_unknown_dependencies().to_vec());
+                .push(reads(PlanProgram::branch_unknown_dependencies));
+            limiter_corrections.push(correction);
             stamp_values.push(value);
 
             let mut jacobian_current_pairs = available_current_pairs.clone();
@@ -553,6 +580,7 @@ fn build_model_plan_inner(
         parameter_defaults,
         static_conditions,
         stamp_values,
+        limiter_corrections,
         jacobians,
         reactive_jacobians,
         noise_psd,
@@ -621,6 +649,28 @@ fn lower_parameter_default_program(
         bytecode_program,
         limits,
     )
+}
+
+fn lower_limiter_correction_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    program: &BytecodeProgram,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let equation_id = canonical_equation_id(model, stamp_index)?;
+        let slots = CanonicalExpressionStateSlots::for_equation(model, mir, equation_id, program)?;
+        return NativeProgram::from_mir_derivative(
+            model.name.clone(),
+            EntryKind::Jacobian,
+            mir,
+            equation_id,
+            CanonicalDerivativeAxis::LimiterCorrection,
+            slots.apply(limits),
+        );
+    }
+    NativeProgram::from_bytecode(model.name.clone(), EntryKind::Jacobian, program, limits)
 }
 
 fn lower_jacobian_program(
@@ -3693,32 +3743,41 @@ fn canonical_scalar_shadow_assignments(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let mut assignments = Vec::new();
-    for shadow in shadow_index.scalar_shadows(target_name) {
-        if !live.get(shadow.var_index).copied().unwrap_or(false) {
-            continue;
+    let mut append = |var_index: usize,
+                      name: &str,
+                      axes: &[CanonicalDerivativeAxis]|
+     -> JitResult<()> {
+        if !live.get(var_index).copied().unwrap_or(false) {
+            return Ok(());
         }
-        validate_assignment_target(model, shadow.var_index)?;
+        validate_assignment_target(model, var_index)?;
         let bytecode_program = bytecode_program.ok_or_else(|| JitError::InvalidCanonicalIr {
             model: model.name.clone(),
             detail: format!(
                 "canonical assignment '{target_name}' derivative shadow '{}' has no matching compiled assignment program",
-                shadow.name
+                name
             )
             .into(),
         })?;
-        let program = lower_canonical_shadow_program(
-            model,
-            mir,
-            expr_id,
-            bytecode_program,
-            &shadow.axes,
-            limits,
-        )?;
-        trace_assignment_program_stack(model, shadow.name.as_str(), &program);
-        assignments.push(NativeAssignment::Direct {
-            var_index: shadow.var_index,
-            program,
-        });
+        let program =
+            lower_canonical_shadow_program(model, mir, expr_id, bytecode_program, axes, limits)?;
+        trace_assignment_program_stack(model, name, &program);
+        assignments.push(NativeAssignment::Direct { var_index, program });
+        Ok(())
+    };
+    for shadow in shadow_index.scalar_shadows(target_name) {
+        append(shadow.var_index, shadow.name.as_str(), &shadow.axes)?;
+    }
+    // Constant-index writes (including unrolled loops) are scalar HIR
+    // assignments. Their shadows still occupy the array's contiguous runs.
+    if let Some((array, index, "")) = parse_array_variable_name(target_name) {
+        for shadow in shadow_index.array_shadows(array) {
+            let upper = checked_logical_upper_bound(model, array, shadow.lower, shadow.len)?;
+            if index >= shadow.lower && index < upper {
+                let slot = shadow.base + (index - shadow.lower) as usize;
+                append(slot, model.variable_names[slot].as_str(), &shadow.axes)?;
+            }
+        }
     }
     Ok(assignments)
 }
@@ -4044,6 +4103,9 @@ pub(crate) fn derivative_shadow_axes_from_suffix(
 }
 
 fn derivative_shadow_axis(part: &str) -> Option<CanonicalDerivativeAxis> {
+    if part == "dL" {
+        return Some(CanonicalDerivativeAxis::LimiterCorrection);
+    }
     if let Some(index) = part.strip_prefix("dI") {
         return index
             .parse::<usize>()
@@ -4170,6 +4232,9 @@ fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) 
             mark_program_variable_reads(condition, live);
         }
         mark_program_variable_reads(&stamp.value_program, live);
+        if let Some(program) = &stamp.limiter_correction {
+            mark_program_variable_reads(program, live);
+        }
         for jacobian in &stamp.jacobian_programs {
             mark_program_variable_reads(&jacobian.program, live);
         }
@@ -4292,6 +4357,16 @@ fn mark_canonical_entry_variable_roots(
             value_limits,
         )?;
         mark_native_program_variable_reads(&program, live);
+        if let Some(correction) = &stamp.limiter_correction {
+            let program = lower_limiter_correction_program(
+                model,
+                Some(mir),
+                stamp_index,
+                correction,
+                value_limits,
+            )?;
+            mark_native_program_variable_reads(&program, live);
+        }
 
         let mut jacobian_current_pairs = available_current_pairs.clone();
         if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {

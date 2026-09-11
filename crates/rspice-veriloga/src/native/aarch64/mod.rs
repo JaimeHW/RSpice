@@ -86,6 +86,19 @@ pub(super) fn compile_model_plan(
             image.append_value(program.borrow(), &format!("stamp value {index}"))
         })
         .collect::<JitResult<Vec<_>>>()?;
+    let limiter_corrections = plan
+        .limiter_corrections
+        .iter()
+        .enumerate()
+        .map(|(index, program)| {
+            program
+                .as_ref()
+                .map(|program| {
+                    image.append_value(program.borrow(), &format!("limiter correction {index}"))
+                })
+                .transpose()
+        })
+        .collect::<JitResult<Vec<_>>>()?;
     let jacobians = plan
         .jacobians
         .iter()
@@ -161,6 +174,7 @@ pub(super) fn compile_model_plan(
         parameter_defaults,
         static_conditions,
         stamp_values,
+        limiter_corrections,
         jacobians,
         reactive_jacobians,
         noise_psd,
@@ -220,6 +234,7 @@ pub(super) fn compile_observation_image(
         parameter_defaults: vec![None; model.parameters.len()],
         static_conditions: Vec::new(),
         stamp_values: Vec::new(),
+        limiter_corrections: Vec::new(),
         jacobians: Vec::new(),
         reactive_jacobians: Vec::new(),
         noise_psd: Vec::new(),
@@ -312,6 +327,7 @@ mod tests {
             parameter_defaults: Vec::new(),
             static_conditions: Vec::new(),
             stamp_values: Vec::new(),
+            limiter_corrections: Vec::new(),
             jacobians: Vec::new(),
             reactive_jacobians: Vec::new(),
             noise_psd: Vec::new(),

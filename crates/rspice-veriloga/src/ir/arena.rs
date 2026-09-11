@@ -839,6 +839,14 @@ impl ExprArena {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    /// Whether the primal forest needs a limiter displacement direction.
+    pub(crate) fn has_limiters(&self) -> bool {
+        self.chunks
+            .iter()
+            .flatten()
+            .any(|node| matches!(node, Node::Limit(..) | Node::CanonicalLimit(..)))
+    }
 }
 
 /// The `usize` a terminal pair uses for ground (`expr_converter::GROUND_NODE`),

@@ -2127,12 +2127,22 @@ impl<'a> ExprConverter<'a> {
         let _ = &arena;
         match op {
             #[cfg(any(feature = "native", feature = "wasm-jit"))]
-            AnalogOperator::Limit { proposed, .. } => {
+            AnalogOperator::Limit {
+                proposed,
+                type_metadata,
+                ..
+            } => {
                 // Both JITs consume CompiledModel for topology and state slots,
                 // with executable expressions supplied by canonical IR. This
                 // instruction reserves the matching slot and deliberately
                 // cannot execute as an interpreter fallback.
                 let proposed = self.convert(arena, proposed)?;
+                let proposed = if let Some(polarity) = type_metadata {
+                    let polarity = self.convert(arena, polarity)?;
+                    arena.push(Node::Binary(BinaryOp::Mul, polarity, proposed))
+                } else {
+                    proposed
+                };
                 Ok(arena.push(Node::CanonicalLimit(proposed)))
             }
             #[cfg(not(any(feature = "native", feature = "wasm-jit")))]

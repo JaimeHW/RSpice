@@ -356,9 +356,14 @@ structured callback bodies and their convergence hints remain incomplete.
 Runtime state version 10 and transient checkpoint format 41 preserve limiter
 history and reject older payloads that omitted it or used older discontinuity
 semantics. Executable limiter value and derivative programs share the previous
-Newton history throughout one evaluation. Generated Rust also applies the
-limiter's affine RHS correction; integrating that correction into the executable
-VM, native, and WebAssembly stamping paths remains outstanding.
+Newton history throughout one evaluation. Generated Rust and executable VM,
+native, and WebAssembly scalar stamping apply the limiter's affine RHS
+correction while retaining physical contribution values for current probes.
+The correction follows assignments, arrays, loops, `ddx`, and transient
+companions. Executable limiter models currently use the postfix scalar stamp
+driver; publishing the correction lane through CFG and fused stamp drivers
+remains outstanding. Compiled-model cache version 66 and WebAssembly emitter
+version 31 invalidate artifacts that lack the correction programs.
 
 Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
 a bounded compact bit matrix for ordinary compact models and falls back to

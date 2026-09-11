@@ -254,6 +254,7 @@ enum NativeValueEntry {
     ParameterDefault(usize),
     StaticCondition(usize),
     StampValue(usize),
+    LimiterCorrection(usize),
     Jacobian { stamp: usize, entry: usize },
     ReactiveJacobian { stamp: usize, entry: usize },
     NoisePsd(usize),
@@ -2959,6 +2960,9 @@ impl VerilogADevice {
                 scan_program(condition);
             }
             scan_program(&stamp.value_program);
+            if let Some(program) = &stamp.limiter_correction {
+                scan_program(program);
+            }
             for jac in &stamp.jacobian_programs {
                 scan_program(&jac.program);
             }
@@ -5720,17 +5724,19 @@ impl VerilogADevice {
                     .static_condition_branch_unknowns(index)
                     .ok_or_else(|| Self::missing_native_static_condition_entry(index))?,
             },
-            NativeValueEntry::StampValue(index) => NativeEntryDependencies {
-                current_pairs: native
-                    .stamp_value_current_pairs(index)
-                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
-                prior_currents: native
-                    .stamp_value_prior_currents(index)
-                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
-                branch_unknowns: native
-                    .stamp_value_branch_unknowns(index)
-                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
-            },
+            NativeValueEntry::StampValue(index) | NativeValueEntry::LimiterCorrection(index) => {
+                NativeEntryDependencies {
+                    current_pairs: native
+                        .stamp_value_current_pairs(index)
+                        .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+                    prior_currents: native
+                        .stamp_value_prior_currents(index)
+                        .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+                    branch_unknowns: native
+                        .stamp_value_branch_unknowns(index)
+                        .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+                }
+            }
             NativeValueEntry::Jacobian { stamp, entry } => NativeEntryDependencies {
                 current_pairs: native
                     .jacobian_current_pairs(stamp, entry)
@@ -5810,6 +5816,11 @@ impl VerilogADevice {
             NativeValueEntry::StampValue(index) => native
                 .run_stamp_value(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+            NativeValueEntry::LimiterCorrection(index) => native
+                .run_limiter_correction(index, &ctx, vars_ptr)
+                .ok_or_else(|| {
+                    VmError::NativeJit(format!("missing native limiter correction {index}"))
+                })?,
             NativeValueEntry::Jacobian { stamp, entry } => native
                 .run_jacobian(stamp, entry, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_jacobian_entry(stamp, entry))?,
@@ -7102,6 +7113,35 @@ impl VerilogADevice {
             )?;
             let value = Self::finite_result(value, format!("contribution {program_idx}"))?;
 
+            let correction = if vm.context.evaluation_mode.limiting_enabled()
+                && let Some(correction) = &program.limiter_correction
+            {
+                Self::run_value_program(
+                    &mut vm,
+                    correction,
+                    #[cfg(feature = "native")]
+                    native,
+                    #[cfg(feature = "native")]
+                    NativeValueEntry::LimiterCorrection(program_idx),
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    wasm,
+                    #[cfg(all(
+                        not(feature = "native"),
+                        feature = "wasm-jit",
+                        target_arch = "wasm32"
+                    ))]
+                    WasmJitExecutableEntry::LimiterCorrection(program_idx),
+                )?
+            } else {
+                0.0
+            };
+            let correction =
+                Self::finite_result(correction, format!("limiter correction {program_idx}"))?;
+
             // Probed currents stay per-copy; only the stamps scale
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
@@ -7129,8 +7169,10 @@ impl VerilogADevice {
             // V(p) - V(n) - E(x) = 0; the entries hold -dE/dx (sign -1)
             // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
             // exactly value + sum(sign * deriv * x_old).
-            let mut eq_value =
-                Self::finite_result(value * scale, format!("scaled contribution {program_idx}"))?;
+            let mut eq_value = Self::finite_result(
+                (value - correction) * scale,
+                format!("scaled contribution {program_idx}"),
+            )?;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
@@ -7353,6 +7395,9 @@ impl VerilogADevice {
         let mut pre_current_roots = std::collections::HashSet::new();
         for stamp in &model.stamp_programs {
             program_reads(&stamp.value_program, &mut pre_current_roots);
+            if let Some(program) = &stamp.limiter_correction {
+                program_reads(program, &mut pre_current_roots);
+            }
         }
         loop {
             let before = pre_current_roots.len();

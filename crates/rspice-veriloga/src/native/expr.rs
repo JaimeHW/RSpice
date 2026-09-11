@@ -310,6 +310,7 @@ pub(crate) struct PriorCurrentProbe {
 pub(crate) enum CanonicalDerivativeAxis {
     Node(NodeId),
     Branch(usize),
+    LimiterCorrection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,6 +327,7 @@ impl CanonicalDerivativeAxis {
         match self {
             Self::Node(node) => format!("d{}", usize::from(node)),
             Self::Branch(branch) => format!("dI{branch}"),
+            Self::LimiterCorrection => "dL".into(),
         }
     }
 }
@@ -396,12 +398,15 @@ impl NativeIdentifierIndex {
 /// Whether `suffix` is the derivative-axis tail
 /// [`MirEquationLowerer::lower_identifier_derivative`] and its higher-order
 /// siblings append to a value's name to name its shadow: one or more `@d<node>`
-/// or `@dI<branch>` groups and nothing else.
+/// or `@dI<branch>` groups, or the limiter displacement `@dL`.
 fn is_derivative_shadow_suffix(suffix: &str) -> bool {
     let Some(axes) = suffix.strip_prefix('@') else {
         return false;
     };
     axes.split('@').all(|axis| {
+        if axis == "dL" {
+            return true;
+        }
         let index = axis.strip_prefix("dI").or_else(|| axis.strip_prefix('d'));
         index.is_some_and(|index| {
             !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
@@ -3167,7 +3172,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::ArrayAccess { array, index } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
-            HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
+            HirExprKind::AnalogOperator { op } => {
+                self.lower_analog_operator_derivative(expr_id, op, wrt)
+            }
         }
     }
 
@@ -3600,7 +3607,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     };
                     Ok(!nonzero)
                 }
-                CanonicalDerivativeAxis::Node(_) => Ok(true),
+                CanonicalDerivativeAxis::Node(_) | CanonicalDerivativeAxis::LimiterCorrection => {
+                    Ok(true)
+                }
             };
         }
         let pos = self.branch_endpoint(pos)?;
@@ -3612,7 +3621,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             CanonicalDerivativeAxis::Node(node) => {
                 branch_voltage_derivative(pos, neg, node).to_bits() == 0.0_f64.to_bits()
             }
-            CanonicalDerivativeAxis::Branch(_) => true,
+            CanonicalDerivativeAxis::Branch(_) | CanonicalDerivativeAxis::LimiterCorrection => true,
         })
     }
 
@@ -3634,7 +3643,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     };
                     Ok(!nonzero)
                 }
-                CanonicalDerivativeAxis::Node(_) => Ok(true),
+                CanonicalDerivativeAxis::Node(_) | CanonicalDerivativeAxis::LimiterCorrection => {
+                    Ok(true)
+                }
             };
         }
         let branch = self
@@ -3647,7 +3658,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 branch_voltage_derivative(branch.pos_node, branch.neg_node, node).to_bits()
                     == 0.0_f64.to_bits()
             }
-            (_, CanonicalDerivativeAxis::Branch(_)) => true,
+            (
+                _,
+                CanonicalDerivativeAxis::Branch(_) | CanonicalDerivativeAxis::LimiterCorrection,
+            ) => true,
             (None, CanonicalDerivativeAxis::Node(_)) => false,
         })
     }
@@ -3660,6 +3674,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let normalized = normalize_intrinsic_name(name);
         match normalized.as_str() {
+            "limit" if wrt == CanonicalDerivativeAxis::LimiterCorrection => Ok(false),
             query if electrically_independent_query(query) => Ok(true),
             "vt" | "thermal_vt" => match args {
                 [] => Ok(true),
@@ -3830,6 +3845,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<bool> {
         match op {
+            HirAnalogOperator::Limit { .. }
+                if wrt == CanonicalDerivativeAxis::LimiterCorrection =>
+            {
+                Ok(false)
+            }
             HirAnalogOperator::Limit {
                 proposed,
                 type_metadata: None,
@@ -3976,7 +3996,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         0.0
                     }
                 }
-                CanonicalDerivativeAxis::Node(_) => 0.0,
+                CanonicalDerivativeAxis::Node(_) | CanonicalDerivativeAxis::LimiterCorrection => {
+                    0.0
+                }
             };
             return self.push(NativeOp::Const(derivative));
         }
@@ -3987,7 +4009,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             .flatten();
         let derivative = match wrt {
             CanonicalDerivativeAxis::Node(node) => branch_voltage_derivative(pos, neg, node),
-            CanonicalDerivativeAxis::Branch(_) => 0.0,
+            CanonicalDerivativeAxis::Branch(_) | CanonicalDerivativeAxis::LimiterCorrection => 0.0,
         };
         self.push(NativeOp::Const(derivative))
     }
@@ -4013,7 +4035,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         0.0
                     }
                 }
-                CanonicalDerivativeAxis::Node(_) => 0.0,
+                CanonicalDerivativeAxis::Node(_) | CanonicalDerivativeAxis::LimiterCorrection => {
+                    0.0
+                }
             };
             return self.push(NativeOp::Const(derivative));
         }
@@ -4027,7 +4051,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             CanonicalDerivativeAxis::Node(node) => {
                 branch_voltage_derivative(branch.pos_node, branch.neg_node, node)
             }
-            CanonicalDerivativeAxis::Branch(_) => 0.0,
+            CanonicalDerivativeAxis::Branch(_) | CanonicalDerivativeAxis::LimiterCorrection => 0.0,
         };
         self.push(NativeOp::Const(derivative))
     }
@@ -4817,7 +4841,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
                 self.lower_zi_call_derivative(expr_id, name, args, wrt)
             }
-            "limit" => self.lower_limit_derivative(name, args, wrt),
+            "limit" => self.lower_limit_derivative(expr_id, name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
             "abs" | "fabs" => {
                 self.require_intrinsic_arity(name, args, 1)?;
@@ -4932,7 +4956,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 NativeOp::Const(0.0),
                 |this, temperature| this.lower_derivative(temperature, wrt),
             ),
-            "limit" => self.lower_limit_derivative(name, args, wrt),
+            "limit" => self.lower_limit_derivative(expr_id, name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
             "simparam" => self.lower_simparam_action(name, args, true, |this, fallback| {
                 this.lower_derivative(fallback, wrt)
@@ -5873,12 +5897,20 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_limit_derivative(
         &mut self,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 2)?;
-        self.lower_derivative(args[0], wrt)
+        self.lower_derivative(args[0], wrt)?;
+        if wrt == CanonicalDerivativeAxis::LimiterCorrection {
+            self.lower_limit_call(expr_id, args)?;
+            self.lower(args[0])?;
+            self.append_arithmetic("Sub")?;
+            self.append_arithmetic("Add")?;
+        }
+        Ok(())
     }
 
     fn lower_table_model_derivative(
@@ -5913,6 +5945,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_analog_operator_derivative(
         &mut self,
+        expr_id: ExprId,
         op: &HirAnalogOperator,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
@@ -5921,7 +5954,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 proposed,
                 type_metadata,
                 ..
-            } => self.lower_oriented_limiter_proposed_derivative(*proposed, *type_metadata, wrt),
+            } => {
+                self.lower_oriented_limiter_proposed_derivative(*proposed, *type_metadata, wrt)?;
+                if wrt == CanonicalDerivativeAxis::LimiterCorrection {
+                    self.lower_analog_operator(expr_id, op)?;
+                    self.lower_oriented_limiter_proposed(*proposed, *type_metadata)?;
+                    self.append_arithmetic("Sub")?;
+                    self.append_arithmetic("Add")?;
+                }
+                Ok(())
+            }
             HirAnalogOperator::LimiterArgument { argument } => Err(self.unsupported(format!(
                 "named limiter implicit {} derivative escaped its limiter body",
                 limiter_argument_name(*argument)

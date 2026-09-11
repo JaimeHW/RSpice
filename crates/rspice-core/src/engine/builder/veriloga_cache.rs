@@ -272,7 +272,8 @@ use super::*;
 // Version 63 binds an explicit module selection into memory and disk identities.
 // Version 64 resets simulator-control tasks once before all runtime loops.
 // Version 65 distinguishes transient discontinuities from Newton convergence hints.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 65;
+// Version 66 retains limiter affine residual corrections for Newton stamping.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 66;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -71,6 +71,7 @@ impl NativeEntryStarts {
         starts.extend(entries.parameter_defaults.iter().flatten().copied());
         starts.extend(entries.static_conditions.iter().flatten().copied());
         starts.extend(entries.stamp_values.iter().copied());
+        starts.extend(entries.limiter_corrections.iter().flatten().copied());
         starts.extend(entries.jacobians.iter().flatten().copied());
         starts.extend(entries.reactive_jacobians.iter().flatten().copied());
         starts.extend(entries.noise_psd.iter().copied());
@@ -111,6 +112,7 @@ pub(crate) struct NativeEntryOffsets {
     pub parameter_defaults: Vec<Option<CodeOffset>>,
     pub static_conditions: Vec<Option<CodeOffset>>,
     pub stamp_values: Vec<CodeOffset>,
+    pub limiter_corrections: Vec<Option<CodeOffset>>,
     pub jacobians: Vec<Vec<CodeOffset>>,
     pub reactive_jacobians: Vec<Vec<CodeOffset>>,
     pub noise_psd: Vec<CodeOffset>,
@@ -236,6 +238,9 @@ impl NativeRequiredStorage {
                 scan_program(condition);
             }
             scan_program(&stamp.value_program);
+            if let Some(program) = &stamp.limiter_correction {
+                scan_program(program);
+            }
             for jacobian in &stamp.jacobian_programs {
                 scan_program(&jacobian.program);
             }
@@ -307,6 +312,7 @@ pub struct PlanStats {
     pub parameter_default_entry_points: usize,
     pub static_condition_entry_points: usize,
     pub stamp_value_entry_points: usize,
+    pub limiter_correction_entry_points: usize,
     pub jacobian_entry_points: usize,
     pub reactive_jacobian_entry_points: usize,
     pub noise_source_entry_points: usize,
@@ -321,6 +327,7 @@ impl PlanStats {
             + self.parameter_default_entry_points
             + self.static_condition_entry_points
             + self.stamp_value_entry_points
+            + self.limiter_correction_entry_points
             + self.jacobian_entry_points
             + self.reactive_jacobian_entry_points
             + self.noise_source_entry_points
@@ -454,6 +461,7 @@ impl NativeModel {
             parameter_default_entry_points,
             static_condition_entry_points,
             stamp_value_entry_points: entries.stamp_values.len(),
+            limiter_correction_entry_points: entries.limiter_corrections.iter().flatten().count(),
             jacobian_entry_points,
             reactive_jacobian_entry_points,
             noise_source_entry_points,
@@ -527,6 +535,7 @@ impl NativeModel {
             parameter_defaults: vec![],
             static_conditions: vec![Some(stamp_entry); stamp_value_entry_points],
             stamp_values: vec![stamp_entry; stamp_value_entry_points],
+            limiter_corrections: vec![None; stamp_value_entry_points],
             jacobians: jacobian_entry_points
                 .into_iter()
                 .map(|count| vec![jacobian_entry; count])
@@ -588,6 +597,12 @@ impl NativeModel {
                 detail: "jacobian entry shape does not match stamp entry shape".into(),
             });
         }
+        if entries.limiter_corrections.len() != entries.stamp_values.len() {
+            return Err(JitError::InternalCompilerError {
+                model: "native-model".into(),
+                detail: "limiter-correction entry shape does not match stamp entry shape".into(),
+            });
+        }
         if entries.reactive_jacobians.len() != entries.stamp_values.len() {
             return Err(JitError::InternalCompilerError {
                 model: "native-model".into(),
@@ -627,6 +642,9 @@ impl NativeModel {
             Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for offset in &entries.stamp_values {
+            Self::validate_entry_offset(*offset, entry_starts, image_len)?;
+        }
+        for offset in entries.limiter_corrections.iter().flatten() {
             Self::validate_entry_offset(*offset, entry_starts, image_len)?;
         }
         for stamp_entries in &entries.jacobians {
@@ -1261,7 +1279,9 @@ impl NativeModel {
     /// Whether the fused stamp driver preserves contribution-current ordering
     /// semantics for assignment, value, and Jacobian expressions.
     pub(crate) fn stamp_kernel_is_eligible(&self) -> bool {
-        self.entries.stamp_kernel.is_some() && self.stamp_kernel_current_order_safe
+        self.entries.stamp_kernel.is_some()
+            && self.stamp_kernel_current_order_safe
+            && self.stats.limiter_correction_entry_points == 0
     }
 
     pub(crate) fn stamp_kernel_branch_unknowns(&self) -> &[usize] {
@@ -1301,6 +1321,18 @@ impl NativeModel {
     ) -> Option<f64> {
         self.entries
             .static_conditions
+            .get(index)
+            .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
+    }
+
+    pub(crate) fn run_limiter_correction(
+        &self,
+        index: usize,
+        ctx: &EvalContext,
+        vars: *const f64,
+    ) -> Option<f64> {
+        self.entries
+            .limiter_corrections
             .get(index)
             .and_then(|offset| offset.map(|offset| self.run_value_entry(offset, ctx, vars)))
     }
@@ -1609,6 +1641,7 @@ mod tests {
                 parameter_defaults: vec![],
                 static_conditions: vec![Some(stamp_entry)],
                 stamp_values: vec![stamp_entry],
+                limiter_corrections: vec![None],
                 jacobians: vec![vec![jacobian_entry]],
                 reactive_jacobians: vec![vec![reactive_jacobian_entry]],
                 noise_psd: vec![],
@@ -1741,6 +1774,7 @@ mod tests {
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
+                limiter_corrections: Vec::new(),
                 jacobians: vec![],
                 reactive_jacobians: vec![],
                 noise_psd: vec![],
@@ -1766,6 +1800,7 @@ mod tests {
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(1)],
+            limiter_corrections: vec![None],
             jacobians: vec![vec![]],
             reactive_jacobians: vec![vec![]],
             noise_psd: vec![],
@@ -1813,6 +1848,7 @@ mod tests {
                 parameter_defaults: vec![],
                 static_conditions: vec![],
                 stamp_values: vec![],
+                limiter_corrections: Vec::new(),
                 jacobians: vec![],
                 reactive_jacobians: vec![],
                 noise_psd: vec![],
@@ -1911,6 +1947,7 @@ mod tests {
             parameter_defaults: vec![],
             static_conditions: vec![None],
             stamp_values: vec![CodeOffset::new(0)],
+            limiter_corrections: vec![None],
             jacobians: vec![vec![]],
             reactive_jacobians: vec![vec![]],
             noise_psd: vec![],

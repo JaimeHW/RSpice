@@ -582,6 +582,17 @@ impl StateSlotMapping {
             // negative KCL rows share one compiled derivative by `clone()`, so
             // walking both would pair the same program twice.
             let stride = if stamp.branch_ordinal.is_none() { 2 } else { 1 };
+            if let Some(program) = &stamp.limiter_correction {
+                self.pair_rooted_program(
+                    mir,
+                    layout,
+                    scans,
+                    Pass::EquationDerivative,
+                    &format!("stamp[{index}].limiter_correction"),
+                    root,
+                    program,
+                );
+            }
             for (position, entry) in stamp.jacobian_programs.iter().step_by(stride).enumerate() {
                 self.pair_rooted_program(
                     mir,
@@ -1074,6 +1085,9 @@ fn for_each_program_mut(model: &mut CompiledModel, visit: &mut impl FnMut(&mut B
 
     for stamp in stamp_programs.iter_mut() {
         visit(&mut stamp.value_program);
+        if let Some(program) = &mut stamp.limiter_correction {
+            visit(program);
+        }
         if let Some(condition) = stamp.static_condition.as_mut() {
             visit(condition);
         }

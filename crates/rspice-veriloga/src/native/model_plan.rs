@@ -42,6 +42,7 @@ pub(crate) struct NativeModelPlan {
     pub(crate) parameter_defaults: Vec<Option<PlanProgram>>,
     pub(crate) static_conditions: Vec<Option<PlanProgram>>,
     pub(crate) stamp_values: Vec<PlanProgram>,
+    pub(crate) limiter_corrections: Vec<Option<PlanProgram>>,
     pub(crate) jacobians: Vec<Vec<PlanProgram>>,
     pub(crate) reactive_jacobians: Vec<Vec<PlanProgram>>,
     pub(crate) noise_psd: Vec<PlanProgram>,
@@ -121,6 +122,7 @@ impl NativeModelPlan {
         for (name, actual) in [
             ("static conditions", self.static_conditions.len()),
             ("stamp values", self.stamp_values.len()),
+            ("limiter corrections", self.limiter_corrections.len()),
             ("Jacobian rows", self.jacobians.len()),
             ("reactive-Jacobian rows", self.reactive_jacobians.len()),
             (
@@ -147,6 +149,13 @@ impl NativeModelPlan {
         for (stamp_index, (planned, compiled)) in
             self.jacobians.iter().zip(&model.stamp_programs).enumerate()
         {
+            if self.limiter_corrections[stamp_index].is_some()
+                != compiled.limiter_correction.is_some()
+            {
+                return Err(shape_error(format!(
+                    "native plan stamp {stamp_index} limiter correction does not match compiled program"
+                )));
+            }
             if planned.len() != compiled.jacobian_programs.len() {
                 return Err(shape_error(format!(
                     "native plan stamp {stamp_index} has {} Jacobians for {} compiled entries",

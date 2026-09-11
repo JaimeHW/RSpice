@@ -409,6 +409,8 @@ pub struct BranchEquation {
     pub static_condition: Option<NodeId>,
     /// The expression tree, in [`DeviceIR::exprs`]
     pub expr: NodeId,
+    /// Affine residual correction at the limited Newton operating point.
+    pub limiter_correction: Option<NodeId>,
     /// Partial derivatives (Jacobian entries)
     pub derivatives: Vec<Derivative>,
     /// Derivatives of the reactive operand Q (where expr ~ resistive +
@@ -447,7 +449,7 @@ pub struct Derivative {
 }
 
 /// What a derivative is with respect to
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DerivativeWrt {
     /// Voltage at a unified node index
     Voltage(usize),
@@ -455,6 +457,8 @@ pub enum DerivativeWrt {
     BranchCurrent(usize),
     /// Unit-amplitude realization of one syntactic noise process.
     Noise(usize),
+    /// Affine residual displacement introduced by Newton limiting.
+    LimiterCorrection,
 }
 
 /// Independent solver quantity selected by a symbolic `ddx` expression.
@@ -1028,6 +1032,8 @@ impl DeviceIR {
 
         // Forward AD carries precisely the derivative orders read by the
         // equations and by ddx, including reads through mutable assignments.
+        // Check the small primal arena before physical shadows expand it.
+        let has_limiters = ir.exprs.has_limiters();
         let mut shadow_roots = HashSet::new();
         for &expr in &converted_contribs {
             autodiff::collect_var_names(&ir.exprs, expr, &mut shadow_roots);
@@ -1052,13 +1058,21 @@ impl DeviceIR {
             // forest is the single largest allocation of the whole compile, and
             // on a module with nothing noise-shadowed it was made only to be
             // handed back untouched.
-            let shadowed =
-                autodiff::noise_shadowed_dependencies(&mut ir, noise_process_count, &shadow_roots);
+            let shadowed = autodiff::auxiliary_shadowed_dependencies(
+                &mut ir,
+                autodiff::AuxiliaryAxes::Noise(noise_process_count),
+                &shadow_roots,
+            );
             if shadowed.is_empty() {
                 ir.noise_assignments_mirror_ordinary = true;
             } else {
                 let ordinary_assignments = ir.assignments.clone();
-                autodiff::build_noise_shadow_assignments(&mut ir, shadowed, &mut shadows);
+                autodiff::build_auxiliary_shadow_assignments(
+                    &mut ir,
+                    shadowed,
+                    &mut shadows,
+                    autodiff::AuxiliaryAxes::Noise(noise_process_count),
+                );
                 ir.noise_assignments = std::mem::replace(&mut ir.assignments, ordinary_assignments);
             }
         }
@@ -1088,6 +1102,21 @@ impl DeviceIR {
             ir.noise_assignments.len()
         ));
 
+        for expr in &mut converted_contribs {
+            *expr = autodiff::resolve_ddx(&mut ir.exprs, *expr, &shadows);
+        }
+        // A ddx result can read physical derivative shadows. Resolve it first
+        // so the displacement pass roots those variables as well as primals.
+        if has_limiters {
+            let mut roots = HashSet::new();
+            for &expr in &converted_contribs {
+                autodiff::collect_var_names(&ir.exprs, expr, &mut roots);
+            }
+            let family = autodiff::AuxiliaryAxes::LimiterCorrection;
+            let shadowed = autodiff::auxiliary_shadowed_dependencies(&mut ir, family, &roots);
+            autodiff::build_auxiliary_shadow_assignments(&mut ir, shadowed, &mut shadows, family);
+        }
+
         // Convert contributions to equations
         let equation_span = crate::metrics::FineSpan::new("ir.equations");
         let mut derivative_elapsed = std::time::Duration::ZERO;
@@ -1109,8 +1138,6 @@ impl DeviceIR {
             .zip(parsed_contribs)
             .zip(converted_contribs)
         {
-            let expr = autodiff::resolve_ddx(exprs, expr, &shadows);
-
             // Peel instance-static guards (parameter expressions or
             // variables derived purely from parameters): a potential
             // contribution that is mode-disabled must leave the branch
@@ -1167,6 +1194,18 @@ impl DeviceIR {
                 Self::generate_derivatives(exprs, expr, num_nodes, num_branches, &shadows);
             derivative_elapsed += span.elapsed();
 
+            let limiter_correction = has_limiters
+                .then(|| {
+                    let correction = autodiff::differentiate_with_shadows(
+                        exprs,
+                        expr,
+                        &DerivativeWrt::LimiterCorrection,
+                        &shadows,
+                    );
+                    autodiff::simplify(exprs, correction)
+                })
+                .filter(|&correction| !Self::is_zero(exprs, correction));
+
             // Reactive (charge/flux) derivatives for AC analysis: extract
             // the ddt() operand and differentiate it
             let span = crate::metrics::FineSpan::new("ir.equation_reactive");
@@ -1217,6 +1256,7 @@ impl DeviceIR {
                 branch_ordinal,
                 static_condition,
                 expr,
+                limiter_correction,
                 derivatives,
                 reactive_derivatives,
             });
@@ -1713,7 +1753,7 @@ impl DeviceIR {
 
     /// Check if an expression is zero (constant 0.0)
     fn is_zero(arena: &ExprArena, expr: NodeId) -> bool {
-        matches!(*arena.node(expr), Node::Const(value) if value.abs() < 1e-30)
+        matches!(*arena.node(expr), Node::Const(value) if value == 0.0)
     }
 
     /// Check whether an expression depends only on parameters and constants
@@ -1984,7 +2024,7 @@ pub mod autodiff {
         let ordinal = match wrt {
             DerivativeWrt::Voltage(node) => *node,
             DerivativeWrt::BranchCurrent(k) => num_nodes + k,
-            DerivativeWrt::Noise(_) => return ALL_AXES,
+            DerivativeWrt::Noise(_) | DerivativeWrt::LimiterCorrection => return ALL_AXES,
         };
         if ordinal >= 128 {
             ALL_AXES
@@ -2034,8 +2074,8 @@ pub mod autodiff {
         array_shadow_base: HashMap<SmolStr, usize>,
         /// Node-axis count (axis ordinals of branch unknowns start here)
         num_nodes: usize,
-        /// Independent syntactic noise processes carried by each variable.
-        noise_shadowed: HashMap<SmolStr, BTreeSet<usize>>,
+        /// Non-matrix derivative directions carried by each variable.
+        auxiliary_shadowed: HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
     }
 
     impl ShadowContext {
@@ -2050,6 +2090,7 @@ pub mod autodiff {
                 DerivativeWrt::Voltage(node) => format!("{name}@d{node}").into(),
                 DerivativeWrt::BranchCurrent(k) => format!("{name}@dI{k}").into(),
                 DerivativeWrt::Noise(k) => format!("{name}@dN{k}").into(),
+                DerivativeWrt::LimiterCorrection => format!("{name}@dL").into(),
             }
         }
 
@@ -2059,19 +2100,22 @@ pub mod autodiff {
 
         /// Whether `name` carries a shadow along the given axis
         pub fn is_shadowed_on(&self, name: &str, wrt: &DerivativeWrt) -> bool {
-            if let DerivativeWrt::Noise(process) = wrt {
+            if matches!(
+                wrt,
+                DerivativeWrt::Noise(_) | DerivativeWrt::LimiterCorrection
+            ) {
                 return self
-                    .noise_shadowed
+                    .auxiliary_shadowed
                     .get(name)
-                    .is_some_and(|axes| axes.contains(process));
+                    .is_some_and(|axes| axes.contains(wrt));
             }
             self.shadowed
                 .get(name)
                 .is_some_and(|mask| mask & axis_bit(wrt, self.num_nodes) != 0)
         }
 
-        fn noise_axes_of(&self, name: &str) -> Option<&BTreeSet<usize>> {
-            self.noise_shadowed.get(name)
+        fn auxiliary_axes_of(&self, name: &str) -> Option<&BTreeSet<DerivativeWrt>> {
+            self.auxiliary_shadowed.get(name)
         }
 
         /// First variable slot of an array's shadow run along an axis
@@ -2467,7 +2511,7 @@ pub mod autodiff {
     /// What this buys on the shipped corpus is small and should be stated as
     /// such: the old sweep cost 1.31s across all 43 models against 0.12s here,
     /// because a shipped model's live set converges in a few sweeps, and the
-    /// second call site — inside `build_noise_shadow_assignments`, where the
+    /// second call site — inside `build_auxiliary_shadow_assignments`, where the
     /// list has already been expanded by shadow interleaving — is never
     /// reached, since no shipped model has a noise process feeding a variable.
     /// The bound is the point. A user model that does reach it would sweep a
@@ -3152,26 +3196,42 @@ pub mod autodiff {
         value
     }
 
-    /// Collect the independent noise processes that can affect `expr`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum AuxiliaryAxes {
+        Noise(usize),
+        LimiterCorrection,
+    }
+
+    impl AuxiliaryAxes {
+        fn contains(self, axis: DerivativeWrt) -> bool {
+            match (self, axis) {
+                (Self::Noise(count), DerivativeWrt::Noise(process)) => process < count,
+                (Self::LimiterCorrection, DerivativeWrt::LimiterCorrection) => true,
+                _ => false,
+            }
+        }
+    }
+
+    /// Collect the auxiliary directions that can affect `expr`.
     ///
     /// This is the set-valued counterpart of [`differentiate_with_shadows`]
-    /// for [`DerivativeWrt::Noise`].  Keeping the traversal here in lock-step
+    /// for noise realizations and limiter displacement. Keep this traversal in lock-step
     /// with that routine is important: operands which are metadata or merely
     /// select a value (noise PSDs, array indices, conditional predicates, and
     /// stateful-operator timing arguments) are deliberately not traversed.
-    /// Actual derivative expressions are still built later, after liveness
-    /// has removed processes which cannot reach a contribution.
-    fn collect_expression_noise_axes(
+    /// Actual derivative expressions are built after liveness removes
+    /// directions which cannot reach a contribution.
+    fn collect_expression_auxiliary_axes(
         arena: &mut ExprArena,
         expr: NodeId,
-        deps: &HashMap<SmolStr, BTreeSet<usize>>,
-        num_processes: usize,
+        deps: &HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
+        family: AuxiliaryAxes,
         constants: &mut HashMap<NodeId, SimplifiedConstant>,
-        axes: &mut BTreeSet<usize>,
+        axes: &mut BTreeSet<DerivativeWrt>,
     ) {
         macro_rules! collect {
             ($value:expr) => {
-                collect_expression_noise_axes(arena, $value, deps, num_processes, constants, axes)
+                collect_expression_auxiliary_axes(arena, $value, deps, family, constants, axes)
             };
         }
         macro_rules! is_zero {
@@ -3330,8 +3390,13 @@ pub mod autodiff {
                 }
             }
             Node::CallSpilled { .. } => {}
-            Node::Limexp(inner) | Node::Ddt(inner) | Node::CanonicalLimit(inner) => collect!(inner),
-            Node::Idt(inner, _) | Node::Limit(inner, _) => collect!(inner),
+            Node::Limexp(inner) | Node::Ddt(inner) | Node::Idt(inner, _) => collect!(inner),
+            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => {
+                collect!(inner);
+                if family == AuxiliaryAxes::LimiterCorrection {
+                    axes.insert(DerivativeWrt::LimiterCorrection);
+                }
+            }
             Node::IdtMod { expr: inner, .. } => collect!(inner),
             Node::TableLookup { input, .. } => collect!(input),
             Node::Ddx { .. } => {
@@ -3339,19 +3404,21 @@ pub mod autodiff {
                 // derivative. Preserve that ordering; walking the raw operand
                 // would incorrectly retain noise which its ddx eliminates.
                 let shadows = ShadowContext {
-                    noise_shadowed: deps.clone(),
+                    auxiliary_shadowed: deps.clone(),
                     ..ShadowContext::default()
                 };
                 let resolved = resolve_ddx(arena, expr, &shadows);
-                axes.extend(expression_noise_axes(arena, resolved, deps, num_processes));
+                axes.extend(expression_auxiliary_axes(arena, resolved, deps, family));
             }
             Node::Heavy(_, payload) => match arena.heavy(payload).clone() {
                 Heavy::WhiteNoise { site, .. }
                 | Heavy::FlickerNoise { site, .. }
                 | Heavy::NoiseTable { site, .. } => {
                     let process = site.ordinal as usize;
-                    if process < num_processes {
-                        axes.insert(process);
+                    if let AuxiliaryAxes::Noise(count) = family
+                        && process < count
+                    {
+                        axes.insert(DerivativeWrt::Noise(process));
                     }
                 }
                 Heavy::LaplaceND { expr: inner, .. }
@@ -3435,25 +3502,25 @@ pub mod autodiff {
         }
     }
 
-    fn expression_noise_axes(
+    fn expression_auxiliary_axes(
         arena: &mut ExprArena,
         expr: NodeId,
-        deps: &HashMap<SmolStr, BTreeSet<usize>>,
-        num_processes: usize,
-    ) -> BTreeSet<usize> {
+        deps: &HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
+        family: AuxiliaryAxes,
+    ) -> BTreeSet<DerivativeWrt> {
         let mut constants = HashMap::new();
         let mut axes = BTreeSet::new();
-        collect_expression_noise_axes(arena, expr, deps, num_processes, &mut constants, &mut axes);
+        collect_expression_auxiliary_axes(arena, expr, deps, family, &mut constants, &mut axes);
         axes
     }
 
-    fn scan_noise_shadowed(
+    fn scan_auxiliary_shadowed(
         arena: &mut ExprArena,
         items: &[IrAssignmentItem],
         variables: &[VarDef],
         arrays: &[ArrayDef],
-        num_processes: usize,
-        deps: &mut HashMap<SmolStr, BTreeSet<usize>>,
+        family: AuxiliaryAxes,
+        deps: &mut HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
         changed: &mut bool,
     ) {
         for item in items {
@@ -3461,7 +3528,7 @@ pub mod autodiff {
                 IrAssignmentItem::Initialization { .. } => {}
                 IrAssignmentItem::Task(_) => {}
                 IrAssignmentItem::Assign(assign) => {
-                    let axes = expression_noise_axes(arena, assign.expr, deps, num_processes);
+                    let axes = expression_auxiliary_axes(arena, assign.expr, deps, family);
                     if axes.is_empty() {
                         continue;
                     }
@@ -3491,25 +3558,20 @@ pub mod autodiff {
                         }
                     }
                 }
-                IrAssignmentItem::Loop { body, .. } => scan_noise_shadowed(
-                    arena,
-                    body,
-                    variables,
-                    arrays,
-                    num_processes,
-                    deps,
-                    changed,
-                ),
+                IrAssignmentItem::Loop { body, .. } => {
+                    scan_auxiliary_shadowed(arena, body, variables, arrays, family, deps, changed)
+                }
             }
         }
     }
 
-    fn interleave_noise_shadows(
+    fn interleave_auxiliary_shadows(
         arena: &mut ExprArena,
         items: Vec<IrAssignmentItem>,
         variables: &[VarDef],
         shadow_index: &HashMap<SmolStr, usize>,
         ctx: &ShadowContext,
+        family: AuxiliaryAxes,
     ) -> Vec<IrAssignmentItem> {
         let mut rewritten = Vec::with_capacity(items.len().saturating_mul(2));
         for item in items {
@@ -3526,20 +3588,19 @@ pub mod autodiff {
                         .or_else(|| variables.get(assign.var_index).map(|var| var.name.clone()));
                     if let Some(target_name) = target_name {
                         let processes = ctx
-                            .noise_axes_of(&target_name)
+                            .auxiliary_axes_of(&target_name)
                             .into_iter()
                             .flatten()
                             .copied()
-                            .collect::<Vec<_>>();
-                        for process in processes {
-                            let axis = DerivativeWrt::Noise(process);
+                            .filter(|axis| family.contains(*axis));
+                        for axis in processes {
                             let derivative =
                                 differentiate_with_shadows(arena, assign.expr, &axis, ctx);
                             let shadow_name = ShadowContext::shadow_name(&target_name, &axis);
                             if let Some(target) = &assign.index {
                                 let shadow_base = ctx
                                     .array_shadow_base(&target.array, &axis)
-                                    .expect("noise-shadowed array has a contiguous run");
+                                    .expect("auxiliary-shadowed array has a contiguous run");
                                 rewritten.push(IrAssignmentItem::Assign(VarAssignment {
                                     var_index: shadow_base,
                                     index: Some(IndexedTarget {
@@ -3564,7 +3625,14 @@ pub mod autodiff {
                 IrAssignmentItem::Loop { condition, body } => {
                     rewritten.push(IrAssignmentItem::Loop {
                         condition,
-                        body: interleave_noise_shadows(arena, body, variables, shadow_index, ctx),
+                        body: interleave_auxiliary_shadows(
+                            arena,
+                            body,
+                            variables,
+                            shadow_index,
+                            ctx,
+                            family,
+                        ),
                     });
                 }
             }
@@ -3572,20 +3640,19 @@ pub mod autodiff {
         rewritten
     }
 
-    /// The noise-shadowed variables of `ir`, each with the process axes it
+    /// The auxiliary-shadowed variables of `ir`, each with the directions it
     /// carries, after the fixpoint over the assignments and the liveness cut
     /// from `shadow_roots`.
     ///
-    /// Empty means the noise pass *is* the ordinary pass. The caller then
-    /// records that on the IR instead of cloning the assignments for
-    /// [`build_noise_shadow_assignments`] to leave untouched.
-    pub fn noise_shadowed_dependencies(
+    /// Empty requires no assignment rewrite. For noise this also means the
+    /// ordinary assignment pass can serve the noise evaluator without a copy.
+    pub(crate) fn auxiliary_shadowed_dependencies(
         ir: &mut DeviceIR,
-        num_processes: usize,
+        family: AuxiliaryAxes,
         shadow_roots: &HashSet<SmolStr>,
-    ) -> HashMap<SmolStr, BTreeSet<usize>> {
+    ) -> HashMap<SmolStr, BTreeSet<DerivativeWrt>> {
         let mut deps = HashMap::new();
-        if num_processes == 0 {
+        if family == AuxiliaryAxes::Noise(0) {
             return deps;
         }
         let DeviceIR {
@@ -3595,17 +3662,17 @@ pub mod autodiff {
             arrays,
             ..
         } = ir;
-        let span = crate::metrics::FineSpan::new("ir.noise_axis_fixpoint");
+        let span = crate::metrics::FineSpan::new("ir.auxiliary_axis_fixpoint");
         let mut passes = 0_usize;
         loop {
             let mut changed = false;
             passes += 1;
-            scan_noise_shadowed(
+            scan_auxiliary_shadowed(
                 exprs,
                 assignments,
                 variables,
                 arrays,
-                num_processes,
+                family,
                 &mut deps,
                 &mut changed,
             );
@@ -3617,7 +3684,7 @@ pub mod autodiff {
         if deps.is_empty() {
             return deps;
         }
-        let span = crate::metrics::FineSpan::new("ir.noise_liveness");
+        let span = crate::metrics::FineSpan::new("ir.auxiliary_liveness");
         let liveness = LivenessGraph::build(exprs, assignments, variables, arrays);
         let live = liveness.live_from(shadow_roots);
         span.finish(&format!(
@@ -3629,14 +3696,15 @@ pub mod autodiff {
         deps
     }
 
-    /// Add assignment shadows for the syntactic noise processes in `deps`
-    /// (from [`noise_shadowed_dependencies`]). These are separate from
-    /// solver-axis shadows so process count never enlarges the nonlinear
-    /// Jacobian or its second-derivative layout.
-    pub fn build_noise_shadow_assignments(
+    /// Add the selected auxiliary direction shadows in `deps`. They have no
+    /// physical matrix columns and do not enlarge the solver-axis layout.
+    /// A later auxiliary pass retains earlier shadows but rewrites only its
+    /// own family, preserving the separate numerical and noise schedules.
+    pub(crate) fn build_auxiliary_shadow_assignments(
         ir: &mut DeviceIR,
-        deps: HashMap<SmolStr, BTreeSet<usize>>,
+        deps: HashMap<SmolStr, BTreeSet<DerivativeWrt>>,
         ctx: &mut ShadowContext,
+        family: AuxiliaryAxes,
     ) {
         if deps.is_empty() {
             return;
@@ -3649,7 +3717,7 @@ pub mod autodiff {
             ..
         } = ir;
 
-        let span = crate::metrics::FineSpan::new("ir.noise_shadow_layout");
+        let span = crate::metrics::FineSpan::new("ir.auxiliary_shadow_layout");
         let array_members = arrays
             .iter()
             .filter(|array| deps.get(&array.name).is_some_and(|axes| !axes.is_empty()))
@@ -3669,9 +3737,8 @@ pub mod autodiff {
             .collect::<Vec<_>>();
         scalar_layout.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         for (name, axes) in scalar_layout {
-            for process in axes {
-                let shadow =
-                    ShadowContext::shadow_name(name.as_str(), &DerivativeWrt::Noise(process));
+            for axis in axes {
+                let shadow = ShadowContext::shadow_name(name.as_str(), &axis);
                 shadow_index.insert(shadow.clone(), variables.len());
                 variables.push(VarDef {
                     name: shadow,
@@ -3681,8 +3748,7 @@ pub mod autodiff {
         }
         for array in arrays.iter() {
             let processes = deps.get(&array.name).cloned().unwrap_or_default();
-            for process in processes {
-                let axis = DerivativeWrt::Noise(process);
+            for axis in processes {
                 let run_name = ShadowContext::shadow_name(&array.name, &axis);
                 let run_base = variables.len();
                 ctx.array_shadow_base.insert(run_name, run_base);
@@ -3697,11 +3763,14 @@ pub mod autodiff {
                 }
             }
         }
-        ctx.noise_shadowed = deps;
+        for (name, axes) in deps {
+            ctx.auxiliary_shadowed.entry(name).or_default().extend(axes);
+        }
         span.finish(&format!("shadow_slots={}", shadow_index.len()));
-        let span = crate::metrics::FineSpan::new("ir.noise_shadow_interleave");
+        let span = crate::metrics::FineSpan::new("ir.auxiliary_shadow_interleave");
         let originals = std::mem::take(assignments);
-        *assignments = interleave_noise_shadows(exprs, originals, variables, &shadow_index, ctx);
+        *assignments =
+            interleave_auxiliary_shadows(exprs, originals, variables, &shadow_index, ctx, family);
         span.finish(&format!("assignments={}", assignments.len()));
     }
 
@@ -4628,8 +4697,17 @@ pub mod autodiff {
                 arena.push(Node::IdtCompanion(di))
             }
 
-            // $limit passes its value through at convergence
-            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => differentiate!(inner),
+            // Physical/noise tangents pass through the proposal. The separate
+            // affine direction also carries the local limiter displacement.
+            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => {
+                let base = differentiate!(inner);
+                if *wrt == DerivativeWrt::LimiterCorrection {
+                    let displacement = binary!(BinaryOp::Sub, expr, inner);
+                    binary!(BinaryOp::Add, base, displacement)
+                } else {
+                    base
+                }
+            }
 
             // Table lookup: slope of the active segment times the inner
             // derivative
@@ -5256,6 +5334,41 @@ pub mod autodiff {
 
         /// The axes symbolic differentiation finds, which the structural walk
         /// has to agree with.
+        fn noise_dependencies(
+            deps: &HashMap<SmolStr, BTreeSet<usize>>,
+        ) -> HashMap<SmolStr, BTreeSet<DerivativeWrt>> {
+            deps.iter()
+                .map(|(name, axes)| {
+                    (
+                        name.clone(),
+                        axes.iter().copied().map(DerivativeWrt::Noise).collect(),
+                    )
+                })
+                .collect()
+        }
+
+        fn expression_noise_axes(
+            arena: &mut ExprArena,
+            expr: NodeId,
+            deps: &HashMap<SmolStr, BTreeSet<usize>>,
+            count: usize,
+        ) -> BTreeSet<usize> {
+            expression_auxiliary_axes(
+                arena,
+                expr,
+                &noise_dependencies(deps),
+                AuxiliaryAxes::Noise(count),
+            )
+            .into_iter()
+            .map(|axis| {
+                let DerivativeWrt::Noise(process) = axis else {
+                    panic!("unexpected non-noise direction")
+                };
+                process
+            })
+            .collect()
+        }
+
         fn old_ad_axes(
             arena: &mut ExprArena,
             expr: NodeId,
@@ -5263,7 +5376,7 @@ pub mod autodiff {
             num_processes: usize,
         ) -> BTreeSet<usize> {
             let shadows = ShadowContext {
-                noise_shadowed: deps.clone(),
+                auxiliary_shadowed: noise_dependencies(deps),
                 ..ShadowContext::default()
             };
             (0..num_processes)

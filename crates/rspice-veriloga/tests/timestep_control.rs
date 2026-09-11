@@ -12,22 +12,11 @@ fn compile_device(instance: &str, source: &str) -> VerilogADevice {
 
 fn compile_selected_device(instance: &str, source: &str, module: Option<&str>) -> VerilogADevice {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
-    let model = compiler
-        .compile_module(source, module)
+    let report = compiler
+        .compile_runtime(source, module)
         .expect("compile timestep-control model");
-    #[cfg(feature = "native")]
-    {
-        let canonical_ir = compiler
-            .compile_canonical_ir_module(source, module)
-            .expect("compile timestep-control canonical IR");
-        VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
-            .expect("construct timestep-control device from canonical IR")
-    }
-    #[cfg(not(feature = "native"))]
-    {
-        VerilogADevice::try_new(instance, model, &[1, 0])
-            .expect("construct timestep-control bytecode device")
-    }
+    VerilogADevice::try_new_with_canonical_ir(instance, report.model, &report.canonical_ir, &[1, 0])
+        .expect("construct timestep-control device from paired runtime artifacts")
 }
 
 fn stamp_once(device: &mut VerilogADevice, voltages: &[f64]) {
@@ -549,15 +538,17 @@ fn limiter_values_and_jacobians_share_previous_newton_history() {
                 device.update_voltages(&[1.0]);
                 if stamp {
                     let mut matrix = 0.0;
+                    let mut rhs = 0.0;
                     device
                         .try_stamp_with_mode(
                             &[1.0],
                             |_, _, value| matrix += value,
-                            |_, _| {},
+                            |_, value| rhs += value,
                             Mode::NewtonLimited,
                         )
                         .unwrap();
                     assert_eq!(matrix, 2.0 * limited, "stamped derivative: {body}");
+                    assert_eq!(rhs, limited * limited, "stamped companion: {body}");
                 } else {
                     assert_eq!(
                         device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap(),
@@ -679,5 +670,180 @@ endmodule
     for (voltage, expected) in [(-1.0, 0.0), (1.0, 7.0), (-1.0, 0.0)] {
         device.update_voltages(&[voltage]);
         assert_eq!(device.try_evaluate().unwrap(), [expected]);
+    }
+}
+
+#[test]
+fn limiter_stamps_linearize_at_the_limited_value_once_per_iteration() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
+    for (expression, derivative, rhs) in [("limited", 1.0, 0.0), ("limited*limited", 0.5, 0.0625)] {
+        let source = format!(
+            "module bounded(p,n); inout p,n; electrical p,n; real limited;
+            analog begin limited=$limit(V(p,n),0.25); I(p,n)<+{expression}; end endmodule"
+        );
+        let mut device = compile_device("STAMP", &source);
+        device
+            .try_stamp_with_mode(&[0.0], |_, _, _| {}, |_, _| {}, Mode::NewtonLimited)
+            .unwrap();
+        let mut matrix = 0.0;
+        let mut actual_rhs = 0.0;
+        device
+            .try_stamp_with_mode(
+                &[1.0],
+                |_, _, value| matrix += value,
+                |_, value| actual_rhs += value,
+                Mode::NewtonLimited,
+            )
+            .unwrap();
+        assert_eq!(
+            (matrix, actual_rhs),
+            (derivative, rhs),
+            "{expression}; {:?}",
+            device.variables().collect::<Vec<_>>()
+        );
+        device.update_voltages(&[1.0]);
+        let next = device.try_evaluate_with_mode(Mode::NewtonLimited).unwrap();
+        assert_eq!(
+            next,
+            vec![if expression == "limited" { 0.5 } else { 0.25 }],
+            "stamping must advance the limiter only once"
+        );
+    }
+}
+
+#[test]
+fn limiter_rhs_correction_follows_the_executed_dataflow() {
+    let cases = [
+        ("I(p,n)<+$limit(V(p,n),0.25);", 1.0, 0.0),
+        ("x=$limit(V(p,n),0.25); I(p,n)<+x*x;", 0.5, 0.0625),
+        (
+            "x=$limit(V(p,n),0.25); I(p,n)<+x*x; x=2*x; I(p,n)<+x*x;",
+            2.5,
+            0.3125,
+        ),
+        (
+            "x=$limit(V(p,n),0.25); x=x*x; for(i=0;i<2;i=i+1) a[i]=x; I(p,n)<+a[0]+2*a[1];",
+            1.5,
+            0.1875,
+        ),
+        (
+            "x=$limit(V(p,n),0.25); for(i=0;i<passes;i=i+1) a[i]=x*x; I(p,n)<+a[0]+2*a[1];",
+            1.5,
+            0.1875,
+        ),
+        (
+            "x=pow($limit(V(p,n),0.25),3); I(p,n)<+ddx(x,V(p,n));",
+            1.5,
+            0.1875,
+        ),
+        (
+            "x=$limit($limit(V(p,n),0.25),0.125); I(p,n)<+x*x;",
+            0.25,
+            0.015625,
+        ),
+        (
+            "I(p,n)<+$limit(V(p,n),0.25)+$limit(2*V(p,n),0.125);",
+            3.0,
+            0.0,
+        ),
+        ("I(p,n)<+$limit(V(p,n)*V(p,n),0.25);", 2.0, 1.0),
+        (
+            "x=$limit(V(p,n),0.25); I(p,n)<+(V(p,n)>0 ? x*x : 0);",
+            0.5,
+            0.0625,
+        ),
+    ];
+    for (body, expected_g, expected_rhs) in cases {
+        let source = format!(
+            "module correction(p,n); inout p,n; electrical p,n; parameter integer passes=2; real x,a[0:1]; integer i; analog begin {body} end endmodule"
+        );
+        let mut device = compile_device("CORRECTION", &source);
+        device.try_stamp(&[0.0], |_, _, _| {}, |_, _| {}).unwrap();
+        let mut g = 0.0;
+        let mut rhs = 0.0;
+        device
+            .try_stamp(&[1.0], |_, _, v| g += v, |_, v| rhs += v)
+            .unwrap();
+        assert_eq!(
+            (g, rhs),
+            (expected_g, expected_rhs),
+            "{body}; {:?}",
+            device.variables().collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn limiter_rhs_preserves_branch_signs_multiplicity_and_probe_modes() {
+    use rspice_veriloga::vm::VerilogAEvaluationMode as Mode;
+    for (contribution, row, limited_g, limited_rhs, physical_g, physical_rhs) in [
+        ("I(p,n)<+x*x;", 0, 0.5, 0.0625, 2.0, 1.0),
+        ("V(p,n)<+x*x;", 1, 0.5, -0.0625, -1.0, -1.0),
+        ("V(p,n): x*x==0;", 1, 0.5, 0.0625, 2.0, 1.0),
+    ] {
+        for m in [1.0, 3.0] {
+            let source = format!(
+                "module orientation(p,n); inout p,n; electrical p,n; real x; analog begin x=$limit(V(p,n),0.25); {contribution} end endmodule"
+            );
+            let mut device = compile_device("ORIENTATION", &source);
+            device.set_multiplicity(m);
+            if row == 1 {
+                device.set_branch_current_indices(&[2]);
+            }
+            device
+                .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+                .unwrap();
+            for mode in [Mode::StaticProbe, Mode::SmallSignal, Mode::NewtonLimited] {
+                let mut g = 0.0;
+                let mut rhs = 0.0;
+                device
+                    .try_stamp_with_mode(
+                        &[1.0, 0.0],
+                        |r, c, v| {
+                            if r == row && c == 0 {
+                                g += v;
+                            }
+                        },
+                        |r, v| {
+                            if r == row {
+                                rhs += v;
+                            }
+                        },
+                        mode,
+                    )
+                    .unwrap();
+                let expected = if mode == Mode::NewtonLimited {
+                    (limited_g, limited_rhs)
+                } else {
+                    (physical_g, physical_rhs)
+                };
+                let scale = if row == 0 { m } else { 1.0 };
+                assert_eq!(
+                    (g, rhs),
+                    (expected.0 * scale, expected.1 * scale),
+                    "{contribution}; m={m}; {mode:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn limiter_rhs_preserves_transient_companion_coefficients() {
+    for expression in ["ddt(x*x)", "x*ddt(x)", "idt(x*x,0)"] {
+        let source = format!(
+            "module dynamic_correction(p,n); inout p,n; electrical p,n; real x; analog begin x=$limit(V(p,n),0.25); I(p,n)<+{expression}; end endmodule"
+        );
+        let mut device = compile_device("DYNAMIC", &source);
+        device.set_analysis_type(2);
+        device.set_timestep(1.0);
+        device.try_stamp(&[0.0], |_, _, _| {}, |_, _| {}).unwrap();
+        device.advance_state();
+        let mut g = 0.0;
+        let mut rhs = 0.0;
+        device
+            .try_stamp(&[1.0], |_, _, v| g += v, |_, v| rhs += v)
+            .unwrap();
+        assert_eq!((g, rhs), (0.5, 0.0625), "{expression}");
     }
 }

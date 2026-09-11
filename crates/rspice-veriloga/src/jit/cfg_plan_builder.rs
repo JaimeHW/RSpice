@@ -967,6 +967,16 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         class,
         detail,
     };
+    if model
+        .stamp_programs
+        .iter()
+        .any(|stamp| stamp.limiter_correction.is_some())
+    {
+        return Err(refuse(
+            CfgPlanRefusal::Lowering,
+            "limiter correction requires the postfix executable plan".into(),
+        ));
+    }
 
     // Rooted on what *this* plan reads. The value entries below become
     // prelude-slot loads, so the assignments the shipped entries used to keep
@@ -1526,6 +1536,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         program: PlanProgram::Blocks(prelude.into_program()),
     });
     plan.stamp_values = stamp_values;
+    plan.limiter_corrections = (0..model.stamp_programs.len()).map(|_| None).collect();
     plan.jacobians = jacobians;
     plan.reactive_jacobians = reactive_jacobians;
     plan.noise_psd = noise_psd;

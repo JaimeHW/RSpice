@@ -9,6 +9,7 @@ pub(crate) enum WasmJitExecutableEntry {
     ParameterDefault(usize),
     StaticCondition(usize),
     StampValue(usize),
+    LimiterCorrection(usize),
     Jacobian { stamp: usize, entry: usize },
     ReactiveJacobian { stamp: usize, entry: usize },
     NoisePsd(usize),
@@ -39,6 +40,7 @@ pub(crate) struct WasmJitExecutable {
     parameter_defaults: Vec<Option<String>>,
     static_conditions: Vec<Option<String>>,
     stamp_values: Vec<String>,
+    limiter_corrections: Vec<Option<String>>,
     jacobians: Vec<Vec<String>>,
     reactive_jacobians: Vec<Vec<String>>,
     noise_psd: Vec<String>,
@@ -61,6 +63,7 @@ impl WasmJitExecutable {
             parameter_defaults: vec![None; model.parameters.len()],
             static_conditions: vec![None; model.stamp_programs.len()],
             stamp_values: vec![String::new(); model.stamp_programs.len()],
+            limiter_corrections: vec![None; model.stamp_programs.len()],
             jacobians: model
                 .stamp_programs
                 .iter()
@@ -96,6 +99,12 @@ impl WasmJitExecutable {
                     *stamp_index,
                     name,
                     "stamp-value",
+                )?,
+                WasmJitValueRole::LimiterCorrection { stamp_index } => set_optional(
+                    &mut executable.limiter_corrections,
+                    *stamp_index,
+                    name,
+                    "limiter-correction",
                 )?,
                 WasmJitValueRole::Jacobian {
                     stamp_index,
@@ -139,6 +148,12 @@ impl WasmJitExecutable {
         }
         for (stamp, program) in model.stamp_programs.iter().enumerate() {
             require_optional_shape(
+                &executable.limiter_corrections,
+                stamp,
+                program.limiter_correction.is_some(),
+                "limiter-correction",
+            )?;
+            require_optional_shape(
                 &executable.static_conditions,
                 stamp,
                 program.static_condition.is_some(),
@@ -173,6 +188,9 @@ impl WasmJitExecutable {
                 self.static_conditions.get(index)?.as_deref()
             }
             WasmJitExecutableEntry::StampValue(index) => nonempty(self.stamp_values.get(index)?),
+            WasmJitExecutableEntry::LimiterCorrection(index) => {
+                self.limiter_corrections.get(index)?.as_deref()
+            }
             WasmJitExecutableEntry::Jacobian { stamp, entry } => {
                 nonempty(self.jacobians.get(stamp)?.get(entry)?)
             }

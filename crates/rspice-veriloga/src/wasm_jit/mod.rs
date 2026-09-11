@@ -115,7 +115,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 27 to 28 preserves finite legacy hypot curvature at extreme input gains.
 /// 28 to 29 evaluates simulator queries and their selected fallbacks at runtime.
 /// 29 to 30 protects quotient numerators against intermediate range loss in scalar and packed AD.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 30;
+/// 30 to 31 publishes limiter affine residual correction entries.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 31;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -197,6 +198,9 @@ pub enum WasmJitValueRole {
         stamp_index: u32,
     },
     StampValue {
+        stamp_index: u32,
+    },
+    LimiterCorrection {
         stamp_index: u32,
     },
     Jacobian {
@@ -584,6 +588,16 @@ fn emit_model_value_module(
             },
         });
     }
+    for (stamp_index, program) in plan.limiter_corrections.iter().enumerate() {
+        if let Some(program) = program {
+            planned.push(PlannedValue {
+                program: program.borrow(),
+                role: WasmJitValueRole::LimiterCorrection {
+                    stamp_index: u32_index(stamp_index, "stamp")?,
+                },
+            });
+        }
+    }
     for (stamp_index, programs) in plan.jacobians.iter().enumerate() {
         let mut entries = Vec::with_capacity(programs.len());
         for (entry_index, program) in programs.iter().enumerate() {
@@ -698,7 +712,9 @@ fn emit_model_value_module(
             stamps: stamps.clone(),
             with_jacobians: false,
         });
-        if plan.current_dependencies.stamp_kernel_order_safe() {
+        if plan.current_dependencies.stamp_kernel_order_safe()
+            && plan.limiter_corrections.iter().all(Option::is_none)
+        {
             stamp_kernel_export = Some(codegen::WASM_JIT_STAMP_KERNEL_EXPORT.to_owned());
             fused.push(codegen::WasmFusedKernel {
                 export_name: codegen::WASM_JIT_STAMP_KERNEL_EXPORT,
@@ -883,6 +899,15 @@ fn summarize_model_plan(
         )?;
     }
     for program in &plan.stamp_values {
+        include_program(
+            program.borrow(),
+            &mut entry_programs,
+            &mut operations,
+            &mut maximum_stack_depth,
+            &mut emitted_programs,
+        )?;
+    }
+    for program in plan.limiter_corrections.iter().flatten() {
         include_program(
             program.borrow(),
             &mut entry_programs,
@@ -1999,6 +2024,11 @@ endmodule
                 harness.reset();
                 let value = harness.stamp_value_export(0);
                 let derivative = harness.jacobian_export(0, 0);
+                let correction = harness
+                    .executable
+                    .export(WasmJitExecutableEntry::LimiterCorrection(0))
+                    .expect("limiter correction export")
+                    .to_owned();
                 for (proposed, limited) in
                     [(0.0, 0.0), (1.0, 0.25), (1.0, 0.5), (1.0, 0.75), (1.0, 1.0)]
                 {
@@ -2016,6 +2046,17 @@ endmodule
                             harness.read_f64(FRAME_RESULT_OFFSET as usize),
                             limited * limited,
                             "{body}; postfix={postfix}"
+                        );
+                        assert_eq!(harness.call(&correction), 0);
+                        let correction = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        assert_eq!(
+                            correction,
+                            2.0 * limited * (limited - proposed),
+                            "{body}; postfix={postfix}"
+                        );
+                        assert_eq!(
+                            2.0 * limited * proposed - limited * limited + correction,
+                            limited * limited
                         );
                         assert_eq!(harness.call(&derivative), 0);
                         assert_eq!(
@@ -3654,6 +3695,12 @@ endmodule
                     &native_context,
                     native_variables.as_ptr(),
                 ),
+                WasmJitValueRole::LimiterCorrection { stamp_index } => native
+                    .run_limiter_correction(
+                        *stamp_index as usize,
+                        &native_context,
+                        native_variables.as_ptr(),
+                    ),
                 WasmJitValueRole::StampValue { stamp_index } => {
                     compared_stamp = true;
                     native.run_stamp_value(

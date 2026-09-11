@@ -730,8 +730,8 @@ impl CodeGenerator {
                 ColumnAxis::Node(*node),
             ),
             DerivativeWrt::BranchCurrent(k) => (StampIndex::Branch(*k), ColumnAxis::Branch(*k)),
-            DerivativeWrt::Noise(_) => {
-                unreachable!("noise-process derivatives are not matrix Jacobian columns")
+            DerivativeWrt::Noise(_) | DerivativeWrt::LimiterCorrection => {
+                unreachable!("auxiliary derivatives are not matrix Jacobian columns")
             }
         }
     }
@@ -759,6 +759,10 @@ impl CodeGenerator {
         emit_ctx: &EmitContext,
     ) -> CompileResult<StampProgram> {
         let value_program = self.compile_expr(arena, eq.expr, emit_ctx)?;
+        let limiter_correction = eq
+            .limiter_correction
+            .map(|expr| self.compile_expr(arena, expr, emit_ctx))
+            .transpose()?;
         let static_condition = eq
             .static_condition
             .map(|cond| self.compile_expr(arena, cond, emit_ctx))
@@ -814,6 +818,7 @@ impl CodeGenerator {
             return Ok(StampProgram {
                 stamp_locations,
                 value_program,
+                limiter_correction,
                 jacobian_programs,
                 reactive_jacobians,
                 branch_ordinal: Some(ordinal),
@@ -863,6 +868,7 @@ impl CodeGenerator {
             return Ok(StampProgram {
                 stamp_locations,
                 value_program,
+                limiter_correction,
                 jacobian_programs,
                 reactive_jacobians,
                 branch_ordinal: Some(ordinal),
@@ -935,6 +941,7 @@ impl CodeGenerator {
         Ok(StampProgram {
             stamp_locations,
             value_program,
+            limiter_correction,
             jacobian_programs,
             reactive_jacobians,
             branch_ordinal: None,
@@ -2409,6 +2416,57 @@ mod slew_derivative_tests {
                 program.instructions.last(),
                 Some(Instruction::SlewStateDerivative(0))
             ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod limiter_correction_tests {
+    use super::*;
+    use crate::ir::{DerivativeWrt, autodiff};
+    use crate::vm::{Vm, VmContext};
+
+    #[test]
+    fn limiter_correction_bytecode_preserves_physical_values_and_companion_rhs() {
+        for (outer_step, limited) in [(None, 0.25_f64), (Some(0.125), 0.125)] {
+            let arena = &mut ExprArena::new();
+            let proposed = arena.push(Node::Voltage(0, u32::MAX));
+            let step = arena.push(Node::Const(0.25));
+            let mut value = arena.push(Node::Limit(proposed, Some(step)));
+            if let Some(step) = outer_step {
+                let step = arena.push(Node::Const(step));
+                value = arena.push(Node::Limit(value, Some(step)));
+            }
+            let value = arena.push(Node::Binary(BinaryOp::Mul, value, value));
+            let jacobian = autodiff::differentiate(arena, value, &DerivativeWrt::Voltage(0));
+            let correction =
+                autodiff::differentiate(arena, value, &DerivativeWrt::LimiterCorrection);
+            let generator = CodeGenerator::new();
+            let emit_context = empty_emit_context();
+            let value = generator.compile_expr(arena, value, &emit_context).unwrap();
+            let jacobian = generator
+                .compile_expr(arena, jacobian, &emit_context)
+                .unwrap();
+            let correction = generator
+                .compile_expr(arena, correction, &emit_context)
+                .unwrap();
+            for correction_first in [false, true] {
+                let mut context = VmContext::new(1);
+                context.begin_stateful_evaluation();
+                assert_eq!(Vm::new(&mut context).execute(&value).unwrap(), 0.0);
+                context.voltages[0] = 1.0;
+                context.begin_stateful_evaluation();
+                if correction_first {
+                    Vm::new(&mut context).execute(&correction).unwrap();
+                }
+                let f = Vm::new(&mut context).execute(&value).unwrap();
+                let g = Vm::new(&mut context).execute(&jacobian).unwrap();
+                let c = Vm::new(&mut context).execute(&correction).unwrap();
+                assert_eq!(f, limited * limited);
+                assert_eq!(g, 2.0 * limited);
+                assert_eq!(c, g * (limited - 1.0));
+                assert_eq!(g - (f - c), limited * limited);
+            }
         }
     }
 }

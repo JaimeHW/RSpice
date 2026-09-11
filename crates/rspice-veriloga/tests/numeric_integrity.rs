@@ -3,6 +3,21 @@ mod support;
 use rspice_veriloga::vm::VmError;
 use support::DeviceFixture;
 
+#[test]
+fn tiny_nonzero_conductance_is_retained_in_the_jacobian() {
+    let model = DeviceFixture::compile(
+        "module tiny(p,n); inout p,n; electrical p,n; analog I(p,n)<+1e-40*V(p,n); endmodule",
+    );
+    let mut device = model.device("TINY", &[1, 0]);
+    let mut conductance = 0.0;
+    let mut rhs = 0.0;
+    device
+        .try_stamp(&[1.0], |_, _, g| conductance += g, |_, v| rhs += v)
+        .unwrap();
+    assert_eq!(conductance, 1e-40);
+    assert_eq!(rhs, 0.0);
+}
+
 fn assert_numeric_error(error: VmError, expected_context: &str) {
     match error {
         VmError::InvalidNumericResult(message) => assert!(

@@ -570,6 +570,9 @@ pub struct StampProgram {
     pub stamp_locations: Vec<StampLocation>,
     /// The bytecode program to evaluate the value
     pub value_program: BytecodeProgram,
+    /// Limiter displacement propagated through the residual. Subtract only
+    /// when forming the Newton companion RHS; physical values stay unchanged.
+    pub limiter_correction: Option<BytecodeProgram>,
     /// Jacobian programs (one per derivative)
     pub jacobian_programs: Vec<JacobianEntry>,
     /// Reactive Jacobian programs: dQ/dx of the contribution's ddt()
