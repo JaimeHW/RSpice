@@ -61,12 +61,13 @@
 //! than a scheduling policy — the kernel decides *which* signals changed, and
 //! these decide whether such a change means anything to a given process.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use super::cfg::{CfgFunction, CfgTerminator, CfgValueKind, DigitalWait, is_leaf_kind};
 use super::digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalSchedulingRegion,
-    DigitalSensitivityTerm, DigitalSignal, DigitalWriteSelect, DigitalWriteTarget,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalEventExpression,
+    DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal, DigitalWriteSelect,
+    DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
@@ -350,13 +351,96 @@ impl DigitalSuspension {
 /// difference is the delay: the IR carries a [`ValueId`] because the operand is
 /// evaluated when the wait is *reached*, and by the time a kernel sees this the
 /// evaluation has happened.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DigitalWaitRequest {
     /// `@(...)`: resume when one of these terms is satisfied.
     Event(Vec<DigitalSensitivityTerm>),
+    /// Captured expression baselines, to observe after each dependent input change.
+    Expressions(DigitalExpressionWait),
     /// Resume after this many ticks of the plan's resolved design precision,
     /// counted from suspension. Module-local delay rounding is already applied.
     Delay(i64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DigitalEventProgram {
+    root: ValueId,
+    instructions: Vec<ValueId>,
+    dependencies: Vec<DigitalSignalId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DigitalExpressionState {
+    program: Arc<DigitalEventProgram>,
+    edge: Option<DigitalEdge>,
+    previous: DigitalScalar,
+}
+
+/// An event expression's live baselines. Prepared instruction graphs are shared
+/// between activations; the baselines alone belong to a subscription/checkpoint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalExpressionWait {
+    plan_identity: [u8; 32],
+    process: DigitalProcessId,
+    states: Vec<DigitalExpressionState>,
+    dependencies: Vec<DigitalSignalId>,
+}
+
+impl DigitalExpressionWait {
+    pub fn process(&self) -> DigitalProcessId {
+        self.process
+    }
+    pub fn dependencies(&self) -> &[DigitalSignalId] {
+        &self.dependencies
+    }
+
+    /// Observe one changed input at the instant its value is stored. The host
+    /// must preserve intermediate changes, and remove the subscription when
+    /// this returns true. This never executes the source process or its writes.
+    pub fn observe<E: DigitalEnvironment + ?Sized>(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        changed: DigitalSignalId,
+        environment: &mut E,
+        scratch: &mut DigitalEvalScratch,
+    ) -> Result<bool, DigitalEvalError> {
+        if self.plan_identity != plan.content_identity {
+            return Err(DigitalEvalError::ResumePlanMismatch);
+        }
+        let process = plan
+            .process(self.process)
+            .ok_or(DigitalEvalError::ProcessNotInPlan(self.process))?;
+        for state in &mut self.states {
+            if state.program.dependencies.binary_search(&changed).is_err() {
+                continue;
+            }
+            let mut interpreter = Interpreter::new(plan, process, environment, scratch);
+            for id in &state.program.instructions {
+                let value = interpreter.compute(*id)?;
+                interpreter.scratch.table.define(*id, value);
+            }
+            let next = interpreter.scalar(state.program.root)?.into_owned();
+            let satisfied = match (&state.previous, &next, state.edge) {
+                (
+                    DigitalScalar::FourState(previous),
+                    DigitalScalar::FourState(next),
+                    Some(edge),
+                ) => classify_edge(previous.bit(0), next.bit(0)) == Some(edge),
+                (_, _, None) => state.previous != next,
+                _ => {
+                    return Err(DigitalEvalError::InvalidEventExpression {
+                        value: state.program.root,
+                        detail: "edge event expression must have a bit-valued result".into(),
+                    });
+                }
+            };
+            state.previous = next;
+            if satisfied {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 /// Everything needed to start a suspended process again.
@@ -455,6 +539,10 @@ pub enum DigitalEvalError {
     },
     /// A `#delay` operand that is not an integer.
     NonIntegerDelay(ValueId),
+    InvalidEventExpression {
+        value: ValueId,
+        detail: String,
+    },
     /// Numeric conversion failed before the delay could be scheduled.
     InvalidDelay {
         value: ValueId,
@@ -571,6 +659,9 @@ impl std::fmt::Display for DigitalEvalError {
                 "resume state names block {} of a function with {blocks} blocks",
                 usize::from(*block)
             ),
+            Self::InvalidEventExpression { value, detail } => {
+                write!(f, "event expression {}: {detail}", usize::from(*value))
+            }
             Self::InvalidDelay { value, detail } => {
                 write!(f, "delay value {}: {detail}", usize::from(*value))
             }
@@ -1061,6 +1152,8 @@ fn four_state_in<'v>(
 pub struct DigitalEvalScratch {
     /// One slot per SSA value, emptied at every entry into a function.
     table: ValueTable,
+    event_identity: Option<[u8; 32]>,
+    event_programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
     /// One control-flow edge's arguments, refilled per edge.
     arguments: Vec<DigitalScalar>,
     /// One concatenation's operands, refilled per node.
@@ -1280,6 +1373,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         // and it costs one increment instead of one pass over the function's
         // whole value list.
         scratch.table.enter(process.function.values.len());
+        if scratch.event_identity != Some(plan.content_identity) {
+            scratch.event_programs.clear();
+            scratch.event_identity = Some(plan.content_identity);
+        }
         Self {
             plan,
             process,
@@ -1348,6 +1445,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                             let mut spare = std::mem::take(&mut self.scratch.terms);
                             spare.clone_from(terms);
                             DigitalWaitRequest::Event(spare)
+                        }
+                        DigitalWait::Expressions(terms) => {
+                            DigitalWaitRequest::Expressions(self.capture_event_expressions(terms)?)
                         }
                         DigitalWait::Delay(delay) => {
                             DigitalWaitRequest::Delay(self.integer(*delay)?)
@@ -1494,6 +1594,54 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         self.plan
             .signal(id)
             .ok_or(DigitalEvalError::UndeclaredSignal(id))
+    }
+
+    fn capture_event_expressions(
+        &mut self,
+        terms: &[DigitalEventExpression],
+    ) -> Result<DigitalExpressionWait, DigitalEvalError> {
+        let mut states = Vec::with_capacity(terms.len());
+        let mut dependencies = std::collections::BTreeSet::new();
+        for term in terms {
+            let key = (self.process.id, term.value);
+            let program = match self.scratch.event_programs.get(&key) {
+                Some(program) => Arc::clone(program),
+                None => {
+                    let (instructions, dependencies) =
+                        super::digital_validate::event_expression_schedule(
+                            self.function(),
+                            term.value,
+                        )
+                        .map_err(|detail| {
+                            DigitalEvalError::InvalidEventExpression {
+                                value: term.value,
+                                detail,
+                            }
+                        })?;
+                    let program = Arc::new(DigitalEventProgram {
+                        root: term.value,
+                        instructions,
+                        dependencies,
+                    });
+                    self.scratch
+                        .event_programs
+                        .insert(key, Arc::clone(&program));
+                    program
+                }
+            };
+            dependencies.extend(program.dependencies.iter().copied());
+            states.push(DigitalExpressionState {
+                previous: self.scalar(term.value)?.into_owned(),
+                program,
+                edge: term.edge,
+            });
+        }
+        Ok(DigitalExpressionWait {
+            plan_identity: self.plan.content_identity,
+            process: self.process.id,
+            states,
+            dependencies: dependencies.into_iter().collect(),
+        })
     }
 
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
@@ -1742,6 +1890,28 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     op, &value, &count,
                 )))
             }
+            CfgValueKind::DigitalBitSelect {
+                input,
+                index,
+                bounds,
+                signed,
+            } => {
+                let input = self.four_state(*input)?;
+                let index = self.four_state(*index)?;
+                let bit = index
+                    .bit_index(*signed)
+                    .map(|index| {
+                        super::VectorBounds {
+                            msb: bounds.0,
+                            lsb: bounds.1,
+                        }
+                        .position_of(index)
+                    })
+                    .and_then(|position| u32::try_from(position).ok())
+                    .filter(|position| *position < input.width())
+                    .map_or(FourStateBit::Unknown, |position| input.bit(position));
+                Ok(DigitalScalar::FourState(FourStateValue::splat(1, bit)))
+            }
             CfgValueKind::DigitalPartSelect { input, msb, lsb } => {
                 let (input, msb, lsb) = (*input, *msb, *lsb);
                 let input = self.four_state(input)?;
@@ -1874,6 +2044,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Some(DigitalWait::Event(terms)) => {
                         Some(DigitalWaitRequest::Event(terms.clone()))
                     }
+                    Some(DigitalWait::Expressions(terms)) => Some(DigitalWaitRequest::Expressions(
+                        self.capture_event_expressions(terms)?,
+                    )),
                     None => None,
                 };
                 let (value, region) = (*value, *region);

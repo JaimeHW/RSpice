@@ -1587,11 +1587,11 @@ impl ProcessLowerer<'_> {
         if nonblocking && let Some(control) = &assign.timing {
             let wait = match control {
                 TimingControl::Delay(delay) => DigitalWait::Delay(self.delay(block, &delay.value)),
-                TimingControl::Event(event) => DigitalWait::Event(self.sensitivity_terms(
-                    &event.sensitivity,
+                TimingControl::Event(event) => self.event_wait(
+                    block,
+                    event,
                     Some(&DigitalStatement::BlockingAssign(assign.clone())),
-                    event.span,
-                )),
+                ),
             };
             self.write_with_wait(block, &assign.target, carried[0], true, Some(wait));
             return block;
@@ -1954,10 +1954,7 @@ impl ProcessLowerer<'_> {
     ) -> BlockId {
         let resume = self.builder.create_block();
         let wait = match control {
-            TimingControl::Event(event) => {
-                let terms = self.sensitivity_terms(&event.sensitivity, guarded, event.span);
-                DigitalWait::Event(terms)
-            }
+            TimingControl::Event(event) => self.event_wait(block, event, guarded),
             TimingControl::Delay(delay) => {
                 let value = self.delay(block, &delay.value);
                 DigitalWait::Delay(value)
@@ -2003,6 +2000,58 @@ impl ProcessLowerer<'_> {
             CfgValueType::FourState { width: 64 },
             CfgValueKind::DigitalDelayTicks { input, signed },
         )
+    }
+
+    fn event_wait(
+        &mut self,
+        block: BlockId,
+        event: &crate::ast::EventControl,
+        guarded: Option<&DigitalStatement>,
+    ) -> DigitalWait {
+        let crate::ast::Sensitivity::Explicit(terms) = &event.sensitivity else {
+            return DigitalWait::Event(self.sensitivity_terms(
+                &event.sensitivity,
+                guarded,
+                event.span,
+            ));
+        };
+        if terms.iter().all(|term| {
+            signal_name(&term.signal).is_some_and(|name| {
+                self.lookup_local(name).is_none() && self.index.contains_key(name)
+            })
+        }) {
+            return DigitalWait::Event(self.sensitivity_terms(
+                &event.sensitivity,
+                guarded,
+                event.span,
+            ));
+        }
+        let expressions = terms.iter().map(|term| {
+            let mut reads = BTreeSet::new();
+            collect_expression_reads(&term.signal, &mut reads);
+            if reads.iter().any(|name| self.lookup_local(name).is_some()) {
+                self.error(
+                    "event expressions reading process-local storage require shared local event bindings",
+                    term.span,
+                );
+            }
+            let real = self.is_real_expression(&term.signal);
+            if real && term.edge.is_some() {
+                self.error(
+                    "posedge/negedge require a bit-valued event expression; use value-change control for a real expression",
+                    term.span,
+                );
+            }
+            let value = if real { self.real_expression(block, &term.signal) }
+                else { self.expression(block, &term.signal) };
+            super::digital::DigitalEventExpression {
+                value, edge: term.edge.map(|edge| match edge {
+                    EdgeKind::Posedge => DigitalEdge::Posedge,
+                    EdgeKind::Negedge => DigitalEdge::Negedge,
+                }),
+            }
+        }).collect();
+        DigitalWait::Expressions(expressions)
     }
 
     /// Resolve a sensitivity list to signal terms.
@@ -2806,17 +2855,17 @@ impl ProcessLowerer<'_> {
             }
             Expression::ArrayAccess(access) => {
                 let input = self.named_value(block, &access.array, access.span);
-                let index = self.constant_index(&access.index).unwrap_or(0);
-                // `x[i]` on a vector: a bit *name*, resolved against the
-                // declaration exactly as a two-bound select is.
-                let position = self.declared_range_of(&access.array).position_of(index);
+                let signed = self.self_signed(&access.index);
+                let index = self.expression(block, &access.index);
+                let bounds = self.declared_range_of(&access.array);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalPartSelect {
+                    CfgValueKind::DigitalBitSelect {
                         input,
-                        msb: position,
-                        lsb: position,
+                        index,
+                        bounds: (bounds.msb, bounds.lsb),
+                        signed,
                     },
                 )
             }
@@ -3800,6 +3849,11 @@ fn collect_expression_reads(expression: &Expression, reads: &mut BTreeSet<String
     match expression {
         Expression::Identifier(identifier) => {
             reads.insert(identifier.name.to_string());
+        }
+        Expression::SystemFunction(function) => {
+            for argument in &function.args {
+                collect_expression_reads(argument, reads);
+            }
         }
         Expression::ArrayAccess(access) => {
             reads.insert(access.array.to_string());

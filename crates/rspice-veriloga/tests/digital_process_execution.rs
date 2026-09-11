@@ -1626,22 +1626,6 @@ fn event_nonblocking_writes_capture_values_sensitivities_and_continue() {
         captures[2].value,
         DigitalUpdate::FourState(FourStateValue::from_u64(8, 0x42))
     );
-    // A supported term must not hide a second term that has no executable
-    // dependency representation. Full computed-event support remains required.
-    for extra in ["posedge (a & b)", "posedge bits[1]"] {
-        let source = format!(
-            "module unsupported; reg a,b,q; reg [1:0] bits; initial q <= @(posedge a or {extra}) 1; endmodule"
-        );
-        let error = VerilogACompiler::default()
-            .compile_canonical_ir_module(&source, None)
-            .unwrap_err();
-        let diagnostic = error.to_string();
-        assert!(
-            diagnostic.contains("event expression")
-                || diagnostic.contains("sensitivity-list term names no signal"),
-            "{diagnostic}"
-        );
-    }
 }
 
 /// A process-local declared outside a suspension and read after it keeps what
@@ -4381,4 +4365,79 @@ fn a_process_local_reg_names_its_bits_by_its_own_declaration() {
 
     expect_finished(harness.run());
     assert_eq!(harness.get("seen"), "1001");
+}
+
+#[test]
+fn computed_event_expressions_track_result_edges_and_dynamic_indices() {
+    let mut h = Harness::from_source(
+        "module computed; reg a,b,q; reg [2:0] bus; reg [1:0] index;
+         initial begin a=0; b=0; q=0; bus=0; index=0;
+           @(posedge (a & b) or bus[index]) q=1;
+         end endmodule",
+    );
+    let transported: CanonicalDigitalPlan =
+        serde_json::from_str(&serde_json::to_string(&h.plan).unwrap()).unwrap();
+    transported.validate().unwrap();
+    assert_eq!(transported, h.plan);
+    let DigitalProcessOutcome::Suspended(suspension) = h.run() else {
+        panic!("must wait");
+    };
+    let (DigitalWaitRequest::Expressions(mut wait), resume) = suspension.into_parts() else {
+        panic!("computed wait");
+    };
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    for (name, bits, expected) in [
+        ("b", "1", false),
+        ("bus", "010", false),
+        ("index", "01", true),
+    ] {
+        h.set(name, bits);
+        let signal = h.signal(name);
+        assert_eq!(
+            wait.observe(&h.plan, signal, &mut h.store, &mut scratch)
+                .unwrap(),
+            expected,
+            "{name}"
+        );
+    }
+    expect_finished(h.resume(0, &resume));
+    assert_eq!(h.get("q"), "1");
+
+    // Real results have value-change events; four-state comparisons of real
+    // operands have ordinary bit edges. Repeated references to one input are legal.
+    for event in ["a+a", "posedge (a > 0.5)", "posedge b or negedge b", "1'b0"] {
+        let source = format!(
+            "module events; real a; reg b,q; initial begin a=0.0; q=0; @({event}) q=1; end endmodule"
+        );
+        VerilogACompiler::default()
+            .compile_canonical_ir_module(&source, None)
+            .unwrap();
+    }
+    let source = "module local_event; initial begin : scope real saved; saved=0.0; @($realtobits(saved)); end endmodule";
+    let error = VerilogACompiler::default()
+        .compile_canonical_ir_module(source, None)
+        .unwrap_err();
+    assert!(error.to_string().contains("process-local"), "{error}");
+}
+
+#[test]
+fn computed_event_dependencies_use_exact_runtime_bit_indices() {
+    let mut h = Harness::from_source(
+        "module bits; reg [-2:1] bus; reg signed [95:0] index; reg q; initial q=bus[index]; endmodule",
+    );
+    h.set("bus", "1001");
+    for (index, expected) in [
+        (format!("{}10", "1".repeat(94)), "1"), // -2, above 64 bits
+        ("1".repeat(96), "0"),                  // -1
+        (format!("{}1", "0".repeat(95)), "1"),
+        ("0".repeat(96), "0"),
+        (format!("{}10", "0".repeat(94)), "x"), // beyond upper declared index
+        (format!("01{}", "0".repeat(94)), "x"), // large known positive index
+        ("x".repeat(96), "x"),
+        ("z".repeat(96), "x"),
+    ] {
+        h.set("index", &index);
+        expect_finished(h.run());
+        assert_eq!(h.get("q"), expected, "index {index}");
+    }
 }

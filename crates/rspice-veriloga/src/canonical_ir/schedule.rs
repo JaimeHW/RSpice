@@ -1886,6 +1886,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalArithmetic { .. }
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
+            | CfgValueKind::DigitalBitSelect { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. }
         | CfgValueKind::DigitalCaseMatch { .. }

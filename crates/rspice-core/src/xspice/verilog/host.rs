@@ -363,6 +363,7 @@ enum ProcessStatus {
     /// Suspended on an event control, subscribed to every signal its terms
     /// name.
     AwaitingEvent(Vec<DigitalSensitivityTerm>),
+    AwaitingExpression(u64),
     /// Waiting in the inactive region for the active region to drain (`#0`).
     Inactive,
     /// Reached `Return`. An `initial` process ends here and never runs again.
@@ -390,6 +391,8 @@ pub(crate) struct DigitalHost {
     nba_target: TargetId,
     delayed_updates: BTreeMap<u64, Vec<DigitalDeferredUpdate>>,
     event_updates: BTreeMap<u64, EventCapture>,
+    expression_updates: BTreeMap<u64, DigitalDeferredUpdate>,
+    expression_processes: BTreeMap<u64, usize>,
     event_waiters: Vec<BTreeSet<u64>>,
     event_candidates: Vec<u64>,
     slots: Vec<ProcessSlot>,
@@ -486,9 +489,11 @@ impl DigitalHost {
             nba_target,
             delayed_updates: BTreeMap::new(),
             event_updates: BTreeMap::new(),
+            expression_updates: BTreeMap::new(),
+            expression_processes: BTreeMap::new(),
             event_waiters: vec![BTreeSet::new(); plan.signals.len()],
             event_candidates: Vec::new(),
-            store: DigitalSignalStore::new(&plan),
+            store: DigitalSignalStore::from_plan(Arc::clone(&plan)),
             scheduler,
             slots: vec![
                 ProcessSlot {
@@ -620,6 +625,7 @@ impl DigitalHost {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
         }
+        self.set_event_clock(tick, None)?;
         for (signal, value) in drives {
             self.store.force(*signal, value.clone(), &self.plan)?;
         }
@@ -639,6 +645,7 @@ impl DigitalHost {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
         }
+        self.set_event_clock(tick, Some(physical_seconds))?;
         for (signal, value) in drives {
             self.store.force(*signal, value.clone(), &self.plan)?;
         }
@@ -668,6 +675,8 @@ impl DigitalHost {
         value: f64,
         tick: u64,
     ) -> Result<(), DigitalRunError> {
+        self.store.check_force_real(signal, &self.plan)?;
+        self.set_event_clock(tick, None)?;
         self.store.force_real(signal, value, &self.plan)?;
         self.dispatch(tick)?;
         self.settle(tick)
@@ -754,6 +763,7 @@ impl DigitalHost {
     /// one is promoted, so a nonblocking update scheduled by an inactive-region
     /// process still lands after every process in the slot has run.
     fn promote_region(&mut self, tick: u64) -> Result<bool, DigitalRunError> {
+        self.set_event_clock(tick, None)?;
         for region in DigitalSchedulingRegion::ORDERED {
             let mut promoted = false;
 
@@ -791,10 +801,12 @@ impl DigitalHost {
         Ok(false)
     }
 
-    /// Run one process from wherever it stopped, and record where it stops
-    /// next.
-    fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
-        let absolute_seconds = match self.analog_activation_seconds {
+    fn set_event_clock(
+        &mut self,
+        tick: u64,
+        physical_seconds: Option<f64>,
+    ) -> Result<(), DigitalRunError> {
+        let absolute_seconds = match physical_seconds.or(self.analog_activation_seconds) {
             Some(seconds) => seconds,
             None => self.scheduler.resolution().ticks_to_seconds(tick)?,
         };
@@ -803,6 +815,13 @@ impl DigitalHost {
                 tick,
                 absolute_seconds,
             });
+        Ok(())
+    }
+
+    /// Run one process from wherever it stopped, and record where it stops
+    /// next.
+    fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        self.set_event_clock(tick, None)?;
         // The plan, the store and the scratch are three different fields, so
         // an activation borrows all three at once and pays for none of them:
         // the process is read straight out of `self.plan` rather than through
@@ -844,6 +863,10 @@ impl DigitalHost {
         self.store
             .current_sequence()
             .ok_or(DigitalRunError::EventSequenceOverflow)?;
+        let process_kind = process.kind;
+        self.check_expression_error()?;
+        self.expression_updates
+            .extend(self.store.take_expression_captures());
         for capture in self.store.take_event_captures() {
             for term in &capture.terms {
                 self.event_waiters[usize::from(term.signal)].insert(capture.sequence);
@@ -887,7 +910,7 @@ impl DigitalHost {
                 // list to wait on and lets it return — its value cannot change,
                 // and a driver woken for it would have nothing to do. The graph
                 // decides, and the host does not overrule it.
-                if process.kind == DigitalProcessKind::Always {
+                if process_kind == DigitalProcessKind::Always {
                     return Err(DigitalRunError::UnexpectedCompletion {
                         process: self.describe(index),
                     });
@@ -899,6 +922,12 @@ impl DigitalHost {
                 let (wait, resume) = suspension.into_parts();
                 self.slots[index].resume = Some(resume);
                 match wait {
+                    DigitalWaitRequest::Expressions(wait) => {
+                        let token = self.store.register_expression_wait(wait);
+                        self.expression_processes.insert(token, index);
+                        self.slots[index].status = ProcessStatus::AwaitingExpression(token);
+                        Ok(())
+                    }
                     DigitalWaitRequest::Event(terms) => {
                         self.slots[index].wait_after_sequence = self
                             .store
@@ -960,11 +989,23 @@ impl DigitalHost {
             self.store
                 .current_sequence()
                 .ok_or(DigitalRunError::EventSequenceOverflow)?;
+            self.check_expression_error()?;
             self.store.drain_transitions_into(drained);
             if drained.is_empty() {
                 return Ok(());
             }
             for transition in drained.iter() {
+                for token in &transition.expressions {
+                    if let Some(update) = self.expression_updates.remove(token) {
+                        self.store.release_expression_capture(*token, update);
+                    } else if let Some(index) = self.expression_processes.remove(token) {
+                        debug_assert_eq!(
+                            self.slots[index].status,
+                            ProcessStatus::AwaitingExpression(*token)
+                        );
+                        self.queue_ready(index, tick)?;
+                    }
+                }
                 self.dispatch_event_captures(transition);
                 let net = usize::from(transition.signal);
                 let mut position = 0usize;
@@ -1001,6 +1042,16 @@ impl DigitalHost {
                 }
             }
         }
+    }
+
+    fn check_expression_error(&mut self) -> Result<(), DigitalRunError> {
+        if let Some((index, error)) = self.store.take_expression_error() {
+            return Err(DigitalRunError::Evaluation {
+                process: self.describe(index),
+                error,
+            });
+        }
+        Ok(())
     }
 
     /// Only captures subscribed to the changed signal are visited. A capture

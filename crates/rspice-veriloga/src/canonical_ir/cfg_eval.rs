@@ -1263,6 +1263,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalArithmetic { .. }
             | CfgValueKind::DigitalShift { .. }
             | CfgValueKind::DigitalPartSelect { .. }
+            | CfgValueKind::DigitalBitSelect { .. }
             | CfgValueKind::DigitalConcat { .. }
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }

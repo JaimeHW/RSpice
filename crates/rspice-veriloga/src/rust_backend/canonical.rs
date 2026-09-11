@@ -593,6 +593,9 @@ fn kernel_region_metrics(
                 write!(out, "digital-arithmetic:{op:?}")
             }
             CfgValueKind::DigitalShift { op, .. } => write!(out, "digital-shift:{op:?}"),
+            CfgValueKind::DigitalBitSelect { bounds, signed, .. } => {
+                write!(out, "digital-bit-select:{bounds:?}:{signed}")
+            }
             CfgValueKind::DigitalPartSelect { msb, lsb, .. } => {
                 write!(out, "digital-part-select:{msb}:{lsb}")
             }

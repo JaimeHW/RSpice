@@ -1052,6 +1052,13 @@ pub enum CfgValueKind {
         msb: i64,
         lsb: i64,
     },
+    /// One declared bit selected by a runtime integer expression.
+    DigitalBitSelect {
+        input: ValueId,
+        index: ValueId,
+        bounds: (i64, i64),
+        signed: bool,
+    },
     /// Concatenation. The first part supplies the most significant bits.
     DigitalConcat {
         parts: Vec<ValueId>,
@@ -1206,6 +1213,7 @@ impl CfgValueKind {
             | Self::DigitalArithmetic { .. }
             | Self::DigitalShift { .. }
             | Self::DigitalPartSelect { .. }
+            | Self::DigitalBitSelect { .. }
             | Self::DigitalConcat { .. }
             | Self::DigitalSelect { .. }
             | Self::DigitalBlockingWrite { .. }
@@ -1451,6 +1459,7 @@ impl CfgValueKind {
                 then_value,
                 else_value,
             } => vec![*condition, *then_value, *else_value],
+            Self::DigitalBitSelect { input, index, .. } => vec![*input, *index],
             Self::DigitalNonblockingWrite { value, wait, .. } => std::iter::once(*value)
                 .chain(wait.iter().flat_map(DigitalWait::operands))
                 .collect(),
@@ -1712,6 +1721,10 @@ impl CfgValueKind {
                 *then_value = map(*then_value);
                 *else_value = map(*else_value);
             }
+            Self::DigitalBitSelect { input, index, .. } => {
+                *input = map(*input);
+                *index = map(*index);
+            }
             Self::DigitalNonblockingWrite { value, wait, .. } => {
                 *value = map(*value);
                 if let Some(wait) = wait {
@@ -1861,6 +1874,8 @@ pub enum DigitalWait {
     /// An empty list would be a process that can never resume; the lowering
     /// refuses one rather than emitting it.
     Event(Vec<DigitalSensitivityTerm>),
+    /// Value changes or edges on computed results, rather than their inputs.
+    Expressions(Vec<super::digital::DigitalEventExpression>),
     /// `#delay`: resume after this many resolved design ticks have elapsed.
     ///
     /// The operand contains converted integer ticks, evaluated when the
@@ -1874,6 +1889,7 @@ impl DigitalWait {
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
             Self::Event(_) => Vec::new(),
+            Self::Expressions(terms) => terms.iter().map(|term| term.value).collect(),
             Self::Delay(delay) => vec![*delay],
         }
     }
@@ -1886,15 +1902,21 @@ impl DigitalWait {
     pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
             Self::Event(_) => {}
+            Self::Expressions(terms) => {
+                for term in terms {
+                    term.value = map(term.value);
+                }
+            }
             Self::Delay(delay) => *delay = map(*delay),
         }
     }
 
-    /// The signals whose events can resume the process.
-    pub fn sensitivity(&self) -> &[DigitalSensitivityTerm] {
+    /// Direct signal sensitivity, or None when computed results need evaluation.
+    pub fn sensitivity(&self) -> Option<&[DigitalSensitivityTerm]> {
         match self {
-            Self::Event(terms) => terms,
-            Self::Delay(_) => &[],
+            Self::Event(terms) => Some(terms),
+            Self::Delay(_) => Some(&[]),
+            Self::Expressions(_) => None,
         }
     }
 }

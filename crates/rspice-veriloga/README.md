@@ -255,12 +255,25 @@ transitions. Pending subscriptions survive mixed rejection and accepted
 in-memory checkpoint restoration. Custom `DigitalEnvironment` hosts must honor
 `DigitalDeferredUpdate::wait` for both delay and event controls.
 
-MS02 remains open. Computed/selected event expressions and repeat-event controls
-still require executable lowering; unsupported terms fail compilation instead
-of disappearing from a partially supported sensitivity list. Min:typ:max
-selection, continuous driver delays, complete
+Computed event controls such as `@(posedge (enable & clk))`, `@(bus[index])`
+and `@(a+b)` for real signals evaluate the result at registration and after each
+dependent input change. Ordinary waits and nonblocking captures share this
+expression contract. Intermediate changes inside one process activation are
+retained. Dynamic bit reads use the declared range, exact signed/unsigned index
+values (including wide indices), and X for unknown or out-of-range selection.
+Constant event expressions remain asleep because their value cannot change.
+The same signal may appear in multiple edge terms. Custom hosts must observe
+`DigitalWaitRequest::Expressions` at each input write with
+`DigitalExpressionWait::observe`, then deliver one wakeup/update when satisfied.
+Prepared expression programs are shared; checkpointed baselines are independent.
+
+MS02 remains open. Repeat-event controls, min:typ:max selection, continuous driver
+delays, complete
 delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
+Process-local and analog-owned event dependencies, dynamic write targets and
+indexed part selects still need their corresponding MS02/MS06 implementation;
+explicit computed controls with unsupported storage dependencies are refused.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.
 
 `strict_mode` and `integration_order` are **reserved**. They participate in

@@ -1307,3 +1307,72 @@ endmodule
         other => panic!("expected a refusal for a module with nothing to run, got {other:?}"),
     }
 }
+
+#[test]
+fn computed_event_expressions_preserve_pulses_captures_and_current_clocks() {
+    let source = "module computed(q,late,selected,guarded,real_ok,done);
+      output [7:0] q; output late,selected,guarded,real_ok,done;
+      reg [7:0] q; reg late,selected,guarded,real_ok,done,clk,enable;
+      reg [3:0] bus; reg [1:0] index; real a,b,held;
+      initial begin
+        q=0; late=0; selected=0; guarded=0; real_ok=0; done=0;
+        clk=0; enable=0; bus=0; index=0; a=0.0; b=0.0; held=0.0;
+        q <= @(posedge (clk & enable)) 7; clk=1;
+        q <= @(posedge (clk & enable)) 9; enable=1; enable=0;
+        late <= @(posedge (clk & enable)) 1;
+        selected <= @(bus[index]) 1; bus=4'b1000; index=1;
+        guarded <= @(posedge (bus==4'b1010)) 1; bus=4'b1010;
+        held <= @(a+b) 1.25; a=1.0; b=-1.0;
+        #1 real_ok=(held==1.25); clk=0; enable=1;
+        #1 clk=1; @(posedge (clk & enable)) done=1;
+      end
+      initial begin #3 clk=0; #1 clk=1; end
+      endmodule";
+    let report = run_digital_verilog(
+        source,
+        &DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![
+                port("q", 8),
+                port("late", 1),
+                port("selected", 1),
+                port("guarded", 1),
+                port("real_ok", 1),
+                port("done", 1),
+            ],
+            clock: None,
+            step: 1,
+            settle: 0,
+            vectors: vec![vec![]; 5],
+        },
+    )
+    .unwrap();
+    for (tick, row) in report.observations.iter().enumerate() {
+        let actual: Vec<_> = row.values.iter().map(|(_, value)| value.as_str()).collect();
+        assert_eq!(
+            actual,
+            [
+                "00001001",
+                if tick >= 2 { "1" } else { "0" },
+                "1",
+                "1",
+                if tick >= 1 { "1" } else { "0" },
+                if tick >= 4 { "1" } else { "0" }
+            ],
+            "tick {tick}"
+        );
+    }
+    let report = run_digital_verilog(
+        "module timed(drive,q); input drive; output q; wire drive; reg q; initial q=0; always @(posedge (drive & ($time>=2))) q=1; endmodule",
+        &DigitalStimulus { module:None, inputs:vec![port("drive",1)], outputs:vec![port("q",1)], clock:None, step:1, settle:0, vectors:vectors(&[&["1"],&["0"],&["1"]]) }
+    ).unwrap();
+    assert_eq!(
+        report
+            .observations
+            .iter()
+            .map(|row| row.values[0].1.as_str())
+            .collect::<Vec<_>>(),
+        ["0", "0", "1"]
+    );
+}

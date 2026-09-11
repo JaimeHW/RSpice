@@ -2889,7 +2889,7 @@ endmodule
     }
 
     #[test]
-    fn event_nonblocking_captures_survive_mixed_rejection_and_checkpoint() {
+    fn computed_event_expressions_and_direct_captures_survive_mixed_rejection_and_checkpoint() {
         let source = "module events(p,arm,adc); inout p; electrical p;
             input arm,adc; wire arm,adc; real held,initial_held; reg requested,independent;
             initial begin
@@ -2900,93 +2900,102 @@ endmodule
             always @(posedge arm) begin held <= @(posedge adc) $abstime; requested=1; end
             analog I(p)<+(held+initial_held)*1e6+requested*1e-3;
             endmodule";
-        let mut host =
-            MixedSignalHost::compile(source, None, "events", &[1], SchedulerLimits::default())
-                .unwrap();
-        host.add_adc_bridge("arm", 0, (2, 0), 0.4, 0.6).unwrap();
-        host.add_adc_bridge("adc", 0, (3, 0), 0.4, 0.6).unwrap();
-        begin(&mut host, 0);
-        settle_and_accept(&mut host, &[0.0, 0.0, 0.0]);
-        let stamp = |host: &mut MixedSignalHost, adc: f64| {
-            let voltages = [0.0, 0.6, adc];
-            while host.settle_analog_bridges(&voltages).unwrap() {}
-            let mut rhs = 0.0;
-            host.stamp(
-                &voltages,
-                |_, _, _| {},
-                |row, value| {
-                    if row == 0 {
-                        rhs += value;
-                    }
-                },
-            )
-            .unwrap();
-            rhs
-        };
-        for reject in [true, false] {
-            host.begin_trial(
-                0.65e-9,
-                0.65e-9,
-                IntegrationCoefficients::inactive(),
-                false,
-                false,
-            )
-            .unwrap();
-            assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
-            assert_eq!(
-                host.read_digital("requested").unwrap(),
-                "1",
-                "event capture must not suspend its creator"
-            );
-            if reject {
-                host.reject_trial().unwrap();
-                assert_eq!(host.read_digital("requested").unwrap(), "0");
+        for computed in [false, true] {
+            let source = if computed {
+                source
+                    .replace("posedge arm", "posedge (arm & ($abstime > 0.5e-9))")
+                    .replace("posedge adc", "posedge (adc & ($abstime > 1e-9))")
             } else {
-                host.accept_trial().unwrap();
-            }
-        }
-        let checkpoint = host.checkpoint().unwrap();
-        for replay in 0..2 {
-            if replay == 1 {
-                host.restore(&checkpoint).unwrap();
-            }
+                source.to_string()
+            };
+            let mut host =
+                MixedSignalHost::compile(&source, None, "events", &[1], SchedulerLimits::default())
+                    .unwrap();
+            host.add_adc_bridge("arm", 0, (2, 0), 0.4, 0.6).unwrap();
+            host.add_adc_bridge("adc", 0, (3, 0), 0.4, 0.6).unwrap();
+            begin(&mut host, 0);
+            settle_and_accept(&mut host, &[0.0, 0.0, 0.0]);
+            let stamp = |host: &mut MixedSignalHost, adc: f64| {
+                let voltages = [0.0, 0.6, adc];
+                while host.settle_analog_bridges(&voltages).unwrap() {}
+                let mut rhs = 0.0;
+                host.stamp(
+                    &voltages,
+                    |_, _, _| {},
+                    |row, value| {
+                        if row == 0 {
+                            rhs += value;
+                        }
+                    },
+                )
+                .unwrap();
+                rhs
+            };
             for reject in [true, false] {
                 host.begin_trial(
-                    1.65e-9,
-                    1e-9,
+                    0.65e-9,
+                    0.65e-9,
                     IntegrationCoefficients::inactive(),
                     false,
                     false,
                 )
                 .unwrap();
-                assert!(
-                    (stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12,
-                    "both captures retain their original real RHS"
-                );
+                assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
                 assert_eq!(
-                    host.read_digital("independent").unwrap(),
-                    "0",
-                    "physical event must not drain the unrelated tick-2 timer"
+                    host.read_digital("requested").unwrap(),
+                    "1",
+                    "event capture must not suspend its creator"
                 );
                 if reject {
                     host.reject_trial().unwrap();
+                    assert_eq!(host.read_digital("requested").unwrap(), "0");
                 } else {
                     host.accept_trial().unwrap();
                 }
             }
-            assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
-            host.begin_trial(
-                2e-9,
-                0.35e-9,
-                IntegrationCoefficients::inactive(),
-                false,
-                false,
-            )
-            .unwrap();
-            assert!((stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12);
-            assert_eq!(host.read_digital("independent").unwrap(), "1");
-            host.accept_trial().unwrap();
-            assert!(host.next_event_time().unwrap().is_none());
+            let checkpoint = host.checkpoint().unwrap();
+            for replay in 0..2 {
+                if replay == 1 {
+                    host.restore(&checkpoint).unwrap();
+                }
+                for reject in [true, false] {
+                    host.begin_trial(
+                        1.65e-9,
+                        1e-9,
+                        IntegrationCoefficients::inactive(),
+                        false,
+                        false,
+                    )
+                    .unwrap();
+                    assert!(
+                        (stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12,
+                        "both captures retain their original real RHS"
+                    );
+                    assert_eq!(
+                        host.read_digital("independent").unwrap(),
+                        "0",
+                        "physical event must not drain the unrelated tick-2 timer"
+                    );
+                    if reject {
+                        host.reject_trial().unwrap();
+                    } else {
+                        host.accept_trial().unwrap();
+                    }
+                }
+                assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
+                host.begin_trial(
+                    2e-9,
+                    0.35e-9,
+                    IntegrationCoefficients::inactive(),
+                    false,
+                    false,
+                )
+                .unwrap();
+                assert!((stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12);
+                assert_eq!(host.read_digital("independent").unwrap(), "1");
+                host.accept_trial().unwrap();
+                assert!(host.next_event_time().unwrap().is_none());
+            }
         }
     }
 

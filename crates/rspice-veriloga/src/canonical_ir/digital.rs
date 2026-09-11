@@ -240,6 +240,14 @@ pub struct DigitalSensitivityTerm {
     pub edge: Option<DigitalEdge>,
 }
 
+/// One computed event expression, evaluated at registration and input changes.
+/// Its root uses the ordinary typed digital expression graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalEventExpression {
+    pub value: super::ids::ValueId,
+    pub edge: Option<DigitalEdge>,
+}
+
 /// How a sensitivity list came to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalSensitivityOrigin {

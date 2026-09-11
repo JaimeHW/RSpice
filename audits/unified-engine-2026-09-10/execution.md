@@ -77,7 +77,7 @@ checkpoint representation, before optimizing partitions or caches.
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
 | Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
-| Complete resolved module timing and scheduling regions | MS02 | Declared scales, runtime waits and delay-controlled NBA delivery, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
+| Complete resolved module timing and scheduling regions | MS02 | Declared scales, runtime waits, delay/event-controlled NBA delivery, computed event expressions, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
 | Global scheduling, resolution, atomic acceptance and effects | MS05 | Open | Pending |
@@ -512,6 +512,75 @@ identity changed (generator digest
 Concurrent `0f063c299` and `6e36744f3` are retained. Their AC source-amplitude
 and parameter-sensitivity changes do not alter the event capture implementation;
 combined full-release verification remains pending.
+
+Computed event controls now carry ordinary typed expression roots in canonical
+IR. Pure dependency programs are prepared once per process/root and shared
+between activations. Each subscription owns its previous result; the store
+indexes subscriptions by their input signals and observes them at each write,
+before later writes can hide a short pulse. Both ordinary process waits and
+independent NBA captures consume the resulting one-shot notifications. Accepted
+state clones preserve these baselines, subscriptions and pending captures.
+External/analog input publication and NBA promotion now establish the current
+physical/reporting clock before evaluating dependent expressions.
+
+The first focused compiler case exposed the existing constant-only bit-read
+lowering. Runtime bit selection now has its own typed node. It retains declared
+ascending/nonzero ranges, signedness, exact wide indices and unknown/out-of-range
+X semantics. Static part selection and dynamic write targets retain their
+separate contracts. Implicit sensitivity also follows system-function arguments.
+Semantic analysis no longer rejects repeated input names or constant event
+expressions; computed lists report no incomplete static signal-only metadata.
+Event observation uses expression result changes and LSB edge classification,
+per IEEE 1364-2005 sections 9.7.2 and 9.7.4; bit selection follows section 4.2.1.
+[IEEE language reference](https://www.csie.nuk.edu.tw/~stpan/course/Verilog1964-2005.pdf).
+
+Process-local and analog-owned event dependency bindings, indexed part selects,
+repeat controls and dynamic write targets remain required work. Their present
+refusal is not qualification of those valid language features. The circuit-wide
+graph, scheduling/acceptance authority and all later approved milestones remain
+open. There is no vendor-parity or production-readiness claim at this increment.
+
+
+Five focused cases pass on the combined source: computed-event grammar, compiler
+expression/dependency execution with artifact round-trip, exact runtime bit
+indices, digital-host pulses/captures/clocks, and direct/computed mixed replay.
+Evidence includes masked input changes, changes to an unselected bit, a changed
+index, real expression value changes, repeated posedge/negedge terms, constant
+expressions, 96-bit signed indices, unknown/out-of-range X, same-activation
+pulses, source-order NBA delivery and late registration. The mixed fixture uses
+`$abstime` inside both arm and ADC event expressions at physical 0.65 ns and
+1.65 ns, with rejection/retry and accepted checkpoint replay. The independent
+2 ns timer is not delivered early. Budgets remain 1e-12 A and 1e-20 s.
+
+The first compiler failure identified the constant-only bit-read gap. Subsequent
+build corrections resolved one missing enum arm, a host borrow lifetime and a
+nonserializable semantic range type; the canonical range is now an explicit
+integer tuple. Failed checks were retried after those corrections. The host
+pair was rerun once after integrating concurrent `ce9503c7c` (analog switch
+branches/accepted-mode discontinuities) and `cd8a0420d` (deferred resistors and
+parameter directions). Combined schema 45 and cache format 82 are distinct
+from the switch-branch commit's schema 44/cache 81. No full suite, actual
+browser/tablet execution, performance qualification or vendor-reference run
+was performed for this increment.
+
+
+The final integration also preserves `60ddce38e` (direct/indirect parallel-branch
+conflict validation) and `9e025c3dd` (finite complex parameter quotients). The
+closing schema is 46 and cache format is 83, so artifacts from either concurrent
+schema 45 implementation cannot be mistaken for the combined contract. The five
+focused checks above ran before these last two commits; their changes concern
+parallel analog contributions and complex parameter evaluation, which these
+fixtures do not use. They were reviewed at integration, with final broad release
+verification still pending. The generator identity is refreshed against the
+final integrated compiler source.
+
+
+The authoritative generator completed all 43 built-ins against the final source.
+Only the generator manifest identity changed; the upstream switch-branch emitted
+bundle is preserved. Final generator digest:
+`80516a056315159b2ee0a0169a736b231a917158221eba7ec6c7673739d1ee7f`.
+The second refresh was required by a concurrent compiler-source change arriving
+during the first generation; it was not an additional simulation-test sweep.
 
 ## Next implementation work
 

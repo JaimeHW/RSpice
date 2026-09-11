@@ -593,6 +593,17 @@ impl FourStateValue {
         Some(magnitude)
     }
 
+    /// A declared bit index. Unknown or numerically out-of-range indices select X.
+    pub(crate) fn bit_index(&self, signed: bool) -> Option<i64> {
+        if self.width <= 64 {
+            return self
+                .to_integer(signed)
+                .and_then(|value| i64::try_from(value).ok());
+        }
+        self.to_wide_integer(signed)
+            .and_then(|value| i64::try_from(value).ok())
+    }
+
     /// IEEE 1364-2005, 9.7.1: X/Z means zero; negative delays become unsigned
     /// 64-bit time. Refuse known positive magnitudes outside that representation.
     pub(crate) fn delay_units(&self, signed: bool) -> Result<u64, &'static str> {

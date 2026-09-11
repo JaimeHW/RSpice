@@ -490,14 +490,12 @@ fn an_empty_event_control_is_refused_with_the_implicit_alternative() {
 }
 
 #[test]
-fn a_sensitivity_term_naming_no_signal_is_refused() {
-    let message = analyze_error(&digital_module(
-        "    reg q;\n\
-         \x20   always @(1 + 2) q = 1'b1;",
-    ));
+fn computed_event_expression_with_no_inputs_is_legal() {
+    let analyzed = analyze(&digital_module("reg q; always @(1 + 2) q = 1'b1;"));
     assert!(
-        message.contains("names no signal"),
-        "expected a sensitivity-term diagnostic, got {message:?}"
+        only_module(&analyzed).digital.processes[0]
+            .sensitivity
+            .is_none()
     );
 }
 

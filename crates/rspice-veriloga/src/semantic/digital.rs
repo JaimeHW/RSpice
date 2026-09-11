@@ -1295,7 +1295,7 @@ impl SemanticAnalyzer {
             Some(control) => match &control.sensitivity {
                 Sensitivity::Implicit => (None, true),
                 Sensitivity::Explicit(terms) => {
-                    (Some(self.resolve_sensitivity(terms, signals, index)), false)
+                    (self.resolve_sensitivity(terms, signals, index), false)
                 }
             },
             None => (None, false),
@@ -1320,21 +1320,16 @@ impl SemanticAnalyzer {
         terms: &[EventTerm],
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
-    ) -> Vec<AnalyzedSensitivity> {
+    ) -> Option<Vec<AnalyzedSensitivity>> {
         let mut resolved = Vec::new();
+        let mut computed = false;
         for term in terms {
             self.check_digital_expression(&term.signal, signals, index);
-            let Some(name) = Self::sensitivity_signal_name(&term.signal) else {
-                // A term that names no signal can never be triggered by one.
-                self.record_error_at(
-                    SemanticErrorKind::InvalidExpression(
-                        "sensitivity-list term names no signal, so nothing can trigger it"
-                            .to_string(),
-                    ),
-                    term.span,
-                );
+            let Expression::Identifier(identifier) = &term.signal else {
+                computed = true;
                 continue;
             };
+            let name = identifier.name.clone();
             // IEEE 1364-2005 section 9.7.2 classifies an edge from a scalar
             // transition, and table 5-2 does so over the four values a bit can
             // take; an edge on a vector is an edge on its least significant
@@ -1364,39 +1359,13 @@ impl SemanticAnalyzer {
                 );
                 continue;
             }
-            if let Some(previous) = resolved
-                .iter()
-                .find(|entry: &&AnalyzedSensitivity| entry.signal == name)
-            {
-                self.record_error_at(
-                    SemanticErrorKind::DuplicateSymbol {
-                        name: name.clone(),
-                        first_defined: previous.span,
-                    },
-                    term.span,
-                );
-                continue;
-            }
             resolved.push(AnalyzedSensitivity {
                 edge: term.edge,
                 signal: name,
                 span: term.span,
             });
         }
-        resolved
-    }
-
-    /// The single signal a sensitivity term watches.
-    ///
-    /// IEEE 1364-2005 section 9.7.4 allows an arbitrary expression, but a term
-    /// that watches more than one signal, or none, has no static list entry.
-    fn sensitivity_signal_name(expression: &Expression) -> Option<SmolStr> {
-        match expression {
-            Expression::Identifier(identifier) => Some(identifier.name.clone()),
-            Expression::ArrayAccess(access) => Some(access.array.clone()),
-            Expression::Digital(digital) => digital.base_name().cloned(),
-            _ => None,
-        }
+        if computed { None } else { Some(resolved) }
     }
 
     // ------------------------------------------------------------------

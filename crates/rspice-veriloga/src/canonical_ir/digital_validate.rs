@@ -173,6 +173,10 @@ impl CanonicalDigitalPlan {
                         ..
                     } => check_terms(terms)?,
                     CfgTerminator::Wait {
+                        wait: DigitalWait::Expressions(terms),
+                        ..
+                    } => check_expressions(function, terms)?,
+                    CfgTerminator::Wait {
                         wait: DigitalWait::Delay(value),
                         ..
                     } => {
@@ -224,6 +228,25 @@ impl CanonicalDigitalPlan {
                         {
                             return Err(error(
                                 "digital delay conversion has the wrong value domain or width",
+                            ));
+                        }
+                    }
+                    CfgValueKind::DigitalBitSelect {
+                        input,
+                        index,
+                        bounds,
+                        ..
+                    } => {
+                        let width = bounds.0.abs_diff(bounds.1).checked_add(1);
+                        if value.value_type != (CfgValueType::FourState { width: 1 })
+                            || !matches!(
+                                function.value(*index).value_type,
+                                CfgValueType::FourState { .. } | CfgValueType::Integer
+                            )
+                            || !matches!(function.value(*input).value_type, CfgValueType::FourState { width: w } if Some(u64::from(w)) == width)
+                        {
+                            return Err(error(
+                                "digital bit select has inconsistent input, index or declared bounds",
                             ));
                         }
                     }
@@ -295,6 +318,13 @@ impl CanonicalDigitalPlan {
                             }
                             check_terms(terms)?;
                         }
+                        if let CfgValueKind::DigitalNonblockingWrite {
+                            wait: Some(DigitalWait::Expressions(terms)),
+                            ..
+                        } = kind
+                        {
+                            check_expressions(function, terms)?;
+                        }
                         if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
                             && *region != DigitalSchedulingRegion::NonBlockingAssign
                         {
@@ -322,4 +352,72 @@ impl CanonicalDigitalPlan {
         }
         Ok(())
     }
+}
+
+/// Trace only the expression graph. A process's writes and resume parameters
+/// must never be replayed while observing an event. Uses an explicit stack so
+/// source-controlled expression depth cannot exhaust the host stack.
+pub(crate) fn event_expression_schedule(
+    function: &super::CfgFunction,
+    root: super::ids::ValueId,
+) -> Result<(Vec<super::ids::ValueId>, Vec<super::ids::DigitalSignalId>), String> {
+    let mut states = vec![0u8; function.values.len()];
+    let mut stack = vec![(root, false)];
+    let mut order = Vec::new();
+    let mut dependencies = std::collections::BTreeSet::new();
+    while let Some((id, finish)) = stack.pop() {
+        let index = usize::from(id);
+        let Some(value) = function.values.get(index) else {
+            return Err("event expression names an absent value".into());
+        };
+        if finish {
+            states[index] = 2;
+            order.push(id);
+            continue;
+        }
+        match states[index] {
+            2 => continue,
+            1 => return Err("event expression contains a value cycle".into()),
+            _ => {}
+        }
+        if value.value_type == CfgValueType::Effect
+            || matches!(
+                value.kind,
+                CfgValueKind::BlockParameter | CfgValueKind::DigitalAnalogPotential { .. }
+            )
+            || !(value.kind.is_digital() || matches!(value.kind, CfgValueKind::RealConstant(_)))
+        {
+            return Err(
+                "event expression needs event bindings for process-local or analog-owned storage"
+                    .into(),
+            );
+        }
+        if let CfgValueKind::DigitalSignalRead { signal }
+        | CfgValueKind::DigitalRealSignalRead { signal } = value.kind
+        {
+            dependencies.insert(signal);
+        }
+        states[index] = 1;
+        stack.push((id, true));
+        for operand in value.kind.operands().into_iter().rev() {
+            stack.push((operand, false));
+        }
+    }
+    Ok((order, dependencies.into_iter().collect()))
+}
+
+fn check_expressions(
+    function: &super::CfgFunction,
+    terms: &[DigitalEventExpression],
+) -> IrValidationResult {
+    if terms.is_empty() {
+        return Err(error("event expression list must not be empty"));
+    }
+    for term in terms {
+        event_expression_schedule(function, term.value).map_err(error)?;
+        if term.edge.is_some() && function.value(term.value).value_type == CfgValueType::Real {
+            return Err(error("edge event expression must have a bit-valued result"));
+        }
+    }
+    Ok(())
 }

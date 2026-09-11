@@ -85,12 +85,16 @@ use rspice_veriloga::canonical_ir::digital::{
     DigitalSignal, DigitalSignalKind,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
-    DigitalWaitRequest,
+    DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
+    DigitalEvalScratch, DigitalExpressionWait, DigitalRealDrive, DigitalWaitRequest,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 /// IEEE 1364-2005 table 4-1: the value one `wire` bit takes from two drivers.
 ///
@@ -145,6 +149,7 @@ pub(crate) const fn resolve_bit(left: FourStateBit, right: FourStateBit) -> Four
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SignalTransition {
     pub(crate) sequence: u64,
+    pub(crate) expressions: Vec<u64>,
     pub(crate) signal: DigitalSignalId,
     pub(crate) values: TransitionValues,
 }
@@ -299,6 +304,12 @@ struct ReadyUpdate {
 /// The signal store and driver resolution for one compiled digital plan.
 #[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
+    plan: Arc<CanonicalDigitalPlan>,
+    expression_waits: BTreeMap<u64, DigitalExpressionWait>,
+    expression_inputs: Vec<BTreeSet<u64>>,
+    expression_scratch: DigitalEvalScratch,
+    expression_error: Option<(usize, DigitalEvalError)>,
+    expression_captures: Vec<(u64, DigitalDeferredUpdate)>,
     /// Current value of every four-state signal, at its declared width.
     ///
     /// A real net has a slot here too, of width zero, and it is never read:
@@ -376,6 +387,72 @@ impl DigitalSignalStore {
         self.ready_update(capture.update, capture.sequence);
     }
 
+    pub(crate) fn register_expression_wait(&mut self, wait: DigitalExpressionWait) -> u64 {
+        let sequence = self.next_sequence();
+        self.insert_expression_wait(sequence, wait);
+        sequence
+    }
+
+    fn insert_expression_wait(&mut self, sequence: u64, wait: DigitalExpressionWait) {
+        for signal in wait.dependencies() {
+            self.expression_inputs[usize::from(*signal)].insert(sequence);
+        }
+        self.expression_waits.insert(sequence, wait);
+    }
+
+    pub(crate) fn take_expression_captures(&mut self) -> Vec<(u64, DigitalDeferredUpdate)> {
+        std::mem::take(&mut self.expression_captures)
+    }
+
+    pub(crate) fn take_expression_error(&mut self) -> Option<(usize, DigitalEvalError)> {
+        self.expression_error.take()
+    }
+
+    pub(crate) fn release_expression_capture(
+        &mut self,
+        sequence: u64,
+        update: DigitalDeferredUpdate,
+    ) {
+        self.ready_update(update, sequence);
+    }
+
+    /// Evaluate at the write, before a later write can hide an intermediate
+    /// value. Only subscriptions indexed by this input are visited.
+    fn observe_expressions(&mut self, signal: DigitalSignalId) -> Vec<u64> {
+        if self.expression_inputs[usize::from(signal)].is_empty() || self.expression_error.is_some()
+        {
+            return Vec::new();
+        }
+        let mut waits = std::mem::take(&mut self.expression_waits);
+        let mut scratch = std::mem::take(&mut self.expression_scratch);
+        let plan = Arc::clone(&self.plan);
+        let candidates: Vec<_> = self.expression_inputs[usize::from(signal)]
+            .iter()
+            .copied()
+            .collect();
+        let mut satisfied = Vec::new();
+        for id in candidates {
+            let wait = waits.get_mut(&id).expect("indexed expression wait");
+            match wait.observe(&plan, signal, self, &mut scratch) {
+                Ok(true) => {
+                    let wait = waits.remove(&id).unwrap();
+                    for input in wait.dependencies() {
+                        self.expression_inputs[usize::from(*input)].remove(&id);
+                    }
+                    satisfied.push(id);
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    self.expression_error = Some((usize::from(wait.process()), error));
+                    break;
+                }
+            }
+        }
+        self.expression_scratch = scratch;
+        self.expression_waits = waits;
+        satisfied
+    }
+
     pub(crate) fn set_activation_clock(&mut self, clock: DigitalClock) {
         self.activation_clock = Some(clock);
     }
@@ -387,7 +464,12 @@ impl DigitalSignalStore {
     /// holds the resolution of its drivers, which before any driver has run is
     /// `z` on every bit (section 7.9). An undriven net is therefore `z` and
     /// stays `z` until something outside the design writes it.
+    #[cfg(test)]
     pub(crate) fn new(plan: &CanonicalDigitalPlan) -> Self {
+        Self::from_plan(Arc::new(plan.clone()))
+    }
+
+    pub(crate) fn from_plan(plan: Arc<CanonicalDigitalPlan>) -> Self {
         let count = plan.signals.len();
         let mut widths = Vec::with_capacity(count);
         let mut kinds = Vec::with_capacity(count);
@@ -455,6 +537,12 @@ impl DigitalSignalStore {
             transitions: Vec::new(),
             analog_potentials: vec![None; plan.analog_probes.len()],
             activation_clock: None,
+            plan,
+            expression_waits: BTreeMap::new(),
+            expression_inputs: vec![BTreeSet::new(); count],
+            expression_scratch: DigitalEvalScratch::new(),
+            expression_error: None,
+            expression_captures: Vec::new(),
         }
     }
 
@@ -563,6 +651,16 @@ impl DigitalSignalStore {
         value: f64,
         plan: &CanonicalDigitalPlan,
     ) -> Result<(), StoreError> {
+        self.check_force_real(signal, plan)?;
+        self.publish_real(signal, value);
+        Ok(())
+    }
+
+    pub(crate) fn check_force_real(
+        &self,
+        signal: DigitalSignalId,
+        plan: &CanonicalDigitalPlan,
+    ) -> Result<(), StoreError> {
         let index = usize::from(signal);
         if index >= self.reals.len() {
             return Err(StoreError::UndeclaredSignal(signal));
@@ -579,7 +677,6 @@ impl DigitalSignalStore {
                 drivers,
             });
         }
-        self.publish_real(signal, value);
         Ok(())
     }
 
@@ -676,8 +773,10 @@ impl DigitalSignalStore {
         }
         let previous = std::mem::replace(&mut self.values[index], value.clone());
         let sequence = self.next_sequence();
+        let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
             sequence,
+            expressions,
             signal,
             values: TransitionValues::FourState {
                 previous,
@@ -699,8 +798,10 @@ impl DigitalSignalStore {
         }
         let previous = std::mem::replace(&mut self.reals[index], value);
         let sequence = self.next_sequence();
+        let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
             sequence,
+            expressions,
             signal,
             values: TransitionValues::Real {
                 previous,
@@ -845,6 +946,10 @@ impl DigitalEnvironment for DigitalSignalStore {
     fn defer_update(&mut self, mut update: DigitalDeferredUpdate) {
         let sequence = self.next_sequence();
         match update.wait.take() {
+            Some(DigitalWaitRequest::Expressions(wait)) => {
+                self.insert_expression_wait(sequence, wait);
+                self.expression_captures.push((sequence, update));
+            }
             Some(DigitalWaitRequest::Event(terms)) => self.event_captures.push(EventCapture {
                 sequence,
                 terms,
