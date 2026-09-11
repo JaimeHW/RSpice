@@ -61,10 +61,9 @@
 //! * A `real` **both** halves write is refused by name, citing section 7.3.
 //!   That is not a scheduling problem to be solved later; it is a program the
 //!   standard does not admit.
-//! * A `real` a process writes and the analog body **reads** is refused for a
-//!   reason that names what is missing: section 7.3.6.5 makes it the digital
-//!   value at the greatest tick at or before the analog time, and the compiled
-//!   analog body has no route to the digital signal store yet.
+//! * A `real` a process writes and the analog body **reads** also has a
+//!   canonical state-variable input. The mixed host samples the digital store
+//!   before analog evaluation and restores this input when rejecting a trial.
 //! * A `real` no process writes is left exactly where it was. So a pure-analog
 //!   module cannot be affected by any of it — it has no processes to satisfy
 //!   the first condition.

@@ -79,6 +79,16 @@ use super::veriloga_cache::CachedVerilogAModel;
 /// node's row is never singular when nothing else is attached to it.
 const MIXED_DAC_SOURCE_RESISTANCE: crate::Value = 20.0;
 
+/// Per-build specialization cache. Base model Arcs remain alive in the build's
+/// model table, so their addresses identify immutable artifacts for this scope.
+pub(super) type MixedSpecializations = std::collections::HashMap<
+    (usize, usize, Vec<(String, u64)>),
+    (
+        std::sync::Arc<rspice_veriloga::CompiledModel>,
+        std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    ),
+>;
+
 /// Which way one boundary port faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BoundaryDirection {
@@ -137,6 +147,7 @@ pub(super) fn try_build_mixed_signal_instance(
     netlist: &crate::Netlist,
     element: &crate::netlist::Element,
     entry: &CachedVerilogAModel,
+    specializations: &mut MixedSpecializations,
     connect_rules: &DesignConnectRules,
     temperature: f64,
     abort: &dyn crate::abort_signal::AbortSignal,
@@ -158,7 +169,83 @@ pub(super) fn try_build_mixed_signal_instance(
         return Ok(false);
     }
 
-    let model = &entry.model;
+    let mut overrides = Vec::with_capacity(params.len());
+    for (name, value) in params {
+        let value = match value {
+            crate::netlist::ParametricValue::Resolved(value) => *value,
+            crate::netlist::ParametricValue::Expression(expression) => {
+                crate::netlist::expr::eval_expression(expression, &netlist.params).map_err(
+                    |error| {
+                        SimulationError::Circuit(format!(
+                            "mixed instance '{}' parameter '{name}': {error}",
+                            element.name
+                        ))
+                    },
+                )?
+            }
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    "mixed instance '{}' parameter '{name}' requires a numeric value",
+                    element.name
+                )));
+            }
+        };
+        let index = entry.model.parameter_index(name).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "unknown mixed instance '{}' parameter '{name}'",
+                element.name
+            ))
+        })?;
+        overrides.push((entry.model.parameters[index].name.as_str(), value));
+    }
+    overrides.sort_by(|left, right| left.0.cmp(right.0));
+    let specialized = if overrides.is_empty() {
+        None
+    } else {
+        let key = (
+            std::sync::Arc::as_ptr(&entry.model) as usize,
+            artifact as *const _ as usize,
+            overrides
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_bits()))
+                .collect(),
+        );
+        if let Some(specialized) = specializations.get(&key) {
+            Some(specialized.clone())
+        } else {
+            let compiler =
+                rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+                    enable_ams: true,
+                    ..Default::default()
+                });
+            let runtime = compiler
+                .specialize_mixed_runtime(
+                    artifact,
+                    &overrides,
+                    &super::veriloga_cache::VerilogACompileControl { abort },
+                )
+                .map_err(|error| {
+                    if abort.is_aborted() {
+                        SimulationError::Aborted
+                    } else {
+                        SimulationError::Circuit(format!(
+                            "mixed instance '{}' parameter elaboration failed: {error}",
+                            element.name
+                        ))
+                    }
+                })?;
+            let specialized = (
+                std::sync::Arc::new(runtime.model),
+                std::sync::Arc::new(runtime.canonical_ir),
+            );
+            specializations.insert(key, specialized.clone());
+            Some(specialized)
+        }
+    };
+    let (model, artifact) = match &specialized {
+        Some((model, artifact)) => (model, artifact.as_ref()),
+        None => (&entry.model, artifact),
+    };
     let declared_nodes = declared_node_count(artifact);
     if element.nodes.len() != declared_nodes {
         // `num_terminals` is one per module port and says nothing about how
@@ -186,15 +273,6 @@ pub(super) fn try_build_mixed_signal_instance(
             element.name,
             element.nodes.len(),
             subckt_name,
-        )));
-    }
-    if !params.is_empty() {
-        return Err(SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' passes instance parameters, which this route does \
-             not carry into the module yet: the analog half's parameter defaults are resolved at \
-             construction and the discrete half's are folded into its compiled plan, so an \
-             override would reach one and not the other",
-            element.name
         )));
     }
 
@@ -226,6 +304,7 @@ pub(super) fn try_build_mixed_signal_instance(
         std::sync::Arc::clone(model),
         artifact,
         &layout.analog_terminals,
+        &overrides,
         SchedulerLimits::default(),
         circuit.generated_simulation_parameters,
         &super::veriloga_cache::VerilogACompileControl { abort },

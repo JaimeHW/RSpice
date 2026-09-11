@@ -1992,6 +1992,31 @@ impl VmContext {
         self.param_given.get(index).copied().unwrap_or(0) != 0
     }
 
+    /// Sample a discrete-owned input without restarting analog initialization.
+    pub(crate) fn sample_discrete_state(
+        &mut self,
+        index: usize,
+        value: f64,
+    ) -> Result<(), VmError> {
+        let position = self
+            .event_state_indices
+            .binary_search(&index)
+            .map_err(|_| {
+                VmError::InvalidRuntimeConfiguration(format!(
+                    "variable slot {index} is not transactional state"
+                ))
+            })?;
+        if !value.is_finite() {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "discrete state slot {index} is not finite"
+            )));
+        }
+        self.accepted_event_variables[position] = value;
+        self.variables[index] = value;
+        self.numerical_evaluation_valid = false;
+        Ok(())
+    }
+
     /// Set a variable value.
     pub fn set_variable(&mut self, index: usize, value: f64) {
         if self

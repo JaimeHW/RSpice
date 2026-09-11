@@ -800,7 +800,59 @@ impl VerilogACompiler {
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<RuntimeCompileReport> {
-        let analyzed = self.analyze_preprocessed(source_package, preprocessed, measurements)?;
+        self.compile_runtime_specialized_measured(
+            source_package,
+            preprocessed,
+            module_name,
+            &[],
+            qualifications,
+            measurements,
+        )
+    }
+
+    /// Elaborate one mixed instance from its authenticated source, applying
+    /// numeric overrides before ranges, hierarchy, and digital constants fold.
+    pub fn specialize_mixed_runtime(
+        &self,
+        artifact: &canonical_ir::CanonicalIrArtifact,
+        parameters: &[(&str, f64)],
+        control: &dyn PipelineControl,
+    ) -> CompileResult<RuntimeCompileReport> {
+        artifact.validate().map_err(Self::canonical_ir_error)?;
+        let source = artifact.parameter_source.as_deref().ok_or_else(|| {
+            CompileError::ModuleSelection("mixed artifact has no parameter elaboration source; recompile it with the current compiler".into())
+        })?;
+        let mut measurements = metrics::MetricsRecorder::with_control(
+            source.len(),
+            self.options.performance_budget.clone(),
+            control,
+        );
+        self.compile_runtime_specialized_measured(
+            &artifact.metadata.source_package,
+            source,
+            Some(&artifact.hir.module_name),
+            parameters,
+            RuntimeQualificationOptions::default(),
+            &mut measurements,
+        )
+    }
+
+    fn compile_runtime_specialized_measured(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        module_name: Option<&str>,
+        parameters: &[(&str, f64)],
+        qualifications: RuntimeQualificationOptions,
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<RuntimeCompileReport> {
+        let analyzed = self.analyze_preprocessed_with_parameters(
+            source_package,
+            preprocessed,
+            module_name,
+            parameters,
+            measurements,
+        )?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
@@ -983,6 +1035,17 @@ impl VerilogACompiler {
         source: &str,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<semantic::AnalyzedFile> {
+        self.analyze_preprocessed_with_parameters(source_package, source, None, &[], measurements)
+    }
+
+    fn analyze_preprocessed_with_parameters(
+        &self,
+        source_package: &str,
+        source: &str,
+        module_name: Option<&str>,
+        parameters: &[(&str, f64)],
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<semantic::AnalyzedFile> {
         let trace = compiler_phase_trace_enabled();
         let target = format!("Verilog-A compiler {source_package}");
 
@@ -1014,7 +1077,53 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Parse)?;
         trace_compiler_phase(trace, &target, "parse", None, None);
         let phase_started = web_time::Instant::now();
-        let source_file = Parser::new(&tokens).parse()?;
+        let mut source_file = Parser::new(&tokens).parse()?;
+        if !parameters.is_empty() {
+            let selected = source_file
+                .items
+                .iter_mut()
+                .find_map(|item| match item {
+                    ast::Item::Module(module) if Some(module.name.as_str()) == module_name => {
+                        Some(module)
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    CompileError::ModuleSelection(
+                        "parameter specialization requires a selected module".into(),
+                    )
+                })?;
+            let mut seen = std::collections::HashSet::new();
+            for &(name, value) in parameters {
+                if !value.is_finite() || !seen.insert(name) {
+                    return Err(CompileError::ModuleSelection(format!(
+                        "parameter override `{name}` must be unique and finite"
+                    )));
+                }
+                let parameter = selected
+                    .parameters
+                    .iter_mut()
+                    .find(|parameter| parameter.name == name)
+                    .ok_or_else(|| {
+                        CompileError::ModuleSelection(format!(
+                            "unknown parameter `{name}` in module `{}`",
+                            selected.name
+                        ))
+                    })?;
+                if parameter.param_type == ast::ParamType::String
+                    || !parameter.dimensions.is_empty()
+                {
+                    return Err(CompileError::ModuleSelection(format!(
+                        "parameter `{name}` requires a scalar numeric override"
+                    )));
+                }
+                parameter.default = Some(ast::Expression::Number(ast::NumberLit {
+                    value,
+                    raw: format!("{value:e}").into(),
+                    span: parameter.span,
+                }));
+            }
+        }
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
         measurements.metrics_mut().top_level_item_count =
             metrics::usize_to_u64(source_file.items.len());
@@ -1115,7 +1224,7 @@ impl VerilogACompiler {
         )?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
         let phase_started = web_time::Instant::now();
-        let artifact = canonical_ir::CanonicalIrArtifact::from_parts_with_noise_plan(
+        let mut artifact = canonical_ir::CanonicalIrArtifact::from_parts_with_noise_plan(
             metadata,
             hir,
             mir,
@@ -1123,6 +1232,9 @@ impl VerilogACompiler {
         )
         .map_err(Self::canonical_ir_error)?
         .with_digital(digital);
+        if !artifact.digital.is_empty() && !artifact.hir.parameters.is_empty() {
+            artifact.parameter_source = Some(source.into());
+        }
         measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
         Ok(artifact)
     }
@@ -1210,9 +1322,9 @@ impl VerilogACompiler {
     ///
     /// Preprocessing runs first, so a `connectmodule` reached through an
     /// `` `include `` is read like any other. What this deliberately does not
-    /// do is cache: the caller decides whether a file is worth reading, and
-    /// the intended filter is the cheapest one there is — a file whose text
-    /// does not contain the word `connectrules` declares no rules.
+    /// do is cache: the caller decides whether a file is worth reading. A raw
+    /// source scan must conservatively include sources containing directives or
+    /// macro invocations, which can supply rules through an include or expansion.
     pub fn connect_specification_from_file(
         &self,
         path: &std::path::Path,
@@ -1237,6 +1349,19 @@ impl VerilogACompiler {
         let source_id = SourceId::new(0);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
         let source_file = Parser::new(&tokens).parse()?;
+        if !source_file
+            .items
+            .iter()
+            .any(|item| matches!(item, ast::Item::ConnectRules(_)))
+        {
+            return Ok(ConnectSpecification {
+                declares_module: source_file
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, ast::Item::Module(_))),
+                rules: Default::default(),
+            });
+        }
         let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
         Ok(ConnectSpecification {
             declares_module: !analyzed.modules.is_empty(),

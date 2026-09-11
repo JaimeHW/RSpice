@@ -396,6 +396,9 @@ pub(crate) struct DigitalHost {
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
     inactive: Vec<usize>,
+    /// Ready activations caused by an analog event. Its reported tick may be
+    /// ahead of physical analog time; unrelated timers at that tick stay queued.
+    analog_ready: Option<Vec<TargetId>>,
     /// The kernel's id for each process's driver, interned once at
     /// construction. The [`EventTarget`] behind it — the strings an
     /// oscillation diagnostic prints — stays in the kernel, and an activation
@@ -482,6 +485,7 @@ impl DigitalHost {
             ],
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
+            analog_ready: None,
             targets,
             process_of_target,
             fired: Vec::new(),
@@ -557,10 +561,15 @@ impl DigitalHost {
     /// the suspension after it. All three kinds therefore start the same way,
     /// and the host does not consult the kind to decide.
     pub(crate) fn start(&mut self) -> Result<(), DigitalRunError> {
+        self.prepare_start()?;
+        self.settle(0)
+    }
+
+    pub(crate) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
         for index in 0..self.slots.len() {
             self.queue(index, 0)?;
         }
-        self.settle(0)
+        Ok(())
     }
 
     /// Write a signal from outside the design and settle the consequences.
@@ -600,6 +609,26 @@ impl DigitalHost {
         }
         self.dispatch(tick)?;
         self.settle(tick)
+    }
+
+    /// Settle only the zero-delay causal consequences of an analog crossing.
+    /// Positive delays are still scheduled relative to its rounded digital
+    /// timestamp, but are consumed only when analog time reaches their tick.
+    pub(crate) fn force_many_from_analog(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
+        for (signal, value) in drives {
+            self.store.check_force(*signal, value, &self.plan)?;
+        }
+        for (signal, value) in drives {
+            self.store.force(*signal, value.clone(), &self.plan)?;
+        }
+        self.analog_ready = Some(Vec::new());
+        let result = self.dispatch(tick).and_then(|()| self.settle(tick));
+        self.analog_ready = None;
+        result
     }
 
     /// Publish one converged analog solution's probe values into the store.
@@ -654,7 +683,14 @@ impl DigitalHost {
     fn settle_into(&mut self, tick: u64, fired: &mut Vec<TargetId>) -> Result<(), DigitalRunError> {
         loop {
             fired.clear();
-            self.scheduler.run_due_event_targets(tick, fired)?;
+            if let Some(ready) = self.analog_ready.as_mut() {
+                fired.append(ready);
+                for target in fired.iter() {
+                    self.scheduler.note_external_activation(tick, *target)?;
+                }
+            } else {
+                self.scheduler.run_due_event_targets(tick, fired)?;
+            }
 
             if fired.is_empty() {
                 if !self.promote_region(tick)? {
@@ -691,7 +727,7 @@ impl DigitalHost {
 
             if region == DigitalSchedulingRegion::Inactive && !self.inactive.is_empty() {
                 for index in std::mem::take(&mut self.inactive) {
-                    self.queue(index, tick)?;
+                    self.queue_ready(index, tick)?;
                 }
                 promoted = true;
             }
@@ -866,7 +902,7 @@ impl DigitalHost {
                     };
                     if satisfied {
                         self.unsubscribe(index);
-                        self.queue(index, tick)?;
+                        self.queue_ready(index, tick)?;
                         // `unsubscribe` removed this entry, so the next
                         // candidate has slid into `position`.
                         continue;
@@ -896,6 +932,19 @@ impl DigitalHost {
             EventValue::Digital(DigitalValue::default()),
         );
         Ok(())
+    }
+
+    fn queue_ready(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        if let Some(ready) = self.analog_ready.as_mut() {
+            self.slots[index].status = ProcessStatus::Queued;
+            let target = self.targets[index];
+            if !ready.contains(&target) {
+                ready.push(target);
+            }
+            Ok(())
+        } else {
+            self.queue(index, tick)
+        }
     }
 
     /// Subscribe a process to every net its sensitivity list names.

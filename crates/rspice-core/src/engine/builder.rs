@@ -5036,6 +5036,8 @@ impl Engine {
         // `.veriloga` files as the models so that each is opened once.
         #[cfg(feature = "veriloga")]
         let mut design_connect_rules = connect_modules::DesignConnectRules::default();
+        #[cfg(feature = "veriloga")]
+        let mut mixed_specializations = mixed_modules::MixedSpecializations::default();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
@@ -7595,6 +7597,7 @@ impl Engine {
                                 netlist,
                                 element,
                                 entry,
+                                &mut mixed_specializations,
                                 &design_connect_rules,
                                 self.config.temperature,
                                 abort,

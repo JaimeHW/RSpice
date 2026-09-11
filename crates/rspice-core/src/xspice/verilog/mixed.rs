@@ -561,6 +561,7 @@ struct TrialScratch {
 /// makes an opened trial cost no allocation at all.
 #[derive(Clone, Default)]
 struct TrialVectors {
+    discrete_inputs: Vec<f64>,
     transition_times: Vec<Option<f64>>,
     sampled_adc_voltages: Vec<f64>,
     probe_values: Vec<f64>,
@@ -575,6 +576,7 @@ struct TrialVectors {
 #[derive(Clone)]
 struct MixedState {
     digital: MixedCell<DigitalHost>,
+    initial_digital: Option<MixedCell<DigitalHost>>,
     bridges: MixedCell<Bridges>,
     /// Differential voltage each A/D bridge saw at the last accepted timepoint,
     /// which is the far end of the interval a threshold crossing is
@@ -585,15 +587,8 @@ struct MixedState {
     accepted_adc_transition_times: Vec<Option<f64>>,
     /// The continuous-net potential each of the plan's probes read at the last
     /// accepted timepoint, parallel to `MixedSignalHost::analog_probes`.
-    ///
-    /// This is the whole of Verilog-AMS LRM 2.4 section 7.3.6.3's answer for a
-    /// process that wakes on its *own* schedule — a `#delay` or a digital
-    /// edge — rather than on an analog one: at the moment such a process runs
-    /// there is no Newton candidate at this timepoint yet, and the most recent
-    /// analog value that exists is the one the solver last committed. A
-    /// process woken by an A/D transition instead reads the converged
-    /// candidate, because `settle_analog_bridges` refreshes the bank from it
-    /// before publishing the transition that wakes the process.
+    /// Scheduled activations sample the trial's candidate solution; this bank
+    /// provides accepted history and the initial values of explicit host drives.
     accepted_probe_values: Vec<f64>,
     /// Recent accepted history of each A/D boundary net, parallel to
     /// `bridges.adc`.
@@ -608,6 +603,7 @@ struct MixedState {
 
 #[derive(Clone)]
 struct ActiveTrial {
+    start_digital: bool,
     /// The digital host as it stood when the trial opened — the whole of what
     /// a rejected trial has to put back.
     ///
@@ -718,9 +714,7 @@ pub struct MixedSignalHost {
     /// unconditionally, which was 14.5 % of that run spent copying a device to
     /// throw the copy away.
     ///
-    /// It is out here because **a rejected trial has nothing in the device to
-    /// restore**, and that is a property of the runtime rather than a hope
-    /// about one. Every stateful analog operator evaluates its candidate from
+    /// Stateful analog operators evaluate their candidates from
     /// its own *committed* record — `filters::…::candidate_evaluation` opens
     /// with a clone of `self.committed`, the integration slots read
     /// `state_values_prev`, and `VmContext::apply_validated_advance_state` is
@@ -728,7 +722,9 @@ pub struct MixedSignalHost {
     /// trial reaches that promotion only through
     /// [`Self::accept_trial`], so a trial that is rejected leaves the accepted
     /// state bit-identical and leaves behind only candidate state that the
-    /// next evaluation recomputes from the same accepted record.
+    /// next evaluation recomputes from the same accepted record. The small
+    /// bank of externally supplied discrete variables is restored separately
+    /// from `TrialVectors::discrete_inputs`, alongside scalar solver inputs.
     ///
     /// The plain analog route has always relied on exactly this: a rejected
     /// transient timestep re-runs `prepare_veriloga_timepoint` and re-stamps
@@ -756,6 +752,7 @@ pub struct MixedSignalHost {
     /// which is what makes the whole cross-domain read path cost such a module
     /// nothing.
     analog_probes: Vec<AnalogProbeWiring>,
+    discrete_inputs: Vec<DiscreteAnalogInput>,
     /// Every vector boundary port, as a bus over the deck nodes its bits
     /// landed on. Empty for a module whose discrete ports are all scalar,
     /// which is every module this route carried before vectors were bridged.
@@ -766,6 +763,14 @@ pub struct MixedSignalHost {
     boundary_buses: Vec<BoundaryBus>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
+}
+
+#[derive(Clone)]
+struct DiscreteAnalogInput {
+    signal: DigitalSignalId,
+    variable: usize,
+    signed: bool,
+    name: String,
 }
 
 impl fmt::Debug for MixedSignalHost {
@@ -853,6 +858,7 @@ impl MixedSignalHost {
             model,
             canonical_ir,
             terminal_nodes,
+            &[],
             scheduler_limits,
             Default::default(),
             control,
@@ -874,6 +880,7 @@ impl MixedSignalHost {
         model: Arc<rspice_veriloga::CompiledModel>,
         canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
         terminal_nodes: &[usize],
+        parameters: &[(&str, f64)],
         scheduler_limits: SchedulerLimits,
         simulation_parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
         control: &dyn rspice_veriloga::PipelineControl,
@@ -897,7 +904,7 @@ impl MixedSignalHost {
             model,
             Some(canonical_ir),
             terminal_nodes,
-            &[],
+            parameters,
             simulation_parameters,
             control,
         );
@@ -922,6 +929,25 @@ impl MixedSignalHost {
         }
 
         let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
+        let discrete_inputs = canonical_ir
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .filter_map(|variable| {
+                canonical_ir
+                    .digital
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == variable.name)
+                    .map(|signal| DiscreteAnalogInput {
+                        signal: signal.id,
+                        variable: usize::from(variable.id),
+                        signed: signal.signed,
+                        name: signal.name.to_string(),
+                    })
+            })
+            .collect();
         let max_circuit_node = analog_solver_nodes(&analog).max().unwrap_or(0);
 
         let resolution = TimeResolution::new(TIME_UNIT_EXPONENT).map_err(DigitalRunError::from)?;
@@ -944,6 +970,7 @@ impl MixedSignalHost {
             analog_inputs: AnalogSolverInputs::analysis_start(2),
             state: MixedState {
                 digital: MixedCell::new(digital),
+                initial_digital: None,
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
                 accepted_adc_transition_times: Vec::new(),
@@ -958,6 +985,7 @@ impl MixedSignalHost {
             digital_started: false,
             trial: None,
             analog_probes,
+            discrete_inputs,
             boundary_buses: Vec::new(),
             max_circuit_node,
             max_bridge_iterations,
@@ -986,6 +1014,7 @@ impl MixedSignalHost {
         self.analog_inputs = AnalogSolverInputs::analysis_start(analysis);
         self.analog_inputs.phase = phase;
         self.state.digital = MixedCell::new(self.state.digital.fresh());
+        self.state.initial_digital = None;
         self.state.accepted_adc_voltages.fill(0.0);
         self.state.accepted_adc_transition_times.fill(None);
         self.state.accepted_probe_values.fill(0.0);
@@ -1035,9 +1064,18 @@ impl MixedSignalHost {
             });
         }
         if !self.digital_started {
+            if !self.analog_probes.is_empty() {
+                self.state.initial_digital = Some(self.state.digital.clone());
+            }
             let digital = self.state.digital.make_mut();
             digital.sample_analog_potentials(&self.state.accepted_probe_values);
-            digital.start()?;
+            if self.analog_probes.is_empty() {
+                digital.start()?;
+            } else {
+                // Initial processes that read analog quantities must wait for
+                // the time-zero candidate, just like a later scheduled read.
+                digital.prepare_start()?;
+            }
             self.digital_started = true;
         }
         Ok(())
@@ -1401,35 +1439,24 @@ impl MixedSignalHost {
             timestep_seconds,
             integration,
         };
-        let prepare = (|| {
-            // Ask before taking the mutable view. `advance_to` on a tick with
-            // nothing due is a no-op, but taking the view is not: it copies the
-            // whole digital host out of the rollback image that was just
-            // captured. Most timepoints of an LTE-controlled transient have no
-            // digital event due, and this is the predicate that lets them cost
-            // nothing — the same shape as the XSPICE drain's
-            // `has_event_at_or_before`.
-            if self
-                .state
-                .digital
-                .next_tick()
-                .is_some_and(|next| next <= tick)
+        // A due process can read V(...). Defer its activation until stamp or
+        // bridge settling supplies this trial's candidate analog solution.
+        // Each Newton probe starts from `rollback`, so the process is replayed
+        // against the current candidate instead of retaining an earlier read.
+        let prepare = self.apply_analog_inputs(inputs).and_then(|()| {
+            // A digital-only activation has no analog read to defer. Preserve
+            // its immediate begin-trial behavior without copying an idle host.
+            if self.analog_probes.is_empty()
+                && self
+                    .state
+                    .digital
+                    .next_tick()
+                    .is_some_and(|next| next <= tick)
             {
-                // The slot about to run may contain a process that probes a
-                // continuous net. Nothing has been solved at this timepoint
-                // yet, so what it reads is the last accepted analog solution —
-                // Verilog-AMS LRM 2.4 section 7.3.6.3's "analog value
-                // calculated for the time corresponding to a real promotion of
-                // the digital time", held from the last timepoint at or before
-                // this tick. Refreshed before `advance_to` rather than inside
-                // it, so every process in the slot sees one solution.
-                let probes = self.state.accepted_probe_values.clone();
-                let digital = self.state.digital.make_mut();
-                digital.sample_analog_potentials(&probes);
-                digital.advance_to(tick)?;
+                self.state.digital.make_mut().advance_to(tick)?;
             }
-            self.apply_analog_inputs(inputs)
-        })();
+            Ok(())
+        });
         if let Err(error) = prepare {
             self.state.digital = rollback;
             // These are inputs this device was holding a moment ago, so
@@ -1440,11 +1467,24 @@ impl MixedSignalHost {
             return Err(error);
         }
         self.analog_inputs = inputs;
+        let start_digital =
+            time_seconds == 0.0 && !self.state.started && self.state.initial_digital.is_some();
+        if start_digital {
+            self.state.digital = self.state.initial_digital.as_ref().unwrap().clone();
+        }
         // Refilled rather than allocated. `clone_from` and `resize` keep the
         // allocation the last trial handed back, and every one of these is the
         // same length on every trial of a run, so an opened trial allocates
         // nothing.
         let mut vectors = std::mem::take(&mut self.scratch.trial);
+        vectors.discrete_inputs.clear();
+        vectors
+            .discrete_inputs
+            .extend(self.discrete_inputs.iter().map(|input| {
+                self.analog
+                    .discrete_state_value(input.variable)
+                    .expect("canonical discrete input is a state variable")
+            }));
         vectors
             .transition_times
             .clone_from(&self.state.accepted_adc_transition_times);
@@ -1463,6 +1503,7 @@ impl MixedSignalHost {
             .dac_moved
             .resize(self.state.bridges.dac.len(), false);
         self.trial = Some(ActiveTrial {
+            start_digital,
             rollback,
             analog_inputs: previous_inputs,
             tick,
@@ -1479,6 +1520,63 @@ impl MixedSignalHost {
     /// Whether a trial is open.
     pub(crate) fn trial_active(&self) -> bool {
         self.trial.is_some()
+    }
+
+    fn advance_trial_digital(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
+        let tick = self.active_tick()?;
+        let start = self.trial.as_ref().is_some_and(|trial| trial.start_digital);
+        if start
+            || self
+                .state
+                .digital
+                .next_tick()
+                .is_some_and(|next| next <= tick)
+        {
+            fill_analog_probes(
+                &self.analog_probes,
+                circuit_voltages,
+                &mut self.scratch.probes,
+            );
+            let digital = self.state.digital.make_mut();
+            digital.sample_analog_potentials(&self.scratch.probes);
+            if start {
+                digital.start()?;
+                self.trial.as_mut().unwrap().start_digital = false;
+            }
+            digital.advance_to(tick)?;
+        }
+        Ok(())
+    }
+
+    fn sample_discrete_inputs(&mut self) -> Result<bool, MixedSignalError> {
+        let mut changed = false;
+        for input in &self.discrete_inputs {
+            let value = if self.state.digital.is_real(input.signal) {
+                self.state.digital.read_real(input.signal)
+            } else {
+                self.state
+                    .digital
+                    .read(input.signal)
+                    .and_then(|value| value.to_integer(input.signed))
+                    .map(|value| value as f64)
+            };
+            let value = value.filter(|value| value.is_finite()).ok_or_else(|| {
+                MixedSignalError::InvalidBridge {
+                    detail: format!(
+                        "analog read of discrete signal `{}` has an X, Z, or non-finite value",
+                        input.name
+                    ),
+                }
+            })?;
+            if self.analog.discrete_state_value(input.variable) != Some(value) {
+                self.analog
+                    .make_mut()
+                    .sample_discrete_state(input.variable, value)
+                    .map_err(analog_error)?;
+                changed = true;
+            }
+        }
+        Ok(changed)
     }
 
     /// Push one set of solver inputs into the analog device.
@@ -1560,6 +1658,8 @@ impl MixedSignalHost {
     {
         self.active_tick()?;
         self.validate_solution(circuit_voltages)?;
+        self.advance_trial_digital(circuit_voltages)?;
+        self.sample_discrete_inputs()?;
         self.analog
             .make_mut()
             .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
@@ -1573,7 +1673,8 @@ impl MixedSignalHost {
             let level = match value.bit(bridge.bit) {
                 FourStateBit::Zero => bridge.low,
                 FourStateBit::One => bridge.high,
-                FourStateBit::Unknown | FourStateBit::HighImpedance => bridge.undefined_level(),
+                FourStateBit::Unknown => bridge.undefined_level(),
+                FourStateBit::HighImpedance => continue,
             };
             let conductance = 1.0 / bridge.resistance;
             // Ground has no matrix row, so a bridge referred to it stamps only
@@ -1625,17 +1726,9 @@ impl MixedSignalHost {
     /// and here to reorder against, because [`Self::begin_trial`] has already
     /// refused a step that passed a scheduled event.
     ///
-    /// One consequence to know when reading this, because it is not obvious
-    /// from the clamp: publishing forward also *opens* that later slot.
-    /// [`DigitalHost::force_many`] settles the digital world to whichever tick
-    /// it is handed, so an event already dated at the tick after this trial's
-    /// runs in the same settle, at an analog time short of its own tick's
-    /// seconds. The overshoot is bounded by one tick, because a crossing is
-    /// interpolated inside the trial's own step and so cannot round further
-    /// than the tick above it, and it is confined to the trial: a rejected
-    /// step restores the scheduler with the rest of the state.
-    ///
-    /// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
+    /// Only the crossing's zero-delay consequences execute at this physical
+    /// time. Its rounded reporting tick does not authorize draining unrelated
+    /// timers; those remain pending until analog time reaches their timestamp.
     pub fn settle_analog_bridges(
         &mut self,
         circuit_voltages: &[f64],
@@ -1687,6 +1780,23 @@ impl MixedSignalHost {
         circuit_voltages: &[f64],
     ) -> Result<bool, MixedSignalError> {
         read_dac_bits(&self.state, &mut scratch.dac_before)?;
+        fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
+        let start = self.trial.as_ref().is_some_and(|trial| trial.start_digital);
+        if start
+            || self
+                .state
+                .digital
+                .next_tick()
+                .is_some_and(|next| next <= tick)
+        {
+            let digital = self.state.digital.make_mut();
+            digital.sample_analog_potentials(&scratch.probes);
+            if start {
+                digital.start()?;
+                self.trial.as_mut().unwrap().start_digital = false;
+            }
+            digital.advance_to(tick)?;
+        }
         scratch.bit_drives.clear();
         scratch.drives.clear();
         scratch.crossings.clear();
@@ -1760,7 +1870,7 @@ impl MixedSignalHost {
         if !scratch.drives.is_empty() {
             let digital = self.state.digital.make_mut();
             digital.sample_analog_potentials(&scratch.probes);
-            digital.force_many(&scratch.drives, publish_tick)?;
+            digital.force_many_from_analog(&scratch.drives, publish_tick)?;
             if let Some(trial) = self.trial.as_mut() {
                 for &(index, crossing) in &scratch.crossings {
                     trial.vectors.transition_times[index] = Some(crossing);
@@ -1769,7 +1879,7 @@ impl MixedSignalHost {
             }
         }
         read_dac_bits(&self.state, &mut scratch.dac_after)?;
-        let changed = scratch.dac_before != scratch.dac_after;
+        let changed = self.sample_discrete_inputs()? || scratch.dac_before != scratch.dac_after;
         if let Some(trial) = self.trial.as_mut() {
             // Which D/A nets moved, not merely that one did. The boundary
             // diagnostic names participants, and a `!=` on the whole vector
@@ -1855,6 +1965,7 @@ impl MixedSignalHost {
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
+        self.state.initial_digital = None;
         std::mem::swap(
             &mut self.state.accepted_adc_transition_times,
             &mut trial.vectors.transition_times,
@@ -1892,6 +2003,16 @@ impl MixedSignalHost {
     /// reporting is the caller's rather than a consequence of it.
     fn unwind(&mut self, trial: ActiveTrial) {
         self.state.digital = trial.rollback;
+        for (input, value) in self
+            .discrete_inputs
+            .iter()
+            .zip(&trial.vectors.discrete_inputs)
+        {
+            let _ = self
+                .analog
+                .make_mut()
+                .sample_discrete_state(input.variable, *value);
+        }
         let _ = self.undo_analog_inputs(trial.analog_inputs);
         self.scratch.trial = trial.vectors;
     }
@@ -2606,6 +2727,42 @@ endmodule
             .expect("bridges settle")
         {}
         host.accept_trial().expect("accept a quiet trial");
+    }
+
+    #[test]
+    fn discrete_analog_inputs_restore_on_rejection_and_checkpoint() {
+        let source = "module shared(p); inout p; electrical p; real state; initial begin state=0.25; #1 state=1.25; end analog I(p)<+state; endmodule";
+        let mut host =
+            MixedSignalHost::compile(source, None, "x", &[1], SchedulerLimits::default()).unwrap();
+        let stamp = |host: &mut MixedSignalHost| {
+            while host.settle_analog_bridges(&[0.0]).unwrap() {}
+            let mut rhs = 0.0;
+            host.stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+                .unwrap();
+            rhs
+        };
+        begin(&mut host, 0);
+        assert_eq!(stamp(&mut host), -0.25);
+        host.accept_trial().unwrap();
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host), -1.25);
+        host.reject_trial().unwrap();
+        assert_eq!(
+            host.analog
+                .discrete_state_value(host.discrete_inputs[0].variable),
+            Some(0.25)
+        );
+        assert_eq!(
+            host.analog.checkpoint_state().unwrap(),
+            checkpoint.analog_checkpoint
+        );
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host), -1.25);
+        host.accept_trial().unwrap();
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host), -1.25);
     }
 
     #[test]

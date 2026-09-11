@@ -3781,6 +3781,25 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Supply a discrete-domain input through its canonical state-variable lane.
+    /// The mixed host restores these inputs when rejecting a speculative trial.
+    pub fn sample_discrete_state(&mut self, index: usize, value: f64) -> Result<(), VmError> {
+        self.context.sample_discrete_state(index, value)
+    }
+
+    /// Read an input before opening a speculative mixed trial.
+    pub fn discrete_state_value(&self, index: usize) -> Option<f64> {
+        let position = self
+            .model
+            .event_state_variables
+            .binary_search(&index)
+            .ok()?;
+        self.context
+            .accepted_event_variables()
+            .get(position)
+            .copied()
+    }
+
     /// Set simulation time
     pub fn set_time(&mut self, time: f64) {
         self.try_set_time(time).unwrap_or_else(|err| {

@@ -36,18 +36,15 @@
 //!   `event_expression` production that admits `analog_event_functions`:
 //!   nothing subscribes a process to an analog event yet, so an `a2d` can read
 //!   the analog side but cannot be *woken* by it;
-//! * a `d2a` written the other way — a discrete process setting a `real` that
-//!   an `analog` block contributes through `transition` — is refused because
-//!   the analog body *reads* a variable the discrete half owns. Section 7.3
-//!   allows that read and section 7.3.6.5 fixes its value, so the refusal names
-//!   the seam rather than the program: the compiled analog body has no route to
-//!   the digital signal store.
+//! * a discrete process setting a `real` that an `analog` block contributes
+//!   through `transition` uses a canonical state-variable input. The mixed
+//!   host supplies that input from the discrete store during each trial.
 //!
-//! Neither refusal is about time any more. The host that runs a connect
+//! The remaining event-subscription refusal is not about time. The host that runs a connect
 //! module's discrete half (`rspice_core`'s
 //! `xspice::verilog::MixedSignalHost`) floors an LTE-controlled trial time onto
-//! its tick grid and runs both domains at it, so the two halves do meet — what
-//! they cannot yet do is hand each other a value in these two positions.
+//! its tick grid and runs both domains at it. Arbitrary analog-event functions
+//! in discrete sensitivity lists still require an event subscription route.
 //!
 //! # Where the behaviour is instead
 //!

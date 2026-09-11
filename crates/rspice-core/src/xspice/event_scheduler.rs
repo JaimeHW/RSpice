@@ -1186,6 +1186,28 @@ impl EventScheduler {
         self.drain_due(bound_tick, |_, event, _| fired.push(event.target))
     }
 
+    /// Account for an immediate analog-caused activation without draining any
+    /// timer at its rounded reporting tick.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn note_external_activation(
+        &mut self,
+        tick: u64,
+        target: TargetId,
+    ) -> Result<(), SchedulerError> {
+        self.open_due_slot(tick);
+        self.slot_events_executed += 1;
+        self.queues.note_activation(target);
+        if self.slot_events_executed > self.limits.max_events_per_tick {
+            return Err(self.oscillation(
+                tick,
+                OscillationCause::EventLimit,
+                self.slot_delta_cycles,
+                self.slot_events_executed,
+            ));
+        }
+        Ok(())
+    }
+
     /// The one drain loop both due-slot modes run.
     fn drain_due<F>(
         &mut self,

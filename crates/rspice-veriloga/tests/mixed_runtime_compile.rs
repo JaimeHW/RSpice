@@ -13,6 +13,74 @@ endmodule
 "#;
 
 #[test]
+fn mixed_parameter_specialization_survives_serialization_and_changes_port_shape() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = "module sized(q); parameter integer WIDTH=2; output [WIDTH-1:0] q; reg [WIDTH-1:0] q; initial q=1; endmodule";
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let bytes = serde_json::to_vec(&runtime.canonical_ir).unwrap();
+    let artifact = serde_json::from_slice(&bytes).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &artifact,
+            &[("WIDTH", 4.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    specialized.validate_integrity().unwrap();
+    assert_eq!(specialized.canonical_ir.digital.signals[0].width, 4);
+    assert_eq!(runtime.canonical_ir.digital.signals[0].width, 2);
+    assert_ne!(
+        runtime.canonical_ir.digital_identity,
+        specialized.canonical_ir.digital_identity
+    );
+    for parameters in [
+        vec![("missing", 1.0)],
+        vec![("WIDTH", f64::NAN)],
+        vec![("WIDTH", 2.0), ("WIDTH", 3.0)],
+    ] {
+        assert!(
+            compiler
+                .specialize_mixed_runtime(
+                    &artifact,
+                    &parameters,
+                    &rspice_veriloga::NoPipelineControl
+                )
+                .is_err()
+        );
+    }
+    let mut corrupted = runtime.canonical_ir;
+    corrupted.parameter_source = Some(source.replace("WIDTH=2", "WIDTH=3").into());
+    assert!(corrupted.validate().is_err());
+}
+
+#[test]
+fn shared_discrete_inputs_reject_dual_writers_and_unrepresentable_widths() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (source, expected) in [
+        (
+            "module dual(p); inout p; electrical p; reg state; initial state=0; analog begin state=1; I(p)<+state; end endmodule",
+            "cannot be written by the analog body",
+        ),
+        (
+            "module wide(p); inout p; electrical p; reg [63:0] state; initial state=0; analog I(p)<+state; endmodule",
+            "32-bit signed integer range",
+        ),
+    ] {
+        let error = compiler
+            .compile_runtime(source, None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
 fn mixed_runtime_compilation_is_explicit_and_retains_both_domains() {
     let refused = VerilogACompiler::new(CompilerOptions::default())
         .compile_runtime(MIXED, None)

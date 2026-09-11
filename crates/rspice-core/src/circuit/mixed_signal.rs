@@ -349,9 +349,8 @@ impl CircuitData {
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
-            let committed = host
-                .stamp(voltages, |_, _, _| {}, |_, _| {})
-                .and_then(|()| settle_to_quiet(host, voltages))
+            let committed = settle_to_quiet(host, voltages)
+                .and_then(|()| host.stamp(voltages, |_, _, _| {}, |_, _| {}))
                 .and_then(|()| {
                     let rising = host.analog_device().discontinuity_rising();
                     host.accept_trial()?;
@@ -390,8 +389,8 @@ impl CircuitData {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
             let inspected = (|| {
-                host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
                 settle_to_quiet(host, voltages)?;
+                host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
                 let target = host
                     .analog_device()
                     .try_transient_event_refinement_time()

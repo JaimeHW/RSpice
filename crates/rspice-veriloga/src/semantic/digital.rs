@@ -631,6 +631,98 @@ impl SemanticAnalyzer {
             instances: Vec::new(),
             constants: self.digital_constants(module),
         };
+        self.bind_discrete_analog_reads(module, analyzed);
+    }
+
+    fn bind_discrete_analog_reads(&mut self, module: &Module, analyzed: &mut AnalyzedModule) {
+        let mut writes = std::collections::HashSet::new();
+        let mut reads = std::collections::HashSet::new();
+        for block in [
+            module.analog_block.as_ref(),
+            module.analog_initial.as_ref(),
+            module.analog_final.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for statement in &block.statements {
+                collect_analog_names(statement, &mut writes, &mut reads);
+            }
+        }
+        for signal in &analyzed.digital.signals {
+            if writes.contains(&signal.name) {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "discrete signal `{}` cannot be written by the analog body",
+                        signal.name
+                    )),
+                    signal.span,
+                );
+            }
+            if !reads.contains(&signal.name)
+                && !writes.contains(&signal.name)
+                && !reads.contains(OPAQUE_ANALOG_READ)
+            {
+                continue;
+            }
+            let is_real = signal.class.is_real();
+            // Analog integer expressions currently have the language's 32-bit
+            // integer representation. Wider packed values need their own typed
+            // conversion and must not be silently truncated into that lane.
+            if !is_real
+                && signal.width
+                    > if signal.signedness == Signedness::Signed {
+                        32
+                    } else {
+                        31
+                    }
+            {
+                self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
+                    "analog read of packed discrete signal `{}` exceeds the supported 32-bit signed integer range", signal.name
+                )), signal.span);
+            }
+            let value_type = if is_real {
+                super::ValueType::Real
+            } else {
+                super::ValueType::Integer
+            };
+            let slot = if let Some(slot) = analyzed
+                .variables
+                .iter()
+                .position(|variable| variable.name == signal.name)
+            {
+                analyzed.variables[slot].is_state = true;
+                slot
+            } else {
+                let slot = analyzed.variables.len();
+                analyzed.variables.push(super::AnalyzedVariable {
+                    name: signal.name.clone(),
+                    var_type: if is_real {
+                        VarType::Real
+                    } else {
+                        VarType::Integer
+                    },
+                    value_type,
+                    is_state: true,
+                });
+                if let Err(error) = self.define_symbol(Symbol {
+                    name: signal.name.clone(),
+                    kind: SymbolKind::Variable,
+                    value_type,
+                    span: signal.span,
+                    attrs: Default::default(),
+                }) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(error.to_string()),
+                        signal.span,
+                    );
+                }
+                slot
+            };
+            analyzed.event_state_variables.push(slot);
+        }
+        analyzed.event_state_variables.sort_unstable();
+        analyzed.event_state_variables.dedup();
     }
 
     // ------------------------------------------------------------------
@@ -785,11 +877,6 @@ impl SemanticAnalyzer {
         if written.is_empty() {
             return;
         }
-        let analog = module
-            .analog_block
-            .as_ref()
-            .or(module.analog_initial.as_ref())
-            .or(module.analog_final.as_ref());
         // What the continuous body does with each name, over every analog
         // block the module declares rather than only the first: `analog
         // initial x = 0;` beside `analog V(a) <+ x;` is two blocks and one
@@ -809,12 +896,6 @@ impl SemanticAnalyzer {
                 collect_analog_names(statement, &mut analog_writes, &mut analog_reads);
             }
         }
-        // One expression form the walk could not enumerate makes every name a
-        // possible read. Erring that way promotes nothing the analog body
-        // might still be using, which is the direction that cannot produce a
-        // wrong answer — only a refusal.
-        let opaque_read = analog_reads.contains(OPAQUE_ANALOG_READ);
-
         for declaration in &module.variables {
             if declaration.var_type != VarType::Real {
                 continue;
@@ -837,24 +918,6 @@ impl SemanticAnalyzer {
                             item.name
                         )),
                         item.span,
-                    );
-                    continue;
-                }
-                // Section 7.3 allows this read and section 7.3.6.5 fixes its
-                // value, so the refusal is about the seam rather than about
-                // the program.
-                if (opaque_read || analog_reads.contains(&item.name))
-                    && let Some(block) = analog
-                {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "`{}` is written by a discrete process and read by the analog body; \
-                             Verilog-AMS LRM 2.4 section 7.3.6.5 makes that read the digital \
-                             value at the greatest tick at or before the analog time, and the \
-                             compiled analog body has no route to the digital signal store yet",
-                            item.name
-                        )),
-                        block.span,
                     );
                     continue;
                 }
@@ -2301,17 +2364,9 @@ fn collect_expression_names(
             read.insert(access.array.clone());
             collect_expression_names(&access.index, read);
         }
-        Expression::BranchAccess(access) => match access {
-            BranchAccess::Nodes { pos, neg, .. } => {
-                read.insert(pos.clone());
-                if let Some(neg) = neg {
-                    read.insert(neg.clone());
-                }
-            }
-            BranchAccess::Branch { name, .. } => {
-                read.insert(name.clone());
-            }
-        },
+        // Probe endpoints identify topology, not a read of a same-named
+        // discrete variable (a boundary port can also have a digital name).
+        Expression::BranchAccess(_) => {}
         Expression::Binary(binary) => {
             collect_expression_names(&binary.left, read);
             collect_expression_names(&binary.right, read);

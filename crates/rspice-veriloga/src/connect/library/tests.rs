@@ -376,17 +376,11 @@ endmodule
 /// `analog` block contributes — is refused for what is now a much narrower
 /// reason, and one that names a clause rather than a wall.
 ///
-/// Verilog-AMS LRM 2.4 section 7.3 makes the *program* legal: `vout` is written
-/// by the discrete domain and only by it, and section 7.3.6.5 fixes what the
-/// analog body reads — "the digital value calculated for the greatest digital
-/// time tick which is less than or equal to the analog time when the expression
-/// is evaluated", which is the zero-order hold the D/A bridge already is. What
-/// is missing is the seam: the compiled analog body has no route to the digital
-/// signal store. The refusal says so.
+/// A real written by the discrete domain reaches analog equations through
+/// a canonical state-variable input (Verilog-AMS section 7.3.6.5).
 #[test]
-fn a_cross_clock_variable_is_refused_by_name() {
-    let error = analysis_error(
-        "\
+fn a_cross_clock_variable_uses_a_state_input() {
+    let source = "\
 module d2a_with_body(d, a);
     input d;
     output a;
@@ -400,15 +394,18 @@ module d2a_with_body(d, a);
     analog
         V(a) <+ transition(vout, 0.0, trise, trise);
 endmodule
-",
-    );
-    assert!(
-        error.contains(
-            "is written by a discrete process and read by the analog body; Verilog-AMS LRM 2.4 \
-             section 7.3.6.5"
-        ),
-        "unexpected error: {error}"
-    );
+";
+    let analyzed = crate::SemanticAnalyzer::new()
+        .analyze(&parse(source))
+        .unwrap();
+    let module = &analyzed.modules["d2a_with_body"];
+    let slot = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "vout")
+        .unwrap();
+    assert!(module.variables[slot].is_state);
+    assert!(module.event_state_variables.contains(&slot));
 }
 
 /// The same module with the analog body *writing* the shared variable is a

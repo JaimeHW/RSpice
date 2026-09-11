@@ -24,6 +24,10 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalIrArtifact {
+    /// Preprocessed source retained only for parameterized mixed modules, so
+    /// instance elaboration can specialize both domains on every platform.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_source: Option<SmolStr>,
     pub metadata: CanonicalMetadata,
     pub hir_digest: SmolStr,
     pub mir_digest: SmolStr,
@@ -69,6 +73,7 @@ impl CanonicalIrArtifact {
         span.finish(&format!("expressions={}", hir.expressions.len()));
 
         Ok(Self {
+            parameter_source: None,
             metadata,
             hir_digest,
             mir_digest,
@@ -96,6 +101,16 @@ impl CanonicalIrArtifact {
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics =
             validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
+        if let Some(source) = &self.parameter_source {
+            if super::metadata::source_identity(source) != self.metadata.source_identity
+                || super::metadata::StableDigest::from_text(source).as_hex()
+                    != self.metadata.source_digest
+            {
+                diagnostics.push(artifact_error(
+                    "parameter elaboration source does not match its source identity",
+                ));
+            }
+        }
         if let Err(mut errors) = self.digital.validate() {
             diagnostics.append(&mut errors);
         }

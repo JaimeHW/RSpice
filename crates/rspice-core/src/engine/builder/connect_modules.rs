@@ -339,12 +339,13 @@ pub(super) struct DesignConnectRules {
 impl DesignConnectRules {
     /// Whether a file is worth reading for connect rules at all.
     ///
-    /// The cheapest filter there is, and the reason the rule about `` `include
-    /// `` above holds: compiling a Verilog-A model is cached and reading its
-    /// connect rules is not, so a deck that has no connect rules must not pay
-    /// a preprocess per build to discover that.
+    /// A directive or macro invocation can import or expand to rules. Only a
+    /// plain source with neither rules nor preprocessing can safely be skipped.
+    /// Sealed virtual sources are supplied by their registered artifact, so an
+    /// absent filesystem source continues to be handled by the model cache.
     pub(super) fn may_declare(path: &std::path::Path) -> bool {
-        std::fs::read_to_string(path).is_ok_and(|text| text.contains("connectrules"))
+        std::fs::read_to_string(path)
+            .is_ok_and(|text| text.contains("connectrules") || text.contains('`'))
     }
 
     /// Read one file's specification, refusing a second file that declares

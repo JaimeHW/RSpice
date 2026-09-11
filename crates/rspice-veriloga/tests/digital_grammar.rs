@@ -2261,29 +2261,30 @@ fn a_module_level_real_a_process_writes_becomes_a_digital_variable() {
     );
 }
 
-/// The same `real`, in a module whose analog body *reads* it, is refused —
-/// and refused for what is missing rather than for the boundary.
-///
-/// Verilog-AMS LRM 2.4 section 7.3 allows the read: `gain` is written by the
-/// discrete domain and only by it, and reads cross both ways. Section 7.3.6.5
-/// even fixes the value — "the digital value calculated for the greatest
-/// digital time tick which is less than or equal to the analog time when the
-/// expression is evaluated". What the compiler is short of is the route from
-/// the compiled analog body to the digital signal store, so that is what the
-/// message says.
+/// A discrete-owned real read by analog equations has a transactional input
+/// slot shared by every analog backend (Verilog-AMS section 7.3.6.5).
 #[test]
-fn a_module_level_real_the_analog_body_reads_is_refused_by_name() {
+fn a_module_level_real_the_analog_body_reads_uses_a_state_input() {
     // `digital_module`'s analog block is `I(p, n) <+ gain * V(p, n)`, so this
     // fixture is precisely the read case.
-    let error = analyze_error(&digital_module(
+    let analyzed = analyze(&digital_module(
         "    wire clk;\n\
      \x20   always @(posedge clk) gain = gain + 1.0;",
     ));
+    let module = only_module(&analyzed);
+    let slot = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "gain")
+        .unwrap();
+    assert!(module.variables[slot].is_state);
+    assert!(module.event_state_variables.contains(&slot));
     assert!(
-        error.contains("`gain`")
-            && error.contains("read by the analog body")
-            && error.contains("section 7.3.6.5"),
-        "the refusal must name the variable and the clause, got {error:?}"
+        module
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "gain")
     );
 }
 
