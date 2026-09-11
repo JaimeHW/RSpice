@@ -1816,6 +1816,25 @@ endmodule
         }
     }
 
+    #[test]
+    fn shared_circular_integrators_take_the_cfg_plan() {
+        let report = VerilogACompiler::default()
+            .compile_runtime(
+                "module circular(p,n,m); inout p,n,m; electrical p,n,m;
+                 real phase; analog begin
+                   phase=idtmod(V(p,n),5.0,V(m,n),0.25);
+                   I(p,n)<+phase; I(m,n)<+2.0*phase;
+                 end endmodule",
+                None,
+            )
+            .unwrap();
+        let (plan, refusal) =
+            build_default_model_plan_reported(&report.model, &report.canonical_ir).unwrap();
+        assert!(refusal.is_none(), "{refusal:?}");
+        assert!(plan.prelude_slot_count() > 0);
+        plan.validate_shape(&report.model).unwrap();
+    }
+
     fn forms(plan: &NativeModelPlan) -> Vec<(&'static str, &'static str)> {
         let mut forms = Vec::new();
         for entry in &plan.stamp_values {

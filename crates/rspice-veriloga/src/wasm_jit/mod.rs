@@ -122,7 +122,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// Version 35 resolves declared grounds before allocating solver nodes.
 /// Version 36 uses one canonical unknown per physical potential branch.
 /// Version 37 preserves ordered source retention on switch branches.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 37;
+/// Version 38 lowers circular integrators through the canonical CFG plan.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 38;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2459,6 +2460,55 @@ endmodule
             let context = harness.store.data_mut().context_mut();
             assert_eq!(context.state_values, states);
             assert_eq!(context.state_candidate_valid, valid);
+        }
+    }
+
+    #[test]
+    fn wasm_circular_integrators_share_exact_history_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = "module circular(p,n,m); inout p,n,m; electrical p,n,m;
+            real phase; analog begin
+              phase=idtmod(V(p,n),5.0,V(m,n),0.25);
+              I(p,n)<+phase; I(m,n)<+2.0*phase;
+            end endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "circular", postfix);
+            assert_eq!(harness.artifact.prelude_export().is_some(), !postfix);
+            harness.reset();
+            let first = harness.stamp_value_export(0);
+            let second = harness.stamp_value_export(1);
+            harness.store.data_mut().context_mut().analysis_type = 2;
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+            for (step, (modulus, expected)) in
+                [(2.0, 1.0), (2.0, 1.25), (3.0, 2.5), (4.0, 1.75), (2.0, 2.0)]
+                    .into_iter()
+                    .enumerate()
+            {
+                let context = harness.store.data_mut().context_mut();
+                context.time = step as f64 * 0.25;
+                context.set_timestep(if step == 0 { 0.0 } else { 0.25 });
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, modulus);
+                for _ in 0..2 {
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for (export, gain) in [(&first, 1.0), (&second, 2.0)] {
+                        assert_eq!(harness.call(export), 0);
+                        assert_eq!(
+                            harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                            gain * expected,
+                            "postfix={postfix}; step={step}"
+                        );
+                    }
+                }
+                let context = harness.store.data_mut().context_mut();
+                assert_eq!(context.idtmod_origins.len(), 1);
+                context.advance_state().unwrap();
+                assert_eq!(
+                    context.accepted_checkpoint().unwrap().idtmod_origins.len(),
+                    1
+                );
+            }
         }
     }
 

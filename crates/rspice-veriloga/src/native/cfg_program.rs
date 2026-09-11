@@ -882,6 +882,20 @@ impl Lowerer<'_> {
                 let ic = operand(*ic)?;
                 push(NativeOp::IdtState(slot), &[input, ic])
             }
+            CfgValueKind::IdtMod {
+                operator,
+                input,
+                ic,
+                modulus,
+                offset,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::IdtMod)?;
+                let input = operand(*input)?;
+                let ic = operand(*ic)?;
+                let modulus = operand(*modulus)?;
+                let offset = operand(*offset)?;
+                push(NativeOp::IdtModState(slot), &[input, ic, modulus, offset])
+            }
             // `limexp`'s derivative is a clamp rather than a call, and the
             // block model already has every piece of it. Spelling it out here
             // rather than adding a `NativeOp` is what keeps this route from
