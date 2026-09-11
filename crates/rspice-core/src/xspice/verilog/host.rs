@@ -56,6 +56,8 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
+#[cfg(test)]
+mod analog_sample_tests;
 mod coupled;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
@@ -79,7 +81,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
     start_in as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 
 use super::store::{
     DigitalSignalStore, EventCapture, SignalTransition, StoreError, TransitionValues, signal_name,
@@ -382,6 +384,8 @@ enum ProcessStatus {
     /// name.
     AwaitingEvent(Vec<DigitalSensitivityTerm>),
     AwaitingExpression(u64),
+    /// Paused within an expression until the circuit evaluates its producer.
+    AwaitingAnalog(DigitalAnalogProbeId),
     /// Waiting in the inactive region for the active region to drain (`#0`).
     Inactive,
     /// Reached `Return`. An `initial` process ends here and never runs again.
@@ -421,6 +425,8 @@ pub(crate) struct DigitalHost {
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
     inactive: Vec<usize>,
+    /// Read barriers in encounter order, serviced before later HDL regions.
+    analog_waiters: Vec<usize>,
     /// Ready activations caused by an analog event. Its reported tick may be
     /// ahead of physical analog time; unrelated timers at that tick stay queued.
     analog_ready: Option<Vec<TargetId>>,
@@ -530,6 +536,7 @@ impl DigitalHost {
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             analog_ready: None,
+            analog_waiters: Vec::new(),
             analog_activation_seconds: None,
             targets,
             process_of_target,
@@ -574,6 +581,7 @@ impl DigitalHost {
             self.scheduler.limits(),
         );
         fresh.store.inherit_bit_connections(&self.store);
+        fresh.store.inherit_analog_variable_inputs(&self.store);
         for (_, target) in fresh.store.external_sources() {
             fresh
                 .external_targets
@@ -859,8 +867,17 @@ impl DigitalHost {
                 Some(ready) => !ready.is_empty(),
                 None => self.scheduler.next_tick().is_some_and(|next| next <= tick),
             };
-            if fired.is_empty() && !more && !active && !self.promote_region(tick)? {
-                return Ok(());
+            if fired.is_empty() && !more && !active {
+                if !self.analog_waiters.is_empty() {
+                    participant.sample_analog(&mut DigitalActiveExchange {
+                        host: self,
+                        tick,
+                        physical_seconds,
+                    })?;
+                    self.resume_analog_waiters(tick)?;
+                } else if !self.promote_region(tick)? {
+                    return Ok(());
+                }
             }
 
             // One call per settle iteration, which is the reading
@@ -1040,6 +1057,11 @@ impl DigitalHost {
                     wait => (DigitalEventCount::one(), wait),
                 };
                 match wait {
+                    DigitalWaitRequest::AnalogSample(probe) => {
+                        self.slots[index].status = ProcessStatus::AwaitingAnalog(probe);
+                        self.analog_waiters.push(index);
+                        Ok(())
+                    }
                     DigitalWaitRequest::Repeated { .. } => {
                         unreachable!("interpreter emits a single repeat control")
                     }

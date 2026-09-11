@@ -2429,6 +2429,76 @@ No broad test suite was run.
 This is a compiler/producer increment. It does not close analog-variable circuit
 execution, MS03/MS06, the full MS00-MS15 plan, or vendor/production qualification.
 
+## MS03/MS05/MS06: analog read continuations and scheduler barrier
+
+An unavailable analog-owned variable now suspends the digital interpreter at
+that read. The read node itself is the implicit barrier: the continuation stores
+its instruction cursor and only the SSA values live there. Immutable liveness
+lists are computed once per process and shared by subsequent activations. This
+preserves operands already evaluated inside an expression, branch decisions,
+loop locals and prefix effects without restarting the process or retaining an
+entire working value table. Ordinary HDL timing controls retain their explicit
+block-argument contract. Plan/process identity and read-site checks protect
+resumption. This supersedes the previous increment's missing-variable-sample
+interpreter error; missing physical-probe samples remain errors.
+
+The shared digital host now retains analog-awaiting processes in encounter
+order. Once HDL and the enrolled external Active participant are quiet, a
+separate sample callback publishes a validated variable bank before those
+processes resume. Inactive and NBA promotion waits for these Active readers.
+The callback retains the causal physical time, so a rounded analog activation
+cannot consume a future timer. A missing provider or incomplete sample bank
+refuses execution rather than reporting a settled process that is still waiting.
+
+The signal store can bind every variable producer to its digital inputs.
+Changes invalidate dependent samples; unchanged writes and unrelated signals
+do not invalidate a bound producer. Before bindings exist, invalidation is
+conservative. Bindings survive fresh analysis and cloning, while samples start
+unavailable. Publishing a physical solution bank cannot mark variable samples
+valid. Real writes now preserve the sign of zero, invalidate dependent samples
+and notify expressions such as @($realtobits(r)); direct @(r) sensitivity still
+uses numerical value changes. No tolerance is introduced into either decision.
+
+Three focused compiler/interpreter checks passed in 0.00 seconds after a
+1.57-second incremental test build. They cover real/integer samples, signed
+extension, resampling, captured operands across multiple read barriers, retained
+branch choices and locals, repeated unavailable reads, exactly one queued NBA,
+loop resumptions and untaken analog reads. Log:
+target/unified-mixed-fixes/analog-read-barrier-compiler.log.
+Two scheduler checks passed in 0.01 seconds after a one-minute build. The final
+signed-zero refinement reran only the affected scheduler check, which passed
+in 0.01 seconds. Logs: target/unified-mixed-fixes/analog-read-barrier-host.log
+and analog-read-barrier-host-final.log in the same directory. These scheduler
+checks use an explicit analytic provider and the real interpreter/event host;
+they are not a qualification of normal circuit producer evaluation. They pin
+Active/inactive/NBA order, initialized producer inputs, dependency invalidation,
+fresh-analysis bindings, signed-zero expression events, missing-provider refusal
+and preservation of a future timer during a causal analog activation.
+
+The actual MixedSignalHost constructor still deliberately refuses variable
+probes. The next increment must wire its native/Wasm analog producer into the
+new callback through both local and circuit-linked execution, retain and reuse
+the resulting prepared stamps when their inputs are unchanged, and invalidate
+both stamps and samples on candidate, time, analysis, input and trial changes.
+All-owner startup, numerical feedback, tasks/effects, rejection and acceptance
+must participate in that integration before removing the guard. Analog-variable
+and physical-probe event subscriptions remain separate open requirements.
+The module-level integer ownership refusal also remains open under MS06; these
+scheduler fixtures use a supported packed input instead of claiming that case.
+
+Artifact schema 56 is unchanged: no serialized IR or persisted-resume format
+was added. All 43 built-ins were regenerated, with unchanged numerical bodies
+and bundle digest 2cd3646b9677f3f1247809c7568cda0806b58e800331597e2a4bbf0aa874e504.
+The generator digest is 717cbd803746cde9f99295771476a5a57f70d34ee0d1bcd94d5ab00468a3c782.
+Log: target/unified-mixed-fixes/analog-read-barrier-generator.log.
+Main through c1d1ad46f is incorporated for publication. Its HB numerical-range
+changes do not modify compiler inputs or these digital runtime paths, so the
+unchanged focused checks were not repeated after integration.
+Broad suites, actual circuit-variable execution, browser/tablet execution and
+licensed reference comparisons were not run.
+This is an interpreter/scheduler increment, not completion of MS03, MS05, MS06,
+the full MS00-MS15 plan, production readiness or vendor parity.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

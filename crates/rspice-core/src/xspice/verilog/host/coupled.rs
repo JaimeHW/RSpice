@@ -12,6 +12,20 @@ pub(crate) trait DigitalActiveParticipant {
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError>;
+
+    /// All Active prefixes have drained. Evaluate the requested analog
+    /// producers at this physical time and publish their common sample bank.
+    fn sample_analog(
+        &mut self,
+        exchange: &mut DigitalActiveExchange<'_>,
+    ) -> Result<(), DigitalRunError> {
+        Err(DigitalRunError::ExternalExecution {
+            detail: format!(
+                "analog-variable sample requests {:?} require a circuit evaluation participant",
+                exchange.analog_sample_requests()
+            ),
+        })
+    }
 }
 
 /// Restricted access: an event participant can observe resolved nets and drive
@@ -23,6 +37,54 @@ pub(crate) struct DigitalActiveExchange<'a> {
 }
 
 impl DigitalActiveExchange<'_> {
+    pub(crate) fn read_signal(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
+        self.host.read(signal)
+    }
+
+    pub(crate) fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.host.read_real(signal)
+    }
+    pub(crate) fn analog_sample_requests(&self) -> Vec<DigitalAnalogProbeId> {
+        let mut probes = BTreeSet::new();
+        for index in &self.host.analog_waiters {
+            if let ProcessStatus::AwaitingAnalog(probe) = self.host.slots[*index].status {
+                probes.insert(probe);
+            }
+        }
+        probes.into_iter().collect()
+    }
+
+    /// Validate the entire producer bank before publishing any value.
+    pub(crate) fn publish_analog_variables(
+        &mut self,
+        samples: &[(DigitalAnalogProbeId, f64)],
+    ) -> Result<(), DigitalRunError> {
+        use rspice_veriloga::canonical_ir::digital::DigitalAnalogQuantity;
+        let mut seen = BTreeSet::new();
+        for &(id, value) in samples {
+            let valid = self
+                .host
+                .plan
+                .analog_probe(id)
+                .is_some_and(|probe| match probe.quantity {
+                    DigitalAnalogQuantity::RealVariable => value.is_finite(),
+                    DigitalAnalogQuantity::IntegerVariable => {
+                        value.is_finite()
+                            && value.fract() == 0.0
+                            && value >= i32::MIN as f64
+                            && value <= i32::MAX as f64
+                    }
+                    _ => false,
+                });
+            if !valid || !seen.insert(id) {
+                return Err(DigitalRunError::ExternalExecution {
+                    detail: format!("invalid or repeated analog-variable sample {id}: {value}"),
+                });
+            }
+        }
+        self.host.store.sample_analog_variables(samples);
+        Ok(())
+    }
     #[cfg(test)]
     pub(crate) fn tick(&self) -> u64 {
         self.tick
@@ -71,6 +133,78 @@ impl DigitalActiveParticipant for NoActiveParticipant {
 }
 
 impl DigitalHost {
+    /// Bind every analog-variable producer to the discrete inputs its equations
+    /// consume. Until this is provided, all resolved digital changes invalidate
+    /// all variable samples. Electrical probes always follow the trial solution.
+    pub(crate) fn bind_analog_variable_inputs(
+        &mut self,
+        dependencies: &[(DigitalAnalogProbeId, Vec<DigitalSignalId>)],
+    ) -> Result<(), DigitalRunError> {
+        use rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget;
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "analog sample inputs must be bound before digital execution starts".into(),
+            });
+        }
+        let expected: BTreeSet<_> = self
+            .plan
+            .analog_probes
+            .iter()
+            .filter_map(|probe| {
+                matches!(probe.target, DigitalAnalogProbeTarget::Variable { .. })
+                    .then_some(probe.id)
+            })
+            .collect();
+        let mut seen = BTreeSet::new();
+        let mut inputs = std::collections::HashMap::<_, Vec<_>>::new();
+        for (probe, signals) in dependencies {
+            if !expected.contains(probe)
+                || !seen.insert(*probe)
+                || signals
+                    .iter()
+                    .any(|signal| self.plan.signal(*signal).is_none())
+            {
+                return Err(DigitalRunError::ExternalExecution {
+                    detail: format!("invalid analog-variable input binding for probe {probe}"),
+                });
+            }
+            for signal in signals {
+                let probes = inputs.entry(*signal).or_default();
+                if !probes.contains(probe) {
+                    probes.push(*probe);
+                }
+            }
+        }
+        if seen != expected {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "analog input bindings must cover every variable probe".into(),
+            });
+        }
+        self.store.bind_analog_variable_inputs(inputs);
+        Ok(())
+    }
+    pub(super) fn resume_analog_waiters(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        use rspice_veriloga::canonical_ir::digital_eval::DigitalEnvironment;
+        // Check every request first. A participant that forgot a producer must
+        // not resume a prefix of the waiting readers and silently finish.
+        for index in &self.analog_waiters {
+            let ProcessStatus::AwaitingAnalog(probe) = self.slots[*index].status else {
+                unreachable!("sample waiter must have an analog continuation")
+            };
+            if self.store.read_analog_variable(probe).is_none() {
+                return Err(DigitalRunError::Evaluation {
+                    process: self.describe(*index),
+                    error: DigitalEvalError::AnalogProbeUnavailable(probe),
+                });
+            }
+        }
+        let mut waiters = std::mem::take(&mut self.analog_waiters);
+        for index in waiters.drain(..) {
+            self.queue_ready(index, tick)?;
+        }
+        self.analog_waiters = waiters;
+        Ok(())
+    }
     pub(super) fn require_standalone_execution(&self) -> Result<(), DigitalRunError> {
         if self.store.has_external_participants() {
             return Err(DigitalRunError::ExternalExecution {

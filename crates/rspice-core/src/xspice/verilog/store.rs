@@ -373,10 +373,14 @@ pub(crate) struct DigitalSignalStore {
     /// every plan a purely digital run produces — so the vector costs a design
     /// without cross-domain reads nothing and cannot be written by one.
     ///
-    /// Written only by [`Self::sample_analog_probes`], which is the
-    /// mixed-signal host's; a process can only read it, which is section 7.3's
-    /// rule that writes stay in their own domain, enforced by the type.
+    /// Written by the mixed host's physical sampler and the analog-variable
+    /// producer callback. A digital process can only read this bank.
     analog_samples: Vec<Option<f64>>,
+    /// Conservatively invalidate variable samples on resolved digital changes
+    /// until the circuit supplies narrower producer-input dependencies.
+    analog_variable_probes: Vec<DigitalAnalogProbeId>,
+    analog_variable_inputs:
+        Option<Arc<std::collections::HashMap<DigitalSignalId, Vec<DigitalAnalogProbeId>>>>,
     activation_clock: Option<DigitalClock>,
 }
 
@@ -566,6 +570,11 @@ impl DigitalSignalStore {
             delayed: Vec::new(),
             transitions: Vec::new(),
             analog_samples: vec![None; plan.analog_probes.len()],
+            analog_variable_probes: plan.analog_probes.iter().filter_map(|probe| {
+                matches!(probe.target, rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget::Variable { .. })
+                    .then_some(probe.id)
+            }).collect(),
+            analog_variable_inputs: None,
             activation_clock: None,
             plan,
             connected: None,
@@ -579,11 +588,8 @@ impl DigitalSignalStore {
 
     /// Publish one converged analog solution's probe values into the store.
     ///
-    /// The only writer of the continuous half, and the one place Verilog-AMS
-    /// LRM 2.4 section 7.3.6.3's timing question is answered: whatever the
-    /// caller samples here is what every process reads until the next call,
-    /// so the caller is choosing "the analog value calculated for the time
-    /// corresponding to a real promotion of the digital time".
+    /// Refresh electrical probes from the candidate solution and invalidate
+    /// variable probes until their producer completes a normal evaluation.
     ///
     /// A slice of a different length than the plan declared probes is a caller
     /// that built the store from one plan and the samples from another, so it
@@ -601,6 +607,38 @@ impl DigitalSignalStore {
         }
         for (slot, value) in self.analog_samples.iter_mut().zip(values) {
             *slot = Some(*value);
+        }
+        // Physical solution samples cannot certify an analog evaluation's
+        // published variables, even if their buffer slots contain numbers.
+        for id in &self.analog_variable_probes {
+            self.analog_samples[usize::from(*id)] = None;
+        }
+    }
+
+    pub(crate) fn sample_analog_variables(&mut self, samples: &[(DigitalAnalogProbeId, f64)]) {
+        for &(id, value) in samples {
+            self.analog_samples[usize::from(id)] = Some(value);
+        }
+    }
+
+    pub(crate) fn bind_analog_variable_inputs(
+        &mut self,
+        inputs: std::collections::HashMap<DigitalSignalId, Vec<DigitalAnalogProbeId>>,
+    ) {
+        self.analog_variable_inputs = Some(Arc::new(inputs));
+    }
+
+    pub(crate) fn inherit_analog_variable_inputs(&mut self, source: &Self) {
+        self.analog_variable_inputs = source.analog_variable_inputs.clone();
+    }
+
+    fn invalidate_analog_variables(&mut self, signal: DigitalSignalId) {
+        let probes = match &self.analog_variable_inputs {
+            Some(inputs) => inputs.get(&signal).map(Vec::as_slice).unwrap_or(&[]),
+            None => &self.analog_variable_probes,
+        };
+        for id in probes {
+            self.analog_samples[usize::from(*id)] = None;
         }
     }
 
@@ -815,6 +853,7 @@ impl DigitalSignalStore {
         previous: FourStateValue,
         value: FourStateValue,
     ) {
+        self.invalidate_analog_variables(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
@@ -830,16 +869,16 @@ impl DigitalSignalStore {
 
     /// Store a real value and record the transition if it is one.
     ///
-    /// The change test is `!=` and nothing else. Verilog-AMS LRM 2.4 section
-    /// 3.7's event on a real net is a change of value; a tolerance here would
-    /// decide that some changes do not count, which is a rule the standard does
-    /// not have and which no author could see being applied.
+    /// Direct real subscriptions compare numerical values without tolerance.
+    /// A signed-zero bit change also reaches computed subscriptions such as
+    /// `@($realtobits(r))`; dispatch still rejects it for a direct `@(r)`.
     fn publish_real(&mut self, signal: DigitalSignalId, value: f64) {
         let index = usize::from(signal);
-        if self.reals[index] == value {
+        if self.reals[index] == value && self.reals[index].to_bits() == value.to_bits() {
             return;
         }
         let previous = std::mem::replace(&mut self.reals[index], value);
+        self.invalidate_analog_variables(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
@@ -1057,12 +1096,15 @@ impl DigitalEnvironment for DigitalSignalStore {
         self.read_analog_potential(probe)
     }
 
+    fn read_analog_variable(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.read_analog_potential(probe)
+    }
+
     fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
         // Two different `None`s collapse to one on purpose: a probe the store
         // was not built for, and a probe no solution has been sampled into
-        // yet. Both mean the same thing to a process — there is no analog
-        // value to read — and the interpreter's refusal names the probe, which
-        // is what tells the two apart in a diagnostic.
+        // yet. A physical read refuses either absence; a variable read requests
+        // a sampling barrier. The interpreter first checks the declaration.
         self.analog_samples
             .get(usize::from(probe))
             .copied()

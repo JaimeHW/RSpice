@@ -3,8 +3,8 @@
 //! [`cfg_eval`](super::cfg_eval) is the reference interpreter for the analog
 //! body: it walks a [`CfgFunction`] to completion and hands back every value it
 //! computed. A process function cannot be evaluated that way, because it does
-//! not run to completion — it suspends, and the thing that decides when it
-//! resumes is a simulation kernel that does not exist yet.
+//! not run to completion — it suspends, and the simulation kernel decides
+//! when it resumes.
 //!
 //! So this is a second interpreter, and the difference between the two is the
 //! whole of its design. It walks the same graph over a different value domain
@@ -39,6 +39,10 @@
 //!   exactly what the contract says, and starting from an empty table is how
 //!   this interpreter proves the lowering got it right rather than accidentally
 //!   papering over a missing block argument.
+//! - **An unavailable analog variable suspends at its read.** An implicit
+//!   same-time barrier captures only values live at that instruction. Resuming
+//!   restores those values and retries the read, preserving earlier operands
+//!   and effects even when the read occurs inside a conditional expression.
 //! - **Section 5.2.1 resizing happens at the write**, in [`apply_write`], and
 //!   nowhere else. The lowering emits no resize node — a right-hand side
 //!   arrives at its natural width and the target's declared width is applied
@@ -72,6 +76,10 @@ use super::digital::{
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
 use crate::four_state::FourStateBit;
+
+#[path = "digital_eval_analog_samples.rs"]
+mod analog_samples;
+use analog_samples::AnalogReadPlan;
 
 // ============================================================================
 // The environment
@@ -181,6 +189,8 @@ pub trait DigitalEnvironment {
     }
 
     /// The value published by the normal analog evaluation, without replay.
+    /// None requests a same-time sampling barrier. The kernel supplies a fresh
+    /// sample before resuming the resulting `AnalogSample` continuation.
     fn read_analog_variable(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
         None
     }
@@ -322,7 +332,7 @@ pub enum DigitalScalar {
 /// What running a process produced.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DigitalProcessOutcome {
-    /// The process reached a [`CfgTerminator::Wait`] and stopped there.
+    /// The process reached a timing control or an unavailable analog-variable read.
     Suspended(DigitalSuspension),
     /// The process reached a [`CfgTerminator::Return`] and is over.
     ///
@@ -364,6 +374,9 @@ impl DigitalSuspension {
 /// evaluation has happened.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DigitalWaitRequest {
+    /// Supply a current analog-owned variable sample, then resume at the read.
+    /// This is a same-time evaluation barrier, not an HDL scheduling region.
+    AnalogSample(DigitalAnalogProbeId),
     /// Repeat an event subscription without resuming on intermediate events.
     Repeated {
         count: super::digital_value::DigitalEventCount,
@@ -471,6 +484,9 @@ pub struct DigitalResumeState {
     plan_identity: [u8; 32],
     process: DigitalProcessId,
     block: BlockId,
+    /// An implicit analog read resumes within the block. Ordinary timing
+    /// controls enter the block and bind its parameters instead.
+    analog_instruction: Option<usize>,
     arguments: Vec<DigitalScalar>,
 }
 
@@ -485,7 +501,13 @@ impl DigitalResumeState {
         self.block
     }
 
-    /// The values that will bind to that block's parameters.
+    /// The instruction awaiting an analog sample, or None for a timing control.
+    pub fn analog_instruction(&self) -> Option<usize> {
+        self.analog_instruction
+    }
+
+    /// Captured values: block parameters for a timing control, or the live
+    /// expression operands at an analog read barrier.
     pub fn arguments(&self) -> &[DigitalScalar] {
         &self.arguments
     }
@@ -502,6 +524,11 @@ impl DigitalResumeState {
 /// aborting the simulator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigitalEvalError {
+    /// A sample-barrier continuation does not identify an analog-variable read.
+    InvalidAnalogResume {
+        block: BlockId,
+        instruction: usize,
+    },
     /// The host did not publish an activation clock, or its time is invalid.
     ClockUnavailable,
     InvalidClock,
@@ -597,6 +624,10 @@ pub enum DigitalEvalError {
 impl std::fmt::Display for DigitalEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidAnalogResume { block, instruction } => write!(
+                f,
+                "analog sample continuation names invalid instruction {instruction} in block {block}"
+            ),
             Self::ProcessNotInPlan(id) => write!(
                 f,
                 "process {id} is not a member of the supplied digital plan"
@@ -1179,6 +1210,8 @@ pub struct DigitalEvalScratch {
     expression: Option<Box<DigitalEvalScratch>>,
     event_identity: Option<[u8; 32]>,
     event_programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
+    /// Immutable live-value lists, computed once per process that needs a sample.
+    analog_read_plans: HashMap<DigitalProcessId, Arc<AnalogReadPlan>>,
     /// One control-flow edge's arguments, refilled per edge.
     arguments: Vec<DigitalScalar>,
     /// One concatenation's operands, refilled per node.
@@ -1349,7 +1382,14 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     // displaces becomes the spare the next suspension fills.
     let displaced = std::mem::replace(&mut scratch.arguments, state.arguments);
     scratch.recycle_resume(displaced);
-    Interpreter::new(plan, process, environment, scratch).run(block, step_limit)
+    let mut interpreter = Interpreter::new(plan, process, environment, scratch);
+    match state.analog_instruction {
+        Some(instruction) => {
+            interpreter.restore_analog_read(block, instruction)?;
+            interpreter.run_from(block, instruction, step_limit)
+        }
+        None => interpreter.run(block, step_limit),
+    }
 }
 
 // The containing artifact is validated before publication; this check remains
@@ -1411,6 +1451,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         scratch.table.enter(function.values.len());
         if scratch.event_identity != Some(plan.content_identity) {
             scratch.event_programs.clear();
+            scratch.analog_read_plans.clear();
             scratch.event_identity = Some(plan.content_identity);
         }
         Self {
@@ -1431,17 +1472,42 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         entry: BlockId,
         step_limit: usize,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
-        let function = self.function();
         // The entry arguments are already in the edge buffer: empty for a
         // start, and the resumed state's own list for a resumption.
         self.bind(entry)?;
+        self.run_from(entry, 0, step_limit)
+    }
 
+    fn run_from(
+        mut self,
+        entry: BlockId,
+        mut first_instruction: usize,
+        step_limit: usize,
+    ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+        let function = self.function();
         let mut block = entry;
         for _ in 0..step_limit {
-            for instruction in &function.block(block).instructions {
-                let value = self.compute(instruction.result)?;
+            for (index, instruction) in function
+                .block(block)
+                .instructions
+                .iter()
+                .enumerate()
+                .skip(first_instruction)
+            {
+                let value = match self.compute(instruction.result) {
+                    Err(DigitalEvalError::AnalogProbeUnavailable(probe))
+                        if matches!(
+                            function.value(instruction.result).kind,
+                            CfgValueKind::DigitalAnalogVariable { .. }
+                        ) =>
+                    {
+                        return self.suspend_analog_read(block, index, probe);
+                    }
+                    value => value?,
+                };
                 self.scratch.table.define(instruction.result, value);
             }
+            first_instruction = 0;
 
             match &function.block(block).terminator {
                 CfgTerminator::Return => return Ok(DigitalProcessOutcome::Finished),
@@ -1511,6 +1577,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                             plan_identity: self.plan.content_identity,
                             process: self.process.id,
                             block: *resume,
+                            analog_instruction: None,
                             arguments,
                         },
                     }));

@@ -5123,17 +5123,14 @@ initial begin captured=measured; wide=count; negative=(count<0); #1 captured=mea
 endmodule
 "#,
     );
-    assert!(matches!(
-        start(
-            &harness.plan,
-            &harness.plan.processes[0],
-            &mut harness.store
-        ),
-        Err(DigitalEvalError::AnalogProbeUnavailable(_))
-    ));
+    let unavailable = expect_suspended(harness.start(0));
+    assert_eq!(
+        unavailable.wait(),
+        &DigitalWaitRequest::AnalogSample(harness.probe("measured"))
+    );
     harness.set_analog("measured", 2.25);
     harness.set_analog("count", -3.0);
-    let wait = expect_suspended(harness.start(0));
+    let wait = expect_suspended(harness.resume(0, unavailable.resume_state()));
     assert_eq!(harness.get_real("captured"), 2.25);
     assert_eq!(harness.get("wide"), format!("{:064b}", u64::MAX - 2));
     assert_eq!(harness.get("negative"), "1");
@@ -5149,4 +5146,98 @@ endmodule
         ),
         Err(DigitalEvalError::InvalidNumericConversion { .. })
     ));
+}
+
+#[test]
+fn analog_sample_barriers_preserve_expression_operands_and_prefix_effects() {
+    let mut harness = Harness::from_source(
+        r#"
+module barrier(p); inout p; electrical p;
+real a,b,captured,bias; reg choose; reg [7:0] prefix,deferred;
+analog begin a=V(p); b=2*V(p); I(p)<+V(p)/1000; end
+initial begin : work
+  integer local;
+  prefix=prefix+1; bias=2; local=7; deferred<=19;
+  captured=bias+(choose ? a+b : 9.0)+local;
+  #1; captured=captured+a;
+end
+endmodule
+"#,
+    );
+    harness.set("prefix", "00000000");
+    harness.set("choose", "1");
+    harness.set_real("bias", 2.0);
+    let first = expect_suspended(harness.start(0));
+    assert_eq!(
+        first.wait(),
+        &DigitalWaitRequest::AnalogSample(harness.probe("a"))
+    );
+    assert!(first.resume_state().analog_instruction().is_some());
+    assert_eq!(harness.get("prefix"), "00000001");
+    assert_eq!(harness.deferred_count(), 1);
+
+    // Other work at the barrier may change a signal. Already-read operands
+    // and the chosen branch still belong to the suspended expression.
+    harness.set("prefix", "01100100");
+    harness.set("choose", "0");
+    harness.set_real("bias", 100.0);
+    harness.set_analog("a", 3.0);
+    let second = expect_suspended(harness.resume(0, first.resume_state()));
+    assert_eq!(
+        second.wait(),
+        &DigitalWaitRequest::AnalogSample(harness.probe("b"))
+    );
+    let still_waiting = expect_suspended(harness.resume(0, second.resume_state()));
+    assert_eq!(second, still_waiting);
+    harness.set_analog("a", 100.0);
+    harness.set_analog("b", 4.0);
+    let delay = expect_suspended(harness.resume(0, still_waiting.resume_state()));
+    assert!(matches!(delay.wait(), DigitalWaitRequest::Delay(_)));
+    assert_eq!(harness.get_real("captured"), 16.0);
+    assert_eq!(harness.get("prefix"), "01100100");
+    assert_eq!(harness.deferred_count(), 1);
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("deferred"), "00010011");
+    harness.set_analog("a", 5.0);
+    expect_finished(harness.resume(0, delay.resume_state()));
+    assert_eq!(harness.get_real("captured"), 21.0);
+}
+
+#[test]
+fn analog_sample_barriers_preserve_loop_locals_and_skip_untaken_reads() {
+    let mut harness = Harness::from_source(
+        r#"
+module loops(p); inout p; electrical p;
+real sample,total; reg choose;
+analog begin sample=V(p); I(p)<+V(p)/1000; end
+initial begin : work
+  integer i; total=0;
+  for (i=0; i<3; i=i+1) begin
+    total=total+(choose ? sample : 10.0)+i;
+    #0;
+  end
+end
+endmodule
+"#,
+    );
+    harness.set("choose", "0");
+    let first_delay = expect_suspended(harness.start(0));
+    assert_eq!(first_delay.wait(), &DigitalWaitRequest::Delay(0));
+    assert_eq!(harness.get_real("total"), 10.0);
+    harness.set("choose", "1");
+    let read = expect_suspended(harness.resume(0, first_delay.resume_state()));
+    assert_eq!(
+        read.wait(),
+        &DigitalWaitRequest::AnalogSample(harness.probe("sample"))
+    );
+    harness.set_analog("sample", 2.0);
+    let second_delay = expect_suspended(harness.resume(0, read.resume_state()));
+    assert_eq!(harness.get_real("total"), 13.0);
+    let probe = usize::from(harness.probe("sample"));
+    harness.store.analog[probe] = None;
+    let next_read = expect_suspended(harness.resume(0, second_delay.resume_state()));
+    harness.set_analog("sample", 4.0);
+    let final_delay = expect_suspended(harness.resume(0, next_read.resume_state()));
+    assert_eq!(harness.get_real("total"), 19.0);
+    expect_finished(harness.resume(0, final_delay.resume_state()));
 }
