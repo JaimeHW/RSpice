@@ -883,7 +883,9 @@ pub(super) fn validate_bjt_model_level(
         params,
         expr_params,
         string_params,
-        native_vbic_model,
+        // Breakdown compatibility fields require an explicit native LEVEL;
+        // inferring VBIC from these same fields would bypass that contract.
+        level.is_some_and(is_native_vbic_bjt_level),
     )?;
 
     if native_vbic_model {
