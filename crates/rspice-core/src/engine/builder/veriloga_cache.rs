@@ -276,7 +276,8 @@ use super::*;
 // Version 67 solves flow probes as simultaneous branch equations.
 // Version 68 also retains mixed parameter elaboration source and discrete analog inputs.
 // Version 69 retains the active connection source closure in the canonical artifact.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 69;
+// Version 70 fingerprints the source bytes actually consumed by preprocessing.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 70;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1738,12 +1739,12 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits(
 }
 
 #[cfg(feature = "veriloga")]
-pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
+pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     path: &Path,
     selected_module: Option<&str>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<CachedVerilogAModel, SimulationError> {
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
     use std::sync::atomic::Ordering::Relaxed;
 
     VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
@@ -1766,7 +1767,7 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
         if dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
             VERILOGA_CACHE_TELEMETRY.memory_hits.fetch_add(1, Relaxed);
             log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
-            return Ok(entry);
+            return Ok(Some(entry));
         }
         VERILOGA_CACHE_TELEMETRY
             .stale_memory_entries
@@ -1807,15 +1808,46 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
             );
         }
         log::debug!("Verilog-A cache hit (disk): '{}'", canonical.display());
-        return Ok(entry);
+        return Ok(Some(entry));
     }
 
     VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
+    Ok(None)
+}
+
+#[cfg(all(test, feature = "veriloga"))]
+fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
+    path: &Path,
+    selected_module: Option<&str>,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<CachedVerilogAModel, SimulationError> {
+    if let Some(entry) =
+        lookup_cached_veriloga_with_limits_and_abort(path, selected_module, limits, abort)?
+    {
+        return Ok(entry);
+    }
+    let prepared = prepare_veriloga_source(path, limits, abort)?;
+    compile_and_cache_prepared_veriloga(path, selected_module, &prepared, limits, abort)
+}
+
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+pub(super) fn prepare_veriloga_source(
+    path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
     check_build_abort(abort)?;
-    let source_metadata = std::fs::metadata(&canonical.source_path).map_err(|error| {
+    if is_sealed_veriloga_virtual_path(path) {
+        return Err(SimulationError::Netlist(format!(
+            "Sealed Verilog-A runtime '{}' requires its registered canonical source context; filesystem preparation is not permitted",
+            path.display()
+        )));
+    }
+    let source_metadata = std::fs::metadata(path).map_err(|error| {
         SimulationError::Netlist(format!(
             "Verilog-A source '{}' does not exist or is unreadable: {}",
-            canonical.display(),
+            path.display(),
             error
         ))
     })?;
@@ -1825,21 +1857,89 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
         limits.max_dependency_source_bytes,
     )?;
 
-    log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
+    let preparation_started = crate::time_compat::Instant::now();
+    let prepared = compiler.prepare_file_runtime_source_with_limits_and_control(
+        path,
+        rspice_veriloga::SourceProviderLimits {
+            max_dependencies: usize::MAX,
+            max_total_source_bytes: limits.max_dependency_source_bytes,
+            max_include_depth: limits.max_include_depth,
+            max_expanded_bytes: limits.max_expanded_source_bytes,
+        },
+        &control,
+    );
+    record_veriloga_compilation_time(preparation_started.elapsed());
+    prepared.map_err(|error| {
+        use std::sync::atomic::Ordering::Relaxed;
+        // A failed preparation is a failed compilation attempt. Successful
+        // preparation is shared; each later module emission counts once.
+        VERILOGA_CACHE_TELEMETRY
+            .compilations_started
+            .fetch_add(1, Relaxed);
+        match error {
+            rspice_veriloga::CompileError::Cancelled(_) => {
+                VERILOGA_CACHE_TELEMETRY
+                    .compilations_cancelled
+                    .fetch_add(1, Relaxed);
+                SimulationError::Aborted
+            }
+            error => {
+                VERILOGA_CACHE_TELEMETRY
+                    .compilations_failed
+                    .fetch_add(1, Relaxed);
+                SimulationError::Netlist(format!(
+                    "Failed to prepare Verilog-A '{}': {error}",
+                    path.display()
+                ))
+            }
+        }
+    })
+}
+
+#[cfg(all(feature = "veriloga", target_arch = "wasm32"))]
+pub(super) fn prepare_veriloga_source(
+    path: &Path,
+    _limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
+    check_build_abort(abort)?;
+    Err(SimulationError::Netlist(format!(
+        "Verilog-A source '{}' is not registered for browser execution; compile and register its virtual runtime before building the circuit",
+        path.display()
+    )))
+}
+
+#[cfg(feature = "veriloga")]
+fn record_veriloga_compilation_time(elapsed: std::time::Duration) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let nanos = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+    let _ = VERILOGA_CACHE_TELEMETRY
+        .total_compilation_nanos
+        .fetch_update(Relaxed, Relaxed, |total| Some(total.saturating_add(nanos)));
+}
+
+#[cfg(feature = "veriloga")]
+pub(super) fn compile_and_cache_prepared_veriloga(
+    path: &Path,
+    selected_module: Option<&str>,
+    prepared: &rspice_veriloga::PreparedRuntimeSource,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<CachedVerilogAModel, SimulationError> {
+    use std::sync::atomic::Ordering::Relaxed;
+
+    check_build_abort(abort)?;
+    let canonical = VerilogASourceKey::new(path, selected_module);
+    let control = VerilogACompileControl { abort };
+    log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     VERILOGA_CACHE_TELEMETRY
         .compilations_started
         .fetch_add(1, Relaxed);
     let compile_started = crate::time_compat::Instant::now();
-    let compiled =
-        compiler.compile_file_runtime_with_metadata_and_control(path, selected_module, &control);
-    let compilation_nanos = u64::try_from(compile_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-    let _ = VERILOGA_CACHE_TELEMETRY
-        .total_compilation_nanos
-        .fetch_update(Relaxed, Relaxed, |total| {
-            Some(total.saturating_add(compilation_nanos))
-        });
+    let compiled = prepared.compile_runtime_with_control(selected_module, &control);
+    record_veriloga_compilation_time(compile_started.elapsed());
     let compiled = match compiled {
         Ok(compiled) => {
             VERILOGA_CACHE_TELEMETRY
@@ -1875,8 +1975,23 @@ pub(super) fn resolve_cached_or_compile_veriloga_with_limits_and_abort(
             ))
         },
     )?;
-    let dependencies =
-        fingerprint_paths_with_limits_and_abort(&compiled.dependencies, limits, abort)?;
+    let mut dependency_bytes = 0_usize;
+    let mut dependencies = Vec::with_capacity(compiled.source_dependencies.len());
+    for dependency in &compiled.source_dependencies {
+        check_build_abort(abort)?;
+        dependency_bytes = dependency_bytes.saturating_add(dependency.byte_len);
+        ResourceLimitError::ensure(
+            ResourceKind::DependencySourceBytes,
+            dependency_bytes,
+            limits.max_dependency_source_bytes,
+        )?;
+        dependencies.push(VerilogADependencyFingerprint {
+            canonical_path: dependency.path.clone(),
+            modified_ns: None,
+            file_len: u64::try_from(dependency.byte_len).unwrap_or(u64::MAX),
+            content_hash: dependency.content_identity,
+        });
+    }
     let entry = CachedVerilogAModel {
         dependencies,
         model: std::sync::Arc::new(compiled.model),

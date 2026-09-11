@@ -323,35 +323,6 @@ pub(super) struct DesignConnectRules {
 }
 
 impl DesignConnectRules {
-    /// Whether a file is worth reading for connect rules at all.
-    ///
-    /// A directive or macro invocation can import or expand to rules. Only a
-    /// plain source with neither rules nor preprocessing can safely be skipped.
-    /// Sealed virtual sources are supplied by their registered artifact, so an
-    /// absent filesystem source continues to be handled by the model cache.
-    pub(super) fn may_declare(path: &std::path::Path) -> bool {
-        if super::veriloga_cache::is_sealed_veriloga_virtual_path(path) {
-            return false;
-        }
-        std::fs::read_to_string(path)
-            .is_ok_and(|text| text.contains("connectrules") || text.contains('`'))
-    }
-
-    /// Discover standalone file libraries. Device rules are registered from
-    /// their compiled closure, so this preliminary read cannot override them.
-    pub(super) fn discover(
-        path: &std::path::Path,
-    ) -> Result<rspice_veriloga::ConnectSpecification, SimulationError> {
-        rspice_veriloga::VerilogACompiler::default()
-            .connect_specification_from_file(path)
-            .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "connect rules in '{}' could not be read: {error}",
-                    path.display()
-                ))
-            })
-    }
-
     pub(super) fn register(
         &mut self,
         path: &std::path::Path,

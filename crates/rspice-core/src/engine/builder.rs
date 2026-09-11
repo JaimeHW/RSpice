@@ -60,6 +60,8 @@ use xspice_ports::*;
 #[cfg(feature = "veriloga")]
 mod veriloga_cache;
 #[cfg(feature = "veriloga")]
+use veriloga_cache::normalize_model_key;
+#[cfg(feature = "veriloga")]
 pub use veriloga_cache::{
     ProjectVerilogARuntimeRegistration, VerilogACacheEntry, VerilogACachePruneReport,
     VerilogACacheStats, VerilogACacheTelemetry, clear_veriloga_cache, prune_veriloga_cache,
@@ -70,9 +72,7 @@ pub use veriloga_cache::{
     veriloga_cache_stats, veriloga_cache_telemetry,
 };
 #[cfg(feature = "veriloga")]
-use veriloga_cache::{
-    normalize_model_key, resolve_cached_or_compile_veriloga_with_limits_and_abort,
-};
+mod veriloga_sources;
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;
@@ -5042,52 +5042,16 @@ impl Engine {
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
-            let mut connect_source_modules = HashMap::new();
-            for include in &netlist.veriloga_includes {
-                if connect_modules::DesignConnectRules::may_declare(&include.file_path) {
-                    // One file can supply several explicitly selected devices,
-                    // but its design-wide connect rules must be registered once.
-                    let source = veriloga_cache::canonicalize_for_cache(&include.file_path);
-                    let specification = match connect_source_modules.entry(source) {
-                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
-                            connect_modules::DesignConnectRules::discover(&include.file_path)?,
-                        ),
-                    };
-                    if !specification.declares_module {
-                        if let Some(module) = &include.selected_module {
-                            return Err(SimulationError::Netlist(format!(
-                                "Verilog-A source '{}' declares no device module, so module '{}' cannot be selected",
-                                include.file_path.display(),
-                                module
-                            )));
-                        }
-                        // A file that declares only connect modules is a
-                        // connect library. It contributes rules and no device,
-                        // and asking the compiler for a model would fail on a
-                        // file that is perfectly well formed.
-                        log::info!(
-                            "Read connect rules from '{}', which declares no device module",
-                            include.file_path.display()
-                        );
-                        design_connect_rules.register(&include.file_path, specification.clone())?;
-                        continue;
-                    }
-                }
-                let entry = resolve_cached_or_compile_veriloga_with_limits_and_abort(
-                    &include.file_path,
-                    include.selected_module.as_deref(),
-                    self.config.resource_limits,
-                    abort,
-                )?;
-                if let Some(artifact) = entry.canonical_ir.as_deref() {
-                    design_connect_rules.register_artifact(&include.file_path, artifact)?;
-                } else if let Some(specification) = connect_source_modules
-                    .get(&veriloga_cache::canonicalize_for_cache(&include.file_path))
-                {
-                    // Legacy analog-only registration has no canonical artifact.
-                    design_connect_rules.register(&include.file_path, specification.clone())?;
-                }
+            let resolved = veriloga_sources::resolve_includes(
+                &netlist.veriloga_includes,
+                &mut design_connect_rules,
+                self.config.resource_limits,
+                abort,
+            )?;
+            for (include, entry) in netlist.veriloga_includes.iter().zip(resolved) {
+                let Some(entry) = entry else {
+                    continue; // Standalone connection library, already registered.
+                };
                 bind_veriloga_model(
                     &mut veriloga_models,
                     entry.model.name.as_str(),

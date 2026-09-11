@@ -134,6 +134,11 @@ if a file changes afterward. The preparation and compiler options are shared;
 module compilation does not reopen sources. Keep prepared trees scoped to
 elaboration. The limits/control variant bounds source expansion and preserves
 cancellation; returned module metrics include the shared preparation prefix.
+The engine groups `.VERILOGA` selections by source and uses this preparation
+for cold model compilation and standalone connection libraries. Warm runtime
+cache entries carry their own connection closure. Cache dependency hashes come
+from captured preprocessing bytes, so a later source edit cannot relabel old
+compiled behavior as current.
 
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data

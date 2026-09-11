@@ -76,7 +76,7 @@ checkpoint representation, before optimizing partitions or caches.
 | Required behavior | Packages | Implementation at this checkpoint | Qualification |
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
-| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport implemented; prepared-source caching and configuration work remain | Focused file/virtual transport cases pass |
+| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport and shared file preparation implemented; design-wide configuration work remains | Focused file/virtual and source-refresh cases pass |
 | Complete resolved module timing and scheduling regions | MS02 | Open | Pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
@@ -118,19 +118,36 @@ invented throughput numbers do not qualify parity.
 | Remote integration and distinct schema/cache versions | `cargo test --locked -p rspice-core --no-default-features --features veriloga --test veriloga_mixed_signal_regressions --target-dir target/unified-mixed-fixes --jobs 2` with test debuginfo disabled | 10 passed; no full suite run |
 | Active connection closure transport | Core targets `veriloga_connect_source_closure` and `veriloga_mixed_signal_regressions`, filtered to `connect`, using the same portable build options | 2 passed: included file rules and serialized virtual models with shared rules/cache reuse |
 | Connection integrity and parameter-source reuse | Compiler target `mixed_runtime_compile`, filtered to `connection_closure_is_retained_validated_and_reused_for_specialization`, no default features | Passed: retained user definitions, specialization, round-trip, missing/lost/altered payload rejection |
+| Immutable preparation (`0b92805e8`) | Compiler target `prepared_source`, no default features | 2 passed: multiple modules compile with a removed include, captured identities remain correct, a new preparation sees changed bytes, source limits apply, standalone libraries need no device module |
+| Engine source groups and cache provenance | Core target `veriloga_connect_source_closure`, portable Verilog feature | Both cases pass: shared virtual rules/cache reuse and a source edit during multi-module compilation followed by a fresh run |
 
-The source-transport increment advances canonical schema to 33 and core disk
-cache format to 69. Old records are rebuilt. Connection source is stored once
+The source-transport increment advances canonical schema to 33. The subsequent
+prepared-source integration advances core disk cache format to 70, so records
+whose dependency fingerprints were obtained by a post-compilation reread are
+rebuilt. Connection source is stored once
 when it can also supply mixed parameter specialization. Sealed paths bypass
-filesystem rule discovery. The preliminary standalone-library discovery pass
-and explicit configuration selection remain MS01 work; authored body execution
-remains MS07. Generated artifact regeneration and the complete target matrix
+filesystem rule discovery. The engine no longer runs a preliminary textual
+connection scan: it resolves cached models first, then prepares each needed file
+group once for its module selections and connection specification. Only one
+analyzed tree is retained at a time; runtime artifacts use the existing bounded
+cache. Source expansion receives the engine's byte/depth limits. Browser cache
+misses return a registration diagnostic without filesystem preparation.
+
+The source-edit circuit has two 1 mS model conductances behind a 1 kohm resistor,
+so its 1 V input gives 1/3 V. Editing the shared include during the first module's
+emission leaves both modules at 1 mS in that run. The next run recompiles both at
+2 mS and gives 1/5 V, proving that cached old behavior is not labeled with the
+new include's identity. Standalone connection rules keep both logic outputs at
+1 V. All voltage budgets remain 1e-9 V.
+
+Design-wide dependency consistency across different roots and explicit
+configuration selection remain MS01 work; authored body execution remains MS07.
+Generated artifact regeneration and the complete target matrix
 remain integration/release work after the shared schemas stabilize.
 
 ## Next implementation work
 
-Complete MS01 source/configuration handling, including standalone libraries and
-shared prepared-source caching. Implement MS02 resolved timing metadata, then
+Complete MS01 design-wide source/configuration handling. Implement MS02 resolved timing metadata, then
 MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must
 include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
 off-grid timing and a rejected trial. Continue through every remaining milestone

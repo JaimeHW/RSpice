@@ -33,6 +33,16 @@ pub struct PreparedRuntimeSource {
 }
 
 impl PreparedRuntimeSource {
+    pub fn is_connect_library(&self) -> bool {
+        self.analyzed.modules.is_empty()
+            && self.analyzed.source.items.iter().any(|item| {
+                matches!(
+                    item,
+                    crate::ast::Item::ConnectModule(_) | crate::ast::Item::ConnectRules(_)
+                )
+            })
+    }
+
     /// Ordinary modules in declaration order, excluding connect modules.
     pub fn module_names(&self) -> impl Iterator<Item = &str> {
         self.analyzed
