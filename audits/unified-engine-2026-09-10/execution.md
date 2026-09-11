@@ -1417,10 +1417,67 @@ remain open. This increment does not qualify advanced analyses, generated/Wasm
 execution, platforms, capacity, production readiness or Spectre parity. No
 licensed reference installation is available, as confirmed by the user.
 
+## Model-floor-aware adaptive event approach
+
+Adaptive transient interval fitting now considers the mandatory event/stop time,
+the model/controller minimum, the persistent user maximum and the current model
+bound together. It retains an ordinary proposal when the remaining interval can
+still be covered by supported steps. Otherwise it chooses a feasible interval,
+including direct event landing when two minimum-sized steps cannot fit. It does
+not enlarge the model/user ceiling, move the event or accept a rejected solution.
+An impossible subdivision reports its times and bounds before model evaluation.
+Locked replay retains its prescribed intervals and existing refusal behavior.
+
+The fitting calculation runs after source biasing and breakpoint equalization,
+so those operations cannot reintroduce the recorded subminimum half-interval.
+The final candidate retains the exact shared-device target when fitting reaches
+it. A current model bound is not assumed to remain fixed for future candidates;
+the partition feasibility ceiling is the persistent user maximum. Existing
+canonical-stop roundoff handling remains available for fixed minimum-step runs,
+while a distinct scheduled device event retains its exact interval contract.
+Fused subtraction handles the near-integer interval-count rounding that initially
+refused a previously supported 100-step minimum-interval run.
+
+Focused evidence constructs a real analog timer at 2.5e-20 seconds with a
+1.25e-20-second maximum and a 1e-20-second model floor. Ngspice and Xyce land
+exactly on the event, preserve its before/after output and keep all recorded
+integration intervals within the bounds. The fixture explicitly reports its
+instantaneous output discontinuity. Existing minimum-bound/maximum-floor runs and
+unsupported maximum/locked/final intervals also pass: three selected deck cases
+in 0.11 seconds after a 19.30-second build. Initial failures and the corrections
+are in model-floor-interval.log and model-floor-interval-rounding.log.
+
+Integrated remote main through fed97cb86, preserving c67b90fb5's runtime/backend
+integral-range/circular-phase change and regenerated models, and the other
+agent's updated legacy mixed rollback fixture. The interval feasibility unit
+passed in 0.00 seconds after a 108-second dependency build; it covers the exact
+recorded failing interval, a feasible constrained split, a conflicting bound,
+a changing model bound, an unsupported interval and an ordinary distant target.
+All three selected timestep deck cases passed in 0.07 seconds after a 63-second
+build. The shared HDL/XSPICE off-grid/rejected-step deck then passed in 2.74
+seconds after a 1.91-second test build. Logs: model-floor-interval-integrated-unit.log,
+model-floor-interval-integrated-decks.log and model-floor-interval-shared-deck.log.
+The final normal push first encountered concurrent main commits 1467c12c2 and
+686717809. Rebased without conflicts, preserving their BJT current-balance and
+thermal/junction-noise work. They do not change these timestep APIs or the
+devices in the selected fixtures; the same focused tests were not rebuilt again.
+No full-suite, generator rerun or platform qualification was performed here.
+This completes the recorded equalization defect; it does not close the remaining
+controller, initialization, cache/effect/result, root or static-history work.
+
+The next static-history change must distinguish physical static contributions
+from ordinary residual probes. Current VM StaticProbe disables limiting but has
+no StaticDaeProbe mode, while generated models expose a separate dynamic-operator
+policy. The core capture calls the ordinary VM probe, and mixed hosts are absent
+from capture during shared acceptance. Do not simply stamp mixed transient
+companions into static history or reuse a DC analysis: both would change the
+intended transient equations. Derivative/integral state and weighting need direct
+analytic evidence alongside a settled digital candidate before MS08 can close.
+
 ## Next implementation work
 
-Complete the controller's model-floor and all-owner startup/history contracts,
-then the remaining MS05 effect/result/cache transaction. Preserve physical loads
+Complete the all-owner startup/history contract and the remaining MS05
+controller/effect/result/cache transaction. Preserve physical loads
 and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable

@@ -54,6 +54,110 @@ pub(super) struct DynamicBreakpointSink<'a> {
     pub pending_dynamic_breakpoints: &'a mut Vec<Value>,
 }
 
+/// Fit an adaptive model step without leaving an interval below the model's
+/// integration floor before the next mandatory time. The persistent ceiling is
+/// the user's maximum; the candidate ceiling also includes the current model
+/// bound, which may change after acceptance. This does not accept a trial.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fit_model_interval(
+    time: Value,
+    target: Value,
+    proposed: Value,
+    minimum: Value,
+    persistent_maximum: Value,
+    candidate_maximum: Value,
+    is_stop_time: bool,
+) -> Result<Value, SimulationError> {
+    let gap = target - time;
+    let refuse = || {
+        SimulationError::Circuit(format!(
+            "cannot integrate to mandatory time {target:.16e}s from {time:.16e}s: \
+         interval {gap:.16e}s cannot satisfy model minimum {minimum:.16e}s, \
+         maximum {persistent_maximum:.16e}s and current bound {candidate_maximum:.16e}s"
+        ))
+    };
+    if !time.is_finite()
+        || !target.is_finite()
+        || gap <= 0.0
+        || !gap.is_finite()
+        || !minimum.is_finite()
+        || minimum <= 0.0
+        || !persistent_maximum.is_finite()
+        || persistent_maximum < minimum
+        || !candidate_maximum.is_finite()
+        || candidate_maximum < minimum
+        || candidate_maximum > persistent_maximum
+        || !proposed.is_finite()
+        || proposed <= 0.0
+    {
+        return Err(refuse());
+    }
+    let roundoff = 64.0 * Value::EPSILON * time.abs().max(target.abs());
+    // Retain the existing canonical-stop rule for accumulated floating-point
+    // addition error. A distinct scheduled device event never uses this rule.
+    if is_stop_time && gap < minimum && minimum - gap <= roundoff {
+        return Ok(minimum);
+    }
+    if gap < minimum {
+        return Err(refuse());
+    }
+    if is_stop_time && candidate_maximum == minimum {
+        let count = (gap / minimum).round();
+        if count >= 1.0 && minimum.mul_add(-count, gap).abs() <= roundoff {
+            return Ok(minimum);
+        }
+    }
+    let requested = proposed.clamp(minimum, candidate_maximum).min(gap);
+    if time + requested <= time {
+        return Err(refuse());
+    }
+    let min_count = (gap / persistent_maximum).ceil().max(1.0);
+    let max_count = (gap / minimum).floor();
+    if min_count > max_count {
+        return Err(refuse());
+    }
+    let mut count = (gap / requested).ceil().clamp(min_count, max_count);
+    // A distant horizon cannot resolve one candidate in its interval count.
+    // Preserve ordinary adaptive behavior and re-evaluate at the next point.
+    if count > 4_503_599_627_370_496.0 {
+        return Ok(requested);
+    }
+    // Division may round a quotient just below an integer up to it. FMA
+    // retains the remaining interval when that subtraction is near the floor.
+    if minimum.mul_add(1.0 - count, gap) < minimum && count > min_count {
+        count -= 1.0;
+    }
+    let lower = persistent_maximum.mul_add(1.0 - count, gap).max(minimum);
+    let upper = minimum
+        .mul_add(1.0 - count, gap)
+        .min(candidate_maximum)
+        .min(gap);
+    if lower > upper {
+        return Err(refuse());
+    }
+    let mut dt = requested.clamp(lower, upper);
+    if dt == gap {
+        return Ok(dt);
+    }
+    // The accepted absolute timestamp is rounded separately from dt. Leave a
+    // representable supported interval on its far side as well.
+    let next = time + dt;
+    if !next.is_finite() || next <= time {
+        return Err(refuse());
+    }
+    if target - next < minimum {
+        let earlier = (target - minimum).next_down() - time;
+        if earlier >= lower && earlier <= upper {
+            dt = earlier;
+        } else if gap <= candidate_maximum {
+            dt = gap;
+        } else {
+            return Err(refuse());
+        }
+    }
+    Ok(dt)
+}
+
 impl Engine {
     #[inline]
     pub(super) fn max_expected_source_delta(
@@ -1163,6 +1267,42 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn model_interval_preserves_both_bounds_and_a_representable_event_gap() {
+        let time = 2.010059999998316589e-8;
+        let target = 2.010060000000000067e-8;
+        let dt = fit_model_interval(
+            time,
+            target,
+            8.4173899133396096e-21,
+            1e-20,
+            2e-11,
+            2e-11,
+            false,
+        )
+        .unwrap();
+        assert_eq!(dt, target - time);
+        assert_eq!(
+            fit_model_interval(0.0, 2.5, 1.125, 1.0, 1.25, 1.25, false).unwrap(),
+            1.25
+        );
+        assert_eq!(
+            fit_model_interval(1.25, 2.5, 1.0, 1.0, 1.25, 1.25, false).unwrap(),
+            1.25
+        );
+        assert!(fit_model_interval(0.0, 2.5, 1.125, 1.0, 1.25, 1.125, false).is_err());
+        // A transient model bound need not be assumed to remain fixed forever.
+        assert_eq!(
+            fit_model_interval(0.0, 2.5, 1.125, 1.0, 3.0, 1.125, false).unwrap(),
+            1.125
+        );
+        assert!(fit_model_interval(0.0, 0.75, 1.0, 1.0, 3.0, 3.0, false).is_err());
+        assert_eq!(
+            fit_model_interval(0.0, 100.0, 3.0, 1e-20, 5.0, 5.0, false).unwrap(),
+            3.0
+        );
+    }
+
     use super::*;
 
     #[test]

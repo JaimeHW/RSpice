@@ -99,6 +99,55 @@ fn nonconvergence_stops_at_the_veriloga_integration_floor() {
 }
 
 #[test]
+fn analog_timer_near_the_model_floor_lands_without_an_invalid_equalized_step() {
+    let model = write_model(
+        &format!("floor_timer_{}.va", std::process::id()),
+        "module floor_timer(p); inout p; electrical p; integer q; analog begin @(initial_step) q=0; @(timer(2.5e-20)) begin q=1; $discontinuity(0); end V(p)<+q; end endmodule",
+    );
+    let deck = Netlist::parse(&format!(
+        "floor timer\nX1 out floor_timer\nR1 out 0 1k\n.va \"{model}\" floor_timer\n.end\n"
+    ))
+    .unwrap();
+    let floor = GENERATED_DDT_TIMESTEP_FLOOR;
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let result = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .run_tran(&deck, 5.0 * floor, 1.25 * floor)
+        .unwrap_or_else(|error| panic!("{spice_dialect:?}: {error}"));
+        let event = 2.5e-20;
+        let point = result
+            .time
+            .iter()
+            .position(|time| *time == event)
+            .expect("exact timer landing");
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!(
+            result.voltages[out][..point]
+                .iter()
+                .all(|v| v.abs() < 1e-10)
+        );
+        assert!(
+            result.voltages[out][point..]
+                .iter()
+                .all(|v| (*v - 1.0).abs() < 1e-10)
+        );
+        for dt in result.step_sizes.iter().skip(1) {
+            assert!(
+                *dt >= floor && *dt <= 1.25 * floor,
+                "{spice_dialect:?}: dt={dt:.18e}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn bound_step_at_or_below_the_integration_floor_uses_the_minimum() {
     let model = write_model(
         &format!("floor_bound_{}.va", std::process::id()),

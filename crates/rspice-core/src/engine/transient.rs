@@ -5880,6 +5880,45 @@ impl Engine {
                         Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
             }
+            if locked_grid.is_none() && model_min_dt > 0.0 {
+                let target = breakpoints
+                    .next_after(t)
+                    .into_iter()
+                    .chain(pending_veriloga_event_time)
+                    .filter(|target| *target > t)
+                    .fold(tstop, Value::min);
+                let candidate_maximum = circuit
+                    .veriloga_timestep_bound()
+                    .map_err(SimulationError::Circuit)?
+                    .map_or(timestep.max_dt(), |bound| {
+                        bound.max(timestep.hard_min_dt()).min(timestep.max_dt())
+                    })
+                    .min(max_step);
+                let fitted = breakpoints::fit_model_interval(
+                    t,
+                    target,
+                    dt,
+                    timestep.hard_min_dt(),
+                    max_step,
+                    candidate_maximum,
+                    target == tstop && pending_veriloga_event_time != Some(target),
+                )?;
+                if fitted != dt {
+                    dt = fitted;
+                    exact_veriloga_event_time = pending_veriloga_event_time
+                        .filter(|event| *event == target && dt >= target - t);
+                    candidate_step_time = canonical_transient_step_time_with_device_event(
+                        t,
+                        dt,
+                        tstop,
+                        exact_veriloga_event_time,
+                    );
+                    at_breakpoint = exact_veriloga_event_time.is_some()
+                        || breakpoints.at_breakpoint(candidate_step_time);
+                    expected_source_delta =
+                        Self::max_expected_source_delta(&circuit, t, candidate_step_time);
+                }
+            }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
             } else if let Some(method) = fixed_method {
