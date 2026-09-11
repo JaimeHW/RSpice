@@ -2163,6 +2163,27 @@ an unselected arm is not suppressed. This is visible in the lowering and ordered
 interpreter and remains an open correctness item. This increment does not close
 MS06, the broader plan, production qualification, or licensed-reference parity.
 
+## MS06: qualify the original mixed clock comparison in a circuit
+
+The shared HDL/XSPICE regression again uses $realtime > 0 && !seen, removing
+both the real-literal workaround and its nested conditions. It passed with the
+existing off-grid capture, event ordering, native RC load, rejected analog steps
+and replay assertions intact. This exercises the numeric conversion after the
+HDL plans are linked into circuit execution, rather than only in the compiler's
+standalone process interpreter.
+
+Result: one test passed in 2.82 seconds after a 1m24s build with incremental
+caches disabled. Log: target/unified-mixed-fixes/
+digital-numeric-conversion-circuit-final.log. The first attempt is retained in
+digital-numeric-conversion-circuit.log as the disk-exhaustion failure; it is not
+counted as passing evidence. Compiler fix: 7ac549f69. No generator inputs change
+in this circuit-regression increment.
+
+This closes the previously reproduced mixed clock-comparison refusal. Lazy
+real conditional evaluation, wider MS06/MS03/MS05 requirements and the remaining
+MS00–MS15 plan stay open. No licensed Spectre installation is available;
+reference parity and production qualification remain unproven.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

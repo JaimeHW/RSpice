@@ -2081,9 +2081,7 @@ module shared_divider(fromx,future,q,captured);
  initial begin q=0; captured=1; seen=0; end
  always @(posedge fromx) begin
    q<=~q;
-   if ($realtime>0.0) begin
-     if (!seen) begin captured<=future; seen<=1; end
-   end
+   if ($realtime>0 && !seen) begin captured<=future; seen<=1; end
  end
 endmodule
 "#,
