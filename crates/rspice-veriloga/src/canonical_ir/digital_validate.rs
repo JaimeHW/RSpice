@@ -63,9 +63,11 @@ impl CanonicalDigitalPlan {
         // JSON maps all non-finite floats to null. Preserve the exact real
         // constant bits as well, including NaN payloads and signed zero.
         for process in &self.processes {
-            for value in &process.function.values {
-                if let CfgValueKind::RealConstant(number) = value.kind {
-                    writer.0.update(&number.to_bits().to_le_bytes());
+            for function in process_functions(&process.function) {
+                for value in &function.values {
+                    if let CfgValueKind::RealConstant(number) = value.kind {
+                        writer.0.update(&number.to_bits().to_le_bytes());
+                    }
                 }
             }
         }
@@ -156,225 +158,260 @@ impl CanonicalDigitalPlan {
             if usize::from(process.id) != index {
                 return Err(error("digital processes must have dense IDs"));
             }
-            let function = &process.function;
-            function
-                .validate()
-                .map_err(|detail| error(format!("digital process {}: {detail}", index)))?;
-            if !function.block(function.entry).params.is_empty() {
-                return Err(error("digital process entry must not take arguments"));
-            }
-            if let Some(sensitivity) = &process.static_sensitivity {
-                check_terms(&sensitivity.terms)?;
-            }
-            let check_wait = |wait: &DigitalWait| -> IrValidationResult {
-                let wait = if let DigitalWait::Repeat { count, event } = wait {
-                    if !matches!(
-                        function.value(*count).value_type,
-                        CfgValueType::FourState { .. }
-                    ) {
-                        return Err(error(
-                            "repeat event count must be normalized four-state data",
-                        ));
-                    }
-                    if !matches!(
-                        event.as_ref(),
-                        DigitalWait::Event(_) | DigitalWait::Expressions(_)
-                    ) {
-                        return Err(error("repeat must contain one event control"));
-                    }
-                    event.as_ref()
-                } else {
-                    wait
-                };
-                match wait {
-                    DigitalWait::Event(terms) => {
-                        if terms.is_empty() {
-                            return Err(error("event wait must have sensitivity terms"));
-                        }
-                        check_terms(terms)
-                    }
-                    DigitalWait::Expressions(terms) => check_expressions(function, terms),
-                    DigitalWait::Delay(value) => {
-                        if !matches!(
-                            function.value(*value).value_type,
-                            CfgValueType::Integer | CfgValueType::FourState { .. }
-                        ) {
-                            return Err(error(
-                                "digital delay must contain converted integer ticks",
-                            ));
-                        }
-                        Ok(())
-                    }
-                    DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
+            for function in process_functions(&process.function) {
+                function
+                    .validate()
+                    .map_err(|detail| error(format!("digital process {}: {detail}", index)))?;
+                if !function.block(function.entry).params.is_empty() {
+                    return Err(error("digital process entry must not take arguments"));
                 }
-            };
-            for block in &function.blocks {
-                match &block.terminator {
-                    CfgTerminator::Wait { wait, .. } => check_wait(wait)?,
-                    CfgTerminator::Branch { condition, .. } => {
+                if let Some(sensitivity) = &process.static_sensitivity {
+                    check_terms(&sensitivity.terms)?;
+                }
+                let check_wait = |wait: &DigitalWait| -> IrValidationResult {
+                    let wait = if let DigitalWait::Repeat { count, event } = wait {
                         if !matches!(
-                            function.value(*condition).value_type,
+                            function.value(*count).value_type,
                             CfgValueType::FourState { .. }
                         ) {
-                            return Err(error("digital branch must have a four-state condition"));
+                            return Err(error(
+                                "repeat event count must be normalized four-state data",
+                            ));
                         }
-                    }
-                    _ => {}
-                }
-            }
-            for value in &function.values {
-                let kind = &value.kind;
-                if !kind.is_digital()
-                    && !matches!(
-                        kind,
-                        CfgValueKind::RealConstant(_) | CfgValueKind::BlockParameter
-                    )
-                {
-                    return Err(error("analog value kind in digital process"));
-                }
-                if matches!(
-                    value.value_type,
-                    CfgValueType::Boolean | CfgValueType::Lanes(_)
-                ) {
-                    return Err(error("analog value type in digital process"));
-                }
-                match kind {
-                    CfgValueKind::DigitalRepeatCount { input, .. } => {
-                        let expected = match function.value(*input).value_type {
-                            CfgValueType::FourState { width } => CfgValueType::FourState { width },
-                            CfgValueType::Integer | CfgValueType::Real => {
-                                CfgValueType::FourState { width: 32 }
+                        if !matches!(
+                            event.as_ref(),
+                            DigitalWait::Event(_) | DigitalWait::Expressions(_)
+                        ) {
+                            return Err(error("repeat must contain one event control"));
+                        }
+                        event.as_ref()
+                    } else {
+                        wait
+                    };
+                    match wait {
+                        DigitalWait::Event(terms) => {
+                            if terms.is_empty() {
+                                return Err(error("event wait must have sensitivity terms"));
                             }
-                            _ => return Err(error("repeat count has the wrong value domain")),
-                        };
-                        if value.value_type != expected {
-                            return Err(error("repeat count has the wrong output width"));
+                            check_terms(terms)
                         }
-                    }
-                    CfgValueKind::DigitalDelayTicks { input, .. } => {
-                        if value.value_type != (CfgValueType::FourState { width: 64 })
-                            || !matches!(
-                                function.value(*input).value_type,
-                                CfgValueType::Integer
-                                    | CfgValueType::Real
-                                    | CfgValueType::FourState { .. }
-                            )
-                        {
-                            return Err(error(
-                                "digital delay conversion has the wrong value domain or width",
-                            ));
-                        }
-                    }
-                    CfgValueKind::DigitalBitSelect {
-                        input,
-                        index,
-                        bounds,
-                        ..
-                    } => {
-                        let width = bounds.0.abs_diff(bounds.1).checked_add(1);
-                        if value.value_type != (CfgValueType::FourState { width: 1 })
-                            || !matches!(
-                                function.value(*index).value_type,
-                                CfgValueType::FourState { .. } | CfgValueType::Integer
-                            )
-                            || !matches!(function.value(*input).value_type, CfgValueType::FourState { width: w } if Some(u64::from(w)) == width)
-                        {
-                            return Err(error(
-                                "digital bit select has inconsistent input, index or declared bounds",
-                            ));
-                        }
-                    }
-                    CfgValueKind::DigitalIntegerToReal { input, .. } => {
-                        if value.value_type != CfgValueType::Real
-                            || !matches!(
-                                function.value(*input).value_type,
+                        DigitalWait::Expressions(terms) => check_expressions(function, terms),
+                        DigitalWait::Delay(value) => {
+                            if !matches!(
+                                function.value(*value).value_type,
                                 CfgValueType::Integer | CfgValueType::FourState { .. }
-                            )
-                        {
-                            return Err(error(
-                                "integer-to-real conversion has inconsistent value domains",
-                            ));
-                        }
-                    }
-                    CfgValueKind::DigitalRealToInteger { input, width } => {
-                        if *width == 0
-                            || *width > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
-                            || value.value_type != (CfgValueType::FourState { width: *width })
-                            || function.value(*input).value_type != CfgValueType::Real
-                        {
-                            return Err(error(
-                                "real-to-integer conversion has inconsistent value domains or width",
-                            ));
-                        }
-                    }
-                    CfgValueKind::DigitalTime { query } => {
-                        if value.value_type != query.value_type() {
-                            return Err(error(
-                                "digital time query has the wrong value domain or width",
-                            ));
-                        }
-                    }
-                    CfgValueKind::DigitalSignalRead { signal }
-                    | CfgValueKind::DigitalRealSignalRead { signal } => {
-                        let Some(signal) = self.signal(*signal) else {
-                            return Err(error("digital read names an undeclared signal"));
-                        };
-                        let expected = if signal.kind.is_real() {
-                            CfgValueType::Real
-                        } else {
-                            CfgValueType::FourState {
-                                width: signal.width,
+                            ) {
+                                return Err(error(
+                                    "digital delay must contain converted integer ticks",
+                                ));
                             }
-                        };
-                        if value.value_type != expected
-                            || signal.kind.is_real()
-                                != matches!(kind, CfgValueKind::DigitalRealSignalRead { .. })
-                        {
-                            return Err(error(
-                                "digital signal read has the wrong value domain or width",
-                            ));
+                            Ok(())
                         }
+                        DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
                     }
-                    CfgValueKind::DigitalAnalogPotential { probe }
-                        if self.analog_probe(*probe).is_none() =>
+                };
+                for block in &function.blocks {
+                    match &block.terminator {
+                        CfgTerminator::Wait { wait, .. } => check_wait(wait)?,
+                        CfgTerminator::Branch { condition, .. } => {
+                            if !matches!(
+                                function.value(*condition).value_type,
+                                CfgValueType::FourState { .. }
+                            ) {
+                                return Err(error(
+                                    "digital branch must have a four-state condition",
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for value in &function.values {
+                    let kind = &value.kind;
+                    if !kind.is_digital()
+                        && !matches!(
+                            kind,
+                            CfgValueKind::RealConstant(_) | CfgValueKind::BlockParameter
+                        )
                     {
-                        return Err(error("digital read names an undeclared analog probe"));
+                        return Err(error("analog value kind in digital process"));
                     }
-                    CfgValueKind::DigitalBlockingWrite { target, .. }
-                    | CfgValueKind::DigitalNonblockingWrite { target, .. } => {
-                        if self
-                            .signal(target.signal)
-                            .is_none_or(|signal| !signal.procedurally_assignable)
-                        {
-                            return Err(error(
-                                "digital procedural write must target a declared variable",
-                            ));
-                        }
-                        if let CfgValueKind::DigitalNonblockingWrite {
-                            wait: Some(wait), ..
-                        } = kind
-                        {
-                            check_wait(wait)?;
-                        }
-                        if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
-                            && *region != DigitalSchedulingRegion::NonBlockingAssign
-                        {
-                            return Err(error(
-                                "digital nonblocking write has the wrong scheduling region",
-                            ));
-                        }
+                    if matches!(
+                        value.value_type,
+                        CfgValueType::Boolean | CfgValueType::Lanes(_)
+                    ) {
+                        return Err(error("analog value type in digital process"));
                     }
-                    CfgValueKind::DigitalDriverWrite { driver, target, .. } => {
-                        if drivers.get(driver).is_none_or(|declared| {
-                            declared.process != process.id || declared.target != *target
-                        }) {
-                            return Err(error(
-                                "digital driver write does not match its declaration",
-                            ));
+                    match kind {
+                        CfgValueKind::DigitalExpression {
+                            function: expression,
+                            result,
+                        } => {
+                            expression
+                                .validate()
+                                .map_err(|detail| error(format!("event expression: {detail}")))?;
+                            expression_dependencies(expression, *result).map_err(error)?;
+                            if value.value_type != expression.value(*result).value_type {
+                                return Err(error(
+                                    "event expression result has the wrong value domain or width",
+                                ));
+                            }
                         }
-                        written_drivers.insert(*driver);
+                        CfgValueKind::DigitalRealSelect {
+                            condition,
+                            then_value,
+                            else_value,
+                        } => {
+                            if value.value_type != CfgValueType::Real
+                                || !matches!(
+                                    function.value(*condition).value_type,
+                                    CfgValueType::FourState { .. }
+                                )
+                                || function.value(*then_value).value_type != CfgValueType::Real
+                                || function.value(*else_value).value_type != CfgValueType::Real
+                            {
+                                return Err(error("real selection has inconsistent value domains"));
+                            }
+                        }
+                        CfgValueKind::DigitalRepeatCount { input, .. } => {
+                            let expected = match function.value(*input).value_type {
+                                CfgValueType::FourState { width } => {
+                                    CfgValueType::FourState { width }
+                                }
+                                CfgValueType::Integer | CfgValueType::Real => {
+                                    CfgValueType::FourState { width: 32 }
+                                }
+                                _ => return Err(error("repeat count has the wrong value domain")),
+                            };
+                            if value.value_type != expected {
+                                return Err(error("repeat count has the wrong output width"));
+                            }
+                        }
+                        CfgValueKind::DigitalDelayTicks { input, .. } => {
+                            if value.value_type != (CfgValueType::FourState { width: 64 })
+                                || !matches!(
+                                    function.value(*input).value_type,
+                                    CfgValueType::Integer
+                                        | CfgValueType::Real
+                                        | CfgValueType::FourState { .. }
+                                )
+                            {
+                                return Err(error(
+                                    "digital delay conversion has the wrong value domain or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalBitSelect {
+                            input,
+                            index,
+                            bounds,
+                            ..
+                        } => {
+                            let width = bounds.0.abs_diff(bounds.1).checked_add(1);
+                            if value.value_type != (CfgValueType::FourState { width: 1 })
+                                || !matches!(
+                                    function.value(*index).value_type,
+                                    CfgValueType::FourState { .. } | CfgValueType::Integer
+                                )
+                                || !matches!(function.value(*input).value_type, CfgValueType::FourState { width: w } if Some(u64::from(w)) == width)
+                            {
+                                return Err(error(
+                                    "digital bit select has inconsistent input, index or declared bounds",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalIntegerToReal { input, .. } => {
+                            if value.value_type != CfgValueType::Real
+                                || !matches!(
+                                    function.value(*input).value_type,
+                                    CfgValueType::Integer | CfgValueType::FourState { .. }
+                                )
+                            {
+                                return Err(error(
+                                    "integer-to-real conversion has inconsistent value domains",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalRealToInteger { input, width } => {
+                            if *width == 0
+                                || *width > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                                || value.value_type != (CfgValueType::FourState { width: *width })
+                                || function.value(*input).value_type != CfgValueType::Real
+                            {
+                                return Err(error(
+                                    "real-to-integer conversion has inconsistent value domains or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalTime { query } => {
+                            if value.value_type != query.value_type() {
+                                return Err(error(
+                                    "digital time query has the wrong value domain or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalSignalRead { signal }
+                        | CfgValueKind::DigitalRealSignalRead { signal } => {
+                            let Some(signal) = self.signal(*signal) else {
+                                return Err(error("digital read names an undeclared signal"));
+                            };
+                            let expected = if signal.kind.is_real() {
+                                CfgValueType::Real
+                            } else {
+                                CfgValueType::FourState {
+                                    width: signal.width,
+                                }
+                            };
+                            if value.value_type != expected
+                                || signal.kind.is_real()
+                                    != matches!(kind, CfgValueKind::DigitalRealSignalRead { .. })
+                            {
+                                return Err(error(
+                                    "digital signal read has the wrong value domain or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalAnalogPotential { probe }
+                            if self.analog_probe(*probe).is_none() =>
+                        {
+                            return Err(error("digital read names an undeclared analog probe"));
+                        }
+                        CfgValueKind::DigitalBlockingWrite { target, .. }
+                        | CfgValueKind::DigitalNonblockingWrite { target, .. } => {
+                            if self
+                                .signal(target.signal)
+                                .is_none_or(|signal| !signal.procedurally_assignable)
+                            {
+                                return Err(error(
+                                    "digital procedural write must target a declared variable",
+                                ));
+                            }
+                            if let CfgValueKind::DigitalNonblockingWrite {
+                                wait: Some(wait), ..
+                            } = kind
+                            {
+                                check_wait(wait)?;
+                            }
+                            if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
+                                && *region != DigitalSchedulingRegion::NonBlockingAssign
+                            {
+                                return Err(error(
+                                    "digital nonblocking write has the wrong scheduling region",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalDriverWrite { driver, target, .. } => {
+                            if drivers.get(driver).is_none_or(|declared| {
+                                declared.process != process.id || declared.target != *target
+                            }) {
+                                return Err(error(
+                                    "digital driver write does not match its declaration",
+                                ));
+                            }
+                            written_drivers.insert(*driver);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
@@ -428,6 +465,10 @@ pub(crate) fn event_expression_schedule(
         {
             dependencies.insert(signal);
         }
+        if let CfgValueKind::DigitalExpression { function, result } = &value.kind {
+            function.validate().map_err(|error| error.to_string())?;
+            dependencies.extend(expression_dependencies(function, *result)?);
+        }
         states[index] = 1;
         stack.push((id, true));
         for operand in value.kind.operands().into_iter().rev() {
@@ -451,4 +492,123 @@ fn check_expressions(
         }
     }
     Ok(())
+}
+
+/// Embedded expression functions have one level of independent SSA scope.
+/// Nested embedded functions are rejected before walking their contents.
+fn process_functions(function: &super::CfgFunction) -> impl Iterator<Item = &super::CfgFunction> {
+    std::iter::once(function).chain(
+        function
+            .values
+            .iter()
+            .filter_map(|value| match &value.kind {
+                CfgValueKind::DigitalExpression { function, .. } => Some(function.as_ref()),
+                _ => None,
+            }),
+    )
+}
+
+/// Validate pure, acyclic observation and collect every possible signal input,
+/// including inputs of branches that are currently inactive. Selection changes
+/// can make any of them relevant on the next observation.
+fn expression_dependencies(
+    function: &super::CfgFunction,
+    result: super::ids::ValueId,
+) -> Result<Vec<super::ids::DigitalSignalId>, String> {
+    let Some(output) = function.values.get(usize::from(result)) else {
+        return Err("event expression names an absent result".into());
+    };
+    if !matches!(
+        output.value_type,
+        CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }
+    ) {
+        return Err("event expression must return scalar data".into());
+    }
+    if !function.block(function.entry).params.is_empty() {
+        return Err("event expression must not capture process arguments".into());
+    }
+    let mut dependencies = std::collections::BTreeSet::new();
+    for value in &function.values {
+        if matches!(
+            value.kind,
+            CfgValueKind::DigitalExpression { .. }
+                | CfgValueKind::DigitalBlockingWrite { .. }
+                | CfgValueKind::DigitalNonblockingWrite { .. }
+                | CfgValueKind::DigitalDriverWrite { .. }
+                | CfgValueKind::DigitalAnalogPotential { .. }
+        ) || !matches!(
+            value.value_type,
+            CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }
+        ) || !(value.kind.is_digital()
+            || matches!(
+                value.kind,
+                CfgValueKind::RealConstant(_) | CfgValueKind::BlockParameter
+            ))
+        {
+            return Err("event expression must be pure and needs supported event bindings".into());
+        }
+        if let CfgValueKind::DigitalSignalRead { signal }
+        | CfgValueKind::DigitalRealSignalRead { signal } = value.kind
+        {
+            dependencies.insert(signal);
+        }
+    }
+    let mut incoming = vec![0usize; function.blocks.len()];
+    let mut returns = 0;
+    let mut definition = None;
+    for block in &function.blocks {
+        match &block.terminator {
+            CfgTerminator::Return => returns += 1,
+            CfgTerminator::Jump { .. } | CfgTerminator::Branch { .. } => {}
+            _ => return Err("event expression must not suspend".into()),
+        }
+        if block.params.contains(&result) || block.instructions.iter().any(|i| i.result == result) {
+            definition = Some(block.id);
+        }
+        for successor in block.successors() {
+            incoming[usize::from(successor)] += 1;
+        }
+    }
+    let mut ready: Vec<_> = incoming
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &n)| (n == 0).then_some(super::ids::BlockId::from(i)))
+        .collect();
+    let mut visited = 0;
+    while let Some(block) = ready.pop() {
+        visited += 1;
+        for successor in function.block(block).successors() {
+            let count = &mut incoming[usize::from(successor)];
+            *count -= 1;
+            if *count == 0 {
+                ready.push(successor);
+            }
+        }
+    }
+    if visited != function.blocks.len() || returns == 0 {
+        return Err("event expression control flow must be acyclic and return a value".into());
+    }
+    // Every return must have passed the result's definition. Constants may be
+    // unplaced leaves; all other results have a defining block checked above.
+    if let Some(definition) = definition {
+        let mut seen = vec![false; function.blocks.len()];
+        let mut pending = vec![function.entry];
+        while let Some(block) = pending.pop() {
+            if block == definition || std::mem::replace(&mut seen[usize::from(block)], true) {
+                continue;
+            }
+            if matches!(function.block(block).terminator, CfgTerminator::Return) {
+                return Err("event expression result is not defined on every return path".into());
+            }
+            pending.extend(function.block(block).successors());
+        }
+    } else if !matches!(
+        output.kind,
+        CfgValueKind::RealConstant(_)
+            | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::FourStateConstant(_)
+    ) {
+        return Err("event expression result has no definition".into());
+    }
+    Ok(dependencies.into_iter().collect())
 }

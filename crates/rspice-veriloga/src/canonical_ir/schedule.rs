@@ -1876,7 +1876,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalAnalogPotential { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
-        | CfgValueKind::DigitalRealSelect { .. }
+        | CfgValueKind::DigitalExpression { .. }
+            | CfgValueKind::DigitalRealSelect { .. }
         | CfgValueKind::DigitalRealToBits { .. }
         | CfgValueKind::DigitalBitsToReal { .. }
             | CfgValueKind::DigitalIntegerToReal { .. }

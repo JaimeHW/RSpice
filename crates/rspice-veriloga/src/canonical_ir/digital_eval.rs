@@ -1164,6 +1164,8 @@ fn four_state_in<'v>(
 pub struct DigitalEvalScratch {
     /// One slot per SSA value, emptied at every entry into a function.
     table: ValueTable,
+    /// Separate reusable values for a pure expression, never process state.
+    expression: Option<Box<DigitalEvalScratch>>,
     event_identity: Option<[u8; 32]>,
     event_programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
     /// One control-flow edge's arguments, refilled per edge.
@@ -1360,6 +1362,7 @@ fn validate_process_membership(
 struct Interpreter<'a, 's, E: ?Sized> {
     plan: &'a CanonicalDigitalPlan,
     process: &'a CfgDigitalProcess,
+    function: &'a CfgFunction,
     environment: &'a mut E,
     /// The reused working set. Its value table is one slot per SSA value and is
     /// empty at every entry into the function — the generation bump in
@@ -1380,11 +1383,21 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         environment: &'a mut E,
         scratch: &'s mut DigitalEvalScratch,
     ) -> Self {
+        Self::with_function(plan, process, &process.function, environment, scratch)
+    }
+
+    fn with_function(
+        plan: &'a CanonicalDigitalPlan,
+        process: &'a CfgDigitalProcess,
+        function: &'a CfgFunction,
+        environment: &'a mut E,
+        scratch: &'s mut DigitalEvalScratch,
+    ) -> Self {
         // A generation bump rather than a clear: the observable state is the
         // same table an allocation would have produced — every slot empty —
         // and it costs one increment instead of one pass over the function's
         // whole value list.
-        scratch.table.enter(process.function.values.len());
+        scratch.table.enter(function.values.len());
         if scratch.event_identity != Some(plan.content_identity) {
             scratch.event_programs.clear();
             scratch.event_identity = Some(plan.content_identity);
@@ -1392,13 +1405,14 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         Self {
             plan,
             process,
+            function,
             environment,
             scratch,
         }
     }
 
     fn function(&self) -> &'a CfgFunction {
-        &self.process.function
+        self.function
     }
 
     fn run(
@@ -1696,6 +1710,34 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
         let kind = &self.function().value(id).kind;
         match kind {
+            CfgValueKind::DigitalExpression { function, result } => {
+                let mut storage = self.scratch.expression.take().unwrap_or_default();
+                storage.arguments.clear();
+                let interpreter = Interpreter::with_function(
+                    self.plan,
+                    self.process,
+                    function,
+                    self.environment,
+                    &mut storage,
+                );
+                // Validation restricts expression functions to acyclic, pure
+                // control flow. Even malformed input cannot run indefinitely.
+                let outcome = interpreter.run(function.entry, function.blocks.len());
+                let value = outcome.and_then(|outcome| match outcome {
+                    DigitalProcessOutcome::Finished => storage
+                        .table
+                        .get(function, *result)
+                        .map(ScalarRef::into_owned),
+                    DigitalProcessOutcome::Suspended(_) => {
+                        Err(DigitalEvalError::InvalidEventExpression {
+                            value: id,
+                            detail: "an event expression must not suspend".into(),
+                        })
+                    }
+                });
+                self.scratch.expression = Some(storage);
+                value
+            }
             CfgValueKind::DigitalRepeatCount { input, signed } => {
                 let value = match self.scalar(*input)? {
                     ScalarRef::Real(value) => {
@@ -1876,21 +1918,13 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 else_value,
             } => {
                 let (condition, then_value, else_value) = (*condition, *then_value, *else_value);
-                // IEEE 1364-2005 section 9.4, not section 5.1.13. A real has no
-                // bits for section 5.1.13's ambiguous-condition merge to
-                // combine, so an `x` or `z` condition takes the `else` arm —
-                // the rule this interpreter already applies at a `Branch`,
-                // which is what keeps `c ? a : b` and the `if` it stands for
-                // from disagreeing.
-                let taken = truth(&*self.four_state(condition)?) == FourStateBit::One;
-                // Both arms are still evaluated, so a refusal inside the arm
-                // not taken is reported rather than hidden by the condition.
+                let condition = truth(&*self.four_state(condition)?);
                 let then_value = self.real(then_value)?;
                 let else_value = self.real(else_value)?;
-                Ok(DigitalScalar::Real(if taken {
-                    then_value
-                } else {
-                    else_value
+                Ok(DigitalScalar::Real(match condition {
+                    FourStateBit::One => then_value,
+                    FourStateBit::Zero => else_value,
+                    FourStateBit::Unknown | FourStateBit::HighImpedance => 0.0,
                 }))
             }
             CfgValueKind::DigitalBitwise { op, left, right } => {
@@ -2067,11 +2101,12 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 // copy of the value to hand the store.
                 let Interpreter {
                     plan,
-                    process,
+                    function,
                     environment,
                     scratch,
+                    ..
                 } = self;
-                let value = four_state_in(&process.function, &scratch.table, value)?;
+                let value = four_state_in(function, &scratch.table, value)?;
                 apply_write(plan, &mut **environment, target, &value)?;
                 Ok(DigitalScalar::Effect)
             }
@@ -2098,12 +2133,12 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 // contribution cannot recover a width it was not given.
                 let width = target_width(signal, &target.select);
                 let Interpreter {
-                    process,
+                    function,
                     environment,
                     scratch,
                     ..
                 } = self;
-                let value = four_state_in(&process.function, &scratch.table, value)?;
+                let value = four_state_in(function, &scratch.table, value)?;
                 environment.drive_signal(DigitalDrive {
                     driver,
                     target: target.clone(),
@@ -2138,12 +2173,12 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 // is known now.
                 let width = target_width(signal, &target.select);
                 let Interpreter {
-                    process,
+                    function,
                     environment,
                     scratch,
                     ..
                 } = self;
-                let value = four_state_in(&process.function, &scratch.table, value)?;
+                let value = four_state_in(function, &scratch.table, value)?;
                 environment.defer_update(DigitalDeferredUpdate {
                     target: target.clone(),
                     value: DigitalUpdate::FourState(value.resized(width)),

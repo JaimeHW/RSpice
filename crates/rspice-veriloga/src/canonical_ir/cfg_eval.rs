@@ -1312,6 +1312,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
+            | CfgValueKind::DigitalExpression { .. }
             | CfgValueKind::DigitalRealSelect { .. }
             | CfgValueKind::DigitalRealToBits { .. }
             | CfgValueKind::DigitalBitsToReal { .. }

@@ -2212,6 +2212,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
+            | CfgValueKind::DigitalExpression { .. }
             | CfgValueKind::DigitalRealSelect { .. }
             | CfgValueKind::DigitalRealToBits { .. }
             | CfgValueKind::DigitalBitsToReal { .. }

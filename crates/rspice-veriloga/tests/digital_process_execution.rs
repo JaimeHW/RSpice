@@ -4696,3 +4696,226 @@ fn numeric_conversions_validate_their_value_domains_and_target_widths() {
     let error = format!("{:?}", plan.validate().unwrap_err());
     assert!(error.contains("real-to-integer conversion"), "{error}");
 }
+
+#[test]
+fn real_conditionals_skip_inactive_reads_and_preserve_statement_flow() {
+    let mut h = Harness::from_source(
+        r#"
+      module lazy(p); inout p; electrical p;
+        reg select; reg [95:0] poison; real result, captured, deferred, after;
+        initial begin : scope
+          real local;
+          local=0.0;
+          result=(select ? 5.0 : V(p)) + (select ? 1.0 : $bitstoreal(64'bx))
+                 + (select ? 2.0 : poison);
+          while (select ? (local < 3.0 ? 1.0 : 0.0) : poison)
+            local=select ? local+1.0 : poison;
+          deferred <= select ? local : poison;
+          captured = #2 (select ? local : poison);
+          after = select ? V(p) : poison;
+        end
+      endmodule
+    "#,
+    );
+    h.set("select", "1");
+    let suspended = expect_suspended(h.start(0));
+    assert_eq!(h.get_real("result"), 8.0);
+    h.set("select", "0");
+    h.set("poison", &format!("{:096b}", 9));
+    h.flush_nonblocking();
+    assert_eq!(h.get_real("deferred"), 3.0);
+    expect_finished(h.resume(0, suspended.resume_state()));
+    assert_eq!(h.get_real("captured"), 3.0);
+    assert_eq!(h.get_real("after"), 9.0);
+
+    // A continuous driver must re-enter the condition's entry, not reuse the
+    // selected arm or cached values from the preceding activation.
+    let mut driver = Harness::from_source(
+        "module mux; reg select; reg [95:0] poison; wreal y; assign y=select ? 2.5 : poison; endmodule",
+    );
+    driver.set("select", "1");
+    let wait = expect_suspended(driver.start(0));
+    assert_eq!(
+        driver.store.driven_reals.values().next().unwrap().value,
+        2.5
+    );
+    driver.set("select", "0");
+    driver.set("poison", &format!("{:096b}", 7));
+    expect_suspended(driver.resume(0, wait.resume_state()));
+    assert_eq!(
+        driver.store.driven_reals.values().next().unwrap().value,
+        7.0
+    );
+}
+
+#[test]
+fn real_conditionals_apply_ambiguous_rule_and_report_selected_errors() {
+    for condition in ["x", "z"] {
+        let mut h = Harness::from_source(
+            "module ambiguous; reg c; real different,same; initial begin different=c ? 2.5 : 9.0; same=c ? 2.5 : 2.5; end endmodule",
+        );
+        h.set("c", condition);
+        expect_finished(h.start(0));
+        assert_eq!(h.get_real("different"), 0.0);
+        assert_eq!(h.get_real("same"), 0.0);
+    }
+    for (expression, condition) in [
+        ("c ? 2.5 : poison", "0"),
+        ("c ? poison : 2.5", "1"),
+        ("c ? poison : 2.5", "x"),
+        ("c ? 2.5 : poison", "z"),
+    ] {
+        let mut h = Harness::from_source(&format!(
+            "module selected; reg c; reg [95:0] poison; real r; initial r={expression}; endmodule"
+        ));
+        h.set("c", condition);
+        assert!(
+            matches!(
+                start(&h.plan, &h.plan.processes[0], &mut h.store),
+                Err(DigitalEvalError::InvalidNumericConversion { .. })
+            ),
+            "{expression}, {condition}"
+        );
+    }
+}
+
+#[test]
+fn computed_event_real_conditionals_observe_only_selected_values() {
+    let mut h = Harness::from_source(
+        "module events; reg select,q; reg [95:0] data; real a;
+         initial begin a=2.5; q=0; @(select ? a : data) q=1; end endmodule",
+    );
+    h.set("select", "1");
+    let transported: CanonicalDigitalPlan =
+        serde_json::from_str(&serde_json::to_string(&h.plan).unwrap()).unwrap();
+    transported.validate().unwrap();
+    h.plan = transported;
+    let suspension = expect_suspended(h.start(0));
+    let (DigitalWaitRequest::Expressions(mut wait), resume) = suspension.into_parts() else {
+        panic!("computed wait")
+    };
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    // Changing the unused operand, including X/Z, leaves the event baseline.
+    h.set("data", &"z".repeat(96));
+    let data = h.signal("data");
+    assert!(
+        !wait
+            .observe(&h.plan, data, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    h.set("data", &format!("{:096b}", 7));
+    assert!(
+        !wait
+            .observe(&h.plan, data, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    h.set("select", "0");
+    let select = h.signal("select");
+    assert!(
+        wait.observe(&h.plan, select, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    h.set_real("a", 8.5);
+    let a = h.signal("a");
+    assert!(
+        !wait
+            .observe(&h.plan, a, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    h.set("select", "1");
+    assert!(
+        wait.observe(&h.plan, select, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    expect_finished(h.resume(0, &resume));
+    assert_eq!(h.get("q"), "1");
+}
+
+#[test]
+fn computed_event_programs_reject_invalid_nested_artifacts() {
+    use rspice_veriloga::canonical_ir::{CfgTerminator, CfgValueKind, CfgValueType};
+    let h = Harness::from_source(
+        "module validation; reg c; reg [7:0] data; real a; initial begin a=2.5; @(c ? a : data); end endmodule",
+    );
+    for (case, expected) in [
+        (0, "absent result"),
+        (1, "undeclared signal"),
+        (2, "must be pure"),
+        (3, "must be acyclic"),
+        (4, "every return path"),
+        (5, "four-state condition"),
+        (6, "must be pure"),
+    ] {
+        let mut plan = h.plan.clone();
+        let node = plan.processes[0]
+            .function
+            .values
+            .iter_mut()
+            .find(|v| matches!(v.kind, CfgValueKind::DigitalExpression { .. }))
+            .unwrap();
+        let nested = node.kind.clone();
+        let CfgValueKind::DigitalExpression { function, result } = &mut node.kind else {
+            unreachable!()
+        };
+        match case {
+            0 => *result = 999999usize.into(),
+            1 => {
+                let value = function
+                    .values
+                    .iter_mut()
+                    .find(|v| matches!(v.kind, CfgValueKind::DigitalRealSignalRead { .. }))
+                    .unwrap();
+                value.kind = CfgValueKind::DigitalRealSignalRead {
+                    signal: 999999usize.into(),
+                };
+            }
+            2 => {
+                let value = function
+                    .values
+                    .iter_mut()
+                    .find(|v| matches!(v.kind, CfgValueKind::DigitalRealSignalRead { .. }))
+                    .unwrap();
+                value.kind = nested;
+            }
+            3 => {
+                function.blocks[usize::from(function.entry)].terminator = CfgTerminator::Jump {
+                    target: function.entry,
+                    args: Vec::new(),
+                }
+            }
+            4 => {
+                *result = function
+                    .values
+                    .iter()
+                    .find(|v| matches!(v.kind, CfgValueKind::DigitalIntegerToReal { .. }))
+                    .unwrap()
+                    .id
+            }
+            5 => {
+                let real = function
+                    .values
+                    .iter()
+                    .find(|v| matches!(v.kind, CfgValueKind::RealConstant(_)))
+                    .unwrap()
+                    .id;
+                let CfgTerminator::Branch { condition, .. } =
+                    &mut function.blocks[usize::from(function.entry)].terminator
+                else {
+                    panic!("branch")
+                };
+                *condition = real;
+            }
+            6 => {
+                let value = function
+                    .values
+                    .iter_mut()
+                    .find(|v| matches!(v.kind, CfgValueKind::DigitalRealSignalRead { .. }))
+                    .unwrap();
+                value.value_type = CfgValueType::Effect;
+            }
+            _ => unreachable!(),
+        }
+        let error = format!("{:?}", plan.validate().unwrap_err());
+        assert!(error.contains(expected), "case {case}: {error}");
+    }
+}

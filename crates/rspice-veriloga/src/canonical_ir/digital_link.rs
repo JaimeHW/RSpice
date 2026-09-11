@@ -509,6 +509,11 @@ fn relocate_value(
     drivers: &BTreeMap<DigitalDriverId, DigitalDriverId>,
 ) -> LinkResult<()> {
     match kind {
+        CfgValueKind::DigitalExpression { function, .. } => {
+            for value in &mut function.values {
+                relocate_value(&mut value.kind, source, map, drivers)?;
+            }
+        }
         CfgValueKind::DigitalSignalRead { signal }
         | CfgValueKind::DigitalRealSignalRead { signal } => {
             *signal = map.signals[usize::from(*signal)];

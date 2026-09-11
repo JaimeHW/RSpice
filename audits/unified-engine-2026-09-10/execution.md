@@ -2184,6 +2184,67 @@ real conditional evaluation, wider MS06/MS03/MS05 requirements and the remaining
 MS00–MS15 plan stay open. No licensed Spectre installation is available;
 reference parity and production qualification remain unproven.
 
+## MS06: lazy real conditionals and control flow in event observations
+
+Real conditional expressions now retain their control flow. A known condition
+executes only its selected arm, so an unused X/Z numeric conversion,
+$bitstoreal conversion or unavailable analog probe cannot fail the activation.
+An ambiguous X/Z condition evaluates both arms and returns real zero, correcting
+the previous false-arm selection. This follows IEEE 1364-2005 section 5.1.13;
+the real operator is included in the VAMS-2023 expression contract.
+
+A digital lowering adapter preserves block entry identities for loop re-entry
+while sending subsequent instructions, variable reads and suspension arguments
+through the expression's continuation. Explicit typed merge parameters carry
+arm results. Each arm appears once in the CFG, including the ambiguous path,
+so nested conditionals do not duplicate source subtrees.
+
+Computed event controls carry an independent pure expression CFG rather than
+flattening conditional arms into an eager operand list. Capture and observation
+use the same interpreter and reusable, separate value storage. Dependencies
+include every possible branch input; only selected values are evaluated.
+Signal IDs relocate inside the expression when plans are linked. The artifact
+validator checks the inner function and its types, scalar result availability,
+acyclic execution, and the absence of writes, suspension, nested programs or
+unsupported analog/local subscriptions. Artifact schema 53 and content identity
+include the new representation and embedded real constant bits.
+
+Five focused source-execution checks passed in 0.00 seconds after a 26.80-second
+build: inactive reads, ambiguous/selected errors, nested conditionals, local
+loop state, nonblocking/delayed capture, continuous driver re-entry, computed
+event baseline updates, dynamic indices and serialized plans. A sixth check
+for seven malformed embedded artifacts passed in 0.00 seconds after a
+26.42-second build. Logs: target/unified-mixed-fixes/lazy-real-tests.log and
+lazy-real-artifact-tests.log. These checks used native,wasm-jit compiler features;
+actual native/Wasm digital code generation remains MS11 work.
+
+Main through 6ad3a073f was incorporated, preserving the other workstreams'
+integral-derivative and VBIC/HB/PAC changes. The only rebase conflict was the
+generated manifest, for which the integrated generator is authoritative. The
+continuation lookup now compresses traversed chains, avoiding repeated walks
+through preceding sequential conditionals. All six focused compiler checks
+passed on this integrated code in 0.01 seconds after a 28.51-second build.
+Log: target/unified-mixed-fixes/lazy-real-integrated-tests.log.
+
+The integrated generator refreshed all 43 built-ins with no numerical source
+changes relative to 6ad3a073f. Generator digest:
+d4717e17a18a519ce71ea411942e839049c7a40d1941110233321c5cfeeb3d18.
+Bundle digest:
+42d6535f34a94ae96bc3055bb5f2c80aad6cbae8b3a8f67342e87ed49823cc8c.
+Log: target/unified-mixed-fixes/lazy-real-integrated-generator.log. The earlier
+lazy-real-generator.log records generation before the upstream integration;
+its metadata is superseded by this integrated result.
+
+The actual circuit regression passed: two linked HDL receivers independently
+observe their conditional expressions, skip unknown inactive bus values, wake
+at their distinct parameterized switching times, and drive native SPICE RC
+loads to the expected loaded voltage. This exercises inner signal relocation,
+shared event delivery and analog assembly together. Result: one test passed
+in 0.04 seconds after a 1m22s build. Log:
+target/unified-mixed-fixes/lazy-real-circuit-test.log.
+No full suite was run. This increment does not close MS06, remaining MS00-MS15
+requirements, production qualification, or unavailable licensed-reference parity.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2191,9 +2252,11 @@ controller/effect/result/cache transaction. Preserve physical loads
 and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
-dependencies and feedback convergence. Complete lazy real-conditional evaluation
-and the remaining ownership/type/event requirements under MS06; mixed numeric
-conversion now handles the recorded comparison refusal. Extend qualification of the
+dependencies and feedback convergence. Complete the remaining ownership/type/
+event requirements under MS06. Real conditionals now retain control flow and
+numeric conversion handles the recorded mixed-clock comparison. Four-state
+conditional lowering still computes both arms; extend lazy evaluation there
+while preserving context sizing and bitwise X/Z merging. Extend qualification of the
 now-enabled conservative OneStep path and preserve correct readbacks while
 improving eligibility of compiler-created flow temporaries. Settled static
 history, distinct companion rules, compiler proof and mixed weighting are

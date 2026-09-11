@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 53 preserves control flow in independently observed digital expressions.
 /// Version 52 retains numeric real/integer conversions in digital CFGs.
 /// Version 51 retains indirect-equation absolute tolerances.
 /// Version 50 validates and retains nature inheritance and physical declaration closures.
@@ -54,7 +55,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 52;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 53;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

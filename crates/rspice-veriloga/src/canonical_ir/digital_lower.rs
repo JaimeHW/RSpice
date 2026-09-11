@@ -461,7 +461,7 @@ fn lower_continuous_assign(
         index,
         constants,
         probes,
-        builder: SsaBuilder::new(),
+        builder: ProcessBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
         scopes: Vec::new(),
@@ -620,7 +620,7 @@ fn lower_process(
         index,
         constants,
         probes,
-        builder: SsaBuilder::new(),
+        builder: ProcessBuilder::new(),
         diagnostics: Vec::new(),
         locals: Vec::new(),
         scopes: Vec::new(),
@@ -810,6 +810,97 @@ impl Context {
     };
 }
 
+/// Expression lowering can split a statement's block. Keep its entry identity
+/// for loop back edges, but route subsequent statements through its current
+/// continuation. Target IDs and sealing always refer to the original entry.
+struct ProcessBuilder {
+    ssa: SsaBuilder,
+    continuations: HashMap<BlockId, BlockId>,
+}
+
+impl std::ops::Deref for ProcessBuilder {
+    type Target = SsaBuilder;
+    fn deref(&self) -> &SsaBuilder {
+        &self.ssa
+    }
+}
+impl std::ops::DerefMut for ProcessBuilder {
+    fn deref_mut(&mut self) -> &mut SsaBuilder {
+        &mut self.ssa
+    }
+}
+impl ProcessBuilder {
+    fn new() -> Self {
+        Self {
+            ssa: SsaBuilder::new(),
+            continuations: HashMap::new(),
+        }
+    }
+    fn tail(&mut self, entry: BlockId) -> BlockId {
+        let mut block = entry;
+        while let Some(next) = self.continuations.get(&block) {
+            block = *next;
+        }
+        // Sequential conditionals repeatedly append to the same source block.
+        // Compress that lookup so a long statement list does not walk every
+        // preceding expression's continuation on every instruction.
+        if block != entry {
+            self.continuations.insert(entry, block);
+        }
+        block
+    }
+    fn continue_at(&mut self, block: BlockId, continuation: BlockId) {
+        let tail = self.tail(block);
+        self.continuations.insert(tail, continuation);
+    }
+    fn push(&mut self, block: BlockId, ty: CfgValueType, kind: CfgValueKind) -> ValueId {
+        let block = self.tail(block);
+        self.ssa.push(block, ty, kind)
+    }
+    fn set_terminator(&mut self, block: BlockId, terminator: CfgTerminator) {
+        let block = self.tail(block);
+        self.ssa.set_terminator(block, terminator);
+    }
+    fn read_variable(&mut self, variable: CfgVariable, block: BlockId) -> Option<ValueId> {
+        let block = self.tail(block);
+        self.ssa.read_variable(variable, block)
+    }
+    fn write_variable(&mut self, variable: CfgVariable, block: BlockId, value: ValueId) {
+        let block = self.tail(block);
+        self.ssa.write_variable(variable, block, value);
+    }
+    fn carry_value(&mut self, value: ValueId, from: BlockId, to: BlockId) -> ValueId {
+        let from = self.tail(from);
+        self.ssa.carry_value(value, from, to)
+    }
+    fn carry_variable(
+        &mut self,
+        variable: CfgVariable,
+        from: BlockId,
+        to: BlockId,
+    ) -> Option<ValueId> {
+        let from = self.tail(from);
+        self.ssa.carry_variable(variable, from, to)
+    }
+    fn merge_values(&mut self, to: BlockId, incoming: &[(BlockId, ValueId)]) -> ValueId {
+        let incoming: Vec<_> = incoming
+            .iter()
+            .map(|&(from, value)| (self.tail(from), value))
+            .collect();
+        self.ssa.merge_values(to, &incoming)
+    }
+    fn finish(self, entry: BlockId) -> Result<super::CfgFunction, super::cfg::CfgValidationError> {
+        self.ssa.finish(entry)
+    }
+    fn finish_with_outputs(
+        self,
+        entry: BlockId,
+        outputs: &[ValueId],
+    ) -> Result<(super::CfgFunction, Vec<ValueId>), super::cfg::CfgValidationError> {
+        self.ssa.finish_with_outputs(entry, outputs)
+    }
+}
+
 struct ProcessLowerer<'a> {
     time_scale: crate::time_scale::ModuleTimeScale,
     signals: &'a [DigitalSignal],
@@ -831,7 +922,7 @@ struct ProcessLowerer<'a> {
     /// a process is lowered in one pass and the table has to be shared with
     /// the processes lowered before and after it.
     probes: &'a mut Vec<DigitalAnalogProbe>,
-    builder: SsaBuilder,
+    builder: ProcessBuilder,
     diagnostics: Vec<IrDiagnostic>,
     /// Every variable declared in the process, by id.
     locals: Vec<ProcessLocal>,
@@ -2138,8 +2229,24 @@ impl ProcessLowerer<'_> {
                     term.span,
                 );
             }
-            let value = if real { self.real_expression(block, &term.signal) }
-                else { self.expression(block, &term.signal) };
+            // Event observations re-run only this expression, including its
+            // control flow, never the surrounding process or its writes.
+            let outer = std::mem::replace(&mut self.builder, ProcessBuilder::new());
+            let entry = self.builder.create_block();
+            let value = if real { self.real_expression(entry, &term.signal) }
+                else { self.expression(entry, &term.signal) };
+            let ty = self.builder.value_type_of(value).expect("expression type");
+            self.builder.set_terminator(entry, CfgTerminator::Return);
+            self.builder.seal_all_blocks();
+            let expression_builder = std::mem::replace(&mut self.builder, outer);
+            let value = match expression_builder.finish_with_outputs(entry, &[value]) {
+                Ok((function, outputs)) => self.builder.push(block, ty,
+                    CfgValueKind::DigitalExpression { function: Box::new(function), result: outputs[0] }),
+                Err(detail) => {
+                    self.error(format!("invalid event expression CFG: {detail}"), term.span);
+                    self.real_constant(0.0)
+                }
+            };
             super::digital::DigitalEventExpression {
                 value, edge: term.edge.map(|edge| match edge {
                     EdgeKind::Posedge => DigitalEdge::Posedge,
@@ -2547,22 +2654,88 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            // Verilog-AMS LRM 2.4 table 4-2's conditional operator. The
-            // condition is four-state and self-determined, exactly as it is for
-            // a four-state `?:`; the arms are real.
             Expression::Conditional(conditional) => {
+                // IEEE 1364-2005 5.1.13: known conditions evaluate one arm;
+                // an ambiguous condition evaluates both and returns real zero.
                 let condition = self.condition(block, &conditional.condition);
-                let then_value = self.real_operand(block, &conditional.then_expr);
-                let else_value = self.real_operand(block, &conditional.else_expr);
-                self.builder.push(
+                let zero_bit = self.builder.push_leaf(
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 0)),
+                );
+                let one_bit = self.builder.push_leaf(
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 1)),
+                );
+                let is_false = self.builder.push(
                     block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalCaseMatch {
+                        selector: condition,
+                        label: zero_bit,
+                        kind: DigitalCaseMatch::Exact,
+                        signed: false,
+                    },
+                );
+                let is_true = self.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 1 },
+                    CfgValueKind::DigitalCaseMatch {
+                        selector: condition,
+                        label: one_bit,
+                        kind: DigitalCaseMatch::Exact,
+                        signed: false,
+                    },
+                );
+                let then_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let join = self.builder.create_block();
+                self.builder.set_terminator(
+                    block,
+                    CfgTerminator::Branch {
+                        condition: is_false,
+                        then_target: else_block,
+                        then_args: Vec::new(),
+                        else_target: then_block,
+                        else_args: Vec::new(),
+                    },
+                );
+                self.builder.seal_block(then_block);
+                let then_value = self.real_operand(then_block, &conditional.then_expr);
+                self.builder.set_terminator(
+                    then_block,
+                    CfgTerminator::Branch {
+                        condition: is_true,
+                        then_target: join,
+                        then_args: Vec::new(),
+                        else_target: else_block,
+                        else_args: Vec::new(),
+                    },
+                );
+                self.builder.seal_block(else_block);
+                let else_value = self.real_operand(else_block, &conditional.else_expr);
+                let zero = self.real_constant(0.0);
+                let else_result = self.builder.push(
+                    else_block,
                     CfgValueType::Real,
                     CfgValueKind::DigitalRealSelect {
-                        condition,
-                        then_value,
-                        else_value,
+                        condition: is_false,
+                        then_value: else_value,
+                        else_value: zero,
                     },
-                )
+                );
+                self.builder.set_terminator(
+                    else_block,
+                    CfgTerminator::Jump {
+                        target: join,
+                        args: Vec::new(),
+                    },
+                );
+                let result = self
+                    .builder
+                    .merge_values(join, &[(then_block, then_value), (else_block, else_result)]);
+                self.builder.seal_block(join);
+                self.builder.continue_at(block, join);
+                result
             }
             // `$bitstoreal(b)`: the crossing in the other direction. The
             // operand is sized to 64 bits here rather than taken as written,

@@ -2199,3 +2199,56 @@ endmodule
     assert_eq!(free.len(), 3);
     assert_eq!(free[1].value.state, rspice_core::xspice::DigitalState::One);
 }
+
+#[test]
+fn linked_real_conditional_events_skip_unknown_inputs_and_drive_spice_loads() {
+    let source = ModelFile::new(
+        "conditional_source",
+        r#"
+`timescale 1ns/1ps
+module conditional_source(data);
+ output [3:0] data; reg [3:0] data;
+ initial begin data=4'bx; #1 data=7; end
+endmodule
+"#,
+    );
+    let receiver = ModelFile::new(
+        "conditional_receiver",
+        r#"
+`timescale 1ns/1ps
+module conditional_receiver(data,q);
+ input [3:0] data; wire [3:0] data;
+ output q; reg q;
+ parameter real SWITCH=2.0;
+ reg select; real level;
+ initial begin select=1; level=2.5; q=0;
+   @(select ? level : data) q=(select ? level : data)>6.5;
+ end
+ initial #SWITCH select=0;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* conditional event programs across linked instances and native loads\n.param vcc=1\nXs d3 d2 d1 d0 conditional_source\nXa d3 d2 d1 d0 qa conditional_receiver SWITCH=2\nXb d3 d2 d1 d0 qb conditional_receiver SWITCH=3\nRa qa 0 1k\nRb qb 0 1k\nCa qa 0 1p\nCb qb 0 1p\n.va \"{}\" conditional_source\n.va \"{}\" conditional_receiver\n.end\n",
+        source.deck_path(),
+        receiver.deck_path()
+    );
+    let result = run(&deck, 5e-9, 0.1e-9);
+    for (node, time) in [("qa", 2e-9), ("qb", 3e-9)] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(
+            events.len(),
+            2,
+            "{node}: inactive input must not wake the receiver"
+        );
+        assert!(
+            (events[1].time - time).abs() < 1e-22,
+            "{node}: {:?}",
+            events
+        );
+        assert!(
+            (waveform(&result, node).last().unwrap() - 1.0 / 1.02).abs() < 1e-8,
+            "{node}: native RC load must settle to the driven level"
+        );
+    }
+}

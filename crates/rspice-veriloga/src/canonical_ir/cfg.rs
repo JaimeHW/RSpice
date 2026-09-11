@@ -918,20 +918,16 @@ pub enum CfgValueKind {
         left: ValueId,
         right: ValueId,
     },
-    /// `condition ? then_value : else_value` over two real arms.
-    ///
-    /// Verilog-AMS LRM 2.4 table 4-2 makes `?:` legal in a real expression, and
-    /// it is the operator a real-number model is built out of — a rung of a
-    /// ladder, a mux, a saturation.
-    ///
-    /// The condition is four-state, so it can be ambiguous, and the two
-    /// standards answer different questions about that. IEEE 1364-2005 section
-    /// 5.1.13 combines the arms bit by bit when the condition is `x` or `z`,
-    /// which has no real-valued form: a real has no bits to combine. So the
-    /// rule this node carries is section 9.4's — an ambiguous condition is not
-    /// true, and the `else` arm is the value — which is the rule the
-    /// interpreter already applies to a `Branch`, and therefore the one that
-    /// makes `assign y = c ? a : b;` and the `if`/`else` it stands for agree.
+    /// An independently re-evaluable, pure digital expression. Its values have
+    /// their own ID space and it captures no process-local storage. Control
+    /// flow is preserved so observing an event obeys ordinary expression rules.
+    DigitalExpression {
+        function: Box<CfgFunction>,
+        result: ValueId,
+    },
+    /// Select already-evaluated real values. Source conditionals use CFG
+    /// branches to evaluate only the required arms; ambiguous conditions
+    /// evaluate both arms and yield zero (IEEE 1364-2005 5.1.13).
     DigitalRealSelect {
         condition: ValueId,
         then_value: ValueId,
@@ -1229,6 +1225,7 @@ impl CfgValueKind {
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
+            | Self::DigitalExpression { .. }
             | Self::DigitalRealSelect { .. }
             | Self::DigitalRealToBits { .. }
             | Self::DigitalBitsToReal { .. }
@@ -2869,6 +2866,27 @@ impl SsaBuilder {
         let parameter = self.new_value(value_type, CfgValueKind::BlockParameter);
         self.blocks[usize::from(to)].params.push(parameter);
         self.blocks[usize::from(from)].push_argument(to, value);
+        parameter
+    }
+
+    /// Merge already-computed values on all incoming edges of a fresh join.
+    /// Add this parameter before reading variables in the join, so automatic
+    /// SSA parameters follow the explicit result on every predecessor edge.
+    pub fn merge_values(&mut self, to: BlockId, incoming: &[(BlockId, ValueId)]) -> ValueId {
+        assert!(!incoming.is_empty(), "a merge needs incoming values");
+        let value_type = self.values[usize::from(incoming[0].1)].value_type;
+        let parameter = self.new_value(value_type, CfgValueKind::BlockParameter);
+        for &(from, value) in incoming {
+            debug_assert_eq!(self.value_type_of(value), Some(value_type));
+            debug_assert_eq!(
+                self.blocks[usize::from(from)]
+                    .arguments_to(to)
+                    .map(<[ValueId]>::len),
+                Some(self.blocks[usize::from(to)].params.len())
+            );
+            self.blocks[usize::from(from)].push_argument(to, value);
+        }
+        self.blocks[usize::from(to)].params.push(parameter);
         parameter
     }
 
