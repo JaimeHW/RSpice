@@ -1572,7 +1572,7 @@ impl ProcessLowerer<'_> {
         join
     }
 
-    /// Capture the RHS at encounter. A delay-controlled nonblocking assignment queues
+    /// Capture the RHS at encounter. A nonblocking assignment queues
     /// the captured value and continues; a blocking one suspends until delivery.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
         // A real target takes the real half of the expression grammar and none
@@ -1584,9 +1584,16 @@ impl ProcessLowerer<'_> {
             let context = self.lvalue_width(&assign.target);
             [self.assigned_value(block, &assign.value, context)]
         };
-        if nonblocking && let Some(TimingControl::Delay(delay)) = &assign.timing {
-            let delay = self.delay(block, &delay.value);
-            self.write_with_delay(block, &assign.target, carried[0], true, Some(delay));
+        if nonblocking && let Some(control) = &assign.timing {
+            let wait = match control {
+                TimingControl::Delay(delay) => DigitalWait::Delay(self.delay(block, &delay.value)),
+                TimingControl::Event(event) => DigitalWait::Event(self.sensitivity_terms(
+                    &event.sensitivity,
+                    Some(&DigitalStatement::BlockingAssign(assign.clone())),
+                    event.span,
+                )),
+            };
+            self.write_with_wait(block, &assign.target, carried[0], true, Some(wait));
             return block;
         }
         let block = match &assign.timing {
@@ -1637,16 +1644,16 @@ impl ProcessLowerer<'_> {
     /// the defect this fixes did not fail loudly, it wrote `x` into the top of
     /// every concatenation target narrower than the sum of its parts.
     fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
-        self.write_with_delay(block, target, value, nonblocking, None);
+        self.write_with_wait(block, target, value, nonblocking, None);
     }
 
-    fn write_with_delay(
+    fn write_with_wait(
         &mut self,
         block: BlockId,
         target: &DigitalLValue,
         value: ValueId,
         nonblocking: bool,
-        delay: Option<ValueId>,
+        wait: Option<DigitalWait>,
     ) {
         if self.refuse_real_in_concatenation(target) {
             return;
@@ -1671,7 +1678,7 @@ impl ProcessLowerer<'_> {
                             lsb: i64::from(offset),
                         },
                     );
-                    self.write_with_delay(block, element, slice, nonblocking, delay);
+                    self.write_with_wait(block, element, slice, nonblocking, wait.clone());
                 }
             }
             // A process-local is an SSA variable, not a signal: writing one is
@@ -1713,7 +1720,7 @@ impl ProcessLowerer<'_> {
                         target: resolved,
                         value,
                         region: DigitalSchedulingRegion::NonBlockingAssign,
-                        delay,
+                        wait,
                     }
                 } else {
                     CfgValueKind::DigitalBlockingWrite {
@@ -2014,10 +2021,16 @@ impl ProcessLowerer<'_> {
             crate::ast::Sensitivity::Explicit(terms) => terms
                 .iter()
                 .filter_map(|term| {
-                    let name = signal_name(&term.signal)?;
-                    let signal = self.index.get(name)?;
+                    let Some(signal) = signal_name(&term.signal)
+                        .and_then(|name| self.index.get(name)).copied() else {
+                        self.error(
+                            "event expression has no executable signal dependency: computed and selected event expressions require lowering",
+                            term.signal.span(),
+                        );
+                        return None;
+                    };
                     Some(DigitalSensitivityTerm {
-                        signal: *signal,
+                        signal,
                         edge: term.edge.map(|edge| match edge {
                             EdgeKind::Posedge => DigitalEdge::Posedge,
                             EdgeKind::Negedge => DigitalEdge::Negedge,

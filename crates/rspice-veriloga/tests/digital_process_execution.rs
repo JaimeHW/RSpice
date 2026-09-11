@@ -379,7 +379,7 @@ impl Harness {
     fn flush_nonblocking(&mut self) {
         let (updates, delayed): (Vec<_>, Vec<_>) = std::mem::take(&mut self.store.deferred)
             .into_iter()
-            .partition(|update| update.delay_ticks == 0);
+            .partition(|update| matches!(update.wait, None | Some(DigitalWaitRequest::Delay(0))));
         self.store.deferred = delayed;
         for update in &updates {
             assert_eq!(update.region, DigitalSchedulingRegion::NonBlockingAssign);
@@ -413,7 +413,7 @@ impl Harness {
                     target: drive.target.clone(),
                     value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
-                    delay_ticks: 0,
+                    wait: None,
                 },
             )
             .expect("a drive must apply");
@@ -1551,7 +1551,13 @@ fn delayed_nonblocking_writes_capture_values_and_continue_without_suspending() {
     assert_eq!(h.deferred_count(), 4);
     let captures = &h.store.deferred;
     assert_eq!(
-        captures.iter().map(|u| u.delay_ticks).collect::<Vec<_>>(),
+        captures
+            .iter()
+            .map(|u| match u.wait {
+                Some(DigitalWaitRequest::Delay(ticks)) => ticks,
+                _ => panic!("expected captured delay"),
+            })
+            .collect::<Vec<_>>(),
         [30, 2, 30, 30]
     );
     assert_eq!(
@@ -1570,6 +1576,72 @@ fn delayed_nonblocking_writes_capture_values_and_continue_without_suspending() {
     expect_finished(h.resume(0, suspension.resume_state()));
     assert_eq!(h.get("stage"), "00000010");
     assert_eq!(h.deferred_count(), 4, "completion cannot cancel captures");
+}
+
+#[test]
+fn event_nonblocking_writes_capture_values_sensitivities_and_continue() {
+    let mut h = Harness::from_source(
+        "module events; reg a,b,done; reg [7:0] data,q,implicit_q; wreal changed; real held;
+         initial begin
+           done=0; data=8'h42; held=0.0;
+           q <= @(posedge a or negedge b) data;
+           held <= @(changed) 1.25;
+           implicit_q <= @* data;
+           data=8'h99; done=1;
+         end endmodule",
+    );
+    expect_finished(h.run());
+    assert_eq!(h.get("done"), "1");
+    assert_eq!(h.get("q"), "xxxxxxxx");
+    assert_eq!(h.get_real("held"), 0.0);
+    assert_eq!(h.deferred_count(), 3);
+    h.flush_nonblocking();
+    assert_eq!(
+        h.deferred_count(),
+        3,
+        "unsatisfied events do not enter NBA delivery"
+    );
+    let captures = &h.store.deferred;
+    let Some(DigitalWaitRequest::Event(terms)) = &captures[0].wait else {
+        panic!("event capture")
+    };
+    assert_eq!(
+        terms.iter().map(|t| (t.signal, t.edge)).collect::<Vec<_>>(),
+        [
+            (h.signal("a"), Some(DigitalEdge::Posedge)),
+            (h.signal("b"), Some(DigitalEdge::Negedge))
+        ]
+    );
+    assert_eq!(
+        captures[0].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(8, 0x42))
+    );
+    assert_eq!(captures[1].value, DigitalUpdate::Real(1.25));
+    let Some(DigitalWaitRequest::Event(terms)) = &captures[2].wait else {
+        panic!("implicit event capture")
+    };
+    assert_eq!(terms.len(), 1);
+    assert_eq!(terms[0].signal, h.signal("data"));
+    assert_eq!(
+        captures[2].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(8, 0x42))
+    );
+    // A supported term must not hide a second term that has no executable
+    // dependency representation. Full computed-event support remains required.
+    for extra in ["posedge (a & b)", "posedge bits[1]"] {
+        let source = format!(
+            "module unsupported; reg a,b,q; reg [1:0] bits; initial q <= @(posedge a or {extra}) 1; endmodule"
+        );
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir_module(&source, None)
+            .unwrap_err();
+        let diagnostic = error.to_string();
+        assert!(
+            diagnostic.contains("event expression")
+                || diagnostic.contains("sensitivity-list term names no signal"),
+            "{diagnostic}"
+        );
+    }
 }
 
 /// A process-local declared outside a suspension and read after it keeps what
@@ -3413,7 +3485,7 @@ impl Design {
                     target: drive.target.clone(),
                     value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
-                    delay_ticks: 0,
+                    wait: None,
                 },
             )
             .expect("a drive must apply");

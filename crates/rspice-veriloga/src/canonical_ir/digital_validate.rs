@@ -271,7 +271,8 @@ impl CanonicalDigitalPlan {
                             ));
                         }
                         if let CfgValueKind::DigitalNonblockingWrite {
-                            delay: Some(delay), ..
+                            wait: Some(super::cfg::DigitalWait::Delay(delay)),
+                            ..
                         } = kind
                             && !matches!(
                                 function.value(*delay).value_type,
@@ -281,6 +282,18 @@ impl CanonicalDigitalPlan {
                             return Err(error(
                                 "nonblocking delay must contain converted integer ticks",
                             ));
+                        }
+                        if let CfgValueKind::DigitalNonblockingWrite {
+                            wait: Some(super::cfg::DigitalWait::Event(terms)),
+                            ..
+                        } = kind
+                        {
+                            if terms.is_empty() {
+                                return Err(error(
+                                    "nonblocking event wait must have sensitivity terms",
+                                ));
+                            }
+                            check_terms(terms)?;
                         }
                         if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
                             && *region != DigitalSchedulingRegion::NonBlockingAssign

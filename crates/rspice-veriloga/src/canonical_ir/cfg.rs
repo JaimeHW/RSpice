@@ -1085,8 +1085,8 @@ pub enum CfgValueKind {
         /// in source; carried explicitly so the region is read off the node
         /// rather than assumed from the kind.
         region: DigitalSchedulingRegion,
-        /// Optional converted design-tick delay, captured when the write executes.
-        delay: Option<ValueId>,
+        /// Optional timing control for the captured update; never a process suspension.
+        wait: Option<DigitalWait>,
     },
     /// A continuous driver's contribution to a net (IEEE 1364-2005 section
     /// 6.1).
@@ -1451,8 +1451,8 @@ impl CfgValueKind {
                 then_value,
                 else_value,
             } => vec![*condition, *then_value, *else_value],
-            Self::DigitalNonblockingWrite { value, delay, .. } => std::iter::once(*value)
-                .chain(delay.iter().copied())
+            Self::DigitalNonblockingWrite { value, wait, .. } => std::iter::once(*value)
+                .chain(wait.iter().flat_map(DigitalWait::operands))
                 .collect(),
             Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
                 vec![*value]
@@ -1712,10 +1712,10 @@ impl CfgValueKind {
                 *then_value = map(*then_value);
                 *else_value = map(*else_value);
             }
-            Self::DigitalNonblockingWrite { value, delay, .. } => {
+            Self::DigitalNonblockingWrite { value, wait, .. } => {
                 *value = map(*value);
-                if let Some(delay) = delay {
-                    *delay = map(*delay);
+                if let Some(wait) = wait {
+                    wait.map_operands(&mut map);
                 }
             }
             Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
@@ -1853,7 +1853,7 @@ pub enum CfgTerminator {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CfgStateSite(pub ExprId, pub CanonicalStateOperator);
 
-/// What a suspended process is waiting for.
+/// Timing control for a suspended process or an independent captured update.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalWait {
     /// `@(...)`: resume when any listed event occurs.
@@ -1863,7 +1863,7 @@ pub enum DigitalWait {
     Event(Vec<DigitalSensitivityTerm>),
     /// `#delay`: resume after this many resolved design ticks have elapsed.
     ///
-    /// The operand is an [`CfgValueType::Integer`] value, evaluated when the
+    /// The operand contains converted integer ticks, evaluated when the
     /// wait is reached rather than when the process starts — `#(n)` where `n`
     /// is a variable waits for its value at that moment.
     Delay(ValueId),

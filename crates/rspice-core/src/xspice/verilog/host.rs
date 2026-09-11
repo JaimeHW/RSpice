@@ -56,7 +56,11 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    sync::Arc,
+};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
@@ -73,7 +77,7 @@ use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 
 use super::store::{
-    DigitalSignalStore, SignalTransition, StoreError, TransitionValues, signal_name,
+    DigitalSignalStore, EventCapture, SignalTransition, StoreError, TransitionValues, signal_name,
 };
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
@@ -197,6 +201,8 @@ pub enum DigitalRunError {
     },
     /// The run needed more ticks than the decimal grid can represent exactly.
     TickOverflow,
+    /// The logical event-order counter cannot represent another operation.
+    EventSequenceOverflow,
     /// A stimulus names a different module than the design was compiled for.
     ///
     /// Only reachable through [`super::CompiledDigitalDesign::run`], because
@@ -289,6 +295,7 @@ impl fmt::Display for DigitalRunError {
             Self::UnknownSignal { name } => {
                 write!(f, "the compiled design declares no signal named `{name}`")
             }
+            Self::EventSequenceOverflow => write!(f, "digital event ordering sequence exhausted"),
             Self::TickOverflow => write!(
                 f,
                 "the run reached a time past the exactly representable tick range"
@@ -369,6 +376,7 @@ struct ProcessSlot {
     /// How to enter the process next time. `None` enters at the entry block,
     /// which is what a process that has never run does.
     resume: Option<DigitalResumeState>,
+    wait_after_sequence: u64,
 }
 
 /// A compiled digital plan, running.
@@ -381,6 +389,9 @@ pub(crate) struct DigitalHost {
     /// No process slot or driver identity is allocated per delayed assignment.
     nba_target: TargetId,
     delayed_updates: BTreeMap<u64, Vec<DigitalDeferredUpdate>>,
+    event_updates: BTreeMap<u64, EventCapture>,
+    event_waiters: Vec<BTreeSet<u64>>,
+    event_candidates: Vec<u64>,
     slots: Vec<ProcessSlot>,
     /// Net to waiting-process index, ascending within each net.
     waiters: Vec<Vec<usize>>,
@@ -474,12 +485,16 @@ impl DigitalHost {
         Self {
             nba_target,
             delayed_updates: BTreeMap::new(),
+            event_updates: BTreeMap::new(),
+            event_waiters: vec![BTreeSet::new(); plan.signals.len()],
+            event_candidates: Vec::new(),
             store: DigitalSignalStore::new(&plan),
             scheduler,
             slots: vec![
                 ProcessSlot {
                     status: ProcessStatus::Queued,
                     resume: None,
+                    wait_after_sequence: 0,
                 };
                 plan.processes.len()
             ],
@@ -826,11 +841,28 @@ impl DigitalHost {
             error,
         })?;
 
+        self.store
+            .current_sequence()
+            .ok_or(DigitalRunError::EventSequenceOverflow)?;
+        for capture in self.store.take_event_captures() {
+            for term in &capture.terms {
+                self.event_waiters[usize::from(term.signal)].insert(capture.sequence);
+            }
+            self.event_updates.insert(capture.sequence, capture);
+        }
+
         // Capture requests were emitted at their statement, and retain that
         // order even if the process has completed or now suspends elsewhere.
         for update in self.store.take_delayed_updates() {
+            let Some(DigitalWaitRequest::Delay(delay)) = update.wait else {
+                unreachable!("timed capture")
+            };
+            let delay = u64::try_from(delay).map_err(|_| DigitalRunError::NegativeDelay {
+                process: self.describe(index),
+                delay,
+            })?;
             let due = tick
-                .checked_add(update.delay_ticks)
+                .checked_add(delay)
                 .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
                 .ok_or(DigitalRunError::TickOverflow)?;
             if !self.delayed_updates.contains_key(&due) {
@@ -868,6 +900,10 @@ impl DigitalHost {
                 self.slots[index].resume = Some(resume);
                 match wait {
                     DigitalWaitRequest::Event(terms) => {
+                        self.slots[index].wait_after_sequence = self
+                            .store
+                            .current_sequence()
+                            .ok_or(DigitalRunError::EventSequenceOverflow)?;
                         self.subscribe(index, &terms);
                         self.slots[index].status = ProcessStatus::AwaitingEvent(terms);
                         Ok(())
@@ -921,15 +957,23 @@ impl DigitalHost {
         drained: &mut Vec<SignalTransition>,
     ) -> Result<(), DigitalRunError> {
         loop {
+            self.store
+                .current_sequence()
+                .ok_or(DigitalRunError::EventSequenceOverflow)?;
             self.store.drain_transitions_into(drained);
             if drained.is_empty() {
                 return Ok(());
             }
             for transition in drained.iter() {
+                self.dispatch_event_captures(transition);
                 let net = usize::from(transition.signal);
                 let mut position = 0usize;
                 while position < self.waiters[net].len() {
                     let index = self.waiters[net][position];
+                    if transition.sequence <= self.slots[index].wait_after_sequence {
+                        position += 1;
+                        continue;
+                    }
                     let satisfied = match (&self.slots[index].status, &transition.values) {
                         (
                             ProcessStatus::AwaitingEvent(terms),
@@ -957,6 +1001,38 @@ impl DigitalHost {
                 }
             }
         }
+    }
+
+    /// Only captures subscribed to the changed signal are visited. A capture
+    /// sees changes after registration, including later writes in its creator's
+    /// current activation; earlier transitions in the same batch are excluded.
+    fn dispatch_event_captures(&mut self, transition: &SignalTransition) {
+        let mut candidates = std::mem::take(&mut self.event_candidates);
+        candidates.extend(
+            self.event_waiters[usize::from(transition.signal)]
+                .range(..transition.sequence)
+                .copied(),
+        );
+        for id in candidates.iter().copied() {
+            let capture = self.event_updates.get(&id).expect("indexed event capture");
+            let satisfied = match &transition.values {
+                TransitionValues::FourState { previous, next } => {
+                    any_term_is_satisfied(&capture.terms, transition.signal, previous, next)
+                }
+                TransitionValues::Real { previous, next } => {
+                    any_real_term_is_satisfied(&capture.terms, transition.signal, *previous, *next)
+                }
+            };
+            if satisfied {
+                let capture = self.event_updates.remove(&id).unwrap();
+                for term in &capture.terms {
+                    self.event_waiters[usize::from(term.signal)].remove(&id);
+                }
+                self.store.release_event_capture(capture);
+            }
+        }
+        candidates.clear();
+        self.event_candidates = candidates;
     }
 
     /// Place one activation for a process in the kernel.

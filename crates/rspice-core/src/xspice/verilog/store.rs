@@ -86,6 +86,7 @@ use rspice_veriloga::canonical_ir::digital::{
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
+    DigitalWaitRequest,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
@@ -143,6 +144,7 @@ pub(crate) const fn resolve_bit(left: FourStateBit, right: FourStateBit) -> Four
 /// asks whether anything moved at all.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SignalTransition {
+    pub(crate) sequence: u64,
     pub(crate) signal: DigitalSignalId,
     pub(crate) values: TransitionValues,
 }
@@ -280,6 +282,20 @@ enum ContributionValue {
     Real(Option<f64>),
 }
 
+/// A captured write registered at one point in the ordered execution stream.
+#[derive(Debug, Clone)]
+pub(crate) struct EventCapture {
+    pub sequence: u64,
+    pub terms: Vec<rspice_veriloga::canonical_ir::digital::DigitalSensitivityTerm>,
+    pub update: DigitalDeferredUpdate,
+}
+
+#[derive(Clone)]
+struct ReadyUpdate {
+    order: u64,
+    update: DigitalDeferredUpdate,
+}
+
 /// The signal store and driver resolution for one compiled digital plan.
 #[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
@@ -306,7 +322,12 @@ pub(crate) struct DigitalSignalStore {
     spans: Vec<DriverSpan>,
     /// Nonblocking and otherwise deferred updates, in the order they were
     /// evaluated. The host partitions them by region when it drains.
-    deferred: Vec<DigitalDeferredUpdate>,
+    deferred: Vec<ReadyUpdate>,
+    deferred_ordered: bool,
+    event_captures: Vec<EventCapture>,
+    /// Monotonic logical order for writes, registrations and ready updates.
+    /// Exhaustion is an explicit run failure; ordering never wraps.
+    sequence: Option<u64>,
     /// Captures awaiting transfer to the host's future event queue. Kept apart
     /// so an untimed process never scans every update already ready for NBA.
     delayed: Vec<DigitalDeferredUpdate>,
@@ -329,6 +350,32 @@ pub(crate) struct DigitalSignalStore {
 }
 
 impl DigitalSignalStore {
+    pub(crate) fn current_sequence(&self) -> Option<u64> {
+        self.sequence
+    }
+
+    fn next_sequence(&mut self) -> u64 {
+        self.sequence = self.sequence.and_then(|value| value.checked_add(1));
+        self.sequence.unwrap_or(u64::MAX)
+    }
+
+    pub(crate) fn take_event_captures(&mut self) -> Vec<EventCapture> {
+        std::mem::take(&mut self.event_captures)
+    }
+
+    fn ready_update(&mut self, update: DigitalDeferredUpdate, order: u64) {
+        if self.deferred.last().is_some_and(|last| last.order > order) {
+            self.deferred_ordered = false;
+        }
+        self.deferred.push(ReadyUpdate { order, update });
+    }
+
+    pub(crate) fn release_event_capture(&mut self, capture: EventCapture) {
+        // Eligible updates from ordered statements retain capture order, even
+        // when their event conditions become true in the opposite order.
+        self.ready_update(capture.update, capture.sequence);
+    }
+
     pub(crate) fn set_activation_clock(&mut self, clock: DigitalClock) {
         self.activation_clock = Some(clock);
     }
@@ -401,6 +448,9 @@ impl DigitalSignalStore {
             contributions,
             spans,
             deferred: Vec::new(),
+            deferred_ordered: true,
+            event_captures: Vec::new(),
+            sequence: Some(0),
             delayed: Vec::new(),
             transitions: Vec::new(),
             analog_potentials: vec![None; plan.analog_probes.len()],
@@ -541,8 +591,9 @@ impl DigitalSignalStore {
     /// The scheduler has reached this capture's due tick. It now waits for its
     /// NBA region, with the same ordering as other updates already made ready.
     pub(crate) fn release_delayed_update(&mut self, mut update: DigitalDeferredUpdate) {
-        update.delay_ticks = 0;
-        self.deferred.push(update);
+        update.wait = None;
+        let sequence = self.next_sequence();
+        self.ready_update(update, sequence);
     }
 
     /// Take every deferred update belonging to one region, oldest first.
@@ -555,16 +606,27 @@ impl DigitalSignalStore {
         &mut self,
         region: DigitalSchedulingRegion,
     ) -> Vec<DigitalDeferredUpdate> {
-        if !self.deferred.iter().any(|update| update.region == region) {
+        if !self
+            .deferred
+            .iter()
+            .any(|ready| ready.update.region == region)
+        {
             return Vec::new();
+        }
+        // Normal NBA traffic is append-only and already ordered. Event capture
+        // delivery can arrive from replaying an earlier transition, so sort
+        // only when that happened, before any update in the region is applied.
+        if !self.deferred_ordered {
+            self.deferred.sort_by_key(|ready| ready.order);
+            self.deferred_ordered = true;
         }
         let mut due = Vec::new();
         let mut held = Vec::with_capacity(self.deferred.len());
-        for update in std::mem::take(&mut self.deferred) {
-            if update.region == region {
-                due.push(update);
+        for ready in std::mem::take(&mut self.deferred) {
+            if ready.update.region == region {
+                due.push(ready.update);
             } else {
-                held.push(update);
+                held.push(ready);
             }
         }
         self.deferred = held;
@@ -613,7 +675,9 @@ impl DigitalSignalStore {
             return;
         }
         let previous = std::mem::replace(&mut self.values[index], value.clone());
+        let sequence = self.next_sequence();
         self.transitions.push(SignalTransition {
+            sequence,
             signal,
             values: TransitionValues::FourState {
                 previous,
@@ -634,7 +698,9 @@ impl DigitalSignalStore {
             return;
         }
         let previous = std::mem::replace(&mut self.reals[index], value);
+        let sequence = self.next_sequence();
         self.transitions.push(SignalTransition {
+            sequence,
             signal,
             values: TransitionValues::Real {
                 previous,
@@ -776,11 +842,19 @@ impl DigitalEnvironment for DigitalSignalStore {
         self.publish(signal, value);
     }
 
-    fn defer_update(&mut self, update: DigitalDeferredUpdate) {
-        if update.delay_ticks == 0 {
-            self.deferred.push(update);
-        } else {
-            self.delayed.push(update);
+    fn defer_update(&mut self, mut update: DigitalDeferredUpdate) {
+        let sequence = self.next_sequence();
+        match update.wait.take() {
+            Some(DigitalWaitRequest::Event(terms)) => self.event_captures.push(EventCapture {
+                sequence,
+                terms,
+                update,
+            }),
+            Some(DigitalWaitRequest::Delay(delay)) if delay != 0 => {
+                update.wait = Some(DigitalWaitRequest::Delay(delay));
+                self.delayed.push(update);
+            }
+            _ => self.ready_update(update, sequence),
         }
     }
 

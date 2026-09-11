@@ -124,8 +124,9 @@ pub trait DigitalEnvironment {
     /// carries a value, not an expression, which is what makes `a <= b; b <= a;`
     /// a swap. The target and region ride along so the kernel can apply it with
     /// [`apply_deferred`] when the region it names drains. A positive delay is
-    /// relative to this activation: the host must retain the capture until that
-    /// tick, then deliver it in the named region. Zero stays in this time slot.
+    /// relative to this activation. An event wait registers at this statement
+    /// and observes subsequent changes; the process continues in either case.
+    /// Once satisfied, the update joins the named region. Zero stays in this slot.
     fn defer_update(&mut self, update: DigitalDeferredUpdate);
 
     /// Replace a real variable's whole value.
@@ -248,9 +249,9 @@ pub struct DigitalDeferredUpdate {
     /// The right-hand side, evaluated.
     pub value: DigitalUpdate,
     pub region: DigitalSchedulingRegion,
-    /// Relative design ticks, captured with the RHS. Zero means this slot's NBA
-    /// region and must not suspend the process or pass through the inactive region.
-    pub delay_ticks: u64,
+    /// Optional delay or event subscription captured with the RHS. The host
+    /// delivers the update in its region only after this condition is satisfied.
+    pub wait: Option<DigitalWaitRequest>,
 }
 
 /// The value half of a deferred update.
@@ -1857,16 +1858,23 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 target,
                 value,
                 region,
-                delay,
+                wait,
             } => {
-                let delay_ticks = match delay {
-                    Some(delay) => u64::try_from(self.integer(*delay)?).map_err(|_| {
-                        DigitalEvalError::InvalidDelay {
-                            value: *delay,
-                            detail: "converted nonblocking delay must be nonnegative",
+                let wait = match wait {
+                    Some(DigitalWait::Delay(delay)) => {
+                        let ticks = self.integer(*delay)?;
+                        if ticks < 0 {
+                            return Err(DigitalEvalError::InvalidDelay {
+                                value: *delay,
+                                detail: "converted nonblocking delay must be nonnegative",
+                            });
                         }
-                    })?,
-                    None => 0,
+                        Some(DigitalWaitRequest::Delay(ticks))
+                    }
+                    Some(DigitalWait::Event(terms)) => {
+                        Some(DigitalWaitRequest::Event(terms.clone()))
+                    }
+                    None => None,
                 };
                 let (value, region) = (*value, *region);
                 let signal = self.signal(target.signal)?;
@@ -1876,7 +1884,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                         target: target.clone(),
                         value: DigitalUpdate::Real(value),
                         region,
-                        delay_ticks,
+                        wait,
                     });
                     return Ok(DigitalScalar::Effect);
                 }
@@ -1895,7 +1903,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     target: target.clone(),
                     value: DigitalUpdate::FourState(value.resized(width)),
                     region,
-                    delay_ticks,
+                    wait,
                 });
                 Ok(DigitalScalar::Effect)
             }

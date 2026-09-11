@@ -513,6 +513,71 @@ fn delayed_nonblocking_updates_preserve_capture_order_and_nba_regions() {
     assert!(matches!(error, DigitalRunError::TickOverflow), "{error}");
 }
 
+#[test]
+fn event_nonblocking_captures_observe_registration_order_and_deliver_once() {
+    let source = "module events(q,late,captured,done,seen,real_ok,ordered);
+        output [7:0] q,late,captured,seen,ordered; output done,real_ok;
+        reg [7:0] q,late,captured,seen,data,ordered; reg done,real_ok,clk,a,b;
+        real changed,held;
+        initial begin
+          q=0; late=0; captured=0; done=0; seen=0; real_ok=0; ordered=0;
+          clk=0; a=0; b=0; changed=0.0; held=0.0; data=8'h41;
+          captured <= @(negedge clk) data;
+          q <= @(posedge clk) 8'h11; q <= @(posedge clk) 8'h22;
+          held <= @(changed) 1.25;
+          ordered <= @(posedge a) 1; ordered <= @(posedge b) 2;
+          b=1; a=1;
+          data=8'h99; clk=1; changed=2.0;
+          late <= @(posedge clk) 8'h33;
+          #0 seen=q;
+          #1 real_ok=(held==1.25); clk=0;
+          #1 clk=1;
+          @(posedge clk) begin done=1; q=0; late=0; end
+        end
+        initial begin #3 clk=0; #1 clk=1; #1 clk=0; #1 clk=1; end
+        endmodule";
+    let report = run_digital_verilog(
+        source,
+        &DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![
+                port("q", 8),
+                port("late", 8),
+                port("captured", 8),
+                port("done", 1),
+                port("seen", 8),
+                port("real_ok", 1),
+                port("ordered", 8),
+            ],
+            clock: None,
+            step: 1,
+            settle: 0,
+            vectors: vec![vec![]; 7],
+        },
+    )
+    .unwrap();
+    for (tick, row) in report.observations.iter().enumerate() {
+        let q = if tick < 4 { 0x22 } else { 0 };
+        let late = if (2..4).contains(&tick) { 0x33 } else { 0 };
+        let captured = if tick == 0 { 0 } else { 0x41 };
+        let actual: Vec<_> = row.values.iter().map(|(_, value)| value.clone()).collect();
+        assert_eq!(
+            actual,
+            [
+                format!("{q:08b}"),
+                format!("{late:08b}"),
+                format!("{captured:08b}"),
+                u8::from(tick >= 4).to_string(),
+                "00000000".to_string(),
+                u8::from(tick >= 1).to_string(),
+                "00000010".to_string()
+            ],
+            "tick {tick}"
+        );
+    }
+}
+
 // ===========================================================================
 // Refusals
 // ===========================================================================

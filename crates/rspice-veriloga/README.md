@@ -245,10 +245,20 @@ until its due tick; zero/X/Z delays use the current nonblocking region without
 suspending the process. The host delivers these after active and inactive work,
 including real values and partial-vector writes. Captures survive process
 completion, mixed-trial rejection/retry and accepted in-memory checkpoints.
-Custom `DigitalEnvironment` hosts must honor `DigitalDeferredUpdate::delay_ticks`.
+Event-controlled nonblocking assignments also capture their RHS and continue.
+Direct signal edges, real signal changes and implicit RHS sensitivity register
+independent one-shot subscriptions at encounter. Only subsequent transitions
+can satisfy a subscription, including later writes in the same activation.
+Eligible captures retain source statement order within the NBA queue. Ordinary
+process event waits use the same registration frontier to exclude earlier
+transitions. Pending subscriptions survive mixed rejection and accepted
+in-memory checkpoint restoration. Custom `DigitalEnvironment` hosts must honor
+`DigitalDeferredUpdate::wait` for both delay and event controls.
 
-MS02 remains open. Event-controlled nonblocking assignments still need independent
-capture subscriptions; their current lowering suspends the process. Min:typ:max selection, continuous driver delays, complete
+MS02 remains open. Computed/selected event expressions and repeat-event controls
+still require executable lowering; unsupported terms fail compilation instead
+of disappearing from a partially supported sensitivity list. Min:typ:max
+selection, continuous driver delays, complete
 delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.

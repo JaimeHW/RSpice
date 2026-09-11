@@ -469,6 +469,50 @@ one activation, same-slot ordering, repeated captures and mixed rollback. Dynami
 LHS selections and deferred process-local storage are still MS06 requirements.
 All other approved milestones remain in scope.
 
+
+Event-controlled nonblocking assignments now carry an optional `DigitalWait`
+in canonical IR and a captured `DigitalWaitRequest` at runtime. Direct signal
+edges, real changes and implicit RHS sensitivity register independent one-shot
+subscriptions without suspending the source process. Indexed subscriptions only
+visit captures dependent on the changed signal. A monotonic, checked sequence
+separates registration from earlier transitions in the same activation; ordinary
+process event waits use that frontier too. Eligible captured writes retain source
+statement order. Normal ready NBA traffic remains append-only, with sorting only
+when event delivery appended an earlier capture after a later ready update.
+Sequence exhaustion is an explicit run error rather than wrapping event order.
+
+Four focused positive cases pass: compiler event capture/continuation, existing
+compiler delayed capture/continuation, digital-host event order/one-shot delivery,
+and mixed rejection/checkpoint replay. The host cases cover transitions before
+and after registration, two captures delivered in source order despite reversed
+trigger order, real captures, inactive-region reads, source-process completion,
+and an ordinary event wait that must ignore an already-observed clock edge.
+The mixed case captures physical time at 0.65 ns and delivers it on a later
+1.65 ns analog activation, while an unrelated tick-2 delayed NBA remains pending.
+Registration and delivery survive rejected trials and accepted in-memory replay.
+Current and breakpoint budgets remain 1e-12 A and 1e-20 s. A stale internal
+method argument caused a build failure and was corrected before host execution.
+The negative compiler assertion initially expected only the lowering diagnostic;
+the semantic stage can refuse the same unsupported term earlier. Its assertion
+now accepts either source-located refusal, while still requiring compilation to
+fail. Computed/selected event expressions and repeat controls remain required
+MS02 work; rejecting them is not completion of those language requirements.
+
+Canonical schema is 43 and disk-cache format is 80. With the drive nearly full,
+Cargo's package-scoped cleanup removed 7.6 GiB of disposable compiler dev build
+artifacts in this worktree. Other worktrees and the generator profile were
+preserved. No full suite, actual browser/tablet run or vendor-reference execution
+was performed. The user confirmed no licensed Spectre reference installation is
+available; implementation continues and reference qualification stays pending.
+
+
+The authoritative generator regenerated all 43 shipped models; only its manifest
+identity changed (generator digest
+`65a907b8de921d9347fc1dbb4eae6a580d16d2406c19a52cb2acf8b70b68e1f5`).
+Concurrent `0f063c299` and `6e36744f3` are retained. Their AC source-amplitude
+and parameter-sensitivity changes do not alter the event capture implementation;
+combined full-release verification remains pending.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;
