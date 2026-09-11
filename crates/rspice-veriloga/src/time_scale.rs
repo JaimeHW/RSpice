@@ -77,6 +77,15 @@ impl ModuleTimeScale {
         self.precision_exponent
     }
 
+    /// Exact denominator for converting a design timestamp to module units.
+    pub(crate) fn ticks_per_unit(self, design_precision: i8) -> Result<u64, &'static str> {
+        self.validate()?;
+        if !(-15..=self.precision_exponent).contains(&design_precision) {
+            return Err("design precision cannot be coarser than a module's precision");
+        }
+        Ok(10_u64.pow((self.unit_exponent - design_precision) as u32))
+    }
+
     /// Parse the two operands of an active `timescale directive.
     pub(crate) fn parse(operands: &str) -> Result<Self, &'static str> {
         fn exponent(operand: &str) -> Option<i8> {

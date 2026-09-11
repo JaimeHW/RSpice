@@ -41,6 +41,7 @@
 //! a table test, not a wrong waveform.
 
 use crate::four_state::{FourStateBit, FourStateLiteral};
+use num_bigint::{BigInt, Sign};
 use serde::{Deserialize, Serialize};
 
 /// Number of value bits carried by one plane word.
@@ -592,6 +593,26 @@ impl FourStateValue {
         Some(magnitude)
     }
 
+    fn to_wide_integer(&self, signed: bool) -> Option<BigInt> {
+        if self.has_unknown() {
+            return None;
+        }
+        let magnitude = BigInt::from_slice(Sign::Plus, self.aval());
+        Some(if signed && self.sign_bit() == FourStateBit::One {
+            magnitude - (BigInt::from(1_u8) << self.width as usize)
+        } else {
+            magnitude
+        })
+    }
+
+    fn from_wide_integer(width: u32, value: BigInt) -> Self {
+        // Bitwise masking uses two's complement, so negative results wrap at
+        // the declared width exactly as assignment to a Verilog vector does.
+        let mask = (BigInt::from(1_u8) << width as usize) - 1_u8;
+        let (_, digits) = (value & mask).to_u32_digits();
+        Self::from_planes(width, &digits, &[])
+    }
+
     /// Extend or truncate to `width`, filling by `signed`.
     ///
     /// IEEE 1364-2005 section 5.4.1 extends a context-determined operand before
@@ -864,6 +885,24 @@ pub fn relational(
     right: &FourStateValue,
     signed: bool,
 ) -> FourStateValue {
+    if left.width().max(right.width()) > 64 {
+        let (Some(left), Some(right)) =
+            (left.to_wide_integer(signed), right.to_wide_integer(signed))
+        else {
+            return one_bit(FourStateBit::Unknown);
+        };
+        let outcome = match op {
+            RelationalOp::Lt => left < right,
+            RelationalOp::Le => left <= right,
+            RelationalOp::Gt => left > right,
+            RelationalOp::Ge => left >= right,
+        };
+        return one_bit(if outcome {
+            FourStateBit::One
+        } else {
+            FourStateBit::Zero
+        });
+    }
     let (Some(left), Some(right)) = (left.to_integer(signed), right.to_integer(signed)) else {
         return one_bit(FourStateBit::Unknown);
     };
@@ -920,6 +959,24 @@ pub fn arithmetic(
     signed: bool,
 ) -> FourStateValue {
     let width = left.width().max(right.width());
+    if width > 64 {
+        let (Some(left), Some(right)) =
+            (left.to_wide_integer(signed), right.to_wide_integer(signed))
+        else {
+            return FourStateValue::splat(width, FourStateBit::Unknown);
+        };
+        let result = match op {
+            ArithmeticOp::Add => left + right,
+            ArithmeticOp::Sub => left - right,
+            ArithmeticOp::Mul => left * right,
+            ArithmeticOp::Div | ArithmeticOp::Mod if right.sign() == Sign::NoSign => {
+                return FourStateValue::splat(width, FourStateBit::Unknown);
+            }
+            ArithmeticOp::Div => left / right,
+            ArithmeticOp::Mod => left % right,
+        };
+        return FourStateValue::from_wide_integer(width, result);
+    }
     let (Some(left), Some(right)) = (left.to_integer(signed), right.to_integer(signed)) else {
         return FourStateValue::splat(width, FourStateBit::Unknown);
     };
@@ -969,8 +1026,17 @@ pub enum ShiftOp {
 /// bit rather than testing it.
 pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> FourStateValue {
     let width = value.width();
-    let Some(count) = count.to_u64() else {
+    if count.has_unknown() {
         return FourStateValue::splat(width, FourStateBit::Unknown);
+    }
+    // A known wide count is still known: saturate a value beyond u64 because
+    // every such count already shifts out the whole (u32-sized) vector.
+    let count = if count.width() <= 64 {
+        count.to_u64().expect("known narrow count")
+    } else if count.aval().iter().skip(2).any(|word| *word != 0) {
+        u64::MAX
+    } else {
+        count.resized(64).to_u64().expect("known low count bits")
     };
     let fill = match op {
         ShiftOp::Left | ShiftOp::Right => FourStateBit::Zero,

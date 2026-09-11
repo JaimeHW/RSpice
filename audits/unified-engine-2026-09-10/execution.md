@@ -77,7 +77,7 @@ checkpoint representation, before optimizing partitions or caches.
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
 | Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
-| Complete resolved module timing and scheduling regions | MS02 | Declared module scales, constant delays, declaration-owned time queries and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
+| Complete resolved module timing and scheduling regions | MS02 | Declared scales, constant delays, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
 | Global scheduling, resolution, atomic acceptance and effects | MS05 | Open | Pending |
@@ -136,6 +136,10 @@ invented throughput numbers do not qualify parity.
 | Declaration-owned time queries | Compiler `module_timing` and `canonical_device` targets, `module_time_queries` filter, no default features | Portable device and executable generated Rust agree on the shared-terminal conductance at three physical times within 1e-12 S; seconds-sized query retains real division; malformed arity, missing fallback names and string fallback refuse |
 | Time queries in digital defaults, delays and analog coupling | Core `veriloga_module_timing`, `module_time_queries` filter, portable Verilog feature | Passed: parent/child declarations resolve separately; query-based delay switches a loaded circuit at 0.5 ns within 1e-20 s and produces 1/4 V then 1/3 V within 1e-9 V |
 | Shipped artifact refresh for canonical schema 38 | Authoritative `rspice-veriloga-gen regenerate-builtins --jobs 2`, generator profile | All 43 models regenerated; analog output bytes unchanged; generator digest `d53ce225d4e027cfb790448eb459e16aeed9f01b366bbab53eec844784b104a3` |
+| Digital activation clock expressions and wide arithmetic | Compiler `digital_process_execution`, `digital_clock_queries` filter, no default features | 2 passed after integration: half-unit rounding, suspension, exact integers beyond f64, 32-bit wrap before widening, signed 129-bit arithmetic/comparisons, 257-bit shift counts, wide decimal/unsized literals, X/Z and zero division, missing clock/invalid type/arity rejection |
+| Literal admission after exact wide lowering | Compiler library `lexer::tests::malformed_based_literals_fail_closed`, no default features | Passed: malformed and over-budget forms still refuse; valid wide based forms retain bit-plane tokens |
+| Digital clocks on the event and mixed hosts | Core library `digital_clock_queries` filter, portable Verilog feature | 2 passed after integration: hierarchical 10 ns/1 ns units at 1.5 ns; a 0.65 ns physical activation reports tick 1, preserves #0, isolates a pending tick-1 timer, rolls back/retries and restores an in-memory checkpoint; 1e-12 A and 1e-20 s budgets |
+| Shipped artifact refresh for canonical schema 40 | Authoritative `rspice-veriloga-gen regenerate-builtins --jobs 2`, generator profile | All 43 models regenerated; source bytes unchanged relative to the preserved physical-branch fix; generator digest `c68a11fbaf28dd50961182701765bffe39801b5fd94d250ea757e1b00968f152` |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -348,6 +352,40 @@ generator manifest. The concurrent `00aca9e51` finite-tanh derivative fix touche
 native SPICE behavioral expressions and is preserved at integration; none of
 these timing fixtures uses tanh. Combined release verification remains pending.
 
+Digital time reporting now has a typed `DigitalTime` CFG node and a required
+`DigitalClock` environment contract. Reads stay in their process blocks across
+suspension. The plan supplies design precision and the process supplies its
+module unit. `$time` rounds by integer quotient/remainder; `$stime` takes its
+low 32 bits before the enclosing expression widens it. `$realtime` scales the
+reporting tick; `$abstime` keeps physical seconds. The host publishes a fresh
+clock for every activation, retaining physical analog time through its immediate
+and inactive-region consequences. Accepted-state clones and the existing
+in-memory checkpoint restore these records. Persisted mixed restart remains open.
+The definitions follow IEEE 1364-2005 section 17.7 and VAMS-2023 section 9.10;
+the physical/reporting split retains the section 7.3.6.1 causal contract.
+[IEEE standard text](https://www.eg.bucknell.edu/~csci320/2016-fall/wp-content/uploads/2015/08/verilog-std-1364-2005.pdf),
+[VAMS-2023](https://www.accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
+The widened `$time` fixture exposed pre-existing arithmetic/comparison behavior
+that mapped every operand above 64 bits to unknown. Known wide operands now use
+`num-bigint` 0.4.8, already present in the repository dependency graph; the
+machine-word fast path remains. Results wrap at declared width, signed division
+truncates toward zero, and remainder follows the dividend. Wide known shift
+counts remain known. Valid wide based literals now use the digital bit planes,
+unsized values retain their digits, and decimal magnitudes beyond 128 bits use
+the existing literal budget. The analog integer decoder retains its separate
+representability restriction. Full cross-domain coercions remain MS06 work.
+
+The first test link failed because C: was full, before any test could execute.
+Cargo's package-scoped cleanup removed 5.9 GiB of this worktree's disposable UI
+build artifacts; source files and other worktrees were preserved. The failed
+link was retried. Subsequent retries addressed the observed wide-arithmetic and
+literal failures. Concurrent `ee4ae21b3` is preserved, including physical-branch
+mapping and generated model changes. The combined artifact schema is 40 and
+disk-cache format is 77, distinct from that commit's schema 39/cache 76. The five
+focused cases pass on the combined source. No full suite or actual browser,
+tablet or vendor-reference execution was performed for this increment.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;
@@ -356,7 +394,7 @@ profiles, terminal contracts and backend qualification consistent with the mixed
 model routes. Qualify the actual
 browser-worker path at its integrated target milestone.
 Continue hierarchical library/view binding with the typed design graph.
-Continue MS02 with digital clock queries and remaining delay semantics,
+Continue MS02 with remaining delay semantics and time declarations,
 then MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must
 include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
 off-grid timing and a rejected trial. Continue through every remaining milestone

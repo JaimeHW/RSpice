@@ -283,7 +283,8 @@ use super::*;
 // Version 74 retains declared module timing and delays in resolved design ticks.
 // Version 75 resolves module time queries and scales retained analog $realtime.
 // Version 76 links canonical equations to shared physical branch unknowns.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 76;
+// Version 77 carries digital clock queries and exact wide digital expressions.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 77;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

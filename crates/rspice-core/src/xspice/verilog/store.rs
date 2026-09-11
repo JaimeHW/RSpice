@@ -85,7 +85,7 @@ use rspice_veriloga::canonical_ir::digital::{
     DigitalSignal, DigitalSignalKind,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
+    DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalRealDrive,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
@@ -322,9 +322,14 @@ pub(crate) struct DigitalSignalStore {
     /// mixed-signal host's; a process can only read it, which is section 7.3's
     /// rule that writes stay in their own domain, enforced by the type.
     analog_potentials: Vec<Option<f64>>,
+    activation_clock: Option<DigitalClock>,
 }
 
 impl DigitalSignalStore {
+    pub(crate) fn set_activation_clock(&mut self, clock: DigitalClock) {
+        self.activation_clock = Some(clock);
+    }
+
     /// Build a store for one plan.
     ///
     /// Initial values follow IEEE 1364-2005 directly and are not a policy this
@@ -395,6 +400,7 @@ impl DigitalSignalStore {
             deferred: Vec::new(),
             transitions: Vec::new(),
             analog_potentials: vec![None; plan.analog_probes.len()],
+            activation_clock: None,
         }
     }
 
@@ -729,6 +735,9 @@ pub(crate) fn signal_name(plan: &CanonicalDigitalPlan, signal: DigitalSignalId) 
 }
 
 impl DigitalEnvironment for DigitalSignalStore {
+    fn read_clock(&self) -> Option<DigitalClock> {
+        self.activation_clock
+    }
     fn read_signal(&self, signal: DigitalSignalId) -> Option<FourStateValue> {
         self.values.get(usize::from(signal)).cloned()
     }

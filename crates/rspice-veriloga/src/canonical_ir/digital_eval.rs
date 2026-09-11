@@ -97,6 +97,11 @@ use crate::four_state::FourStateBit;
 /// interpreter does not report the old value, because a store that cannot see
 /// its own previous contents cannot implement the trait usefully anyway.
 pub trait DigitalEnvironment {
+    /// Reporting tick and physical time of this activation. The containing plan
+    /// supplies tick precision and the process supplies its module's time unit.
+    /// A host must set this before starting or resuming a process.
+    fn read_clock(&self) -> Option<DigitalClock>;
+
     /// The signal's value right now, at its declared width.
     ///
     /// Called once per [`CfgValueKind::DigitalSignalRead`] node, at the moment
@@ -190,6 +195,15 @@ pub trait DigitalEnvironment {
     ///
     /// The value is already resized to the target's width per section 5.2.1.
     fn drive_signal(&mut self, drive: DigitalDrive);
+}
+
+/// Time belongs to an activation, including its zero-delay consequences.
+/// An analog crossing may have a reporting tick on either side of its physical
+/// time; this does not authorize consuming unrelated events at that tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DigitalClock {
+    pub tick: u64,
+    pub absolute_seconds: f64,
 }
 
 /// One driver's contribution to a net, evaluated.
@@ -382,6 +396,9 @@ impl DigitalResumeState {
 /// aborting the simulator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DigitalEvalError {
+    /// The host did not publish an activation clock, or its time is invalid.
+    ClockUnavailable,
+    InvalidClock,
     /// The caller paired a process with a different containing plan.
     ProcessNotInPlan(DigitalProcessId),
     /// A raw plan was supplied without a compiled content identity.
@@ -426,7 +443,10 @@ pub enum DigitalEvalError {
         found: DigitalProcessId,
     },
     /// A resume state naming a block this function does not have.
-    ResumeBlockOutOfRange { block: BlockId, blocks: usize },
+    ResumeBlockOutOfRange {
+        block: BlockId,
+        blocks: usize,
+    },
     /// A `#delay` operand that is not an integer.
     NonIntegerDelay(ValueId),
     /// A four-state value reached an operator that computes on reals, or the
@@ -466,6 +486,11 @@ impl std::fmt::Display for DigitalEvalError {
                 "process {id} is not a member of the supplied digital plan"
             ),
             Self::UnsealedPlan => write!(f, "digital plan has no compiled content identity"),
+            Self::ClockUnavailable => write!(f, "digital process activation has no clock"),
+            Self::InvalidClock => write!(
+                f,
+                "digital process activation has an invalid clock or time scale"
+            ),
             Self::ResumePlanMismatch => write!(
                 f,
                 "resume state belongs to a different compiled digital plan"
@@ -1462,6 +1487,41 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
         let kind = &self.function().value(id).kind;
         match kind {
+            CfgValueKind::DigitalTime { query } => {
+                use super::digital::DigitalTimeQuery;
+                let clock = self
+                    .environment
+                    .read_clock()
+                    .ok_or(DigitalEvalError::ClockUnavailable)?;
+                if !clock.absolute_seconds.is_finite() || clock.absolute_seconds < 0.0 {
+                    return Err(DigitalEvalError::InvalidClock);
+                }
+                let divisor = self
+                    .process
+                    .time_scale
+                    .ticks_per_unit(self.plan.timing.precision_exponent)
+                    .map_err(|_| DigitalEvalError::InvalidClock)?;
+                match query {
+                    DigitalTimeQuery::AbsoluteTime => {
+                        Ok(DigitalScalar::Real(clock.absolute_seconds))
+                    }
+                    DigitalTimeQuery::RealTime => {
+                        Ok(DigitalScalar::Real(clock.tick as f64 / divisor as f64))
+                    }
+                    DigitalTimeQuery::Time | DigitalTimeQuery::ShortTime => {
+                        // Round nonnegative time to the nearest module unit
+                        // using integer division, including exact half units.
+                        // No f64 round trip may lose the low bits of $time.
+                        let remainder = clock.tick % divisor;
+                        let rounded =
+                            clock.tick / divisor + u64::from(remainder >= divisor - remainder);
+                        Ok(DigitalScalar::FourState(FourStateValue::from_u64(
+                            query.bit_width().expect("integer time query"),
+                            rounded,
+                        )))
+                    }
+                }
+            }
             CfgValueKind::FourStateConstant(value) => Ok(DigitalScalar::FourState(value.clone())),
             CfgValueKind::IntegerConstant(value) => Ok(DigitalScalar::Integer(*value)),
             CfgValueKind::DigitalSignalRead { signal } => {
@@ -1819,6 +1879,9 @@ mod tests {
     struct NoEnvironment;
 
     impl DigitalEnvironment for NoEnvironment {
+        fn read_clock(&self) -> Option<DigitalClock> {
+            None
+        }
         fn read_signal(&self, _signal: DigitalSignalId) -> Option<FourStateValue> {
             None
         }
@@ -2163,6 +2226,9 @@ mod tests {
     struct OneSignal(FourStateValue);
 
     impl DigitalEnvironment for OneSignal {
+        fn read_clock(&self) -> Option<DigitalClock> {
+            None
+        }
         fn read_signal(&self, _signal: DigitalSignalId) -> Option<FourStateValue> {
             Some(self.0.clone())
         }

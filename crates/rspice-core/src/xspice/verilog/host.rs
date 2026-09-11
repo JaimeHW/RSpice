@@ -384,6 +384,8 @@ pub(crate) struct DigitalHost {
     /// Ready activations caused by an analog event. Its reported tick may be
     /// ahead of physical analog time; unrelated timers at that tick stay queued.
     analog_ready: Option<Vec<TargetId>>,
+    /// Physical time for causal analog activations whose reporting tick differs.
+    analog_activation_seconds: Option<f64>,
     /// The kernel's id for each process's driver, interned once at
     /// construction. The [`EventTarget`] behind it — the strings an
     /// oscillation diagnostic prints — stays in the kernel, and an activation
@@ -471,6 +473,7 @@ impl DigitalHost {
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             analog_ready: None,
+            analog_activation_seconds: None,
             targets,
             process_of_target,
             fired: Vec::new(),
@@ -603,6 +606,7 @@ impl DigitalHost {
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
+        physical_seconds: f64,
     ) -> Result<(), DigitalRunError> {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
@@ -611,8 +615,10 @@ impl DigitalHost {
             self.store.force(*signal, value.clone(), &self.plan)?;
         }
         self.analog_ready = Some(Vec::new());
+        self.analog_activation_seconds = Some(physical_seconds);
         let result = self.dispatch(tick).and_then(|()| self.settle(tick));
         self.analog_ready = None;
+        self.analog_activation_seconds = None;
         result
     }
 
@@ -745,6 +751,15 @@ impl DigitalHost {
     /// Run one process from wherever it stopped, and record where it stops
     /// next.
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        let absolute_seconds = match self.analog_activation_seconds {
+            Some(seconds) => seconds,
+            None => self.scheduler.resolution().ticks_to_seconds(tick)?,
+        };
+        self.store
+            .set_activation_clock(rspice_veriloga::canonical_ir::DigitalClock {
+                tick,
+                absolute_seconds,
+            });
         // The plan, the store and the scratch are three different fields, so
         // an activation borrows all three at once and pays for none of them:
         // the process is read straight out of `self.plan` rather than through

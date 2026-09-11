@@ -48,12 +48,10 @@ pub enum TokenKind {
     // === Literals ===
     /// Integer literal: 123, 0xFF, 0b101
     IntegerLiteral,
-    /// A based literal with at least one `x`, `z`, or `?` digit: `4'b10x1`.
+    /// A based literal with unknown bits or too wide for the analog integer IR.
     ///
-    /// Kept apart from [`TokenKind::IntegerLiteral`] because it has no numeric
-    /// value. The continuous half of the language cannot represent one, so it
-    /// must not be able to reach an analog expression by falling through a
-    /// shared literal production.
+    /// Kept apart from [`TokenKind::IntegerLiteral`] so its bit planes and
+    /// declared width cannot be lost through the analog integer representation.
     FourStateLiteral,
     /// Real literal: 1.5, 1e-3, 2.5M
     RealLiteral,
@@ -1064,10 +1062,13 @@ impl<'a> Lexer<'a> {
                 LexerErrorKind::InvalidNumber(text.to_string()),
                 span,
             )),
-            Err(detail) => Err(LexerError::new(
-                LexerErrorKind::InvalidNumber(format!("{text}: {detail}")),
-                span,
-            )),
+            Err(detail) => match crate::four_state::decode(text) {
+                Ok(_) => Ok(Token::with_text(TokenKind::FourStateLiteral, span, text)),
+                Err(_) => Err(LexerError::new(
+                    LexerErrorKind::InvalidNumber(format!("{text}: {detail}")),
+                    span,
+                )),
+            },
         }
     }
 
@@ -1342,7 +1343,7 @@ mod tests {
     #[test]
     fn malformed_based_literals_fail_closed() {
         for src in [
-            "0'h0", "65'h1", "8'", "8's", "8'q1", "8'h", "8'b102", "8'o8", "8'dA",
+            "0'h0", "70000'h1", "8'", "8's", "8'q1", "8'h", "8'b102", "8'o8", "8'dA",
         ] {
             let error = Lexer::new(src, SourceId::new(0))
                 .collect_tokens()
@@ -1353,13 +1354,12 @@ mod tests {
             );
         }
 
-        let error = Lexer::new("'h1_0000_0000_0000_0000", SourceId::new(0))
-            .collect_tokens()
-            .expect_err("over-wide unsized literal must be rejected");
-        assert!(
-            error.to_string().contains("requires more than 64 bits"),
-            "{error}"
-        );
+        for source in ["65'h1", "'h1_0000_0000_0000_0000"] {
+            let tokens = Lexer::new(source, SourceId::new(0))
+                .collect_tokens()
+                .unwrap();
+            assert_eq!(tokens[0].kind, TokenKind::FourStateLiteral);
+        }
     }
 
     /// A literal with an `x`, `z`, or `?` digit lexes as its own kind rather

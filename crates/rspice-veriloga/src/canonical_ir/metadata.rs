@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 40 adds digital clock queries and exact wide digital expressions.
 /// Version 39 links each contribution to its shared physical branch unknown.
 /// Version 38 resolves declaration-owned time queries before hierarchy flattening.
 /// Version 37 retains module time scales and resolved digital delay ticks.
@@ -41,7 +42,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 39;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 40;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

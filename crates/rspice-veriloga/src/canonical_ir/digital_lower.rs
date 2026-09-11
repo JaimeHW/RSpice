@@ -2192,7 +2192,10 @@ impl ProcessLowerer<'_> {
             // classifying it by its operand would send it down the four-state
             // path it exists to leave.
             Expression::SystemFunction(function) => {
-                function.name == "$bitstoreal" || self.module_time_query(function).is_some()
+                function.name == "$bitstoreal"
+                    || self.module_time_query(function).is_some()
+                    || super::digital::DigitalTimeQuery::from_name(&function.name)
+                        .is_some_and(|query| query.bit_width().is_none())
             }
             // A probe of a continuous net is a real, whichever net it names
             // (Verilog-AMS LRM 2.4 section 7.3.3, and Table 7-1's converse —
@@ -2293,12 +2296,7 @@ impl ProcessLowerer<'_> {
         )
     }
 
-    /// Lower an expression that must produce a real.
-    ///
-    /// The whole real half of the expression grammar, and deliberately small:
-    /// what is not here is refused by name, because a real-number model that
-    /// silently lost an operator would produce a plausible waveform and no way
-    /// to tell it was wrong.
+    /// Resolve constant module declarations independently of the process clock.
     fn module_time_query(&self, function: &crate::ast::SystemFunction) -> Option<f64> {
         if !function.name.eq_ignore_ascii_case("$simparam")
             || !(1..=2).contains(&function.args.len())
@@ -2311,7 +2309,18 @@ impl ProcessLowerer<'_> {
         self.time_scale.parameter_value(&name.value).ok().flatten()
     }
 
+    /// Lower an expression that must produce a real.
     fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        if let Expression::SystemFunction(function) = expression
+            && let Some(query) = super::digital::DigitalTimeQuery::from_name(&function.name)
+            && query.bit_width().is_none()
+        {
+            return self.builder.push(
+                block,
+                query.value_type(),
+                CfgValueKind::DigitalTime { query },
+            );
+        }
         if let Expression::SystemFunction(function) = expression
             && let Some(value) = self.module_time_query(function)
         {
@@ -2891,9 +2900,17 @@ impl ProcessLowerer<'_> {
             }
             Expression::Unary(unary) => self.unary(block, unary, inner),
             Expression::Binary(binary) => self.binary(block, binary, inner),
-            // `$realtobits(x)`: the one construct that produces bits from a
-            // real, and the reason every other real-to-bits path is a refusal
-            // rather than a coercion.
+            Expression::SystemFunction(function)
+                if super::digital::DigitalTimeQuery::from_name(&function.name).is_some() =>
+            {
+                let query = super::digital::DigitalTimeQuery::from_name(&function.name).unwrap();
+                self.builder.push(
+                    block,
+                    query.value_type(),
+                    CfgValueKind::DigitalTime { query },
+                )
+            }
+            // `$realtobits(x)` produces the real's explicit bit representation.
             Expression::SystemFunction(function) if function.name == "$realtobits" => {
                 let Some(argument) = function.args.first() else {
                     // The analyzer refuses the arity; producing a
@@ -3165,6 +3182,11 @@ impl ProcessLowerer<'_> {
             // spelling of this one.
             Expression::SystemFunction(function) if function.name == "$realtobits" => {
                 REAL_BIT_PATTERN_WIDTH
+            }
+            Expression::SystemFunction(function) => {
+                super::digital::DigitalTimeQuery::from_name(&function.name)
+                    .and_then(|query| query.bit_width())
+                    .unwrap_or(1)
             }
             _ => 1,
         }

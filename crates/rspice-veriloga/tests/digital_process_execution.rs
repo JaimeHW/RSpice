@@ -57,10 +57,90 @@ fn parse_value(spelling: &str) -> FourStateValue {
     FourStateValue::from_bits_msb_first(&bits)
 }
 
+#[test]
+fn digital_clock_queries_preserve_integer_bits_rounding_and_resume_time() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType, DigitalClock};
+    let source = "`timescale 10ns/1ps\nmodule clocked;
+        reg [63:0] t; reg [31:0] st; reg [127:0] wide; real rt, at;
+        initial begin
+            t=$time; st=$stime; wide=$time+1; rt=$realtime; at=$abstime;
+            #0;
+            t=$time; st=$stime; wide=$time+1; rt=$realtime; at=$abstime;
+        end endmodule";
+    let mut harness = Harness::from_source(source);
+    assert!(matches!(
+        start(
+            &harness.plan,
+            &harness.plan.processes[0],
+            &mut harness.store
+        ),
+        Err(DigitalEvalError::ClockUnavailable)
+    ));
+    harness.store.clock = Some(DigitalClock {
+        tick: 14_999,
+        absolute_seconds: 14.999e-9,
+    });
+    let suspension = expect_suspended(harness.start(0));
+    assert_eq!(harness.get("t"), format!("{:064b}", 1));
+    assert_eq!(harness.get_real("rt"), 1.4999);
+    assert_eq!(harness.get_real("at"), 14.999e-9);
+    harness.store.clock = Some(DigitalClock {
+        tick: 15_000,
+        absolute_seconds: 15e-9,
+    });
+    assert!(matches!(
+        harness.resume(0, suspension.resume_state()),
+        DigitalProcessOutcome::Finished
+    ));
+    assert_eq!(harness.get("t"), format!("{:064b}", 2));
+    assert_eq!(harness.get("st"), format!("{:032b}", 2));
+    assert_eq!(harness.get("wide"), format!("{:0128b}", 3));
+    assert_eq!(harness.get_real("rt"), 1.5);
+    assert_eq!(harness.get_real("at"), 15e-9);
+
+    // Above the exact f64 integer range, and the specified low-32-bit $stime
+    // wraparound. A widened enclosing expression must not widen $stime itself.
+    for (tick, low) in [
+        (4_294_967_301_u64, 5_u64),
+        (9_007_199_254_740_993, 1),
+        (u64::MAX, u32::MAX as u64),
+    ] {
+        let mut wide = Harness::from_source(
+            "`timescale 1fs/1fs\nmodule wide; reg [127:0] t, st; initial begin t=$time+128'd1; st=$stime+128'd1; end endmodule",
+        );
+        wide.store.clock = Some(DigitalClock {
+            tick,
+            absolute_seconds: tick as f64 * 1e-15,
+        });
+        assert!(matches!(wide.start(0), DigitalProcessOutcome::Finished));
+        assert_eq!(wide.get("t"), format!("{:0128b}", u128::from(tick) + 1));
+        assert_eq!(wide.get("st"), format!("{:0128b}", u128::from(low) + 1));
+    }
+    let mut altered = harness.plan.clone();
+    let value = altered.processes[0]
+        .function
+        .values
+        .iter_mut()
+        .find(|value| matches!(value.kind, CfgValueKind::DigitalTime { .. }))
+        .unwrap();
+    value.value_type = CfgValueType::FourState { width: 7 };
+    assert!(altered.validate().is_err());
+    for function in ["$time", "$stime", "$realtime", "$abstime"] {
+        let source = format!("module bad; reg [63:0] q; initial q={function}(1); endmodule");
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir_module(&source, None)
+                .is_err(),
+            "{function}"
+        );
+    }
+}
+
 /// A signal store, a nonblocking-update queue, and one slot per driver: the
 /// smallest thing that satisfies [`DigitalEnvironment`], and a stand-in for the
 /// event kernel's own.
 struct Store {
+    clock: Option<rspice_veriloga::canonical_ir::DigitalClock>,
     values: Vec<FourStateValue>,
     /// The value of every real net, in the same signal space. A four-state
     /// signal's slot is never read; keeping one table per signal id rather than
@@ -84,7 +164,57 @@ struct Store {
     analog: Vec<Option<f64>>,
 }
 
+#[test]
+fn digital_clock_queries_compose_with_wide_signed_arithmetic_and_shifts() {
+    let mut harness = Harness::from_source(
+        "`timescale 1fs/1fs\nmodule wide;
+        reg signed [128:0] a,b,d,m,product,fill;
+        reg [128:0] u,square,shifted,empty,invalid,unsized_value,decimal_value;
+        reg lt,gt,bad; reg [256:0] count;
+        initial begin
+            a=-129'd7; b=129'd2; d=a/b; m=a%b; product=a*b;
+            u=$time+(129'd1<<64); square=u*u;
+            count=257'd1; shifted=u<<count;
+            count=257'd1<<200; empty=u>>count; fill=a>>>count;
+            invalid=u/129'd0; lt=(a<b); gt=(square>u); bad=(129'bx<u);
+            unsized_value='h100000000000000000000000000000001;
+            decimal_value=129'd340282366920938463463374607431768211457;
+        end endmodule",
+    );
+    harness.store.clock = Some(rspice_veriloga::canonical_ir::DigitalClock {
+        tick: 1,
+        absolute_seconds: 1e-15,
+    });
+    assert!(matches!(harness.start(0), DigitalProcessOutcome::Finished));
+    assert_eq!(harness.get("u"), format!("{:0129b}", (1u128 << 64) + 1));
+    assert_eq!(
+        harness.get("square"),
+        format!("1{:0128b}", (1u128 << 65) + 1)
+    );
+    assert_eq!(
+        harness.get("shifted"),
+        format!("{:0129b}", (1u128 << 65) + 2)
+    );
+    assert_eq!(harness.get("d"), format!("{}01", "1".repeat(127)));
+    assert_eq!(harness.get("m"), "1".repeat(129));
+    assert_eq!(harness.get("product"), format!("{}0010", "1".repeat(125)));
+    assert_eq!(harness.get("empty"), "0".repeat(129));
+    assert_eq!(harness.get("fill"), "1".repeat(129));
+    assert_eq!(harness.get("invalid"), "x".repeat(129));
+    assert_eq!(harness.get("lt"), "1");
+    assert_eq!(harness.get("gt"), "1");
+    assert_eq!(harness.get("bad"), "x");
+    assert_eq!(
+        harness.get("unsized_value"),
+        format!("1{}1", "0".repeat(127))
+    );
+    assert_eq!(harness.get("decimal_value"), harness.get("unsized_value"));
+}
+
 impl DigitalEnvironment for Store {
+    fn read_clock(&self) -> Option<rspice_veriloga::canonical_ir::DigitalClock> {
+        self.clock
+    }
     fn read_signal(&self, signal: DigitalSignalId) -> Option<FourStateValue> {
         self.values.get(usize::from(signal)).cloned()
     }
@@ -163,6 +293,7 @@ impl Harness {
         Self {
             plan,
             store: Store {
+                clock: None,
                 values,
                 reals,
                 deferred: Vec::new(),
@@ -3099,6 +3230,7 @@ fn bitstoreal_refuses_an_unknown_bit() {
         .expect("fixture must lower to canonical IR")
         .digital;
     let mut store = Store {
+        clock: None,
         values: plan
             .signals
             .iter()

@@ -841,6 +841,11 @@ pub enum CfgValueKind {
     DigitalRealSignalRead {
         signal: DigitalSignalId,
     },
+    /// A clock read pinned to the process block, never hoisted across a wait.
+    /// The process owns the module scale; the environment owns its activation.
+    DigitalTime {
+        query: super::digital::DigitalTimeQuery,
+    },
     /// A continuous-domain potential, read from inside a process function.
     ///
     /// Verilog-AMS LRM 2.4 section 7.3.3's probe, and the *only* direction the
@@ -1175,6 +1180,7 @@ impl CfgValueKind {
             | Self::IntegerConstant(_)
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
+            | Self::DigitalTime { .. }
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }

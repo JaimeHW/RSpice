@@ -1245,6 +1245,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::IntegerConstant(_)
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }
+            | CfgValueKind::DigitalTime { .. }
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }

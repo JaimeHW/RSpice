@@ -560,6 +560,7 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalRealSignalRead { signal } => {
                 write!(out, "digital-real-read:{signal}")
             }
+            CfgValueKind::DigitalTime { query } => write!(out, "digital-time:{query:?}"),
             CfgValueKind::DigitalAnalogPotential { probe } => {
                 write!(out, "digital-analog-potential:{probe}")
             }

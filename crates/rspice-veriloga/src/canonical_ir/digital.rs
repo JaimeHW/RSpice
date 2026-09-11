@@ -135,6 +135,41 @@ use crate::semantic::VectorBounds;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+/// Simulator time functions evaluated at a process's current activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalTimeQuery {
+    Time,
+    ShortTime,
+    RealTime,
+    AbsoluteTime,
+}
+
+impl DigitalTimeQuery {
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "$time" => Some(Self::Time),
+            "$stime" => Some(Self::ShortTime),
+            "$realtime" => Some(Self::RealTime),
+            "$abstime" => Some(Self::AbsoluteTime),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn bit_width(self) -> Option<u32> {
+        match self {
+            Self::Time => Some(64),
+            Self::ShortTime => Some(32),
+            Self::RealTime | Self::AbsoluteTime => None,
+        }
+    }
+
+    pub(crate) fn value_type(self) -> super::cfg::CfgValueType {
+        self.bit_width()
+            .map_or(super::cfg::CfgValueType::Real, |width| {
+                super::cfg::CfgValueType::FourState { width }
+            })
+    }
+}
 /// Scheduling region of one simulation time slot.
 ///
 /// IEEE 1364-2005 section 11 stratifies a time slot so that a nonblocking

@@ -1871,7 +1871,7 @@ impl MixedSignalHost {
         if !scratch.drives.is_empty() {
             let digital = self.state.digital.make_mut();
             digital.sample_analog_potentials(&scratch.probes);
-            digital.force_many_from_analog(&scratch.drives, publish_tick)?;
+            digital.force_many_from_analog(&scratch.drives, publish_tick, time_seconds)?;
             if let Some(trial) = self.trial.as_mut() {
                 for &(index, crossing) in &scratch.crossings {
                     trial.vectors.transition_times[index] = Some(crossing);
@@ -2728,6 +2728,78 @@ endmodule
             .expect("bridges settle")
         {}
         host.accept_trial().expect("accept a quiet trial");
+    }
+
+    #[test]
+    fn digital_clock_queries_retain_physical_activation_and_roll_back() {
+        let source = "module clocked(p,adc); inout p; electrical p; input adc; wire adc;
+            real absolute, reported; reg ok, unrelated;
+            initial begin absolute=0.0; reported=0.0; ok=0; unrelated=0; #1 unrelated=1; end
+            always @(posedge adc) begin
+                absolute=$abstime; reported=$realtime; ok=($time==1 && $stime==1);
+                #0 reported=reported+$realtime;
+                #1 absolute=$abstime;
+            end
+            analog I(p)<+(absolute*1e9+reported+ok)/1000.0;
+            endmodule";
+        let mut host =
+            MixedSignalHost::compile(source, None, "clock", &[1], SchedulerLimits::default())
+                .unwrap();
+        host.add_adc_bridge("adc", 0, (2, 0), 0.4, 0.6).unwrap();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0, 0.0]);
+        let stamp = |host: &mut MixedSignalHost| {
+            while host.settle_analog_bridges(&[0.0, 0.6]).unwrap() {}
+            let mut rhs = 0.0;
+            host.stamp(
+                &[0.0, 0.6],
+                |_, _, _| {},
+                |row, value| {
+                    if row == 0 {
+                        rhs += value;
+                    }
+                },
+            )
+            .unwrap();
+            rhs
+        };
+        // This crossing reports tick 1 while its physical time is 0.65 ns.
+        // #0 retains both clocks, and the independent tick-1 timer stays queued.
+        for reject in [true, false] {
+            host.begin_trial(
+                0.65e-9,
+                0.65e-9,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .unwrap();
+            assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
+            assert_eq!(host.read_digital("unrelated").unwrap(), "0");
+            assert!((host.next_event_time().unwrap().unwrap() - 1e-9).abs() < 1e-20);
+            if reject {
+                host.reject_trial().unwrap();
+                assert_eq!(host.read_digital("ok").unwrap(), "0");
+                assert_eq!(host.read_digital("adc").unwrap(), "0");
+            } else {
+                host.accept_trial().unwrap();
+            }
+        }
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 1);
+        assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
+        assert_eq!(host.read_digital("unrelated").unwrap(), "1");
+        host.accept_trial().unwrap();
+        begin(&mut host, 2);
+        assert!((stamp(&mut host) + 5e-3).abs() < 1e-12);
+        host.accept_trial().unwrap();
+        // Restoring accepted state must also discard the later activation clock.
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0, 0.6]);
+        begin(&mut host, 2);
+        assert!((stamp(&mut host) + 5e-3).abs() < 1e-12);
+        host.accept_trial().unwrap();
     }
 
     #[test]

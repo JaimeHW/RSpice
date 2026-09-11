@@ -1863,6 +1863,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::IntegerConstant(_)
         | CfgValueKind::DigitalSignalRead { .. }
         | CfgValueKind::DigitalRealSignalRead { .. }
+        | CfgValueKind::DigitalTime { .. }
         // A probe of a continuous net is `Newton` for a stronger reason than
         // the rest of this list: it reads the analog solution, which changes
         // on every Newton iteration of every trial. Any coarser class would be

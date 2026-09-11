@@ -213,6 +213,13 @@ impl CanonicalDigitalPlan {
                     return Err(error("analog value type in digital process"));
                 }
                 match kind {
+                    CfgValueKind::DigitalTime { query } => {
+                        if value.value_type != query.value_type() {
+                            return Err(error(
+                                "digital time query has the wrong value domain or width",
+                            ));
+                        }
+                    }
                     CfgValueKind::DigitalSignalRead { signal }
                     | CfgValueKind::DigitalRealSignalRead { signal } => {
                         let Some(signal) = self.signal(*signal) else {

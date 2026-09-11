@@ -218,8 +218,23 @@ seconds-valued. This changes the former unscaled alias. VAMS-2023 section 9.10
 deprecates analog `$realtime` in favor of `$abstime`; the retained compatibility
 behavior is not a vendor qualification claim.
 
+Digital `$time`, `$stime`, `$realtime` and `$abstime` read the current process
+activation. `$time` rounds exact design ticks to a 64-bit unsigned count of
+module time units; `$stime` returns the low 32 bits of that count. `$realtime`
+returns the fractional module-unit count. `$abstime` returns physical activation
+time in seconds. An analog-triggered activation and its `#0` consequences retain
+that physical time even when their digital reporting tick is rounded. A later
+positive-delay activation receives its own clock. Custom `DigitalEnvironment`
+implementations must supply `read_clock`; absent or invalid clocks are errors.
+
+Known digital arithmetic and relational operands wider than 64 bits use exact
+integer arithmetic, with results wrapping at their declared width. X/Z and
+division-by-zero behavior is preserved. Wide shift counts, based literals and
+unsized based values retain their bits, within the existing 65,536-bit literal
+budget. Remaining type/conversion work in MS06 is still open.
+
 MS02 remains open. Runtime-valued delays, min:typ:max selection, complete
-delayed-assignment semantics, digital time reporting functions and SystemVerilog
+delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.
 

@@ -2028,6 +2028,18 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::SystemFunction(function) => {
+                if crate::canonical_ir::DigitalTimeQuery::from_name(&function.name).is_some() {
+                    if !function.args.is_empty() {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{} expects no arguments",
+                                function.name
+                            )),
+                            function.span,
+                        );
+                    }
+                    return;
+                }
                 let module_query = function.name.eq_ignore_ascii_case("$simparam")
                     && matches!(function.args.first(), Some(Expression::StringLit(name))
                         if self.current_time_scale.parameter_value(&name.value).ok().flatten().is_some());

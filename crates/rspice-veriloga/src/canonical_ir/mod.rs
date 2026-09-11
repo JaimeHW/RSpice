@@ -68,10 +68,11 @@ pub use diagnostic::{
 pub use digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriver, DigitalDriverId, DigitalEdge,
     DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm,
-    DigitalSignal, DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalSignal, DigitalStaticSensitivity, DigitalTimeQuery, DigitalWriteSelect,
+    DigitalWriteTarget,
 };
 pub use digital_eval::{
-    DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
+    DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
     DigitalProcessOutcome, DigitalResumeState, DigitalScalar, DigitalSuspension,
     DigitalWaitRequest, apply_deferred as apply_deferred_digital_update, classify_edge,
     resume as resume_digital_process, start as start_digital_process,

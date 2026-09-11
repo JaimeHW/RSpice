@@ -42,6 +42,32 @@ fn rows(report: &DigitalRunReport) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn digital_clock_queries_use_each_hierarchical_module_unit() {
+    let source = "`timescale 10ns/1ps
+        module child(q); output q; reg q; initial begin q=0; #0.15
+            q=($realtime==0.15 && $time==0 && $stime==0 && $abstime>1.49999999999e-9 && $abstime<1.50000000001e-9);
+        end endmodule
+        `timescale 1ns/1ps
+        module top(q,c); output q,c; reg q; wire c; child u(c);
+        initial begin q=0; #1.5
+            q=($realtime==1.5 && $time==2 && $stime==2 && $abstime>1.49999999999e-9 && $abstime<1.50000000001e-9);
+        end endmodule";
+    let design = CompiledDigitalDesign::compile(source, Some("top")).unwrap();
+    let report = design
+        .run(&DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![port("q", 1), port("c", 1)],
+            clock: None,
+            step: 1500,
+            settle: 0,
+            vectors: vec![vec![], vec![]],
+        })
+        .unwrap();
+    assert_eq!(rows(&report), ["q=0 c=0", "q=1 c=1"]);
+}
+
 // ===========================================================================
 // Continuous assignment: section 6.1
 // ===========================================================================

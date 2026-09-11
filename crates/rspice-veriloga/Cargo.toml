@@ -26,6 +26,8 @@ wasmparser = { workspace = true, optional = true }
 
 # Complex arithmetic for the s-domain (Laplace) filter realization.
 num-complex = { workspace = true }
+# Exact digital arithmetic beyond a machine word; already used by rspice-core.
+num-bigint = "0.4.8"
 
 # Data structures
 indexmap = "2.7"

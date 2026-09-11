@@ -100,8 +100,8 @@ pub struct FourStateLiteral {
     pub base: LiteralBase,
     /// Whether the author wrote the `s`/`S` signed marker.
     pub signed: bool,
-    /// Bit values, most significant first. Always
-    /// `declared_width.unwrap_or(UNSIZED_FOUR_STATE_WIDTH)` entries long.
+    /// Bit values, most significant first. Unsized literals retain all their
+    /// digits and have at least `UNSIZED_FOUR_STATE_WIDTH` bits.
     pub bits: Vec<FourStateBit>,
 }
 
@@ -112,9 +112,8 @@ impl FourStateLiteral {
 
     /// Whether any bit is `x` or `z`.
     ///
-    /// A literal that decodes to only `0`/`1` bits never reaches here: the
-    /// lexer routes it to the integer decoder instead. The predicate exists
-    /// for consumers that receive an already-decoded literal.
+    /// Known wide literals use this representation too; their bits remain
+    /// exact rather than being converted through the analog integer IR.
     pub fn has_unknown_bits(&self) -> bool {
         self.bits
             .iter()
@@ -203,7 +202,7 @@ pub fn has_signed_marker(raw: &str) -> bool {
         .is_some_and(|(signed, _, _)| signed)
 }
 
-/// Decode a based literal whose digits contain at least one `x`, `z`, or `?`.
+/// Decode a bounded based literal, including known values wider than 64 bits.
 ///
 /// Returns a human-readable reason on failure; callers wrap it in their own
 /// diagnostic so the message keeps the literal's source span.
@@ -237,7 +236,7 @@ pub fn decode(raw: &str) -> Result<FourStateLiteral, String> {
     }
 
     let mut decoded = decode_digits(raw, base, &digits)?;
-    let target = declared_width.unwrap_or(UNSIZED_FOUR_STATE_WIDTH);
+    let target = declared_width.unwrap_or(UNSIZED_FOUR_STATE_WIDTH.max(decoded.len() as u32));
     resize(&mut decoded, target);
 
     Ok(FourStateLiteral {
@@ -311,13 +310,6 @@ fn decode_digits(raw: &str, base: LiteralBase, digits: &str) -> Result<Vec<FourS
     Ok(bits)
 }
 
-/// Largest decimal literal this decoder materializes.
-///
-/// A decimal digit string is a number rather than a per-digit expansion, so
-/// decoding one means arithmetic, and arithmetic here is `u128`. Refusing past
-/// that is a stated boundary; guessing past it would be a wrong constant.
-const MAX_DECIMAL_LITERAL_BITS: u32 = 128;
-
 /// Decode a base-10 digit string, IEEE 1364-2005 section 3.5.1.
 ///
 /// Two forms, and they cannot be mixed. Ordinarily the digits are a plain
@@ -344,15 +336,37 @@ fn decode_decimal(raw: &str, digits: &str) -> Result<Vec<FourStateBit>, String> 
     if !digits.chars().all(|character| character.is_ascii_digit()) {
         return Err(format!("'{raw}' contains a digit outside base 10"));
     }
-    let value = digits.parse::<u128>().map_err(|_| {
-        format!(
-            "'{raw}' is a decimal literal beyond {MAX_DECIMAL_LITERAL_BITS} bits; \
-             this compiler materializes no wider decimal value"
-        )
-    })?;
+    let value = match digits.parse::<u128>() {
+        Ok(value) => value,
+        Err(_) => {
+            // Bound source work before arbitrary-precision parsing, then
+            // enforce the same materialized-bit budget as binary/hex literals.
+            if digits.len() > MAX_FOUR_STATE_WIDTH as usize {
+                return Err(format!("'{raw}' exceeds the decimal literal digit budget"));
+            }
+            let value = num_bigint::BigUint::parse_bytes(digits.as_bytes(), 10)
+                .ok_or_else(|| format!("'{raw}' has invalid decimal digits"))?;
+            let width = value.bits().max(1);
+            if width > u64::from(MAX_FOUR_STATE_WIDTH) {
+                return Err(format!(
+                    "'{raw}' exceeds the {MAX_FOUR_STATE_WIDTH}-bit literal budget"
+                ));
+            }
+            return Ok((0..width)
+                .rev()
+                .map(|index| {
+                    if value.bit(index) {
+                        FourStateBit::One
+                    } else {
+                        FourStateBit::Zero
+                    }
+                })
+                .collect());
+        }
+    };
     // Most significant bit first, and never empty: a zero is one `0` bit, which
     // `resize` then pads to the declared width.
-    let significant = MAX_DECIMAL_LITERAL_BITS - value.leading_zeros();
+    let significant = 128 - value.leading_zeros();
     Ok((0..significant.max(1))
         .rev()
         .map(|index| {
