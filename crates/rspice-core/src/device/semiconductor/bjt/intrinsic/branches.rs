@@ -209,26 +209,79 @@ impl Bjt {
         linearized: BjtLinearization,
         rb: Value,
     ) -> Value {
+        self.legacy_gp_base_resistance_law::<false>(linearized, rb)
+            .current
+    }
+
+    /// The physical resistance law also supplies exact derivatives for HB.
+    /// Native SPICE Newton/AC retains its documented frozen-resistance load.
+    #[inline]
+    pub(in crate::device::semiconductor::bjt) fn legacy_gp_base_resistance_law<
+        const EXACT: bool,
+    >(
+        &self,
+        linearized: BjtLinearization,
+        rb: Value,
+    ) -> BranchLinearization {
         let [whole, minimum] = self
             .legacy_junction_params
             .as_ref()
             .and_then(|j| j.base_resistance)
             .map_or([rb, 0.0], |r| r.operating);
+        let mut partials = [0.0; 3];
         let factor = if self.irb > 0.0 {
             let current = self.polarity() * linearized.ib;
             if !current.is_finite() {
-                return Value::NAN;
+                return BranchLinearization {
+                    current: Value::NAN,
+                    ..Default::default()
+                };
             }
-            let ratio = (current / self.irb).max(1e-9);
-            // Rationalize the small-current expression and scale its large
-            // argument so finite currents divided by tiny IRB can reach the
-            // spreading-law limit without overflowing intermediate products.
+            let raw_ratio = current / self.irb;
+            let ratio = raw_ratio.max(1e-9);
             let root = ratio.sqrt();
             let z = if ratio < 1.0 {
                 14.59025 * root / (2.4317 * ((1.0 + 14.59025 * ratio).sqrt() + 1.0))
             } else {
                 ((14.59025 + ratio.recip()).sqrt() - root.recip()) / 2.4317
             };
+            if EXACT && raw_ratio > 1e-9 {
+                // z*dF/dz avoids division by a small z. Its series prevents
+                // cancellation in the cotangent form near zero; below the
+                // native small-z boundary differentiate that exact polynomial.
+                let square = z * z;
+                let logarithmic_slope = if z.abs() < 1e-3 {
+                    -square * (8.0 / 15.0 + square * 16.0 / 105.0)
+                } else if z.abs() < 0.125 {
+                    -square
+                        * (8.0 / 15.0
+                            + square
+                                * (16.0 / 105.0
+                                    + square
+                                        * (16.0 / 525.0
+                                            + square
+                                                * (32.0 / 6237.0
+                                                    + square
+                                                        * (11056.0 / 14189175.0
+                                                            + square * 32.0 / 289575.0)))))
+                } else {
+                    let cotangent = z.tan().recip();
+                    3.0 * ((2.0 * z * cotangent - 1.0) * (1.0 + cotangent * cotangent)
+                        - cotangent / z)
+                };
+                let dlogz_dlogr = if ratio < 1.0 {
+                    0.5 / (1.0 + 14.59025 * ratio).sqrt()
+                } else {
+                    (0.5 / root) / (14.59025 + ratio.recip()).sqrt()
+                };
+                let scale = (whole - minimum) * logarithmic_slope * dlogz_dlogr;
+                partials = [
+                    linearized.dib_dvbe,
+                    linearized.dib_dvbc,
+                    linearized.dib_dvrth,
+                ]
+                .map(|derivative| scale * (derivative / linearized.ib));
+            }
             if z.abs() < 1e-3 {
                 let square = z * z;
                 1.0 - square * (4.0 / 15.0 + square * 4.0 / 105.0)
@@ -237,15 +290,34 @@ impl Bjt {
                 3.0 * (tangent - z) / (z * tangent * tangent)
             }
         } else {
-            linearized.qb.max(1e-12).recip()
+            let qb = linearized.qb.max(1e-12);
+            if EXACT && linearized.qb > 1e-12 {
+                let scale = -(whole - minimum) / qb;
+                partials = [
+                    linearized.dqb_dvbe,
+                    linearized.dqb_dvbc,
+                    linearized.dqb_dvrth,
+                ]
+                .map(|derivative| scale * (derivative / qb));
+            }
+            qb.recip()
         };
-        // A convex blend preserves a small whole RB when RBM is much larger;
-        // subtracting RBM again at factor=1 would lose the authored RB.
-        if (0.0..=1.0).contains(&factor) {
+        let current = if (0.0..=1.0).contains(&factor) {
             whole * factor + minimum * (1.0 - factor)
         } else {
             minimum + (whole - minimum) * factor
+        };
+        let mut result = BranchLinearization {
+            current,
+            ..Default::default()
+        };
+        if EXACT {
+            result.d_internal[IDX_VBI] = partials[0] + partials[1];
+            result.d_internal[IDX_VCI] = -partials[1];
+            result.d_internal[IDX_VEI] = -partials[0];
+            result.d_internal[IDX_VRTH] = partials[2];
         }
+        result
     }
 
     pub(in crate::device::semiconductor::bjt) fn ibep_branch(

@@ -1202,6 +1202,77 @@ impl Bjt {
             .map(|branch| branch.current)
     }
 
+    /// Prepare the native physical MNA topology for a periodic evaluator.
+    /// Netlist construction already allocates every non-collapsed unknown.
+    pub(crate) fn prepare_periodic_mna(&mut self, num_nodes: usize) -> Result<(), String> {
+        if !self.mna_promoted() {
+            if self.has_intrinsic_state_unknowns() {
+                return Err(format!(
+                    "BJT '{}' has unbound periodic internal states",
+                    self.name
+                ));
+            }
+            self.assign_mna_internal_nodes(|_| {
+                unreachable!("collapsed native BJT needs no new node")
+            });
+        }
+        self.resolve_mna_rbi_branch(num_nodes);
+        Ok(())
+    }
+
+    /// Sample physical F/Q and their Jacobians at an unlimited state. Stamped
+    /// RHS values are -F and -Q (not absolute Newton companion sources); both
+    /// matrices contain positive derivatives of the physical equations.
+    pub(crate) fn stamp_periodic_fq(
+        &mut self,
+        solution: &[Value],
+        static_part: &mut impl MatrixStamper,
+        charge_part: &mut impl MatrixStamper,
+    ) {
+        self.update_mna_static_probe(solution);
+        self.stamp_mna_at(static_part, Some(solution), true);
+        let external_nodes = self.external_terminal_nodes();
+        let (branches, _, _) = self.mna_charge_state();
+        for (index, branch) in branches.iter().enumerate() {
+            let polarity = self.charge_branch_polarity(index);
+            let node = |internal: Option<usize>, external: Option<usize>| {
+                internal
+                    .map(|index| self.mna_internal_node(index))
+                    .or_else(|| external.map(|index| external_nodes[index]))
+                    .unwrap_or(0)
+            };
+            let pos = node(branch.pos_internal, branch.pos_external);
+            let neg = node(branch.neg_internal, branch.neg_external);
+            for (row, sign) in [(pos, polarity), (neg, -polarity)] {
+                if row == 0 {
+                    continue;
+                }
+                charge_part.stamp_rhs(row, -sign * branch.charge);
+                for (column, &derivative) in branch.d_internal.iter().enumerate() {
+                    if derivative != 0.0 {
+                        charge_part.stamp(row, self.mna_internal_node(column), sign * derivative);
+                    }
+                }
+                for (&column, &derivative) in external_nodes.iter().zip(&branch.d_external) {
+                    if derivative != 0.0 {
+                        charge_part.stamp(row, column, sign * derivative);
+                    }
+                }
+            }
+        }
+        // A constant GP base lead can be externalized by the builder. Its
+        // original-base collector charge then lives outside the intrinsic
+        // branch array and must still enter the full periodic circuit.
+        if let Some(charge) = self.legacy_external_bc_charge(solution) {
+            let [pos, neg] = charge.nodes;
+            for (row, sign) in [(pos, 1.0), (neg, -1.0)] {
+                charge_part.stamp_rhs(row, -sign * charge.charge);
+                charge_part.stamp(row, pos, sign * charge.capacitance);
+                charge_part.stamp(row, neg, -sign * charge.capacitance);
+            }
+        }
+    }
+
     /// Stamp the full promoted static system: the four terminal KCL rows, the
     /// active internal KCL rows, and the excess-phase algebraic rows, all
     /// linearized at the limited bias from the last `update`.
@@ -1209,7 +1280,7 @@ impl Bjt {
         &self,
         stamper: &mut impl MatrixStamper,
     ) {
-        self.stamp_mna_at(stamper, None);
+        self.stamp_mna_at(stamper, None, false);
     }
 
     /// Stamp J and -F directly for a Newton correction at `anchor`. If the
@@ -1217,10 +1288,15 @@ impl Bjt {
     /// This avoids subtracting large absolute-voltage companions to recover
     /// small physical currents at steep thermal slopes.
     pub(crate) fn stamp_mna_correction(&self, stamper: &mut impl MatrixStamper, anchor: &[Value]) {
-        self.stamp_mna_at(stamper, Some(anchor));
+        self.stamp_mna_at(stamper, Some(anchor), false);
     }
 
-    fn stamp_mna_at(&self, stamper: &mut impl MatrixStamper, anchor: Option<&[Value]>) {
+    fn stamp_mna_at(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        anchor: Option<&[Value]>,
+        exact: bool,
+    ) {
         let Some(eval) = self.mna_eval else {
             return;
         };
@@ -1310,7 +1386,14 @@ impl Bjt {
         }
 
         if self.mna_rbi_matrix_node != 0 {
-            self.stamp_mna_rbi_current(stamper, eval.linearized, &internal, &external, anchor);
+            self.stamp_mna_rbi_current(
+                stamper,
+                eval.linearized,
+                &internal,
+                &external,
+                anchor,
+                exact,
+            );
         }
 
         // Excess-phase network: algebraic xf rows plus the xf2-controlled
@@ -1337,6 +1420,7 @@ impl Bjt {
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
         external: &[Value; EXTERNAL_DIM],
         anchor: Option<&[Value]>,
+        exact: bool,
     ) {
         let branch = self.mna_rbi_matrix_node;
         let current = self.mna_rbi_current;
@@ -1355,7 +1439,14 @@ impl Bjt {
 
         // Vbx - Vbi - (RBI/qb)*I = 0. The temperature and charge-control
         // partials use the solved current, not an unresolvable voltage drop.
-        let resistance = self.mna_rbi_resistance(linearized, self.vrth);
+        let resistance = if exact && self.uses_legacy_gummel_poon() {
+            self.legacy_gp_base_resistance_law::<true>(
+                linearized,
+                self.guarded_series_resistance(self.rbi),
+            )
+        } else {
+            self.mna_rbi_resistance(linearized, self.vrth)
+        };
         let mut equation = Self::scale_branch(resistance, -current);
         equation.current += self.vbx - self.vbi;
         equation.d_internal[IDX_VBX] += 1.0;
@@ -1488,6 +1579,122 @@ mod tests {
         fn stamp_rhs(&mut self, index: NodeId, value: Value) {
             if index > 0 {
                 self.b[index - 1] += value;
+            }
+        }
+    }
+
+    #[test]
+    fn periodic_native_fq_matches_all_physical_mna_derivatives() {
+        for (level, irb) in [
+            (1.0, 0.0),
+            (1.0, 1e-5),
+            (4.0, 0.0),
+            (11.0, 0.0),
+            (12.0, 0.0),
+        ] {
+            for p in [1.0, -1.0] {
+                let params = std::collections::HashMap::from_iter(
+                    [
+                        ("LEVEL", level),
+                        ("IS", 1e-14),
+                        ("BF", 80.0),
+                        ("VAF", 30.0),
+                        ("IKF", 1e-3),
+                        ("RB", 2000.0),
+                        ("RBM", 100.0),
+                        ("IRB", irb),
+                        ("RCX", 10.0),
+                        ("RCI", 20.0),
+                        ("RBX", 10.0),
+                        ("RBI", 40.0),
+                        ("RE", 1.0),
+                        ("RBP", 10.0),
+                        ("RS", 1.0),
+                        ("IBEI", 1e-16),
+                        ("IBCI", 1e-16),
+                        ("ISP", 1e-16),
+                        ("CJE", 10e-12),
+                        ("CJC", 5e-12),
+                        ("CJEP", 3e-12),
+                        ("CJCP", 2e-12),
+                        ("TF", 10e-9),
+                        ("TR", 2e-9),
+                        ("XCJC", 0.4),
+                        ("WBE", 0.8),
+                        ("QCO", 1e-14),
+                        ("GAMM", 1e-9),
+                    ]
+                    .map(|(key, value)| (key.to_string(), value)),
+                );
+                let mut bjt = if p > 0.0 {
+                    Bjt::new_npn("QP".into(), 1, 2, 3)
+                } else {
+                    Bjt::new_pnp("QP".into(), 1, 2, 3)
+                }
+                .with_params(&params)
+                .with_instance_params(&[("AREA".into(), 2.0), ("M".into(), 3.0)]);
+                bjt.set_substrate_node(4);
+                let mut next = 5;
+                bjt.assign_mna_internal_nodes(|_| {
+                    let node = next;
+                    next += 1;
+                    node
+                });
+                bjt.assign_mna_rbi_branch(1);
+                bjt.prepare_periodic_mna(next - 1).unwrap();
+                let n = next;
+                let mut bias = vec![0.0; n];
+                for (node, value) in [
+                    (1, 1.2),
+                    (2, 0.68),
+                    (3, 0.0),
+                    (4, 0.0),
+                    (bjt.node_cx, 1.199),
+                    (bjt.node_ci, 1.198),
+                    (bjt.node_bx, 0.6799),
+                    (bjt.node_bi, 0.677),
+                    (bjt.node_ei, 0.0001),
+                    (bjt.node_bp, 1.197),
+                    (bjt.node_si, 0.00001),
+                    (bjt.mna_rbi_matrix_node, 2e-5),
+                ] {
+                    if node != 0 {
+                        bias[node - 1] = p * value;
+                    }
+                }
+                let sample = |bjt: &mut Bjt, point: &[Value]| {
+                    let mut f = DenseStamper::new(n);
+                    let mut q = DenseStamper::new(n);
+                    bjt.stamp_periodic_fq(point, &mut f, &mut q);
+                    [f, q]
+                };
+                let base = sample(&mut bjt, &bias);
+                for col in 0..n {
+                    let step = if col == n - 1 { 1e-8 } else { 1e-6 };
+                    let mut plus = bias.clone();
+                    plus[col] += step;
+                    let mut minus = bias.clone();
+                    minus[col] -= step;
+                    let plus = sample(&mut bjt, &plus);
+                    let minus = sample(&mut bjt, &minus);
+                    for (kind, ((base, plus), minus)) in
+                        base.iter().zip(&plus).zip(&minus).enumerate()
+                    {
+                        for row in 0..n {
+                            let fd = -(plus.b[row] - minus.b[row]) / (2.0 * step);
+                            let analytic = base.a[row][col];
+                            let roundoff =
+                                64.0 * Value::EPSILON * (plus.b[row].abs() + minus.b[row].abs())
+                                    / step;
+                            let floor = if kind == 0 { 1e-10 } else { 1e-20 };
+                            assert!(
+                                (fd - analytic).abs()
+                                    <= 2e-5 * fd.abs().max(analytic.abs()) + roundoff + floor,
+                                "LEVEL={level} IRB={irb} polarity={p} F/Q={kind} ({row},{col}): FD={fd:e}, analytic={analytic:e}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
