@@ -42,6 +42,35 @@ pub(super) struct ReactiveBreakpointScheduling<'a> {
     pub current_abstol: Value,
 }
 
+/// Newly evaluated values only; older history levels stay in their SoA arrays
+/// until every BJT has reconstructed a valid candidate.
+struct AcceptedBjtValues {
+    charges: [Value; BJT_DYNAMIC_CHARGE_COUNT],
+    currents: [Value; BJT_DYNAMIC_CHARGE_COUNT],
+    internal: [Value; BJT_INTERNAL_STATE_DIM],
+    linear: Option<BjtPredictorLinearBranchState>,
+    voltages: [Value; 3],
+    lead_currents: Option<[Value; BJT_EXTERNAL_STATE_DIM]>,
+}
+
+#[must_use]
+pub(super) struct PreparedBjtHistory {
+    values: Vec<AcceptedBjtValues>,
+    dt: Value,
+}
+
+/// Fallible native work evaluated before any accepted history is rotated.
+#[must_use]
+pub(super) struct PreparedReactiveHistory<'engine> {
+    bjt: PreparedBjtHistory,
+    behavioral: crate::device::behavioral::PreparedBehavioralStep,
+    #[cfg(feature = "parallel")]
+    mos_workers: Option<usize>,
+    #[cfg(feature = "parallel")]
+    mos_pool: Option<&'engine rayon::ThreadPool>,
+    engine: std::marker::PhantomData<&'engine Engine>,
+}
+
 impl Engine {
     /// Commit all accepted JFET charge and trap histories. Trial evaluations
     /// borrow these histories; transient and shooting share the same commit.
@@ -193,168 +222,194 @@ impl Engine {
         jfet_history.accepted_dt_prev = dt;
     }
 
-    /// Commit the accepted BJT charge, predictor and terminal-current history.
-    /// Shared by ordinary transient integration and periodic traversals; trial
-    /// evaluations never call this operation.
+    /// Prepare the complete BJT family before rotating any accepted history.
+    /// Shared by ordinary transient integration and periodic traversals.
     pub(in crate::engine) fn accept_bjt_history(
         circuit: &crate::circuit::CircuitData,
-        bjt_history: &mut BjtTransientHistory,
+        history: &mut BjtTransientHistory,
         accepted_solution: &[Value],
         coeff: &CompanionCoefficients,
         dt: Value,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
     ) -> Result<(), SimulationError> {
+        let prepared = Self::prepare_bjt_history(
+            circuit,
+            history,
+            accepted_solution,
+            coeff,
+            dt,
+            vbic_snapshots,
+        )?;
+        Self::commit_bjt_history(history, prepared);
+        Ok(())
+    }
+
+    fn prepare_bjt_history(
+        circuit: &crate::circuit::CircuitData,
+        history: &BjtTransientHistory,
+        solution: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+    ) -> Result<PreparedBjtHistory, SimulationError> {
+        let mut values = Vec::with_capacity(circuit.bjts.devices.len());
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            // A failed/unsupported dynamic snapshot must never expose the
-            // preceding accepted sample's current under a new time point.
-            bjt_history.accepted_terminal_currents[idx] = None;
-            let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
-            let vb = Self::node_voltage(accepted_solution, bjt.node_base);
-            let ve = Self::node_voltage(accepted_solution, bjt.node_emitter);
-            let vs = Self::node_voltage(accepted_solution, bjt.node_substrate);
+            let vc = Self::node_voltage(solution, bjt.node_collector);
+            let vb = Self::node_voltage(solution, bjt.node_base);
+            let ve = Self::node_voltage(solution, bjt.node_emitter);
+            let vs = Self::node_voltage(solution, bjt.node_substrate);
             let external = [vc, vb, ve, vs];
-            let vbe = vb - ve;
-            let vbc = vb - vc;
-            let vcs = vc - vs;
-            if bjt.vbic_mna_promoted() {
-                // Promoted VBIC: the accepted solution already carries the
-                // internal node voltages, so the charge history commits from
-                // a direct evaluation at the accepted bias.
-                let (branches, internal, _) =
-                    bjt.vbic_mna_charge_state_at_solution(accepted_solution);
-                for (branch_idx, branch) in branches.iter().enumerate() {
-                    let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
-                    let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
-                    let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                    let cq_curr = Self::jfet_companion_ccap(
-                        coeff,
-                        dt,
-                        branch.charge,
-                        BranchChargeHistory {
-                            q_prev,
-                            q_prev_prev,
-                            cq_prev,
-                        },
-                    );
-                    bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
-                    bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
-                    bjt_history.charge_q_prev[idx][branch_idx] = branch.charge;
-                    bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
-                }
-                bjt_history.dynamic_internal_prev_prev[idx] =
-                    bjt_history.dynamic_internal_prev[idx];
-                bjt_history.dynamic_internal_prev[idx] = internal;
-                bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
-                bjt_history.vbe_prev[idx] = vbe;
-                bjt_history.ibe_prev[idx] = 0.0;
-                bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
-                bjt_history.vbc_prev[idx] = vbc;
-                bjt_history.ibc_prev[idx] = 0.0;
-                bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
-                bjt_history.vcs_prev[idx] = vcs;
-                bjt_history.ics_prev[idx] = 0.0;
-                continue;
-            }
-            let cached_snapshot = vbic_snapshots
-                .and_then(|cache| cache.get(idx))
-                .copied()
-                .flatten();
-            let Some(snapshot) = Self::resolve_legacy_bjt_transient_snapshot(
-                bjt,
-                external,
-                BjtChargeStep {
-                    coeff,
-                    dt,
-                    q_prev: &bjt_history.charge_q_prev[idx],
-                    q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
-                    cq_prev: &bjt_history.charge_cq_prev[idx],
-                },
-                BjtPredictorHistory {
-                    internal_prev: bjt_history.dynamic_internal_prev.get(idx),
-                    linear_prev: bjt_history.dynamic_linear_prev.get(idx),
-                    linear_prev_prev: bjt_history.dynamic_linear_prev_prev.get(idx),
-                    previous_dt: bjt_history.accepted_dt_prev,
-                },
-                cached_snapshot,
-            ) else {
+            if !external.iter().all(|value| value.is_finite()) {
                 return Err(SimulationError::Circuit(format!(
-                    "BJT '{}' accepted private transient state did not converge for dt={dt:e}",
+                    "BJT '{}' accepted terminal voltage is non-finite for dt={dt:e}",
                     bjt.name
                 )));
-            };
-            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
-                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
-            // Evaluate lead currents before rotating the accepted charge
-            // history: the companion uses Q[n] at this solution together
-            // with Q[n-1]/Q[n-2]/CQ[n-1]. The resulting Y*v-i_eq vector is
-            // therefore the same static-plus-displacement current that owned
-            // the converged Newton stamp.
-            bjt_history.accepted_terminal_currents[idx] =
-                Some(Self::reduced_bjt_transient_terminal_currents(
+            }
+            let (charges, internal, linear, voltages, lead_currents) = if bjt.vbic_mna_promoted() {
+                let (branches, internal, _) = bjt.vbic_mna_charge_state_at_solution(solution);
+                (
+                    branches.map(|branch| branch.charge),
+                    internal,
+                    None,
+                    [vb - ve, vb - vc, vc - vs],
+                    None,
+                )
+            } else {
+                let cached = vbic_snapshots
+                    .and_then(|cache| cache.get(idx))
+                    .copied()
+                    .flatten();
+                let snapshot = Self::resolve_legacy_bjt_transient_snapshot(
+                    bjt,
+                    external,
+                    BjtChargeStep {
+                        coeff,
+                        dt,
+                        q_prev: &history.charge_q_prev[idx],
+                        q_prev_prev: &history.charge_q_prev_prev[idx],
+                        cq_prev: &history.charge_cq_prev[idx],
+                    },
+                    BjtPredictorHistory {
+                        internal_prev: history.dynamic_internal_prev.get(idx),
+                        linear_prev: history.dynamic_linear_prev.get(idx),
+                        linear_prev_prev: history.dynamic_linear_prev_prev.get(idx),
+                        previous_dt: history.accepted_dt_prev,
+                    },
+                    cached,
+                )
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "BJT '{}' accepted private transient state did not converge for dt={dt:e}",
+                        bjt.name
+                    ))
+                })?;
+                let (vbe, vbc, vbx, vcs) =
+                    Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+                // Form total lead current against the old accepted Q/CQ so it
+                // matches the companion that produced this electrical candidate.
+                let lead_currents = Self::reduced_bjt_transient_terminal_currents(
                     bjt,
                     &snapshot,
                     BjtChargeStep {
                         coeff,
                         dt,
-                        q_prev: &bjt_history.charge_q_prev[idx],
-                        q_prev_prev: &bjt_history.charge_q_prev_prev[idx],
-                        cq_prev: &bjt_history.charge_cq_prev[idx],
+                        q_prev: &history.charge_q_prev[idx],
+                        q_prev_prev: &history.charge_q_prev_prev[idx],
+                        cq_prev: &history.charge_cq_prev[idx],
                     },
-                )?);
-            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
-                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
-            );
-            let mut charge_values = snapshot.branches.map(|branch| branch.charge);
-            charge_values[BJT_QBE_BRANCH_INDEX] = legacy_charges.qbe;
-            charge_values[BJT_QBC_BRANCH_INDEX] = legacy_charges.qbc;
-            charge_values[BJT_QBCX_BRANCH_INDEX] = legacy_charges.qbx;
-            charge_values[BJT_QBCP_BRANCH_INDEX] = legacy_charges.qcs;
-            let mut cq_currents = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
-            for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
-                let charge = charge_values[branch_idx];
-                let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
-                let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
-                let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                let cq_curr = Self::jfet_companion_ccap(
+                )?;
+                let legacy = bjt.legacy_transient_charge_state_with_vbx(vbe, vbc, vbx, vcs);
+                let mut charges = snapshot.branches.map(|branch| branch.charge);
+                charges[BJT_QBE_BRANCH_INDEX] = legacy.qbe;
+                charges[BJT_QBC_BRANCH_INDEX] = legacy.qbc;
+                charges[BJT_QBCX_BRANCH_INDEX] = legacy.qbx;
+                charges[BJT_QBCP_BRANCH_INDEX] = legacy.qcs;
+                let internal = snapshot.reduction.internal_voltages;
+                (
+                    charges,
+                    internal,
+                    Some(Self::bjt_predictor_linear_branch_state(
+                        bjt, external, internal,
+                    )),
+                    [vbe, vbc, vcs],
+                    Some(lead_currents),
+                )
+            };
+            let currents: [Value; BJT_DYNAMIC_CHARGE_COUNT] = std::array::from_fn(|branch| {
+                Self::jfet_companion_ccap(
                     coeff,
                     dt,
-                    charge,
+                    charges[branch],
                     BranchChargeHistory {
-                        q_prev,
-                        q_prev_prev,
-                        cq_prev,
+                        q_prev: history.charge_q_prev[idx][branch],
+                        q_prev_prev: history.charge_q_prev_prev[idx][branch],
+                        cq_prev: history.charge_cq_prev[idx][branch],
                     },
-                );
-                bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
-                bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
-                bjt_history.charge_q_prev[idx][branch_idx] = charge;
-                bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
-                cq_currents[branch_idx] = cq_curr;
+                )
+            });
+            if !charges
+                .iter()
+                .chain(currents.iter())
+                .chain(internal.iter())
+                .chain(voltages.iter())
+                .chain(lead_currents.iter().flatten())
+                .all(|value| value.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' accepted transient history is non-finite for dt={dt:e}",
+                    bjt.name
+                )));
             }
-            bjt_history.dynamic_internal_prev_prev[idx] = bjt_history.dynamic_internal_prev[idx];
-            bjt_history.dynamic_internal_prev[idx] = snapshot.reduction.internal_voltages;
-            let predictor_linear = Self::bjt_predictor_linear_branch_state(
-                bjt,
-                external,
-                snapshot.reduction.internal_voltages,
-            );
-            bjt_history.dynamic_linear_prev_prev[idx] = bjt_history.dynamic_linear_prev[idx];
-            bjt_history.dynamic_linear_prev[idx] = predictor_linear;
-
-            bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
-            bjt_history.vbe_prev[idx] = legacy_vbe;
-            bjt_history.ibe_prev[idx] = cq_currents[BJT_QBE_BRANCH_INDEX];
-            bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
-            bjt_history.vbc_prev[idx] = legacy_vbc;
-            bjt_history.ibc_prev[idx] = cq_currents[BJT_QBC_BRANCH_INDEX];
-            bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
-            bjt_history.vcs_prev[idx] = legacy_vcs;
-            bjt_history.ics_prev[idx] = cq_currents[BJT_QBCP_BRANCH_INDEX];
+            values.push(AcceptedBjtValues {
+                charges,
+                currents,
+                internal,
+                linear,
+                voltages,
+                lead_currents,
+            });
         }
+        Ok(PreparedBjtHistory { values, dt })
+    }
 
-        bjt_history.accepted_dt_prev_prev = bjt_history.accepted_dt_prev;
-        bjt_history.accepted_dt_prev = dt;
-        Ok(())
+    fn commit_bjt_history(history: &mut BjtTransientHistory, prepared: PreparedBjtHistory) {
+        for (idx, value) in prepared.values.into_iter().enumerate() {
+            history.accepted_terminal_currents[idx] = value.lead_currents;
+            history.charge_q_prev_prev_prev[idx] = history.charge_q_prev_prev[idx];
+            history.charge_q_prev_prev[idx] = history.charge_q_prev[idx];
+            history.charge_q_prev[idx] = value.charges;
+            history.charge_cq_prev[idx] = value.currents;
+            history.dynamic_internal_prev_prev[idx] = history.dynamic_internal_prev[idx];
+            history.dynamic_internal_prev[idx] = value.internal;
+            if let Some(linear) = value.linear {
+                history.dynamic_linear_prev_prev[idx] = history.dynamic_linear_prev[idx];
+                history.dynamic_linear_prev[idx] = linear;
+            }
+            history.vbe_prev_prev[idx] = history.vbe_prev[idx];
+            history.vbe_prev[idx] = value.voltages[0];
+            history.vbc_prev_prev[idx] = history.vbc_prev[idx];
+            history.vbc_prev[idx] = value.voltages[1];
+            history.vcs_prev_prev[idx] = history.vcs_prev[idx];
+            history.vcs_prev[idx] = value.voltages[2];
+            let promoted = value.linear.is_none();
+            history.ibe_prev[idx] = if promoted {
+                0.0
+            } else {
+                value.currents[BJT_QBE_BRANCH_INDEX]
+            };
+            history.ibc_prev[idx] = if promoted {
+                0.0
+            } else {
+                value.currents[BJT_QBC_BRANCH_INDEX]
+            };
+            history.ics_prev[idx] = if promoted {
+                0.0
+            } else {
+                value.currents[BJT_QBCP_BRANCH_INDEX]
+            };
+        }
+        history.accepted_dt_prev_prev = history.accepted_dt_prev;
+        history.accepted_dt_prev = prepared.dt;
     }
 
     #[inline]
@@ -416,6 +471,99 @@ impl Engine {
         currents
     }
 
+    pub(super) fn prepare_reactive_history<'engine>(
+        &'engine self,
+        circuit: &mut crate::circuit::CircuitData,
+        step: AcceptedReactiveStep<'_>,
+        histories: &TransientDeviceHistories<'_>,
+        snapshots: AcceptedReactiveSnapshots<'_>,
+    ) -> Result<PreparedReactiveHistory<'engine>, SimulationError> {
+        #[cfg(feature = "parallel")]
+        let mos_workers = self.classic_mos_parallel_worker_count(circuit.mosfets.devices.len());
+        #[cfg(feature = "parallel")]
+        let mos_pool = if mos_workers.is_some() {
+            let instance_count = circuit.mosfets.devices.len();
+            let mosfet_history = &*histories.mosfet;
+            let mosfet_caps = snapshots.mosfet_caps;
+            let mosfet_gate_companion_charges = snapshots
+                .mosfet_gate_companion_charges
+                .filter(|charges| charges.len() == instance_count);
+            let history_shapes_match = [
+                &mosfet_history.vgs_prev,
+                &mosfet_history.vgs_prev_prev,
+                &mosfet_history.capgs_prev_half,
+                &mosfet_history.qgs_prev,
+                &mosfet_history.qgs_prev_prev,
+                &mosfet_history.qgs_prev_prev_prev,
+                &mosfet_history.cqgs_prev,
+                &mosfet_history.vgd_prev,
+                &mosfet_history.vgd_prev_prev,
+                &mosfet_history.capgd_prev_half,
+                &mosfet_history.qgd_prev,
+                &mosfet_history.qgd_prev_prev,
+                &mosfet_history.qgd_prev_prev_prev,
+                &mosfet_history.cqgd_prev,
+                &mosfet_history.vgb_prev,
+                &mosfet_history.vgb_prev_prev,
+                &mosfet_history.capgb_prev_half,
+                &mosfet_history.qgb_prev,
+                &mosfet_history.qgb_prev_prev,
+                &mosfet_history.qgb_prev_prev_prev,
+                &mosfet_history.cqgb_prev,
+                &mosfet_history.vbs_j_prev,
+                &mosfet_history.vbs_j_prev_prev,
+                &mosfet_history.qbs_prev,
+                &mosfet_history.qbs_prev_prev,
+                &mosfet_history.cqbs_prev,
+                &mosfet_history.vbd_j_prev,
+                &mosfet_history.vbd_j_prev_prev,
+                &mosfet_history.qbd_prev,
+                &mosfet_history.qbd_prev_prev,
+                &mosfet_history.cqbd_prev,
+            ]
+            .into_iter()
+            .all(|history| history.len() == instance_count);
+            let caps_shape_matches =
+                mosfet_caps.is_none_or(|capacitances| capacitances.len() == instance_count);
+            let gate_charges_shape_matches =
+                mosfet_gate_companion_charges.is_none_or(|charges| charges.len() == instance_count);
+            if !history_shapes_match
+                || !caps_shape_matches
+                || !gate_charges_shape_matches
+                || mosfet_history.accepted_displacement_currents.len() != instance_count
+            {
+                return Err(SimulationError::Circuit(
+                    "classic-MOS transient history shape does not match the device population"
+                        .to_string(),
+                ));
+            }
+            self.prepare_classic_mos_parallel()?
+        } else {
+            None
+        };
+        let bjt = Self::prepare_bjt_history(
+            circuit,
+            histories.bjt,
+            step.accepted_solution,
+            step.coeff,
+            step.dt,
+            snapshots.vbic_snapshots,
+        )?;
+        let behavioral = circuit
+            .behavioral_sources
+            .prepare_transient_step(step.accepted_solution, step.accepted_time)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        Ok(PreparedReactiveHistory {
+            bjt,
+            behavioral,
+            #[cfg(feature = "parallel")]
+            mos_workers,
+            #[cfg(feature = "parallel")]
+            mos_pool,
+            engine: std::marker::PhantomData,
+        })
+    }
+
     #[inline]
     pub(super) fn update_reactive_history(
         &self,
@@ -426,6 +574,26 @@ impl Engine {
         scheduling: ReactiveBreakpointScheduling<'_>,
         sink: DynamicBreakpointSink<'_>,
     ) -> Result<(), SimulationError> {
+        let prepared = self.prepare_reactive_history(circuit, step, &histories, snapshots)?;
+        self.commit_reactive_history(
+            circuit, step, histories, snapshots, scheduling, sink, prepared,
+        );
+        Ok(())
+    }
+
+    /// Consume preparation for this unchanged solution, integration policy and
+    /// topology, on the preparing execution context. No fallible model work runs.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn commit_reactive_history(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        step: AcceptedReactiveStep<'_>,
+        histories: TransientDeviceHistories<'_>,
+        snapshots: AcceptedReactiveSnapshots<'_>,
+        scheduling: ReactiveBreakpointScheduling<'_>,
+        sink: DynamicBreakpointSink<'_>,
+        prepared: PreparedReactiveHistory<'_>,
+    ) {
         let DynamicBreakpointSink {
             dynamic_breakpoints_added,
             warned_dynamic_breakpoint_cap,
@@ -440,7 +608,7 @@ impl Engine {
         } = scheduling;
         let AcceptedReactiveSnapshots {
             xyce_one_step_order2,
-            vbic_snapshots,
+            vbic_snapshots: _,
             capacitor_accepted_states,
             mosfet_caps,
             mosfet_gate_companion_charges,
@@ -546,8 +714,7 @@ impl Engine {
         circuit.commit_accepted_nonlinear_state();
         circuit
             .behavioral_sources
-            .accept_transient_step(accepted_solution, accepted_time)
-            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            .commit_transient_step(prepared.behavioral);
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {
@@ -751,14 +918,7 @@ impl Engine {
             }
         }
 
-        Self::accept_bjt_history(
-            circuit,
-            bjt_history,
-            accepted_solution,
-            coeff,
-            dt,
-            vbic_snapshots,
-        )?;
+        Self::commit_bjt_history(bjt_history, prepared.bjt);
 
         Self::accept_jfet_history(
             circuit,
@@ -807,56 +967,7 @@ impl Engine {
             use rayon::prelude::*;
 
             let instance_count = circuit.mosfets.devices.len();
-            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
-                let history_shapes_match = [
-                    &mosfet_history.vgs_prev,
-                    &mosfet_history.vgs_prev_prev,
-                    &mosfet_history.capgs_prev_half,
-                    &mosfet_history.qgs_prev,
-                    &mosfet_history.qgs_prev_prev,
-                    &mosfet_history.qgs_prev_prev_prev,
-                    &mosfet_history.cqgs_prev,
-                    &mosfet_history.vgd_prev,
-                    &mosfet_history.vgd_prev_prev,
-                    &mosfet_history.capgd_prev_half,
-                    &mosfet_history.qgd_prev,
-                    &mosfet_history.qgd_prev_prev,
-                    &mosfet_history.qgd_prev_prev_prev,
-                    &mosfet_history.cqgd_prev,
-                    &mosfet_history.vgb_prev,
-                    &mosfet_history.vgb_prev_prev,
-                    &mosfet_history.capgb_prev_half,
-                    &mosfet_history.qgb_prev,
-                    &mosfet_history.qgb_prev_prev,
-                    &mosfet_history.qgb_prev_prev_prev,
-                    &mosfet_history.cqgb_prev,
-                    &mosfet_history.vbs_j_prev,
-                    &mosfet_history.vbs_j_prev_prev,
-                    &mosfet_history.qbs_prev,
-                    &mosfet_history.qbs_prev_prev,
-                    &mosfet_history.cqbs_prev,
-                    &mosfet_history.vbd_j_prev,
-                    &mosfet_history.vbd_j_prev_prev,
-                    &mosfet_history.qbd_prev,
-                    &mosfet_history.qbd_prev_prev,
-                    &mosfet_history.cqbd_prev,
-                ]
-                .into_iter()
-                .all(|history| history.len() == instance_count);
-                let caps_shape_matches =
-                    mosfet_caps.is_none_or(|capacitances| capacitances.len() == instance_count);
-                let gate_charges_shape_matches = mosfet_gate_companion_charges
-                    .is_none_or(|charges| charges.len() == instance_count);
-                if !history_shapes_match
-                    || !caps_shape_matches
-                    || !gate_charges_shape_matches
-                    || mosfet_history.accepted_displacement_currents.len() != instance_count
-                {
-                    return Err(SimulationError::Circuit(
-                        "classic-MOS transient history shape does not match the device population"
-                            .to_string(),
-                    ));
-                }
+            if let Some(worker_count) = prepared.mos_workers {
                 let chunk_size = instance_count.div_ceil(worker_count).max(1);
                 let devices = circuit.mosfets.devices.as_slice();
                 let vgs_prev_prev = mosfet_history.vgs_prev_prev.as_slice();
@@ -899,7 +1010,7 @@ impl Engine {
                 )
                     .into_par_iter();
 
-                self.install_classic_mos_parallel(|| {
+                let operation = || {
                     gate_outputs
                         .zip(body_outputs)
                         .with_min_len(chunk_size)
@@ -1116,7 +1227,11 @@ impl Engine {
                                 }
                             },
                         );
-                })?;
+                };
+                match prepared.mos_pool {
+                    Some(pool) => pool.install(operation),
+                    None => operation(),
+                }
                 true
             } else {
                 false
@@ -1470,7 +1585,6 @@ impl Engine {
             bsim4_history,
         );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);
-        Ok(())
     }
 }
 
@@ -1508,5 +1622,132 @@ mod tests {
             ]
             .map(Value::to_bits)
         );
+    }
+    fn native_candidate(
+        engine: &Engine,
+        circuit: &mut crate::CircuitData,
+        bjt: &mut BjtTransientHistory,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), SimulationError> {
+        let coeff = CompanionCoefficients::backward_euler();
+        engine.update_reactive_history(
+            circuit,
+            AcceptedReactiveStep {
+                accepted_solution: solution,
+                accepted_time: time,
+                dt: 1e-9,
+                coeff: &coeff,
+                bsim4_trnqs_coeff: &coeff,
+            },
+            TransientDeviceHistories {
+                bjt,
+                jfet: &mut JfetTransientHistory::default(),
+                diode: &mut DiodeTransientHistory::default(),
+                mosfet: &mut MosfetTransientHistory::default(),
+                vdmos: &mut VdmosTransientHistory::default(),
+                b3soi: &mut B3SoiTransientHistory::default(),
+                bsim3: &mut Bsim3TransientHistory::default(),
+                bsim4: &mut Bsim4TransientHistory::default(),
+                ekv26: &mut Ekv26TransientHistory::default(),
+            },
+            AcceptedReactiveSnapshots {
+                xyce_one_step_order2: false,
+                vbic_snapshots: None,
+                capacitor_accepted_states: None,
+                mosfet_caps: None,
+                mosfet_gate_companion_charges: None,
+                suppress_gate_charge_history: false,
+                tline_dc_refs: &[],
+                coupled_tline_refs: &[],
+            },
+            ReactiveBreakpointScheduling {
+                breakpoints: &mut BreakpointManager::new(),
+                tstop: 3e-9,
+                voltage_reltol: 1e-3,
+                voltage_abstol: 1e-6,
+                current_abstol: 1e-12,
+            },
+            DynamicBreakpointSink {
+                dynamic_breakpoints_added: &mut 0,
+                warned_dynamic_breakpoint_cap: &mut false,
+                pending_dynamic_breakpoints: &mut Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn native_preparation_preserves_all_earlier_histories_when_bjt_or_expression_fails() {
+        let deck = Netlist::parse("native preparation\nRin in 0 1k\nRbad bad 0 1k\nBfirst integral 0 V=sdt(v(in))\nBlater out 0 I={sdt(v(in))+v(bad)}\nRout out 0 1k\nRintegral integral 0 1k\nQfirst c b1 0 qm\nQlater c b2 0 qm\nRc c 0 1k\nRb1 b1 0 1k\nRb2 b2 0 1k\nC1 in 0 1n\nL1 c 0 1n\n.model qm NPN(IS=1e-14 CJE=1p CJC=1p TF=1n RC=1 RB=1 RE=1)\n.end\n").unwrap();
+        let engine = Engine::default();
+        let mut circuit = engine.build_circuit(&deck).unwrap();
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        circuit
+            .behavioral_sources
+            .accept_transient_step(&solution, 0.0)
+            .unwrap();
+        let mut bjt =
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let before = bjt.clone();
+        // Snapshot every mutable passive history generation.
+        let capacitor_before = format!("{:?}", circuit.capacitors);
+        let inductor_before = format!("{:?}", circuit.inductors);
+        // Native series resistances can put the actual junction terminals on
+        // generated nodes; inject the failure at the BJT's bound base node.
+        let b1 = circuit.bjts.devices[0].node_base - 1;
+        let b2 = circuit.bjts.devices[1].node_base - 1;
+        let input = circuit.get_node_by_name("in").unwrap() - 1;
+        let bad = circuit.get_node_by_name("bad").unwrap() - 1;
+        solution[b1] = 0.6;
+        solution[b2] = Value::NAN;
+        solution[input] = 10.0;
+        let branch = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
+        solution[branch] = 0.5;
+        let error = native_candidate(&engine, &mut circuit, &mut bjt, &solution, 1e-9).unwrap_err();
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("qlater"),
+            "{error}"
+        );
+        assert_eq!(bjt, before);
+        assert_eq!(format!("{:?}", circuit.capacitors), capacitor_before);
+        assert_eq!(format!("{:?}", circuit.inductors), inductor_before);
+
+        solution[b2] = 0.5;
+        solution[bad] = Value::NAN;
+        let error = native_candidate(&engine, &mut circuit, &mut bjt, &solution, 1e-9).unwrap_err();
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("blater"),
+            "{error}"
+        );
+        assert_eq!(
+            bjt, before,
+            "prepared BJT values must not leak through a later expression failure"
+        );
+        assert_eq!(format!("{:?}", circuit.capacitors), capacitor_before);
+        assert_eq!(format!("{:?}", circuit.inductors), inductor_before);
+
+        // Also exercise the standalone family entry point: its first voltage
+        // source cannot commit SDT before its later current source is validated.
+        circuit
+            .behavioral_sources
+            .accept_transient_step(&solution, 1e-9)
+            .unwrap_err();
+        solution[bad] = 0.0;
+        solution[input] = 0.0;
+        native_candidate(&engine, &mut circuit, &mut bjt, &solution, 2e-9).unwrap();
+        assert_ne!(bjt, before);
+        assert_eq!(bjt.accepted_dt_prev, 1e-9);
+        assert_eq!(circuit.inductors.i_prev, [0.5]);
+        let integral = circuit.behavioral_sources.voltage_sources[0]
+            .evaluate(&solution, 2e-9)
+            .unwrap();
+        assert_eq!(
+            integral, 0.0,
+            "a refused 10 V trial must contribute no area to accepted SDT state"
+        );
+        let integral = circuit.behavioral_sources.current_sources[0]
+            .evaluate(&solution, 2e-9)
+            .unwrap();
+        assert_eq!(integral, 0.0);
     }
 }

@@ -455,8 +455,20 @@ impl Engine {
         &self,
         operation: impl FnOnce() -> R + Send,
     ) -> Result<R, SimulationError> {
+        Ok(match self.prepare_classic_mos_parallel()? {
+            Some(pool) => pool.install(operation),
+            None => operation(),
+        })
+    }
+
+    /// Resolve the execution resource before any accepted history is mutated.
+    /// None means the caller already runs inside its owning frontend pool.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn prepare_classic_mos_parallel(
+        &self,
+    ) -> Result<Option<&rayon::ThreadPool>, SimulationError> {
         if rayon::current_thread_index().is_some() {
-            return Ok(operation());
+            return Ok(None);
         }
 
         const MAX_CLASSIC_MOS_WORKERS: usize = 8;
@@ -475,7 +487,7 @@ impl Engine {
         let pool = pool.as_ref().map_err(|message| {
             SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(message.clone()))
         })?;
-        Ok(pool.install(operation))
+        Ok(Some(pool))
     }
 
     pub(crate) fn ensure_result_shape(

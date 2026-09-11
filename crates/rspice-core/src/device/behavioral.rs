@@ -478,15 +478,26 @@ impl BehavioralVoltageSource {
         Ok(value)
     }
 
-    /// Evaluate and commit stateful expression operators at an accepted point.
-    pub(crate) fn accept_transient_step(
+    /// Evaluate an owned VM candidate without changing accepted operator state.
+    /// The compiled expression and binding tables remain shared with this source.
+    fn prepare_transient_step(
         &mut self,
         solution: &[Value],
         time: Value,
-    ) -> Result<(), BehavioralEvaluationError> {
-        self.evaluate(solution, time)?;
-        self.vm.accept_transient_step(time);
-        Ok(())
+    ) -> Result<Vm, BehavioralEvaluationError> {
+        self.refresh_expression_inputs(solution);
+        let context = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_frequency(self.frequency)
+            .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
+            .with_expression_dialect(self.expression_dialect);
+        let mut candidate = self.vm.clone();
+        let value = candidate.execute(&self.program, &context);
+        if !value.is_finite() {
+            return Err(self.nonfinite_error("expression value", time, value));
+        }
+        candidate.accept_transient_step(time);
+        Ok(candidate)
     }
 
     #[inline]
@@ -2204,15 +2215,26 @@ impl BehavioralCurrentSource {
         Ok(value)
     }
 
-    /// Evaluate and commit stateful expression operators at an accepted point.
-    pub(crate) fn accept_transient_step(
+    /// Evaluate an owned VM candidate without changing accepted operator state.
+    /// The compiled expression and binding tables remain shared with this source.
+    fn prepare_transient_step(
         &mut self,
         solution: &[Value],
         time: Value,
-    ) -> Result<(), BehavioralEvaluationError> {
-        self.evaluate(solution, time)?;
-        self.vm.accept_transient_step(time);
-        Ok(())
+    ) -> Result<Vm, BehavioralEvaluationError> {
+        self.refresh_expression_inputs(solution);
+        let context = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_frequency(self.frequency)
+            .with_temperature(self.temperature)
+            .with_gmin(self.gmin)
+            .with_expression_dialect(self.expression_dialect);
+        let mut candidate = self.vm.clone();
+        let value = candidate.execute(&self.program, &context);
+        if !value.is_finite() {
+            return Err(self.nonfinite_error("expression value", time, value));
+        }
+        candidate.accept_transient_step(time);
+        Ok(candidate)
     }
 
     #[inline]
@@ -2634,6 +2656,14 @@ pub struct BehavioralSources {
     pub current_sources: Vec<BehavioralCurrentSource>,
 }
 
+/// Evaluated operator frames for an unchanged behavioral-source topology.
+/// Dropping the candidate leaves every source's accepted VM state intact.
+#[must_use]
+pub(crate) struct PreparedBehavioralStep {
+    voltage: Vec<Vm>,
+    current: Vec<Vm>,
+}
+
 impl BehavioralSources {
     pub fn new() -> Self {
         Self::default()
@@ -2722,13 +2752,39 @@ impl BehavioralSources {
         solution: &[Value],
         time: Value,
     ) -> Result<(), BehavioralEvaluationError> {
-        for source in &mut self.voltage_sources {
-            source.accept_transient_step(solution, time)?;
-        }
-        for source in &mut self.current_sources {
-            source.accept_transient_step(solution, time)?;
-        }
+        let prepared = self.prepare_transient_step(solution, time)?;
+        self.commit_transient_step(prepared);
         Ok(())
+    }
+
+    pub(crate) fn prepare_transient_step(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<PreparedBehavioralStep, BehavioralEvaluationError> {
+        let voltage = self
+            .voltage_sources
+            .iter_mut()
+            .map(|source| source.prepare_transient_step(solution, time))
+            .collect::<Result<_, _>>()?;
+        let current = self
+            .current_sources
+            .iter_mut()
+            .map(|source| source.prepare_transient_step(solution, time))
+            .collect::<Result<_, _>>()?;
+        Ok(PreparedBehavioralStep { voltage, current })
+    }
+
+    /// Promote already evaluated frames; no expression is executed here.
+    pub(crate) fn commit_transient_step(&mut self, prepared: PreparedBehavioralStep) {
+        debug_assert_eq!(self.voltage_sources.len(), prepared.voltage.len());
+        debug_assert_eq!(self.current_sources.len(), prepared.current.len());
+        for (source, vm) in self.voltage_sources.iter_mut().zip(prepared.voltage) {
+            source.vm = vm;
+        }
+        for (source, vm) in self.current_sources.iter_mut().zip(prepared.current) {
+            source.vm = vm;
+        }
     }
 
     /// Stamp all behavioral sources

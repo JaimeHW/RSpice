@@ -789,6 +789,54 @@ and parser plumbing). The two checks ran before that integration; its changes
 were reviewed and do not modify thermal state or the acceptance implementation.
 Compiler and generated-model inputs were not changed by this increment.
 
+## MS05 increment: prepare fallible native history work before rotation
+
+Native reactive acceptance now has explicit preparation and commit operations.
+Preparation resolves BJT private state and terminal currents for the entire
+family, evaluates every behavioral-source VM candidate, validates parallel MOS
+history shapes and obtains the analysis worker pool. The commit operation uses
+those prepared values and contains no fallible expression, BJT reconstruction or
+worker-pool acquisition call. The existing transient entry point prepares before
+rotating capacitor, inductor, hysteresis, transmission-line or junction history.
+
+BJT candidates retain only newly evaluated charge/current/internal/predictor
+values, rather than duplicating old history generations. Non-finite terminal
+voltages and reconstructed history are refused with the device identity. The
+standalone BJT acceptance operation used by periodic traversals also prepares
+the full family before promotion. Behavioral candidates copy VM execution state;
+compiled expressions, binding tables and parameter setup are not cloned. A later
+current source cannot leave an earlier voltage source's SDT state accepted.
+Standalone behavioral acceptance follows the same prepare/commit contract.
+
+Two focused checks pass. A native acceptance case combines two BJTs, voltage and
+current behavioral sources with SDT, a capacitor and an inductor. A later BJT
+failure and then a later behavioral-source failure leave every BJT and passive
+history unchanged. Retrying with zero input gives exactly zero integrated SDT
+area; a rejected 10 V trial cannot contribute to accepted history. The fixture
+also checks the standalone behavioral family entry point. The existing native
+BJT lead-current regression passes its Trap/Gear and polarity cases with external
+series resistances, preserving the numerical current/KCL checks.
+
+An initial compile caught a misplaced worker-helper return during extraction;
+that edit was corrected before executable checks. The first failure fixture put
+NaN on the external base node behind a generated series resistor, so it did not
+actually invalidate the BJT's bound terminal. The fixture now targets that actual
+terminal. Only that corrected failure-path case was rerun on the combined
+`e599fa164` baseline, including `dacde68df` and `df95d156b` passive-value/parser
+changes. The existing BJT numerical regression passed on `86b69f439` before
+those changes and the added terminal-finiteness check.
+
+This separates native preparation from promotion but does not yet move native
+promotion behind the HDL barrier. The next integration must carry the prepared
+native token through XSPICE projection and joint HDL acceptance, invalidate
+solution-derived snapshots when projection changes their inputs, then promote
+all native histories without another fallible calculation. Native evaluated
+cache rollback, controller time/breakpoint consumption, effects/output retention,
+shared event connectivity and the actual whole-circuit feedback/rejection slice
+still require the complete MS04/MS05 coordinator. All other MS00–MS15 requirements
+remain in scope. No broad suite, platform or vendor qualification, performance run,
+compiler-schema change or generated-model refresh was performed.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;
