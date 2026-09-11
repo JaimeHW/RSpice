@@ -161,9 +161,7 @@ pub(super) fn parse_numeric_field_value(
     line_num: usize,
 ) -> Result<Value, ParseError> {
     let expr = strip_wrapping_expression_delimiters(raw_value);
-    if !looks_like_expression(expr)
-        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr)
-    {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(expr) {
         return Ok(value);
     }
     if let Some(value) = params.get(expr) {
@@ -181,20 +179,15 @@ pub(super) fn parse_parametric_field_value(
         return ParametricValue::String(value.to_string());
     }
     let expr = strip_wrapping_expression_delimiters(raw_value);
-    if !looks_like_expression(expr)
-        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr)
-    {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(expr) {
         return ParametricValue::Resolved(value);
     }
     if params.get_string(expr).is_some() {
         return ParametricValue::StringExpression(expr.to_string());
     }
-    if params.get(expr).is_some() || expr.chars().any(|ch| "+-*/()".contains(ch)) {
-        return ParametricValue::Expression(expr.to_string());
-    }
-    if let Ok(value) = eval_expression(expr, params) {
-        return ParametricValue::Resolved(value);
-    }
+    // Only complete real literals are scope independent. Preserve every other
+    // numeric expression for its owning context, including comparisons,
+    // powers, complex literals and definitions not bound at this parse point.
     ParametricValue::Expression(expr.to_string())
 }
 
@@ -208,23 +201,6 @@ pub(super) fn strip_wrapping_double_quoted_string_literal(raw: &str) -> Option<&
     } else {
         None
     }
-}
-
-pub(super) fn looks_like_expression(expr: &str) -> bool {
-    let trimmed = expr.trim();
-    for (idx, ch) in trimmed.char_indices() {
-        match ch {
-            '*' | '/' | '(' | ')' => return true,
-            '+' | '-' if idx > 0 => {
-                let prev = trimmed.as_bytes()[idx - 1] as char;
-                if prev != 'e' && prev != 'E' {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
 }
 
 pub(super) struct ParsedModelParams {
@@ -2325,6 +2301,55 @@ mod tests {
 
     fn coalesce(line: &str) -> Vec<String> {
         super::coalesce_assignment_fields(super::split_spice_fields(line))
+    }
+
+    #[test]
+    fn numeric_fields_and_instance_arguments_preserve_complete_expressions() {
+        use crate::config::ExpressionDialect;
+        use crate::netlist::{NetlistParseOptions, ParametricValue};
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let mut context = ParamContext::new();
+            context.set_expression_dialect(dialect);
+            context.set("p", 3.0);
+            for (expression, scalar, combined) in [
+                ("2^p", 8.0, 8.0),
+                ("5%p", 2.0, 2.0),
+                ("1<p", 1.0, 1.0),
+                ("3==p", 1.0, 1.0),
+                ("0||p", 1.0, 1.0),
+                ("1j", 0.0, 1.0),
+            ] {
+                assert_eq!(
+                    super::parse_numeric_field_value(expression, &context, 1).unwrap(),
+                    scalar
+                );
+                assert!(matches!(
+                    super::parse_parametric_field_value(expression, &context),
+                    ParametricValue::Expression(_)
+                ));
+                for nested in [false, true] {
+                    let instance = if nested {
+                        format!(
+                            "Xtop in out wrapper p=3\n.subckt wrapper in out p=9\nXleaf in out cell q={expression}\n.ends"
+                        )
+                    } else {
+                        format!("Xtop in out cell q={expression}")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &format!("Parameter field expressions\n.param p=3\nV1 in 0 1\n{instance}\n.subckt cell in out q=99\nE1 out 0 in 0 {{real(q)+img(q)}}\n.ends\n.end"),
+                        NetlistParseOptions { expression_dialect: dialect, ..Default::default() },
+                    ).unwrap();
+                    let result = crate::engine::Engine::default()
+                        .run_dc_op(&netlist)
+                        .unwrap();
+                    assert_eq!(
+                        result.voltage(2),
+                        combined,
+                        "{dialect:?} nested={nested}: {expression}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
