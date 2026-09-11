@@ -527,18 +527,7 @@ impl SemanticAnalyzer {
         let mut module_spans = HashMap::new();
         self.warnings.clear();
 
-        // First pass: register user-defined natures, then disciplines that
-        // reference them. Access compatibility validation relies on this DB.
-        for item in &source.items {
-            if let Item::Nature(nature) = item {
-                self.register_nature(nature)?;
-            }
-        }
-        for item in &source.items {
-            if let Item::Discipline(discipline) = item {
-                self.register_discipline(discipline)?;
-            }
-        }
+        self.register_physical_definitions(source)?;
 
         // Second pass: analyze modules in declaration order while applying
         // the file-scoped default-transition and default-discipline settings.
@@ -673,7 +662,105 @@ impl SemanticAnalyzer {
         });
     }
 
+    /// Inspect the physical declaration closure without analyzing module bodies.
+    pub(crate) fn physical_definitions(
+        mut self,
+        source: &SourceFile,
+    ) -> CompileResult<DisciplineDb> {
+        self.register_physical_definitions(source)?;
+        Ok(self.disciplines)
+    }
+
+    fn register_physical_definitions(&mut self, source: &SourceFile) -> CompileResult<()> {
+        let mut declared = HashSet::new();
+        for item in &source.items {
+            if let Item::Nature(nature) = item {
+                if !declared.insert(nature.name.as_str()) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "duplicate nature declaration '{}'",
+                            nature.name
+                        )),
+                        nature.span,
+                    )));
+                }
+                self.register_nature(nature)?;
+            }
+        }
+        // Calculus relationships can refer forward, including the reciprocal
+        // Current/Charge and Voltage/Flux declarations in disciplines.vams.
+        for item in &source.items {
+            if let Item::Nature(definition) = item {
+                let nature = &self.disciplines.natures[definition.name.as_str()];
+                for (attribute, target) in [
+                    ("idt_nature", &nature.idt_nature),
+                    ("ddt_nature", &nature.ddt_nature),
+                ] {
+                    if let Some(target) = target
+                        && self.disciplines.get_nature(target).is_none()
+                    {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "nature '{}' {attribute} references undefined nature '{target}'",
+                                definition.name
+                            )),
+                            definition.span,
+                        )));
+                    }
+                }
+                if let Some(base) = nature
+                    .base
+                    .as_deref()
+                    .and_then(|name| self.disciplines.get_nature(name))
+                {
+                    for (attribute, target, inherited) in [
+                        ("idt_nature", &nature.idt_nature, &base.idt_nature),
+                        ("ddt_nature", &nature.ddt_nature, &base.ddt_nature),
+                    ] {
+                        let target = target.as_deref().unwrap_or(&nature.name);
+                        let inherited = inherited.as_deref().unwrap_or(&base.name);
+                        if self.disciplines.nature_base(target)
+                            != self.disciplines.nature_base(inherited)
+                        {
+                            return Err(CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::UnsupportedFeature(format!(
+                                    "derived nature '{}' {attribute} must share the base nature of '{inherited}'",
+                                    definition.name
+                                )),
+                                definition.span,
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        for item in &source.items {
+            if let Item::Discipline(discipline) = item {
+                self.register_discipline(discipline)?;
+            }
+        }
+        Ok(())
+    }
+
     fn register_nature(&mut self, nature: &NatureDef) -> CompileResult<()> {
+        let mut ancestor = nature.base.as_deref();
+        let mut depth = 0;
+        while let Some(name) = ancestor {
+            if name == nature.name || depth >= self.disciplines.natures.len() {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "nature '{}' has cyclic inheritance",
+                        nature.name
+                    )),
+                    nature.span,
+                )));
+            }
+            depth += 1;
+            ancestor = self
+                .disciplines
+                .get_nature(name)
+                .and_then(|nature| nature.base.as_deref());
+        }
         let base = nature
             .base
             .as_deref()
@@ -704,26 +791,80 @@ impl SemanticAnalyzer {
                     nature.span,
                 ))
             })?;
+        if let Some(base) = base
+            && access != base.access
+        {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "derived nature '{}' cannot change the inherited access function '{}'",
+                    nature.name, base.access
+                )),
+                nature.span,
+            )));
+        }
+        if base.is_some() && nature.units.is_some() {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "derived nature '{}' cannot redeclare inherited units",
+                    nature.name
+                )),
+                nature.span,
+            )));
+        }
         let units = nature
             .units
             .as_ref()
             .map(|s| s.to_string())
             .or_else(|| base.map(|base| base.units.clone()))
-            .unwrap_or_default();
-        let abstol = nature
-            .abstol
-            .as_ref()
-            .and_then(|expr| self.eval_const(expr))
-            .or_else(|| base.map(|base| base.abstol))
-            .unwrap_or(0.0);
+            .ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::MissingAttribute(format!(
+                        "units for nature '{}'",
+                        nature.name
+                    )),
+                    nature.span,
+                ))
+            })?;
+        let abstol = if let Some(expression) = &nature.abstol {
+            Self::eval_const_with(expression, &HashMap::new())
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .ok_or_else(|| {
+                    CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "nature '{}' abstol must be a finite, non-negative real constant",
+                            nature.name
+                        )),
+                        expression.span(),
+                    ))
+                })?
+        } else {
+            base.map(|base| base.abstol).ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::MissingAttribute(format!(
+                        "abstol for nature '{}'",
+                        nature.name
+                    )),
+                    nature.span,
+                ))
+            })?
+        };
 
         self.disciplines.add_nature(Nature {
             name: nature.name.to_string(),
+            base: nature.base.as_ref().map(ToString::to_string),
             units,
             abstol,
             access,
-            idt_nature: nature.idt_nature.as_ref().map(|s| s.to_string()),
-            ddt_nature: nature.ddt_nature.as_ref().map(|s| s.to_string()),
+            idt_nature: nature
+                .idt_nature
+                .as_ref()
+                .map(|s| s.to_string())
+                .or_else(|| base.and_then(|base| base.idt_nature.clone())),
+            ddt_nature: nature
+                .ddt_nature
+                .as_ref()
+                .map(|s| s.to_string())
+                .or_else(|| base.and_then(|base| base.ddt_nature.clone())),
             span: Some(nature.span),
         });
         Ok(())
@@ -4166,8 +4307,8 @@ impl SemanticAnalyzer {
     /// Analyze an indirect contribution `V(x): lhs == rhs`: the target
     /// branch carries an unknown source whose value the solver picks so
     /// the constraint holds. The recorded expression is the residual
-    /// `lhs - rhs`; under an inactive guard it degrades to `I(branch)`,
-    /// pinning the unknown to zero so the branch opens.
+    /// `lhs - rhs`; an inactive guard opens the branch by letting structural
+    /// stamping pin its unused current unknown to zero.
     fn analyze_indirect_contribution(
         &mut self,
         stmt: &IndirectContributionStmt,

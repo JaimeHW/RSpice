@@ -2,9 +2,9 @@
 //!
 //! Model names are not unique across a corpus — the same compact model ships
 //! in several PDKs, sometimes at different revisions. When a public name is
-//! claimed more than once, every claimant is disambiguated by a prefix of its
-//! source digest, so a name never silently resolves to whichever copy was
-//! generated last.
+//! claimed more than once, every claimant is disambiguated by its generated
+//! namespace. Profiles can pin that namespace independently of source hashes,
+//! keeping published names stable when a model or a shared header is repaired.
 //!
 //! Disambiguation is applied to *all* colliding devices rather than to all but
 //! the first, and suffixed names are still checked against names already
@@ -38,7 +38,7 @@ pub fn resolve_generated_registry_model_names(devices: &[GeneratedRustDevice]) -
             format!(
                 "{}__{}",
                 device.public_model_name,
-                registry_digest_suffix(&device.source_digest)
+                registry_namespace_suffix(device)
             )
         } else {
             device.public_model_name.clone()
@@ -68,6 +68,16 @@ fn registry_digest_suffix(source_digest: &str) -> String {
     } else {
         suffix
     }
+}
+
+fn registry_namespace_suffix(device: &GeneratedRustDevice) -> String {
+    device
+        .folder_name
+        .rsplit_once("__")
+        .map(|(_, suffix)| suffix)
+        .filter(|suffix| suffix.len() == 8 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .map(str::to_owned)
+        .unwrap_or_else(|| registry_digest_suffix(&device.source_digest))
 }
 
 fn registry_key(name: &str) -> String {

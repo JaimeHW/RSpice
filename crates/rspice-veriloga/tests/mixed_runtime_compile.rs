@@ -13,6 +13,34 @@ endmodule
 "#;
 
 #[test]
+fn connection_metadata_retains_physical_definitions_without_connect_rules() {
+    let compiler = VerilogACompiler::default();
+    let source = "nature ProbeQuantity; units=\"V\"; access=Probe; abstol=1e-7; endnature
+        discipline sensing; potential ProbeQuantity; enddiscipline
+        module sensor(p); inout p; sensing p; analog Probe(p)<+1; endmodule";
+    let specification = compiler
+        .connect_specification_from_preprocessed(source)
+        .unwrap();
+    assert!(specification.declares_module);
+    assert_eq!(
+        specification.disciplines.natures["ProbeQuantity"].abstol,
+        1e-7
+    );
+    assert_eq!(
+        specification.disciplines.disciplines["sensing"]
+            .potential
+            .as_deref(),
+        Some("ProbeQuantity")
+    );
+    let invalid = source.replace("abstol=1e-7", "abstol=unknown");
+    assert!(
+        compiler
+            .connect_specification_from_preprocessed(&invalid)
+            .is_err()
+    );
+}
+
+#[test]
 fn connection_closure_is_retained_validated_and_reused_for_specialization() {
     use rspice_veriloga::canonical_ir::{CanonicalConnectionContext, CanonicalIrArtifact};
 

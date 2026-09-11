@@ -238,6 +238,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
         .into());
     }
 
+    validate_generated_namespaces(&devices)?;
     reject_legacy_ad_runtime(&devices)?;
     let packages = generated_model_packages(&devices);
     remove_obsolete_generated_runtime_files(generated_root)?;
@@ -296,6 +297,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
         .into());
     }
 
+    validate_generated_namespaces(&devices)?;
     reject_legacy_ad_runtime(&devices)?;
     remove_obsolete_generated_runtime_files(generated_root)?;
     write_device_subset(generated_root, &devices)?;
@@ -490,6 +492,26 @@ fn read_generated_manifest(
         && manifest.device_count == manifest.devices.len()
         && manifest.file_count == manifest.files.len())
     .then_some(manifest)
+}
+
+fn validate_generated_namespaces(devices: &[GeneratedRustDevice]) -> BuiltinResult<()> {
+    let mut folders = std::collections::BTreeSet::new();
+    let mut packages = std::collections::BTreeSet::new();
+    for package in generated_model_packages(devices) {
+        if !folders.insert(package.folder_name.to_ascii_lowercase()) {
+            return Err(
+                format!("duplicate generated model folder: {}", package.folder_name).into(),
+            );
+        }
+        if !packages.insert(package.package_name.to_ascii_lowercase()) {
+            return Err(format!(
+                "duplicate generated model package: {}",
+                package.package_name
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn reject_legacy_ad_runtime(devices: &[GeneratedRustDevice]) -> BuiltinResult<()> {
@@ -1749,7 +1771,15 @@ fn generate_device_work_item(
     let kernel_regions = generated.metrics.kernel_regions.clone();
     let noise_invalidation_value_count = generated.metrics.noise_invalidation_value_count;
     let noise_shared_preprocess_value_count = generated.metrics.noise_shared_preprocess_value_count;
-    let device = generated.output;
+    let mut device = generated.output;
+    if let Some(namespace) = item.compile_profile.namespaces.get(&item.module) {
+        device.folder_name = super::names::RustDeviceNames::new(
+            &relative_source.to_string_lossy(),
+            &item.module,
+            namespace,
+        )
+        .folder;
+    }
 
     Ok(GeneratedBuiltinModule {
         index,
@@ -2044,6 +2074,97 @@ mod tests {
             std::process::id(),
             std::thread::current().id()
         ))
+    }
+
+    #[test]
+    fn published_namespaces_survive_shared_header_changes() {
+        let root = temporary_registry_root("published-namespaces");
+        fs::create_dir_all(&root).unwrap();
+        for name in ["a.va", "b.va"] {
+            fs::write(root.join(name), "`include \"shared.vams\"\nmodule duplicate(p); inout p; electrical p; analog I(p) <+ `GAIN * V(p); endmodule\n").unwrap();
+        }
+        fs::write(
+            root.join(super::super::discover::VERILOGA_COMPILE_PROFILE_FILE_NAME),
+            "namespace a.va::duplicate=11111111\nnamespace b.va::duplicate=22222222\n",
+        )
+        .unwrap();
+        fs::write(root.join("shared.vams"), "`define GAIN 1.0\n").unwrap();
+        let (before, _, _) =
+            generate_devices_with_stack(root.clone(), None, false, Some(1)).unwrap();
+        fs::write(root.join("shared.vams"), "`define GAIN 2.0\n").unwrap();
+        let (after, _, _) =
+            generate_devices_with_stack(root.clone(), None, false, Some(1)).unwrap();
+        assert_eq!(before.len(), 2);
+        assert_eq!(
+            generated_model_packages(&before),
+            generated_model_packages(&after)
+        );
+        assert_eq!(
+            resolve_generated_registry_model_names(&after),
+            ["duplicate__11111111", "duplicate__22222222"]
+        );
+        for (before, after) in before.iter().zip(&after) {
+            assert_ne!(before.source_digest, after.source_digest);
+            assert_ne!(before.source_identity, after.source_identity);
+            let stamp = |device: &GeneratedRustDevice| {
+                device
+                    .files
+                    .iter()
+                    .find(|file| file.relative_path == "stamp.rs")
+                    .unwrap()
+                    .contents
+                    .clone()
+            };
+            assert_ne!(
+                stamp(before),
+                stamp(after),
+                "new numerical code must accompany the new source identity"
+            );
+        }
+        validate_generated_namespaces(&after).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn published_namespaces_reject_invalid_selectors_and_collisions() {
+        let root = temporary_registry_root("invalid-namespaces");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.va"), "module example; endmodule\n").unwrap();
+        for directive in [
+            "namespace a.va::example=1234",
+            "namespace ../a.va::example=12345678",
+            "namespace missing.va::example=12345678",
+            "namespace a.va::missing=12345678",
+            "namespace a.va::example=12345678\nnamespace a.va::example=87654321",
+        ] {
+            fs::write(
+                root.join(super::super::discover::VERILOGA_COMPILE_PROFILE_FILE_NAME),
+                directive,
+            )
+            .unwrap();
+            assert!(discover_veriloga_sources(&root).is_err(), "{directive}");
+        }
+        let duplicate_folders = [
+            generated_device_fixture("same__12345678", "one"),
+            generated_device_fixture("SAME__12345678", "two"),
+        ];
+        assert!(
+            validate_generated_namespaces(&duplicate_folders)
+                .unwrap_err()
+                .to_string()
+                .contains("folder")
+        );
+        let duplicate_packages = [
+            generated_device_fixture("one__12345678", "one_two"),
+            generated_device_fixture("two__87654321", "one-two"),
+        ];
+        assert!(
+            validate_generated_namespaces(&duplicate_packages)
+                .unwrap_err()
+                .to_string()
+                .contains("package")
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

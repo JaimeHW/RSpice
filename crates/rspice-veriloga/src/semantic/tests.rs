@@ -34,6 +34,92 @@ fn constant_value(expression: &Expression) -> f64 {
 }
 
 #[test]
+fn derived_natures_retain_tolerances_and_calculus_relationships() {
+    let file = analyze(
+        "nature Signal; access=S; units=\"u\"; abstol=2e-9;
+         idt_nature=Integral; ddt_nature=Derivative; endnature
+         nature Integral; units=\"u*s\"; access=SI; abstol=3e-10; endnature
+         nature Derivative; units=\"u/s\"; access=SD; abstol=4e-8; endnature
+         nature Alias : Signal; endnature
+         nature Precise : Alias; abstol=1e-12; endnature
+         nature FineIntegral : Integral; abstol=1e-14; endnature
+         nature Related : Precise; idt_nature=FineIntegral; endnature",
+    )
+    .unwrap();
+    for (name, tolerance) in [("Alias", 2e-9), ("Precise", 1e-12)] {
+        let nature = &file.disciplines.natures[name];
+        assert_eq!(nature.access, "S");
+        assert_eq!(nature.units, "u");
+        assert_eq!(nature.abstol, tolerance);
+        assert_eq!(nature.idt_nature.as_deref(), Some("Integral"));
+        assert_eq!(nature.ddt_nature.as_deref(), Some("Derivative"));
+    }
+    assert_eq!(file.disciplines.nature_base("Related"), Some("Signal"));
+    assert_eq!(
+        file.disciplines.natures["Related"].idt_nature.as_deref(),
+        Some("FineIntegral")
+    );
+    let plain = analyze("nature Plain : Voltage; endnature").unwrap();
+    assert_eq!(
+        plain.disciplines.natures["Plain"].idt_nature.as_deref(),
+        Some("Flux")
+    );
+}
+
+#[test]
+fn invalid_nature_attributes_are_diagnostics_instead_of_fallback_values() {
+    for (declaration, diagnostic) in [
+        ("nature Bad; access=B; abstol=1e-6; endnature", "units"),
+        ("nature Bad : Voltage; units=\"V\"; endnature", "units"),
+        (
+            "nature Bad : Voltage; idt_nature=Charge; endnature",
+            "idt_nature",
+        ),
+        (
+            "nature Bad : Voltage; ddt_nature=Current; endnature",
+            "ddt_nature",
+        ),
+        ("nature Voltage : Voltage; endnature", "cyclic inheritance"),
+        (
+            "nature Alias : Voltage; endnature nature Voltage : Alias; endnature",
+            "cyclic inheritance",
+        ),
+        (
+            "nature Alias : Voltage; endnature nature Alias : Current; endnature",
+            "duplicate nature",
+        ),
+        ("nature Bad; units=\"\"; access=B; endnature", "abstol"),
+        (
+            "nature Bad; units=\"\"; access=B; abstol=missing; endnature",
+            "abstol",
+        ),
+        ("nature Bad : Voltage; abstol=missing; endnature", "abstol"),
+        (
+            "nature Bad; units=\"\"; access=B; abstol=-1; endnature",
+            "abstol",
+        ),
+        (
+            "nature Bad; units=\"\"; access=B; abstol=1e308*1e308; endnature",
+            "abstol",
+        ),
+        ("nature Bad : Voltage; access=Other; endnature", "access"),
+        (
+            "nature Bad; units=\"\"; access=B; abstol=1e-6; idt_nature=Missing; endnature",
+            "idt_nature",
+        ),
+        (
+            "nature Bad; units=\"\"; access=B; abstol=1e-6; ddt_nature=Missing; endnature",
+            "ddt_nature",
+        ),
+    ] {
+        let error = analyze(declaration).expect_err(declaration).to_string();
+        assert!(error.contains(diagnostic), "{declaration}: {error}");
+    }
+    let zero = analyze("nature Exact; units=\"\"; access=E; abstol=0; endnature").unwrap();
+    assert_eq!(zero.disciplines.natures["Exact"].abstol, 0.0);
+}
+
+#[test]
 fn transition_materializes_default_times_and_omitted_fall_from_rise() {
     for (call, expected_rise, expected_fall) in [
         ("transition(1.0)", 1.0e-9, 1.0e-9),

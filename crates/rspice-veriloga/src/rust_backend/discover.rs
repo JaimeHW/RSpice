@@ -4,8 +4,8 @@
 //! modules each declares. Two on-disk markers steer it: a directory holding
 //! `.rspice-veriloga-skip` is excluded entirely, and a
 //! `.rspice-veriloga-profile` file supplies the [`VerilogACompileProfile`] —
-//! the `defines`/`undefines` a source needs to preprocess at all, which for
-//! foundry releases is often not optional.
+//! the `defines`/`undefines` a source needs to preprocess, and optional
+//! `namespace SOURCE::MODULE=HEX_ID` declarations that preserve published names.
 //!
 //! Results are sorted, since discovery order determines generation order and
 //! generation has to be reproducible.
@@ -23,6 +23,8 @@ pub const VERILOGA_COMPILE_PROFILE_FILE_NAME: &str = ".rspice-veriloga-profile";
 pub struct VerilogACompileProfile {
     pub defines: Vec<(String, Option<String>)>,
     pub undefines: Vec<String>,
+    /// Authored namespaces keep published model paths stable as sources change.
+    pub namespaces: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +50,15 @@ pub fn discover_veriloga_sources(
     for path in files {
         let compile_profile = compile_profile_for_source(root, &path)?;
         let modules = module_names_in_file(root, &path, &compile_profile)?;
+        for module in compile_profile.namespaces.keys() {
+            if !modules.contains(module) {
+                return Err(RustBackendError::internal(
+                    path.display().to_string(),
+                    module,
+                    "namespace selects a module absent from the preprocessed source",
+                ));
+            }
+        }
         if !modules.is_empty() {
             candidates.push(VerilogASourceCandidate {
                 path,
@@ -142,6 +153,7 @@ fn compile_profile_for_source(
 
     let mut defines = BTreeMap::<String, Option<String>>::new();
     let mut undefines = BTreeSet::<String>::new();
+    let mut namespaces = BTreeMap::<String, String>::new();
     for directory in directories {
         let profile_path = directory.join(VERILOGA_COMPILE_PROFILE_FILE_NAME);
         if !profile_path.is_file() {
@@ -154,20 +166,30 @@ fn compile_profile_for_source(
                 format!("failed to read compile profile: {error}"),
             )
         })?;
-        apply_compile_profile(&profile_path, &contents, &mut defines, &mut undefines)?;
+        apply_compile_profile(
+            &profile_path,
+            &contents,
+            path,
+            &mut defines,
+            &mut undefines,
+            &mut namespaces,
+        )?;
     }
 
     Ok(VerilogACompileProfile {
         defines: defines.into_iter().collect(),
         undefines: undefines.into_iter().collect(),
+        namespaces,
     })
 }
 
 fn apply_compile_profile(
     path: &Path,
     contents: &str,
+    source: &Path,
     defines: &mut BTreeMap<String, Option<String>>,
     undefines: &mut BTreeSet<String>,
+    namespaces: &mut BTreeMap<String, String>,
 ) -> Result<(), RustBackendError> {
     for (index, raw_line) in contents.lines().enumerate() {
         let line_number = index + 1;
@@ -180,6 +202,80 @@ fn apply_compile_profile(
             .map(|(directive, arguments)| (directive, arguments.trim()))
             .unwrap_or((line, ""));
         match directive {
+            "namespace" => {
+                let (selector, namespace) = arguments.split_once('=').ok_or_else(|| {
+                    profile_error(
+                        path,
+                        line_number,
+                        "expected namespace SOURCE::MODULE=HEX_ID",
+                    )
+                })?;
+                let (relative_source, module) =
+                    selector.trim().rsplit_once("::").ok_or_else(|| {
+                        profile_error(
+                            path,
+                            line_number,
+                            "namespace selector must name SOURCE::MODULE",
+                        )
+                    })?;
+                let namespace = namespace.trim();
+                if namespace.len() != 8 || !namespace.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "namespace must contain exactly eight hexadecimal digits",
+                    ));
+                }
+                let module = module.trim();
+                if module.is_empty() {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "namespace module cannot be empty",
+                    ));
+                }
+                let relative_source = Path::new(relative_source.trim());
+                if relative_source.as_os_str().is_empty()
+                    || relative_source
+                        .components()
+                        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "namespace source must be a relative path inside the profile directory",
+                    ));
+                }
+                let selected_source = path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(relative_source);
+                if !selected_source.is_file() {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "namespace source file does not exist",
+                    ));
+                }
+                let selected_source = selected_source.canonicalize().map_err(|error| {
+                    profile_error(
+                        path,
+                        line_number,
+                        &format!("cannot resolve namespace source: {error}"),
+                    )
+                })?;
+                if selected_source == source
+                    && namespaces
+                        .insert(module.to_string(), namespace.to_ascii_lowercase())
+                        .is_some()
+                {
+                    return Err(profile_error(
+                        path,
+                        line_number,
+                        "duplicate namespace for source module",
+                    ));
+                }
+            }
             "define" => {
                 let (name, value) = arguments
                     .split_once('=')
@@ -212,7 +308,7 @@ fn apply_compile_profile(
                 return Err(profile_error(
                     path,
                     line_number,
-                    "expected `define NAME[=VALUE]` or `undef NAME`",
+                    "expected `define NAME[=VALUE]`, `undef NAME`, or `namespace SOURCE::MODULE=HEX_ID`",
                 ));
             }
         }

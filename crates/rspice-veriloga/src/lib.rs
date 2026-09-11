@@ -1295,7 +1295,7 @@ impl VerilogACompiler {
                     .iter()
                     .any(|item| matches!(item, ast::Item::Module(_))),
                 rules: Default::default(),
-                disciplines: disciplines::DisciplineDb::with_standard(),
+                disciplines: SemanticAnalyzer::new().physical_definitions(&source_file)?,
             });
         }
         let mut analyzer = SemanticAnalyzer::new();

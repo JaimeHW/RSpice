@@ -14,6 +14,8 @@ use std::collections::HashMap;
 pub struct Nature {
     /// Name of the nature (e.g., "Voltage", "Current")
     pub name: String,
+    /// Parent declaration, retained for physical compatibility checks.
+    pub base: Option<String>,
     /// Units string (e.g., "V", "A")
     pub units: String,
     /// Abstol (absolute tolerance for convergence)
@@ -32,6 +34,7 @@ impl Nature {
     pub fn builtin(name: &str, units: &str, abstol: f64, access: &str) -> Self {
         Self {
             name: name.to_string(),
+            base: None,
             units: units.to_string(),
             abstol,
             access: access.to_string(),
@@ -139,6 +142,19 @@ impl DisciplineDb {
         self.natures.get(name)
     }
 
+    /// Root declaration shared by related natures. Invalid public database
+    /// graphs return None rather than looping on a cycle.
+    pub fn nature_base(&self, name: &str) -> Option<&str> {
+        let mut nature = self.get_nature(name)?;
+        for _ in 0..self.natures.len() {
+            match &nature.base {
+                Some(base) => nature = self.get_nature(base)?,
+                None => return Some(&nature.name),
+            }
+        }
+        None
+    }
+
     /// Get a discipline by name
     pub fn get_discipline(&self, name: &str) -> Option<&Discipline> {
         self.disciplines.get(name)
@@ -147,8 +163,12 @@ impl DisciplineDb {
     /// Add standard electrical natures
     fn add_standard_natures(&mut self) {
         // Electrical
-        self.add_nature(Nature::builtin("Voltage", "V", 1.0e-6, "V"));
-        self.add_nature(Nature::builtin("Current", "A", 1.0e-12, "I"));
+        let mut voltage = Nature::builtin("Voltage", "V", 1.0e-6, "V");
+        voltage.idt_nature = Some("Flux".to_string());
+        self.add_nature(voltage);
+        let mut current = Nature::builtin("Current", "A", 1.0e-12, "I");
+        current.idt_nature = Some("Charge".to_string());
+        self.add_nature(current);
 
         // Charge/Flux (for capacitor/inductor modeling)
         let mut charge = Nature::builtin("Charge", "coul", 1.0e-14, "Q");
@@ -263,26 +283,81 @@ impl DisciplineDb {
 
     /// Check if two disciplines are compatible for connection
     pub fn are_compatible(&self, d1: &str, d2: &str) -> bool {
-        if d1 == d2 {
+        let (Some(a), Some(b)) = (self.get_discipline(d1), self.get_discipline(d2)) else {
+            return false;
+        };
+        a.domain == b.domain
+            && self.natures_compatible(a.potential.as_deref(), b.potential.as_deref())
+            && self.natures_compatible(a.flow.as_deref(), b.flow.as_deref())
+    }
+
+    fn natures_compatible(&self, left: Option<&str>, right: Option<&str>) -> bool {
+        let (Some(left), Some(right)) = (left, right) else {
+            // A missing binding cannot conflict with the other discipline.
             return true;
-        }
-
-        let disc1 = self.get_discipline(d1);
-        let disc2 = self.get_discipline(d2);
-
-        match (disc1, disc2) {
-            (Some(a), Some(b)) => {
-                // Same domain and at least one nature in common
-                a.domain == b.domain && (a.potential == b.potential || a.flow == b.flow)
-            }
-            _ => false,
-        }
+        };
+        let (Some(a), Some(b)) = (self.get_nature(left), self.get_nature(right)) else {
+            return false;
+        };
+        a.units == b.units
+            || self
+                .nature_base(left)
+                .is_some_and(|base| Some(base) == self.nature_base(right))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AccessKind, DisciplineDb};
+    use super::{AccessKind, Discipline, DisciplineDb, Domain, Nature};
+
+    #[test]
+    fn compatibility_checks_every_bound_nature_through_both_public_apis() {
+        let mut db = DisciplineDb::with_standard();
+        db.add_nature(Nature::builtin("OtherVoltage", "V", 1e-8, "OV"));
+        db.add_discipline(Discipline::builtin(
+            "same_units",
+            Domain::Continuous,
+            Some("OtherVoltage"),
+            None,
+        ));
+        db.add_discipline(Discipline::builtin(
+            "temperature",
+            Domain::Continuous,
+            Some("Temperature"),
+            None,
+        ));
+        db.add_discipline(Discipline::builtin(
+            "mismatched_flow",
+            Domain::Continuous,
+            Some("Voltage"),
+            Some("Power"),
+        ));
+        db.add_discipline(Discipline::builtin(
+            "natureless",
+            Domain::Continuous,
+            None,
+            None,
+        ));
+        for (left, right, expected) in [
+            ("voltage", "temperature", false),
+            ("electrical", "mismatched_flow", false),
+            ("electrical", "voltage", true),
+            ("electrical", "current", true),
+            ("voltage", "same_units", true),
+            ("electrical", "natureless", true),
+            ("electrical", "logic", false),
+            ("unknown", "unknown", false),
+        ] {
+            for (a, b) in [(left, right), (right, left)] {
+                assert_eq!(db.are_compatible(a, b), expected, "{a}/{b}");
+                assert_eq!(
+                    crate::connect::disciplines_compatible(&db, a, b),
+                    expected,
+                    "connect {a}/{b}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn magnetic_access_functions_keep_their_standard_roles() {

@@ -370,6 +370,10 @@ exercised by the test suite:
   non-ANSI port styles. Ground qualifiers inherit the declared discipline
   (`thermal g; ground g;`); typed grounds (`ground thermal g;`) are also
   supported. The undeclared shorthand `ground g;` defaults to electrical.
+  Derived natures retain their ancestry, tolerance, units, and calculus
+  relationships. Invalid attributes and incompatible relationship overrides
+  are diagnosed. Connection metadata retains source-defined natures even
+  without connect rules; both compatibility APIs apply the same nature rules.
   Analog net buses and ground declarations on module ports remain
   unsupported; connect those ports to ground in the containing circuit.
 - **Control flow**, lowered to guarded dataflow: `if`/`else`, `case`,
@@ -601,7 +605,14 @@ regeneration command when either has moved.
 
 Two markers steer discovery inside the model tree: a `.rspice-veriloga-skip`
 file excludes a directory, and a `.rspice-veriloga-profile` file supplies
-the `defines`/`undefines` a source needs to preprocess.
+the `defines`/`undefines` a source needs to preprocess. Profiles also accept
+`namespace SOURCE::MODULE=HEX_ID`, where `SOURCE` is relative to the profile
+directory and `HEX_ID` is eight hexadecimal digits. These declarations preserve
+published generated paths and duplicate model names across source repairs;
+content hashes still change and invalidate stale artifacts. Each source/module
+may have one namespace declaration across its inherited profiles. The shipped
+corpus pins all published namespaces. Discovery rejects missing sources or
+modules, and generation rejects colliding folders or package names before writing.
 
 There is one emitter and no tier to select. A model either lowers through the
 canonical CFG backend or generation fails naming the construct that stopped it;

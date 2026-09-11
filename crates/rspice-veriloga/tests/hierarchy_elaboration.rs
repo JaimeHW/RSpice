@@ -482,7 +482,7 @@ module parent(p, n); inout p, n; electrical p, n; child bad (p, .n(n)); endmodul
         ),
         (
             r#"
-nature Heat; access = Temp; endnature
+nature Heat; units = "K"; access = Temp; abstol = 1e-4; endnature
 discipline thermal; potential Heat; enddiscipline
 module child(p); inout p; thermal p; endmodule
 module parent(p); inout p; electrical p; child bad(p); endmodule

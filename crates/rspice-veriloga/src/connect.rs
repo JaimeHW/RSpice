@@ -419,42 +419,10 @@ impl ConnectRuleTable {
 /// Nature compatibility is the Self Rule plus the Non-Existent Binding Rule —
 /// "a nature is compatible with a non-existent discipline binding" — which is
 /// what makes a discipline that declares only a potential compatible with one
-/// that declares both. The Base and Derived Nature Rules need a nature's base,
-/// which [`crate::disciplines::Nature`] does not retain after
-/// [`crate::semantic`] folds a derived nature into a standalone one, so two
-/// natures derived from one base are compared by the Units Value Rule instead:
-/// "two natures are compatible if they have the same value for the units
-/// attribute".
+/// that declares both. Base, derived, and equal-unit nature relationships are
+/// resolved by the same database used for semantic analysis.
 pub fn disciplines_compatible(db: &DisciplineDb, left: &str, right: &str) -> bool {
-    if left == right {
-        return true;
-    }
-    let (Some(left), Some(right)) = (db.get_discipline(left), db.get_discipline(right)) else {
-        return false;
-    };
-    if left.domain != right.domain {
-        return false;
-    }
-    let natureless = |d: &crate::disciplines::Discipline| d.potential.is_none() && d.flow.is_none();
-    if natureless(left) || natureless(right) {
-        return true;
-    }
-    natures_compatible(db, left.potential.as_deref(), right.potential.as_deref())
-        && natures_compatible(db, left.flow.as_deref(), right.flow.as_deref())
-}
-
-fn natures_compatible(db: &DisciplineDb, left: Option<&str>, right: Option<&str>) -> bool {
-    let (Some(left), Some(right)) = (left, right) else {
-        // Non-Existent Binding Rule.
-        return true;
-    };
-    if left == right {
-        return true;
-    }
-    match (db.get_nature(left), db.get_nature(right)) {
-        (Some(left), Some(right)) => left.units == right.units,
-        _ => false,
-    }
+    db.are_compatible(left, right)
 }
 
 fn discipline_domain(db: &DisciplineDb, name: &str) -> Option<Domain> {

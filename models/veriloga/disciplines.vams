@@ -23,12 +23,15 @@ endnature
 nature Voltage;
     units = "V";
     access = V;
+    idt_nature = Flux;
     abstol = 1e-6;
 endnature
 
 nature Flux;
     units = "Wb";
     access = Phi;
+    ddt_nature = Voltage;
+    abstol = 1e-9;
 endnature
 
 // Electrical discipline (most common)
@@ -73,16 +76,19 @@ enddiscipline
 nature Angle;
     units = "rad";
     access = Theta;
+    abstol = 1e-6;
 endnature
 
 nature Angular_Velocity;
     units = "rad/s";
     access = Omega;
+    abstol = 1e-6;
 endnature
 
 nature Angular_Force;
     units = "N*m";
     access = Tau;
+    abstol = 1e-6;
 endnature
 
 discipline rotational;
@@ -99,21 +105,25 @@ enddiscipline
 nature Position;
     units = "m";
     access = x;
+    abstol = 1e-6;
 endnature
 
 nature Velocity;
     units = "m/s";
     access = v;
+    abstol = 1e-6;
 endnature
 
 nature Force;
     units = "N";
     access = F;
+    abstol = 1e-6;
 endnature
 
 nature Acceleration;
     units = "m/s^2";
     access = a;
+    abstol = 1e-6;
 endnature
 
 discipline kinematic;
