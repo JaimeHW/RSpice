@@ -489,7 +489,7 @@ impl Engine {
         }
     }
 
-    fn noise_source_label(identity: &crate::analysis::NoiseSourceIdentity) -> String {
+    pub(in crate::engine) fn noise_source_label(identity: &crate::analysis::NoiseSourceIdentity) -> String {
         identity.mechanism.as_ref().map_or_else(
             || identity.device.clone(),
             |mechanism| format!("{}:{mechanism}", identity.device),
@@ -2769,116 +2769,7 @@ impl Engine {
             }
         }
 
-        // Promoted VBIC exposes model-specific sources on its internal nodes.
-        // Older VBIC follows ngspice; VBIC 1.3 follows the Xyce VA definition.
-        // GP internal sources retain their physical nodes through Schur reduction.
         for (bjt_index, bjt) in circuit.bjts.devices.iter().enumerate() {
-            if !bjt.noise_enabled() {
-                continue;
-            }
-            if let Some(model) = bjt.vbic_noise_operating_model() {
-                // Each mechanism retains Q1 as its owner for DNO(Q1) and
-                // DNO(Q1,mechanism), regardless of the model's source count.
-                for (mechanism, node_pos, node_neg, conductance) in model.thermal {
-                    let label = format!("{}:{mechanism}", bjt.name);
-                    if let Some(resistance) =
-                        Self::noise_resistance_from_conductance(&label, conductance)?
-                    {
-                        let mut source =
-                            NoiseSource::thermal(bjt.name.clone(), node_pos, node_neg, resistance)
-                                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                                    &bjt.name, mechanism,
-                                ));
-                        if let Some(constants) = model.physical_constants {
-                            source = source.with_physical_constants(constants);
-                        }
-                        if let Some(temperature) = model.absolute_temperature {
-                            absolute_temperatures.insert(source.identity.clone(), temperature);
-                        } else {
-                            // VBIC 1.3's absolute temperature already includes
-                            // TRISE and its thermal port. Only older models use
-                            // the ngspice analysis-temperature offset here.
-                            source.temperature_offset = bjt.noise_temperature_offset;
-                        }
-                        noise_sources.push(source);
-                    }
-                }
-                for (mechanism, node_pos, node_neg, current) in model.shot {
-                    if current != 0.0 {
-                        let mut source =
-                            NoiseSource::shot(bjt.name.clone(), node_pos, node_neg, current)
-                                .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                                    &bjt.name, mechanism,
-                                ));
-                        if let Some(constants) = model.physical_constants {
-                            source = source.with_physical_constants(constants);
-                        }
-                        noise_sources.push(source);
-                    }
-                }
-                if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
-                    let m = bjt.m;
-                    if !m.is_finite() || m <= 0.0 {
-                        return Err(SimulationError::Circuit(format!(
-                            "Noise source '{}:FN' has invalid multiplicity {m:e}",
-                            bjt.name
-                        )));
-                    }
-                    for (mechanism, node_pos, node_neg, current, scale) in model.flicker {
-                        if (current != 0.0 || model.flicker_current_floor > 0.0) && scale > 0.0 {
-                            Self::checked_positive_noise_parameter(
-                                &format!("{}:{mechanism}", bjt.name),
-                                scale,
-                            )?;
-                            let total_current = current.abs();
-                            let per_copy = total_current / m;
-                            let per_copy = if per_copy.is_nan() {
-                                per_copy
-                            } else {
-                                per_copy.max(model.flicker_current_floor)
-                            };
-                            let (current, multiplicity_factor) =
-                                if per_copy.is_normal() || total_current == 0.0 {
-                                    (per_copy, m)
-                                } else {
-                                    // Retain the total current if division by M
-                                    // loses range/precision. This alternative can
-                                    // still represent a finite spectrum (e.g. AFN=0.5).
-                                    let factor = Self::checked_positive_noise_parameter(
-                                        &format!("{}:{mechanism} current normalization", bjt.name),
-                                        m.powf(1.0 - afn),
-                                    )?;
-                                    (total_current, factor)
-                                };
-                            let mut source = NoiseSource::flicker_with_frequency_exponent(
-                                bjt.name.clone(),
-                                node_pos,
-                                node_neg,
-                                kfn,
-                                afn,
-                                bfn,
-                                current,
-                            )
-                            .with_identity(
-                                crate::analysis::NoiseSourceIdentity::mechanism(
-                                    &bjt.name, mechanism,
-                                ),
-                            );
-                            // Retain coefficient range through the current
-                            // power and frequency law in either representation.
-                            (source.parameter, source.parameter_exponent) =
-                                crate::numerics::product_binary_normalization(
-                                    &[kfn, multiplicity_factor, scale],
-                                    &[],
-                                );
-                            noise_sources.push(source);
-                        }
-                    }
-                }
-                continue;
-            }
-
-            let terminals = bjt.legacy_noise_terminals();
             let offset = dc_solution
                 .len()
                 .checked_add(
@@ -2890,110 +2781,15 @@ impl Engine {
                         })?,
                 )
                 .ok_or_else(|| SimulationError::Circuit("BJT noise node count overflow".into()))?;
-            // Substrate-only resistance also owns a private noise block,
-            // even when C/B/E all collapse directly onto circuit nodes.
-            let has_private_noise = bjt.has_intrinsic_state_unknowns();
-            if has_private_noise && !bjt.mna_promoted() {
+            if Self::append_bjt_noise_sources(
+                bjt,
+                dc_solution,
+                bjt_snapshots.get(bjt_index).and_then(Option::as_ref),
+                offset,
+                &mut noise_sources,
+                &mut absolute_temperatures,
+            )? {
                 private_bjts.push(bjt_index);
-            }
-            let nodes = [
-                bjt.node_collector,
-                bjt.node_base,
-                bjt.node_emitter,
-                bjt.node_substrate,
-            ];
-            let node = |terminal: (Option<usize>, Option<usize>)| {
-                terminal.0.map_or_else(
-                    || nodes[terminal.1.expect("physical noise terminal")],
-                    |index| {
-                        if bjt.mna_promoted() {
-                            bjt.mna_internal_node(index)
-                        } else {
-                            offset + index + 1
-                        }
-                    },
-                )
-            };
-            let [collector, base, emitter] = terminals.map(node);
-            let noise_internal = if bjt.mna_promoted() {
-                Some(bjt.mna_internal_state_at_solution(dc_solution))
-            } else {
-                bjt_snapshots
-                    .get(bjt_index)
-                    .and_then(Option::as_ref)
-                    .map(|s| s.reduction.internal_voltages)
-            };
-            if has_private_noise {
-                let voltage = |id| Self::noise_node_voltage(dc_solution, id);
-                let internal = noise_internal.unwrap_or_else(|| {
-                    bjt.charge_snapshot(
-                        voltage(nodes[0]),
-                        voltage(nodes[1]),
-                        voltage(nodes[2]),
-                        voltage(nodes[3]),
-                    )
-                    .reduction
-                    .internal_voltages
-                });
-                for branch in bjt.legacy_private_resistance_noise(internal) {
-                    let Some(resistance) = Self::noise_resistance_from_conductance(
-                        &format!("{}:{}", bjt.name, branch.mechanism),
-                        branch.conductance,
-                    )?
-                    else {
-                        continue;
-                    };
-                    let mut source = NoiseSource::thermal(
-                        bjt.name.clone(),
-                        node(branch.terminals[0]),
-                        node(branch.terminals[1]),
-                        resistance,
-                    )
-                    .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(
-                            &bjt.name,
-                            branch.mechanism,
-                        ),
-                    );
-                    source.temperature_offset = bjt.noise_temperature_offset;
-                    noise_sources.push(source);
-                }
-            }
-            let (ic, ib, _) = noise_internal.map_or_else(
-                || bjt.noise_branch_currents(),
-                |snapshot| bjt.legacy_noise_branch_currents_at_state(snapshot),
-            );
-            if ic != 0.0 {
-                noise_sources.push(
-                    NoiseSource::shot(format!("{}:IC", bjt.name), collector, emitter, ic)
-                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
-                            &bjt.name, "IC",
-                        )),
-                );
-            }
-            if ib != 0.0 {
-                noise_sources.push(
-                    NoiseSource::shot(format!("{}:IB", bjt.name), base, emitter, ib).with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
-                    ),
-                );
-            }
-            if let Some((kf, af, ef)) = bjt.flicker_noise_coefficients() {
-                noise_sources.push(Self::semiconductor_flicker_source(
-                    NoiseSource::flicker_with_frequency_exponent(
-                        bjt.name.clone(),
-                        base,
-                        emitter,
-                        kf,
-                        af,
-                        ef,
-                        ib,
-                    )
-                    .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "FN"),
-                    ),
-                    bjt.m,
-                )?);
             }
         }
 
