@@ -1954,49 +1954,16 @@ impl<'a> Flattener<'a> {
                 deferred_params: Vec::new(),
             },
 
-            // Nested subcircuit - propagate parameters
+            // The child resolver binds arguments sequentially in this caller
+            // scope. Eager projection here loses complex values and makes later
+            // arguments miss earlier bindings on the same invocation.
             ElementKind::Subcircuit {
                 subckt_name,
-                params: instance_params,
-            } => {
-                let mut merged_params = Vec::with_capacity(instance_params.len());
-                for (name, value) in instance_params {
-                    let resolved = if parametric_value_is_string(value) {
-                        ParametricValue::String(resolve_string_parametric_value(value, scope)?)
-                    } else if let ParametricValue::Expression(expression) = value
-                        && scope.expression_dialect() == ExpressionDialect::Xyce
-                    {
-                        let prepared =
-                            prepare_behavioral_expression(expression, scope).map_err(|error| {
-                                ParseError::InvalidValue(format!(
-                                    "nested subcircuit parameter '{}' could not be prepared: {}",
-                                    name, error
-                                ))
-                            })?;
-                        if behavioral_expression_references_runtime_quantity(&prepared) {
-                            ParametricValue::Expression(prepared)
-                        } else {
-                            ParametricValue::Resolved(resolve_parametric_value(
-                                &ParametricValue::Expression(prepared),
-                                scope,
-                                &self.random,
-                            )?)
-                        }
-                    } else {
-                        ParametricValue::Resolved(resolve_parametric_value(
-                            value,
-                            scope,
-                            &self.random,
-                        )?)
-                    };
-                    merged_params.push((name.clone(), resolved));
-                }
-
-                ElementKind::Subcircuit {
-                    subckt_name: subckt_name.clone(),
-                    params: merged_params,
-                }
-            }
+                params,
+            } => ElementKind::Subcircuit {
+                subckt_name: subckt_name.clone(),
+                params: params.clone(),
+            },
 
             ElementKind::Xspice {
                 model,
@@ -2461,6 +2428,28 @@ impl<'a> Flattener<'a> {
         })
     }
 
+    /// Ready parameter leaves retain complex values and function bindings.
+    /// Symbolic definitions and behavioral-only syntax still need expansion.
+    fn resolve_prepared_scalar_value(
+        &self,
+        expression: &str,
+        prepared: String,
+        scope: &ParamContext,
+    ) -> Result<Value, ParseError> {
+        let expression = if !scope.has_retained_parameter_expressions()
+            && super::expr::parse_expression(expression).is_ok()
+        {
+            expression.to_string()
+        } else {
+            prepared
+        };
+        resolve_parametric_value(
+            &ParametricValue::Expression(expression),
+            scope,
+            &self.random,
+        )
+    }
+
     /// Resolve a deferred value expression, or keep the parse-time value.
     fn resolve_optional_value_expr(
         &self,
@@ -2481,11 +2470,7 @@ impl<'a> Flattener<'a> {
                             .to_string(),
                     ));
                 }
-                resolve_parametric_value(
-                    &ParametricValue::Expression(prepared),
-                    scope,
-                    &self.random,
-                )
+                self.resolve_prepared_scalar_value(expr, prepared, scope)
             }
             None => Ok(value),
         }
@@ -2529,11 +2514,7 @@ impl<'a> Flattener<'a> {
                     Ok((Value::NAN, Some(prepared)))
                 } else {
                     Ok((
-                        resolve_parametric_value(
-                            &ParametricValue::Expression(prepared),
-                            scope,
-                            &self.random,
-                        )?,
+                        self.resolve_prepared_scalar_value(expr, prepared, scope)?,
                         None,
                     ))
                 }
@@ -2568,11 +2549,7 @@ impl<'a> Flattener<'a> {
                     name
                 )));
             }
-            let value = resolve_parametric_value(
-                &ParametricValue::Expression(prepared),
-                scope,
-                &self.random,
-            )?;
+            let value = self.resolve_prepared_scalar_value(expr, prepared, scope)?;
             match merged
                 .iter_mut()
                 .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
@@ -3327,25 +3304,51 @@ fn parametric_value_is_string(value: &ParametricValue) -> bool {
     )
 }
 
+/// A parameter remains complex until an electrical scalar field consumes it.
+#[derive(Clone)]
+struct NumericParameterBinding {
+    value: crate::ComplexValue,
+    direction: Option<Result<super::expr::ComplexDirection, super::expr::ExprError>>,
+}
+
+impl NumericParameterBinding {
+    fn bind(&self, name: &str, scope: &mut ParamContext) {
+        scope.set_complex(name, self.value);
+        scope.retain_parameter_direction(name, false, self.direction.clone());
+    }
+}
+
 fn resolve_parametric_value(
     value: &ParametricValue,
     scope: &ParamContext,
     random: &RandomState,
 ) -> Result<Value, ParseError> {
+    resolve_numeric_parameter_binding(value, scope, random).map(|binding| binding.value.re)
+}
+
+fn resolve_numeric_parameter_binding(
+    value: &ParametricValue,
+    scope: &ParamContext,
+    random: &RandomState,
+) -> Result<NumericParameterBinding, ParseError> {
     match value {
-        ParametricValue::Resolved(v) => Ok(*v),
+        ParametricValue::Resolved(value) => Ok(NumericParameterBinding {
+            value: (*value).into(),
+            direction: None,
+        }),
         ParametricValue::Expression(expr) => {
-            let mut ctx = scope.clone();
-            // Join the netlist-wide stream: each instance expression that
-            // calls gauss/agauss/unif/aunif/limit advances one shared,
-            // reproducible sequence instead of replaying the same draws.
-            ctx.adopt_random(random);
-            super::expr::eval_expression(expr, &ctx).map_err(|error| match error {
-                super::expr::ExprError::UndefinedParam(name) => {
-                    ParseError::UndefinedParameter(name)
-                }
-                other => ParseError::InvalidValue(other.to_string()),
-            })
+            let mut context = scope.clone();
+            // All derived scopes consume the same netlist-wide sequence.
+            context.adopt_random(random);
+            context
+                .evaluate_parameter_binding(expr)
+                .map(|(value, direction)| NumericParameterBinding { value, direction })
+                .map_err(|error| match error {
+                    super::expr::ExprError::UndefinedParam(name) => {
+                        ParseError::UndefinedParameter(name)
+                    }
+                    other => ParseError::InvalidValue(other.to_string()),
+                })
         }
         ParametricValue::String(value) => Err(ParseError::InvalidValue(format!(
             "string parameter value '{}' cannot be used as a numeric value",
@@ -3455,8 +3458,8 @@ fn build_subcircuit_param_scope(
     for (name, value) in instance_strings {
         scope.set_string(&name, value);
     }
-    for (name, value) in instance_numeric {
-        scope.set(&name, value);
+    for (name, binding) in instance_numeric {
+        binding.bind(&name, &mut scope);
     }
     for (name, expression) in instance_expressions {
         if scope.expression_references_spectre_statistics(&expression) {
@@ -3508,6 +3511,30 @@ struct SubcircuitParameterResolutionContext<'a> {
     qualified_instance_name: &'a str,
 }
 
+/// Runtime quantities use the behavioral compiler; static parameter functions
+/// are validated by the parameter evaluator that actually implements them.
+fn prepare_runtime_parameter_expression(
+    name: &str,
+    expression: &str,
+    scope: &ParamContext,
+) -> Result<Option<String>, ParseError> {
+    let prepared = prepare_behavioral_expression(expression, scope).map_err(|error| {
+        ParseError::InvalidValue(format!(
+            "parameter expression '{name}' could not be prepared: {error}"
+        ))
+    })?;
+    if !behavioral_expression_references_runtime_quantity(&prepared) {
+        return Ok(None);
+    }
+    match validate_prepared_behavioral_runtime_expression(&prepared) {
+        Ok(Some(identifier)) => Err(ParseError::UndefinedParameter(identifier)),
+        Err(error) => Err(ParseError::InvalidValue(format!(
+            "parameter expression '{name}' is invalid: {error}"
+        ))),
+        Ok(None) => Ok(Some(prepared)),
+    }
+}
+
 fn resolve_deferred_param_expressions(
     expr_params: &[(String, String)],
     scope: &mut ParamContext,
@@ -3542,56 +3569,27 @@ fn resolve_deferred_param_expressions(
                 continue;
             }
             if scope.expression_dialect() == ExpressionDialect::Xyce {
-                match prepare_behavioral_expression(&expr, scope) {
-                    Ok(prepared) => {
-                        match validate_prepared_behavioral_runtime_expression(&prepared) {
-                            Ok(Some(identifier)) => {
-                                first_error
-                                    .get_or_insert(ParseError::UndefinedParameter(identifier));
-                                unresolved.push((name, expr));
-                                continue;
-                            }
-                            Err(error) => {
-                                first_error.get_or_insert_with(|| {
-                                    ParseError::InvalidValue(format!(
-                                        "parameter expression '{}' is invalid: {}",
-                                        name, error
-                                    ))
-                                });
-                                unresolved.push((name, expr));
-                                continue;
-                            }
-                            Ok(None) => {}
-                        }
-                        if !behavioral_expression_references_runtime_quantity(&prepared) {
-                            // Static expressions continue through the numeric
-                            // resolver below so forward references can make
-                            // progress over subsequent fixed-point passes.
-                        } else {
-                            scope.define_parameter_expression(&name, expr, None);
-                            progress = true;
-                            continue;
-                        }
+                match prepare_runtime_parameter_expression(&name, &expr, scope) {
+                    Ok(Some(_)) => {
+                        scope.define_parameter_expression(&name, expr, None);
+                        progress = true;
+                        continue;
                     }
+                    Ok(None) => {}
                     Err(error) => {
-                        first_error.get_or_insert_with(|| {
-                            ParseError::InvalidValue(format!(
-                                "parameter expression '{}' could not be prepared: {}",
-                                name, error
-                            ))
-                        });
+                        first_error.get_or_insert(error);
                         unresolved.push((name, expr));
                         continue;
                     }
                 }
             }
-            match resolve_parametric_value(
+            match resolve_numeric_parameter_binding(
                 &ParametricValue::Expression(expr.clone()),
                 scope,
                 random,
             ) {
-                Ok(value) => {
-                    scope.set(&name, value);
+                Ok(binding) => {
+                    binding.bind(&name, scope);
                     progress = true;
                 }
                 Err(err) => {
@@ -3645,7 +3643,7 @@ fn resolve_deferred_param_expressions(
 /// Parameters after resolution, split by what each one resolved to: numeric
 /// values, string literals, and the assignments that stayed symbolic.
 type ResolvedParams = (
-    Vec<(String, Value)>,
+    Vec<(String, NumericParameterBinding)>,
     Vec<(String, String)>,
     Vec<(String, String)>,
 );
@@ -3661,7 +3659,7 @@ fn resolve_subcircuit_instance_params(
     let mut instance_scope = caller_scope.clone();
     instance_scope.adopt_random(random);
     let mut pending = instance_params.to_vec();
-    let mut numeric = Vec::<(String, Value)>::new();
+    let mut numeric = Vec::<(String, NumericParameterBinding)>::new();
     let mut strings = Vec::<(String, String)>::new();
     let mut expressions = Vec::<(String, String)>::new();
 
@@ -3678,6 +3676,8 @@ fn resolve_subcircuit_instance_params(
                     Ok(resolved) => {
                         instance_scope.shadow_spectre_statistical_parameter(&name);
                         instance_scope.set_string(&name, resolved.clone());
+                        numeric.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+                        expressions.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
                         upsert_string_param_value(&mut strings, name, resolved);
                         progress = true;
                     }
@@ -3692,6 +3692,8 @@ fn resolve_subcircuit_instance_params(
                 {
                     instance_scope.define_parameter_expression(&name, expression.clone(), None);
                     instance_scope.mark_spectre_statistical_parameter(&name);
+                    numeric.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+                    strings.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
                     upsert_expression_param_value(&mut expressions, name, expression.clone());
                     progress = true;
                     continue;
@@ -3699,55 +3701,34 @@ fn resolve_subcircuit_instance_params(
                 if instance_scope.expression_dialect() == ExpressionDialect::Xyce
                     && let ParametricValue::Expression(expression) = &value
                 {
-                    match prepare_behavioral_expression(expression, &instance_scope) {
-                        Ok(prepared) => {
-                            match validate_prepared_behavioral_runtime_expression(&prepared) {
-                                Ok(Some(identifier)) => {
-                                    first_error
-                                        .get_or_insert(ParseError::UndefinedParameter(identifier));
-                                    unresolved.push((name, value));
-                                    continue;
-                                }
-                                Err(error) => {
-                                    first_error.get_or_insert_with(|| {
-                                        ParseError::InvalidValue(format!(
-                                            "subcircuit instance parameter '{}' is invalid: {}",
-                                            name, error
-                                        ))
-                                    });
-                                    unresolved.push((name, value));
-                                    continue;
-                                }
-                                Ok(None) => {}
-                            }
-                            if behavioral_expression_references_runtime_quantity(&prepared) {
-                                instance_scope.shadow_spectre_statistical_parameter(&name);
-                                instance_scope.define_parameter_expression(
-                                    &name,
-                                    prepared.clone(),
-                                    None,
-                                );
-                                upsert_expression_param_value(&mut expressions, name, prepared);
-                                progress = true;
-                                continue;
-                            }
+                    match prepare_runtime_parameter_expression(&name, expression, &instance_scope) {
+                        Ok(Some(prepared)) => {
+                            instance_scope.shadow_spectre_statistical_parameter(&name);
+                            instance_scope.define_parameter_expression(
+                                &name,
+                                prepared.clone(),
+                                None,
+                            );
+                            numeric.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+                            strings.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+                            upsert_expression_param_value(&mut expressions, name, prepared);
+                            progress = true;
+                            continue;
                         }
+                        Ok(None) => {}
                         Err(error) => {
-                            first_error.get_or_insert_with(|| {
-                                ParseError::InvalidValue(format!(
-                                    "subcircuit instance parameter '{}' could not be prepared: {}",
-                                    name, error
-                                ))
-                            });
+                            first_error.get_or_insert(error);
                             unresolved.push((name, value));
                             continue;
                         }
                     }
                 }
-                match resolve_parametric_value(&value, &instance_scope, random) {
+                match resolve_numeric_parameter_binding(&value, &instance_scope, random) {
                     Ok(resolved) => {
                         instance_scope.shadow_spectre_statistical_parameter(&name);
-                        instance_scope.set(&name, resolved);
+                        resolved.bind(&name, &mut instance_scope);
+                        strings.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
+                        expressions.retain(|(existing, _)| !existing.eq_ignore_ascii_case(&name));
                         upsert_numeric_param_value(&mut numeric, name, resolved);
                         progress = true;
                     }
@@ -3786,7 +3767,11 @@ fn subcircuit_instance_param_is_string(
         || parametric_value_is_string(value)
 }
 
-fn upsert_numeric_param_value(items: &mut Vec<(String, Value)>, name: String, value: Value) {
+fn upsert_numeric_param_value(
+    items: &mut Vec<(String, NumericParameterBinding)>,
+    name: String,
+    value: NumericParameterBinding,
+) {
     if let Some((_, existing_value)) = items
         .iter_mut()
         .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
@@ -4397,6 +4382,188 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn subcircuit_bindings_preserve_complex_scopes_and_physical_values() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let netlist = Netlist::parse_with_options(
+                "Complex instance bindings
+.param z={2+3j}
+Xdirect d 0 cell z={z+1j} next={z+1j}
+Xnested n 0 wrapper z={z}
+Xdefault f 0 cell
+.subckt wrapper a b z=100
+.param local={z+2j}
+Xchild a b cell z={local} next={z+1j}
+.ends
+.subckt cell a b z={1+2j} next={z+1j}
+.param squared={z*z}
+.func part(x) {img(x)}
+R1 a b {1+part(z)}
+R2 a b {1+img(squared)}
+R3 a b 1 M={1+img(next)}
+V1 inside b DC {1+img(next)} AC {1+img(next)}
+.ends
+.end",
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let circuit = crate::engine::Engine::default()
+                .build_circuit(&netlist)
+                .unwrap();
+            for (scope, r1, r2, magnitude) in [
+                ("Xdirect", 5.0, 17.0, 6.0),
+                ("Xnested.Xchild", 6.0, 21.0, 7.0),
+                ("Xdefault", 3.0, 5.0, 4.0),
+            ] {
+                for (name, conductance) in [("R1", 1.0 / r1), ("R2", 1.0 / r2), ("R3", magnitude)] {
+                    let name = format!("{scope}.{name}");
+                    let index = circuit
+                        .resistors
+                        .names
+                        .iter()
+                        .position(|actual| actual.eq_ignore_ascii_case(&name))
+                        .unwrap();
+                    assert_eq!(
+                        circuit.resistors.conductances[index], conductance,
+                        "{dialect:?} {name}"
+                    );
+                }
+                let name = format!("{scope}.V1");
+                let index = circuit
+                    .voltage_sources
+                    .names
+                    .iter()
+                    .position(|actual| actual.eq_ignore_ascii_case(&name))
+                    .unwrap();
+                assert_eq!(
+                    circuit.voltage_sources.dc_values[index], magnitude,
+                    "{dialect:?} {name}"
+                );
+                assert_eq!(
+                    circuit.voltage_sources.ac_magnitudes[index], magnitude,
+                    "{dialect:?} {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nested_instance_arguments_preserve_sequential_random_bindings() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for mode in [
+                super::super::StatisticalParamMode::Sample,
+                super::super::StatisticalParamMode::Nominal,
+            ] {
+                let make = |nested| {
+                    let instances = if nested {
+                        "Xtop out 0 wrapper\n.subckt wrapper a b z=999\nX1 a b cell z={aunif(2,0.25)} next={z+1}\nX2 a b cell z={aunif(3,0.5)} next={z+1}\n.ends"
+                    } else {
+                        "X1 out 0 cell z={aunif(2,0.25)} next={z+1}\nX2 out 0 cell z={aunif(3,0.5)} next={z+1}"
+                    };
+                    Netlist::parse_with_options(&format!(
+                        "Sequential argument draws\n{instances}\n.subckt cell a b z=99 next=99\n.param sampled={{aunif(5,0.5)}}\nR1 a b {{next}}\nR2 a b {{sampled}}\n.ends\n.end"
+                    ), super::super::parser::NetlistParseOptions {
+                        expression_dialect: dialect,
+                        statistical_mode: mode,
+                        statistical_seed: Some(793),
+                        ..Default::default()
+                    }).unwrap()
+                };
+                let direct = make(false);
+                let nested = make(true);
+                let engine = crate::engine::Engine::default();
+                let direct_circuit = engine.build_circuit(&direct).unwrap();
+                let next_draw = direct.params.random().next_uniform();
+                let nested_circuit = engine.build_circuit(&nested).unwrap();
+                assert_eq!(
+                    nested_circuit.resistors.reported_resistances,
+                    direct_circuit.resistors.reported_resistances,
+                    "{dialect:?} {mode:?}"
+                );
+                assert_eq!(nested.params.random().next_uniform(), next_draw);
+                let expected_stream = RandomState::new(793);
+                let sample = |mean, spread| match mode {
+                    super::super::StatisticalParamMode::Sample => {
+                        mean + spread * expected_stream.next_symmetric()
+                    }
+                    super::super::StatisticalParamMode::Nominal => mean,
+                };
+                let expected = [
+                    sample(2.0, 0.25) + 1.0,
+                    sample(5.0, 0.5),
+                    sample(3.0, 0.5) + 1.0,
+                    sample(5.0, 0.5),
+                ];
+                assert_eq!(nested_circuit.resistors.reported_resistances, expected);
+                assert_eq!(next_draw, expected_stream.next_uniform());
+                assert!((2.75..=3.25).contains(&nested_circuit.resistors.reported_resistances[0]));
+                assert!((3.5..=4.5).contains(&nested_circuit.resistors.reported_resistances[2]));
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_subcircuit_bindings_retain_complex_parameter_directions() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let netlist = Netlist::parse_with_options(
+                "Parameter directions through local bindings\n.param p=0\n.subckt cell a b z=99 next=99\n.param squared={z*z} cusp={abs(p)} alias=cusp\nR1 a b 1\n.ends\n.end",
+                super::super::parser::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    ..Default::default()
+                },
+            ).unwrap();
+            let mut caller = netlist.params.clone();
+            caller.seed_parameter_direction("p", false);
+            let scope = build_subcircuit_param_scope(
+                &netlist.subcircuits[0],
+                "X1",
+                "Xtop.X1",
+                &caller,
+                &[
+                    (
+                        "z".into(),
+                        ParametricValue::Expression("1+1e-8*p+2j".into()),
+                    ),
+                    ("next".into(), ParametricValue::Expression("z+3j".into())),
+                    ("label".into(), ParametricValue::Resolved(1.0)),
+                    ("label".into(), ParametricValue::String("new".into())),
+                    ("number".into(), ParametricValue::String("old".into())),
+                    ("number".into(), ParametricValue::Resolved(7.0)),
+                ],
+                caller.random(),
+                &NoAbort,
+            )
+            .unwrap();
+            assert_eq!(
+                scope.get_complex("z"),
+                Some(crate::ComplexValue::new(1.0, 2.0))
+            );
+            assert_eq!(
+                scope.get_complex("next"),
+                Some(crate::ComplexValue::new(1.0, 5.0))
+            );
+            assert_eq!(
+                scope.get_complex("squared"),
+                Some(crate::ComplexValue::new(-3.0, 4.0))
+            );
+            assert_eq!(
+                scope.parameter_direction("next").unwrap().binary64(),
+                crate::ComplexValue::new(1e-8, 0.0)
+            );
+            assert_eq!(
+                scope.parameter_direction("squared").unwrap().binary64(),
+                crate::ComplexValue::new(2e-8, 4e-8)
+            );
+            assert_eq!(scope.get_string("label"), Some("new"));
+            assert_eq!(scope.get("number"), Some(7.0));
+            assert_eq!(scope.get("alias"), Some(0.0));
+            assert!(scope.parameter_direction("alias").is_err());
+        }
     }
 
     #[test]

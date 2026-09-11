@@ -5204,8 +5204,7 @@ impl Engine {
                         && model.is_none()
                         && instance_params.is_empty()
                         && deferred_params.is_empty()
-                        && netlist.params.all_parameter_expressions().is_empty()
-                        && netlist.params.all_global_expressions().is_empty();
+                        && !netlist.params.has_retained_parameter_expressions();
                     let mut direction = None;
                     let primary_value = if scalar_primary {
                         let mut context = base_eval_context(netlist);

@@ -543,6 +543,11 @@ impl ParamContext {
             .collect()
     }
 
+    /// Whether expression expansion is needed to resolve symbolic bindings.
+    pub(crate) fn has_retained_parameter_expressions(&self) -> bool {
+        !self.parameter_expressions.is_empty() || !self.global_expressions.is_empty()
+    }
+
     /// Whether the ordinary namespace contains this name in any value class.
     pub fn has_parameter_binding(&self, name: &str) -> bool {
         let key = name.to_uppercase();
