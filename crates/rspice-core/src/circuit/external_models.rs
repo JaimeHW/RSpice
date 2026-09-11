@@ -379,6 +379,46 @@ pub(crate) struct XspiceCompanionPolicy<'a> {
     pub xyce_one_step_order2: bool,
 }
 
+/// The common analog companion contract for runtime and mixed HDL models.
+#[cfg(feature = "veriloga")]
+#[derive(Clone, Copy)]
+pub(crate) struct VerilogACompanionRules {
+    pub derivative: rspice_veriloga::vm::IntegrationCoefficients,
+    pub state: rspice_veriloga::vm::IntegrationCoefficients,
+}
+
+#[cfg(feature = "veriloga")]
+impl VerilogACompanionRules {
+    pub fn from_policy(dt: Value, policy: XspiceCompanionPolicy<'_>) -> Result<Self, String> {
+        // OneStep2 assembles (Q-Qprev)/dt + (F+Fprev)/2. Its ddt
+        // stamp is doubled BE before the external half-weight; internal
+        // integrators and filters instead solve their full trapezoidal rule.
+        let coefficients = if policy.xyce_one_step_order2 {
+            crate::numerics::integration::CompanionCoefficients::backward_euler()
+        } else {
+            *policy.coefficients
+        };
+        let derivative: rspice_veriloga::vm::IntegrationCoefficients =
+            rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+                coefficients.coeff_g, coefficients.coeff_v_n,
+                coefficients.coeff_v_n_minus_1, coefficients.needs_two_history,
+                coefficients.coeff_i_n, dt,
+            ).map_err(|error| error.to_string())?
+                .scaled(if policy.xyce_one_step_order2 { 2.0 } else { 1.0 }).into();
+        let state = if policy.xyce_one_step_order2 && derivative.active {
+            rspice_veriloga::vm::IntegrationCoefficients {
+                previous_derivative_scale: 1.0,
+                ..derivative
+            }
+        } else {
+            derivative
+        };
+        derivative.validate().map_err(|error| error.to_string())?;
+        state.validate().map_err(|error| error.to_string())?;
+        Ok(Self { derivative, state })
+    }
+}
+
 impl CircuitData {
     //=========================================================================
     // XSPICE Code Model Interface
@@ -563,8 +603,9 @@ impl CircuitData {
     ///
     /// Runtime-loaded analog-only and mixed models currently expose a combined
     /// transient stamp. Static history can now observe their settled states,
-    /// but both must retain the ordinary companion formulation until derivative
-    /// and integral operators receive the distinct weighted rules. This does
+    /// and derivative/integral operators receive distinct solver-selected rules.
+    /// Both still require a model-equation capability proof and weighted mixed
+    /// assembly before the ordinary companion guard can be lifted. This does
     /// not restrict the ordinary trapezoidal/Gear integration order. Generated
     /// models carry a compiler-proven capability bit that excludes `idt`,
     /// nonlinear `ddt`, and `ddt`-dependent control flow.
@@ -3231,16 +3272,29 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
-        let integration = rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
-            coefficients.coeff_g,
-            coefficients.coeff_v_n,
-            coefficients.coeff_v_n_minus_1,
-            coefficients.needs_two_history,
-            coefficients.coeff_i_n,
+        self.prepare_veriloga_timepoint_with_policy(
+            time,
             dt,
+            XspiceCompanionPolicy {
+                coefficients,
+                xyce_one_step_order2: false,
+            },
+            initial_step,
+            final_step,
         )
-        .map(rspice_veriloga::vm::IntegrationCoefficients::from)
-        .map_err(|error| {
+    }
+
+    /// Prepare both companion families from the circuit's equation policy.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn prepare_veriloga_timepoint_with_policy(
+        &mut self,
+        time: Value,
+        dt: Value,
+        companion: XspiceCompanionPolicy<'_>,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<(), String> {
+        let integration = VerilogACompanionRules::from_policy(dt, companion).map_err(|error| {
             format!("Verilog-A devices cannot advance to t={time:.16e}s: {error}")
         })?;
         for device in self.veriloga_devices.iter_mut() {
@@ -3262,7 +3316,7 @@ impl CircuitData {
                 format!("Verilog-A device '{instance}' transient timestep setup failed: {error}")
             })?;
             device
-                .try_set_integration_coefficients(integration)
+                .try_set_integration_rules(integration.derivative, integration.state)
                 .map_err(|error| {
                     format!(
                         "Verilog-A device '{instance}' transient integration setup failed: {error}"

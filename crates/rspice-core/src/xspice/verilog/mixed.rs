@@ -538,6 +538,7 @@ struct AnalogSolverInputs {
     time_seconds: f64,
     timestep_seconds: f64,
     integration: IntegrationCoefficients,
+    state_integration: IntegrationCoefficients,
 }
 
 impl AnalogSolverInputs {
@@ -554,6 +555,7 @@ impl AnalogSolverInputs {
             time_seconds: 0.0,
             timestep_seconds: 0.0,
             integration: IntegrationCoefficients::inactive(),
+            state_integration: IntegrationCoefficients::inactive(),
         }
     }
 }
@@ -673,8 +675,8 @@ struct ActiveTrial {
     tick: u64,
     time_seconds: f64,
     timestep_seconds: f64,
-    /// Whether this trial was opened by [`MixedSignalHost::begin_probe_trial`]
-    /// and therefore may never be committed.
+    /// Whether this trial was opened as a probe by
+    /// [`MixedSignalHost::begin_trial_with_integration_rules`] and may never be committed.
     ///
     /// A solver assembles a residual at times that are not candidate accepted
     /// endpoints — an LTE probe, a static residual capture at a timepoint
@@ -1556,9 +1558,10 @@ impl MixedSignalHost {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), MixedSignalError> {
-        self.begin_trial_inner(
+        self.begin_trial_with_integration_rules(
             time_seconds,
             timestep_seconds,
+            integration,
             integration,
             initial_step,
             final_step,
@@ -1583,6 +1586,7 @@ impl MixedSignalHost {
     /// reaches that path — [`Self::accept_trial`] refuses one by name — so the
     /// check has nothing to protect and would refuse legitimate assemblies.
     /// Every other guard, the missed-breakpoint one included, still applies.
+    #[cfg(test)]
     pub(crate) fn begin_probe_trial(
         &mut self,
         time_seconds: f64,
@@ -1591,9 +1595,10 @@ impl MixedSignalHost {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), MixedSignalError> {
-        self.begin_trial_inner(
+        self.begin_trial_with_integration_rules(
             time_seconds,
             timestep_seconds,
+            integration,
             integration,
             initial_step,
             final_step,
@@ -1601,11 +1606,15 @@ impl MixedSignalHost {
         )
     }
 
-    fn begin_trial_inner(
+    /// Begin a circuit trial with separate derivative and internal-state rules.
+    /// A probe may inspect an already accepted timepoint but cannot commit.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn begin_trial_with_integration_rules(
         &mut self,
         time_seconds: f64,
         timestep_seconds: f64,
         integration: IntegrationCoefficients,
+        state_integration: IntegrationCoefficients,
         initial_step: bool,
         final_step: bool,
         probe: bool,
@@ -1619,6 +1628,16 @@ impl MixedSignalHost {
         if !timestep_seconds.is_finite() || timestep_seconds < 0.0 {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "timestep must be finite and nonnegative".into(),
+            });
+        }
+        // Reject the complete configuration before timestep setup can promote
+        // an operating-point candidate or invalidate any retained state.
+        integration.validate().map_err(analog_error)?;
+        state_integration.validate().map_err(analog_error)?;
+        if integration.active != state_integration.active {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "derivative and state integration rules must share the active analysis"
+                    .into(),
             });
         }
         let tick = self
@@ -1662,6 +1681,7 @@ impl MixedSignalHost {
             time_seconds,
             timestep_seconds,
             integration,
+            state_integration,
         };
         // A due process can read V(...). Defer its activation until stamp or
         // bridge settling supplies this trial's candidate analog solution.
@@ -1828,7 +1848,7 @@ impl MixedSignalHost {
             .try_set_timestep(inputs.timestep_seconds)
             .map_err(analog_error)?;
         analog
-            .try_set_integration_coefficients(inputs.integration)
+            .try_set_integration_rules(inputs.integration, inputs.state_integration)
             .map_err(analog_error)?;
         Ok(())
     }
@@ -3547,6 +3567,35 @@ endmodule
     fn rejected_probe_diagnostics_do_not_enter_accepted_state_or_checkpoints() {
         let mut host = host();
         let checkpoint = host.checkpoint().unwrap();
+        let valid_rule = IntegrationCoefficients::backward_euler(1e-9).unwrap();
+        let invalid_state = IntegrationCoefficients {
+            derivative_scale: f64::NAN,
+            ..valid_rule
+        };
+        host.begin_trial_with_integration_rules(
+            1e-9,
+            1e-9,
+            valid_rule,
+            invalid_state,
+            false,
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert!(!host.trial_active());
+        assert_eq!(
+            host.analog.checkpoint_state().unwrap(),
+            checkpoint.analog_checkpoint
+        );
+        assert_eq!(host.analog_inputs.time_seconds, 0.0);
+        assert_eq!(
+            host.analog_inputs.integration,
+            IntegrationCoefficients::inactive()
+        );
+        assert_eq!(
+            host.analog_inputs.state_integration,
+            IntegrationCoefficients::inactive()
+        );
         let adc = host.read_digital("adc");
         let q = host.read_digital("q");
         let sample = |host: &mut MixedSignalHost, time, voltage| {

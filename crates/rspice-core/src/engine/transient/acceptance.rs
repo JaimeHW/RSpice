@@ -461,9 +461,30 @@ mod tests {
         time: Value,
         dt: Value,
     ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+        step_with_policy(engine, circuit, matrix, solution, time, dt, false)
+    }
+
+    fn step_with_policy(
+        engine: &Engine,
+        circuit: &mut crate::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &mut [Value],
+        time: Value,
+        dt: Value,
+        weighted: bool,
+    ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
         let coefficients = CompanionCoefficients::backward_euler();
         circuit
-            .prepare_veriloga_timepoint(time, dt, &coefficients, time == 0.0, false)
+            .prepare_veriloga_timepoint_with_policy(
+                time,
+                dt,
+                XspiceCompanionPolicy {
+                    coefficients: &coefficients,
+                    xyce_one_step_order2: weighted,
+                },
+                time == 0.0,
+                false,
+            )
             .unwrap();
         engine.accept_external_transient_models(
             circuit,
@@ -472,7 +493,7 @@ mod tests {
             time,
             dt,
             &coefficients,
-            false,
+            weighted,
             true,
             0.0,
             time == 0.0,
@@ -535,41 +556,84 @@ mod tests {
         assert_eq!(initial[bridge - 1], 0.25);
         assert_eq!(initial[native - 1], 0.25);
         let checkpoint = circuit.clone();
-        for replay in 0..2 {
-            if replay == 1 {
+        for weighted in [false, true] {
+            for _replay in 0..2 {
                 circuit = checkpoint.clone();
-            }
-            for (time, voltage, integral, digital) in [(1e-9, 2.0, 6.0, 1.0), (2e-9, 3.0, 9.0, 0.0)]
-            {
-                solution[va - 1] = voltage;
-                solution[mixed - 1] = voltage;
-                let (_, history) = step(
-                    &engine,
-                    &mut circuit,
-                    &mut matrix,
-                    &mut solution,
-                    time,
-                    1e-9,
-                )
-                .unwrap();
-                let history = history.unwrap();
-                assert!(
-                    (history[va - 1] - (2.5 * voltage + integral)).abs() < 1e-12,
-                    "runtime history={history:?}"
-                );
-                assert!(
-                    (history[mixed - 1] - ((2.0 * (digital + 1.0) + 0.5) * voltage + integral))
-                        .abs()
-                        < 1e-12,
-                    "mixed history={history:?}"
-                );
-                assert_eq!(history[bridge - 1], 0.25 - 0.5 * digital);
-                assert_eq!(history[native - 1], 0.25);
-                assert_eq!(
-                    circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
-                    if digital == 1.0 { "1" } else { "0" }
-                );
-                assert!(!circuit.mixed_signal_hosts[0].trial_active());
+                for (time, voltage, integral, digital) in
+                    [(1e-9, 2.0, 6.0, 1.0), (2e-9, 3.0, 9.0, 0.0)]
+                {
+                    solution[va - 1] = voltage;
+                    solution[mixed - 1] = voltage;
+                    // The probe uses the derivative bank, while acceptance below
+                    // must preserve the full internal integral and undo probe state.
+                    let integral = if weighted {
+                        if time == 1e-9 { 5.0 } else { 7.5 }
+                    } else {
+                        integral
+                    };
+                    let prior_voltage = if time == 1e-9 { 0.0 } else { 2.0 };
+                    let ddt_gain = if weighted { 6.0 } else { 3.0 };
+                    let idt_gain = if weighted { 0.5 } else { 1.0 };
+                    let digital_before = circuit.mixed_signal_hosts[0].read_digital("q").unwrap();
+                    let mut probe_rhs = vec![0.0; size];
+                    matrix.values_mut().fill(0.0);
+                    circuit
+                        .stamp_mixed_transient_trial(
+                            &mut matrix,
+                            &mut probe_rhs,
+                            time,
+                            1e-9,
+                            &solution,
+                            XspiceCompanionPolicy {
+                                coefficients: &CompanionCoefficients::backward_euler(),
+                                xyce_one_step_order2: weighted,
+                            },
+                            false,
+                            false,
+                        )
+                        .unwrap();
+                    let slot = matrix.get_index(mixed - 1, mixed - 1).unwrap();
+                    let jacobian = matrix.values_mut()[slot.offset()];
+                    assert!(
+                        (jacobian - (2.0 * (digital + 1.0) + ddt_gain + idt_gain)).abs() < 1e-12
+                    );
+                    let expected = 2.0 * (digital + 1.0) * voltage
+                        + ddt_gain * (voltage - prior_voltage)
+                        + integral;
+                    assert!((jacobian * voltage - probe_rhs[mixed - 1] - expected).abs() < 1e-12);
+                    assert_eq!(
+                        circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
+                        digital_before
+                    );
+                    let (_, history) = step_with_policy(
+                        &engine,
+                        &mut circuit,
+                        &mut matrix,
+                        &mut solution,
+                        time,
+                        1e-9,
+                        weighted,
+                    )
+                    .unwrap();
+                    let history = history.unwrap();
+                    assert!(
+                        (history[va - 1] - (2.5 * voltage + integral)).abs() < 1e-12,
+                        "runtime history={history:?}"
+                    );
+                    assert!(
+                        (history[mixed - 1] - ((2.0 * (digital + 1.0) + 0.5) * voltage + integral))
+                            .abs()
+                            < 1e-12,
+                        "mixed history={history:?}"
+                    );
+                    assert_eq!(history[bridge - 1], 0.25 - 0.5 * digital);
+                    assert_eq!(history[native - 1], 0.25);
+                    assert_eq!(
+                        circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
+                        if digital == 1.0 { "1" } else { "0" }
+                    );
+                    assert!(!circuit.mixed_signal_hosts[0].trial_active());
+                }
             }
         }
     }

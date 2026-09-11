@@ -23,7 +23,7 @@
 mod coupled_tests;
 
 use super::external_models::{
-    XspiceAcceptanceRollback, XspiceCompanionPolicy, XspiceDigitalBindings,
+    VerilogACompanionRules, XspiceAcceptanceRollback, XspiceCompanionPolicy, XspiceDigitalBindings,
     XspiceDigitalParticipant,
 };
 use crate::circuit::CircuitData;
@@ -54,18 +54,9 @@ const MAX_BOUNDARY_SETTLE_PASSES: u32 = 64;
 fn mixed_integration_coefficients(
     time: Value,
     dt: Value,
-    coefficients: &crate::numerics::integration::CompanionCoefficients,
-) -> Result<rspice_veriloga::vm::IntegrationCoefficients, SimulationError> {
-    rspice_veriloga_runtime::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
-        coefficients.coeff_g,
-        coefficients.coeff_v_n,
-        coefficients.coeff_v_n_minus_1,
-        coefficients.needs_two_history,
-        coefficients.coeff_i_n,
-        dt,
-    )
-    .map(Into::into)
-    .map_err(|error| {
+    companion: XspiceCompanionPolicy<'_>,
+) -> Result<VerilogACompanionRules, SimulationError> {
+    VerilogACompanionRules::from_policy(dt, companion).map_err(|error| {
         SimulationError::Circuit(format!(
             "mixed Verilog-AMS modules cannot advance to t={time:.16e}s: {error}"
         ))
@@ -105,7 +96,7 @@ impl<'a> MixedHostTrialGroup<'a> {
         hosts: &'a mut [MixedSignalHost],
         time: Value,
         dt: Value,
-        integration: rspice_veriloga::vm::IntegrationCoefficients,
+        integration: VerilogACompanionRules,
         analysis_step: Option<(bool, bool)>,
         probe: bool,
     ) -> Result<Self, SimulationError> {
@@ -123,11 +114,15 @@ impl<'a> MixedHostTrialGroup<'a> {
         };
         for host in group.hosts.iter_mut() {
             let (initial, final_step) = analysis_step.unwrap_or_else(|| host.analysis_step());
-            let started = if probe {
-                host.begin_probe_trial(time, dt, integration, initial, final_step)
-            } else {
-                host.begin_trial(time, dt, integration, initial, final_step)
-            };
+            let started = host.begin_trial_with_integration_rules(
+                time,
+                dt,
+                integration.derivative,
+                integration.state,
+                initial,
+                final_step,
+                probe,
+            );
             named(host, started)?;
         }
         Ok(group)
@@ -559,7 +554,7 @@ impl CircuitData {
         if self.mixed_signal_hosts.is_empty() {
             return Ok(());
         }
-        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let integration = mixed_integration_coefficients(time, dt, companion)?;
         let bindings = self.mixed_xspice_bindings.clone();
         self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
             let mut digital = coordinator.begin_trial(time, true).map_err(shared_error)?;
@@ -644,7 +639,7 @@ impl CircuitData {
             Option<&[Value]>,
         ) -> Result<T, SimulationError>,
     ) -> Result<(bool, T), SimulationError> {
-        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let integration = mixed_integration_coefficients(time, dt, companion)?;
         let bindings = self.mixed_xspice_bindings.clone();
         if bindings.is_some() && resources.is_none() {
             return Err(SimulationError::Circuit(
@@ -744,7 +739,14 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<bool, SimulationError> {
-        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
+        let integration = mixed_integration_coefficients(
+            time,
+            dt,
+            XspiceCompanionPolicy {
+                coefficients,
+                xyce_one_step_order2: false,
+            },
+        )?;
         self.validate_nonmixed_model_acceptance()
             .map_err(SimulationError::Circuit)?;
         let mut discontinuity = self.veriloga_discontinuity_rising();
@@ -818,7 +820,7 @@ impl CircuitData {
         if boundary_root.is_some() {
             return Ok((boundary_root, false));
         }
-        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let integration = mixed_integration_coefficients(time, dt, companion)?;
         let bindings = self.mixed_xspice_bindings.clone();
         self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
             let mut refinement: Option<Value> = None;

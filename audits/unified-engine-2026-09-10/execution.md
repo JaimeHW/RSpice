@@ -1958,6 +1958,44 @@ handoff, whole-equation F/Q capability proof and weighted mixed assembly still
 need completion before enabling the guarded OneStep path. Other MS08 analyses,
 the remaining MS00–MS15 packages and vendor/platform qualification remain open.
 
+## Circuit policy handoff for both companion families
+
+One core conversion now supplies the derivative/internal-state pair to both
+runtime Verilog-A instances and mixed Verilog-AMS hosts. An ordinary companion
+keeps its selected method and histories. The OneStep2 policy selects doubled
+backward Euler for DDT and full trapezoidal integration for internal states;
+the zero-interval origin stays inactive. Runtime residual assembly and portless
+candidate setup pass the equation policy, while mixed stamping, task inspection
+and the all-owner acceptance barrier use the same conversion.
+
+Mixed trial inputs now retain both rules, including the pair restored after a
+probe or refusal. Both rules validate before timestep setup can promote an
+operating-point candidate or invalidate retained state. The existing public
+single-rule host/device entry points remain compatible.
+
+The existing acceptance fixture now covers ordinary BE and the distinct-rule
+policy, each with checkpoint replay. At two one-nanosecond steps its mixed probe
+checks the DDT current/Jacobian, IDT slope and digital-dependent conductance,
+then verifies that rollback restores the digital value before acceptance.
+Accepted runtime and mixed static histories follow IDT values 6 and 9 under BE,
+and 5 and 7.5 under the distinct rule. Native resistor loading, DAC loading and
+both scheduled digital transitions are checked at the same barrier. The existing
+probe-diagnostics fixture additionally rejects an invalid second rule without
+changing its time, rules, accepted analog checkpoint or trial state.
+
+Both focused cases passed in 0.01 seconds after a 1m22s build. The initial build
+caught a test using a typed CSC index as a slice offset; the fixture now reads
+its explicit diagnostic offset. Logs: target/unified-mixed-fixes/
+distinct-integration-policy.log and distinct-integration-policy-final.log.
+These are core-only changes, so the built-in generator inputs/digest are
+unchanged. No broad suite or unrelated deck rerun was performed.
+
+This closes the solver-policy handoff prerequisite, not the full F/Q path.
+The runtime/mixed OneStep eligibility guard remains closed until the compiler
+proves the complete equation split and mixed stamps receive the external weight.
+The remaining MS08 and MS00–MS15 work and reference/platform qualification
+remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -1966,9 +2004,10 @@ and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
 dependencies and feedback convergence. Close the recorded mixed real/integer
-comparison refusal under MS06. Connect the distinct derivative/state rules to
-the solver policy and qualify the complete weighted F/Q integration path; the
-settled mixed static-history capture prerequisite is implemented.
+comparison refusal under MS06. Prove the complete F/Q equation split and
+apply the external weight to mixed stamps before qualifying that integration
+path; settled mixed static-history capture and companion-policy handoff are
+implemented.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

@@ -1656,10 +1656,13 @@ impl Engine {
             #[cfg(feature = "veriloga")]
             if circuit.has_veriloga_devices() {
                 circuit
-                    .prepare_veriloga_timepoint(
+                    .prepare_veriloga_timepoint_with_policy(
                         time,
                         dt,
-                        &companion_coeff,
+                        XspiceCompanionPolicy {
+                            coefficients: &companion_coeff,
+                            xyce_one_step_order2: ctx.xyce_one_step_order2,
+                        },
                         ctx.analysis_initial_step,
                         ctx.analysis_final_step,
                     )
