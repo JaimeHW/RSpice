@@ -416,6 +416,17 @@ pub(super) fn gmres_with_abort(
             for (j, y_j) in y.iter().enumerate().take(k).skip(i + 1) {
                 sum -= hessenberg[j][i] * y_j;
             }
+            if hessenberg[i][i] == ZERO {
+                // Arnoldi can break down on an inconsistent singular system.
+                // Keep the last finite iterate: dividing by this zero pivot
+                // would turn ordinary stagnation into a non-finite candidate.
+                return Ok(GmresOutcome {
+                    solution: x,
+                    iterations: total_iterations,
+                    relative_residual: beta / b_norm,
+                    converged: false,
+                });
+            }
             y[i] = sum / hessenberg[i][i];
         }
 
@@ -699,6 +710,22 @@ mod tests {
                 (got - want).norm() <= 1e-8 * scale.max(1.0),
                 "GMRES vs direct: {got} vs {want}"
             );
+        }
+    }
+
+    #[test]
+    fn singular_krylov_breakdown_preserves_a_finite_unconverged_iterate() {
+        let matrix = vec![vec![ZERO; 2]; 2];
+        let precond = BlockJacobiPreconditioner::build(&matrix, 2, 1);
+        for rhs in [
+            vec![Complex64::new(1.0, 0.0), ZERO],
+            vec![Complex64::new(1.0, -2.0), Complex64::new(3.0, 4.0)],
+        ] {
+            let outcome = gmres(&matvec_of(&matrix), &precond, &rhs, 8, 4);
+            assert!(!outcome.converged);
+            assert_eq!(outcome.iterations, 1);
+            assert_eq!(outcome.relative_residual, 1.0);
+            assert!(outcome.solution.iter().all(|&value| value == ZERO));
         }
     }
 
