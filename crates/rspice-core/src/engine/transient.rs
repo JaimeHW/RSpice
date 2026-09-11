@@ -1899,6 +1899,7 @@ impl Engine {
                             solution,
                             &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
+                            Some(&bjt_history.accepted_external_bc_current),
                             Some([
                                 &jfet_history.accepted_cqgs,
                                 &jfet_history.accepted_cqgd,
@@ -5053,6 +5054,7 @@ impl Engine {
                             &solution,
                             &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
+                            Some(&bjt_history.accepted_external_bc_current),
                             Some([
                                 &jfet_history.accepted_cqgs,
                                 &jfet_history.accepted_cqgd,
@@ -11243,7 +11245,7 @@ D1 D 0 DMOD
         let mut bjt = crate::device::Bjt::new_npn("QBAD".into(), 1, 2, 3);
         bjt.externalize_legacy_base_lead(4, 10.0);
         let error = bjt
-            .authored_transient_lead_currents(&[0.0; 2], [0.0; 4])
+            .authored_transient_lead_currents(&[0.0; 2], [0.0; 4], 0.0)
             .expect_err("out-of-range internal lead node must fail closed");
         assert!(
             error.contains("QBAD") && error.contains("node 4"),

@@ -285,6 +285,15 @@ impl Engine {
             let b = bjt.node_base;
             let e = bjt.node_emitter;
             let s = bjt.node_substrate;
+            if let Some(nodes) = bjt.legacy_external_bc_charge_nodes() {
+                for row in nodes {
+                    for col in nodes {
+                        if row > 0 && col > 0 {
+                            triplets.push((row - 1, col - 1, 0.0));
+                        }
+                    }
+                }
+            }
             for &row in &[c, b, e, s] {
                 for &col in &[c, b, e, s] {
                     if row > 0 && col > 0 {

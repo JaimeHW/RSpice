@@ -439,6 +439,13 @@ pub(crate) struct BjtChargeSnapshot {
     pub branches: [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
 }
 
+pub(crate) struct BjtExternalBcCharge {
+    pub nodes: [NodeId; 2],
+    pub voltage: Value,
+    pub charge: Value,
+    pub capacitance: Value,
+}
+
 pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v2";
 const VBIC_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "promoted-vbic-v4";
 const VBIC_DELAY_BRANCH_COUNT: usize = 4;
@@ -642,6 +649,9 @@ struct LegacyTemperatureParameters {
     junction_coefficients: [[Value; 2]; 3],
     grading_coefficients: [[Value; 2]; 3],
     nominal_grading: [Value; 3],
+    linear_coefficients: [Option<[Value; 2]>; 10],
+    nominal_early: [Value; 2],
+    nominal_transit: [Value; 3],
 }
 
 #[derive(Debug, Clone, Default)]

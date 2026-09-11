@@ -215,6 +215,8 @@ pub(in crate::engine) struct BjtTransientHistory {
     pub(super) charge_q_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
     pub(super) charge_q_prev_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
     pub(super) charge_cq_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
+    /// Accepted external BC displacement current survives integration resets.
+    pub(super) accepted_external_bc_current: Vec<Value>,
     /// Accepted total terminal currents for legacy native BJTs, in C/B/E/S
     /// order. `None` preserves the ordinary static operating-point report for
     /// device families whose transient lead-current projection is not owned
@@ -531,6 +533,10 @@ impl Engine {
                 ("charge_q_prev_prev_prev", bjt.charge_q_prev_prev_prev.len()),
                 ("charge_cq_prev", bjt.charge_cq_prev.len()),
                 (
+                    "accepted_external_bc_current",
+                    bjt.accepted_external_bc_current.len(),
+                ),
+                (
                     "accepted_terminal_currents",
                     bjt.accepted_terminal_currents.len(),
                 ),
@@ -556,6 +562,10 @@ impl Engine {
             ("bjt.vcs_prev", bjt.vcs_prev.as_slice()),
             ("bjt.vcs_prev_prev", bjt.vcs_prev_prev.as_slice()),
             ("bjt.ics_prev", bjt.ics_prev.as_slice()),
+            (
+                "bjt.accepted_external_bc_current",
+                bjt.accepted_external_bc_current.as_slice(),
+            ),
         ] {
             validate_history_finite_values(field, values.iter().copied())?;
         }
@@ -1028,6 +1038,7 @@ D1 b 0 DM
             charge_q_prev_prev: vec![std::array::from_fn(|index| 30.0 + index as Value)],
             charge_q_prev_prev_prev: vec![std::array::from_fn(|index| 50.0 + index as Value)],
             charge_cq_prev: vec![std::array::from_fn(|index| 70.0 + index as Value)],
+            accepted_external_bc_current: vec![89.0],
             accepted_terminal_currents: vec![Some(std::array::from_fn(|index| {
                 90.0 + index as Value
             }))],

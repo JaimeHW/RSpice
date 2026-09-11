@@ -323,6 +323,7 @@ impl Engine {
             charge_q_prev_prev: Vec::with_capacity(n),
             charge_q_prev_prev_prev: Vec::with_capacity(n),
             charge_cq_prev: Vec::with_capacity(n),
+            accepted_external_bc_current: vec![0.0; n],
             accepted_terminal_currents: Vec::with_capacity(n),
             dynamic_internal_prev: Vec::with_capacity(n),
             dynamic_internal_prev_prev: Vec::with_capacity(n),
@@ -353,12 +354,17 @@ impl Engine {
             } else {
                 bjt.transient_initial_condition().unwrap_or((None, None))
             };
+            let external_base_seed = bjt
+                .legacy_external_bc_charge_nodes()
+                .map_or((0, 0, None), |nodes| (nodes[0], bjt.node_emitter, ic_vbe));
             let seeded = Self::seeded_device_solution(
                 solution,
                 seed,
                 &[
                     (bjt.node_base, bjt.node_emitter, ic_vbe),
                     (bjt.node_collector, bjt.node_emitter, ic_vce),
+                    // MODEUIC seeds vbx=IC(VBE)-IC(VCE), before RBM too.
+                    external_base_seed,
                 ],
             );
             let solution = seeded.as_ref();
@@ -423,6 +429,9 @@ impl Engine {
             charge_values[BJT_QBE_BRANCH_INDEX] = charges.qbe;
             charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
             charge_values[BJT_QBCX_BRANCH_INDEX] = charges.qbx;
+            if let Some(charge) = bjt.legacy_external_bc_charge(solution) {
+                charge_values[BJT_QBCX_BRANCH_INDEX] = charge.charge;
+            }
             charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
             let predictor_linear = Self::bjt_predictor_linear_branch_state(
                 bjt,
@@ -924,6 +933,34 @@ impl Engine {
 
             if charge_factor <= 0.0 {
                 continue;
+            }
+            if let Some(charge) = bjt.legacy_external_bc_charge(voltages) {
+                let current = Self::jfet_companion_ccap(
+                    coeff,
+                    dt,
+                    charge.charge,
+                    BranchChargeHistory {
+                        q_prev: history.charge_q_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                        q_prev_prev: history.charge_q_prev_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                        cq_prev: history.charge_cq_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                    },
+                );
+                let conductance = charge_factor * charge.capacitance;
+                let source = conductance * charge.voltage - current;
+                if !conductance.is_finite() || !source.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "BJT '{}' has a nonfinite external BC companion",
+                        bjt.name
+                    )));
+                }
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    charge.nodes[0],
+                    charge.nodes[1],
+                    conductance,
+                    source,
+                );
             }
             // Schur elimination must follow the OneStep static/history split.
             // The private equations are half a trapezoidal companion; reducing
@@ -2114,6 +2151,7 @@ mod tests {
             charge_q_prev_prev: vec![[-4.0; BJT_DYNAMIC_CHARGE_COUNT]],
             charge_q_prev_prev_prev: vec![[-5.0; BJT_DYNAMIC_CHARGE_COUNT]],
             charge_cq_prev: vec![[104.0; BJT_DYNAMIC_CHARGE_COUNT]],
+            accepted_external_bc_current: vec![107.0],
             accepted_terminal_currents: vec![Some(accepted_terminal)],
             dynamic_internal_prev: vec![accepted_internal],
             dynamic_internal_prev_prev: vec![[-6.0; BJT_INTERNAL_STATE_DIM]],
@@ -2157,6 +2195,7 @@ mod tests {
             bjt_history.dynamic_internal_prev_prev,
             bjt_history.dynamic_internal_prev
         );
+        assert_eq!(bjt_history.accepted_external_bc_current, vec![107.0]);
         assert_eq!(bjt_history.dynamic_linear_prev[0].vrcx, 41.0);
         assert_eq!(bjt_history.dynamic_linear_prev_prev[0].vrcx, 41.0);
         assert_eq!(bjt_history.dynamic_linear_prev_prev[0].vrs, 47.0);

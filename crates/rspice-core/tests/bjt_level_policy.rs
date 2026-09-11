@@ -3954,6 +3954,454 @@ fn legacy_junction_areas_match_ngspice_currents_and_stored_charge() {
 }
 
 #[test]
+fn legacy_transport_temperature_controls_match_ngspice_and_equivalent_models() {
+    // Independently measured ngspice 46 DC/AC data, including IRB, AREA/M,
+    // both Early effects, both high-current knees and all transit terms.
+    let parameters = [
+        ("VAF", 40.0, "TVAF1", 0.002, "TVAF2", 1e-05),
+        ("VAR", 15.0, "TVAR1", -0.001, "TVAR2", 2e-05),
+        ("IKF", 0.002, "TIKF1", 0.003, "TIKF2", 2e-05),
+        ("IKR", 0.003, "TIKR1", -0.002, "TIKR2", 1e-05),
+        ("IRB", 1e-05, "TIRB1", 0.004, "TIRB2", 1e-05),
+        ("TF", 2e-09, "TTF1", 0.005, "TTF2", -1e-05),
+        ("TR", 3e-09, "TTR1", -0.003, "TTR2", 2e-05),
+        ("ITF", 0.0005, "TITF1", 0.002, "TITF2", 3e-05),
+        ("RC", 8.0, "TRC1", 0.003, "TRC2", 2e-05),
+        ("RE", 3.0, "TRE1", -0.001, "TRE2", 1e-05),
+    ];
+    let config = SimulationConfig {
+        spice_dialect: SpiceDialect::Ngspice,
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            voltage_reltol: 1e-10,
+            voltage_abstol: 1e-12,
+            current_abstol: 1e-18,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let engine = Engine::new(config.clone());
+    for (temperature, vc, dc_reference, ac_reference) in [
+        (
+            -40.0,
+            1.0,
+            [
+                -1.3503851267415712e-05,
+                -1.738607070256304e-07,
+                1.3677711974472674e-05,
+            ],
+            [
+                [-0.0005357174275035237, 1.1739495899857801e-05],
+                [-7.23911367254191e-06, -0.00015406705145988282],
+                [0.000542959163483292, 8.589855355657624e-05],
+            ],
+        ),
+        (
+            27.0,
+            1.0,
+            [
+                -0.003360575118428022,
+                -5.6129418738205816e-05,
+                0.003416704537166235,
+            ],
+            [
+                [-0.07823013540264195, 0.0030095050813166717],
+                [-0.0016981378707962079, -0.002428060364399574],
+                [0.0799290296445625, -0.0006183320071880909],
+            ],
+        ),
+        (
+            70.0,
+            1.0,
+            [
+                -0.018087233404887493,
+                -0.0005484493185713563,
+                0.018635682723458814,
+            ],
+            [
+                [-0.22970250378263787, 0.024084042476336234],
+                [-0.012119262435395909, -0.00952795367967403],
+                [0.24182882387173937, -0.014545324814211277],
+            ],
+        ),
+        (
+            70.0,
+            0.2,
+            [
+                -0.01735061496240968,
+                -0.0006553152103060955,
+                0.01800593017271576,
+            ],
+            [
+                [-0.21180005567077803, 0.022484544062144753],
+                [-0.015344926111985483, -0.009688793514697164],
+                [0.22715157071507736, -0.012790232747375665],
+            ],
+        ),
+    ] {
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let mut controls = String::new();
+            let mut mapped = String::new();
+            let dt = temperature - 27.0;
+            for (name, value, first, c1, second, c2) in parameters {
+                // Exercise native RC/RE coefficient aliases and a scoped
+                // expression, without changing any other token's spelling.
+                let first = match first {
+                    "TRC1" => "TRC",
+                    "TRE1" => "TRE",
+                    _ => first,
+                };
+                let coefficient = if first == "TIKF1" {
+                    "{knee_tc}".to_string()
+                } else {
+                    c1.to_string()
+                };
+                controls.push_str(&format!(
+                    " {name}={value} {first}={coefficient} {second}={c2}"
+                ));
+                mapped.push_str(&format!(
+                    " {name}={}",
+                    value * (1.0 + c1 * dt + c2 * dt * dt)
+                ));
+            }
+            let make = |fields: &str| {
+                format!(
+                    "GP transport temperature\n.param knee_tc=9\nVC c 0 {} AC .3\nVB b 0 {} AC 1\nVE e 0 0 AC .2\nX1 c b e cell knee_tc=.003\n.subckt cell c b e knee_tc=7\nQ1 c b e 0 qm AREA=2 M=3\n.model qm {kind}(IS=1e-14 BF=80 BR=3 SUBS=1 RB=120 RBM=20 CJE=2p CJC=3p CJS=5p XCJC=.35 XTF=2 VTF=5 {fields})\n.ends\n.temp {temperature}\n.end",
+                    polarity * vc,
+                    polarity * 0.65
+                )
+            };
+            let actual_text = make(&controls);
+            let mapped_text = make(&mapped);
+            let actual_deck = Netlist::parse(&actual_text).unwrap();
+            let mapped_deck = Netlist::parse(&mapped_text).unwrap();
+            let actual_dc = engine.run_dc_op(&actual_deck).unwrap();
+            let mapped_dc = engine.run_dc_op(&mapped_deck).unwrap();
+            let actual_ac = engine.run_ac(&actual_deck, &[1e6]).unwrap();
+            let mapped_ac = engine.run_ac(&mapped_deck, &[1e6]).unwrap();
+            for (index, name) in ["VC", "VB", "VE"].into_iter().enumerate() {
+                let actual = actual_dc.branch_current_named(name).unwrap();
+                let equivalent = mapped_dc.branch_current_named(name).unwrap();
+                assert!((actual - equivalent).abs() <= equivalent.abs() * 1e-9 + 1e-16);
+                let reference = polarity * dc_reference[index];
+                // The independent simulator uses older k/q constants.
+                assert!(
+                    (actual - reference).abs() < reference.abs() * 3e-5,
+                    "{kind} T={temperature} VC={vc} DC {name}: {actual:e} vs {reference:e}"
+                );
+                let column = actual_ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case(name))
+                    .unwrap();
+                let actual = actual_ac[0].currents[column];
+                let equivalent = mapped_ac[0].currents[column];
+                assert!((actual - equivalent).norm() <= equivalent.norm() * 1e-9 + 1e-16);
+                let reference =
+                    rspice_core::Complex64::new(ac_reference[index][0], ac_reference[index][1]);
+                assert!(
+                    (actual - reference).norm() < reference.norm() * 3e-5,
+                    "{kind} T={temperature} VC={vc} AC {name}: {actual:?} vs {reference:?}"
+                );
+            }
+            if temperature == 70.0 && vc == 0.2 {
+                let mut config = config.clone();
+                config.integration_method =
+                    rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
+                config.locked_time_grid = Some(std::sync::Arc::new(
+                    (0..=20).map(|i| f64::from(i) * 1e-9).collect(),
+                ));
+                let engine = Engine::new(config);
+                let ramp = |text: &str| {
+                    Netlist::parse(&text.replace(
+                        &format!("VB b 0 {} AC 1", polarity * 0.65),
+                        &format!("VB b 0 PWL(0 {} 20n {})", polarity * 0.65, polarity * 0.67),
+                    ))
+                    .unwrap()
+                };
+                let actual = engine.run_tran(&ramp(&actual_text), 20e-9, 1e-9).unwrap();
+                let mapped = engine.run_tran(&ramp(&mapped_text), 20e-9, 1e-9).unwrap();
+                assert_eq!(actual.time, mapped.time);
+                for name in ["VC", "VB", "VE"] {
+                    let a = actual.try_branch_current_waveform_named(name).unwrap();
+                    let b = mapped.try_branch_current_waveform_named(name).unwrap();
+                    for (a, b) in a.iter().zip(b) {
+                        assert!((a - b).abs() <= b.abs() * 1e-8 + 1e-14);
+                    }
+                }
+            }
+        }
+    }
+    // The IRB fix also applies without temperature coefficients, under both
+    // dialects. Parallel copies must leave internal bias and knee ratios fixed.
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(config.clone().with_spice_dialect(dialect));
+        let deck = |m: f64| {
+            Netlist::parse(&format!("IRB multiplicity\nVC c 0 1\nVB b 0 .68 AC 1\nQ1 c b 0 qm AREA=2 M={m}\n.model qm NPN(IS=1e-14 BF=80 RB=120 RBM=20 IRB=1e-5)\n.end")).unwrap()
+        };
+        let unit = engine.run_ac(&deck(1.0), &[1e6]).unwrap();
+        let parallel = engine.run_ac(&deck(4.0), &[1e6]).unwrap();
+        for (one, four) in unit[0].currents.iter().zip(&parallel[0].currents) {
+            assert!((four - one * 4.0).norm() <= one.norm() * 4e-9 + 1e-15);
+        }
+    }
+}
+
+#[test]
+fn legacy_external_bc_charge_matches_capacitor_terminals_and_checkpoint_history() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+        ] {
+            let config = SimulationConfig {
+                spice_dialect: dialect,
+                integration_method: method,
+                convergence_config: ConvergenceConfig {
+                    gmin_target: 0.0,
+                    junction_gmin_target: 0.0,
+                    voltage_reltol: 1e-10,
+                    voltage_abstol: 1e-12,
+                    current_abstol: 1e-18,
+                    ..Default::default()
+                },
+                locked_time_grid: Some(std::sync::Arc::new(
+                    (0..=20).map(|i| f64::from(i) * 5e-9).collect(),
+                )),
+                ..Default::default()
+            };
+            let engine = Engine::new(config);
+            for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+                for rc in [0.0, 100.0] {
+                    let sources = format!(
+                        "External BC storage\nVC c 0 0\nVB b 0 PWL(0 0 100n {}) AC 1\n",
+                        p * 0.1
+                    );
+                    // Both branches share one order/timestep controller. Ngspice
+                    // applies different truncation coverage to C1 and BJT XCJC.
+                    let equivalent = if rc == 0.0 {
+                        "C1 br cr 6n".into()
+                    } else {
+                        format!("C1 br ci 6n\nR1 ci cr {}", rc / 6.0)
+                    };
+                    let actual = Netlist::parse(&format!("{sources}Q1 c b 0 qm AREA=3 M=2\n.model qm {kind}(IS=0 RB=50 RC={rc} CJC=1n MJC=0 XCJC=0)\nVCref cr 0 0\nVBref br 0 PWL(0 0 100n {}) AC 1\n{equivalent}\n.save @Q1[ib] @Q1[ic] I(VB) I(VC) I(VBref) I(VCref)\n.end", p * 0.1)).unwrap();
+                    let ac = engine.run_ac(&actual, &[1e6]).unwrap();
+                    let current = |name: &str| {
+                        ac[0].currents[ac[0]
+                            .branch_names
+                            .iter()
+                            .position(|n| n.eq_ignore_ascii_case(name))
+                            .unwrap()]
+                    };
+                    for (name, reference) in [("VB", "VBref"), ("VC", "VCref")] {
+                        let a = current(name);
+                        let b = current(reference);
+                        assert!((a - b).norm() < b.norm() * 1e-11);
+                    }
+                    let check_resume = dialect == SpiceDialect::Ngspice
+                        && method == IntegrationMethod::BackwardEuler
+                        && p == 1.0
+                        && rc == 100.0;
+                    let (a, scheduled) = if check_resume {
+                        engine
+                            .run_tran_checkpoint_schedule_with_startup_mode(
+                                &actual,
+                                100e-9,
+                                5e-9,
+                                TransientStartupMode::OperatingPoint,
+                                &[50e-9],
+                            )
+                            .unwrap()
+                    } else {
+                        (engine.run_tran(&actual, 100e-9, 5e-9).unwrap(), Vec::new())
+                    };
+                    for (source, reference, parameter) in
+                        [("VB", "VBref", "IB"), ("VC", "VCref", "IC")]
+                    {
+                        let actual = a.try_branch_current_waveform_named(source).unwrap();
+                        let expected = a.try_branch_current_waveform_named(reference).unwrap();
+                        let device = a.try_device_op_waveform_named("Q1", parameter).unwrap();
+                        for ((actual, expected), device) in actual.iter().zip(expected).zip(device)
+                        {
+                            assert!(
+                                (actual - expected).abs() < expected.abs() * 1e-8 + 1e-13,
+                                "{dialect:?} {method:?} {kind} RC={rc} {source}: {actual:e} vs {expected:e}"
+                            );
+                            assert!(
+                                (device + actual).abs() < actual.abs() * 1e-8 + 1e-13,
+                                "{dialect:?} {method:?} {kind} RC={rc} {parameter}: {device:e} vs source {actual:e}"
+                            );
+                        }
+                    }
+                    if check_resume {
+                        let checkpoint = &scheduled[0].checkpoint;
+                        let checkpoint = TransientCheckpoint::from_bytes(
+                            &checkpoint
+                                .to_bytes(TransientCheckpointEncoding::Packed)
+                                .unwrap(),
+                        )
+                        .unwrap();
+                        let (resumed, _) = engine
+                            .run_tran_resume(&actual, &checkpoint, 100e-9, 5e-9)
+                            .unwrap();
+                        let seam = a.time.iter().position(|t| *t == resumed.time[0]).unwrap();
+                        assert_eq!(resumed.time, a.time[seam..]);
+                        for parameter in ["IB", "IC"] {
+                            let continued = resumed
+                                .try_device_op_waveform_named("Q1", parameter)
+                                .unwrap();
+                            let full = a.try_device_op_waveform_named("Q1", parameter).unwrap();
+                            assert_eq!(continued, &full[seam..]);
+                        }
+                        // Terminal checkpoints deliberately reset integration order,
+                        // but must preserve the accepted current at the seam exactly.
+                        let (prefix, checkpoint) =
+                            engine.run_tran_checkpointed(&actual, 50e-9, 5e-9).unwrap();
+                        let checkpoint = TransientCheckpoint::from_bytes(
+                            &checkpoint
+                                .to_bytes(TransientCheckpointEncoding::Packed)
+                                .unwrap(),
+                        )
+                        .unwrap();
+                        let (resumed, _) = engine
+                            .run_tran_resume(&actual, &checkpoint, 100e-9, 5e-9)
+                            .unwrap();
+                        for parameter in ["IB", "IC"] {
+                            assert_eq!(
+                                resumed
+                                    .try_device_op_waveform_named("Q1", parameter)
+                                    .unwrap()[0],
+                                *prefix
+                                    .try_device_op_waveform_named("Q1", parameter)
+                                    .unwrap()
+                                    .last()
+                                    .unwrap(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            integration_method: IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(vec![0.0, 5e-9, 10e-9])),
+            ..Default::default()
+        });
+        let netlist = Netlist::parse(&format!(
+            "External BC initial charge\nVB b 0 0\nVC c 0 0\nQ1 c b 0 qm AREA=3 M=2 IC={},0\n.model qm {kind}(IS=0 RB=50 CJC=1n MJC=0 XCJC=0)\n.save @Q1[ib] I(VB)\n.end", polarity * 0.2,
+        )).unwrap();
+        let result = engine
+            .run_tran_with_startup_mode(&netlist, 10e-9, 5e-9, TransientStartupMode::Uic)
+            .unwrap();
+        let current = result.try_branch_current_waveform_named("VB").unwrap()[1];
+        // C=6n, V(0)=+/-0.2, V(5ns)=0 => dQ/dt=-/+0.24 A.
+        assert!(
+            (current - polarity * 0.24).abs() < 1e-10,
+            "{kind} initial external BC charge: {current:e}"
+        );
+        assert!(
+            (result.try_device_op_waveform_named("Q1", "IB").unwrap()[1] + current).abs() < 1e-10
+        );
+    }
+}
+
+#[test]
+fn legacy_transport_temperature_controls_validate_domains() {
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let engine = Engine::new(config.clone());
+    for name in [
+        "TVAF1", "TVAF2", "TVAR1", "TVAR2", "TIKF1", "TIKF2", "TIKR1", "TIKR2", "TIRB1", "TIRB2",
+        "TTF1", "TTF2", "TTR1", "TTR2", "TITF1", "TITF2", "TRC1", "TRC2", "TRC", "TRE1", "TRE2",
+        "TRE",
+    ] {
+        let mut deck =
+            Netlist::parse("Invalid transport coefficient\nQ1 0 0 0 qm\n.model qm NPN\n.end")
+                .unwrap();
+        deck.models[0].params.push((name.into(), f64::NAN));
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+        for (dialect, family) in [
+            (SpiceDialect::Xyce, "LEVEL=1"),
+            (SpiceDialect::Ngspice, "TNF=0"),
+        ] {
+            let deck = Netlist::parse(&format!(
+                "Wrong transport family\nQ1 0 0 0 qm\n.model qm NPN({family} {name}=0)\n.end"
+            ))
+            .unwrap();
+            assert!(
+                Engine::new(config.clone().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+    }
+    for (name, field) in [
+        ("VAF", "TVAF1"),
+        ("VAR", "TVAR1"),
+        ("IKF", "TIKF1"),
+        ("IKR", "TIKR1"),
+        ("IRB", "TIRB1"),
+        ("TF", "TTF1"),
+        ("TR", "TTR1"),
+        ("ITF", "TITF1"),
+        ("RC", "TRC1"),
+        ("RE", "TRE1"),
+    ] {
+        for coefficient in [-2.0, 1e308] {
+            let deck = Netlist::parse(&format!("Invalid mapped transport\nQ1 0 0 0 qm TEMP=29\n.model qm NPN({name}=1 {field}={coefficient})\n.end")).unwrap();
+            assert!(
+                engine
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(field)
+            );
+        }
+        let deck = Netlist::parse(&format!(
+            "Invalid nominal transport\nQ1 0 0 0 qm\n.model qm NPN({name}=-1 {field}=0)\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+    }
+    for name in ["VAF", "VAR", "IKF", "IKR"] {
+        let coefficient = format!("T{name}1");
+        let deck = Netlist::parse(&format!("Zero inverse parameter\nQ1 0 0 0 qm TEMP=28\n.model qm NPN({name}=1 {coefficient}=-1)\n.end")).unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(&coefficient)
+        );
+    }
+    // Omitted/explicit-zero mechanisms remain disabled, even if a coefficient
+    // would be outside its domain for a nonzero nominal value.
+    let deck = Netlist::parse("Disabled mechanisms\nQ1 0 0 0 qm TEMP=29\n.model qm NPN(TVAF1=-1 TVAR1=-1 TIKF1=-1 TIKR1=-1 TIRB1=-1 TTF1=-1 TTR1=-1 TITF1=-1 TRC=-1 TRE=-1)\n.end").unwrap();
+    engine.run_dc_op(&deck).unwrap();
+}
+
+#[test]
 fn legacy_capacitance_temperature_controls_match_ngspice_and_stored_charge() {
     // Independent ngspice 46 AC measurements, with all twelve CT/TVJ/TMJ
     // coefficients active. TLEVC=0 deliberately ignores the CT/TVJ values.

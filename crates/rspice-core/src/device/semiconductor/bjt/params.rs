@@ -31,6 +31,19 @@ impl Bjt {
         [["CTE", "TVJE"], ["CTC", "TVJC"], ["CTS", "TVJS"]];
     pub(crate) const LEGACY_GRADING_TEMPERATURE_PARAMS: [[&str; 2]; 3] =
         [["TMJE1", "TMJE2"], ["TMJC1", "TMJC2"], ["TMJS1", "TMJS2"]];
+    // Early voltages, current knees, transit times/knee, collector/emitter R.
+    pub(crate) const LEGACY_LINEAR_TEMPERATURE_PARAMS: [[&str; 2]; 10] = [
+        ["TVAF1", "TVAF2"],
+        ["TVAR1", "TVAR2"],
+        ["TIKF1", "TIKF2"],
+        ["TIKR1", "TIKR2"],
+        ["TIRB1", "TIRB2"],
+        ["TTF1", "TTF2"],
+        ["TTR1", "TTR2"],
+        ["TITF1", "TITF2"],
+        ["TRC1", "TRC2"],
+        ["TRE1", "TRE2"],
+    ];
 
     pub(crate) fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
         Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
@@ -39,9 +52,10 @@ impl Bjt {
             .chain(Self::LEGACY_CURRENT_TEMPERATURE_PARAMS.iter())
             .chain(Self::LEGACY_JUNCTION_TEMPERATURE_PARAMS.iter())
             .chain(Self::LEGACY_GRADING_TEMPERATURE_PARAMS.iter())
+            .chain(Self::LEGACY_LINEAR_TEMPERATURE_PARAMS.iter())
             .flatten()
             .copied()
-            .chain(["TLEV", "TLEVC"])
+            .chain(["TLEV", "TLEVC", "TRC", "TRE"])
     }
 
     #[inline]
@@ -61,6 +75,36 @@ impl Bjt {
             return Ok(());
         }
         let delta_t = self.temperature - self.tnom.max(1.0);
+        for (index, (value, nominal)) in [
+            (self.vaf, mapping.nominal_early[0]),
+            (self.var, mapping.nominal_early[1]),
+            (self.ikf, self.ikf_nominal),
+            (self.ikr, self.ikr_nominal),
+            (self.irb, self.irb_nominal),
+            (self.tf, mapping.nominal_transit[0]),
+            (self.tr, mapping.nominal_transit[1]),
+            (self.itf, mapping.nominal_transit[2]),
+            (self.rcx, self.rcx_nominal),
+            (self.re, self.re_nominal),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // An omitted Early voltage is the disabled infinite limit.
+            if index < 2 && nominal == Value::INFINITY {
+                continue;
+            }
+            let positive = index < 4 && nominal > 0.0;
+            if !value.is_finite() || value < 0.0 || (positive && value == 0.0) {
+                let [first, second] = Self::LEGACY_LINEAR_TEMPERATURE_PARAMS[index];
+                return Err(format!(
+                    "BJT '{}': {first}/{second} at {} K must yield a finite {} operating parameter, got {value}",
+                    self.name,
+                    self.temperature,
+                    if positive { "positive" } else { "nonnegative" }
+                ));
+            }
+        }
         for (index, (capacitance, potential, grading)) in [
             (self.cje, self.vje, self.mje),
             (self.cjc, self.vjc, self.mjc),
@@ -1225,9 +1269,17 @@ impl Bjt {
         self.re = re_temp.max(resistance_floor) / scale;
         self.rbx = rbx_temp.max(resistance_floor) / scale;
         self.rbi = rbi_temp.max(resistance_floor) / scale;
-        // Xyce's legacy GP model has no temperature coefficient for IRB
-        // (JRB/IOB are aliases), so retain the nominal current threshold.
-        self.irb = self.irb_nominal.max(0.0);
+        // Our base current already includes AREA*M. Both reference models
+        // scale IRB by AREA before applying M to their completed equations.
+        self.irb = if legacy_model {
+            crate::numerics::scaled_exp_product(
+                &[self.irb_nominal.max(0.0), self.area, self.m],
+                &[],
+                0.0,
+            )
+        } else {
+            self.irb_nominal.max(0.0)
+        };
         self.rcx = rcx_temp.max(resistance_floor) / scale;
         self.rci = rci_temp.max(resistance_floor) / scale;
         self.vje = vje_temp;
@@ -1354,6 +1406,85 @@ impl Bjt {
         self.avcx2 = self.avcx2_nominal * (1.0 + delta_t * self.tavcx);
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
+        self.refresh_legacy_linear_temperature(delta_t);
+    }
+
+    fn refresh_legacy_linear_temperature(&mut self, delta_t: Value) {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon || self.xyce_compatibility {
+            return;
+        }
+        let Some(mapping) = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|j| j.temperature_parameters.as_ref())
+        else {
+            return;
+        };
+        let map = |index: usize,
+                   nominal: Value,
+                   fallback: Value,
+                   factors: [Value; 2],
+                   divisors: &[Value]| {
+            let Some(coefficients) = mapping.linear_coefficients[index] else {
+                return fallback;
+            };
+            let multiplier = 1.0 + Self::legacy_polynomial_delta(coefficients, delta_t);
+            // Include geometry before rounding, just as for saturation currents.
+            let factors = [nominal, multiplier, factors[0], factors[1]];
+            crate::numerics::scaled_exp_product(&factors, divisors, 0.0)
+        };
+        let early = |index: usize| {
+            let nominal = mapping.nominal_early[index];
+            if nominal == Value::INFINITY {
+                nominal
+            } else {
+                map(index, nominal, nominal, [1.0, 1.0], &[])
+            }
+        };
+        self.vaf = early(0);
+        self.var = early(1);
+        self.ikf = map(2, self.ikf_nominal, self.ikf, [self.area, self.m], &[]);
+        self.ikr = map(3, self.ikr_nominal, self.ikr, [self.area, self.m], &[]);
+        self.irb = map(4, self.irb_nominal, self.irb, [self.area, self.m], &[]);
+        // ITF is in model units: its evaluator applies AREA*M at the bias.
+        self.tf = map(
+            5,
+            mapping.nominal_transit[0],
+            mapping.nominal_transit[0],
+            [1.0, 1.0],
+            &[],
+        );
+        self.tr = map(
+            6,
+            mapping.nominal_transit[1],
+            mapping.nominal_transit[1],
+            [1.0, 1.0],
+            &[],
+        );
+        self.itf = map(
+            7,
+            mapping.nominal_transit[2],
+            mapping.nominal_transit[2],
+            [1.0, 1.0],
+            &[],
+        );
+        // Externalization clears these nominal fields. Reusing them here
+        // ensures a later refresh cannot resurrect a second series resistor.
+        self.rcx = map(
+            8,
+            self.rcx_nominal,
+            self.rcx,
+            [1.0, 1.0],
+            &[self.area, self.m],
+        );
+        self.re = map(
+            9,
+            self.re_nominal,
+            self.re,
+            [1.0, 1.0],
+            &[self.area, self.m],
+        );
+        self.rc = self.rcx + self.rci;
     }
     /// Set active device temperature (Kelvin).
     pub fn set_temperature(&mut self, temp_k: Value) {
@@ -2218,6 +2349,21 @@ impl Bjt {
                 grading_coefficients: Self::LEGACY_GRADING_TEMPERATURE_PARAMS
                     .map(|names| names.map(|name| params.get(name).copied().unwrap_or(0.0))),
                 nominal_grading: [self.mje, self.mjc, self.ms],
+                linear_coefficients: Self::LEGACY_LINEAR_TEMPERATURE_PARAMS.map(
+                    |[first, second]| {
+                        let alias = match first {
+                            "TRC1" => "TRC",
+                            "TRE1" => "TRE",
+                            _ => first,
+                        };
+                        let first = params.get(first).or_else(|| params.get(alias)).copied();
+                        let second = params.get(second).copied();
+                        (first.is_some() || second.is_some())
+                            .then(|| [first.unwrap_or(0.0), second.unwrap_or(0.0)])
+                    },
+                ),
+                nominal_early: [self.vaf, self.var],
+                nominal_transit: [self.tf, self.tr, self.itf],
                 beta_coefficients: Self::LEGACY_BETA_TEMPERATURE_PARAMS.map(|[first, second]| {
                     (params.contains_key(first) || params.contains_key(second)).then(|| {
                         [
@@ -2343,6 +2489,7 @@ impl Bjt {
         &self,
         solution: &[Value],
         intrinsic: [Value; 4],
+        external_bc_current: Value,
     ) -> Result<[Value; 4], String> {
         let node_voltage = |node: NodeId| {
             if node == 0 {
@@ -2365,7 +2512,7 @@ impl Bjt {
                 Ok(conductance * (node_voltage(external)? - node_voltage(internal)?))
             })
         };
-        Ok([
+        let mut currents = [
             mapped(
                 self.legacy_collector_lead,
                 self.node_collector,
@@ -2374,7 +2521,15 @@ impl Bjt {
             mapped(self.legacy_base_lead, self.node_base, intrinsic[1])?,
             mapped(self.legacy_emitter_lead, self.node_emitter, intrinsic[2])?,
             intrinsic[3],
-        ])
+        ];
+        if self.legacy_external_bc_charge_nodes().is_some() {
+            currents[1] += external_bc_current;
+            // RC's measured lead current already includes the direct charge.
+            if self.legacy_collector_lead.is_none() {
+                currents[0] -= external_bc_current;
+            }
+        }
+        Ok(currents)
     }
 
     /// Apply instance-level BJT scaling and thermal overrides.
@@ -2557,6 +2712,85 @@ mod tests {
                         assert!(((qr - ql) / 2e-9 - cl).abs() < cl * 2e-6);
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_transport_temperature_refresh_retains_nominals_and_externalized_resistors() {
+        let mut parameters = vec![
+            ("VAF", 40.0),
+            ("VAR", 15.0),
+            ("IKF", 2e-3),
+            ("IKR", 3e-3),
+            ("IRB", 1e-5),
+            ("TF", 2e-9),
+            ("TR", 3e-9),
+            ("ITF", 5e-4),
+            ("RC", 8.0),
+            ("RE", 3.0),
+        ];
+        for [first, second] in Bjt::LEGACY_LINEAR_TEMPERATURE_PARAMS {
+            parameters.extend([(first, 0.002), (second, 0.00001)]);
+        }
+        let mut model = model_with(&parameters)
+            .with_instance_params(&[("AREA".into(), 2.0), ("M".into(), 3.0)]);
+        for temperature in [233.15, 343.15, 300.15, 343.15] {
+            model.set_temperature(temperature);
+            model.validate_legacy_temperature_parameters().unwrap();
+            let dt = temperature - 300.15;
+            let factor = 1.0 + 0.002 * dt + 0.00001 * dt * dt;
+            for (actual, nominal) in [
+                (model.vaf, 40.0),
+                (model.var, 15.0),
+                (model.ikf, 12e-3),
+                (model.ikr, 18e-3),
+                (model.irb, 6e-5),
+                (model.tf, 2e-9),
+                (model.tr, 3e-9),
+                (model.itf, 5e-4),
+                (model.rcx, 8.0 / 6.0),
+                (model.re, 0.5),
+            ] {
+                assert!((actual / (nominal * factor) - 1.0).abs() < 2e-15);
+            }
+        }
+        model.clear_collector_series_resistance();
+        model.clear_emitter_series_resistance();
+        model.set_temperature(320.15);
+        assert_eq!((model.rcx, model.rc, model.re), (0.0, 0.0, 0.0));
+        model.validate_legacy_temperature_parameters().unwrap();
+
+        // Explicit zero polynomials override the older shared power-law
+        // extensions; omission retains those established extension semantics.
+        for explicit in [false, true] {
+            let mut parameters = vec![
+                ("LEVEL", 1.0),
+                ("IKF", 1.0),
+                ("RC", 2.0),
+                ("RE", 3.0),
+                ("XIKF", 2.0),
+                ("XRCX", 2.0),
+                ("XRE", 2.0),
+            ];
+            if explicit {
+                parameters.extend([("TIKF1", 0.0), ("TRC", 0.0), ("TRE2", 0.0)]);
+            }
+            let mut model = model_with(&parameters);
+            model.set_temperature(600.3);
+            let factor = if explicit { 1.0 } else { 4.0 };
+            assert_eq!(
+                (model.ikf, model.rcx, model.re),
+                (factor, 2.0 * factor, 3.0 * factor)
+            );
+        }
+        for xyce in [false, true] {
+            let mut model = model_with(&[("JRB", 1e-5)])
+                .with_instance_params(&[("AREA".into(), 2.0), ("M".into(), 3.0)]);
+            model.set_xyce_compatibility(xyce);
+            for temperature in [233.15, 343.15] {
+                model.set_temperature(temperature);
+                assert!((model.irb / 6e-5 - 1.0).abs() < 2e-15);
             }
         }
     }

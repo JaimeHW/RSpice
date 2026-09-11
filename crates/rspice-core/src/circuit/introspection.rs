@@ -873,6 +873,7 @@ impl CircuitData {
         solution: &[Value],
         accepted_diode_displacement_currents: &[Value],
         accepted_bjt_terminal_currents: &[Option<[Value; 4]>],
+        accepted_bjt_external_bc_currents: Option<&[Value]>,
         accepted_jfet_displacement_currents: Option<[&[Value]; 3]>,
         accepted_mosfet_displacement_currents: Option<&[[Value; 5]]>,
     ) -> Result<DeviceOpReport, String> {
@@ -936,16 +937,25 @@ impl CircuitData {
                 })?;
             id.1 = total_current;
         }
-        for (bjt, intrinsic) in self
+        if accepted_bjt_external_bc_currents
+            .is_some_and(|currents| currents.len() != self.bjts.devices.len())
+        {
+            return Err("accepted BJT charge current count mismatch".into());
+        }
+        for (index, (bjt, intrinsic)) in self
             .bjts
             .devices
             .iter()
             .zip(accepted_bjt_terminal_currents.iter())
+            .enumerate()
         {
             let Some(intrinsic) = intrinsic else {
                 continue;
             };
-            let authored = bjt.authored_transient_lead_currents(solution, *intrinsic)?;
+            let external_bc_current =
+                accepted_bjt_external_bc_currents.map_or(0.0, |currents| currents[index]);
+            let authored =
+                bjt.authored_transient_lead_currents(solution, *intrinsic, external_bc_current)?;
             let Some(entry) = report.entries.iter_mut().find(|entry| {
                 entry
                     .device_kind
@@ -990,6 +1000,7 @@ impl CircuitData {
             solution,
             &diode_displacement_currents,
             &currents,
+            None,
             None,
             None,
         )

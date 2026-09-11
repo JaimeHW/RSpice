@@ -1621,6 +1621,24 @@ impl Engine {
             Self::ac_node_voltage(op_voltages, bjt.node_emitter),
             Self::ac_node_voltage(op_voltages, bjt.node_substrate),
         ];
+        // XCJC is attached to the authored base, before externalized RBM.
+        // Its collector terminal is a real node, so stamp this branch directly.
+        if let Some(charge) = bjt.legacy_external_bc_charge(op_voltages) {
+            let admittance = Complex64::new(0.0, omega * charge.capacitance);
+            if !admittance.im.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' has nonfinite external BC capacitance",
+                    bjt.name
+                )));
+            }
+            for (row, sign) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
+                for (col, polarity) in [(charge.nodes[0], 1.0), (charge.nodes[1], -1.0)] {
+                    if row > 0 && col > 0 {
+                        matrix.add(row - 1, col - 1, sign * polarity * admittance);
+                    }
+                }
+            }
+        }
         let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
         let mut c_ii = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
         let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];

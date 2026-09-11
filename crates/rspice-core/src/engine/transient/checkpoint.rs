@@ -178,7 +178,9 @@ fn checkpoint_operation_result<T>(
 /// Version 39 retains JFET terminal displacement currents across integration resets.
 /// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
 /// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
-const FORMAT_VERSION: u32 = 41;
+/// Version 42 retains external BJT BC displacement current across integration resets.
+const FORMAT_VERSION: u32 = 42;
+const BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION: u32 = 42;
 
 #[cfg(feature = "veriloga")]
 const RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION: u32 = 41;
@@ -1075,7 +1077,7 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     hasher.update(domain);
     // Native GP split transport, substrate currents and junction geometry
     // must not resume state captured under earlier constitutive laws.
-    hash_field(&mut hasher, "native_bjt_junction_area_law", 7_u8);
+    hash_field(&mut hasher, "native_bjt_junction_area_law", 8_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -2583,6 +2585,7 @@ fn allocate_bjt_transient_history(
         charge_q_prev_prev: values!("accepted BJT charge_q_prev_prev"),
         charge_q_prev_prev_prev: values!("accepted BJT charge_q_prev_prev_prev"),
         charge_cq_prev: values!("accepted BJT charge_cq_prev"),
+        accepted_external_bc_current: values!("accepted BJT external BC current"),
         accepted_terminal_currents: values!("accepted BJT terminal currents"),
         dynamic_internal_prev: values!("accepted BJT dynamic_internal_prev"),
         dynamic_internal_prev_prev: values!("accepted BJT dynamic_internal_prev_prev"),
@@ -2680,6 +2683,7 @@ fn read_history_bool(
 fn read_accepted_junction_transient_history(
     lines: &mut CheckpointLines<'_>,
     budget: &mut CheckpointParseBudget,
+    version: u32,
 ) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
     let availability_line = lines
         .next()
@@ -2885,6 +2889,14 @@ fn read_accepted_junction_transient_history(
                 vrbp: linear_prev_prev[5],
                 vrs: linear_prev_prev[6],
             });
+        bjt_history.accepted_external_bc_current.push(
+            if version >= BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION {
+                read_finite_history_value(&mut fields, "BJT", row, "accepted_external_bc_current")?
+            } else {
+                // The model semantic identity rejects pre-fix native BJT resumes.
+                0.0
+            },
+        );
         if let Some(extra) = fields.next() {
             return Err(format!(
                 "accepted BJT transient history row {row} has extra field '{extra}'"
@@ -3197,6 +3209,7 @@ fn accepted_junction_history_payload_is_empty(
         && bjt.charge_q_prev_prev.is_empty()
         && bjt.charge_q_prev_prev_prev.is_empty()
         && bjt.charge_cq_prev.is_empty()
+        && bjt.accepted_external_bc_current.is_empty()
         && bjt.accepted_terminal_currents.is_empty()
         && bjt.dynamic_internal_prev.is_empty()
         && bjt.dynamic_internal_prev_prev.is_empty()
@@ -3272,6 +3285,10 @@ fn validate_accepted_junction_transient_history_numeric_state(
         ("charge_q_prev_prev_prev", bjt.charge_q_prev_prev_prev.len()),
         ("charge_cq_prev", bjt.charge_cq_prev.len()),
         (
+            "accepted_external_bc_current",
+            bjt.accepted_external_bc_current.len(),
+        ),
+        (
             "accepted_terminal_currents",
             bjt.accepted_terminal_currents.len(),
         ),
@@ -3311,6 +3328,7 @@ fn validate_accepted_junction_transient_history_numeric_state(
         .chain(bjt.charge_q_prev_prev.iter().flatten())
         .chain(bjt.charge_q_prev_prev_prev.iter().flatten())
         .chain(bjt.charge_cq_prev.iter().flatten())
+        .chain(&bjt.accepted_external_bc_current)
         .chain(bjt.accepted_terminal_currents.iter().flatten().flatten())
         .chain(bjt.dynamic_internal_prev.iter().flatten())
         .chain(bjt.dynamic_internal_prev_prev.iter().flatten())
@@ -7197,6 +7215,7 @@ impl TransientCheckpoint {
                     .fold(0_usize, usize::saturating_add),
             )
             .saturating_add(bjt.accepted_terminal_currents.len())
+            .saturating_add(bjt.accepted_external_bc_current.len())
             .saturating_add(
                 bjt.dynamic_internal_prev
                     .len()
@@ -7668,6 +7687,7 @@ impl TransientCheckpoint {
                     linear.vrs,
                 ],
             );
+            push_values(&mut out, &[history.accepted_external_bc_current[index]]);
             out.push('\n');
 
             match &junction.vbic_snapshot_cache[index] {
@@ -8557,7 +8577,7 @@ impl TransientCheckpoint {
             (false, AcceptedNativeNonlinearCheckpointStates::default())
         };
         let mut accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
-            read_accepted_junction_transient_history(lines, budget)?
+            read_accepted_junction_transient_history(lines, budget, version)?
         } else {
             AcceptedJunctionTransientHistoryCheckpoint::default()
         };
@@ -9812,6 +9832,7 @@ mod tests {
                     index as Value * 0.01 - 0.2
                 })],
                 charge_cq_prev: vec![std::array::from_fn(|index| index as Value * -0.005)],
+                accepted_external_bc_current: vec![0.025],
                 accepted_terminal_currents: vec![Some([0.1, -0.2, 0.3, -0.4])],
                 dynamic_internal_prev: vec![std::array::from_fn(|index| index as Value * 0.125)],
                 dynamic_internal_prev_prev: vec![std::array::from_fn(|index| {
@@ -10273,6 +10294,13 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transient_history ")
+            {
+                output.push_str(line.rsplit_once(' ').unwrap().0);
+                output.push('\n');
+                continue;
+            }
             if version < JFET_CURRENT_HISTORY_FORMAT_VERSION
                 && line.starts_with("accepted_jfet_transient_history ")
             {
@@ -11567,6 +11595,36 @@ mod tests {
 
     #[test]
     fn malformed_accepted_junction_history_fails_during_parse_or_validation() {
+        let mut non_finite = sample();
+        non_finite
+            .accepted_junction_history
+            .bjt_history
+            .accepted_external_bc_current[0] = Value::NAN;
+        assert!(
+            TransientCheckpoint::from_text(&non_finite.to_text())
+                .unwrap_err()
+                .contains("non-finite")
+        );
+        let mut truncated = sample();
+        truncated
+            .accepted_junction_history
+            .bjt_history
+            .accepted_external_bc_current
+            .clear();
+        assert!(
+            truncated
+                .validate_numeric_state()
+                .unwrap_err()
+                .contains("accepted_external_bc_current")
+        );
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 41)).unwrap();
+        assert_eq!(
+            legacy
+                .accepted_junction_history
+                .bjt_history
+                .accepted_external_bc_current,
+            vec![0.0]
+        );
         let mut duplicate = sample();
         duplicate
             .accepted_junction_history
@@ -11690,7 +11748,7 @@ mod tests {
             available: true,
             ..AcceptedJunctionTransientHistoryCheckpoint::default()
         };
-        let mandatory_bjt_values = 9
+        let mandatory_bjt_values = 10
             + 4 * BJT_DYNAMIC_CHARGE_COUNT
             + 2 * BJT_INTERNAL_STATE_DIM
             + 2 * BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT;
@@ -12532,7 +12590,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 25] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 26] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12558,6 +12616,7 @@ mod tests {
         (39, 8),
         (40, 9),
         (41, 10),
+        (42, 10),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -14529,6 +14588,7 @@ mod tests {
         for _ in 0..(2 * BJT_INTERNAL_STATE_DIM + 2 * BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT) {
             text.push_str(" 0");
         }
+        text.push_str(" 0"); // accepted external BC displacement current
         text.push_str("\naccepted_bjt_charge_snapshot ");
         text.push_str(&BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT.to_string());
         for _ in 0..BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT {
@@ -14547,8 +14607,9 @@ mod tests {
         );
         let mut lines = CheckpointLines::new(&text);
         let mut budget = CheckpointParseBudget::new(limit);
-        let error = read_accepted_junction_transient_history(&mut lines, &mut budget)
-            .expect_err("dense snapshots must not amplify beyond the cumulative parse budget");
+        let error =
+            read_accepted_junction_transient_history(&mut lines, &mut budget, FORMAT_VERSION)
+                .expect_err("dense snapshots must not amplify beyond the cumulative parse budget");
         assert!(
             error.contains("parsed-memory limit")
                 && error.contains("accepted BJT charge snapshot values"),
@@ -14628,7 +14689,7 @@ mod tests {
             "accepted_junction_history_available 1\naccepted_junction_history_blockers 0\naccepted_bjt_transient_histories {count}\n"
         );
         let mut lines = CheckpointLines::new(&text);
-        let err = read_accepted_junction_transient_history(&mut lines, &mut budget)
+        let err = read_accepted_junction_transient_history(&mut lines, &mut budget, FORMAT_VERSION)
             .expect_err("outer accepted BJT history counts must be bounded before allocation");
         assert!(
             err.contains("row count overflows") || err.contains("each state requires two rows"),

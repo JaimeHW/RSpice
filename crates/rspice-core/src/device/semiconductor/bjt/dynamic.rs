@@ -665,6 +665,49 @@ impl Bjt {
         }
     }
 
+    fn legacy_external_bc_base_node(&self) -> Option<NodeId> {
+        // Standard GP's collector lead is already a circuit node. Keep a
+        // nonstandard private RCI extension in its existing reduced system.
+        (self.uses_legacy_gummel_poon() && !Self::series_active(self.rci))
+            .then_some(self.legacy_base_lead)
+            .flatten()
+            .map(|(node, _)| node)
+    }
+
+    pub(crate) fn legacy_external_bc_charge_nodes(&self) -> Option<[NodeId; 2]> {
+        let base = self.legacy_external_bc_base_node()?;
+        (self.cjc != 0.0 && self.xcjc != 1.0).then_some([base, self.node_collector])
+    }
+
+    pub(crate) fn legacy_external_bc_charge(
+        &self,
+        solution: &[Value],
+    ) -> Option<BjtExternalBcCharge> {
+        let nodes = self.legacy_external_bc_charge_nodes()?;
+        let capacitance = self.cjc - self.cjc * self.xcjc;
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(Value::NAN)
+            }
+        };
+        let voltage = voltage(nodes[0]) - voltage(nodes[1]);
+        let (charge, slope) = self.vbic_depletion_charge_and_derivative(
+            self.polarity() * voltage,
+            self.vjc,
+            self.mjc,
+            self.fc,
+            0.0,
+        );
+        Some(BjtExternalBcCharge {
+            nodes,
+            voltage,
+            charge: self.polarity() * capacitance * charge,
+            capacitance: capacitance * slope,
+        })
+    }
+
     pub(super) fn legacy_dynamic_charge_branches(
         &self,
         reduction: &BjtDynamicReduction,
@@ -712,7 +755,7 @@ impl Bjt {
                 Self::charge_branch(charges.qbc, d_internal, base_terminal, collector_terminal);
         }
 
-        if self.cjc * (1.0 - self.xcjc) != 0.0 {
+        if self.cjc * (1.0 - self.xcjc) != 0.0 && self.legacy_external_bc_base_node().is_none() {
             let mut branch = BjtChargeBranch {
                 charge: charges.qbx,
                 pos_external: Some(EXT_B),

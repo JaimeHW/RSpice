@@ -323,6 +323,9 @@ impl Engine {
                 charges[BJT_QBE_BRANCH_INDEX] = legacy.qbe;
                 charges[BJT_QBC_BRANCH_INDEX] = legacy.qbc;
                 charges[BJT_QBCX_BRANCH_INDEX] = legacy.qbx;
+                if let Some(charge) = bjt.legacy_external_bc_charge(solution) {
+                    charges[BJT_QBCX_BRANCH_INDEX] = charge.charge;
+                }
                 charges[BJT_QBCP_BRANCH_INDEX] = legacy.qcs;
                 let internal = snapshot.reduction.internal_voltages;
                 (
@@ -379,6 +382,7 @@ impl Engine {
             history.charge_q_prev_prev[idx] = history.charge_q_prev[idx];
             history.charge_q_prev[idx] = value.charges;
             history.charge_cq_prev[idx] = value.currents;
+            history.accepted_external_bc_current[idx] = value.currents[BJT_QBCX_BRANCH_INDEX];
             history.dynamic_internal_prev_prev[idx] = history.dynamic_internal_prev[idx];
             history.dynamic_internal_prev[idx] = value.internal;
             if let Some(linear) = value.linear {
