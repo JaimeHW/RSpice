@@ -6599,6 +6599,7 @@ endmodule
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
             simulation_parameters: &context.simulation_parameters,
+            static_dae_probe: u8::from(!context.evaluation_mode.dynamic_operators_enabled()),
         }
     }
 
@@ -7030,6 +7031,7 @@ endmodule
             prelude_slots_len,
             analog_effects: std::ptr::null_mut(),
             simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
+            static_dae_probe: 0,
         }
     }
 }

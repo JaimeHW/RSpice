@@ -480,6 +480,9 @@ pub struct EvalContext {
     pub analog_effects: *mut Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
     /// Simulator-owned numeric queries, borrowed for the duration of dispatch.
     pub simulation_parameters: *const rspice_veriloga_runtime::GeneratedSimulationParameters,
+    /// Observe static DAE terms while retaining the physical analysis code.
+    /// Appended so all existing generated-code field offsets stay unchanged.
+    pub static_dae_probe: u8,
 }
 
 impl EvalContext {
@@ -550,6 +553,7 @@ impl EvalContext {
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
             simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
+            static_dae_probe: 0,
         }
     }
 
@@ -1678,7 +1682,9 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
         );
     }
     let value = unsafe { *operands };
-    if matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium() {
+    if ctx.static_dae_probe != 0
+        || (matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium())
+    {
         if !value.is_finite() {
             return invalid_native_integration_context(ctx, "ddt", state_id, "input is not finite");
         }
@@ -1736,7 +1742,7 @@ pub unsafe extern "C" fn rspice_ddt_jacobian_native(
         );
     }
     let ctx = unsafe { &*ctx };
-    if ctx.integration_active != 0 {
+    if ctx.static_dae_probe == 0 && ctx.integration_active != 0 {
         (unsafe { *operands }) * ctx.integration_derivative_scale
     } else {
         0.0
@@ -1774,7 +1780,8 @@ unsafe fn rspice_integral_state_native(
         GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory, evaluate_generated_idt_candidate,
         evaluate_generated_idtmod_candidate,
     };
-    let frozen = matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium();
+    let frozen = ctx.static_dae_probe != 0
+        || (matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium());
     let (coefficients, history) = if frozen {
         (
             GeneratedDdtCoefficients::inactive(),
@@ -1844,6 +1851,27 @@ unsafe fn rspice_integral_state_native(
             }
         }
     };
+    if ctx.static_dae_probe != 0 {
+        let retained = unsafe {
+            if *ctx.state_candidate_valid.add(state_id) == 1 {
+                *ctx.state_values.add(state_id)
+            } else if *ctx.state_initialized.add(state_id) != 0 {
+                *ctx.state_prev.add(state_id)
+            } else {
+                value
+            }
+        };
+        return if retained.is_finite() {
+            retained
+        } else {
+            invalid_native_integration_context(
+                ctx,
+                operator,
+                state_id,
+                "has no finite retained static value",
+            )
+        };
+    }
     if frozen {
         return value;
     }
@@ -1901,7 +1929,7 @@ pub unsafe extern "C" fn rspice_idt_jacobian_native(
         );
     }
     let ctx = unsafe { &*ctx };
-    if ctx.integration_active != 0 {
+    if ctx.static_dae_probe == 0 && ctx.integration_active != 0 {
         (unsafe { *operands }) / ctx.integration_derivative_scale
     } else {
         0.0
@@ -2913,7 +2941,8 @@ mod tests {
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 520);
+        assert_eq!(offset_of!(EvalContext, static_dae_probe), 520);
+        assert_eq!(size_of::<EvalContext>(), 528);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -3438,6 +3467,7 @@ mod tests {
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
             simulation_parameters: &crate::native::abi::DEFAULT_SIMULATION_PARAMETERS,
+            static_dae_probe: 0,
         };
 
         assert_eq!(

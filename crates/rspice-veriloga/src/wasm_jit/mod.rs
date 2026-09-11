@@ -2014,6 +2014,45 @@ endmodule
     }
 
     #[test]
+    fn static_dae_wasm_value_and_jacobian_retain_the_primal_candidate() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = "module static_history(p,n,c); inout p,n,c; electrical p,n,c;
+            analog I(p,n)<+2.0*V(p,n)+ddt(3.0*V(p,n))+idt(V(p,n),0.0); endmodule";
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_history", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let context = harness.store.data_mut().context_mut();
+            context.analysis_type = 2;
+            context.set_timestep(0.5);
+            context.begin_stateful_evaluation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 2.0);
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(harness.call(&value), 0);
+            assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 5.0);
+            let context = harness.store.data_mut().context_mut();
+            let states = context.state_values.clone();
+            let valid = context.state_candidate_valid.clone();
+            context.evaluation_mode = Mode::StaticDaeProbe;
+            context.begin_stateful_evaluation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 4.0);
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(harness.call(&value), 0);
+            assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 9.0);
+            assert_eq!(harness.call(&jacobian), 0);
+            assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 2.0);
+            let context = harness.store.data_mut().context_mut();
+            assert_eq!(context.state_values, states);
+            assert_eq!(context.state_candidate_valid, valid);
+        }
+    }
+
+    #[test]
     fn wasm_default_limit_preserves_probe_history_in_automatic_and_postfix_plans() {
         use super::abi::FRAME_RESULT_OFFSET;
         use crate::vm::VerilogAEvaluationMode as Mode;

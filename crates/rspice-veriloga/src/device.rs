@@ -5427,6 +5427,12 @@ impl VerilogADevice {
         &mut self,
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
+        if !mode.dynamic_operators_enabled() {
+            let mut observation = self.clone();
+            let values = observation.try_evaluate_with_task_recording(mode, false)?;
+            observation.validate_discontinuity_state()?;
+            return Ok(values);
+        }
         let result = self
             .try_evaluate_with_task_recording(mode, true)
             .and_then(|values| {
@@ -5796,6 +5802,7 @@ impl VerilogADevice {
             prelude_slots_len: context.prelude_slots.len(),
             analog_effects: context.analog_effects_ptr(),
             simulation_parameters: &context.simulation_parameters,
+            static_dae_probe: u8::from(!context.evaluation_mode.dynamic_operators_enabled()),
         }
     }
 
@@ -6866,8 +6873,32 @@ impl VerilogADevice {
         }
     }
 
-    /// Checked stamping with an explicit named-limiter evaluation policy.
+    /// Checked stamping with an explicit evaluation policy. Static DAE probes
+    /// run on an isolated copy, preserving accepted and candidate model state
+    /// on both success and failure. Compiled code remains shared.
     pub fn try_stamp_with_mode<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+        mode: crate::vm::VerilogAEvaluationMode,
+    ) -> Result<(), VmError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        if !mode.dynamic_operators_enabled() {
+            return self.clone().try_stamp_candidate_with_mode(
+                circuit_voltages,
+                matrix_add,
+                rhs_add,
+                mode,
+            );
+        }
+        self.try_stamp_candidate_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
+    }
+
+    fn try_stamp_candidate_with_mode<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         matrix_add: M,
@@ -8709,6 +8740,85 @@ endmodule
                 .any(|entry| (entry.value - finite_difference).abs() < 1.0e-9),
             "Jacobian {jacobian:?} does not contain finite-difference action {finite_difference}"
         );
+    }
+}
+
+#[cfg(test)]
+mod static_dae_device_tests {
+    use super::VerilogADevice;
+    use crate::{CompilerOptions, VerilogACompiler, vm::VerilogAEvaluationMode as Mode};
+
+    #[test]
+    fn static_dae_probe_retains_integrals_and_isolates_success_and_failure() {
+        let source = r#"
+module static_history(p, n);
+    inout p, n; electrical p, n;
+    analog begin
+        I(p, n) <+ 2.0*V(p,n) + ddt(3.0*V(p,n))
+                   + idt(V(p,n), 1.0) + idtmod(V(p,n), 0.25, 1.0)
+                   + analysis("tran");
+        if (V(p,n) < 0.0) I(p,n) <+ sqrt(V(p,n));
+    end
+endmodule
+"#;
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "STATIC",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        device.set_timestep(0.5);
+        device.set_time(0.5);
+        for (time, voltage, expected) in [(0.5, 2.0, 7.25), (1.0, 4.0, 13.25)] {
+            device.set_time(time);
+            device
+                .try_stamp(&[voltage], |_, _, _| {}, |_, _| {})
+                .unwrap();
+            let before = format!("{:?}", device.context);
+            for _ in 0..2 {
+                let (mut jacobian, mut rhs) = (0.0, 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[voltage],
+                        |row, col, value| {
+                            assert_eq!((row, col), (0, 0));
+                            jacobian += value;
+                        },
+                        |row, value| {
+                            assert_eq!(row, 0);
+                            rhs += value;
+                        },
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(jacobian, 2.0);
+                assert_eq!(jacobian * voltage - rhs, expected);
+                let current: f64 = device
+                    .try_evaluate_with_mode(Mode::StaticDaeProbe)
+                    .unwrap()
+                    .into_iter()
+                    .sum();
+                assert_eq!(current, expected);
+                assert_eq!(format!("{:?}", device.context), before);
+            }
+            let mut published = 0;
+            device
+                .try_stamp_with_mode(
+                    &[-1.0],
+                    |_, _, _| published += 1,
+                    |_, _| {},
+                    Mode::StaticDaeProbe,
+                )
+                .expect_err("invalid late static contribution must surface");
+            assert_eq!(published, 0);
+            assert_eq!(format!("{:?}", device.context), before);
+            device.context.advance_state().unwrap();
+        }
     }
 }
 

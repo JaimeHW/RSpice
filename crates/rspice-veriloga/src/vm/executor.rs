@@ -498,8 +498,9 @@ impl<'a> Vm<'a> {
             // State-based ddt using the transient solver's companion rule.
             Instruction::DdtState(idx) => {
                 let current_value = self.pop()?;
-                if matches!(self.context.analysis_type, 1 | 3)
-                    && !self.context.analysis_phase.is_equilibrium()
+                if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    || (matches!(self.context.analysis_type, 1 | 3)
+                        && !self.context.analysis_phase.is_equilibrium())
                 {
                     if !current_value.is_finite() {
                         return Err(VmError::InvalidNumericResult(
@@ -567,8 +568,10 @@ impl<'a> Vm<'a> {
                 };
                 let ic = self.pop()?;
                 let input = self.pop()?;
-                let frozen = matches!(self.context.analysis_type, 1 | 3)
-                    && !self.context.analysis_phase.is_equilibrium();
+                let static_dae = !self.context.evaluation_mode.dynamic_operators_enabled();
+                let frozen = static_dae
+                    || (matches!(self.context.analysis_type, 1 | 3)
+                        && !self.context.analysis_phase.is_equilibrium());
                 let (coefficients, history) = if frozen {
                     (
                         GeneratedDdtCoefficients::inactive(),
@@ -622,6 +625,24 @@ impl<'a> Vm<'a> {
                         },
                     )
                 };
+                let value = if static_dae {
+                    let retained = if self.context.state_candidate_valid.get(*idx)
+                        == Some(&INTEGRATION_CANDIDATE_VALID)
+                    {
+                        self.context.state_values.get(*idx).copied()
+                    } else if self.context.state_initialized.get(*idx) == Some(&true) {
+                        self.context.state_values_prev.get(*idx).copied()
+                    } else {
+                        Some(value)
+                    };
+                    retained.filter(|value| value.is_finite()).ok_or_else(|| {
+                        VmError::InvalidNumericResult(format!(
+                            "static integral state {idx} has no finite retained value"
+                        ))
+                    })?
+                } else {
+                    value
+                };
                 if !frozen {
                     self.context.state_values[*idx] = value;
                     self.context.state_derivatives[*idx] = input;
@@ -634,8 +655,9 @@ impl<'a> Vm<'a> {
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
                 let coefficients = self.context.integration_coefficients();
+                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
                 self.unary_op(|a| {
-                    if coefficients.active {
+                    if dynamic && coefficients.active {
                         a * coefficients.derivative_scale
                     } else {
                         0.0
@@ -646,8 +668,9 @@ impl<'a> Vm<'a> {
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
                 let coefficients = self.context.integration_coefficients();
+                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
                 self.unary_op(|a| {
-                    if coefficients.active {
+                    if dynamic && coefficients.active {
                         a / coefficients.derivative_scale
                     } else {
                         0.0
@@ -1987,6 +2010,76 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_operators_preserve_candidate_and_accepted_integrals() {
+        let mut context = VmContext::with_states(0, 3);
+        context.analysis_type = 2;
+        context.set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5).unwrap());
+        context.state_initialized = vec![true, true, false];
+        context.state_values_prev = vec![3.0, 5.0, 0.0];
+        context.state_values = vec![9.0, 7.0, 0.75];
+        context.state_candidate_valid = vec![1, 0, 1];
+        context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticDaeProbe;
+        context.begin_stateful_evaluation();
+        let before = format!("{context:?}");
+        for (instructions, expected) in [
+            (
+                vec![Instruction::PushConst(99.0), Instruction::DdtState(0)],
+                0.0,
+            ),
+            (
+                vec![Instruction::PushConst(2.0), Instruction::DdtJacobian],
+                0.0,
+            ),
+            (
+                vec![Instruction::PushConst(2.0), Instruction::IdtJacobian],
+                0.0,
+            ),
+            (
+                vec![
+                    Instruction::PushConst(99.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::IdtState(0),
+                ],
+                9.0,
+            ),
+            (
+                vec![
+                    Instruction::PushConst(99.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::IdtState(1),
+                ],
+                5.0,
+            ),
+            (
+                vec![
+                    Instruction::PushConst(99.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::IdtModState(2),
+                ],
+                0.75,
+            ),
+        ] {
+            assert_eq!(
+                execute_with_context(&mut context, instructions).unwrap(),
+                expected
+            );
+            assert_eq!(format!("{context:?}"), before);
+        }
+        for operator in [Instruction::DdtState(0), Instruction::IdtState(0)] {
+            let mut instructions = vec![Instruction::PushConst(f64::INFINITY)];
+            if matches!(operator, Instruction::IdtState(_)) {
+                instructions.push(Instruction::PushConst(1.0));
+            }
+            instructions.push(operator);
+            assert!(execute_with_context(&mut context, instructions).is_err());
+            assert_eq!(context.state_values, vec![9.0, 7.0, 0.75]);
+            assert_eq!(context.state_candidate_valid, vec![1, 0, 1]);
+        }
     }
 
     #[test]

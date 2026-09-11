@@ -259,6 +259,10 @@ pub enum VerilogAEvaluationMode {
     #[default]
     NewtonLimited,
     StaticProbe,
+    /// Observe static DAE terms at the current physical analysis point:
+    /// derivatives vanish and integral outputs retain their candidate value.
+    /// Device entry points evaluate this mode on an isolated observation copy.
+    StaticDaeProbe,
     SmallSignal,
 }
 
@@ -270,6 +274,10 @@ impl VerilogAEvaluationMode {
             1 | 3 => Self::SmallSignal,
             _ => Self::NewtonLimited,
         }
+    }
+
+    pub(crate) const fn dynamic_operators_enabled(self) -> bool {
+        !matches!(self, Self::StaticDaeProbe)
     }
 
     pub(crate) const fn limiting_enabled(self) -> bool {
@@ -1425,6 +1433,14 @@ impl VmContext {
     }
 
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
+        if !self.evaluation_mode.dynamic_operators_enabled() {
+            // A static observation reads the current candidate, including its
+            // integration-valid flags and event variables. It cannot restart
+            // that candidate from accepted history or emit task effects.
+            self.record_task_effects = false;
+            self.numerical_evaluation_valid = false;
+            return;
+        }
         if self.evaluation_mode.limiting_enabled() {
             self.limiter_active = 0;
         }

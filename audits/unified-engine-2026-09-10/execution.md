@@ -1474,6 +1474,53 @@ companions into static history or reuse a DC analysis: both would change the
 intended transient equations. Derivative/integral state and weighting need direct
 analytic evidence alongside a settled digital candidate before MS08 can close.
 
+## Runtime static DAE integration observations
+
+Added an explicit runtime StaticDaeProbe policy corresponding to the generated
+model policy. It retains the physical analysis/time and bypasses Newton limiting.
+The VM and native ddt helpers return zero without proposing integration history;
+their derivative and integral Jacobian actions are zero. Integral operators still
+validate their authored operands, then retain the valid current integral candidate,
+fall back to accepted history when there is no candidate, or use the initial
+condition before either exists. In particular, disabling integration alone would
+incorrectly replace a nonzero transient integral with its initial condition.
+
+Device value and stamping entry points isolate this mode in a runtime-state copy,
+sharing compiled code. Successful and failed observations leave the original
+candidate, histories, event variables, effects and convergence state unchanged.
+Beginning the observation preserves current integration-valid flags and event
+variables and disables task recording. Native helpers receive an appended context
+flag; existing generated-code offsets are unchanged and the context layout check
+covers the new size/offset. Native image caching is process-local; the persisted
+model-state shape is unchanged. Emitted WebAssembly uses the same VM operator
+policy through its existing runtime helpers and does not change its frame layout.
+
+The three focused regressions passed in 0.01 seconds after a 105-second build
+with native and wasm-jit enabled. A real native device exercises two successive
+transient candidates, nonzero idt and wrapped idtmod values, a nonzero second-step
+ddt term, physical analysis("tran"), repeated value/stamp observations and a late
+invalid contribution with no published matrix callbacks. The VM operator case
+also covers accepted-history fallback and invalid frozen operands. Independently
+emitted Wasm automatic/postfix plans retain the earlier integral candidate after
+a changed voltage and return the static Jacobian. This is host execution in wasmi,
+not a shipping-browser run. The existing exact native context-layout check passed
+in 0.00 seconds using the same built test binary. No full suite was run.
+Log: target/unified-mixed-fixes/static-dae-probe.log.
+
+The authoritative generator then regenerated all 43 built-ins against the final
+compiler inputs. Only the manifest generator digest changed, to
+99f6c8e098e9311cf0d713f54c73537bd7d3b57acc7a5e3adf6da2417fd7de37.
+Log: target/unified-mixed-fixes/static-dae-generator.log.
+
+This is the runtime integration-observation prerequisite, not complete MS08
+circuit history assembly. The core capture still uses ordinary StaticProbe; shared acceptance
+still needs a settled mixed candidate available for static observation. Event
+body re-entry and filter/static decomposition need qualification before that
+connection. Runtime and mixed OneStep2 derivative weighting also remain open;
+integral operators need the correct previous-input term independently of the
+weight applied to ddt contributions. No full-suite, shipping-platform or licensed
+reference qualification is claimed by this increment.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
