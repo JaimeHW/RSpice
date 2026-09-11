@@ -2574,3 +2574,75 @@ fn module_integer_ownership_refuses_dual_writes_and_overwide_groups() {
         "{initializer}"
     );
 }
+
+#[test]
+fn analog_block_ownership_respects_sequential_initializers_and_scope_exit() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module analog_scopes(p); inout p; electrical p;
+integer gain, later, restored; reg [63:0] hidden;
+real measured;
+initial begin gain=3; later=5; restored=11; hidden=1; end
+analog begin
+  begin : outer
+    real sample=gain+later;
+    integer gain=2, later=7;
+    integer hidden=1;
+    for (gain=0; gain<2; gain=gain+1) later=later+1;
+    begin : nested
+      integer restored=13;
+      restored=restored+1;
+      measured=sample+restored+hidden;
+    end
+    measured=measured+restored;
+  end
+  I(p)<+measured*V(p);
+end
+endmodule
+"#,
+        )
+        .unwrap();
+    for name in ["gain", "later", "restored"] {
+        assert!(
+            artifact
+                .hir
+                .variables
+                .iter()
+                .find(|variable| variable.name == name)
+                .unwrap()
+                .is_state,
+            "{name}"
+        );
+    }
+    assert!(
+        artifact
+            .hir
+            .variables
+            .iter()
+            .all(|variable| variable.name != "hidden"),
+        "the local hidden variable must not bind the 64-bit digital signal as an analog input"
+    );
+    assert!(
+        artifact
+            .hir
+            .variables
+            .iter()
+            .any(|variable| variable.name.starts_with("hidden__blk") && !variable.is_state)
+    );
+    // Scope must also be restored for writes after a nested shadow has ended.
+    let error = analyze_error(
+        r#"
+module bad; integer value; initial value=1;
+analog begin
+  begin : local_scope integer value; value=3; end
+  value=2;
+end
+endmodule
+"#,
+    );
+    assert!(
+        error.contains("written by both the analog body and a discrete process"),
+        "{error}"
+    );
+}

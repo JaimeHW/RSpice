@@ -2315,247 +2315,242 @@ impl SemanticAnalyzer {
 /// not enumerate" is a fact the read set carries rather than a silence.
 const OPAQUE_ANALOG_READ: &str = "$opaque";
 
-/// What the continuous body does with each name it mentions.
-///
-/// Two sets and one walk, because the ownership rule asks two questions about
-/// the same name and walking twice would be two chances for the two answers to
-/// come from different traversals. `written` is assignment *targets* only;
-/// `read` is every identifier reached from an expression, including the
-/// right-hand side of an assignment whose target is also written — `x = x + 1`
-/// both writes and reads `x`, and saying so is what makes the write rule fire
-/// on it rather than the read refusal.
-///
-/// Over-approximating in one direction on purpose, the same way
-/// the digital module-write walk does: a name inside a branch that never runs still
-/// counts, because whether it runs is a question about a simulation and this is
-/// a question about a declaration.
-///
-/// A `read` entry that is not a variable at all — a parameter, a net inside a
-/// branch access, a function name — is harmless: the caller only ever asks
-/// about names it has already established are module-level numeric variables a
-/// process writes.
+/// Collect module reads and writes before choosing cross-domain ownership.
+/// Locals bind in declaration order, exactly as analog block lowering does:
+/// an initializer sees its own declaration, but not a later local declaration.
+/// Inactive branches still establish ownership. The worklist borrows syntax so
+/// nested blocks, loops, events and expressions require no recursion or clones.
 fn collect_analog_names(
     statement: &AnalogStatement,
     written: &mut std::collections::HashSet<SmolStr>,
     read: &mut std::collections::HashSet<SmolStr>,
 ) {
-    match statement {
-        AnalogStatement::Null(_) | AnalogStatement::Disable(_) => {}
-        AnalogStatement::Contribution(contribution) => {
-            collect_expression_names(&contribution.value, read);
-        }
-        AnalogStatement::IndirectContribution(contribution) => {
-            collect_expression_names(&contribution.lhs, read);
-            collect_expression_names(&contribution.rhs, read);
-        }
-        AnalogStatement::Assignment(assignment) => {
-            written.insert(assignment.target_name().clone());
-            if let LValue::ArrayAccess { index, .. } = &assignment.target {
-                collect_expression_names(index, read);
-            }
-            collect_expression_names(&assignment.value, read);
-        }
-        AnalogStatement::Conditional(conditional) => {
-            collect_expression_names(&conditional.condition, read);
-            collect_analog_names(&conditional.then_branch, written, read);
-            if let Some(branch) = &conditional.else_branch {
-                collect_analog_names(branch, written, read);
-            }
-        }
-        AnalogStatement::Case(case) => {
-            collect_expression_names(&case.expr, read);
-            for item in &case.items {
-                for value in &item.matches {
-                    collect_expression_names(value, read);
-                }
-                collect_analog_names(&item.statement, written, read);
-            }
-            if let Some(default) = &case.default {
-                collect_analog_names(default, written, read);
-            }
-        }
-        AnalogStatement::For(statement) => {
-            // The loop variable is written by the header, and its initializer
-            // and update are ordinary expressions of the same body.
-            written.insert(statement.var.clone());
-            collect_expression_names(&statement.init, read);
-            collect_expression_names(&statement.condition, read);
-            collect_analog_names(
-                &AnalogStatement::Assignment((*statement.update).clone()),
-                written,
-                read,
-            );
-            collect_analog_names(&statement.body, written, read);
-        }
-        AnalogStatement::While(statement) => {
-            collect_expression_names(&statement.condition, read);
-            collect_analog_names(&statement.body, written, read);
-        }
-        AnalogStatement::Repeat(statement) => {
-            collect_expression_names(&statement.count, read);
-            collect_analog_names(&statement.body, written, read);
-        }
-        AnalogStatement::Block(block) => {
-            for statement in &block.statements {
-                collect_analog_names(statement, written, read);
-            }
-        }
-        AnalogStatement::EventControl(event) => {
-            collect_analog_event_reads(&event.event, read);
-            collect_analog_names(&event.statement, written, read);
-        }
-        AnalogStatement::Call(call) => {
-            for argument in &call.args {
-                collect_expression_names(argument, read);
-            }
-        }
+    enum Work<'a> {
+        Statement(&'a AnalogStatement),
+        Assignment(&'a AssignmentStmt),
+        Declare(&'a VariableItem),
+        Leave(Vec<&'a SmolStr>),
+        Write(&'a SmolStr),
+        Read(&'a SmolStr),
+        Expression(&'a Expression),
+        Element(&'a ArrayLiteralElement),
+        Event(&'a EventExpr),
     }
-}
-
-/// Event arguments participate in state-input binding even when no ordinary
-/// assignment or contribution reads the variable.
-fn collect_analog_event_reads(event: &EventExpr, read: &mut std::collections::HashSet<SmolStr>) {
-    let mut pending = vec![event];
-    while let Some(event) = pending.pop() {
-        match event {
-            EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
-                collect_expression_names(signal, read);
-            }
-            EventExpr::Cross {
-                signal,
-                direction,
-                time_tol,
-                expr_tol,
-                enable,
-                ..
-            } => {
-                collect_expression_names(signal, read);
-                for expression in [direction, time_tol, expr_tol, enable]
-                    .into_iter()
-                    .flatten()
-                {
-                    collect_expression_names(expression, read);
+    let mut locals = HashMap::<&SmolStr, usize>::new();
+    let mut pending = vec![Work::Statement(statement)];
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Declare(item) => {
+                *locals.entry(&item.name).or_default() += 1;
+                if let Some(init) = &item.init {
+                    pending.push(Work::Expression(init));
                 }
             }
-            EventExpr::Above {
-                signal,
-                time_tol,
-                expr_tol,
-                enable,
-                ..
-            } => {
-                collect_expression_names(signal, read);
-                for expression in [time_tol, expr_tol, enable].into_iter().flatten() {
-                    collect_expression_names(expression, read);
-                }
-            }
-            EventExpr::Timer {
-                start,
-                period,
-                time_tol,
-                enable,
-                ..
-            } => {
-                collect_expression_names(start, read);
-                for expression in [period, time_tol, enable].into_iter().flatten() {
-                    collect_expression_names(expression, read);
-                }
-            }
-            EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => {}
-            EventExpr::Or { left, right, .. } => {
-                pending.push(right);
-                pending.push(left);
-            }
-        }
-    }
-}
-
-/// Every identifier an expression reads.
-///
-/// A branch access contributes its *net* names, which is deliberate: they can
-/// never collide with a module-level `real`, so including them costs nothing
-/// and leaving them out would mean one more shape to keep in step.
-fn collect_expression_names(
-    expression: &Expression,
-    read: &mut std::collections::HashSet<SmolStr>,
-) {
-    match expression {
-        Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
-        Expression::Identifier(identifier) => {
-            read.insert(identifier.name.clone());
-        }
-        Expression::ArrayAccess(access) => {
-            read.insert(access.array.clone());
-            collect_expression_names(&access.index, read);
-        }
-        // Probe endpoints identify topology, not a read of a same-named
-        // discrete variable (a boundary port can also have a digital name).
-        Expression::BranchAccess(_) => {}
-        Expression::Binary(binary) => {
-            collect_expression_names(&binary.left, read);
-            collect_expression_names(&binary.right, read);
-        }
-        Expression::Unary(unary) => collect_expression_names(&unary.operand, read),
-        Expression::Conditional(conditional) => {
-            collect_expression_names(&conditional.condition, read);
-            collect_expression_names(&conditional.then_expr, read);
-            collect_expression_names(&conditional.else_expr, read);
-        }
-        Expression::Call(call) => {
-            for argument in &call.args {
-                collect_expression_names(argument, read);
-            }
-        }
-        Expression::SystemFunction(function) => {
-            for argument in &function.args {
-                collect_expression_names(argument, read);
-            }
-        }
-        // Never present in a parsed tree, which is the only kind this walks.
-        // `ddt(x)` and its siblings are `Call`s until `expr_converter` rewrites
-        // them, and that runs after this. Recording the sentinel means a name
-        // reachable only through one is treated as read rather than silently
-        // missed, which is the safe direction: the write rule's failure mode is
-        // promoting a variable the analog body still uses.
-        Expression::AnalogOperator(_) => {
-            read.insert(OPAQUE_ANALOG_READ.into());
-        }
-        Expression::NoiseSource(source) => match source {
-            NoiseSource::White { power, .. } => collect_expression_names(power, read),
-            NoiseSource::Flicker {
-                power, exponent, ..
-            } => {
-                collect_expression_names(power, read);
-                collect_expression_names(exponent, read);
-            }
-            NoiseSource::Table { data, .. } => {
-                for value in data {
-                    collect_expression_names(value, read);
-                }
-            }
-        },
-        Expression::Digital(digital) => {
-            if let Some(name) = digital.base_name() {
-                read.insert(name.clone());
-            }
-            for child in digital.children() {
-                collect_expression_names(child, read);
-            }
-        }
-        Expression::ArrayLiteral(literal) => {
-            for element in &literal.elements {
-                match element {
-                    ArrayLiteralElement::Value(value) => collect_expression_names(value, read),
-                    ArrayLiteralElement::Replication(replication) => {
-                        collect_expression_names(&replication.count, read);
-                        for inner in &replication.elements {
-                            if let ArrayLiteralElement::Value(value) = inner {
-                                collect_expression_names(value, read);
-                            }
-                        }
+            Work::Leave(names) => {
+                for name in names {
+                    let depth = locals.get_mut(name).expect("entered analog local scope");
+                    *depth -= 1;
+                    if *depth == 0 {
+                        locals.remove(name);
                     }
                 }
             }
+            Work::Write(name) => {
+                if !locals.contains_key(name) {
+                    written.insert(name.clone());
+                }
+            }
+            Work::Read(name) => {
+                if !locals.contains_key(name) {
+                    read.insert(name.clone());
+                }
+            }
+            Work::Assignment(assignment) => {
+                pending.push(Work::Write(assignment.target_name()));
+                if let LValue::ArrayAccess { index, .. } = &assignment.target {
+                    pending.push(Work::Expression(index));
+                }
+                pending.push(Work::Expression(&assignment.value));
+            }
+            Work::Statement(statement) => match statement {
+                AnalogStatement::Null(_) | AnalogStatement::Disable(_) => {}
+                AnalogStatement::Contribution(contribution) => {
+                    pending.push(Work::Expression(&contribution.value));
+                }
+                AnalogStatement::IndirectContribution(contribution) => {
+                    pending.push(Work::Expression(&contribution.lhs));
+                    pending.push(Work::Expression(&contribution.rhs));
+                }
+                AnalogStatement::Assignment(assignment) => {
+                    pending.push(Work::Assignment(assignment));
+                }
+                AnalogStatement::Conditional(conditional) => {
+                    pending.push(Work::Expression(&conditional.condition));
+                    pending.push(Work::Statement(&conditional.then_branch));
+                    if let Some(branch) = &conditional.else_branch {
+                        pending.push(Work::Statement(branch));
+                    }
+                }
+                AnalogStatement::Case(case) => {
+                    pending.push(Work::Expression(&case.expr));
+                    for item in &case.items {
+                        pending.extend(item.matches.iter().map(Work::Expression));
+                        pending.push(Work::Statement(&item.statement));
+                    }
+                    if let Some(default) = &case.default {
+                        pending.push(Work::Statement(default));
+                    }
+                }
+                AnalogStatement::For(statement) => {
+                    pending.push(Work::Write(&statement.var));
+                    pending.push(Work::Expression(&statement.init));
+                    pending.push(Work::Expression(&statement.condition));
+                    pending.push(Work::Assignment(&statement.update));
+                    pending.push(Work::Statement(&statement.body));
+                }
+                AnalogStatement::While(statement) => {
+                    pending.push(Work::Expression(&statement.condition));
+                    pending.push(Work::Statement(&statement.body));
+                }
+                AnalogStatement::Repeat(statement) => {
+                    pending.push(Work::Expression(&statement.count));
+                    pending.push(Work::Statement(&statement.body));
+                }
+                AnalogStatement::Block(block) => {
+                    let declarations: Vec<_> = block
+                        .variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .collect();
+                    pending.push(Work::Leave(
+                        declarations.iter().map(|item| &item.name).collect(),
+                    ));
+                    pending.extend(block.statements.iter().rev().map(Work::Statement));
+                    pending.extend(declarations.into_iter().rev().map(Work::Declare));
+                }
+                AnalogStatement::EventControl(event) => {
+                    pending.push(Work::Event(&event.event));
+                    pending.push(Work::Statement(&event.statement));
+                }
+                AnalogStatement::Call(call) => {
+                    pending.extend(call.args.iter().map(Work::Expression));
+                }
+            },
+            Work::Event(event) => match event {
+                EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+                    pending.push(Work::Expression(signal));
+                }
+                EventExpr::Cross {
+                    signal,
+                    direction,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                    ..
+                } => {
+                    pending.push(Work::Expression(signal));
+                    pending.extend(
+                        [direction, time_tol, expr_tol, enable]
+                            .into_iter()
+                            .flatten()
+                            .map(|expression| Work::Expression(expression)),
+                    );
+                }
+                EventExpr::Above {
+                    signal,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                    ..
+                } => {
+                    pending.push(Work::Expression(signal));
+                    pending.extend(
+                        [time_tol, expr_tol, enable]
+                            .into_iter()
+                            .flatten()
+                            .map(|expression| Work::Expression(expression)),
+                    );
+                }
+                EventExpr::Timer {
+                    start,
+                    period,
+                    time_tol,
+                    enable,
+                    ..
+                } => {
+                    pending.push(Work::Expression(start));
+                    pending.extend(
+                        [period, time_tol, enable]
+                            .into_iter()
+                            .flatten()
+                            .map(|expression| Work::Expression(expression)),
+                    );
+                }
+                EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => {}
+                EventExpr::Or { left, right, .. } => {
+                    pending.push(Work::Event(left));
+                    pending.push(Work::Event(right));
+                }
+            },
+            Work::Element(element) => match element {
+                ArrayLiteralElement::Value(value) => pending.push(Work::Expression(value)),
+                ArrayLiteralElement::Replication(replication) => {
+                    pending.push(Work::Expression(&replication.count));
+                    pending.extend(replication.elements.iter().map(Work::Element));
+                }
+            },
+            Work::Expression(expression) => match expression {
+                Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
+                Expression::Identifier(identifier) => pending.push(Work::Read(&identifier.name)),
+                Expression::ArrayAccess(access) => {
+                    pending.push(Work::Read(&access.array));
+                    pending.push(Work::Expression(&access.index));
+                }
+                // Probe endpoints identify topology, not same-named numeric storage.
+                Expression::BranchAccess(_) => {}
+                Expression::Binary(binary) => {
+                    pending.push(Work::Expression(&binary.left));
+                    pending.push(Work::Expression(&binary.right));
+                }
+                Expression::Unary(unary) => pending.push(Work::Expression(&unary.operand)),
+                Expression::Conditional(conditional) => {
+                    pending.push(Work::Expression(&conditional.condition));
+                    pending.push(Work::Expression(&conditional.then_expr));
+                    pending.push(Work::Expression(&conditional.else_expr));
+                }
+                Expression::Call(call) => {
+                    pending.extend(call.args.iter().map(Work::Expression));
+                }
+                Expression::SystemFunction(function) => {
+                    pending.extend(function.args.iter().map(Work::Expression));
+                }
+                // Parsed operators are calls. Preserve the conservative sentinel
+                // if internal syntax reaches this pre-lowering walk.
+                Expression::AnalogOperator(_) => {
+                    read.insert(OPAQUE_ANALOG_READ.into());
+                }
+                Expression::NoiseSource(source) => match source {
+                    NoiseSource::White { power, .. } => pending.push(Work::Expression(power)),
+                    NoiseSource::Flicker {
+                        power, exponent, ..
+                    } => {
+                        pending.push(Work::Expression(power));
+                        pending.push(Work::Expression(exponent));
+                    }
+                    NoiseSource::Table { data, .. } => {
+                        pending.extend(data.iter().map(Work::Expression));
+                    }
+                },
+                Expression::Digital(digital) => {
+                    if let Some(name) = digital.base_name() {
+                        pending.push(Work::Read(name));
+                    }
+                    pending.extend(digital.children().into_iter().map(Work::Expression));
+                }
+                Expression::ArrayLiteral(literal) => {
+                    pending.extend(literal.elements.iter().map(Work::Element));
+                }
+            },
         }
     }
 }

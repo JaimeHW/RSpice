@@ -2684,6 +2684,10 @@ impl SemanticAnalyzer {
                 .param_aliases
                 .iter()
                 .any(|alias| alias.alias == *name)
+            // A discrete-only signal still owns its canonical name. A local
+            // must not acquire that identity merely because the signal needs
+            // no analog input slot in this module.
+            || module.digital.signals.iter().any(|signal| signal.name == *name)
             || module.ports.iter().any(|port| port.name == *name)
             || module.internal_nodes.iter().any(|node| node.name == *name)
             || module.branches.iter().any(|branch| branch.name == *name)
