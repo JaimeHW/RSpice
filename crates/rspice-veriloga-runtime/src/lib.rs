@@ -4882,6 +4882,28 @@ impl<'a> GeneratedStamper<'a> {
         branch_index: usize,
         multiplicity: Value,
     ) {
+        self.stamp_branch_current_local(pos, neg, branch_index, multiplicity);
+        let Some(branch_axis) = self.branch_axis_local(branch_index) else {
+            return;
+        };
+        if let Some(pos_axis) = pos.and_then(|node| self.node_axis_local(node)) {
+            self.add_real_axis(branch_axis, pos_axis, 1.0);
+        }
+        if let Some(neg_axis) = neg.and_then(|node| self.node_axis_local(node)) {
+            self.add_real_axis(branch_axis, neg_axis, -1.0);
+        }
+    }
+
+    /// Couple a solver-owned source current into KCL without imposing a
+    /// voltage relation on its constraint row. Used by indirect contributions.
+    #[inline]
+    pub fn stamp_branch_current_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        branch_index: usize,
+        multiplicity: Value,
+    ) {
         let Some(branch_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
@@ -4889,11 +4911,9 @@ impl<'a> GeneratedStamper<'a> {
         self.observe_terminal_current_pair(pos, neg, branch_current);
         if let Some(pos_axis) = pos.and_then(|node| self.node_axis_local(node)) {
             self.add_real_axis(pos_axis, branch_axis, multiplicity);
-            self.add_real_axis(branch_axis, pos_axis, 1.0);
         }
         if let Some(neg_axis) = neg.and_then(|node| self.node_axis_local(node)) {
             self.add_real_axis(neg_axis, branch_axis, -multiplicity);
-            self.add_real_axis(branch_axis, neg_axis, -1.0);
         }
     }
 
@@ -9211,6 +9231,67 @@ mod fixed_lane_tests {
             let solution = matrix.solve(&[2.5]).expect("unit diagonal solves");
             assert_eq!(solution, vec![2.5], "cached={cached}");
             assert_eq!(stamp_rhs, [0.0], "cached={cached}");
+        }
+    }
+
+    #[test]
+    fn indirect_source_coupling_preserves_constraint_rows_and_terminal_maps() {
+        let entries = (0..4)
+            .flat_map(|row| (0..4).map(move |col| (row, col, 0.0)))
+            .collect::<Vec<_>>();
+        let nodes = [2, 0, 1, 2];
+        let branches = [2, 1];
+        let voltages = [2.0, 4.0, -0.25, 0.5];
+        for linked_slots in [false, true] {
+            let mut matrix = StaticMatrix::from_triplets(4, 4, &entries).unwrap();
+            let mut cache = GeneratedStaticStampCache::default();
+            cache.link(&matrix, &nodes, &branches, 2);
+            if !linked_slots {
+                cache.slots = GeneratedStaticStampSlots::default();
+            }
+            let mut rhs = [0.0; 4];
+            let mut currents = [0.0; 4];
+            {
+                let mut stamper = GeneratedStamper::new_with_static_cache_and_terminal_currents(
+                    &mut matrix,
+                    &mut rhs,
+                    &voltages,
+                    2,
+                    &cache,
+                    &mut currents,
+                );
+                stamper.stamp_branch_current_local(Some(0), Some(2), 0, 4.0);
+                stamper.stamp_branch_current_local(Some(0), Some(3), 1, 5.0);
+                stamper.stamp_branch_current_local(Some(1), Some(2), 1, 2.0);
+                // f = 1e-20*V(0) - V(2) + 3*I(1) - 7. The shared
+                // potential-row helper takes -f and -J for an indirect source.
+                stamper.stamp_potential_sparse_local(
+                    0,
+                    9.75,
+                    [0, 1, 2],
+                    [-1e-20, -999.0, 1.0],
+                    [1],
+                    [-3.0],
+                );
+            }
+            assert_eq!(rhs, [0.0, 0.0, 0.0, 7.0]);
+            assert_eq!(currents, [0.75, -0.5, -1.5, 1.25]);
+            let expected = [
+                [0.0, 0.0, -2.0, -4.0],
+                [0.0, 0.0, 0.0, 4.0],
+                [0.0; 4],
+                [-1.0, 1e-20, 3.0, 0.0],
+            ];
+            // The complete structure is column-major CSC.
+            for (row, values) in expected.iter().enumerate() {
+                for (col, expected) in values.iter().enumerate() {
+                    assert_eq!(
+                        matrix.values_mut()[col * 4 + row],
+                        *expected,
+                        "({row},{col}), linked_slots={linked_slots}"
+                    );
+                }
+            }
         }
     }
 

@@ -60,11 +60,13 @@ pub struct CfgModel {
     /// by [`ContributionId`]. Parallel to `MirModel::equations`.
     pub residuals: Vec<ValueId>,
     /// Topology activation after projecting each potential contribution's
-    /// leading instance-static guard prefix. Parallel to [`Self::residuals`]
-    /// and the HIR contribution list.
+    /// leading instance-static guard prefix. Indirect sources activate only
+    /// where their constraint executes. Parallel to [`Self::residuals`] and
+    /// the HIR contribution list.
     ///
-    /// This is deliberately independent of both the residual value and whether
-    /// runtime control reached the statement. In particular,
+    /// Potential-source activation is deliberately independent of both the
+    /// residual value and whether runtime control reached the statement.
+    /// In particular,
     /// `if (mode) V(a, b) <+ 0` distinguishes an instance-static false/open
     /// branch from an active ideal zero-volt source, while a contribution below
     /// a bias-, time-, or state-dependent guard remains topology-active even on
@@ -1142,7 +1144,7 @@ impl<'a> CfgLowerer<'a> {
             let contribution = ContributionId::from(index);
             self.builder
                 .write_variable(CfgVariable::Residual(contribution), entry, zero);
-            if self.hir.contributions[index].kind == HirContributionKind::Potential {
+            if self.hir.contributions[index].kind != HirContributionKind::Current {
                 self.builder
                     .write_variable(CfgVariable::Activation(contribution), entry, zero);
             }
@@ -1174,7 +1176,7 @@ impl<'a> CfgLowerer<'a> {
             .collect();
         let activations: Vec<Option<ValueId>> = (0..self.hir.contributions.len())
             .map(|index| {
-                if self.hir.contributions[index].kind != HirContributionKind::Potential {
+                if self.hir.contributions[index].kind == HirContributionKind::Current {
                     return None;
                 }
                 let variable = CfgVariable::Activation(ContributionId::from(index));
@@ -1463,7 +1465,9 @@ impl<'a> CfgLowerer<'a> {
         };
         let sum = self.binary(CfgBinaryOp::Add, accumulated, value);
         self.builder.write_variable(variable, self.block, sum);
-        if contribution.kind == HirContributionKind::Potential && !dynamic_topology_ancestor {
+        if contribution.kind == HirContributionKind::Indirect
+            || (contribution.kind == HirContributionKind::Potential && !dynamic_topology_ancestor)
+        {
             self.activate_contribution(contribution.id);
         }
 

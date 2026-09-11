@@ -531,6 +531,11 @@ necessary when a model requires threshold-crossing time resolution.
 Direct and indirect contributions cannot share an analog net pair, including
 parallel named branches. Conflicts are rejected after hierarchy and ground
 resolution, before private flow equations are introduced.
+Generated Rust supports indirect constraint rows, including source-current
+feedback, parameter-controlled activation, transient integration, AC derivatives,
+and grouped noise. These rows couple the source current into KCL without adding
+a structural voltage term, preserving small constraint derivatives. They reuse
+the sparse row and operator-state paths used by direct sources.
 Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
 compatibility; authored sources and flow probes require distinct nets.
 

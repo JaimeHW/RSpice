@@ -22,6 +22,135 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_indirect_sources_preserve_constraint_precision_and_noise() {
+    let (state, stamp, noise) = generated_parts(
+        "module constraint(p,q); inout p,q; electrical p,q; parameter integer enabled=1;
+         analog if(enabled) V(p): V(q)==1e-20*V(p)+white_noise(4,\"input\"); endmodule",
+        "indirect constraint",
+    );
+    run_generated_main("indirect constraint", &state, &stamp, &noise, r#"
+#[derive(Default)] struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _:usize, process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
+        if process.active {
+            assert_eq!(process.psd,4.0);
+            assert_eq!(process.injections.len(),1);
+            self.0.push(process.injections[0].gain);
+        }
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+assert_eq!(device::state::Instance::BRANCH_COUNT,1);
+instance.set_branch_indices(&[2]);
+instance.multiplicity=4.0;
+let bias=[0.0,2.0,0.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+for enabled in [1.0,0.0,1.0] {
+    instance.set_parameter("enabled",enabled).unwrap();
+    instance.finalize_parameters().unwrap();
+    let mut sink=[0.0;10];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!(sink[0],-4.0*enabled,"KCL-only source coupling");
+    assert_eq!(sink[1],1.0-enabled,"inactive source has one identity row");
+    assert_eq!(sink[2],-2.0*enabled,"constraint companion input");
+    assert_eq!(sink[3],1e-20*enabled,"tiny self derivative must survive");
+    let mut capture=Capture::default();
+    instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut capture).unwrap();
+    assert_eq!(capture.0.len(),enabled as usize);
+    if enabled!=0.0 {
+        assert_eq!((capture.0[0].re,capture.0[0].im),(0.5,0.0));
+    }
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_indirect_sources_preserve_dynamic_constraint_signs_and_history() {
+    for (index, lhs, rhs, imaginary, real) in [
+        (0, "ddt(V(p,n))", "2*I(a)", "-w", "0.0"),
+        (
+            1,
+            "V(p,n)",
+            "sin(ddt(I(a)))+ddt(ddt(V(p,n)))",
+            "0.0",
+            "-w*w",
+        ),
+        (2, "idt(V(p,n),0.0)", "I(a)", "1.0/w", "0.0"),
+    ] {
+        let source = format!(
+            "module constraint(p,n); inout p,n; electrical p,n;
+            branch(n,p) a; analog V(a): {lhs}=={rhs}; endmodule"
+        );
+        let name = format!("indirect frequency {index}");
+        let (state, stamp, noise) = generated_parts(&source, &name);
+        run_generated_main(&name, &state, &stamp, &noise, &format!(r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+assert_eq!(device::state::Instance::BRANCH_COUNT,1);
+instance.set_branch_indices(&[2]);
+instance.finalize_parameters().unwrap();
+runtime::set_dynamic_operators_enabled(false);
+let ctx=runtime::GeneratedEvalContext {{voltages:&[0.5,0.0,0.25],temperature:300.15}};
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+let history=instance.capture_rollback_state();
+for w in [0.125_f64,1.0,8.0] {{
+    runtime::FREQUENCY_OMEGA.store(w.to_bits(),std::sync::atomic::Ordering::SeqCst);
+    let mut response=[0.0;6];
+    instance.stamp_reactive(&ctx,&mut runtime::GeneratedReactiveStamper {{sink:Some(&mut response)}});
+    assert_eq!(response[0],if {index}==0 {{1.0}} else {{{imaginary}}},"node imaginary input: {{response:?}}");
+    assert_eq!(response[3],{real},"node real input: {{response:?}}");
+    // A single linear ddt uses the cached charge row; its capture records
+    // branch ordinal + 1 and unscaled charge derivative. Operator chains
+    // use frequency coefficients instead.
+    assert_eq!(response[1],if {index}==0 {{-1.0}} else if {index}==1 {{w}} else {{0.0}},"dynamic coefficient input: {{response:?}}");
+    assert_eq!(instance.capture_rollback_state(),history);
+    assert!(!ctx.evaluation_failed());
+}}
+"#)).unwrap_or_else(|report|panic!("{report}"));
+    }
+
+    let (state, stamp, noise) = generated_parts(
+        "module constraint(p,q); inout p,q; electrical p,q;
+         analog V(p): ddt(V(q))==2*I(p); endmodule",
+        "indirect transient",
+    );
+    run_generated_main(
+        "indirect transient",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.set_branch_indices(&[2]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(0.0,0.0,runtime::GeneratedDdtCoefficients::inactive());
+let initial=runtime::GeneratedEvalContext {voltages:&[0.0,2.0,0.0],temperature:300.15};
+instance.stamp(&initial,&mut runtime::GeneratedStamper::default());
+instance.set_timepoint(0.5,0.5,runtime::GeneratedDdtCoefficients {
+    active:true,derivative_scale:2.0,previous_value_scale:2.0,
+    older_value_scale:0.0,previous_derivative_scale:0.0,
+});
+let accepted=instance.capture_rollback_state();
+for _ in 0..2 {
+    instance.begin_stateful_evaluation();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[0.0,4.0,0.5],temperature:300.15};
+    let mut sink=[0.0;10];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!(sink[0],-1.0);
+    assert_eq!(sink[2],-3.0,"negative constraint residual");
+    assert_eq!(sink[3],-2.0,"negative ddt Jacobian");
+    assert_eq!(sink[4],2.0,"positive feedback Jacobian input");
+    assert_eq!(instance.capture_persistent_state().ddt_previous,vec![2.0]);
+    instance.restore_rollback_state(&accepted);
+    assert!(!ctx.evaluation_failed());
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn module_time_queries_execute_in_generated_hierarchy() {
     let (state, stamp, noise) = generated_parts_selected(
         include_str!("testdata/module_time_queries.va"),
@@ -7530,6 +7659,18 @@ pub mod runtime {
                 if let Some(value) = sink.get_mut(11) {
                     *value += _node_indices.iter().zip(_node_derivatives).filter(|(node, _)| **node == 1).map(|(_, value)| value).sum::<f64>() * _scale;
                 }
+            }
+        }
+
+        pub fn stamp_branch_current_local(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            _branch: usize,
+            _multiplicity: Value,
+        ) {
+            if let Some(sink) = self.sink.as_deref_mut() {
+                if let Some(value) = sink.get_mut(0) { *value -= _multiplicity; }
             }
         }
 

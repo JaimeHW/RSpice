@@ -49,7 +49,7 @@
 //!
 //! ## What it refuses
 //!
-//! Unsupported operators, indirect contributions, and unresolved flow probes
+//! Unsupported operators and unresolved flow probes
 //! produce explicit diagnostics. Timestep and discontinuity controls retain
 //! their trial and accepted state in the generated device contract.
 
@@ -787,19 +787,20 @@ struct Stamps {
     corrections: Vec<Option<usize>>,
 }
 
-/// How one potential contribution maps onto the single solver branch used for
+/// How one potential or indirect contribution maps onto the solver branch used for
 /// its declared identity or unnamed node pair.
 #[derive(Debug, Clone, Copy)]
-struct PotentialEquationPlan {
+struct BranchEquationPlan {
     branch: usize,
     /// `1` when the contribution uses the group's orientation, `-1` when its
-    /// source branch is reversed and its residual/Jacobian must be negated.
+    /// source branch is reversed. Indirect equations use -1 because the shared
+    /// row stamper subtracts a source value while their expression is a residual.
     sign: i8,
 }
 
-/// One structural KCL coupling and the sum of every active potential
-/// contribution sharing a physical MIR branch unknown.
-struct PotentialBranchGroup {
+/// Structural KCL coupling and the equations sharing one MIR branch unknown.
+struct SourceBranchGroup {
+    kind: MirEquationKind,
     pos: Option<NodeId>,
     neg: Option<NodeId>,
     branch: usize,
@@ -875,10 +876,10 @@ struct ModelPlan {
     stages: Vec<Stage>,
     slots: usize,
     node_count: usize,
-    /// Physical-branch target and orientation per potential equation.
-    potential_equations: Vec<Option<PotentialEquationPlan>>,
-    /// Stable source-order groups of potential equations on the same branch.
-    potential_groups: Vec<PotentialBranchGroup>,
+    /// Physical-branch target and orientation per source equation.
+    branch_equations: Vec<Option<BranchEquationPlan>>,
+    /// Stable source-order groups of equations on the same source branch.
+    source_branch_groups: Vec<SourceBranchGroup>,
     /// Output position of each equation's control-flow activation value.
     activation_positions: Vec<Option<usize>>,
     /// Output position of each event-controlled procedural variable candidate,
@@ -1035,7 +1036,7 @@ impl ModelPlan {
             .equations
             .iter()
             .map(|equation| {
-                (equation.kind == MirEquationKind::Potential)
+                (equation.kind != MirEquationKind::Current)
                     .then(|| cfg.activations[usize::from(equation.contribution)])
                     .flatten()
             })
@@ -1483,7 +1484,7 @@ impl ModelPlan {
             );
         }
 
-        let (potential_equations, potential_groups) = plan_potential_branches(artifact)?;
+        let (branch_equations, source_branch_groups) = plan_source_branches(artifact)?;
         record_phase(
             artifact,
             measurements,
@@ -1567,8 +1568,8 @@ impl ModelPlan {
             stages,
             slots,
             node_count: artifact.mir.nodes.len(),
-            potential_equations,
-            potential_groups,
+            branch_equations,
+            source_branch_groups,
             activation_positions,
             event_state_candidate_positions,
             timestep_bound_position,
@@ -2268,28 +2269,22 @@ fn plan_stamps(
     plan
 }
 
-fn plan_potential_branches(
+fn plan_source_branches(
     artifact: &CanonicalIrArtifact,
-) -> Result<
-    (
-        Vec<Option<PotentialEquationPlan>>,
-        Vec<PotentialBranchGroup>,
-    ),
-    RustBackendError,
-> {
+) -> Result<(Vec<Option<BranchEquationPlan>>, Vec<SourceBranchGroup>), RustBackendError> {
     let mut equations = vec![None; artifact.mir.equations.len()];
-    let mut groups: Vec<PotentialBranchGroup> = Vec::new();
+    let mut groups: Vec<SourceBranchGroup> = Vec::new();
     let mut group_by_branch: Vec<Option<usize>> = vec![None; artifact.mir.branch_unknowns.len()];
 
     for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
-        if equation.kind != MirEquationKind::Potential {
+        if equation.kind == MirEquationKind::Current {
             continue;
         }
         let branch = equation.branch_unknown.map(usize::from).ok_or_else(|| {
             RustBackendError::internal(
                 artifact.metadata.source_package.as_str(),
                 artifact.mir.module_name.as_str(),
-                format!("potential equation {equation_index} has no branch unknown"),
+                format!("source equation {equation_index} has no branch unknown"),
             )
         })?;
         let pos = equation.branch.pos_node;
@@ -2310,7 +2305,8 @@ fn plan_potential_branches(
             None => {
                 let group_index = groups.len();
                 group_by_branch[branch] = Some(group_index);
-                groups.push(PotentialBranchGroup {
+                groups.push(SourceBranchGroup {
+                    kind: equation.kind,
                     pos,
                     neg,
                     branch,
@@ -2319,9 +2315,13 @@ fn plan_potential_branches(
                 (group_index, 1)
             }
         };
-        equations[equation_index] = Some(PotentialEquationPlan {
+        equations[equation_index] = Some(BranchEquationPlan {
             branch: groups[group_index].branch,
-            sign,
+            sign: if equation.kind == MirEquationKind::Indirect {
+                -1
+            } else {
+                sign
+            },
         });
     }
 
@@ -2859,12 +2859,12 @@ impl ModelPlan {
             );
         }
 
-        self.emit_potential_structure(&values, out);
+        self.emit_source_structure(&values, out);
 
         for (index, row) in self.conduction.rows.iter().enumerate() {
             let (residual, derivatives) = &self.conduction.positions[index];
             let residual = self.corrected_residual(index, &values, *residual);
-            let activation = (row.kind == MirEquationKind::Potential)
+            let activation = (row.kind != MirEquationKind::Current)
                 .then(|| self.activation_expression(index, &values));
             self.emit_row(
                 row,
@@ -3074,9 +3074,8 @@ impl ModelPlan {
                         optional_node(row.neg)
                     );
                 }
-                MirEquationKind::Potential => {
-                    let plan =
-                        self.potential_equations[entry.equation].expect("potential branch plan");
+                MirEquationKind::Potential | MirEquationKind::Indirect => {
+                    let plan = self.branch_equations[entry.equation].expect("source branch plan");
                     let value = if plan.sign < 0 { "-value" } else { "value" };
                     let _ = writeln!(
                         out,
@@ -3084,7 +3083,6 @@ impl ModelPlan {
                         plan.branch
                     );
                 }
-                MirEquationKind::Indirect => {}
             }
             out.push_str("        }\n");
         }
@@ -3509,12 +3507,12 @@ impl ModelPlan {
 
     fn activation_expression(&self, equation: usize, values: &[String]) -> String {
         let position = self.activation_positions[equation]
-            .expect("only potential equations request topology activation");
+            .expect("only branch-source equations request topology activation");
         truth_output(&self.function, self.outputs[position], &values[position])
     }
 
-    fn emit_potential_structure(&self, values: &[String], out: &mut String) {
-        for group in &self.potential_groups {
+    fn emit_source_structure(&self, values: &[String], out: &mut String) {
+        for group in &self.source_branch_groups {
             let active = group
                 .equations
                 .iter()
@@ -3523,10 +3521,15 @@ impl ModelPlan {
                 .join(" || ");
             let pos = optional_node(group.pos);
             let neg = optional_node(group.neg);
+            let coupling = if group.kind == MirEquationKind::Indirect {
+                "stamp_branch_current_local"
+            } else {
+                "stamp_potential_branch_local"
+            };
             let _ = writeln!(
                 out,
                 "        if {active} {{\n\
-                 \x20           stamper.stamp_potential_branch_local({pos}, {neg}, {}, multiplicity);\n\
+                 \x20           stamper.{coupling}({pos}, {neg}, {}, multiplicity);\n\
                  \x20       }} else {{\n\
                  \x20           stamper.stamp_inactive_potential_branch_local({});\n\
                  \x20       }}",
@@ -3615,12 +3618,12 @@ impl ModelPlan {
                     branch_values.join(", "),
                 );
             }
-            (MirEquationKind::Potential, Reactive::No) => {
-                let plan = self.potential_equations[equation].ok_or_else(|| {
+            (MirEquationKind::Potential | MirEquationKind::Indirect, Reactive::No) => {
+                let plan = self.branch_equations[equation].ok_or_else(|| {
                     RustBackendError::internal(
                         "",
                         "",
-                        format!("potential equation {equation} has no physical branch plan"),
+                        format!("source equation {equation} has no physical branch plan"),
                     )
                 })?;
                 let signed = |value: &str| {
@@ -3643,7 +3646,7 @@ impl ModelPlan {
                     RustBackendError::internal(
                         "",
                         "",
-                        format!("potential equation {equation} has no activation expression"),
+                        format!("source equation {equation} has no activation expression"),
                     )
                 })?;
                 let _ = writeln!(out, "        if {active} {{");
@@ -3662,12 +3665,12 @@ impl ModelPlan {
                 );
                 out.push_str("        }\n");
             }
-            (MirEquationKind::Potential, Reactive::Yes) => {
-                let plan = self.potential_equations[equation].ok_or_else(|| {
+            (MirEquationKind::Potential | MirEquationKind::Indirect, Reactive::Yes) => {
+                let plan = self.branch_equations[equation].ok_or_else(|| {
                     RustBackendError::internal(
                         "",
                         "",
-                        format!("potential equation {equation} has no physical branch plan"),
+                        format!("source equation {equation} has no physical branch plan"),
                     )
                 })?;
                 let signed = |value: &str| {
@@ -3697,7 +3700,6 @@ impl ModelPlan {
                     branch_values.join(", "),
                 );
             }
-            (MirEquationKind::Indirect, _) => {}
         }
         Ok(())
     }
@@ -5739,14 +5741,6 @@ fn reject_unsupported_kinds(
             }
             _ => {}
         }
-    }
-    if artifact
-        .mir
-        .equations
-        .iter()
-        .any(|equation| equation.kind == MirEquationKind::Indirect)
-    {
-        return Err(unsupported(artifact, "an indirect contribution"));
     }
     Ok(())
 }

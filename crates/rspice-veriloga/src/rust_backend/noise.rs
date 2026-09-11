@@ -818,17 +818,6 @@ fn plan_grouped_noise(
     if cfg.noise_processes.is_empty() {
         return Ok(None);
     }
-    if artifact
-        .mir
-        .equations
-        .iter()
-        .any(|equation| equation.kind == MirEquationKind::Indirect)
-    {
-        return Err(unsupported(
-            artifact,
-            "grouped noise routed through an indirect contribution",
-        ));
-    }
     if cfg
         .function
         .values
@@ -1887,8 +1876,7 @@ fn noise_rhs_sign(kind: MirEquationKind) -> f64 {
     match kind {
         MirEquationKind::Current => -1.0,
         MirEquationKind::Potential => 1.0,
-        // Planning rejects indirect equations before emission because their
-        // engine-neutral generated topology is not representable yet.
+        // A constraint residual moves to the RHS with a negative sign.
         MirEquationKind::Indirect => -1.0,
     }
 }
