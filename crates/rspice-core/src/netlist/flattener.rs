@@ -4001,7 +4001,7 @@ fn parse_scoped_model_vector_string(
     let mut numeric_values = Vec::with_capacity(fields.len());
     let mut all_numeric = true;
     for field in &fields {
-        match super::lexer::parse_spice_value(field) {
+        match super::lexer::parse_spice_value_complete(field) {
             Ok(value) if value.is_finite() => numeric_values.push(value),
             _ => {
                 all_numeric = false;

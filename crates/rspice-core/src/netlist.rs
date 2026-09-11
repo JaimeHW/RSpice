@@ -8011,6 +8011,49 @@ mod tests {
     }
 
     #[test]
+    fn scoped_model_string_vectors_preserve_numeric_prefixed_entries() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for fields in ["2*q 1/2 3^4", "0||q 3==q 1<q", "2*q 3"] {
+                let netlist = Netlist::parse_with_options(
+                    &format!("Scoped vector classification\n.param text=\"[{fields}]\" nums=\"[-2 +3k 1e-100]\"\nX1 out cell arg={{text}} values={{nums}}\n.subckt cell out arg=\"[default]\" values=\"[9]\"\nA1 out 0 data\n.model data print_param_types (string_array={{arg}} real_array={{values}})\n.ends\n.end"),
+                    NetlistParseOptions { expression_dialect: dialect, ..Default::default() },
+                ).unwrap();
+                let flattened = flatten_netlist_with_models(&netlist).unwrap();
+                let model_name = flattened
+                    .elements
+                    .iter()
+                    .find_map(|element| {
+                        if let ElementKind::Xspice { model, .. } = &element.kind {
+                            Some(model)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                let model = flattened
+                    .scoped_models
+                    .iter()
+                    .find(|model| &model.name == model_name)
+                    .unwrap();
+                let strings = &model
+                    .string_vector_params
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("string_array"))
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    strings,
+                    &fields.split_whitespace().collect::<Vec<_>>(),
+                    "{dialect:?}"
+                );
+                assert_eq!(model.real_vector_params.len(), 1);
+                assert_eq!(model.real_vector_params[0].1, [-2.0, 3000.0, 1e-100]);
+                assert!(model.expr_params.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn xspice_subckt_vector_param_override_creates_scoped_model() {
         let netlist = Netlist::parse(
             "xspice subckt vector param\n\
