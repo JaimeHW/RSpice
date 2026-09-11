@@ -250,7 +250,10 @@ impl Bjt {
         &self,
         reduction: &BjtDynamicReduction,
     ) -> BjtCurrentBranch {
-        if !self.uses_vbic_dynamic_charges()
+        // VBIC 1.3 heats from delayed Itxf. The older ngspice VBIC
+        // evaluates Ith from instantaneous Itzf even when TD is enabled
+        // (vbicload.c); only its electrical collector current is delayed.
+        if !self.vbic_13
             || self.td <= 0.0
             || !self.thermal_model_enabled()
             || !self.vbic_heat_generation
