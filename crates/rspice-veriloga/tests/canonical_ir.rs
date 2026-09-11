@@ -1703,7 +1703,7 @@ endmodule
 /// that cannot run it.
 ///
 /// This is the contract that lets the canonical level grow without moving any
-/// shipped compilation onto it: `absdelay`, `idtmod` and `last_crossing` each
+/// shipped compilation onto it: `absdelay` and `idtmod` each
 /// own accepted history that the direct generated-Rust backend has no place
 /// for. Each lowers to its own CFG kind — that is the point of
 /// the lane — and each is named at the refusal, so a model reaching one is sent
@@ -1720,11 +1720,6 @@ fn generated_rust_refuses_operators_without_history_support() {
             "idtmod",
             "1.0e-3 * idtmod(V(p, n), 0.0, 1.0, -0.5)",
             "stateful idtmod",
-        ),
-        (
-            "last_crossing",
-            "1.0e-9 * last_crossing(V(p, n) - 0.5, 1)",
-            "last_crossing",
         ),
     ];
 
@@ -1749,7 +1744,6 @@ endmodule
                 value.kind,
                 rspice_veriloga::canonical_ir::CfgValueKind::AbsDelay { .. }
                     | rspice_veriloga::canonical_ir::CfgValueKind::IdtMod { .. }
-                    | rspice_veriloga::canonical_ir::CfgValueKind::LastCrossing { .. }
             )),
             "{name} must reach its own canonical kind"
         );

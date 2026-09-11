@@ -333,21 +333,15 @@ fn kernel_region_metrics(
                     let next = unknown_indices.len();
                     unknown_indices.entry(*branch).or_insert(next);
                 }
-                CfgValueKind::Ddt { operator, .. }
-                | CfgValueKind::Idt { operator, .. }
-                | CfgValueKind::Cross { operator, .. }
-                | CfgValueKind::Above { operator, .. }
-                | CfgValueKind::Timer { operator, .. }
-                | CfgValueKind::Limit { operator, .. }
-                | CfgValueKind::LimitPrevious { operator, .. } => {
-                    let next = operator_indices.len();
-                    operator_indices.entry(*operator).or_insert(next);
-                }
                 CfgValueKind::Staged { slot } => {
                     let next = staged_indices.len();
                     staged_indices.entry(*slot).or_insert(next);
                 }
                 _ => {}
+            }
+            if let Some(site) = function.value(value_id).kind.state_site() {
+                let next = operator_indices.len();
+                operator_indices.entry(site.0).or_insert(next);
             }
         }
     }
@@ -987,7 +981,9 @@ impl ModelPlan {
                     let next = idt_slots.len();
                     idt_slots.entry(*operator).or_insert(next);
                 }
-                CfgValueKind::Cross { operator, .. } | CfgValueKind::Above { operator, .. } => {
+                CfgValueKind::Cross { operator, .. }
+                | CfgValueKind::Above { operator, .. }
+                | CfgValueKind::LastCrossing { operator, .. } => {
                     let next = cross_slots.len();
                     cross_slots.entry(*operator).or_insert(next);
                 }
@@ -1671,32 +1667,27 @@ impl ModelPlan {
             );
         }
 
-        let mut detector_families = HashMap::new();
-        for value in &self.function.values {
-            let (operator, family) = match &value.kind {
-                CfgValueKind::Cross { operator, .. } => (*operator, "cross"),
-                CfgValueKind::Above { operator, .. } => (*operator, "above"),
-                _ => continue,
-            };
-            if let Some(previous) = detector_families.insert(operator, family)
-                && previous != family
-            {
-                return Err(accepted_state_shape_error(
-                    artifact,
-                    format!("event detector operator {operator} is both {previous} and {family}"),
-                ));
-            }
-        }
         let detectors = ordered(&self.cross_slots, "event detector")?;
         shape.section("event_detectors", detectors.len());
         for (slot, operator) in detectors.into_iter().enumerate() {
             let expression = expression(operator)?;
-            let family = detector_families.get(&operator).copied().ok_or_else(|| {
-                accepted_state_shape_error(
-                    artifact,
-                    format!("event detector state operator {operator} has no CFG family"),
-                )
-            })?;
+            // Slot allocation precedes optimization. A detector used only by
+            // noise metadata may be absent from the reduced stamping CFG.
+            let family = match &expression.kind {
+                HirExprKind::Call { name, .. } | HirExprKind::SystemFunction { name, .. }
+                    if matches!(name.as_str(), "cross" | "above" | "last_crossing") =>
+                {
+                    name.as_str()
+                }
+                _ => {
+                    return Err(accepted_state_shape_error(
+                        artifact,
+                        format!(
+                            "event detector state operator {operator} is not a canonical detector"
+                        ),
+                    ));
+                }
+            };
             shape.runtime_operator(
                 family,
                 slot,
@@ -2442,6 +2433,14 @@ impl ModelPlan {
                 "arithmetic::sum_products_div_lanes".to_string(),
             ]);
         }
+        if self
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::LastCrossing { .. }))
+        {
+            runtime_support.push("evaluate_generated_last_crossing".to_string());
+        }
         runtime_support.extend([
             "evaluate_generated_above".to_string(),
             "evaluate_generated_cross".to_string(),
@@ -3098,7 +3097,12 @@ impl ModelPlan {
         control: &dyn crate::metrics::PipelineControl,
     ) -> Result<GeneratedRustFile, RustBackendError> {
         let Some(noise) = &self.noise else {
-            return super::noise::generate_noise_file(artifact, options, control);
+            return super::noise::generate_noise_file(
+                artifact,
+                options,
+                &self.cross_slots,
+                control,
+            );
         };
         let function = &noise.function;
         let mut out = String::new();
@@ -3132,7 +3136,8 @@ impl ModelPlan {
         }
         let (body, values) = emit_body(function, &noise.outputs, &self.emit_bindings())
             .map_err(|error| unsupported(artifact, format!("noise body: {error}")))?;
-        let grouped_noise = super::noise::grouped_noise_extension(artifact, options, control)?;
+        let grouped_noise =
+            super::noise::grouped_noise_extension(artifact, options, &self.cross_slots, control)?;
         // Import from both emitted evaluators, not only from the compact
         // source-wise noise slice's CFG value kinds. The coherent-process
         // extension is emitted from its own differentiated replay plan; the
@@ -3208,6 +3213,7 @@ impl ModelPlan {
             }
         }
         self.emit_noise_prologue(artifact, function, &mut out);
+        super::noise::emit_frozen_event_bindings(&mut out, function, options);
         out.push_str(&indent(&body, 2));
         if uses_checked_operations(function)
             || shared_stages
@@ -3922,6 +3928,32 @@ impl ModelPlan {
                  {pad}            evaluation.fired as u8 as f64\n\
                  {pad}        }}\n\
                  {pad}        Err(source) => {{ ctx.report_event_control_error(\"above\", slot, source); 0.0 }}\n\
+                 {pad}    }}\n\
+                 {pad}}}}}; }}"
+            ));
+        }
+        if wants.last_crossing {
+            for value in &function.values {
+                if let CfgValueKind::LastCrossing { operator, .. } = &value.kind {
+                    self.cross_slots.get(operator).copied().ok_or_else(|| {
+                        unsupported(
+                            artifact,
+                            format!(
+                                "a last_crossing at {operator} with no generated detector slot"
+                            ),
+                        )
+                    })?;
+                }
+            }
+            out.push_str(&format!(
+                "{pad}macro_rules! rspice_last_crossing {{ ($slot:expr, $value:expr, $direction:expr) => {{{{\n\
+                 {pad}    let slot = $slot;\n\
+                 {pad}    match evaluate_generated_last_crossing(self.cross_event_accepted[slot], $value, self.time, $direction) {{\n\
+                 {pad}        Ok(candidate) => {{\n\
+                 {pad}            if ctx.dynamic_operators_enabled() {{ self.cross_event_candidate[slot] = candidate; }}\n\
+                 {pad}            if ctx.analysis_tran() {{ candidate.last_crossing_time }} else {{ -1.0 }}\n\
+                 {pad}        }}\n\
+                 {pad}        Err(source) => {{ ctx.report_event_control_error(\"last_crossing\", slot, source); -1.0 }}\n\
                  {pad}    }}\n\
                  {pad}}}}}; }}"
             ));
@@ -5085,6 +5117,7 @@ struct Wants {
     idt_scale: bool,
     cross: bool,
     above: bool,
+    last_crossing: bool,
     timer: bool,
     limit: bool,
     limit_previous: bool,
@@ -5113,6 +5146,7 @@ impl Wants {
             CfgValueKind::IdtScale => self.idt_scale = true,
             CfgValueKind::Cross { .. } => self.cross = true,
             CfgValueKind::Above { .. } => self.above = true,
+            CfgValueKind::LastCrossing { .. } => self.last_crossing = true,
             CfgValueKind::Timer { .. } => self.timer = true,
             CfgValueKind::Limit { .. } => self.limit = true,
             CfgValueKind::LimitPrevious { .. } => self.limit_previous = true,
@@ -5717,12 +5751,6 @@ fn reject_unsupported_kinds(
                     "rate-limited slew in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the accepted filter state is preserved",
                 ));
             }
-            CfgValueKind::LastCrossing { .. } => {
-                return Err(unsupported(
-                    artifact,
-                    "last_crossing in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the crossing detector's accepted history is preserved",
-                ));
-            }
             // Named by the spelling the source wrote rather than by the family:
             // a filter's four spellings reduce to two forms here, and a refusal
             // that reported the form would send an author looking for a
@@ -5840,6 +5868,7 @@ fn bindings() -> EmitBindings {
         simparam_present: "ctx.has_simparam".into(),
         cross: "rspice_cross!".into(),
         above: "rspice_above!".into(),
+        last_crossing: "rspice_last_crossing!".into(),
         timer: "rspice_timer!".into(),
         ..EmitBindings::default()
     }

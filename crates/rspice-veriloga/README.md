@@ -487,6 +487,11 @@ additional generated model variant. On every VBIC variant, the card's `AREA`,
 `M`, and `MULT` factors combine into the model multiplicity, including factors
 supplied through parameter expressions.
 
+Generated Rust and executable models support `last_crossing` with omitted,
+parameter, or procedural direction operands. Interpolated crossing times remain
+real-valued, survive rollback and checkpoints, and do not request timestep
+refinement. Noise evaluation returns the static sentinel without changing history.
+
 Generated devices retain `$bound_step` requests across conditional calls,
 runtime loops, and nested analog instances. The transient engine uses the
 smallest active bound, including zero as a request for its supported minimum;

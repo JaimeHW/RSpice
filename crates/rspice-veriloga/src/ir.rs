@@ -1536,8 +1536,9 @@ impl DeviceIR {
                 Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => {
                     contains_ddt(arena, input)
                 }
-                Node::Ddx { expr, .. } | Node::LastCrossing { expr, .. } => {
-                    contains_ddt(arena, expr)
+                Node::Ddx { expr, .. } => contains_ddt(arena, expr),
+                Node::LastCrossing { expr, direction } => {
+                    contains_ddt(arena, expr) || contains_ddt_opt(arena, direction)
                 }
                 // ddt() cannot appear in an element index (assignments
                 // reject it upstream), so an indexed read is resistive

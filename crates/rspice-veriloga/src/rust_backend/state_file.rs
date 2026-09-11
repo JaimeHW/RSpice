@@ -52,7 +52,7 @@ pub(super) fn generate_mod_file() -> String {
 
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
-    /// Whether generated state uses accepted/candidate `cross` or `above`
+    /// Whether generated state uses accepted/candidate `cross`, `above`, or `last_crossing`
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
     pub uses_analog_tasks: bool,
@@ -1614,7 +1614,9 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 23 resolves declared grounds before allocating solver nodes.
 // Version 24 removes duplicate potential-current unknowns from generated devices.
 // Version 25 retains switched source kinds and their accepted-mode discontinuities.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 26;
+// Version 26 retains indirect-equation absolute tolerances.
+// Version 27 preserves generated last_crossing interpolation and accepted history.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 27;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

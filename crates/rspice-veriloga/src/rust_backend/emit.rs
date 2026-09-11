@@ -110,6 +110,7 @@ pub struct EmitBindings {
     pub cross: String,
     pub cross_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub above: String,
+    pub last_crossing: String,
     pub timer: String,
     pub timer_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     /// Called as `analysis("dc")`.
@@ -159,6 +160,7 @@ impl Default for EmitBindings {
             cross: "cross".into(),
             cross_slots: HashMap::new(),
             above: "above".into(),
+            last_crossing: "last_crossing".into(),
             timer: "timer".into(),
             timer_slots: HashMap::new(),
             analysis: "analysis".into(),
@@ -198,8 +200,8 @@ pub enum EmitError {
     /// A stateful analog operator whose accepted history this backend does not
     /// own, named by the operator the source wrote.
     ///
-    /// The canonical level represents `idtmod`, `absdelay`, `slew` and
-    /// `last_crossing`; running one needs the history queues and the
+    /// The canonical level represents `idtmod`, `absdelay`, and `slew`;
+    /// running one needs the history queues and the
     /// speculative-candidate discipline that the VM, the native JIT and the
     /// WebAssembly JIT keep. `ModelPlan::build` refuses a module carrying one
     /// before it reaches here; this is the backstop that makes silently
@@ -1943,12 +1945,21 @@ impl Emitter<'_> {
                     operator: "slew",
                 });
             }
-            CfgValueKind::LastCrossing { .. } => {
-                return Err(EmitError::UnsupportedStatefulOperator {
-                    value,
-                    operator: "last_crossing",
-                });
-            }
+            CfgValueKind::LastCrossing {
+                operator,
+                input,
+                direction,
+            } => format!(
+                "{}({}, {}, {})",
+                bindings.last_crossing,
+                bindings
+                    .cross_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator)),
+                self.numeric_operand(*input),
+                self.numeric_operand(*direction),
+            ),
             CfgValueKind::Laplace { .. } | CfgValueKind::LaplaceDerivative { .. } => {
                 return Err(EmitError::UnsupportedStatefulOperator {
                     value,

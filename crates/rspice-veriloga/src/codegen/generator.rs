@@ -1507,9 +1507,11 @@ impl CodeGenerator {
                 }
                 Node::LastCrossing { expr, direction } => {
                     self.emit_expr(arena, expr, emit_ctx, program)?;
-                    program
-                        .instructions
-                        .push(Instruction::PushConst(direction.unwrap_or(0) as f64));
+                    if let Some(direction) = direction {
+                        self.emit_expr(arena, direction, emit_ctx, program)?;
+                    } else {
+                        program.instructions.push(Instruction::PushConst(0.0));
+                    }
                     let detector_id = Self::allocate_slot(&self.cross_detector_count);
                     program
                         .instructions

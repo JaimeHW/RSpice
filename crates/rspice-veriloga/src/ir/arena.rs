@@ -281,8 +281,8 @@ pub enum Node {
     LastCrossing {
         /// Monitored expression.
         expr: NodeId,
-        /// `+1` rising, `-1` falling, `None` either.
-        direction: Option<i32>,
+        /// Runtime integer expression: `+1` rising, `-1` falling, `0`/`None` either.
+        direction: Option<NodeId>,
     },
     /// One of the eighteen site-bearing, event, noise and filter operators,
     /// whose fields live in `ExprArena::heavy(_)`. The kind is repeated inline
@@ -1103,7 +1103,10 @@ pub fn operator_operands(arena: &ExprArena, node: &Node) -> Vec<NodeId> {
         }
     };
     match node {
-        Node::LastCrossing { expr, .. } => operands.push(*expr),
+        Node::LastCrossing { expr, direction } => {
+            operands.push(*expr);
+            optional(*direction, &mut operands);
+        }
         Node::Heavy(_, id) => match arena.heavy(*id) {
             Heavy::WhiteNoise { power, .. } => operands.push(*power),
             Heavy::FlickerNoise {
@@ -1701,7 +1704,7 @@ mod tests {
         out.push(arena.push(Node::IdtCompanion(one)));
         out.push(arena.push(Node::LastCrossing {
             expr: one,
-            direction: Some(1),
+            direction: Some(one),
         }));
         out.push(arena.push(Node::VarIndexed {
             payload: indexed,

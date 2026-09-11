@@ -110,9 +110,10 @@ impl MergedNoiseSchedule {
 pub(super) fn generate_noise_file(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
+    cross_slots: &HashMap<ExprId, usize>,
     control: &dyn PipelineControl,
 ) -> Result<GeneratedRustFile, RustBackendError> {
-    let grouped_noise = grouped_noise_extension(artifact, options, control)?;
+    let grouped_noise = grouped_noise_extension(artifact, options, cross_slots, control)?;
     let parameter_fields = parameter_field_names(artifact);
     let variables = noise_variables(artifact);
     let branch_unknowns = noise_branch_unknowns(artifact);
@@ -485,6 +486,7 @@ struct GroupedNoisePlan {
 pub(super) fn grouped_noise_extension(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
+    cross_slots: &HashMap<ExprId, usize>,
     control: &dyn PipelineControl,
 ) -> Result<String, RustBackendError> {
     let Some(plan) = plan_grouped_noise(artifact, control)? else {
@@ -606,6 +608,8 @@ pub(super) fn grouped_noise_extension(
     )
     .expect("write grouped branch flows");
     let mut bindings = EmitBindings {
+        last_crossing: "rspice_last_crossing!".into(),
+        cross_slots: cross_slots.clone(),
         integer_result: "ctx.integer_result".into(),
         checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
@@ -618,6 +622,7 @@ pub(super) fn grouped_noise_extension(
     // binding transient history during a noise sweep.
     bindings.ddt = "grouped_noise_ddt_is_unsupported".into();
     bindings.idt = "grouped_noise_idt_is_unsupported".into();
+    emit_frozen_event_bindings(&mut out, &plan.function, options);
     let (body, values) = emit_body(&plan.function, &plan.outputs, &bindings)
         .map_err(|error| unsupported(artifact, format!("grouped noise body: {error}")))?;
     if body.contains("integer::") {
@@ -796,6 +801,29 @@ pub(super) fn grouped_noise_extension(
     }
     out.push_str("        Ok(())\n    }\n}\n");
     Ok(out)
+}
+
+/// Noise evaluates static operator values without reading or writing transient
+/// history. Keep operand validation inside the binding so it also applies when
+/// the result only controls which finite PSD is selected.
+pub(super) fn emit_frozen_event_bindings(
+    out: &mut String,
+    function: &CfgFunction,
+    options: &RustTranspileOptions,
+) {
+    if function
+        .values
+        .iter()
+        .any(|value| matches!(value.kind, CfgValueKind::LastCrossing { .. }))
+    {
+        writeln!(
+            out,
+            "        use {}::{{evaluate_generated_last_crossing, GeneratedCrossState}};",
+            options.runtime_path
+        )
+        .expect("write frozen crossing imports");
+        out.push_str("        macro_rules! rspice_last_crossing { ($slot:expr, $value:expr, $direction:expr) => {{ match evaluate_generated_last_crossing(GeneratedCrossState::INITIAL, $value, 0.0, $direction) { Ok(_) => -1.0, Err(source) => { ctx.report_event_control_error(\"last_crossing\", $slot, source); ctx.check_noise_evaluation()?; -1.0 } } }}; }\n");
+    }
 }
 
 fn uses_checked_runtime(body: &str) -> bool {
@@ -1974,6 +2002,7 @@ endmodule
         let generated = super::generate_noise_file(
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
+            &std::collections::HashMap::new(),
             &crate::metrics::NoPipelineControl,
         )
         .expect("fallback noise emission succeeds")
@@ -2157,6 +2186,7 @@ endmodule
         let generated = super::grouped_noise_extension(
             &artifact,
             &crate::rust_backend::RustTranspileOptions::default(),
+            &std::collections::HashMap::new(),
             &crate::metrics::NoPipelineControl,
         )
         .expect("mixed grouped-noise emission succeeds");

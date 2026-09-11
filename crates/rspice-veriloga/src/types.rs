@@ -514,6 +514,10 @@ impl FunctionRegistry {
         );
         functions.insert("slew".into(), FunctionSignature::analog_operator("slew", 3));
         functions.insert(
+            "last_crossing".into(),
+            FunctionSignature::analog_operator("last_crossing", 2),
+        );
+        functions.insert(
             "laplace_zp".into(),
             FunctionSignature::analog_operator("laplace_zp", 3),
         );

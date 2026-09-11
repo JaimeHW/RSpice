@@ -295,7 +295,8 @@ use super::*;
 // Version 86 exposes indirect source activation to runtime topology guards.
 // Version 87 validates and retains nature inheritance and physical declaration closures.
 // Version 88 retains indirect-equation absolute tolerances.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 88;
+// Version 89 preserves real-valued last_crossing results and runtime direction operands.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 89;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

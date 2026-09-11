@@ -3311,6 +3311,7 @@ fn generated_noise_powers_freeze_dynamic_values_without_touching_history() {
         ("idt(V(p,n),3.0)", 3.0),
         ("ddt(idt(V(p,n),3.0))", 0.0),
         ("idt(ddt(V(p,n)),3.0)", 3.0),
+        ("last_crossing(V(p,n),1)", -1.0),
     ]
     .into_iter()
     .enumerate()
@@ -3365,6 +3366,7 @@ fn generated_unused_noise_processes_import_and_evaluate_math_helpers() {
         ("limexp(V(p,n))", "2.0_f64.exp()"),
         ("limexp(-V(p,n))", "(-2.0_f64).exp()"),
         ("limexp(45.0*V(p,n))", "80.0_f64.exp()*11.0"),
+        ("limexp(last_crossing(V(p,n),1))", "(-1.0_f64).exp()"),
     ]
     .into_iter()
     .enumerate()
@@ -4743,6 +4745,161 @@ assert_eq!(restored.capture_persistent_state().event_variables, vec![2.0]);
         body,
     )
     .unwrap_or_else(|report| panic!("transactional generated event-state probe failed:\n{report}"));
+}
+
+#[test]
+fn generated_last_crossing_interpolates_without_refinement_and_restores_history() {
+    for (expression, rising, falling) in [
+        ("last_crossing(V(p,n))", 0.5, 2.75),
+        ("last_crossing(V(p,n), 1)", 0.5, 0.5),
+        ("last_crossing(V(p,n), -1)", -1.0, 2.75),
+    ] {
+        let source = format!(
+            "module last_time(p,n); inout p,n; electrical p,n; analog I(p,n) <+ {expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, expression);
+        run_generated_main(
+            expression,
+            &state,
+            &stamp,
+            &noise,
+            &format!(
+                r#"
+fn stamp(instance: &mut device::state::Instance, voltage: f64) -> f64 {{
+    let voltages = [voltage,0.0];
+    let ctx = runtime::GeneratedEvalContext {{ voltages: &voltages, temperature: 300.15 }};
+    let mut sink = [0.0;12];
+    instance.begin_stateful_evaluation();
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper {{ sink: Some(&mut sink) }});
+    assert!(!ctx.evaluation_failed());
+    assert_eq!(instance.transient_event_refinement_time(), None);
+    sink[0]
+}}
+let mut instance = device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let coefficients = runtime::GeneratedDdtCoefficients::inactive();
+runtime::set_event_analysis(false, true);
+instance.set_timepoint(0.0,0.0,coefficients);
+assert_eq!(stamp(&mut instance,-1.0), -1.0);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let initial = instance.capture_persistent_state();
+runtime::set_event_analysis(true, false);
+instance.set_timepoint(2.0,2.0,coefficients);
+let rollback = instance.capture_rollback_state();
+assert_eq!(stamp(&mut instance,3.0), {rising:?});
+let candidate = instance.capture_rollback_state();
+assert_eq!(stamp(&mut instance,3.0), {rising:?});
+assert_eq!(instance.capture_rollback_state(), candidate);
+assert_eq!(instance.capture_persistent_state(), initial);
+instance.restore_rollback_state(&rollback);
+assert_eq!(stamp(&mut instance,-0.25), -1.0);
+instance.restore_rollback_state(&rollback);
+assert_eq!(stamp(&mut instance,3.0), {rising:?});
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let accepted = instance.capture_persistent_state();
+let mut restored = device::state::Instance::new(&[0,1]);
+restored.finalize_parameters().unwrap();
+restored.restore_persistent_state(&accepted).unwrap();
+for target in [&mut instance, &mut restored] {{
+    target.set_timepoint(3.0,1.0,coefficients);
+    assert_eq!(stamp(target,-1.0), {falling:?});
+    target.validate_advance_state().unwrap();
+    target.apply_validated_advance_state();
+}}
+assert_eq!(instance.capture_persistent_state(), restored.capture_persistent_state());
+// An AC/static probe must keep the transient crossing time out of its value.
+runtime::set_event_analysis(false, true);
+assert_eq!(stamp(&mut instance,-1.0), -1.0);
+"#
+            ),
+        )
+        .unwrap_or_else(|report| panic!("{expression}: {report}"));
+    }
+}
+
+#[test]
+fn generated_last_crossing_preserves_real_arithmetic_and_procedural_directions() {
+    let (state, stamp, noise) = generated_parts(
+        "module crossing(p,n); inout p,n; electrical p,n; parameter integer dir=1; integer choice; real first; analog begin choice=dir; first=last_crossing(V(p,n),choice); choice=-dir; I(p,n) <+ first+10*last_crossing(V(p,n),choice); end endmodule",
+        "typed generated last crossing",
+    );
+    run_generated_main(
+        "typed generated last crossing",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+runtime::set_event_analysis(true, false);
+for (direction, rising, falling) in [(1.0,-9.5,28.0),(-1.0,4.0,7.75)] {
+    let mut instance = device::state::Instance::new(&[0,1]);
+    instance.set_parameter("dir",direction).unwrap();
+    instance.finalize_parameters().unwrap();
+    for (time, voltage, expected) in [(0.0,-1.0,-11.0),(2.0,3.0,rising),(3.0,-1.0,falling)] {
+        instance.set_timepoint(time,1.0,runtime::GeneratedDdtCoefficients::inactive());
+        instance.begin_stateful_evaluation();
+        let voltages = [voltage,0.0];
+        let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature:300.15 };
+        let mut sink = [0.0;12];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut sink) });
+        assert!(!ctx.evaluation_failed());
+        assert_eq!(sink[0], expected);
+        instance.validate_advance_state().unwrap();
+        instance.apply_validated_advance_state();
+    }
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_last_crossing_reports_invalid_direction_without_committing_history() {
+    let (state, stamp, noise) = generated_parts(
+        "module last_time(p,n); inout p,n; electrical p,n; parameter real dir=1; real t; analog begin t=last_crossing(V(p,n),dir); I(p,n) <+ t+white_noise(t<0 ? 1.0 : 2.0,\"input\"); end endmodule",
+        "invalid last crossing direction",
+    );
+    run_generated_main(
+        "invalid last crossing direction",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+struct Capture;
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self, _: usize, _: runtime::GeneratedNoiseEvaluationRef<'_>) -> bool {
+        panic!("invalid direction reached the noise visitor")
+    }
+}
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _: usize, _: runtime::GeneratedNoiseProcessEvaluationRef<'_>) -> bool {
+        panic!("invalid direction reached the grouped noise visitor")
+    }
+}
+runtime::set_event_analysis(true, false);
+for direction in [-2.0, 2.0, 0.5] {
+    runtime::clear_evaluation_error();
+    let mut instance = device::state::Instance::new(&[0,1]);
+    instance.set_parameter("dir",direction).unwrap();
+    instance.finalize_parameters().unwrap();
+    let accepted = instance.capture_persistent_state();
+    let ctx = runtime::GeneratedEvalContext { voltages: &[-1.0,0.0], temperature:300.15 };
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert!(ctx.evaluation_failed(), "invalid direction was silently accepted: {direction}");
+    assert_eq!(instance.capture_persistent_state(), accepted);
+    let history = instance.capture_rollback_state();
+    runtime::clear_evaluation_error();
+    assert!(instance.evaluate_noise_sources(&ctx, &mut Capture).is_err());
+    assert!(ctx.evaluation_failed());
+    runtime::clear_evaluation_error();
+    assert!(instance.evaluate_noise_processes_at_frequency(&ctx, 1.0, &mut Capture).is_err());
+    assert!(ctx.evaluation_failed());
+    assert_eq!(instance.capture_rollback_state(), history);
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
 }
 
 #[test]
@@ -7271,228 +7428,12 @@ pub mod runtime {
         pub limiter_initialized: Vec<bool>,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub struct GeneratedCrossState {
-        pub value: Value,
-        pub time: Value,
-        pub side: i8,
-        pub last_event_time: Value,
-        pub last_crossing_time: Value,
-        pub initialized: bool,
+    mod event_control {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/event_control.rs"),
+    r#"
     }
-
-    impl GeneratedCrossState {
-        pub const INITIAL: Self = Self {
-            value: 0.0,
-            time: 0.0,
-            side: 0,
-            last_event_time: Value::NEG_INFINITY,
-            last_crossing_time: -1.0,
-            initialized: false,
-        };
-        pub const CHECKPOINT_LANES: usize = 6;
-
-        pub fn append_checkpoint_lanes(self, values: &mut Vec<Value>) {
-            values.extend_from_slice(&[
-                self.value,
-                self.time,
-                Value::from(self.side),
-                self.last_event_time,
-                self.last_crossing_time,
-                Value::from(u8::from(self.initialized)),
-            ]);
-        }
-
-        pub fn from_checkpoint_lanes(values: &[Value]) -> Result<Self, String> {
-            if values.len() != Self::CHECKPOINT_LANES {
-                return Err(format!("generated crossing checkpoint requires 6 lanes, found {}", values.len()));
-            }
-            let integer = |name: &str, value: Value| {
-                if !value.is_finite() || value.fract() != 0.0 || value < i32::MIN as Value || value > i32::MAX as Value {
-                    Err(format!("generated {name} checkpoint lane must be a finite integer, got {value}"))
-                } else {
-                    Ok(value as i32)
-                }
-            };
-            let side = integer("crossing side", values[2])?;
-            let initialized = integer("crossing initialized flag", values[5])?;
-            if !(-1..=1).contains(&side) {
-                return Err(format!("generated crossing checkpoint side must be -1, 0, or 1, got {side}"));
-            }
-            if !(0..=1).contains(&initialized) {
-                return Err(format!("generated crossing checkpoint initialized flag must be 0 or 1, got {initialized}"));
-            }
-            let state = Self {
-                value: values[0],
-                time: values[1],
-                side: side as i8,
-                last_event_time: values[3],
-                last_crossing_time: values[4],
-                initialized: initialized != 0,
-            };
-            validate_generated_cross_state(state)?;
-            Ok(state)
-        }
-    }
-
-    impl Default for GeneratedCrossState {
-        fn default() -> Self { Self::INITIAL }
-    }
-
-    pub fn validate_generated_cross_state(state: GeneratedCrossState) -> Result<(), String> {
-        if !(-1..=1).contains(&state.side)
-            || !state.value.is_finite()
-            || !state.time.is_finite()
-            || state.time < 0.0
-            || !(state.last_event_time.is_finite() || state.last_event_time == Value::NEG_INFINITY)
-            || !state.last_crossing_time.is_finite()
-            || state.last_crossing_time < -1.0
-        {
-            Err("generated accepted crossing state is malformed".to_string())
-        } else {
-            Ok(())
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq)]
-    pub struct GeneratedCrossEvaluation {
-        pub fired: bool,
-        pub candidate: GeneratedCrossState,
-        pub refinement_time: Option<Value>,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum GeneratedEventControlError {
-        Invalid,
-    }
-
-    fn event_integer(value: Value) -> Result<i32, GeneratedEventControlError> {
-        if !value.is_finite() || value.fract() != 0.0 || value < i32::MIN as Value || value > i32::MAX as Value {
-            Err(GeneratedEventControlError::Invalid)
-        } else {
-            Ok(value as i32)
-        }
-    }
-
-    fn event_side(value: Value) -> i8 {
-        if value > 0.0 { 1 } else if value < 0.0 { -1 } else { 0 }
-    }
-
-    fn next_time_after(time: Value) -> Value {
-        if time == 0.0 { Value::from_bits(1) } else { Value::from_bits(time.to_bits() + 1) }
-    }
-
-    fn crossing_time(accepted: GeneratedCrossState, value: Value, time: Value) -> Value {
-        let scale = accepted.value.abs().max(value.abs());
-        if scale == 0.0 || !scale.is_finite() {
-            return time;
-        }
-        let a = accepted.value.abs() / scale;
-        let b = value.abs() / scale;
-        accepted.time + (a / (a + b)).clamp(0.0, 1.0) * (time - accepted.time)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn evaluate_cross_impl(
-        accepted: GeneratedCrossState,
-        value: Value,
-        time: Value,
-        direction: i32,
-        time_tol: Value,
-        expr_tol: Value,
-        enabled: bool,
-        initial_above: bool,
-        allow_same_time: bool,
-        events_enabled: bool,
-    ) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
-        if !value.is_finite() || !time.is_finite() || time < 0.0 || !time_tol.is_finite() || time_tol < 0.0 || !expr_tol.is_finite() || expr_tol < 0.0 || validate_generated_cross_state(accepted).is_err() {
-            return Err(GeneratedEventControlError::Invalid);
-        }
-        if !accepted.initialized {
-            let fired = initial_above && enabled && events_enabled && value > 0.0;
-            return Ok(GeneratedCrossEvaluation {
-                fired,
-                candidate: GeneratedCrossState {
-                    value,
-                    time,
-                    side: event_side(value),
-                    last_event_time: if fired { time } else { Value::NEG_INFINITY },
-                    last_crossing_time: if fired { time } else { -1.0 },
-                    initialized: true,
-                },
-                refinement_time: None,
-            });
-        }
-        let same_time = allow_same_time && time == accepted.time;
-        if time < accepted.time || (time == accepted.time && !same_time) {
-            return Ok(GeneratedCrossEvaluation { fired: false, candidate: accepted, refinement_time: None });
-        }
-        let rising = accepted.side < 0 && value >= 0.0;
-        let falling = accepted.side > 0 && value <= 0.0;
-        let crossing_direction = if rising { 1 } else if falling { -1 } else { 0 };
-        let event_time = if crossing_direction != 0 { crossing_time(accepted, value, time) } else { -1.0 };
-        let fired = events_enabled && enabled && crossing_direction != 0 && (direction == 0 || direction == crossing_direction);
-        let refinement_time = if fired && !same_time {
-            let scale_t = accepted.time.abs().max(time.abs());
-            let scale_x = accepted.value.abs().max(value.abs());
-            let effective_t = if time_tol > 0.0 { time_tol } else { (64.0 * Value::EPSILON * scale_t).max(Value::MIN_POSITIVE) };
-            let effective_x = if expr_tol > 0.0 { expr_tol } else { (64.0 * Value::EPSILON * scale_x).max(Value::MIN_POSITIVE) };
-            if time - event_time > effective_t || value.abs() > effective_x {
-                let target = next_time_after(event_time.max(accepted.time));
-                if target <= accepted.time || target >= time { return Err(GeneratedEventControlError::Invalid); }
-                Some(target)
-            } else { None }
-        } else { None };
-        let stable_side = event_side(value);
-        let side = if stable_side != 0 { stable_side } else if crossing_direction != 0 { crossing_direction as i8 } else { accepted.side };
-        Ok(GeneratedCrossEvaluation {
-            fired,
-            candidate: GeneratedCrossState {
-                value,
-                time,
-                side,
-                last_event_time: if fired { event_time } else { accepted.last_event_time },
-                last_crossing_time: if fired { event_time } else { accepted.last_crossing_time },
-                initialized: true,
-            },
-            refinement_time,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn evaluate_generated_cross(accepted: GeneratedCrossState, value: Value, time: Value, direction: Value, time_tol: Value, expr_tol: Value, enable: Value, transient: bool) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
-        evaluate_cross_impl(accepted, value, time, event_integer(direction)?, time_tol, expr_tol, event_integer(enable)? != 0, false, false, transient)
-    }
-
-    pub fn evaluate_generated_above(accepted: GeneratedCrossState, value: Value, time: Value, time_tol: Value, expr_tol: Value, enable: Value, static_analysis: bool) -> Result<GeneratedCrossEvaluation, GeneratedEventControlError> {
-        evaluate_cross_impl(accepted, value, time, 1, time_tol, expr_tol, event_integer(enable)? != 0, true, static_analysis, true)
-    }
-
-    pub fn evaluate_generated_timer(start_time: Value, period: Value, time_tol: Value, enable: Value, current_time: Value, timestep: Value) -> (bool, Option<Value>) {
-        if !start_time.is_finite() || !period.is_finite() || !time_tol.is_finite() || !enable.is_finite() || !current_time.is_finite() || !timestep.is_finite() || enable == 0.0 || period < 0.0 {
-            return (false, None);
-        }
-        let numeric_tol = (16.0 * Value::EPSILON * start_time.abs().max(current_time.abs())).max(Value::MIN_POSITIVE);
-        let event_tol = time_tol.max(0.0).max(numeric_tol);
-        let horizon = current_time + event_tol;
-        let previous_time = current_time - timestep.max(0.0);
-        let scheduled = if horizon + numeric_tol < start_time {
-            None
-        } else if period > 0.0 {
-            let cycles = ((horizon - start_time) / period).floor().max(0.0);
-            let event = start_time + cycles * period;
-            event.is_finite().then_some(event)
-        } else { Some(start_time) };
-        let fired = scheduled.is_some_and(|event| event <= horizon && if timestep > numeric_tol { event > previous_time + numeric_tol } else { (current_time - event).abs() <= event_tol });
-        let next = if horizon + numeric_tol < start_time {
-            Some(start_time)
-        } else if period > 0.0 {
-            let cycles = ((horizon - start_time) / period).floor().max(0.0) + 1.0;
-            let event = start_time + cycles * period;
-            (event.is_finite() && event > current_time + numeric_tol).then_some(event)
-        } else { None };
-        (fired, next)
-    }
+    pub use event_control::*;
 
     #[derive(Debug, Clone, Default, PartialEq)]
     pub struct GeneratedVerilogARollbackState {
@@ -7594,7 +7535,7 @@ pub mod runtime {
         }
         pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) {}
         pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) {}
-        pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) {}
+        pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn integer_result(&self, result: Result<f64, integer::IntegerRuntimeError>) -> f64 {

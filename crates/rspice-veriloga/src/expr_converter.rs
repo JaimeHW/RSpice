@@ -508,28 +508,23 @@ impl<'a> ExprConverter<'a> {
         self.ctx.array(name)
     }
 
-    fn const_cross_direction(
+    fn cross_direction_argument(
         &self,
         arena: &mut ExprArena,
         arg: &Expression,
         name: &str,
-    ) -> CompileResult<i32> {
+    ) -> CompileResult<NodeId> {
         let converted = self.convert(arena, arg)?;
         let folded = autodiff_fold(arena, converted);
         match constant(arena, folded) {
-            Some(v) if matches!(v, -1.0 | 0.0 | 1.0) => Ok(v as i32),
+            Some(v) if matches!(v, -1.0 | 0.0 | 1.0) => Ok(folded),
             Some(v) => Err(
                 CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                     "{name} direction must be -1, 0, or 1, got {v}"
                 )))
                 .into(),
             ),
-            None => Err(
-                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                    "{name} direction argument must be a constant -1, 0, or 1"
-                )))
-                .into(),
-            ),
+            None => Ok(converted),
         }
     }
 
@@ -1322,7 +1317,9 @@ impl<'a> ExprConverter<'a> {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let expr = self.convert(arena, require_arg(0)?)?;
                 let direction = match call.args.get(1) {
-                    Some(arg) => Some(self.const_cross_direction(arena, arg, "last_crossing")?),
+                    Some(arg) => {
+                        Some(self.cross_direction_argument(arena, arg, "last_crossing")?)
+                    }
                     None => None,
                 };
                 Ok(arena.push(Node::LastCrossing { expr, direction }))

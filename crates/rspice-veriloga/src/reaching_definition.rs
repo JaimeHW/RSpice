@@ -358,6 +358,7 @@ fn rename_variable_reads(
         }
         Node::LastCrossing { expr, direction } => {
             let expr = rename_variable_reads(arena, expr, renames);
+            let direction = rename_optional(arena, direction, renames);
             Some(Node::LastCrossing { expr, direction })
         }
         Node::Heavy(_, id) => {

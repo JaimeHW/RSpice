@@ -2231,15 +2231,7 @@ impl SlewFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct CrossState {
-    value: f64,
-    time: f64,
-    side: i8,
-    last_event_time: f64,
-    last_crossing_time: f64,
-    initialized: bool,
-}
+use rspice_veriloga_runtime::GeneratedCrossState as CrossState;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CrossCheckpoint {
@@ -2249,19 +2241,6 @@ pub struct CrossCheckpoint {
     pub last_event_time: f64,
     pub last_crossing_time: f64,
     pub initialized: bool,
-}
-
-impl Default for CrossState {
-    fn default() -> Self {
-        Self {
-            value: 0.0,
-            time: 0.0,
-            side: 0,
-            last_event_time: f64::NEG_INFINITY,
-            last_crossing_time: -1.0,
-            initialized: false,
-        }
-    }
 }
 
 /// Cross detector for threshold crossing events.
@@ -2338,45 +2317,13 @@ impl CrossDetector {
         time: f64,
         direction: i32,
     ) -> Result<f64, String> {
-        Self::validate_value_and_time(value, time)?;
-        if !self.committed.initialized {
-            self.candidate = CrossState {
-                value,
-                time,
-                side: Self::side(value, 0.0),
-                initialized: true,
-                ..CrossState::default()
-            };
-            self.candidate_valid = true;
-            self.candidate_refinement_time = None;
-            return Ok(-1.0);
-        }
-
-        if time <= self.committed.time {
-            self.candidate = self.committed;
-            self.candidate_valid = true;
-            self.candidate_refinement_time = None;
-            return Ok(self.committed.last_crossing_time);
-        }
-
-        let rising = self.committed.value < 0.0 && value >= 0.0;
-        let falling = self.committed.value > 0.0 && value <= 0.0;
-        let crossing_direction = if rising {
-            1
-        } else if falling {
-            -1
-        } else {
-            0
-        };
-        let mut candidate = CrossState {
+        let candidate = rspice_veriloga_runtime::evaluate_generated_last_crossing(
+            self.committed,
             value,
             time,
-            side: Self::side(value, 0.0),
-            ..self.committed
-        };
-        if crossing_direction != 0 && (direction == 0 || direction == crossing_direction) {
-            candidate.last_crossing_time = self.estimate_crossing_time(value, time);
-        }
+            f64::from(direction),
+        )
+        .map_err(|error| error.to_string())?;
         self.candidate = candidate;
         self.candidate_valid = true;
         self.candidate_refinement_time = None;

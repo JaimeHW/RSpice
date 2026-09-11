@@ -1418,6 +1418,50 @@ mod tests {
     }
 
     #[test]
+    fn last_crossing_helper_preserves_fractional_times_and_runtime_direction() {
+        for (direction, rising, falling) in [(1.0, 0.5, 0.5), (-1.0, -1.0, 2.75), (0.0, 0.5, 2.75)]
+        {
+            let mut context = VmContext::default();
+            context.analysis_type = 2;
+            context.allocate_cross_detectors(1);
+            let mut session = WasmJitRuntimeSession::new(context);
+            for (time, voltage, expected) in
+                [(0.0, -1.0, -1.0), (2.0, 3.0, rising), (3.0, -1.0, falling)]
+            {
+                session.context_mut().time = time;
+                for _ in 0..2 {
+                    assert_eq!(
+                        evaluate_helper_with_session(
+                            428,
+                            0,
+                            0,
+                            0,
+                            [voltage, direction, 0.0, 0.0, 0.0],
+                            &[],
+                            Some(&mut session)
+                        ),
+                        Ok(expected),
+                    );
+                }
+                session.context_mut().advance_state().unwrap();
+            }
+            assert!(
+                evaluate_helper_with_session(
+                    428,
+                    0,
+                    0,
+                    0,
+                    [1.0, 2.0, 0.0, 0.0, 0.0],
+                    &[],
+                    Some(&mut session)
+                )
+                .is_err()
+            );
+            assert!(session.take_error().is_some());
+        }
+    }
+
+    #[test]
     fn timer_helper_is_inactive_outside_transient() {
         for analysis_type in [0, 1, 3, 4] {
             let mut context = VmContext::default();
