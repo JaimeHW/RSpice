@@ -644,11 +644,11 @@ fn legacy_itf_scaling_matches_ac_and_transient_charge_conservation() {
         1e-9 * forward * (1.0 + 3.0 * ((vbe - 0.72) / 14.4).exp() * fraction.powi(2))
     };
     for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
-        for devices in [
-            "Q1 c b 0 qm M=3",
-            "Q1 c b 0 qm AREA=3",
-            "Q1 c b 0 qm AREA=1.5 M=2",
-            "Q1 c b 0 qm\nQ2 c b 0 qm\nQ3 c b 0 qm",
+        for (devices, reverse_scale) in [
+            ("Q1 c b 0 qm M=3", 3.0),
+            ("Q1 c b 0 qm AREA=3", 9.0),
+            ("Q1 c b 0 qm AREA=1.5 M=2", 4.5),
+            ("Q1 c b 0 qm\nQ2 c b 0 qm\nQ3 c b 0 qm", 3.0),
         ] {
             let netlist = Netlist::parse(&format!(
                 "* Legacy ITF charge conservation\nVc c 0 {}\nVb b 0 PWL(0 {} 20n {}) AC 1 DC {}\n{devices}\n\
@@ -668,7 +668,8 @@ fn legacy_itf_scaling_matches_ac_and_transient_charge_conservation() {
             let capacitance = 1e-9
                 * (conductance * (1.0 + extra * (3.0 - 2.0 * fraction)) + forward * extra / 14.4);
             let expected = rspice_core::Complex64::new(
-                -3.0 * (conductance / 100.0 + 1e-16 / vt * ((0.65 - 0.72) / vt).exp()),
+                -3.0 * conductance / 100.0
+                    - reverse_scale * 1e-16 / vt * ((0.65 - 0.72) / vt).exp(),
                 -3.0 * std::f64::consts::TAU * 1e8 * capacitance,
             );
             assert!(
@@ -682,8 +683,10 @@ fn legacy_itf_scaling_matches_ac_and_transient_charge_conservation() {
             assert!(result.time.len() > 3 && *result.time.last().unwrap() >= 20e-9);
             for index in 1..result.time.len() {
                 let vbe = p * base[index];
-                let static_base =
-                    3.0 * p * 1e-16 * ((vbe / vt).exp_m1() / 100.0 + ((vbe - 0.72) / vt).exp_m1());
+                let static_base = p
+                    * 1e-16
+                    * (3.0 * (vbe / vt).exp_m1() / 100.0
+                        + reverse_scale * ((vbe - 0.72) / vt).exp_m1());
                 let dynamic_base = 3.0 * p * (charge(vbe) - charge(p * base[index - 1]))
                     / (result.time[index] - result.time[index - 1]);
                 assert!(
@@ -2170,16 +2173,31 @@ fn small_gummel_poon_instances_scale_dc_and_ac_at_temperature() {
             let engine = Engine::new(config);
             for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
                 for (vc, vb) in [(1.0, 0.1), (2.0, 0.7), (0.1, 0.7), (-0.2, -0.4)] {
-                    let make = |parameter, scale| {
+                    let make = |parameter: &str, scale: f64, mult: &str| {
                         Netlist::parse(&format!(
-                        "Small GP instance\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(LEVEL=1 IS=1e-14 BF=100 BR=2 IKF=1e-3 IKR=2e-3 VAF=40 VAR=20 CJE=2p CJC=1p TF=1n TR=2n)\n.options GMIN=0\n.end\n",p*vc,p*vb)).unwrap()
+                        "Small GP instance\nVC c 0 {}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale} {mult}\n.model mm {kind}(LEVEL=1 IS=1e-14 BF=100 BR=2 IKF=1e-3 IKR=2e-3 VAF=40 VAR=20 CJE=2p CJC=1p TF=1n TR=2n)\n.options GMIN=0\n.end\n",p*vc,p*vb)).unwrap()
                     };
-                    let unit = make("M", 1.0);
+                    let unit = make("M", 1.0, "");
                     let dc = engine.run_dc_op(&unit).unwrap();
                     let ac = engine.run_ac(&unit, &[1e6]).unwrap();
                     for parameter in ["M", "AREA"] {
                         for scale in [1e-200, 1e-30, 1e-18, 0.25] {
-                            let deck = make(parameter, scale);
+                            let deck = make(parameter, scale, "");
+                            // Ngspice AREA also sets the default BC geometry,
+                            // so reverse transport is not linear in AREA.
+                            // Normalize that same geometry by multiplicity;
+                            // retain the full tiny-instance precision check.
+                            let (dc, ac) = if parameter == "AREA"
+                                && dialect == SpiceDialect::Ngspice
+                            {
+                                let normalized = make("AREA", scale, &format!("M={}", 1.0 / scale));
+                                (
+                                    engine.run_dc_op(&normalized).unwrap(),
+                                    engine.run_ac(&normalized, &[1e6]).unwrap(),
+                                )
+                            } else {
+                                (dc.clone(), ac.clone())
+                            };
                             let actual_dc = engine.run_dc_op(&deck).unwrap();
                             let actual_ac = engine.run_ac(&deck, &[1e6]).unwrap();
                             assert_eq!(actual_dc.branch_names, dc.branch_names);
@@ -2222,6 +2240,198 @@ fn zero_gummel_poon_saturation_current_stays_disabled() {
         let deck = Netlist::parse(&format!("Disabled BJT current\nVC c 0 1\nVB b 0 {vb}\nQ1 c b 0 mm\n.model mm NPN(IS=0)\n.options GMIN=0\n.end\n")).unwrap();
         let result = engine.run_dc_op(&deck).unwrap();
         assert!(result.branch_currents.iter().all(|&current| current == 0.0));
+    }
+}
+
+#[test]
+fn legacy_junction_areas_match_ngspice_currents_and_stored_charge() {
+    // Independently captured ngspice 46 DC and 1 MHz AC currents at C/B/S.
+    // Both polarities were measured; DC changes sign and AC is identical.
+    // ngspice const.h uses k=1.38064852e-23, q=1.6021766208e-19;
+    // RSpice retains current SI constants. Evaluating the exponential
+    // junction laws with each pair gives 4.46 ppm DC drift at 27 C and
+    // 5.73 ppm at 70 C. Allow 8 ppm for that documented reference
+    // difference; the charge-balance and multiplicity checks stay strict.
+    for (area, explicit, subs, temperature, dc_reference, ac_reference) in [
+        (
+            1,
+            false,
+            1,
+            27.0,
+            [3.072291281861438e-06, -1.026072606073128e-06, 0.0],
+            [
+                (-0.0001187566203542553, -0.0002253863750083927),
+                (3.9644139641568696e-05, 9.302060453714276e-05),
+                (0.0, 0.00013236577047124993),
+            ],
+        ),
+        (
+            2,
+            false,
+            1,
+            27.0,
+            [1.2283283807314812e-05, -4.098378960010237e-06, 0.0],
+            [
+                (-0.0004748506828465704, -0.0004527610635224993),
+                (0.000158400759995824, 0.0001880295225799994),
+                (0.0, 0.00026473154094249987),
+            ],
+        ),
+        (
+            2,
+            true,
+            1,
+            27.0,
+            [1.8424940490939344e-05, -6.1475681479067665e-06, 0.0],
+            [
+                (-0.0007122760242698556, -0.0009438731362262488),
+                (0.000237601139993736, 0.0002820442838699992),
+                (0.0, 0.0006618288523562496),
+            ],
+        ),
+        (
+            2,
+            true,
+            -1,
+            70.0,
+            [0.0019128605970037404, -0.0006378592895541525, 0.0],
+            [
+                (0.06468622631986501, 0.0010358099162726597),
+                (-0.021568345999745282, -0.0015444077190210586),
+                (0.0, 0.000401990629497553),
+            ],
+        ),
+    ] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            temperature: temperature + 273.15,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-9,
+                voltage_abstol: 1e-12,
+                current_abstol: 1e-18,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for nested in [false, true] {
+                let fields = if explicit {
+                    "AREAB={ab} AREAC={ac}"
+                } else {
+                    ""
+                };
+                let device = format!("Q1 c b e s qm AREA={area} {fields} M=4");
+                let device = if nested {
+                    format!(
+                        "X1 c b e s cell ab=3 ac=5\n.subckt cell c b e s ab=19 ac=29\n{device}\n.ends"
+                    )
+                } else {
+                    device
+                };
+                let (ac_c, ac_b) = if subs == 1 { (1, 0) } else { (0, 1) };
+                let deck = Netlist::parse(&format!(
+                    "Junction areas\n.param ab=3 ac=5\n\
+                     VC c 0 DC {} AC {ac_c}\nVB b 0 DC {} AC {ac_b}\nVE e 0 0\nVS s 0 {}\n\
+                     {device}\n.model qm {kind}(IS=1e-12 BF=100 BR=2 ISE=2e-14 NE=1.5 ISC=3e-14 NC=1.3 CJE=2p CJC=3p CJS=5p MJS=.2 TF=1n TR=2n SUBS={subs})\n.options gmin=0\n.end",
+                    -0.3*polarity, 0.04*polarity, -0.1*polarity
+                )).unwrap();
+                let dc = engine.run_dc_op(&deck).unwrap();
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                for (index, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                    let branch = dc
+                        .branch_names
+                        .iter()
+                        .position(|branch| branch.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    assert_rel_close(
+                        &format!(
+                            "{kind} SUBS={subs} T={temperature} AREA={area} explicit={explicit} nested={nested} {name}"
+                        ),
+                        dc.branch_currents[branch],
+                        polarity * dc_reference[index],
+                        8e-6,
+                    );
+                    let branch = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|branch| branch.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    let (re, im) = ac_reference[index];
+                    let expected = rspice_core::Complex64::new(re, im);
+                    assert!(
+                        (ac[0].currents[branch] - expected).norm() < 8e-6 * expected.norm() + 1e-16,
+                        "{kind} SUBS={subs} AREA={area} explicit={explicit} nested={nested} {name}: {:?} != {expected:?}",
+                        ac[0].currents[branch]
+                    );
+                }
+            }
+        }
+    }
+
+    // With zero grading and transport, I = C*dV/dt provides an independent
+    // transient charge-balance check for both substrate connections.
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Ngspice,
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            ..Default::default()
+        },
+        integration_method: rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+        locked_time_grid: Some(std::sync::Arc::new(
+            (0..=20).map(|index| f64::from(index) * 1e-8).collect(),
+        )),
+        ..Default::default()
+    });
+    for (subs, drive, capacitance) in [(1, "c", 136e-12), (-1, "b", 120e-12)] {
+        let ground = if subs == 1 { "b" } else { "c" };
+        let deck = Netlist::parse(&format!(
+            "Junction charge ramp\nVdrive {drive} 0 PWL(0 0 200n .02)\nVground {ground} 0 0\n\
+             Q1 c b 0 0 qm AREA=2 AREAB=3 AREAC=5 M=4\n.model qm NPN(IS=0 CJC=3p CJS=5p MJC=0 MJS=0 SUBS={subs})\n.end"
+        )).unwrap();
+        let result = engine.run_tran(&deck, 200e-9, 10e-9).unwrap();
+        let currents = result.try_branch_current_waveform_named("Vdrive").unwrap();
+        assert!(currents.len() > 3);
+        for &current in currents.iter().skip(1) {
+            assert!(
+                (current + capacitance * 1e5).abs() < 1e-13,
+                "SUBS={subs}: {current:e}"
+            );
+        }
+    }
+    for name in ["AREAB", "AREAC"] {
+        for value in [-1.0, f64::NAN, f64::INFINITY] {
+            let mut deck = Netlist::parse(
+                "Invalid area\nVC c 0 1\nVB b 0 0\nQ1 c b 0 qm\n.model qm NPN\n.end",
+            )
+            .unwrap();
+            let ElementKind::Bjt {
+                instance_params, ..
+            } = &mut deck.elements[2].kind
+            else {
+                unreachable!()
+            };
+            instance_params.push((name.into(), value));
+            assert!(
+                engine
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        for (dialect, level) in [(SpiceDialect::Xyce, 1), (SpiceDialect::Ngspice, 4)] {
+            let deck = Netlist::parse(&format!("Wrong area family\nVC c 0 1\nVB b 0 0\nQ1 c b 0 qm {name}=2\n.model qm NPN(LEVEL={level})\n.end")).unwrap();
+            assert!(
+                Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
     }
 }
 

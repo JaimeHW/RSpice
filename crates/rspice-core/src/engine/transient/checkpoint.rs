@@ -1073,6 +1073,9 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(domain);
+    // Native GP reverse transport and independent junction areas must not
+    // resume accepted charges captured under the earlier common-area law.
+    hash_field(&mut hasher, "native_bjt_junction_area_law", 1_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);

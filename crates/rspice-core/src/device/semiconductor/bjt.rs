@@ -611,6 +611,12 @@ const EXT_B: usize = 1;
 const EXT_E: usize = 2;
 const EXT_S: usize = 3;
 
+#[derive(Debug, Clone, Default)]
+struct LegacyJunctionAreas {
+    base: Option<Value>,
+    collector: Option<Value>,
+}
+
 /// BJT device using the Ebers-Moll model
 ///
 /// Terminal connections:
@@ -924,6 +930,9 @@ pub struct Bjt {
     pub ncnp: Value,
     /// Instance area factor
     pub area: Value,
+    /// Optional independent base/collector geometry for ngspice GP devices.
+    /// Omitted factors track AREA at each temperature/instance refresh.
+    legacy_junction_areas: Option<Box<LegacyJunctionAreas>>,
     /// Instance multiplicity factor
     pub m: Value,
     /// Instance OFF flag used for operating-point startup seeding.
@@ -1935,6 +1944,7 @@ impl Bjt {
             ncip: 1.0,
             ncnp: 2.0,
             area: 1.0,
+            legacy_junction_areas: None,
             m: 1.0,
             initial_off: false,
             initial_condition_vbe: None,

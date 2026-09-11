@@ -6189,6 +6189,7 @@ impl Engine {
                     validate_bjt_instance_controls(
                         &element.name,
                         bjt.uses_vbic_dynamic_charges(),
+                        self.config.spice_dialect,
                         instance_params,
                     )?;
                     bjt = bjt.with_instance_params(instance_params);

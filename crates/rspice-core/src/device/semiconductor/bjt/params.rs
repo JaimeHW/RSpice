@@ -618,6 +618,19 @@ impl Bjt {
         result
     }
 
+    fn junction_area_factors(&self) -> (Value, Value) {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon || self.xyce_compatibility {
+            return (self.area, self.area);
+        }
+        let areas = self.legacy_junction_areas.as_deref();
+        let base = areas.and_then(|areas| areas.base).unwrap_or(self.area);
+        let collector = areas.and_then(|areas| areas.collector).unwrap_or(self.area);
+        match self.substrate_topology {
+            BjtSubstrateTopology::Vertical => (base, collector),
+            BjtSubstrateTopology::Lateral => (collector, base),
+        }
+    }
+
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
         let temp = self.mapped_temperature(temp).0;
         self.clear_thermal_variant_cache();
@@ -656,6 +669,8 @@ impl Bjt {
             )
         };
         let scale = self.instance_scale();
+        let (bc_area, substrate_area) = self.junction_area_factors();
+        let bc_scale = bc_area * self.m;
         let isrr_temp = Self::vbic_temp_scaled_current(
             self.isrr_nominal,
             ratio,
@@ -806,40 +821,64 @@ impl Bjt {
             };
             (nominal, operating)
         });
-        let junction = |potential: Value, capacitance: Value, grading: Value, energy: Value| {
-            if let Some((nominal_shift, operating_shift)) = legacy_shifts {
-                let reference = crate::constants::TEMP_REFERENCE;
-                let pbo = (potential - nominal_shift) / (tnom / reference);
-                let mapped = (temp / reference) * pbo + operating_shift;
-                let old_gamma = (potential - pbo) / pbo;
-                let new_gamma = (mapped - pbo) / pbo;
-                let denominator = 1.0 + grading * (4e-4 * (tnom - reference) - old_gamma);
-                let numerator = 1.0 + grading * (4e-4 * (temp - reference) - new_gamma);
-                let capacitance = crate::numerics::scaled_exp_product(
-                    &[capacitance, numerator, self.area, self.m],
-                    &[denominator],
-                    0.0,
-                );
-                (mapped, capacitance)
-            } else {
-                let mapped = Self::vbic_temp_scaled_potential(potential, ratio, vt, energy);
-                (
-                    mapped,
-                    (capacitance * (potential / mapped.max(1e-18)).powf(grading) * scale).max(0.0),
-                )
-            }
-        };
-        let (vje_temp, cje_temp) =
-            junction(self.vje_nominal, self.cje_nominal, self.mje, self.eaie);
-        let (vjc_temp, cjc_temp) =
-            junction(self.vjc_nominal, self.cjc_nominal, self.mjc, self.eaic);
+        let junction =
+            |potential: Value, capacitance: Value, grading: Value, energy: Value, area: Value| {
+                if let Some((nominal_shift, operating_shift)) = legacy_shifts {
+                    let reference = crate::constants::TEMP_REFERENCE;
+                    let pbo = (potential - nominal_shift) / (tnom / reference);
+                    let mapped = (temp / reference) * pbo + operating_shift;
+                    let old_gamma = (potential - pbo) / pbo;
+                    let new_gamma = (mapped - pbo) / pbo;
+                    let denominator = 1.0 + grading * (4e-4 * (tnom - reference) - old_gamma);
+                    let numerator = 1.0 + grading * (4e-4 * (temp - reference) - new_gamma);
+                    let capacitance = crate::numerics::scaled_exp_product(
+                        &[capacitance, numerator, area, self.m],
+                        &[denominator],
+                        0.0,
+                    );
+                    (mapped, capacitance)
+                } else {
+                    let mapped = Self::vbic_temp_scaled_potential(potential, ratio, vt, energy);
+                    (
+                        mapped,
+                        (capacitance * (potential / mapped.max(1e-18)).powf(grading) * scale)
+                            .max(0.0),
+                    )
+                }
+            };
+        let (vje_temp, cje_temp) = junction(
+            self.vje_nominal,
+            self.cje_nominal,
+            self.mje,
+            self.eaie,
+            self.area,
+        );
+        let (vjc_temp, cjc_temp) = junction(
+            self.vjc_nominal,
+            self.cjc_nominal,
+            self.mjc,
+            self.eaic,
+            bc_area,
+        );
         let (ps_temp, cjcp_temp) = if legacy_model && self.xyce_compatibility {
             // Xyce's legacy substrate charge uses nominal CJS and VJS.
             (self.ps_nominal, self.cjcp_nominal * scale)
         } else {
-            junction(self.ps_nominal, self.cjcp_nominal, self.ms, self.eais)
+            junction(
+                self.ps_nominal,
+                self.cjcp_nominal,
+                self.ms,
+                self.eais,
+                substrate_area,
+            )
         };
-        let (_, cjep_temp) = junction(self.vjc_nominal, self.cjep_nominal, self.mjc, self.eaic);
+        let (_, cjep_temp) = junction(
+            self.vjc_nominal,
+            self.cjep_nominal,
+            self.mjc,
+            self.eaic,
+            self.area,
+        );
         let nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
         let nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
         let avc2_temp = self.avc2_nominal * (1.0 + (temp - self.tnom) * self.tavc);
@@ -899,11 +938,19 @@ impl Bjt {
         } else {
             0.0
         };
-        self.isrr = isrr_temp.max(0.0);
+        // bjttemp.c applies the BC geometry to the already AREA-scaled IS
+        // when separate ISBE/ISBC are absent. This includes the default
+        // AREAB/AREAC=AREA. Xyce GP uses only the common AREA multiplier.
+        self.isrr = isrr_temp.max(0.0)
+            * if legacy_model && !self.xyce_compatibility {
+                bc_area
+            } else {
+                1.0
+            };
         self.ibei = (ibei_temp * scale).max(0.0);
         self.iben = (iben_temp * scale).max(0.0);
-        self.ibci = (ibci_temp * scale).max(0.0);
-        self.ibcn = (ibcn_temp * scale).max(0.0);
+        self.ibci = (ibci_temp * bc_scale).max(0.0);
+        self.ibcn = (ibcn_temp * bc_scale).max(0.0);
         self.vbbe = if vbbe_temp.is_finite() {
             vbbe_temp
         } else {
@@ -1893,7 +1940,8 @@ impl Bjt {
     /// Apply instance-level BJT scaling and thermal overrides.
     ///
     /// Supported keys:
-    /// - `AREA`: area multiplier (default 1)
+    /// - `AREA`: emitter area multiplier (default 1)
+    /// - `AREAB` / `AREAC`: ngspice GP base/collector areas (default AREA)
     /// - `M` / `MULT`: multiplicity (default 1)
     /// - `OFF`: start both junctions from their zero-bias state
     /// - `IC_VBE` / `IC_VCE`: the `IC=` vector components, read only by the
@@ -1910,6 +1958,18 @@ impl Bjt {
             if name.eq_ignore_ascii_case("AREA") {
                 if *value > 0.0 {
                     self.area = *value;
+                }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("AREAB") || name.eq_ignore_ascii_case("AREAC") {
+                let areas = self
+                    .legacy_junction_areas
+                    .get_or_insert_with(Default::default);
+                if name.eq_ignore_ascii_case("AREAB") {
+                    areas.base = Some(*value);
+                } else {
+                    areas.collector = Some(*value);
                 }
                 continue;
             }
@@ -2055,14 +2115,25 @@ mod tests {
                         ] {
                             assert!(
                                 (actual / scale - expected).abs() <= expected.abs() * 2e-14,
-                                "LEVEL={level} {parameter}={scale:e} T={temperature}: {actual:e} vs {expected:e}*scale"
+                                "LEVEL={level} {parameter}={scale:e} T={temperature}: {actual:e} vs {expected:e}"
                             );
                         }
                         for (actual, expected) in [(scaled.re, unit.re), (scaled.rcx, unit.rcx)] {
                             assert!((actual * scale - expected).abs() <= expected.abs() * 2e-14);
                         }
+                        // GP AREA also sets the default BC geometry. Compare
+                        // transport at that geometry with normalized M; the
+                        // simple parameter scalings above remain independent.
+                        let reference = if level == 1.0 && parameter == "AREA" {
+                            unit.clone().with_instance_params(&[
+                                ("AREA".into(), scale),
+                                ("M".into(), 1.0 / scale),
+                            ])
+                        } else {
+                            unit.clone()
+                        };
                         for (vbe, vbc) in [(0.1, -0.3), (0.7, -1.0), (-0.2, 0.7)] {
-                            let expected = unit.transport_charge_state(vbe, vbc);
+                            let expected = reference.transport_charge_state(vbe, vbc);
                             let actual = scaled.transport_charge_state(vbe, vbc);
                             for (actual, expected) in [
                                 (actual.itzf, expected.itzf),
@@ -2070,9 +2141,12 @@ mod tests {
                                 (actual.ditzf_dvbe_eff, expected.ditzf_dvbe_eff),
                                 (actual.ditzr_dvbc_eff, expected.ditzr_dvbc_eff),
                             ] {
+                                let expected = expected * scale;
+                                // Reverse AREA^2 currents can become subnormal.
+                                let tolerance = (expected.abs() * 2e-13).max(Value::from_bits(4));
                                 assert!(
-                                    (actual / scale - expected).abs() <= expected.abs() * 2e-13,
-                                    "LEVEL={level} {parameter}={scale:e} T={temperature} bias=({vbe},{vbc}): {actual:e} vs {expected:e}*scale"
+                                    (actual - expected).abs() <= tolerance,
+                                    "LEVEL={level} {parameter}={scale:e} T={temperature} bias=({vbe},{vbc}): {actual:e} vs {expected:e}"
                                 );
                             }
                         }

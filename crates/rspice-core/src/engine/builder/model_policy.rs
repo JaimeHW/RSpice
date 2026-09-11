@@ -785,10 +785,23 @@ pub(super) fn validate_bjt_model_level(
 pub(super) fn validate_bjt_instance_controls(
     element_name: &str,
     vbic: bool,
+    spice_dialect: SpiceDialect,
     params: &[(String, f64)],
 ) -> Result<(), SimulationError> {
     let mut temperature_offset = false;
     for (name, value) in params {
+        if name.eq_ignore_ascii_case("AREAB") || name.eq_ignore_ascii_case("AREAC") {
+            if vbic || spice_dialect == SpiceDialect::Xyce {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': {name} requires a native ngspice Gummel-Poon model"
+                )));
+            }
+            if !value.is_finite() || *value < 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': {name}={value} must be finite and nonnegative"
+                )));
+            }
+        }
         let switch = name.eq_ignore_ascii_case("SW_ET") || name.eq_ignore_ascii_case("SW_NOISE");
         let vbic_offset = name.eq_ignore_ascii_case("TRISE") || name.eq_ignore_ascii_case("DTA");
         if (switch || vbic_offset)
