@@ -7,7 +7,8 @@
 use super::connect_modules::DesignConnectRules;
 use super::veriloga_cache::{
     CachedVerilogAModel, canonicalize_for_cache, compile_and_cache_prepared_veriloga,
-    lookup_cached_veriloga_with_limits_and_abort, prepare_veriloga_source,
+    lookup_cached_veriloga_with_limits_and_abort, lookup_registered_connection_library,
+    prepare_veriloga_source,
 };
 use crate::abort_signal::AbortSignal;
 use crate::netlist::VerilogAInclude;
@@ -70,6 +71,23 @@ pub(super) fn resolve_includes(
     let mut dependency_versions = DependencyVersions::default();
     for group in groups {
         let path = &includes[group[0]].file_path;
+        if let Some(library) = lookup_registered_connection_library(path, limits, abort)? {
+            for &index in &group {
+                if let Some(module) = &includes[index].selected_module {
+                    return Err(SimulationError::Netlist(format!(
+                        "Verilog-A source '{}' is a registered connection library; device module '{}' cannot be selected",
+                        path.display(),
+                        module
+                    )));
+                }
+            }
+            let specification = library
+                .connect_specification()
+                .map_err(SimulationError::Netlist)?;
+            super::check_build_abort(abort)?;
+            rules.register(path, specification)?;
+            continue;
+        }
         let mut needs_preparation = false;
         let mut cached_identity = None;
         for &index in &group {

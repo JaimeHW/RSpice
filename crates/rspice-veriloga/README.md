@@ -160,8 +160,10 @@ retains the active connection declarations and authored bodies independently of
 a device ABI. Validate its integrity before registration and use
 `connect_specification()` to resolve its physical definitions and named rules
 without filesystem access. The containing project or signed package authenticates
-the artifact identity. Engine registration for this standalone artifact remains
-integration work; module artifacts continue to carry their connection closure.
+the artifact identity. The core's `register_project_veriloga_sources_for_session`
+API registers these artifacts atomically with device runtimes in one bounded
+source cache; module artifacts also continue to carry their connection closure.
+Product-specific library import and worker packaging remain integration work.
 
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data

@@ -125,6 +125,8 @@ invented throughput numbers do not qualify parity.
 | Circuit configuration selection | Core target `veriloga_connect_source_closure`, filtered to `named_configuration`, portable Verilog feature | 2 passed: file/cached/serialized-virtual 1 V/5 V choices with parameter specialization; include-order independence, unknown/ambiguous names and explicit empty rules |
 | Source-qualified configuration selection | Core target `veriloga_connect_source_closure`, filtered to `source_qualified`, portable Verilog feature | Passed: duplicate Shared configurations select 1 V/5 V by import alias across file and transported virtual roots; unknown and multiply bound aliases reject |
 | Prepared virtual sources and standalone connection transport | Compiler targets `prepared_source` and `virtual_source`, filtered to `virtual`, no default features | 2 passed: file/virtual artifact equality, serialization/integrity rejection, one front-end execution across two module emissions, cancellation, existing exact nested dependency receipt |
+| Standalone virtual library circuit registration | Core target `veriloga_connect_source_closure`, filtered to `standalone_virtual`, portable Verilog feature | Passed: a zero-device library selects 1 V/5 V conversion; cache/source budgets, conflicting device registration, no partial installation and wrong-kind module selection preserve valid state |
+| Existing atomic device registration after typed-cache integration | Core library tests filtered to `engine::builder::veriloga_cache::tests::plural_`, portable Verilog feature | 3 passed: whole-batch install, aggregate-budget rollback and installed-key collision rollback |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -175,7 +177,7 @@ unselected closure cannot hide the requested import. Both options participate
 in the netlist configuration fingerprint.
 
 Remaining MS01 items include hierarchical library/view
-binding, connect-only virtual artifacts/registration, and explicit propagation
+binding and explicit propagation of connection-only artifacts
 through all product adapters. The current named selector is design-wide and
 does not claim those broader configuration capabilities.
 
@@ -187,17 +189,33 @@ emission expose cooperative cancellation without replaying completed phase
 callbacks. A separate version-1 `ConnectionLibraryArtifact` carries connection
 source without manufacturing a device ABI; its framed BLAKE3 identity covers the
 schema, logical source package and exact preprocessed source. File and virtual
-preparation produce identical artifacts for the same logical source. Registration
-and product transport of this standalone artifact are the next integration work.
+preparation produce identical artifacts for the same logical source. Product
+transport of this standalone artifact remains integration work.
 The concurrent hierarchy/flow-probe fix `45cfe35ce` was preserved during rebase;
 it advances canonical schema to 34 and core disk cache format to 71 and updates
 the generated model catalog. The two directly affected virtual-source cases
 passed again after that compiler integration. Broader release qualification
 remains pending.
 
+Core source registration now accepts device and standalone connection artifacts
+in one atomic batch. A typed source entry replaces the device-only cache value;
+both kinds use the existing bounded cache, common collision checks and one commit
+point. Connection source is validated and bounded before retention. The builder
+resolves its registered rules without compiling or inventing a device module.
+Failed source/cache budgets and a device/library key collision leave the prior
+entries usable and the pending candidate absent. A standalone library cannot be
+selected as a device. This changes in-memory registration, not the disk device
+record schema. Browser workers and product import flows still need to carry the
+new source entry type end to end before those deployment routes are qualified.
+
 ## Next implementation work
 
-Complete MS01 design-wide source/configuration handling. Implement MS02 resolved timing metadata, then
+Carry standalone connection libraries through MS01's product import, prepared-run
+validation and browser-worker source set. The existing UI `PreparedVerilogARuntimeSet`
+and sealed model-library compiler still assume device-only entries; update their
+binding inventories, identities, registration and source generation together.
+Continue hierarchical library/view binding with the typed design graph.
+Implement MS02 resolved timing metadata, then
 MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must
 include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
 off-grid timing and a rejected trial. Continue through every remaining milestone

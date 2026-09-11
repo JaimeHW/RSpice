@@ -74,8 +74,19 @@ source with no rule block is also an error. The qualifier uses the source alread
 resolved for the import and survives remapping to a sealed virtual source key.
 An explicitly selected empty block supplies no insertion rules; a mixed boundary
 requiring one is an error. Hierarchical library/view configuration
-binding, standalone virtual connection-library registration, and execution of
+binding, product workflows for standalone virtual libraries, and execution of
 arbitrary authored connect bodies remain implementation work.
+
+The public `register_project_veriloga_sources_for_session` API accepts a single
+transaction of `ProjectVerilogASourceRegistration::Runtime` and `::Connections`
+entries. A connection entry carries the compiler's `ConnectionLibraryArtifact`
+under an exact sealed source key, with no dummy device module. Import that key
+with `.VERILOGA` and select its rules normally. Both entry kinds share one bounded
+cache and the same key/alias collision checks; failed validation or aggregate
+budgets preserve the installed set. The `_with_limits` variant also bounds
+expanded connection source. Existing runtime-only registration APIs use the
+same transaction path. A connection-library key cannot be selected as a device
+or replaced by a conflicting device registration.
 
 ## Module map
 

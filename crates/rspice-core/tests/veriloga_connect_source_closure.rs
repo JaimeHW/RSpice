@@ -439,3 +439,127 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
         assert!(error.contains("found 2 sources"), "{error}");
     }
 }
+
+#[test]
+fn standalone_virtual_connections_register_atomically_with_devices() {
+    use rspice_core::{
+        ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogASourceRegistration as Source,
+        ResourceLimits, register_project_veriloga_sources_for_session,
+        register_project_veriloga_sources_for_session_with_limits,
+    };
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let library_bundle = VirtualSourceBundle::new(
+        "rules.vams",
+        [VirtualSourceFile::new(
+            "rules.vams",
+            connection_alternatives(),
+        )],
+    )
+    .unwrap();
+    let prepared_library = compiler
+        .prepare_virtual_runtime_source(&library_bundle, VirtualCompileLimits::default())
+        .unwrap();
+    assert_eq!(prepared_library.module_names().count(), 0);
+    let artifact = serde_json::from_slice(
+        &serde_json::to_vec(&prepared_library.connection_artifact().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let source_prefix = format!(
+        "__rspice_project__/standalone-connections-{}",
+        std::process::id()
+    );
+    let library_key = PathBuf::from(format!("{source_prefix}/rules.vams"));
+    let device_key = PathBuf::from(format!("{source_prefix}/driver.vams"));
+    assert!(!library_key.exists() && !device_key.exists());
+    let runtime = compiler.compile_runtime("module driver(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule", None).unwrap();
+    let device = ProjectVerilogARuntimeRegistration {
+        source_key: device_key.clone(),
+        aliases: vec!["DRIVER".to_owned()],
+        model: runtime.model,
+        canonical_ir: runtime.canonical_ir,
+    };
+    let library = ProjectVerilogAConnectionLibraryRegistration {
+        source_key: library_key.clone(),
+        aliases: vec!["CONNECTIONS".to_owned()],
+        artifact,
+    };
+    let sources = vec![
+        Source::Runtime(device.clone()),
+        Source::Connections(library.clone()),
+    ];
+    register_project_veriloga_sources_for_session(sources.clone()).unwrap();
+    let deck = |name: &str| {
+        Netlist::parse(&format!("* standalone virtual library\nV1 p 0 1\nX1 p q DRIVER\n.va \"{}\" DRIVER\n.va \"{}\" CONNECTIONS\n.options connectrules={name} connectrules_source=connections\n.end\n", device_key.display(), library_key.display())).unwrap()
+    };
+    let assert_output = |name: &str, expected: f64| {
+        let result = Engine::default()
+            .run_tran(&deck(name), 2e-9, 0.2e-9)
+            .unwrap();
+        let q = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("q"))
+            .unwrap();
+        assert!(
+            result.voltages[q]
+                .iter()
+                .all(|v| (v - expected).abs() < 1e-9),
+            "{name}: {:?}",
+            result.voltages[q]
+        );
+    };
+    assert_output("Low", 1.0);
+
+    let mut limits = ResourceLimits::default();
+    limits.max_shared_cache_bytes = 1;
+    let error = register_project_veriloga_sources_for_session_with_limits(sources.clone(), limits)
+        .unwrap_err();
+    assert!(
+        error.contains("shared_cache_bytes limit exceeded"),
+        "{error}"
+    );
+    let mut limits = ResourceLimits::default();
+    limits.max_expanded_source_bytes = 1;
+    let error =
+        register_project_veriloga_sources_for_session_with_limits(sources, limits).unwrap_err();
+    assert!(
+        error.contains("expanded_source_bytes limit exceeded"),
+        "{error}"
+    );
+    let mut collision = device.clone();
+    collision.source_key = library_key.clone();
+    let mut pending = device;
+    pending.source_key = PathBuf::from(format!("{source_prefix}/pending.vams"));
+    let error = register_project_veriloga_sources_for_session(vec![
+        Source::Runtime(pending.clone()),
+        Source::Runtime(collision),
+    ])
+    .unwrap_err();
+    assert!(error.contains("differing installed artifact"), "{error}");
+    let pending_deck = Netlist::parse(&format!(
+        "* rejected candidate\nV1 p 0 1\nX1 p q DRIVER\n.va \"{}\" DRIVER\n.end\n",
+        pending.source_key.display()
+    ))
+    .unwrap();
+    let error = Engine::default()
+        .build_circuit(&pending_deck)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("not installed"), "{error}");
+
+    let mut wrong_kind = deck("Low");
+    wrong_kind.veriloga_includes[1].selected_module = Some("driver".to_owned());
+    let error = Engine::default()
+        .build_circuit(&wrong_kind)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("registered connection library") && error.contains("cannot be selected"),
+        "{error}"
+    );
+    // Failed budgets and mixed-kind collisions must leave both old entries usable.
+    assert_output("High", 5.0);
+}

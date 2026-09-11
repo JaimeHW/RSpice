@@ -491,7 +491,35 @@ impl CachedVerilogAModel {
 }
 
 #[cfg(feature = "veriloga")]
-type VerilogAModelCache = crate::resource::BoundedCache<VerilogASourceKey, CachedVerilogAModel>;
+type VerilogASourceCache = crate::resource::BoundedCache<VerilogASourceKey, CachedVerilogASource>;
+
+/// Device code and standalone connection source share one retention budget and
+/// registration transaction. A library never impersonates a device module.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+pub(super) enum CachedVerilogASource {
+    Runtime(CachedVerilogAModel),
+    Connections(std::sync::Arc<rspice_veriloga::ConnectionLibraryArtifact>),
+}
+
+#[cfg(feature = "veriloga")]
+impl CachedVerilogASource {
+    fn runtime(&self) -> Option<&CachedVerilogAModel> {
+        match self {
+            Self::Runtime(model) => Some(model),
+            Self::Connections(_) => None,
+        }
+    }
+
+    fn artifact_fingerprint(&self) -> Result<[u8; 32], String> {
+        match self {
+            Self::Runtime(model) => {
+                runtime_artifact_fingerprint(&model.model, model.canonical_ir.as_deref())
+            }
+            Self::Connections(library) => Ok(*library.identity()),
+        }
+    }
+}
 
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -580,8 +608,29 @@ fn veriloga_model_cache_entry_bytes(
         .saturating_add(key.selected_module.as_ref().map_or(0, String::len));
     Ok(crate::resource::estimated_cache_entry_bytes::<
         VerilogASourceKey,
-        CachedVerilogAModel,
+        CachedVerilogASource,
     >(key_bytes, counter.bytes))
+}
+
+#[cfg(feature = "veriloga")]
+fn veriloga_source_cache_entry_bytes(
+    key: &VerilogASourceKey,
+    entry: &CachedVerilogASource,
+) -> Result<usize, String> {
+    match entry {
+        CachedVerilogASource::Runtime(model) => veriloga_model_cache_entry_bytes(key, model),
+        CachedVerilogASource::Connections(library) => {
+            let mut counter = CountingWriter::default();
+            serde_json::to_writer(&mut counter, library.as_ref())
+                .map_err(|error| format!("failed to size connection library artifact: {error}"))?;
+            Ok(crate::resource::estimated_cache_entry_bytes::<
+                VerilogASourceKey,
+                CachedVerilogASource,
+            >(
+                key.source_path.to_string_lossy().len(), counter.bytes
+            ))
+        }
+    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -602,12 +651,23 @@ fn retain_veriloga_model(
         return Ok(false);
     }
 
-    let mut cache = veriloga_model_cache()
+    let mut cache = veriloga_source_cache()
         .write()
         .map_err(|_| "failed to acquire Verilog-A cache lock".to_owned())?;
+    if matches!(cache.get(&key), Some(CachedVerilogASource::Connections(_))) {
+        return Err(format!(
+            "Verilog-A source '{}' is registered as a connection library and cannot be replaced by a device",
+            key.display()
+        ));
+    }
     cache.enforce_limit(max_bytes);
     cache.remove(&key);
-    cache.insert_or_get(key.clone(), entry, retained_bytes, max_bytes);
+    cache.insert_or_get(
+        key.clone(),
+        CachedVerilogASource::Runtime(entry),
+        retained_bytes,
+        max_bytes,
+    );
     let retained = cache.get(&key).is_some();
     if required && !retained {
         return Err(format!(
@@ -671,14 +731,14 @@ fn validate_runtime_artifact_pair(
 }
 
 #[cfg(feature = "veriloga")]
-pub(super) fn veriloga_model_cache() -> &'static RwLock<VerilogAModelCache> {
-    static CACHE: OnceLock<RwLock<VerilogAModelCache>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(VerilogAModelCache::default()))
+pub(super) fn veriloga_source_cache() -> &'static RwLock<VerilogASourceCache> {
+    static CACHE: OnceLock<RwLock<VerilogASourceCache>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(VerilogASourceCache::default()))
 }
 
 #[cfg(feature = "veriloga")]
 pub(super) fn clear_in_memory_veriloga_cache() {
-    if let Ok(mut cache) = veriloga_model_cache().write() {
+    if let Ok(mut cache) = veriloga_source_cache().write() {
         cache.clear();
     }
 }
@@ -1757,14 +1817,20 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
         )));
     }
     let canonical = VerilogASourceKey::new(path, selected_module);
-    let memory_entry = if let Ok(mut cache) = veriloga_model_cache().write() {
+    let memory_entry = if let Ok(mut cache) = veriloga_source_cache().write() {
         cache.enforce_limit(limits.max_shared_cache_bytes);
         cache.get_cloned(&canonical)
     } else {
         None
     };
 
-    if let Some(entry) = memory_entry {
+    if let Some(CachedVerilogASource::Connections(_)) = &memory_entry {
+        return Err(SimulationError::Netlist(format!(
+            "Verilog-A source '{}' is a connection library, not a device module",
+            path.display()
+        )));
+    }
+    if let Some(CachedVerilogASource::Runtime(entry)) = memory_entry {
         if dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
             VERILOGA_CACHE_TELEMETRY.memory_hits.fetch_add(1, Relaxed);
             log::debug!("Verilog-A cache hit (memory): '{}'", canonical.display());
@@ -1773,9 +1839,10 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
         VERILOGA_CACHE_TELEMETRY
             .stale_memory_entries
             .fetch_add(1, Relaxed);
-        if let Ok(mut cache) = veriloga_model_cache().write()
+        if let Ok(mut cache) = veriloga_source_cache().write()
             && cache
                 .get(&canonical)
+                .and_then(CachedVerilogASource::runtime)
                 .is_some_and(|current| current.dependencies == entry.dependencies)
         {
             cache.remove(&canonical);
@@ -1814,6 +1881,33 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
 
     VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
     Ok(None)
+}
+
+#[cfg(feature = "veriloga")]
+pub(super) fn lookup_registered_connection_library(
+    path: &Path,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<std::sync::Arc<rspice_veriloga::ConnectionLibraryArtifact>>, SimulationError> {
+    check_build_abort(abort)?;
+    if !is_sealed_veriloga_virtual_path(path) {
+        return Ok(None);
+    }
+    let mut cache = veriloga_source_cache().write().map_err(|_| {
+        SimulationError::Netlist("failed to acquire Verilog-A source cache lock".to_owned())
+    })?;
+    cache.enforce_limit(limits.max_shared_cache_bytes);
+    match cache.get(&VerilogASourceKey::new(path, None)) {
+        Some(CachedVerilogASource::Connections(library)) => {
+            ResourceLimitError::ensure(
+                ResourceKind::ExpandedSourceBytes,
+                library.preprocessed_source().len(),
+                limits.max_expanded_source_bytes,
+            )?;
+            Ok(Some(library.clone()))
+        }
+        _ => Ok(None),
+    }
 }
 
 #[cfg(all(test, feature = "veriloga"))]
@@ -2126,6 +2220,23 @@ pub struct ProjectVerilogARuntimeRegistration {
     pub canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
 }
 
+/// Standalone connection declarations under an exact sealed source key.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+pub struct ProjectVerilogAConnectionLibraryRegistration {
+    pub source_key: PathBuf,
+    pub aliases: Vec<String>,
+    pub artifact: rspice_veriloga::ConnectionLibraryArtifact,
+}
+
+/// One source in an atomic project/package registration transaction.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone)]
+pub enum ProjectVerilogASourceRegistration {
+    Runtime(ProjectVerilogARuntimeRegistration),
+    Connections(ProjectVerilogAConnectionLibraryRegistration),
+}
+
 #[cfg(feature = "veriloga")]
 #[derive(Debug)]
 struct PreparedProjectVerilogARegistration {
@@ -2134,7 +2245,7 @@ struct PreparedProjectVerilogARegistration {
     authority_scope: String,
     aliases: BTreeSet<String>,
     artifact_fingerprint: [u8; 32],
-    entry: CachedVerilogAModel,
+    entry: CachedVerilogASource,
 }
 
 #[cfg(feature = "veriloga")]
@@ -2240,11 +2351,11 @@ fn prepare_project_veriloga_registration(
         authority_scope,
         aliases,
         artifact_fingerprint,
-        entry: CachedVerilogAModel {
+        entry: CachedVerilogASource::Runtime(CachedVerilogAModel {
             dependencies: Vec::new(),
             model: std::sync::Arc::new(registration.model),
             canonical_ir: Some(std::sync::Arc::new(registration.canonical_ir)),
-        },
+        }),
     })
 }
 
@@ -2253,9 +2364,68 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     registrations: impl IntoIterator<Item = ProjectVerilogARuntimeRegistration>,
     max_shared_cache_bytes: usize,
 ) -> Result<(), String> {
+    register_project_veriloga_sources_for_session_with_limits(
+        registrations
+            .into_iter()
+            .map(ProjectVerilogASourceRegistration::Runtime),
+        ResourceLimits {
+            max_shared_cache_bytes,
+            ..Default::default()
+        },
+    )
+}
+
+/// Atomically register sealed device and connection-library sources. Both kinds
+/// share key/alias collision checks and the existing bounded in-memory cache.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_sources_for_session(
+    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
+) -> Result<(), String> {
+    register_project_veriloga_sources_for_session_with_limits(
+        registrations,
+        ResourceLimits::default(),
+    )
+}
+
+/// Register the complete source set with caller-selected source/cache limits.
+/// Validation, collision and budget failures leave the installed set unchanged.
+#[cfg(feature = "veriloga")]
+pub fn register_project_veriloga_sources_for_session_with_limits(
+    registrations: impl IntoIterator<Item = ProjectVerilogASourceRegistration>,
+    limits: ResourceLimits,
+) -> Result<(), String> {
+    let max_shared_cache_bytes = limits.max_shared_cache_bytes;
     let mut prepared_by_key = BTreeMap::<PathBuf, PreparedProjectVerilogARegistration>::new();
     for registration in registrations {
-        let prepared = prepare_project_veriloga_registration(registration)?;
+        let prepared = match registration {
+            ProjectVerilogASourceRegistration::Runtime(runtime) => {
+                prepare_project_veriloga_registration(runtime)?
+            }
+            ProjectVerilogASourceRegistration::Connections(library) => {
+                let (key, folded_key, authority_scope) =
+                    validate_sealed_runtime_source_key(&library.source_key)?;
+                ResourceLimitError::ensure(
+                    ResourceKind::ExpandedSourceBytes,
+                    library.artifact.preprocessed_source().len(),
+                    limits.max_expanded_source_bytes,
+                )
+                .map_err(|error| error.to_string())?;
+                library.artifact.connect_specification()?;
+                let aliases = library
+                    .aliases
+                    .iter()
+                    .map(|alias| validate_project_runtime_alias(alias))
+                    .collect::<Result<_, _>>()?;
+                PreparedProjectVerilogARegistration {
+                    key,
+                    folded_key,
+                    authority_scope,
+                    aliases,
+                    artifact_fingerprint: *library.artifact.identity(),
+                    entry: CachedVerilogASource::Connections(std::sync::Arc::new(library.artifact)),
+                }
+            }
+        };
         if let Some(existing) = prepared_by_key.get_mut(&prepared.key) {
             if existing.artifact_fingerprint != prepared.artifact_fingerprint {
                 return Err(format!(
@@ -2302,7 +2472,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     let incoming_bytes = prepared
         .iter()
         .map(|runtime| {
-            veriloga_model_cache_entry_bytes(
+            veriloga_source_cache_entry_bytes(
                 &VerilogASourceKey::new(&runtime.key, None),
                 &runtime.entry,
             )
@@ -2319,7 +2489,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     )
     .map_err(|error| error.to_string())?;
 
-    let mut cache = veriloga_model_cache()
+    let mut cache = veriloga_source_cache()
         .write()
         .map_err(|_| "failed to acquire Verilog-A cache lock".to_owned())?;
 
@@ -2331,10 +2501,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
         }
         let (_, cached_folded_key, _) =
             validate_sealed_runtime_source_key(&cached_key.source_path)?;
-        let cached_fingerprint = runtime_artifact_fingerprint(
-            cached_entry.model.as_ref(),
-            cached_entry.canonical_ir.as_deref(),
-        )?;
+        let cached_fingerprint = cached_entry.artifact_fingerprint()?;
         for runtime in &prepared {
             if cached_folded_key == runtime.folded_key
                 && cached_fingerprint != runtime.artifact_fingerprint
@@ -2351,10 +2518,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
     for runtime in prepared {
         let entry = if let Some(installed) = cache.get(&VerilogASourceKey::new(&runtime.key, None))
         {
-            let installed_fingerprint = runtime_artifact_fingerprint(
-                installed.model.as_ref(),
-                installed.canonical_ir.as_deref(),
-            )?;
+            let installed_fingerprint = installed.artifact_fingerprint()?;
             if installed_fingerprint != runtime.artifact_fingerprint {
                 return Err(format!(
                     "sealed Verilog-A runtime key '{}' is already installed with a differing artifact",
@@ -2366,7 +2530,7 @@ fn register_project_veriloga_runtimes_for_session_with_limit(
             runtime.entry
         };
         let retained_bytes =
-            veriloga_model_cache_entry_bytes(&VerilogASourceKey::new(&runtime.key, None), &entry)?;
+            veriloga_source_cache_entry_bytes(&VerilogASourceKey::new(&runtime.key, None), &entry)?;
         replacements.push((runtime.key.into(), entry, retained_bytes));
     }
 
@@ -2610,7 +2774,7 @@ endmodule
     }
 
     fn remove_project_runtime_keys(keys: &[&Path]) {
-        let mut cache = veriloga_model_cache().write().expect("cache lock");
+        let mut cache = veriloga_source_cache().write().expect("cache lock");
         for key in keys {
             cache.remove(&VerilogASourceKey::new(key, None));
         }
@@ -2849,7 +3013,7 @@ endmodule
             .expect("optional cache insertion is recoverable")
         );
         assert!(
-            veriloga_model_cache()
+            veriloga_source_cache()
                 .read()
                 .expect("cache lock")
                 .get(&key)
@@ -2898,8 +3062,11 @@ endmodule
         );
 
         let key = VerilogASourceKey::new(&source_key, None);
-        let mut cache = veriloga_model_cache().write().expect("cache lock");
-        let entry = cache.get(&key).expect("session entry");
+        let mut cache = veriloga_source_cache().write().expect("cache lock");
+        let entry = cache
+            .get(&key)
+            .and_then(CachedVerilogASource::runtime)
+            .expect("session device entry");
         assert!(entry.dependencies.is_empty());
         assert_eq!(entry.model.name.as_str(), "owned");
         assert!(entry.canonical_ir.is_some());
@@ -2926,8 +3093,11 @@ endmodule
         .expect("register sealed model-library runtime");
 
         let key = VerilogASourceKey::new(&source_key, None);
-        let mut cache = veriloga_model_cache().write().expect("cache lock");
-        let entry = cache.get(&key).expect("session entry");
+        let mut cache = veriloga_source_cache().write().expect("cache lock");
+        let entry = cache
+            .get(&key)
+            .and_then(CachedVerilogASource::runtime)
+            .expect("session device entry");
         assert!(entry.dependencies.is_empty());
         assert_eq!(entry.model.name.as_str(), "retained");
         cache.remove(&key);
@@ -2979,7 +3149,7 @@ endmodule
             "second_owned"
         );
 
-        let mut cache = veriloga_model_cache().write().unwrap();
+        let mut cache = veriloga_source_cache().write().unwrap();
         cache.remove(&VerilogASourceKey::new(&first_key, None));
         cache.remove(&VerilogASourceKey::new(&second_key, None));
     }
@@ -3068,7 +3238,7 @@ endmodule
         let candidate = project_registration(&candidate_key, "resource_candidate", &[]);
         let prepared = prepare_project_veriloga_registration(candidate.clone())
             .expect("prepare candidate runtime");
-        let required = veriloga_model_cache_entry_bytes(
+        let required = veriloga_source_cache_entry_bytes(
             &VerilogASourceKey::new(&prepared.key, None),
             &prepared.entry,
         )
