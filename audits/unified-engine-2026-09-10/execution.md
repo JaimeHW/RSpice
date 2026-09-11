@@ -76,7 +76,7 @@ checkpoint representation, before optimizing partitions or caches.
 | Required behavior | Packages | Implementation at this checkpoint | Qualification |
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
-| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation and cross-root dependency consistency implemented; explicit configuration work remains | Focused file/virtual and source-refresh cases pass |
+| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
 | Complete resolved module timing and scheduling regions | MS02 | Open | Pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
@@ -122,6 +122,7 @@ invented throughput numbers do not qualify parity.
 | Engine source groups and cache provenance | Core target `veriloga_connect_source_closure`, portable Verilog feature | Both cases pass: shared virtual rules/cache reuse and a source edit during multi-module compilation followed by a fresh run |
 | Cross-root source consistency | Core target `veriloga_connect_source_closure`, filtered to `snapshot`, portable Verilog feature | 2 passed: same-root frozen compilation and cross-root conflict/retry |
 | Named connection configurations | Compiler target `prepared_source`, filtered to `named_connection`, no default features | Passed: independent 1 V/5 V alternatives, empty block, exact-case selection, duplicate module/block rejection |
+| Circuit configuration selection | Core target `veriloga_connect_source_closure`, filtered to `named_configuration`, portable Verilog feature | 2 passed: file/cached/serialized-virtual 1 V/5 V choices with parameter specialization; include-order independence, unknown/ambiguous names and explicit empty rules |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -145,15 +146,28 @@ new include's identity. Standalone connection rules keep both logic outputs at
 Different file roots also share a dependency-version ledger during elaboration.
 If the same dependency was consumed with different bytes, the build identifies
 the dependency and both roots and requests a stable source snapshot. A retry
-can reuse or invalidate the captured cache entries normally. Explicit
-configuration selection remains MS01 work; authored body execution remains MS07.
+can reuse or invalidate the captured cache entries normally. Full
+configuration binding remains MS01 work; authored body execution remains MS07.
 Generated artifact regeneration and the complete target matrix
 remain integration/release work after the shared schemas stabilize.
 
 The compiler now retains each named connection configuration and its declaration
 span. Selecting a block excludes every alternative's insertion and resolution
-statements. Duplicate declarations cannot silently overwrite a module. This is
-the compiler seam for explicit deck selection; circuit integration follows.
+statements. Duplicate declarations cannot silently overwrite a module.
+`.options connectrules=NAME` now chooses one case-sensitive block from all active
+source closures before mixed instances are allocated. The default is the sole
+declared block; alternative blocks require explicit selection. Reusing a closure
+through several device artifacts does not duplicate its configuration. Unknown
+or ambiguous choices report available names, roots and preprocessed declaration
+offsets. Empty selected blocks do not silently restore automatic default rules.
+The named option participates in the existing semantic netlist fingerprint;
+unchanged model code remains cacheable because selection happens at elaboration.
+The two new circuit cases retain the 1e-9 V budget. No broad suite was run.
+
+Remaining MS01 items include source-qualified and hierarchical library/view
+binding, connect-only virtual artifacts/registration, and explicit propagation
+through all product adapters. The current named selector is design-wide and
+does not claim those broader configuration capabilities.
 
 ## Next implementation work
 

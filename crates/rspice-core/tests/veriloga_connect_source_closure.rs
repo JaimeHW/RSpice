@@ -212,3 +212,135 @@ fn different_roots_cannot_mix_versions_of_a_shared_source_snapshot() {
     // entries retain their captured identities and the next build can recover.
     Engine::default().build_circuit(&deck).unwrap();
 }
+
+fn connection_alternatives() -> String {
+    let mut source = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+        .iter()
+        .map(|(_, body)| *body)
+        .collect::<String>();
+    source.push_str("\nconnectrules Low; connect d2a #(.vsup(1.0)); endconnectrules\nconnectrules High; connect d2a #(.vsup(5.0)); endconnectrules\nconnectrules Empty; endconnectrules\n");
+    source
+}
+
+#[test]
+fn named_configuration_changes_file_cached_and_transported_virtual_boundaries() {
+    let tree = SourceTree::new();
+    let module = "`include \"rules.vams\"\nmodule driver(p,q); inout p; electrical p; output q; reg q; parameter real gain=1e-3; initial q=1; analog I(p)<+gain*V(p); endmodule\n";
+    let rules = connection_alternatives();
+    tree.write("rules.vams", &rules);
+    let file = tree.write("driver.vams", module);
+    let bundle = VirtualSourceBundle::new(
+        "driver.vams",
+        [
+            VirtualSourceFile::new("driver.vams", module),
+            VirtualSourceFile::new("rules.vams", rules),
+        ],
+    )
+    .unwrap();
+    let compiled = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_virtual_runtime(&bundle, "driver", VirtualCompileLimits::default())
+    .unwrap();
+    let virtual_key = PathBuf::from(format!(
+        "__rspice_project__/named-configuration-{}/driver.vams",
+        std::process::id()
+    ));
+    let canonical_ir =
+        serde_json::from_slice(&serde_json::to_vec(&compiled.runtime.canonical_ir).unwrap())
+            .unwrap();
+    register_project_veriloga_runtimes_for_session(vec![ProjectVerilogARuntimeRegistration {
+        source_key: virtual_key.clone(),
+        aliases: vec!["DRIVER".to_owned()],
+        model: compiled.runtime.model,
+        canonical_ir,
+    }])
+    .unwrap();
+    for path in [&file, &virtual_key] {
+        let deck_text = format!(
+            "* named connections\nV1 p 0 1\nX1 p q DRIVER gain=2e-3\n.va \"{}\" DRIVER\n",
+            path.to_string_lossy().replace('\\', "/")
+        );
+        // Reconfiguration must reuse model code without reusing the previous
+        // boundary selection, including after virtual transport/specialization.
+        for (configuration, expected) in [("Low", 1.0), ("High", 5.0)] {
+            let deck = Netlist::parse(&format!(
+                "{deck_text}.options connectrules=\"{configuration}\"\n.end\n"
+            ))
+            .unwrap();
+            assert_eq!(deck.options.connect_rules.as_deref(), Some(configuration));
+            let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("q"))
+                .unwrap();
+            assert!(
+                result.voltages[output]
+                    .iter()
+                    .all(|v| (v - expected).abs() < 1e-9),
+                "{configuration}: {:?}",
+                result.voltages[output]
+            );
+        }
+        for (selection, expected) in [
+            ("", "select one with .options connectrules=NAME"),
+            (".options connectrules=low\n", "Unknown connectrules 'low'"),
+            (
+                ".options connectrules=Empty\n",
+                "no connect statement applies",
+            ),
+        ] {
+            let deck = Netlist::parse(&format!("{deck_text}{selection}.end\n")).unwrap();
+            let error = Engine::default()
+                .build_circuit(&deck)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}
+
+#[test]
+fn named_configuration_selects_across_roots_independently_of_include_order() {
+    let tree = SourceTree::new();
+    let device = tree.write("driver.va", "module driver(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule\n");
+    let low = tree.write(
+        "low.vams",
+        &connection_alternatives().replace("connectrules High;", "connectrules Unused;"),
+    );
+    let high = tree.write(
+        "high.vams",
+        &connection_alternatives().replace("connectrules Low;", "connectrules Other;"),
+    );
+    // Only the High block from high.vams is selected; all other blocks in
+    // either source stay inactive, including their duplicate Empty names.
+    for sources in [[&low, &high], [&high, &low]] {
+        let imports = sources
+            .iter()
+            .map(|path| format!(".va \"{}\"\n", path.to_string_lossy().replace('\\', "/")))
+            .collect::<String>();
+        let deck = Netlist::parse(&format!("* source selection\nV1 p 0 1\nX1 p q DRIVER\n.va \"{}\" DRIVER\n{imports}.options connectrules=High\n.end\n", device.to_string_lossy().replace('\\', "/"))).unwrap();
+        let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("q"))
+            .unwrap();
+        assert!(
+            result.voltages[output]
+                .iter()
+                .all(|v| (v - 5.0).abs() < 1e-9)
+        );
+        let mut ambiguous = deck.clone();
+        ambiguous.options.connect_rules = Some("Empty".to_owned());
+        let error = Engine::default()
+            .build_circuit(&ambiguous)
+            .unwrap_err()
+            .to_string();
+        for expected in ["ambiguous", "low.vams", "high.vams"] {
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}

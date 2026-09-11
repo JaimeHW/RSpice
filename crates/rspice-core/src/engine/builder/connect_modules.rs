@@ -310,45 +310,96 @@ pub(super) fn check_delegable(
 
 /// A design's active connect specification. Compiled devices supply the exact
 /// preprocessed closure retained in their artifact, including virtual sources.
-/// Standalone connect libraries supply a separately discovered specification.
-/// Repeated modules from one closure register once. Distinct specifications
-/// require an explicit selection contract; the current deck route diagnoses
-/// that ambiguity instead of silently choosing by include traversal order.
+/// Standalone libraries use the same preparation path. Repeated modules from
+/// one closure register once. Selection happens after all sources are known,
+/// so include order cannot select a different named configuration.
 #[derive(Debug, Default)]
 pub(super) struct DesignConnectRules {
     declared_in: Option<std::path::PathBuf>,
-    source_identity: Option<String>,
+    requested: Option<String>,
+    registered_sources: std::collections::HashSet<String>,
+    available: Vec<(String, std::path::PathBuf, rspice_veriloga::source::Span)>,
+    matches: usize,
     table: ConnectRuleTable,
     disciplines: DisciplineDb,
 }
 
 impl DesignConnectRules {
+    pub(super) fn new(requested: Option<&str>) -> Self {
+        Self {
+            requested: requested.map(str::to_owned),
+            ..Default::default()
+        }
+    }
+
     pub(super) fn register(
         &mut self,
         path: &std::path::Path,
         specification: rspice_veriloga::ConnectSpecification,
     ) -> Result<(), SimulationError> {
-        if specification.rules.insertions().is_empty()
-            && specification.rules.resolutions().is_empty()
+        if !self
+            .registered_sources
+            .insert(specification.source_identity)
         {
             return Ok(());
         }
-        if self.source_identity.as_deref() == Some(specification.source_identity.as_str()) {
+        for block in specification.rules.blocks() {
+            self.available
+                .push((block.name.to_string(), path.to_path_buf(), block.span));
+            if self
+                .requested
+                .as_deref()
+                .is_some_and(|name| name != block.name.as_str())
+            {
+                continue;
+            }
+            self.matches += 1;
+            if self.matches == 1 {
+                self.table = specification
+                    .rules
+                    .select_block(&block.name)
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "connectrules in '{}': {error}",
+                            path.display()
+                        ))
+                    })?;
+                self.declared_in = Some(path.to_path_buf());
+                self.disciplines = specification.disciplines.clone();
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn finish_selection(&self) -> Result<(), SimulationError> {
+        if self.matches == 1 || (self.matches == 0 && self.requested.is_none()) {
             return Ok(());
         }
-        if let Some(first) = self.declared_in.as_ref() {
-            return Err(SimulationError::Circuit(format!(
-                "'{}' and '{}' declare distinct connect specifications; this deck has no \
-                 explicit selection between them",
-                first.display(),
-                path.display()
-            )));
-        }
-        self.declared_in = Some(path.to_path_buf());
-        self.source_identity = Some(specification.source_identity);
-        self.table = specification.rules;
-        self.disciplines = specification.disciplines;
-        Ok(())
+        let available = self
+            .available
+            .iter()
+            .map(|(name, path, span)| {
+                format!(
+                    "'{name}' in '{}' (preprocessed bytes {}..{})",
+                    path.display(),
+                    span.start,
+                    span.end
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = match self.requested.as_deref() {
+            Some(name) if self.matches == 0 => {
+                format!("Unknown connectrules '{name}'; available configurations: {available}")
+            }
+            Some(name) => format!(
+                "Connectrules '{name}' is ambiguous across distinct source closures: {available}"
+            ),
+            None => format!(
+                "Multiple connectrules configurations are available; select one with .options connectrules=NAME: {available}"
+            ),
+        };
+        Err(SimulationError::Netlist(message))
     }
 
     pub(super) fn register_artifact(
@@ -359,7 +410,10 @@ impl DesignConnectRules {
         let Some(source) = artifact.connections.source() else {
             return Ok(());
         };
-        if self.source_identity.as_deref() == Some(artifact.metadata.source_identity.as_str()) {
+        if self
+            .registered_sources
+            .contains(artifact.metadata.source_identity.as_str())
+        {
             return Ok(());
         }
         let specification = rspice_veriloga::VerilogACompiler::default()

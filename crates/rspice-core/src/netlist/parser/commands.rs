@@ -1976,6 +1976,13 @@ pub(super) fn parse_options_command(
                 options.linsol_tr_partition =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (None, "CONNECTRULES") => {
+                options.connect_rules = Some(parse_restart_string_option(
+                    stream,
+                    line_num,
+                    "CONNECTRULES",
+                )?);
+            }
             (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
             | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
                 let (enabled, show_generated) =

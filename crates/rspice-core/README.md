@@ -50,6 +50,27 @@ assert_eq!(result.voltage(1), 10.0);
 frontend to cancel a long transient or sweep cooperatively (this is what
 backs Ctrl-C in the CLI and `KeyboardInterrupt` in the Python bindings).
 
+With the `veriloga` feature, a deck can select a named Verilog-AMS connection
+configuration from its active `.VERILOGA` sources:
+
+```spice
+.veriloga "models.vams" DRIVER module=driver
+.veriloga "connections.vams"
+.options connectrules=LowVoltage
+```
+
+`LowVoltage` is a case-sensitive `connectrules` identifier. One configuration
+is selected for the whole deck. Without an explicit selection, a single block
+is implicit; multiple blocks require a choice. An unknown or multiply declared
+selected name reports the source closures and declaration offsets. File,
+cached, and registered virtual models use the same selection path. Changing
+the option reselects connections while allowing unchanged device code to remain
+cached. The option also participates in the netlist's configuration fingerprint.
+An explicitly selected empty block supplies no insertion rules; a mixed boundary
+requiring one is an error. Source-qualified and hierarchical configuration
+binding, standalone virtual connection-library registration, and execution of
+arbitrary authored connect bodies remain implementation work.
+
 ## Module map
 
 | Module | Contents |

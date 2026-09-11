@@ -4421,6 +4421,11 @@ pub struct SimulationOptions {
     /// approximation ignores nearly the entire BSIM parameter set, so this
     /// is opt-in; results will not match the named model.
     pub allow_simplified_mos: Option<bool>,
+    /// RSpice `.options connectrules=NAME`: select one case-sensitive named
+    /// Verilog-AMS connection configuration from the active source closures.
+    /// Without a selection, exactly one declared configuration is implicit;
+    /// multiple alternatives require an explicit choice.
+    pub connect_rules: Option<String>,
     /// Ngspice-compatible XSPICE automatic analog/digital bridge insertion.
     /// Enabled by default; set `.options auto_bridge=0` to disable.
     pub auto_bridge: Option<bool>,
@@ -4677,6 +4682,9 @@ impl SimulationOptions {
         }
         if other.allow_simplified_mos.is_some() {
             self.allow_simplified_mos = other.allow_simplified_mos;
+        }
+        if other.connect_rules.is_some() {
+            self.connect_rules = other.connect_rules.clone();
         }
         if other.auto_bridge.is_some() {
             self.auto_bridge = other.auto_bridge;
