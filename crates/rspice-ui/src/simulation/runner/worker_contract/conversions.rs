@@ -1105,10 +1105,10 @@ pub(crate) fn prepare_wasm_jit_request_value(
     });
     let mut preparation = WasmJitRequestPreparation {
         dispatch_token,
-        artifacts: Vec::with_capacity(request.project_veriloga_runtimes.iter().len()),
+        artifacts: Vec::with_capacity(request.project_veriloga_runtimes.device_runtimes().len()),
         errors: Vec::new(),
     };
-    for runtime in request.project_veriloga_runtimes.iter() {
+    for runtime in request.project_veriloga_runtimes.device_runtimes() {
         match runtime.compile_wasm_jit_artifact() {
             Ok(artifact) => preparation.artifacts.push(artifact),
             Err(error) => preparation.errors.push(format!(

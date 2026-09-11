@@ -37,13 +37,14 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         "MC worker boundary\n.param rval={resistance}\nV1 in 0 1\nR1 in out {{rval}}\nR2 out 0 1k\n.mc 4 seed {seed} DIST UNIFORM SPREAD .05\n.end ; done\n"
     );
     let request = serde_json::json!({
-        "protocolVersion": 9,
+        "protocolVersion": 10,
         "request": {
             "request": {
                 "id": 1,
                 "request": {"Spec": {"spec": {"MonteCarlo": {"variation_source": source}}, "options": {}}},
                 "netlist": netlist,
-                "source_path": null
+                "source_path": null,
+                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
             },
             "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
             "dependency_buffer_count": 0
@@ -55,7 +56,7 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 19);
+    assert_eq!(response["protocolVersion"], 20);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -91,7 +92,7 @@ fn deck_statistics_retain_full_width_trial_identities() {
 #[wasm_bindgen_test]
 fn transient_quality_survives_the_worker_and_structured_clone_before_output_cropping() {
     let request = serde_json::json!({
-        "protocolVersion": 9,
+        "protocolVersion": 10,
         "request": {
             "request": {
                 "id": 2,
@@ -100,7 +101,8 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
                     "max_timestep": null, "uic": false
                 }}, "options": {}}},
                 "netlist": "Worker convergence\nV1 out 0 1\nR1 out 0 1k\n.end\n",
-                "source_path": null
+                "source_path": null,
+                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
             },
             "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
             "dependency_buffer_count": 0
@@ -115,7 +117,7 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(19.0)
+        Some(20.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -146,13 +148,14 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
 #[wasm_bindgen_test]
 fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone() {
     let request = serde_json::json!({
-        "protocolVersion": 9,
+        "protocolVersion": 10,
         "request": {
             "request": {"id":3,"request":{"Spec":{"spec":{"DcSweep":{
                 "source_name":"V1","start":1.0,"stop":0.0,"step":-0.5,
                 "source2":"V2","start2":1e-7,"stop2":3e-7,"step2":1e-7,"hysteresis":false
             }},"options":{}}},
-            "netlist":"Nested worker DC\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n","source_path":null},
+            "netlist":"Nested worker DC\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n","source_path":null,
+            "project_veriloga_runtimes":{"runtimes":[],"connections":[]}},
             "dependency_metadata":"{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
             "dependency_buffer_count":0
         },"buffers":[]
@@ -165,7 +168,7 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
         js_sys::Reflect::get(&response, &"protocolVersion".into())
             .unwrap()
             .as_f64(),
-        Some(19.0)
+        Some(20.0)
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()

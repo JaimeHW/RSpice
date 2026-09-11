@@ -1,7 +1,7 @@
-//! Sealed Verilog-A runtimes prepared for an executable deck.
+//! Sealed Verilog-A/AMS sources prepared for an executable deck.
 //!
-//! A prepared runtime is engine state: an immutable, worker-transferable
-//! model bound to one exact project-source or signed-PDK identity. Project
+//! A prepared source is engine state: an immutable, worker-transferable
+//! model or connection library bound to an exact source identity. Project
 //! compilation is triggered from the Code & Automation workspace; PDK sources
 //! are compiled only from the authenticated package closure.
 //!
@@ -11,6 +11,12 @@
 //! source token, the selected module, and the compile report.
 
 use sha2::{Digest as _, Sha256};
+
+mod connections;
+use connections::PreparedVerilogAConnectionLibrary;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 /// Why a prepared Verilog-A runtime could not be built.
 ///
@@ -305,16 +311,7 @@ impl PreparedVerilogARuntime {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if !(self.source_key.starts_with("__rspice_project__/")
-            || self.source_key.starts_with("__rspice_pdk__/")
-            || self.source_key.starts_with("__rspice_model_library__/"))
-            || self.source_key.contains('\\')
-            || self.source_key.chars().any(char::is_control)
-            || self
-                .source_key
-                .split('/')
-                .any(|component| component.is_empty() || matches!(component, "." | ".."))
-        {
+        if !valid_sealed_source_key(&self.source_key) {
             return Err("Verilog-A runtime has an invalid sealed virtual source key".to_owned());
         }
         if self.module_name.trim().is_empty() || self.module_name.chars().any(char::is_control) {
@@ -376,15 +373,18 @@ impl PreparedVerilogARuntime {
         &self.netlist_alias
     }
 
+    #[cfg(test)]
     pub(crate) fn provenance_label(&self) -> String {
-        let authority = if self.source_key.starts_with("__rspice_pdk__/") {
-            "signed-pdk-veriloga"
-        } else if self.source_key.starts_with("__rspice_model_library__/") {
-            "model-library-veriloga"
-        } else {
-            "project-veriloga"
-        };
-        format!("{authority}:{}", self.source_key)
+        self.binding().provenance_label()
+    }
+
+    fn binding(&self) -> PreparedVerilogASourceBinding<'_> {
+        PreparedVerilogASourceBinding {
+            source_key: &self.source_key,
+            netlist_alias: &self.netlist_alias,
+            artifact_digest: self.artifact_digest(),
+            is_connection_library: false,
+        }
     }
 
     pub fn terminal_names(&self) -> Result<Vec<String>, String> {
@@ -409,74 +409,138 @@ pub(crate) fn veriloga_selected_module_digest(module_name: &str) -> crate::produ
     crate::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
-/// Canonically ordered set of every sealed Verilog-A runtime required by one
-/// immutable executable deck. The set rejects case-folded key/alias
-/// collisions before worker transfer so model selection cannot depend on
-/// discovery order.
+/// Common binding inventory for executable models and connection libraries.
+/// Device-only consumers use `PreparedVerilogARuntimeSet::device_runtimes`; deck and
+/// provenance consumers must use `PreparedVerilogARuntimeSet::sources`.
+pub(crate) struct PreparedVerilogASourceBinding<'a> {
+    source_key: &'a str,
+    netlist_alias: &'a str,
+    artifact_digest: crate::product::ContentDigest,
+    is_connection_library: bool,
+}
+
+impl<'a> PreparedVerilogASourceBinding<'a> {
+    pub(crate) fn source_key(&self) -> &'a str {
+        self.source_key
+    }
+    pub(crate) fn netlist_alias(&self) -> &'a str {
+        self.netlist_alias
+    }
+    pub(crate) fn artifact_digest(&self) -> crate::product::ContentDigest {
+        self.artifact_digest
+    }
+    pub(crate) fn provenance_label(&self) -> String {
+        let authority = if self.source_key.starts_with("__rspice_pdk__/") {
+            "signed-pdk-veriloga"
+        } else if self.source_key.starts_with("__rspice_model_library__/") {
+            "model-library-veriloga"
+        } else {
+            "project-veriloga"
+        };
+        let kind = if self.is_connection_library {
+            "-connections"
+        } else {
+            ""
+        };
+        format!("{authority}{kind}:{}", self.source_key)
+    }
+}
+
+/// Canonically ordered device and connection sources required by one deck.
+/// Both kinds share a key/alias namespace and are installed atomically.
+/// The connection inventory is required on the wire: older worker requests
+/// must be rebuilt, never interpreted as having no connection libraries.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PreparedVerilogARuntimeSet {
     runtimes: Vec<PreparedVerilogARuntime>,
+    connections: Vec<PreparedVerilogAConnectionLibrary>,
 }
 
 impl PreparedVerilogARuntimeSet {
-    pub fn try_new(mut runtimes: Vec<PreparedVerilogARuntime>) -> Result<Self, String> {
-        for runtime in &runtimes {
-            runtime.validate()?;
-        }
-        runtimes.sort_by(|left, right| {
-            left.source_key
-                .to_ascii_lowercase()
-                .cmp(&right.source_key.to_ascii_lowercase())
-                .then_with(|| {
-                    left.netlist_alias
-                        .to_ascii_lowercase()
-                        .cmp(&right.netlist_alias.to_ascii_lowercase())
-                })
-        });
-        for pair in runtimes.windows(2) {
-            if pair[0].source_key.eq_ignore_ascii_case(&pair[1].source_key) {
-                return Err(format!(
-                    "Verilog-A runtime source key '{}' is duplicated",
-                    pair[1].source_key
-                ));
-            }
-        }
-        let mut aliases = std::collections::HashMap::<String, crate::product::ContentDigest>::new();
-        for runtime in &runtimes {
-            let alias = runtime.netlist_alias.to_ascii_uppercase();
-            if let Some(existing) = aliases.insert(alias, runtime.artifact_digest)
-                && existing != runtime.artifact_digest
-            {
-                return Err(format!(
-                    "Verilog-A netlist alias '{}' identifies different prepared artifacts",
-                    runtime.netlist_alias
-                ));
-            }
-        }
-        Ok(Self { runtimes })
+    pub fn try_new(runtimes: Vec<PreparedVerilogARuntime>) -> Result<Self, String> {
+        Self::try_with_connections(runtimes, Vec::new())
+    }
+
+    fn try_with_connections(
+        mut runtimes: Vec<PreparedVerilogARuntime>,
+        mut connections: Vec<PreparedVerilogAConnectionLibrary>,
+    ) -> Result<Self, String> {
+        runtimes.sort_by_cached_key(|runtime| runtime.source_key.to_ascii_lowercase());
+        connections.sort_by_cached_key(|library| library.binding().source_key.to_ascii_lowercase());
+        let set = Self {
+            runtimes,
+            connections,
+        };
+        set.validate()?;
+        Ok(set)
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        Self::try_new(self.runtimes.clone()).and_then(|canonical| {
-            if canonical == *self {
-                Ok(())
-            } else {
-                Err("Verilog-A runtime set is not in canonical order".to_owned())
+        for runtime in &self.runtimes {
+            runtime.validate()?;
+        }
+        for library in &self.connections {
+            library.validate()?;
+        }
+        let mut keys = std::collections::HashSet::new();
+        let mut aliases = std::collections::HashMap::<String, crate::product::ContentDigest>::new();
+        for source in self.sources() {
+            if !keys.insert(source.source_key.to_ascii_lowercase()) {
+                return Err(format!(
+                    "Verilog-A runtime source key '{}' is duplicated",
+                    source.source_key
+                ));
             }
-        })
+            let alias = source.netlist_alias.to_ascii_uppercase();
+            if let Some(existing) = aliases.insert(alias, source.artifact_digest)
+                && existing != source.artifact_digest
+            {
+                return Err(format!(
+                    "Verilog-A netlist alias '{}' identifies different prepared artifacts",
+                    source.netlist_alias
+                ));
+            }
+        }
+        if !self
+            .runtimes
+            .iter()
+            .map(|runtime| runtime.source_key.to_ascii_lowercase())
+            .is_sorted()
+            || !self
+                .connections
+                .iter()
+                .map(|library| library.binding().source_key.to_ascii_lowercase())
+                .is_sorted()
+        {
+            return Err("Verilog-A runtime set is not in canonical order".to_owned());
+        }
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
-        self.runtimes.is_empty()
+        self.runtimes.is_empty() && self.connections.is_empty()
     }
 
     #[cfg(test)]
     pub fn len(&self) -> usize {
-        self.runtimes.len()
+        self.runtimes.len() + self.connections.len()
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &PreparedVerilogARuntime> {
+    /// Executable devices only, for consumers such as the browser JIT.
+    pub fn device_runtimes(&self) -> impl ExactSizeIterator<Item = &PreparedVerilogARuntime> {
         self.runtimes.iter()
+    }
+
+    pub(crate) fn sources(&self) -> impl Iterator<Item = PreparedVerilogASourceBinding<'_>> {
+        self.runtimes
+            .iter()
+            .map(PreparedVerilogARuntime::binding)
+            .chain(
+                self.connections
+                    .iter()
+                    .map(PreparedVerilogAConnectionLibrary::binding),
+            )
     }
 
     pub fn install(&self) -> Result<(), String> {
@@ -484,16 +548,31 @@ impl PreparedVerilogARuntimeSet {
         let registrations = self
             .runtimes
             .iter()
-            .map(PreparedVerilogARuntime::registration)
+            .map(|runtime| {
+                runtime
+                    .registration()
+                    .map(rspice_core::ProjectVerilogASourceRegistration::Runtime)
+            })
+            .chain(
+                self.connections
+                    .iter()
+                    .map(PreparedVerilogAConnectionLibrary::registration),
+            )
             .collect::<Result<Vec<_>, _>>()?;
-        rspice_core::register_project_veriloga_runtimes_for_session(registrations)
+        rspice_core::register_project_veriloga_sources_for_session(registrations)
     }
 
-    pub(crate) fn try_extend(
-        self,
-        additional: impl IntoIterator<Item = PreparedVerilogARuntime>,
-    ) -> Result<Self, String> {
-        Self::try_new(self.runtimes.into_iter().chain(additional).collect())
+    pub(crate) fn try_merge(self, additional: Self) -> Result<Self, String> {
+        Self::try_with_connections(
+            self.runtimes
+                .into_iter()
+                .chain(additional.runtimes)
+                .collect(),
+            self.connections
+                .into_iter()
+                .chain(additional.connections)
+                .collect(),
+        )
     }
 }
 
@@ -637,92 +716,127 @@ pub(crate) fn compile_model_library_source_runtimes(
     }
 
     let limits = model_library_virtual_compile_limits();
-    let compiler = rspice_veriloga::VerilogACompiler::default();
+    // Every retained model includes its canonical digital plan and is installed
+    // through the unified engine. Mixed reports are safe on this host path.
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
     let mut runtimes = Vec::new();
+    let mut connections = Vec::new();
+    let mut roots_by_path = std::collections::BTreeMap::<_, Vec<_>>::new();
     for root in &authority.roots {
         let root_path = model_library_virtual_path(&root.path)?;
+        roots_by_path.entry(root_path).or_default().push(root);
+    }
+    for (root_path, roots) in roots_by_path {
         let bundle =
             rspice_veriloga::VirtualSourceBundle::new(&root_path, logical_sources.iter().cloned())
                 .map_err(|error| {
                     PreparedRuntimeError::SourceBundle(format!(
                         "Sealed model-library Verilog-A root '{}' is invalid: {error}",
-                        root.path.display()
+                        roots[0].path.display()
                     ))
                 })?;
-        let discovery = compiler
-            .discover_virtual_modules(&bundle, limits)
+        let prepared = compiler
+            .prepare_virtual_runtime_source(&bundle, limits)
             .map_err(|error| {
                 PreparedRuntimeError::Compile(format!(
-                    "Could not discover modules in sealed model-library Verilog-A root '{}': {error}",
-                    root.path.display()
+                    "Could not prepare sealed model-library Verilog-A root '{}': {error}",
+                    roots[0].path.display()
                 ))
             })?;
-        let selected = if let Some(module) = root.selected_module.as_deref() {
-            if !discovery
-                .module_names
-                .iter()
-                .any(|candidate| candidate == module)
-            {
-                return Err(PreparedRuntimeError::SourceIdentity(format!(
-                    "Model-library Verilog-A source '{}' does not declare module '{}'",
-                    root.path.display(),
-                    module
-                )));
-            }
-            vec![(
-                module.to_owned(),
-                root.netlist_alias.as_deref().unwrap_or(module).to_owned(),
-            )]
-        } else if let Some(alias) = root.netlist_alias.as_deref() {
-            let [module] = discovery.module_names.as_slice() else {
-                return Err(PreparedRuntimeError::SourceIdentity(format!(
-                    "Model-library .veriloga source '{}' declares {} modules, so alias '{}' is ambiguous",
-                    root.path.display(),
-                    discovery.module_names.len(),
-                    alias
-                )));
-            };
-            vec![(module.clone(), alias.to_owned())]
-        } else {
-            discovery
-                .module_names
-                .into_iter()
-                .map(|module| (module.clone(), module))
-                .collect::<Vec<_>>()
-        };
+        let module_names = prepared.module_names().collect::<Vec<_>>();
         let root_identity =
             crate::product::ContentDigest::from_bytes(Sha256::digest(root_path.as_bytes()).into());
-        for (module_name, netlist_alias) in selected {
-            if !valid_veriloga_netlist_identifier(&module_name)
-                || !valid_veriloga_netlist_identifier(&netlist_alias)
-            {
-                return Err(PreparedRuntimeError::SourceIdentity(format!(
-                    "Model-library Verilog-A module '{}' or alias '{}' is not a portable SPICE model identifier",
-                    module_name, netlist_alias
-                )));
-            }
-            let compilation = compiler
-                .compile_virtual_runtime(&bundle, &module_name, limits)
-                .map_err(|error| {
-                    PreparedRuntimeError::Compile(format!(
-                        "Could not compile module '{}' from sealed model-library Verilog-A root '{}': {error}",
-                        module_name,
+        for root in roots {
+            if module_names.is_empty() && root.selected_module.is_none() {
+                let artifact = prepared.connection_artifact().ok_or_else(|| {
+                    PreparedRuntimeError::SourceIdentity(format!(
+                        "Model-library Verilog-A source '{}' declares neither device modules nor connection rules",
                         root.path.display()
                     ))
                 })?;
-            let source_key = format!(
-                "__rspice_model_library__/{}/{}/{}.va",
-                authority.closure_digest, root_identity, module_name
-            );
-            runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
-                source_key,
-                authority.closure_digest,
-                netlist_alias,
-                &compilation,
-            )?);
+                let source_key = format!(
+                    "__rspice_model_library__/{}/{}/connections.vams",
+                    authority.closure_digest, root_identity
+                );
+                let alias = root
+                    .netlist_alias
+                    .clone()
+                    .unwrap_or_else(|| format!("__rspice_connections_{root_identity}"));
+                connections.push(
+                    PreparedVerilogAConnectionLibrary::try_new(
+                        source_key,
+                        authority.closure_digest,
+                        alias,
+                        artifact,
+                    )
+                    .map_err(PreparedRuntimeError::Integrity)?,
+                );
+                continue;
+            }
+            let selected = if let Some(module) = root.selected_module.as_deref() {
+                if !module_names.contains(&module) {
+                    return Err(PreparedRuntimeError::SourceIdentity(format!(
+                        "Model-library Verilog-A source '{}' does not declare module '{}'",
+                        root.path.display(),
+                        module
+                    )));
+                }
+                vec![(
+                    module.to_owned(),
+                    root.netlist_alias.as_deref().unwrap_or(module).to_owned(),
+                )]
+            } else if let Some(alias) = root.netlist_alias.as_deref() {
+                let [module] = module_names.as_slice() else {
+                    return Err(PreparedRuntimeError::SourceIdentity(format!(
+                        "Model-library .veriloga source '{}' declares {} modules, so alias '{}' is ambiguous",
+                        root.path.display(),
+                        module_names.len(),
+                        alias
+                    )));
+                };
+                vec![((*module).to_owned(), alias.to_owned())]
+            } else {
+                module_names
+                    .iter()
+                    .map(|module| ((*module).to_owned(), (*module).to_owned()))
+                    .collect::<Vec<_>>()
+            };
+            for (module_name, netlist_alias) in selected {
+                if !valid_veriloga_netlist_identifier(&module_name)
+                    || !valid_veriloga_netlist_identifier(&netlist_alias)
+                {
+                    return Err(PreparedRuntimeError::SourceIdentity(format!(
+                        "Model-library Verilog-A module '{}' or alias '{}' is not a portable SPICE model identifier",
+                        module_name, netlist_alias
+                    )));
+                }
+                let compilation = prepared
+                    .compile_runtime(&module_name)
+                    .map_err(|error| {
+                        PreparedRuntimeError::Compile(format!(
+                            "Could not compile module '{}' from sealed model-library Verilog-A root '{}': {error}",
+                            module_name,
+                            root.path.display()
+                        ))
+                    })?;
+                let source_key = format!(
+                    "__rspice_model_library__/{}/{}/{}.va",
+                    authority.closure_digest, root_identity, module_name
+                );
+                runtimes.push(PreparedVerilogARuntime::try_from_virtual_compilation(
+                    source_key,
+                    authority.closure_digest,
+                    netlist_alias,
+                    &compilation,
+                )?);
+            }
         }
     }
-    PreparedVerilogARuntimeSet::try_new(runtimes).map_err(PreparedRuntimeError::Integrity)
+    PreparedVerilogARuntimeSet::try_with_connections(runtimes, connections)
+        .map_err(PreparedRuntimeError::Integrity)
 }
 
 fn model_library_virtual_path(path: &std::path::Path) -> Result<String, PreparedRuntimeError> {
@@ -759,12 +873,16 @@ fn model_library_virtual_path(path: &std::path::Path) -> Result<String, Prepared
 /// Insert one sealed Verilog-A directive before the terminal `.end` card.
 /// The exact same helper is used by the retained generated artifact and the
 /// immutable prepared-run source, preventing display/execution drift.
-pub fn project_veriloga_directive(source_key: &str, module_name: &str) -> String {
-    format!(".veriloga \"{source_key}\" {module_name}")
+pub fn project_veriloga_directive(source_key: &str, netlist_alias: &str) -> String {
+    format!(".veriloga \"{source_key}\" {netlist_alias}")
 }
 
-pub fn append_project_veriloga_directive(source: &mut String, source_key: &str, module_name: &str) {
-    let directive = project_veriloga_directive(source_key, module_name);
+pub fn append_project_veriloga_directive(
+    source: &mut String,
+    source_key: &str,
+    netlist_alias: &str,
+) {
+    let directive = project_veriloga_directive(source_key, netlist_alias);
     let end = crate::services::simulation_runner::terminal_end_card_offset(source)
         .unwrap_or(source.len());
     if source[..end]
@@ -852,6 +970,17 @@ fn runtime_artifact_digest(
     crate::product::ContentDigest::from_bytes(hasher.finalize().into())
 }
 
+fn valid_sealed_source_key(key: &str) -> bool {
+    (key.starts_with("__rspice_project__/")
+        || key.starts_with("__rspice_pdk__/")
+        || key.starts_with("__rspice_model_library__/"))
+        && !key.contains('\\')
+        && !key.chars().any(char::is_control)
+        && !key
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+}
+
 fn valid_veriloga_netlist_identifier(value: &str) -> bool {
     let mut chars = value.chars();
     chars
@@ -906,6 +1035,94 @@ mod tests {
     use crate::state::model_library::ModelLibraryManager;
 
     #[test]
+    fn standalone_connection_import_preserves_sources_and_rejects_corrupt_bindings() {
+        use super::{
+            PreparedVerilogARuntimeSet, compile_model_library_source_runtimes, test_support::*,
+        };
+        let (sources, _) = standalone_connection_fixture();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(
+            sources.device_runtimes().len(),
+            1,
+            "only devices enter the JIT inventory"
+        );
+        let library_only = PreparedVerilogARuntimeSet::try_with_connections(
+            Vec::new(),
+            sources.connections.clone(),
+        )
+        .unwrap();
+        assert!(!library_only.is_empty());
+        let devices =
+            PreparedVerilogARuntimeSet::try_new(sources.device_runtimes().cloned().collect())
+                .unwrap();
+        assert_eq!(devices.try_merge(library_only).unwrap(), sources);
+
+        let encoded = serde_json::to_value(&sources).unwrap();
+        let restored: PreparedVerilogARuntimeSet = serde_json::from_value(encoded.clone()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored, sources);
+        for field in ["source_key", "netlist_alias", "source_digest"] {
+            let mut corrupt = encoded.clone();
+            corrupt["connections"][0][field] = serde_json::json!("altered");
+            let decoded = serde_json::from_value::<PreparedVerilogARuntimeSet>(corrupt);
+            assert!(
+                decoded.is_err() || decoded.unwrap().validate().is_err(),
+                "{field}"
+            );
+        }
+        let mut corrupt = encoded.clone();
+        corrupt["connections"][0]["artifact"]["preprocessed_source"] =
+            serde_json::json!("connectrules Changed; endconnectrules");
+        assert!(
+            serde_json::from_value::<PreparedVerilogARuntimeSet>(corrupt)
+                .unwrap()
+                .validate()
+                .is_err()
+        );
+        let mut old_shape = encoded;
+        old_shape.as_object_mut().unwrap().remove("connections");
+        assert!(serde_json::from_value::<PreparedVerilogARuntimeSet>(old_shape).is_err());
+
+        let mut authority = standalone_connection_authority();
+        let root = authority
+            .roots
+            .iter_mut()
+            .find(|root| root.netlist_alias.as_deref() == Some("UI_CONNECTIONS"))
+            .unwrap();
+        root.netlist_alias = Some("ui_driver".to_owned());
+        assert!(
+            compile_model_library_source_runtimes(&authority)
+                .unwrap_err()
+                .to_string()
+                .contains("different prepared artifacts")
+        );
+        let root = authority
+            .roots
+            .iter_mut()
+            .find(|root| root.netlist_alias.as_deref() == Some("ui_driver"))
+            .unwrap();
+        root.netlist_alias = None;
+        let unnamed = compile_model_library_source_runtimes(&authority).unwrap();
+        assert!(
+            unnamed
+                .sources()
+                .any(|source| source.netlist_alias().starts_with("__rspice_connections_"))
+        );
+        let root = authority
+            .roots
+            .iter_mut()
+            .find(|root| root.netlist_alias.is_none())
+            .unwrap();
+        root.selected_module = Some("ui_driver".to_owned());
+        assert!(
+            compile_model_library_source_runtimes(&authority)
+                .unwrap_err()
+                .to_string()
+                .contains("does not declare module")
+        );
+    }
+
+    #[test]
     fn sealed_library_module_selection_keeps_aliases_and_module_identity() {
         let mut manager = ModelLibraryManager::new();
         manager.load_library_bundle(
@@ -930,12 +1147,12 @@ mod tests {
         let runtimes =
             crate::simulation::veriloga::compile_model_library_source_runtimes(&authority).unwrap();
         let aliases = runtimes
-            .iter()
+            .device_runtimes()
             .map(|runtime| runtime.netlist_alias())
             .collect::<Vec<_>>();
         assert_eq!(aliases, ["first_alias", "second_alias"]);
         let keys = runtimes
-            .iter()
+            .device_runtimes()
             .map(|runtime| runtime.source_key())
             .collect::<Vec<_>>();
         assert_ne!(keys[0], keys[1]);

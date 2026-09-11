@@ -21,6 +21,15 @@ use crate::workbench::{
 static FIXTURE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
+    let (sources, deck) =
+        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+    reject_deferred_external_sources_with_project_runtimes(&deck, &sources).unwrap();
+    let altered = deck.replace(" UI_CONNECTIONS", " OTHER_CONNECTIONS");
+    assert!(reject_deferred_external_sources_with_project_runtimes(&altered, &sources).is_err());
+}
+
+#[test]
 fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     let mut state = AppState::default();
     state.simulation.run_intent = SimulationRunIntent::ManualDeck;
@@ -88,7 +97,7 @@ fn spectre_model_library_ahdl_is_compiled_and_emitted_as_a_sealed_runtime_direct
     let runtimes = prepared_model_library_veriloga_runtimes(&sealed)
         .expect("prepared-run compilation succeeds");
     assert_eq!(runtimes.len(), 1);
-    let runtime = runtimes.iter().next().expect("one AHDL runtime");
+    let runtime = runtimes.device_runtimes().next().expect("one AHDL runtime");
     let mut executable = "prepared Spectre AHDL\n.end\n".to_owned();
     crate::simulation::veriloga::append_project_veriloga_directive(
         &mut executable,
@@ -1464,7 +1473,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
     assert!(generated.errors.is_empty(), "{:?}", generated.errors);
 
     assert_eq!(runtimes.len(), 1);
-    let runtime = runtimes.iter().next().expect("prepared runtime");
+    let runtime = runtimes.device_runtimes().next().expect("prepared runtime");
     assert_eq!(runtime.source_digest(), expected_digest);
     assert_eq!(runtime.module_name(), "sealed_gain");
     assert_eq!(runtime.terminal_names().unwrap(), ["p", "n"]);

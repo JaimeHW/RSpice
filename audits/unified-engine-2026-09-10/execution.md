@@ -127,6 +127,7 @@ invented throughput numbers do not qualify parity.
 | Prepared virtual sources and standalone connection transport | Compiler targets `prepared_source` and `virtual_source`, filtered to `virtual`, no default features | 2 passed: file/virtual artifact equality, serialization/integrity rejection, one front-end execution across two module emissions, cancellation, existing exact nested dependency receipt |
 | Standalone virtual library circuit registration | Core target `veriloga_connect_source_closure`, filtered to `standalone_virtual`, portable Verilog feature | Passed: a zero-device library selects 1 V/5 V conversion; cache/source budgets, conflicting device registration, no partial installation and wrong-kind module selection preserve valid state |
 | Existing atomic device registration after typed-cache integration | Core library tests filtered to `engine::builder::veriloga_cache::tests::plural_`, portable Verilog feature | 3 passed: whole-batch install, aggregate-budget rollback and installed-key collision rollback |
+| Product connection-source import, snapshot and worker transport | UI library tests with `browser-worker`, filtered to `standalone_connection`; only the worker case rerun after correcting its waveform-label assertion | 4 focused cases passed: HDL-only import/integrity, exact deck dependencies, two-source snapshot provenance, serialized worker execution with 1 V/5 V selected outputs |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -208,12 +209,53 @@ selected as a device. This changes in-memory registration, not the disk device
 record schema. Browser workers and product import flows still need to carry the
 new source entry type end to end before those deployment routes are qualified.
 
+The product source set now retains standalone connection libraries alongside
+device runtimes. Combined sets preserve both inventories through generated and
+manual decks, deferred-source validation, snapshot identities, worker transfer
+and the existing atomic core registration. Library import aliases remain intact;
+unaliased libraries receive a deterministic reserved alias. Source keys and
+aliases are checked across both kinds. The library's outer SHA-256 identity
+covers its source key, closure digest, alias and validated compiler artifact
+identity. Missing or altered inventories are rejected. Device JIT preparation
+continues to enumerate only executable device entries.
+Bundle import uses source preparation, so a zero-device connection file is no
+longer rejected by module discovery. Native and retained imports recognize
+authenticated HDL dependency edges as library contents without requiring a
+dummy SPICE `.model` or `.subckt`. The focused fixture contains only HDL import
+directives and their source files.
+
+Model-library compilation prepares each logical root once for all selected
+modules and opts into mixed runtime reports, matching the core's paired
+analog/digital host contract. Project-editor and signed-PDK compilation still
+use analog-only defaults and need explicit capability integration; this increment
+does not claim those routes are complete. Worker request protocol advances to
+10, with a required connection inventory (including explicit empty lists).
+The browser transport fixtures were updated to that request shape and to the
+already-current response protocol 20. Actual browser execution remains pending.
+The four focused native product cases passed. The worker case uses the actual
+native worker execution and result transport with a mixed HDL driver and a
+standalone connection library; its 1 V/5 V expectations retain the 1e-9 V budget.
+The initial worker assertion was corrected to use the bridge's existing `q`
+voltage label, then only that case was rerun. No broad suite or actual browser
+execution was run for this increment.
+The concurrent changes through `d1e3e6c4e` were integrated before executing
+those tests. That compiler fix advances canonical schema to 35 and core disk
+cache format to 72. The earlier UI dependency build was interrupted before
+tests ran; the combined build reuses those dependencies. The statistical
+parameter and extreme-scale derivative fixes are also retained.
+The subsequent integration retains `5834ad65d`'s statistical-parameter capture
+fix. Its changed paths inspect statistics and user functions; the focused mixed
+decks use neither, so those cases were not repeated for that rebase. The full
+combined regression matrix remains an integration/release gate.
+
 ## Next implementation work
 
-Carry standalone connection libraries through MS01's product import, prepared-run
-validation and browser-worker source set. The existing UI `PreparedVerilogARuntimeSet`
-and sealed model-library compiler still assume device-only entries; update their
-binding inventories, identities, registration and source generation together.
+Carry mixed source and standalone library support through project-editor and
+signed-PDK bindings.
+Review their compile profiles, terminal contracts and backend qualification as
+one capability contract; enabling analog-half emission must never drop the
+digital plan or certify an unsupported executable backend. Qualify the actual
+browser-worker path at its integrated target milestone.
 Continue hierarchical library/view binding with the typed design graph.
 Implement MS02 resolved timing metadata, then
 MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must

@@ -940,7 +940,7 @@ mod tests {
         let second = compiled_runtime_with_alias("second.va", "shared", "rspice_va_second");
         let set = PreparedVerilogARuntimeSet::try_new(vec![second.clone(), first.clone()]).unwrap();
         let keys = set
-            .iter()
+            .device_runtimes()
             .map(PreparedVerilogARuntime::source_key)
             .collect::<Vec<_>>();
         assert!(

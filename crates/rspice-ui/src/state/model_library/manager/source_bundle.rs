@@ -426,14 +426,19 @@ pub(super) fn build(
                         "Uploaded Verilog-A bundle rooted at '{veriloga_root}' is invalid: {error}"
                     )
                 })?;
-        let discovery = rspice_veriloga::VerilogACompiler::default()
-            .discover_virtual_modules(&bundle, veriloga_limits)
+        let prepared = rspice_veriloga::VerilogACompiler::default()
+            .prepare_virtual_runtime_source(&bundle, veriloga_limits)
             .map_err(|error| {
                 format!(
                     "Uploaded Verilog-A bundle rooted at '{veriloga_root}' cannot be compiled: {error}"
                 )
             })?;
-        for include in discovery.include_graph {
+        if prepared.module_names().next().is_none() && !prepared.is_connect_library() {
+            return Err(format!(
+                "Uploaded Verilog-A root '{veriloga_root}' declares no device modules or connection library"
+            ));
+        }
+        for include in prepared.include_graph() {
             let Some(owner_name) = case_folded.get(&include.including_path.to_ascii_lowercase())
             else {
                 // Compiler-owned standard headers never become project
@@ -452,7 +457,7 @@ pub(super) fn build(
                 .expect("Verilog-A dependency belongs to the selected bundle");
             dependencies.push(ResolvedLibDependency {
                 owner: owner.clone(),
-                requested_path: include.requested_path,
+                requested_path: include.requested_path.clone(),
                 target: target.clone(),
             });
         }
@@ -602,14 +607,14 @@ pub(super) fn build(
         }
     }
     library.refresh_effective_model_projection();
-    // A macromodel library legitimately declares only `.subckt`
-    // definitions, so an empty model map alone is not an empty library.
+    // Subcircuit and HDL-source libraries need no artificial `.model` card.
     if library.top_level_models.is_empty()
         && library.section_models.values().all(HashMap::is_empty)
         && library.subcircuits.is_empty()
+        && !ModelLibraryManager::has_authenticated_veriloga_sources(&result)?
     {
         return Err(format!(
-            "Model library '{lib_name}' contains no supported device models or addressable subcircuits"
+            "Model library '{lib_name}' contains no supported device models, addressable subcircuits or authenticated Verilog-A/AMS sources"
         ));
     }
     Ok((lib_name, library))

@@ -52,7 +52,6 @@ pub(crate) struct WorkerRequest {
     pub request: WorkerSimulationRequest,
     pub netlist: String,
     pub source_path: Option<String>,
-    #[serde(default)]
     pub project_veriloga_runtimes: crate::simulation::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
     pub(in crate::simulation) dependencies:
@@ -64,7 +63,7 @@ pub(crate) struct WorkerRequest {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 9;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 10;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -143,6 +142,7 @@ impl WorkerRequestTransport {
             dependency_buffer_count,
             op_previous_state,
         } = self.request;
+        request.project_veriloga_runtimes.validate()?;
         if request.dependencies != Default::default() {
             return Err("worker request metadata carries duplicate inline dependencies".to_owned());
         }

@@ -1378,7 +1378,7 @@ impl PreparedRunSnapshot {
             })?;
         let expected_veriloga_bindings = parts
             .project_veriloga_runtimes
-            .iter()
+            .sources()
             .map(|runtime| {
                 (
                     runtime.source_key().to_owned(),
@@ -1404,7 +1404,7 @@ impl PreparedRunSnapshot {
                 return Err(PreparationError::new(
                     PreparationStage::ModelBindings,
                     format!(
-                        "Prepared Verilog-A source '{source_key}' must declare its sealed model alias"
+                        "Prepared Verilog-A source '{source_key}' must declare its sealed import alias"
                     ),
                 ));
             };
@@ -1422,16 +1422,10 @@ impl PreparedRunSnapshot {
         if observed_veriloga_bindings != expected_veriloga_bindings {
             return Err(PreparationError::new(
                 PreparationStage::ModelBindings,
-                "Every executable Verilog-A directive must match exactly one sealed runtime",
+                "Every executable Verilog-A directive must match exactly one sealed runtime or connection library",
             ));
         }
-        for runtime in parts.project_veriloga_runtimes.iter() {
-            runtime.validate().map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!("Sealed Verilog-A runtime is invalid: {error}"),
-                )
-            })?;
+        for runtime in parts.project_veriloga_runtimes.sources() {
             let directive = crate::simulation::veriloga::project_veriloga_directive(
                 runtime.source_key(),
                 runtime.netlist_alias(),

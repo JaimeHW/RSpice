@@ -115,6 +115,21 @@ solver, transform, and result-conversion loops. The Stop command is therefore
 enabled on both native and browser targets: native runs unwind cooperatively,
 while browser runs additionally terminate their isolated module worker.
 
+Sealed model-library imports retain both device runtimes and standalone
+Verilog-AMS connection libraries. Each source has an exact virtual key, import
+alias and artifact identity; prepared decks inventory both kinds and install
+them in one core transaction. `.options connectrules=NAME
+connectrules_source=ALIAS` selects a named configuration without relying on the
+original filesystem path. Model-library compilation prepares each source root
+once across its module selections and retains canonical digital plans for mixed
+devices. Connection libraries never enter the device JIT inventory.
+
+Worker request protocol 10 requires the complete source inventory, including an
+explicit empty connection list when there are no libraries. Older requests must
+be rebuilt with the matching application/worker release. Native contract checks
+do not qualify actual browser or tablet execution; authored connect-body
+execution and broader mixed-analysis support remain separate engine work.
+
 The pure-Rust `rspice-veriloga` compiler is a direct dependency on all
 platforms (it backs the Verilog-A dialog), and `ed25519-dalek` is used
 std-only so license verification also works on wasm32.

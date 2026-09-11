@@ -642,13 +642,9 @@ impl SimulationController {
         let mut source =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-            .try_extend(
-                prepared_model_library_veriloga_runtimes(&sealed_models)?
-                    .iter()
-                    .cloned(),
-            )
+            .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        for runtime in external_veriloga_runtimes.iter() {
+        for runtime in external_veriloga_runtimes.sources() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut source,
                 runtime.source_key(),
@@ -1227,14 +1223,10 @@ impl SimulationController {
         let project_veriloga_runtimes =
             prepared_configuration_veriloga_runtimes(state, &execution_projection)?;
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-            .try_extend(
-                prepared_model_library_veriloga_runtimes(&sealed_models)?
-                    .iter()
-                    .cloned(),
-            )
+            .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let project_veriloga_runtimes = project_veriloga_runtimes
-            .try_extend(external_veriloga_runtimes.iter().cloned())
+            .try_merge(external_veriloga_runtimes.clone())
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let generated =
             crate::simulation::netlist_gen::generate_netlist_hierarchical_with_variables(
@@ -1263,7 +1255,7 @@ impl SimulationController {
             .bind_generated_netlist_provenance(generated.netlist);
         let mut netlist =
             Self::apply_reference_model_bindings_to_netlist(&generated_source, &model_cards);
-        for runtime in external_veriloga_runtimes.iter() {
+        for runtime in external_veriloga_runtimes.sources() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut netlist,
                 runtime.source_key(),
@@ -1451,13 +1443,9 @@ impl SimulationController {
         let composed = manual_deck::compose_manual_deck_source(&owned_materialized);
         let mut composed = Self::apply_reference_model_bindings_to_netlist(&composed, &model_cards);
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
-            .try_extend(
-                prepared_model_library_veriloga_runtimes(&sealed_models)?
-                    .iter()
-                    .cloned(),
-            )
+            .try_merge(prepared_model_library_veriloga_runtimes(&sealed_models)?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        for runtime in external_veriloga_runtimes.iter() {
+        for runtime in external_veriloga_runtimes.sources() {
             crate::simulation::veriloga::append_project_veriloga_directive(
                 &mut composed,
                 runtime.source_key(),
@@ -1489,7 +1477,7 @@ impl SimulationController {
         reject_unresolved_device_models(&expanded, has_project_technology)?;
         let project_model_sources = prepared_project_model_sources(state, &expanded)?;
         let project_veriloga_runtimes = project_veriloga_runtimes_referenced_by(state, &expanded)?
-            .try_extend(external_veriloga_runtimes.iter().cloned())
+            .try_merge(external_veriloga_runtimes)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         reject_deferred_external_sources_with_project_runtimes(
             &expanded,
@@ -2045,7 +2033,7 @@ fn project_veriloga_runtimes_referenced_by(
         return Ok(Default::default());
     }
     let runtimes = prepared_project_veriloga_runtimes(state)?;
-    let exact_reference = runtimes.iter().any(|runtime| {
+    let exact_reference = runtimes.sources().any(|runtime| {
         executable_logical_lines(source).iter().any(|(_, line)| {
             project_veriloga_directive_matches_exact_identity(
                 line,
@@ -2343,7 +2331,7 @@ fn reject_deferred_external_sources_with_project_runtimes(
     project_runtimes: &crate::simulation::veriloga::PreparedVerilogARuntimeSet,
 ) -> Result<(), PreparationError> {
     for (line_number, logical_line) in executable_logical_lines(netlist) {
-        if project_runtimes.iter().any(|runtime| {
+        if project_runtimes.sources().any(|runtime| {
             project_veriloga_directive_matches_exact_identity(
                 &logical_line,
                 runtime.source_key(),

@@ -302,7 +302,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 20);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 9);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 10);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
@@ -547,6 +547,69 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
 }
 
 #[test]
+fn standalone_connection_worker_transport_retains_selected_physics() {
+    let (sources, deck) =
+        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+    let request = WorkerRequest {
+        id: 18,
+        request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
+            stop_time: 2e-9,
+            step_time: 0.2e-9,
+            start_time: 0.0,
+            max_timestep: None,
+            uic: false,
+        })),
+        netlist: deck,
+        source_path: None,
+        project_veriloga_runtimes: sources,
+        dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
+    };
+    let mut old = WorkerRequestTransport::from_request(request.clone()).unwrap();
+    old.protocol = 9;
+    assert!(
+        old.into_request()
+            .unwrap_err()
+            .contains("unsupported worker request")
+    );
+    for (name, expected) in [("Low", 1.0), ("High", 5.0)] {
+        let mut request = request.clone();
+        request.netlist = request
+            .netlist
+            .replace("connectrules=Low", &format!("connectrules={name}"));
+        let mut transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
+        let metadata = serde_json::to_vec(&transport.request).unwrap();
+        transport.request = serde_json::from_slice(&metadata).unwrap();
+        let restored = transport.into_request().unwrap();
+        assert_eq!(restored, request);
+        assert_eq!(restored.project_veriloga_runtimes.sources().count(), 2);
+        assert_eq!(
+            restored.project_veriloga_runtimes.device_runtimes().len(),
+            1
+        );
+        let result = worker_response_from_request(restored)
+            .into_result()
+            .unwrap();
+        let SimulationResult::Transient { waveforms, .. } = result else {
+            panic!("transient result required")
+        };
+        let (_, q) = waveforms
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("q"))
+            .unwrap_or_else(|| panic!("q voltage waveform missing from {:?}", waveforms.keys()));
+        assert!(!q.y_values.is_empty());
+        assert!(
+            q.y_values
+                .iter()
+                .all(|value| (value - expected).abs() < 1e-9),
+            "{name}: {:?}",
+            q.y_values
+        );
+    }
+}
+
+#[test]
 fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
     let project_id = crate::product::ProjectId::new();
     let bundle = crate::state::ProjectSourceBundle::try_new(
@@ -601,7 +664,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
     assert!(
         restored
             .project_veriloga_runtimes
-            .iter()
+            .device_runtimes()
             .next()
             .unwrap()
             .validate()

@@ -379,7 +379,7 @@ fn browser_bundle_retains_native_spectre_ahdl_dependency_without_parsing_it_as_s
     let runtimes = crate::simulation::veriloga::compile_model_library_source_runtimes(&authority)
         .expect("retained Spectre AHDL compiles through the sealed runtime path");
     assert_eq!(runtimes.len(), 1);
-    let runtime = runtimes.iter().next().expect("compiled runtime");
+    let runtime = runtimes.device_runtimes().next().expect("compiled runtime");
     assert_eq!(runtime.netlist_alias(), "device");
     assert!(
         runtime

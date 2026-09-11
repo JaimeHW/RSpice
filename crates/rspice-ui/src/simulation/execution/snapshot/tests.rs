@@ -703,6 +703,52 @@ fn snapshot_rejects_positive_area_model_bin_overlap_before_dispatch() {
 }
 
 #[test]
+fn standalone_connection_snapshot_requires_library_binding_and_provenance() {
+    let (sources, deck) =
+        crate::simulation::veriloga::test_support::standalone_connection_fixture();
+    let exact = || {
+        let mut input = parts();
+        input.tasks = vec![prepared("tran", "Transient", transient_task())];
+        input.executable_netlist = deck.replace(".tran 0.2n 2n", ".tran 1n 1u");
+        input.project_veriloga_runtimes = sources.clone();
+        input
+    };
+    let snapshot = PreparedRunSnapshot::new(exact()).unwrap();
+    assert_eq!(snapshot.metadata().model_identity_count, 2);
+    assert!(snapshot.model_identities.iter().any(|identity| {
+        identity
+            .label
+            .starts_with("model-library-veriloga-connections:")
+    }));
+
+    let mut missing_payload = exact();
+    missing_payload.project_veriloga_runtimes =
+        crate::simulation::veriloga::PreparedVerilogARuntimeSet::try_new(
+            sources.device_runtimes().cloned().collect(),
+        )
+        .unwrap();
+    assert_eq!(
+        PreparedRunSnapshot::new(missing_payload)
+            .unwrap_err()
+            .stage(),
+        PreparationStage::ModelBindings
+    );
+    let mut missing_directive = exact();
+    missing_directive.executable_netlist = missing_directive
+        .executable_netlist
+        .lines()
+        .filter(|line| !line.ends_with(" UI_CONNECTIONS"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        PreparedRunSnapshot::new(missing_directive)
+            .unwrap_err()
+            .stage(),
+        PreparationStage::ModelBindings
+    );
+}
+
+#[test]
 fn snapshot_requires_the_exact_aliased_project_runtime_directive() {
     let runtime = project_runtime();
     let mut missing = parts();

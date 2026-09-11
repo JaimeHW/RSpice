@@ -3065,15 +3065,57 @@ impl ModelLibraryManager {
         if library.top_level_models.is_empty()
             && library.section_models.values().all(HashMap::is_empty)
             && library.subcircuits.is_empty()
+            && !Self::has_authenticated_veriloga_sources(&result)?
         {
             return Err(format!(
-                "Model library '{}' contains no supported device models or addressable subcircuits",
+                "Model library '{}' contains no supported device models, addressable subcircuits or authenticated Verilog-A/AMS sources",
                 path.display()
             ));
         }
 
         self.libraries.insert(lib_name.clone(), library);
         Ok(lib_name)
+    }
+
+    /// Recognize HDL imports through the parser's captured resolution edges.
+    /// A suffix or an unrelated uploaded HDL file is not a library declaration.
+    fn has_authenticated_veriloga_sources(
+        result: &rspice_core::library::LibParseResult,
+    ) -> Result<bool, String> {
+        for source in &result.resolved_sources {
+            let projected =
+                rspice_core::library::adapt_spectre_model_library(&source.path, &source.content)
+                    .map_err(|error| {
+                        format!(
+                            "{}:{}: {}",
+                            source.path.display(),
+                            error.line,
+                            error.message
+                        )
+                    })?;
+            for line in projected.lines() {
+                let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line)
+                else {
+                    continue;
+                };
+                let requested = rspice_core::netlist::normalize_source_path_literal(
+                    &include.file_path.to_string_lossy(),
+                )
+                .map_err(|error| error.to_string())?;
+                if result.resolved_dependencies.iter().any(|edge| {
+                    edge.owner == source.path
+                        && rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
+                            .is_ok_and(|path| path == requested)
+                        && result
+                            .resolved_sources
+                            .iter()
+                            .any(|target| target.path == edge.target)
+                }) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Import one self-contained model source from authenticated bytes.
