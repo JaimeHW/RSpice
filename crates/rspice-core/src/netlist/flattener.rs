@@ -16,6 +16,7 @@
 
 use super::expr::{
     behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
+    prepare_behavioral_expression_preserving_parameters,
     prepare_behavioral_expression_preserving_spelling,
     validate_prepared_behavioral_runtime_expression,
 };
@@ -2453,32 +2454,21 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
     ) -> Result<String, ParseError> {
-        let mut protected = scope.clone();
-        let mut replacements = Vec::new();
-        for (index, name) in scope
+        let preserved_parameters = scope
             .spectre_statistical_parameter_names()
             .into_iter()
             .filter(|name| scope.get_parameter_expression(name).is_none())
-            .enumerate()
-        {
-            let marker = Value::from_bits(0x5f00_0000_0000_0000_u64 + index as u64);
-            protected.set(&name, marker);
-            let spelling = prepare_behavioral_expression(&name, &protected).map_err(|error| {
-                ParseError::InvalidValue(format!(
-                    "statistical expression for element '{element_path}' could not protect parameter '{name}': {error}"
-                ))
-            })?;
-            replacements.push((spelling, name));
-        }
-        let mut prepared = prepare_behavioral_expression(expression, &protected).map_err(|error| {
+            .collect();
+        prepare_behavioral_expression_preserving_parameters(
+            expression,
+            scope,
+            &preserved_parameters,
+        )
+        .map_err(|error| {
             ParseError::InvalidValue(format!(
                 "statistical expression for element '{element_path}' could not be prepared: {error}"
             ))
-        })?;
-        for (marker, name) in replacements {
-            prepared = prepared.replace(&marker, &name);
-        }
-        Ok(prepared)
+        })
     }
 
     /// Resolve a deferred value expression, or keep the parse-time value.
@@ -4341,6 +4331,104 @@ fn is_simple_probe_name(s: &str) -> bool {
 mod tests {
     use super::*;
     use crate::abort_signal::CountingAbort;
+
+    #[test]
+    fn statistical_parameter_expansion_preserves_arithmetic_and_branches() {
+        let mut scope = ParamContext::new();
+        scope.set("rv", 100.0);
+        scope.mark_spectre_statistical_parameter("rv");
+        scope.define_parameter_expression("derived", "2*rv", Some(200.0.into()));
+        scope.mark_spectre_statistical_parameter("derived");
+        scope.define_global_expression("offset", "7", Some(7.0.into()));
+        scope.set("offset", 5.0);
+        scope.define_function("choose", vec!["x".into()], "if(x<100,3,7)");
+        let flattener = Flattener::new(&[]);
+        let mut failures = Vec::new();
+        for function_count in [1, 65] {
+            for index in 1..function_count {
+                scope.define_function(&format!("unused{index}"), vec!["x".into()], "x");
+            }
+            for (expression, below, above) in [
+                ("rv*2", 180.0, 220.0),
+                ("derived+rv", 270.0, 330.0),
+                ("rv+offset", 95.0, 115.0),
+                ("choose(rv)", 3.0, 7.0),
+                ("choose(110)", 7.0, 7.0),
+                ("if(rv<100,rv,2*rv)", 90.0, 220.0),
+            ] {
+                let prepared = flattener
+                    .prepare_spectre_statistical_expression(expression, &scope, "X1.R1")
+                    .expect("statistical expression prepares");
+                for (sample, expected) in [(90.0, below), (110.0, above)] {
+                    let mut sampled = scope.clone();
+                    sampled.set("rv", sample);
+                    sampled.set("offset", 999.0);
+                    let actual = super::super::expr::eval_expression(&prepared, &sampled)
+                        .expect("prepared expression evaluates at the sampled coordinate");
+                    if actual != expected {
+                        failures.push(format!(
+                            "{function_count} functions, {expression} at rv={sample}: {prepared} gives {actual}, expected {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn statistical_parameter_expansion_reaches_the_built_circuit() {
+        use crate::netlist::{
+            SpectreDistribution, SpectreSpread, SpectreStatisticalCoordinate,
+            SpectreStatisticsPlan, SpectreVariation, SpectreVariationScope,
+        };
+        let plan = SpectreStatisticsPlan {
+            variations: vec![SpectreVariation {
+                line: 3,
+                scope: SpectreVariationScope::Process,
+                parameter: "rv".into(),
+                distribution: SpectreDistribution::Gaussian,
+                spread: SpectreSpread::StandardDeviation("5".into()),
+                percent: false,
+            }],
+            correlations: vec![],
+        };
+        let coordinate = SpectreStatisticalCoordinate {
+            seed: 41,
+            monte_carlo_run: 9,
+            temperature_celsius: 27.0,
+            axes: vec![],
+        };
+        let mut definitions = String::new();
+        for function_count in [0, 65] {
+            for index in 0..function_count {
+                definitions.push_str(&format!(".func unused{index}(x) {{x}}\n"));
+            }
+            let mut netlist = Netlist::parse(&format!(
+                "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
+                 .subckt unit a b\n.param derived={{2*rv}}\n\
+                 R1 a b {{if(rv<1e6,derived,3*rv)}}\n.ends\n\
+                 X1 in 0 unit\nV1 in 0 1\n.end\n",
+                plan.encode_internal()
+            ))
+            .expect("statistical deck parses");
+            let sample = plan.sample_process(&netlist.params, &coordinate).unwrap()["RV"];
+            let expected = if sample < 1e6 {
+                2.0 * sample
+            } else {
+                3.0 * sample
+            };
+            netlist.spectre_statistical_coordinate = Some(coordinate.clone());
+            let circuit = crate::Engine::new(crate::SimulationConfig::default())
+                .build_circuit(&netlist)
+                .expect("sampled hierarchical circuit builds");
+            let actual = circuit.resistors.conductances[0].recip();
+            assert!(
+                (actual / expected - 1.0).abs() < 1e-14,
+                "{function_count} functions: sampled resistance {actual}, expected {expected}"
+            );
+        }
+    }
 
     fn duplicate_binding_error(source: &str) -> Box<DuplicateSubcircuitPortBindingError> {
         let netlist = Netlist::parse(source).expect("duplicate-formal deck parses");

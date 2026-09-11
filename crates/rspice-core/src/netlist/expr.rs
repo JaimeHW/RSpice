@@ -49,7 +49,8 @@ pub use api::{
 };
 pub(crate) use behavioral::{
     BehavioralPreparationError, expand_output_user_functions_with_abort,
-    prepare_behavioral_expression_with_abort, validate_prepared_behavioral_runtime_expression,
+    prepare_behavioral_expression_preserving_parameters, prepare_behavioral_expression_with_abort,
+    validate_prepared_behavioral_runtime_expression,
 };
 pub use behavioral::{
     ParameterCircuitProbe, ParameterCircuitProbeKind, RuntimeSpecialQuantity,

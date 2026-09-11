@@ -285,7 +285,30 @@ pub fn prepare_behavioral_expression(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    match prepare_behavioral_expression_impl(expression, params, false, &NoAbort) {
+    match prepare_behavioral_expression_impl(expression, params, false, None, &NoAbort) {
+        Ok(expression) => Ok(expression),
+        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
+        Err(BehavioralPreparationError::Aborted) => {
+            unreachable!("NoAbort cannot cancel behavioral preparation")
+        }
+    }
+}
+
+/// Expand scoped definitions while keeping selected parameter identities as
+/// AST leaves. Numerical placeholders are unsafe here: constant folding can
+/// consume their value or select a branch before the real coordinate is bound.
+pub(crate) fn prepare_behavioral_expression_preserving_parameters(
+    expression: &str,
+    params: &ParamContext,
+    preserved_parameters: &HashSet<String>,
+) -> Result<String, String> {
+    match prepare_behavioral_expression_impl(
+        expression,
+        params,
+        false,
+        Some(preserved_parameters),
+        &NoAbort,
+    ) {
         Ok(expression) => Ok(expression),
         Err(BehavioralPreparationError::Semantic(error)) => Err(error),
         Err(BehavioralPreparationError::Aborted) => {
@@ -311,7 +334,7 @@ pub(crate) fn prepare_behavioral_expression_with_abort(
     params: &ParamContext,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
-    prepare_behavioral_expression_impl(expression, params, false, abort)
+    prepare_behavioral_expression_impl(expression, params, false, None, abort)
 }
 
 /// Prepare a behavioral expression while retaining its original spelling when
@@ -324,7 +347,7 @@ pub fn prepare_behavioral_expression_preserving_spelling(
     expression: &str,
     params: &ParamContext,
 ) -> Result<String, String> {
-    match prepare_behavioral_expression_impl(expression, params, true, &NoAbort) {
+    match prepare_behavioral_expression_impl(expression, params, true, None, &NoAbort) {
         Ok(expression) => Ok(expression),
         Err(BehavioralPreparationError::Semantic(error)) => Err(error),
         Err(BehavioralPreparationError::Aborted) => {
@@ -465,6 +488,7 @@ fn prepare_behavioral_expression_impl(
     expression: &str,
     params: &ParamContext,
     preserve_unchanged_spelling: bool,
+    preserved_parameters: Option<&HashSet<String>>,
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
     if abort.is_aborted() {
@@ -487,6 +511,7 @@ fn prepare_behavioral_expression_impl(
 
     let expanded = {
         let mut expander = FunctionExpander::new(params, &mut probe_protector, abort);
+        expander.preserved_parameters = preserved_parameters;
         match expander.expand_expr(&parsed, 0) {
             Ok(expanded) => expanded,
             Err(_) if abort.is_aborted() => return Err(BehavioralPreparationError::Aborted),
@@ -964,6 +989,7 @@ struct FunctionExpander<'a, 'p> {
     parameter_stack: Vec<(String, ParameterExpressionKind)>,
     fold_static_function_graph: bool,
     expand_parameter_bindings: bool,
+    preserved_parameters: Option<&'a HashSet<String>>,
     abort: &'a dyn AbortSignal,
 }
 
@@ -997,6 +1023,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             parameter_stack: Vec::new(),
             fold_static_function_graph: params.function_count() > LARGE_FUNCTION_GRAPH_THRESHOLD,
             expand_parameter_bindings: true,
+            preserved_parameters: None,
             abort,
         }
     }
@@ -1060,7 +1087,12 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         {
                             values.push(NetExpr::Param(name));
                         }
-                        NetExpr::Param(name) if !self.expand_parameter_bindings => {
+                        NetExpr::Param(name)
+                            if !self.expand_parameter_bindings
+                                || self.preserved_parameters.is_some_and(|parameters| {
+                                    parameters.contains(&name.to_ascii_uppercase())
+                                }) =>
+                        {
                             values.push(NetExpr::Param(name));
                         }
                         NetExpr::Param(name) => {
