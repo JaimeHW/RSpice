@@ -48,6 +48,7 @@ pub use result::{
 };
 #[cfg(test)]
 pub(crate) use solver::DC_SHORT_CONDUCTANCE;
+pub(crate) use solver::{ScaledNonnegative, normalize_scaled_noise_waveform};
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, HbSwitchNodes, HbVoltageSwitchModel,
     NonlinearDeviceInstance, NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,

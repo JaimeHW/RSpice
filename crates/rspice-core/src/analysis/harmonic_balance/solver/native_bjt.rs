@@ -189,6 +189,38 @@ impl HbSolver {
         Ok(waves)
     }
 
+    /// Visit native models at each unlimited physical bias of the retained
+    /// periodic state, including branch-current and non-electrical coordinates.
+    pub(crate) fn visit_native_bjt_samples(
+        &mut self,
+        state: &HbSolverState,
+        abort: &dyn AbortSignal,
+        mut visit: impl FnMut(usize, usize, &[crate::device::Bjt], &[Value]) -> Result<(), HbError>,
+    ) -> Result<(), HbError> {
+        if self.native_bjts.is_empty() {
+            return Ok(());
+        }
+        let waves = self.native_state_waveforms(state)?;
+        let count = self.fft.size();
+        let mut solution = vec![0.0; waves.len()];
+        for time in 0..count {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            for (value, wave) in solution.iter_mut().zip(&waves) {
+                *value = wave[time];
+            }
+            for bjt in &mut self.native_bjts {
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                bjt.update_mna_static_probe(&solution);
+            }
+            visit(time, count, &self.native_bjts, &solution)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn add_native_periodic_residual(
         &mut self,
         state: &mut HbSolverState,

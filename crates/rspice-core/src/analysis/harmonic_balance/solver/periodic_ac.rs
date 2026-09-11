@@ -119,7 +119,7 @@ impl ScaledComplex {
     }
 }
 
-fn normalize_scaled_noise_waveform(
+pub(crate) fn normalize_scaled_noise_waveform(
     waveform: &[super::devices::ScaledNonnegative],
 ) -> Result<(Vec<Value>, i32), &'static str> {
     if waveform
@@ -1445,7 +1445,7 @@ impl HbSolver {
         Ok(waveforms)
     }
 
-    pub(super) fn checked_periodic_spectrum(
+    pub(crate) fn checked_periodic_spectrum(
         &mut self,
         waveform: &[Value],
         harmonic_count: usize,

@@ -425,7 +425,7 @@ pub(crate) const fn periodic_capability_descriptor(
             ),
             dynamic_state: Complete,
             small_signal: Complete,
-            noise: Absent("native BJT cyclostationary noise sources are not registered"),
+            noise: Complete,
             pss_state: Restricted(
                 "native BJT electrical storage and VBIC thermal/excess-phase states",
             ),
@@ -1604,7 +1604,7 @@ mod tests {
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
             F::Diode => [R, C, C, R, C, A],
-            F::Bjt => [R, C, C, A, R, A],
+            F::Bjt => [R, C, C, C, R, A],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],

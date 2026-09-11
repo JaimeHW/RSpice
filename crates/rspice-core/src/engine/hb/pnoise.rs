@@ -10,13 +10,15 @@
 //! choppers, samplers), and shot noise that switches on and off with its
 //! bias current.
 
+mod bjt;
+
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::analysis::harmonic_balance::{
-    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource,
+    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource, ScaledNonnegative,
     PeriodicSidebandWindow,
 };
 #[cfg(test)]
@@ -53,12 +55,6 @@ pub struct PnoiseAnalysisResult {
 enum PnoiseOperatingPoint<'a> {
     Shooting(&'a super::super::PssOperatingPoint),
     HarmonicBalance(&'a HbOperatingPoint),
-}
-
-#[derive(Clone, Copy)]
-struct ScaledPositive {
-    mantissa: Value,
-    exponent: i32,
 }
 
 fn pnoise_physical_constants(
@@ -145,7 +141,7 @@ fn validate_resistor_noise_metadata(circuit: &CircuitData) -> Result<(), Simulat
 fn checked_scaled_positive_product(
     factors: &[Value],
     quantity: &str,
-) -> Result<ScaledPositive, SimulationError> {
+) -> Result<ScaledNonnegative, SimulationError> {
     let mut mantissa = 1.0;
     let mut exponent = 0i32;
     for &factor in factors {
@@ -155,7 +151,7 @@ fn checked_scaled_positive_product(
             )));
         }
         if factor == 0.0 {
-            return Ok(ScaledPositive {
+            return Ok(ScaledNonnegative {
                 mantissa: 0.0,
                 exponent: 0,
             });
@@ -177,14 +173,14 @@ fn checked_scaled_positive_product(
             "{quantity} normalized mantissa is invalid ({mantissa})"
         )));
     }
-    Ok(ScaledPositive { mantissa, exponent })
+    Ok(ScaledNonnegative { mantissa, exponent })
 }
 
 fn checked_scaled_positive_ratio(
     factors: &[Value],
     divisor: Value,
     quantity: &str,
-) -> Result<ScaledPositive, SimulationError> {
+) -> Result<ScaledNonnegative, SimulationError> {
     if !divisor.is_finite() || divisor <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "{quantity} has invalid positive divisor {divisor}"
@@ -975,6 +971,9 @@ impl Engine {
                     ))
                 })?,
         );
+        sources.extend(self.native_bjt_periodic_noise_sources(
+            &mut solver, &state, temperature, abort,
+        )?);
         let values_per_point = sources
             .len()
             .checked_add(2)

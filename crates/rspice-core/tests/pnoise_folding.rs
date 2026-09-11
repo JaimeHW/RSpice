@@ -1025,3 +1025,166 @@ fn pnoise_card_reports_integrated_input_and_output_noise() {
     assert_eq!(result.integrated_output_noise, None);
     assert_eq!(result.integrated_input_noise, None);
 }
+
+#[test]
+fn native_gp_periodic_shot_and_flicker_match_independent_junction_modulation() {
+    use num_complex::Complex64;
+    let f0 = 1e6;
+    let offsets = [2e5_f64, 1.2e6];
+    let resistance = 1000.0;
+    let m = 3.0;
+    let vt = K_B * T_REF / rspice_core::constants::Q_ELECTRON;
+    for (kind, p, af, kf, drive) in [
+        ("NPN", 1.0, 1.0_f64, 1e-12, 0.01),
+        ("PNP", -1.0, 2.0, 1e-4, 0.01),
+        // The nonlinear flicker amplitude extends well above the eight
+        // voltage harmonics, even though the terminal drive is sinusoidal.
+        ("NPN", 1.0, 10.0, 1e40, 0.06),
+    ] {
+        // Ideal terminal biases and a current monitor give exactly R transimpedance
+        // from the base noise port. Independent Shockley-current quadrature
+        // determines the white intensity and the colored amplitude spectrum.
+        let netlist = Netlist::parse(&format!(
+            "GP modulated noise oracle\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 qm AREA=2 M=3\nFmonitor out 0 VB 1\nRload out 0 1k NOISY=0\n.model qm {kind}(LEVEL=1 IS=1e-15 BF=100 BR=1e6 KF={kf} AF={af} EF=0.7)\n.options GMIN=0 VNTOL=1e-12\n.end\n", p*1.2, p*0.6, p*0.6, p*drive
+        )).unwrap();
+        let mut simulation = SimulationConfig::default();
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(simulation);
+        let mut config = HbConfig::new(f0)
+            .with_harmonics(8)
+            .with_oversample(4)
+            .with_tolerance(1e-10);
+        config.abstol = 1e-18;
+        let hb = engine.run_hb(&netlist, config).unwrap();
+        let points = 1024;
+        let currents: Vec<_> = (0..points)
+            .map(|i| {
+                let phase = std::f64::consts::TAU * i as f64 / points as f64;
+                2e-15 / 100.0 * ((0.6 + drive * phase.sin()) / vt).exp_m1()
+            })
+            .collect();
+        let mean = currents.iter().sum::<f64>() / points as f64;
+        let amplitude: Vec<_> = (0..=64)
+            .map(|h| {
+                currents
+                    .iter()
+                    .enumerate()
+                    .map(|(i, current)| {
+                        Complex64::from_polar(
+                            current.powf(af / 2.0),
+                            -std::f64::consts::TAU * h as f64 * i as f64 / points as f64,
+                        )
+                    })
+                    .sum::<Complex64>()
+                    / points as f64
+            })
+            .collect();
+        for sidebands in [0, 2] {
+            let noise = engine
+                .run_pnoise_from_hb_with_abort(
+                    &netlist,
+                    &offsets,
+                    "out",
+                    None,
+                    None,
+                    sidebands,
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let mechanism = |name: &str, i: usize| -> f64 {
+                noise
+                    .contributors
+                    .iter()
+                    .filter(|(label, _)| label.eq_ignore_ascii_case(name))
+                    .map(|(_, values)| values[i])
+                    .sum()
+            };
+            for (i, &frequency) in offsets.iter().enumerate() {
+                let shot =
+                    resistance * resistance * 2.0 * rspice_core::constants::Q_ELECTRON * m * mean;
+                let flicker = resistance
+                    * resistance
+                    * kf
+                    * m
+                    * (-64_i32..=64)
+                        .map(|h| {
+                            amplitude[h.unsigned_abs() as usize].norm_sqr()
+                                / (frequency + h as f64 * f0).abs().powf(0.7)
+                        })
+                        .sum::<f64>();
+                for (name, expected) in [("Q1:IB", shot), ("Q1:FN", flicker)] {
+                    let actual = mechanism(name, i);
+                    assert!(
+                        (actual / expected - 1.0).abs() < 2e-7,
+                        "{kind} AF={af} K={sidebands} f={frequency} {name}: {actual:e} vs {expected:e}"
+                    );
+                }
+                assert!((noise.output_noise[i] / (shot + flicker) - 1.0).abs() < 2e-7);
+            }
+        }
+    }
+}
+
+#[test]
+fn native_vbic_periodic_noise_matches_stationary_physical_sources() {
+    let offsets = [1e3, 1e6];
+    for (level, dialect, kind, p) in [
+        (4, SpiceDialect::Ngspice, "NPN", 1.0),
+        (11, SpiceDialect::Xyce, "PNP", -1.0),
+        (12, SpiceDialect::Xyce, "NPN", 1.0),
+    ] {
+        let substrate = if level == 11 { "" } else { " 0" };
+        let self_heat = if level == 4 { "SELFT=1" } else { "" };
+        let netlist = Netlist::parse(&format!(
+            "VBIC stationary periodic noise\nVCC supply 0 {}\nRL supply c 500\nVB drive 0 {}\nRIN drive b 100\nQ1 c b 0{substrate} th vm AREA=2 M=3\n.model vm {kind}(LEVEL={level} IS=1e-15 IBEI=1e-17 IBCI=1e-17 IBEIP=1e-17 ISP=1e-17 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 WBE=.8 {self_heat} RTH=1000 CTH=1n TD=100n KFN=1e-12 AFN=1.2 BFN=0.7)\n.options GMIN=0 VNTOL=1e-12 RELTOL=1e-9 ABSTOL=1e-16\n.end\n", p*2.0, p*0.65
+        )).unwrap();
+        let mut simulation = SimulationConfig::default().with_spice_dialect(dialect);
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(simulation);
+        let noise = engine
+            .run_noise_named_with_input_source(&netlist, "c", None, "VB", &offsets, T_REF)
+            .unwrap();
+        let mut config = HbConfig::new(1e6).with_harmonics(8).with_tolerance(1e-10);
+        // This loaded, finite-resistance network cannot resolve attoamp
+        // residuals from binary64 voltage differences. Keep the independent
+        // mechanism and total-density comparisons below at 2 ppm.
+        config.abstol = 1e-14;
+        let hb = engine.run_hb(&netlist, config).unwrap();
+        let periodic = engine
+            .run_pnoise_from_hb_with_abort(
+                &netlist,
+                &offsets,
+                "c",
+                None,
+                Some("VB"),
+                0,
+                &hb.operating_point,
+                &NoAbort,
+            )
+            .unwrap();
+        for (i, point) in noise.iter().enumerate() {
+            for contribution in &point.contributions {
+                if !contribution.identity.device.eq_ignore_ascii_case("Q1") {
+                    continue;
+                }
+                let name = format!("Q1:{}", contribution.identity.mechanism.as_deref().unwrap());
+                let expected = contribution.output_contribution;
+                let actual: f64 = periodic
+                    .contributors
+                    .iter()
+                    .filter(|(label, _)| label.eq_ignore_ascii_case(&name))
+                    .map(|(_, values)| values[i])
+                    .sum();
+                assert!(
+                    (actual - expected).abs() < 2e-6 * expected + 1e-40,
+                    "LEVEL={level} {name} f={}: {actual:e} vs {expected:e}",
+                    offsets[i]
+                );
+            }
+            assert!((periodic.output_noise[i] / point.output_noise_density - 1.0).abs() < 2e-6);
+        }
+    }
+}

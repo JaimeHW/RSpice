@@ -9,13 +9,13 @@ const MAX_EXP_ARG: Value = 40.0;
 /// A non-negative value represented as `mantissa * 2^exponent` without
 /// forcing the physical value through binary64's direct exponent range.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct ScaledNonnegative {
-    pub(super) mantissa: Value,
-    pub(super) exponent: i32,
+pub(crate) struct ScaledNonnegative {
+    pub(crate) mantissa: Value,
+    pub(crate) exponent: i32,
 }
 
 impl ScaledNonnegative {
-    pub(super) const ZERO: Self = Self {
+    pub(crate) const ZERO: Self = Self {
         mantissa: 0.0,
         exponent: 0,
     };
