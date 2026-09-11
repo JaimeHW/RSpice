@@ -103,6 +103,7 @@ pub mod lexer;
 pub mod metrics;
 mod numeric_literal;
 pub mod parser;
+mod prepared_source;
 pub mod preprocessor;
 mod reaching_definition;
 pub mod runtime_report;
@@ -198,6 +199,8 @@ pub struct ConnectSpecification {
     pub declares_module: bool,
 }
 
+pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
+
 /// Result of compiling a Verilog-A source file from disk.
 ///
 /// Includes the compiled model artifact and canonical dependency paths
@@ -239,6 +242,8 @@ pub struct CompiledRuntimeFile {
     pub canonical_ir: canonical_ir::CanonicalIrArtifact,
     /// Canonical source/include dependencies captured at compile time.
     pub dependencies: Vec<std::path::PathBuf>,
+    /// Captured document identities, independent of later filesystem changes.
+    pub source_dependencies: Vec<PreparedSourceDependency>,
     /// Structured phase timings and work-size counters.
     pub metrics: PipelineMetrics,
 }
@@ -1396,7 +1401,7 @@ impl VerilogACompiler {
             source_identity: canonical_ir::source_identity(source),
             declares_module: !analyzed.modules.is_empty(),
             rules: analyzed.connect_rules,
-            disciplines: analyzer.into_disciplines(),
+            disciplines: analyzed.disciplines,
         })
     }
 
@@ -1584,6 +1589,35 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         control: &dyn PipelineControl,
     ) -> CompileResult<CompiledRuntimeFile> {
+        self.prepare_file_runtime_source_with_limits_and_control(
+            path,
+            preprocessor::SourceProviderLimits::UNBOUNDED,
+            control,
+        )?
+        .compile_runtime_with_control(module_name, control)
+    }
+
+    /// Prepare one complete active source closure without selecting a module.
+    /// Standalone connect libraries and multi-module files share this path.
+    pub fn prepare_file_runtime_source(
+        &self,
+        path: &std::path::Path,
+    ) -> CompileResult<PreparedRuntimeSource> {
+        self.prepare_file_runtime_source_with_limits_and_control(
+            path,
+            preprocessor::SourceProviderLimits::UNBOUNDED,
+            &NoPipelineControl,
+        )
+    }
+
+    /// Bound preprocessing of the complete source closure and retain exactly
+    /// the document bytes used, before any module is compiled.
+    pub fn prepare_file_runtime_source_with_limits_and_control(
+        &self,
+        path: &std::path::Path,
+        limits: preprocessor::SourceProviderLimits,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<PreparedRuntimeSource> {
         let input_bytes = std::fs::metadata(path)
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
@@ -1598,9 +1632,18 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Preprocess)?;
         let phase_started = web_time::Instant::now();
         let preprocessed = pp
-            .preprocess_file(path)
+            .preprocess_file_with_limits(path, limits)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
-        let dependencies = pp.take_dependencies();
+        let dependencies: Vec<_> = pp
+            .take_dependency_documents()
+            .into_iter()
+            .filter(|document| document.origin == SourceDocumentOrigin::Provider)
+            .map(|document| PreparedSourceDependency {
+                path: document.logical_path,
+                byte_len: document.source.len(),
+                content_identity: *blake3::hash(document.source.as_bytes()).as_bytes(),
+            })
+            .collect();
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes = metrics::usize_to_u64(preprocessed.len());
         measurements.metrics_mut().dependency_count = metrics::usize_to_u64(dependencies.len());
@@ -1619,8 +1662,31 @@ impl VerilogACompiler {
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed =
             self.analyze_preprocessed(&diagnostic_source, &preprocessed, &mut measurements)?;
-        let executable = self.select_executable_module(&analyzed, module_name)?;
-        let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
+        Ok(PreparedRuntimeSource {
+            source_package,
+            source: preprocessed,
+            analyzed,
+            dependencies,
+            compiler_options: self.options.clone(),
+            metrics: measurements.finish(),
+        })
+    }
+
+    fn compile_prepared_runtime_with_control(
+        &self,
+        prepared: &PreparedRuntimeSource,
+        module_name: Option<&str>,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<CompiledRuntimeFile> {
+        let mut measurements = metrics::MetricsRecorder::with_control(
+            prepared.source.len(),
+            self.options.performance_budget.clone(),
+            control,
+        );
+        *measurements.metrics_mut() = prepared.metrics.clone();
+        measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
+        let executable = self.select_executable_module(&prepared.analyzed, module_name)?;
+        let source_digest = canonical_ir::StableDigest::from_text(&prepared.source).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
         // The same `enable_ams` branch the in-memory runtime entry takes. It
@@ -1639,9 +1705,9 @@ impl VerilogACompiler {
         };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed())?;
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
-            &source_package,
-            &preprocessed,
-            &analyzed,
+            &prepared.source_package,
+            &prepared.source,
+            &prepared.analyzed,
             &executable,
             &mut measurements,
         )?;
@@ -1651,7 +1717,12 @@ impl VerilogACompiler {
         Ok(CompiledRuntimeFile {
             model,
             canonical_ir,
-            dependencies,
+            dependencies: prepared
+                .dependencies
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect(),
+            source_dependencies: prepared.dependencies.clone(),
             metrics: measurements.finish(),
         })
     }

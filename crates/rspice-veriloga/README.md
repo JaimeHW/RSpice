@@ -126,6 +126,15 @@ Retaining authored connect bodies does not yet provide their executable
 insertion; the current engine boundary route still uses supported built-in
 delegations.
 
+`prepare_file_runtime_source` freezes one analyzed file/include closure before
+module selection. It can describe a standalone connection library or compile
+several ordinary modules through `PreparedRuntimeSource::compile_runtime`.
+Captured dependency identities refer to the bytes actually preprocessed, even
+if a file changes afterward. The preparation and compiler options are shared;
+module compilation does not reopen sources. Keep prepared trees scoped to
+elaboration. The limits/control variant bounds source expansion and preserves
+cancellation; returned module metrics include the shared preparation prefix.
+
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data
 for source-only artifact calls. `RustTranspiler::transpile_measured` reports
