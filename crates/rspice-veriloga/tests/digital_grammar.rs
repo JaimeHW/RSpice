@@ -2445,3 +2445,132 @@ fn a_range_on_a_real_port_is_refused() {
         "expected section 3.9's rule, got {error:?}"
     );
 }
+
+#[test]
+fn module_integer_ownership_retains_scope_types_and_event_inputs() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module owners(p); inout p; electrical p;
+integer count,shadow; real hidden; reg signed [7:0] bits; reg done;
+analog begin shadow=7; hidden=1; I(p)<+(count+bits)*V(p); end
+initial begin
+  begin : local_scope
+    integer shadow; real hidden;
+    shadow=2; hidden=3;
+    begin : nested integer count; count=9; end
+  end
+  count=-3; bits=-1;
+  #1 count=count+1;
+  done=(shadow==7);
+end
+endmodule
+"#,
+        )
+        .unwrap();
+    let plan = &artifact.digital;
+    let count = plan
+        .signals
+        .iter()
+        .find(|signal| signal.name == "count")
+        .unwrap();
+    assert!(count.integer && count.signed && count.procedurally_assignable);
+    assert_eq!((count.width, count.bounds), (32, Some((31, 0))));
+    assert!(
+        plan.signals
+            .iter()
+            .all(|signal| signal.name != "shadow" && signal.name != "hidden")
+    );
+    assert!(
+        !plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == "bits")
+            .unwrap()
+            .integer
+    );
+    assert!(
+        artifact
+            .hir
+            .variables
+            .iter()
+            .find(|variable| variable.name == "count")
+            .unwrap()
+            .is_state
+    );
+    let encoded = serde_json::to_string(plan).unwrap();
+    let decoded: rspice_veriloga::canonical_ir::CanonicalDigitalPlan =
+        serde_json::from_str(&encoded).unwrap();
+    assert_eq!(&decoded, plan);
+    decoded.validate().unwrap();
+    let mut invalid = decoded;
+    invalid.signals[usize::from(count.id)].signed = false;
+    assert!(
+        invalid.validate().is_err(),
+        "an integer tag cannot certify unsigned storage"
+    );
+
+    let mut invalid_input = artifact.clone();
+    invalid_input.digital.signals[usize::from(count.id)].integer = false;
+    assert!(
+        invalid_input
+            .validate()
+            .unwrap_err()
+            .iter()
+            .any(|error| error
+                .message
+                .contains("analog input `count` has an incompatible digital type")),
+        "a packed 32-bit tag cannot replace a signed integer input"
+    );
+
+    let analyzed = analyze(
+        r#"
+module event_inputs(p); inout p; electrical p;
+integer enabled, held; real period;
+initial begin enabled=1; period=2e-9; end
+analog begin @(timer(0,period,0,enabled)) held=1; I(p)<+held; end
+endmodule
+"#,
+    );
+    let module = only_module(&analyzed);
+    for name in ["enabled", "period"] {
+        let slot = module
+            .variables
+            .iter()
+            .position(|variable| variable.name == name)
+            .unwrap();
+        assert!(
+            module.variables[slot].is_state,
+            "{name} is read only in an event operand"
+        );
+        assert!(module.event_state_variables.contains(&slot));
+    }
+}
+
+#[test]
+fn module_integer_ownership_refuses_dual_writes_and_overwide_groups() {
+    for kind in ["real", "integer"] {
+        for analog in ["analog value=2;", "analog initial value=2;"] {
+            let error = analyze_error(&format!(
+                "module bad; {kind} value; initial value=1; {analog} endmodule"
+            ));
+            assert!(
+                error.contains("written by both the analog body and a discrete process"),
+                "{error}"
+            );
+        }
+    }
+    for kind in ["reg", "reg signed"] {
+        let error = analyze_error(&format!(
+            "module bad(p); inout p; electrical p; {kind} [31:0] bits; initial bits=1; analog I(p)<+bits; endmodule"
+        ));
+        assert!(error.contains("31-bit grouping limit"), "{error}");
+    }
+    let array = analyze_error("module bad; integer values[0:1]; initial values[0]=1; endmodule");
+    assert!(array.contains("array of `integer`"), "{array}");
+    let initializer = analyze_error("module bad; integer value=1; initial value=2; endmodule");
+    assert!(
+        initializer.contains("declaration initializer"),
+        "{initializer}"
+    );
+}

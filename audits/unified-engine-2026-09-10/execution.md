@@ -2577,6 +2577,64 @@ code generation, browser/tablet execution and licensed comparisons remain open.
 No full suite or vendor comparison was run, and this increment does not close
 MS03, MS05, MS06, the MS00-MS15 plan, production readiness or vendor parity.
 
+## Integer ownership and cross-domain input types (MS06, partial)
+
+Module-level integer variables written by digital processes now acquire signed
+32-bit digital storage. Their source kind remains distinct from a signed packed
+reg in the AST, canonical plan, serialized identity and linked runtime. The
+ownership walk respects process-local declarations, nested scopes and scope exit,
+so a local assignment cannot claim a same-named analog module variable. It uses
+an explicit worklist and borrows loop assignments instead of cloning their ASTs.
+Real-variable ownership shares this corrected walk. Writes from both domains are
+still refused.
+
+The mixed host now chooses analog input conversion from the retained integer
+kind, independently of a packed signal's signedness in digital expressions.
+Integer inputs retain negative values and the full signed 32-bit range. Packed
+bit groups are zero-extended and direct groups wider than 31 bits are refused,
+including signed groups. The prior signed-packed exception was incorrect for the
+selected VAMS-2023 Table 7-1 contract. See the [normative language reference](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf),
+7.2.2 and 7.3.1. This changes the prior behavior of negative packed inputs.
+
+Analog input discovery now visits event arguments (edges, cross/above, timers
+and event disjunctions). A variable used only by an event expression therefore
+receives the same state-input binding as one used in a contribution. Canonical
+validation checks integer storage shape and checks an analog state input's type
+against its digital declaration. A serialized integer cannot be substituted with
+an unsigned/overwide packed binding merely by changing its type tag.
+
+Three focused compiler checks passed after a 20.70 s build. They cover module
+ownership, process-local real/integer shadows, event-only input dependencies,
+serialization, illegal dual-domain writes, packed width limits, and explicit
+array/initializer refusals. The interpreter check executes unknown initial
+integer storage, signed overflow through an NBA, sign extension after suspension,
+and partial writes to integer bits. The final artifact-validation extension
+reran only its affected case, which passed after an 18.73 s build. Both test
+binaries reported 0.00 s execution. Logs in target/unified-mixed-fixes:
+module-integer-ownership-compiler.log and module-integer-ownership-artifact.log.
+The existing producer rollback fixture now uses a module-level integer and
+passed in 0.01 s after a 1m15s build. The loaded two-instance circuit fixture
+passed in 0.03 s after a 43.37 s build. It checks negative integer gain, the
+same signed packed reg read as -1 digitally and 255 by analog equations, native
+R/C loading, analog-owned integer/real samples, event-only timer enable/period
+inputs, a timer breakpoint at 1.537 ns within 1e-18 s, and output edges at 1 ns.
+Logs: module-integer-ownership-host.log and module-integer-ownership-circuit.log.
+Five unique focused checks cover this increment; only the changed artifact case
+was repeated. No failing execution or broader-suite rerun was needed.
+
+Canonical schema is now 57. All 43 built-ins were regenerated; their numerical
+bodies and bundle digest 7fa6dacfd0b7152a324c267c95a7062ff741d5b0e4ca2a86676c44229ec94504
+are unchanged. Generator digest:
+daa138cc795ded724c7bd2abacb2b5a8c2a9ec986c75020f51dff73fd5732255.
+Log: target/unified-mixed-fixes/module-integer-ownership-generator.log.
+
+This closes the recorded basic module-integer ownership refusal, not the whole
+MS06 type/event surface. Numeric arrays, declaration initialization in the owning
+domain, analog-side lexical binding, further X/Z operations, analog-variable and
+physical-probe event subscriptions, the remaining transaction/analysis/backend
+work, shipping platforms and reference qualification remain open. No broad
+suite, actual browser/tablet execution or licensed comparison was performed.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2587,8 +2645,9 @@ the root handshake to XSPICE boundaries and complete flow-event/analog-owned-var
 dependencies and feedback convergence. Scheduled process flow reads now share
 the authoritative solution sample, and retained scalar-variable reads use normal
 analog evaluation and prepared stamps; event subscriptions remain open. Complete the remaining ownership/type/
-event requirements under MS06. Both conditional value domains now retain control
-flow, and numeric conversion handles the recorded mixed-clock comparison.
+event requirements under MS06, including analog-side lexical binding and numeric
+declaration initialization; basic module-level integer ownership is now admitted.
+Both conditional value domains now retain control flow, and numeric conversion handles the recorded mixed-clock comparison.
 Extend qualification of the
 now-enabled conservative OneStep path and preserve correct readbacks while
 improving eligibility of compiler-created flow temporaries. Settled static

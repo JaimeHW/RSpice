@@ -2660,6 +2660,7 @@ mod tests {
                 width,
                 bounds,
                 signed: false,
+                integer: false,
                 procedurally_assignable: true,
                 span: SourceSpanRef {
                     source_file_id: 0,

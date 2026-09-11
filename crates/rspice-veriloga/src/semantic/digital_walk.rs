@@ -221,3 +221,92 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
         }
     }
 }
+
+/// Collect assignments to module storage without mistaking lexical locals for
+/// same-named module variables. Inactive branches still establish ownership.
+pub(super) fn collect_module_writes(
+    body: &DigitalStatement,
+    written: &mut std::collections::HashSet<smol_str::SmolStr>,
+) {
+    enum Work<'a> {
+        Statement(&'a DigitalStatement),
+        Assignment(&'a DigitalAssign),
+        Leave(Vec<&'a smol_str::SmolStr>),
+    }
+    let mut locals = std::collections::HashMap::<&smol_str::SmolStr, usize>::new();
+    let mut pending = vec![Work::Statement(body)];
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Leave(names) => {
+                for name in names {
+                    let depth = locals.get_mut(name).expect("entered local scope");
+                    *depth -= 1;
+                    if *depth == 0 {
+                        locals.remove(name);
+                    }
+                }
+            }
+            Work::Assignment(assign) => {
+                for (name, _) in assign.target.written_names() {
+                    if !locals.contains_key(name) {
+                        written.insert(name.clone());
+                    }
+                }
+            }
+            Work::Statement(statement) => match statement {
+                DigitalStatement::Null(_) => {}
+                DigitalStatement::Block(block) => {
+                    let names: Vec<_> = block
+                        .variables
+                        .iter()
+                        .flat_map(|decl| decl.items.iter().map(|item| &item.name))
+                        .chain(
+                            block
+                                .digital_variables
+                                .iter()
+                                .flat_map(|decl| decl.items.iter().map(|item| &item.name)),
+                        )
+                        .collect();
+                    for name in &names {
+                        *locals.entry(name).or_default() += 1;
+                    }
+                    pending.push(Work::Leave(names));
+                    pending.extend(block.statements.iter().rev().map(Work::Statement));
+                }
+                DigitalStatement::BlockingAssign(assign)
+                | DigitalStatement::NonblockingAssign(assign) => {
+                    pending.push(Work::Assignment(assign))
+                }
+                DigitalStatement::Conditional(conditional) => {
+                    if let Some(branch) = &conditional.else_branch {
+                        pending.push(Work::Statement(branch));
+                    }
+                    pending.push(Work::Statement(&conditional.then_branch));
+                }
+                DigitalStatement::Case(case) => {
+                    if let Some(branch) = &case.default {
+                        pending.push(Work::Statement(branch));
+                    }
+                    pending.extend(
+                        case.items
+                            .iter()
+                            .map(|item| Work::Statement(&item.statement)),
+                    );
+                }
+                DigitalStatement::For(loop_) => {
+                    pending.push(Work::Assignment(&loop_.init));
+                    pending.push(Work::Assignment(&loop_.update));
+                    pending.push(Work::Statement(&loop_.body));
+                }
+                DigitalStatement::While(loop_) => pending.push(Work::Statement(&loop_.body)),
+                DigitalStatement::Repeat(loop_) => pending.push(Work::Statement(&loop_.body)),
+                DigitalStatement::Forever(loop_) => pending.push(Work::Statement(&loop_.body)),
+                DigitalStatement::Timing(timing) => {
+                    if let Some(statement) = &timing.statement {
+                        pending.push(Work::Statement(statement));
+                    }
+                }
+            },
+        }
+    }
+}

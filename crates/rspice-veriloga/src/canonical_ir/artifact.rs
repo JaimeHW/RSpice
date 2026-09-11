@@ -159,6 +159,34 @@ impl CanonicalIrArtifact {
                 "stored connection identity does not match the connection source",
             ));
         }
+        for variable in self
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+        {
+            let Some(signal) = self
+                .digital
+                .signals
+                .iter()
+                .find(|signal| signal.name == variable.name)
+            else {
+                continue;
+            };
+            let expected = if signal.kind.is_real() {
+                super::hir::CanonicalValueType::Real
+            } else {
+                super::hir::CanonicalValueType::Integer
+            };
+            if variable.value_type != expected
+                || (!signal.kind.is_real() && !signal.integer && signal.width > 31)
+            {
+                diagnostics.push(artifact_error(format!(
+                    "analog input `{}` has an incompatible digital type or bit grouping",
+                    variable.name
+                )));
+            }
+        }
         let mut observed = std::collections::BTreeSet::new();
         for probe in &self.digital.analog_probes {
             if let super::digital::DigitalAnalogProbeTarget::Variable { name } = &probe.target {

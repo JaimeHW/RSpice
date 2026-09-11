@@ -347,6 +347,10 @@ pub struct DigitalSignal {
     /// declarations, and a bit select has to agree with the one written.
     pub bounds: Option<(i64, i64)>,
     pub signed: bool,
+    /// Authored integer variable, distinct from a signed packed reg. Cross-domain
+    /// access preserves its signed 32-bit value; packed bits are zero-extended.
+    #[serde(default)]
+    pub integer: bool,
     /// Whether a procedural assignment may drive it (`reg` can, `wire` cannot).
     pub procedurally_assignable: bool,
     pub span: SourceSpanRef,

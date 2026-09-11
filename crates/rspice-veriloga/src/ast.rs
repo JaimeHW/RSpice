@@ -1743,12 +1743,13 @@ pub struct DigitalNetDecl {
 
 /// Variable type keyword for a discrete-domain variable declaration.
 ///
-/// `integer` keeps its existing continuous-domain [`VariableDecl`] node: IEEE
-/// 1364-2005 section 3.9 gives `integer` no range and no signedness qualifier,
-/// so the digital grammar needs nothing new to declare one.
+/// Module-level numeric declarations retain their [`VariableDecl`] syntax;
+/// ownership analysis selects their discrete storage kind when a process writes
+/// them. An integer has the implicit signed range [31:0].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalVariableKind {
     Reg,
+    Integer,
     /// `real`, as a variable of the *discrete* domain.
     ///
     /// The same keyword the continuous domain declares its variables with, and
@@ -1769,6 +1770,7 @@ impl DigitalVariableKind {
     pub const fn keyword(self) -> &'static str {
         match self {
             Self::Reg => "reg",
+            Self::Integer => "integer",
             Self::Real => "real",
         }
     }

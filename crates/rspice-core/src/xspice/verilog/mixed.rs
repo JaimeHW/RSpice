@@ -1049,7 +1049,7 @@ impl MixedSignalHost {
                     .map(|signal| DiscreteAnalogInput {
                         signal: signal.id,
                         variable: usize::from(variable.id),
-                        signed: signal.signed,
+                        signed: signal.integer,
                         real: signal.kind.is_real(),
                         name: signal.name.to_string(),
                     })

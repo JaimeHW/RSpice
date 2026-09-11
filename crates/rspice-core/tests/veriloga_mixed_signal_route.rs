@@ -2277,18 +2277,19 @@ fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs
 module variable_sampler(p,q);
  inout p; electrical p; output q; reg q;
  parameter real LOAD=1000;
- reg [7:0] gain; reg startup_ok;
- real measured; integer count;
+ integer gain; reg signed [7:0] adjustment; reg startup_ok;
+ real measured,period; integer count,enabled;
  analog begin
-   measured=gain*V(p); count=-3;
-   I(p)<+(V(p)-gain)/1000;
+   measured=gain*V(p);
+   @(timer(0,period,0,enabled)) count=-3;
+   I(p)<+(V(p)-gain+adjustment-255)/1000;
  end
  initial begin
-   gain=2; q=0;
+   gain=-2; adjustment=-1; period=1.537e-9; enabled=1; q=0;
    startup_ok=(measured-4*LOAD/(1000+LOAD)<1e-8)
      && (measured-4*LOAD/(1000+LOAD)>-1e-8);
-   #1; gain=4;
-   q=startup_ok && (count==-3)
+   #1; gain=-4;
+   q=startup_ok && (count==-3) && (adjustment==-1)
      && (measured-16*LOAD/(1000+LOAD)<1e-8)
      && (measured-16*LOAD/(1000+LOAD)>-1e-8);
  end
@@ -2300,7 +2301,16 @@ endmodule
         model.deck_path()
     );
     let result = run(&deck, 2e-9, 0.1e-9);
-    for (node, expected) in [("pa", 2.0), ("pb", 8.0 / 3.0)] {
+    let timer_error = result
+        .time
+        .iter()
+        .map(|time| (time - 1.537e-9).abs())
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        timer_error < 1e-18,
+        "event-only period input missed its analog breakpoint by {timer_error:e} s"
+    );
+    for (node, expected) in [("pa", -2.0), ("pb", -8.0 / 3.0)] {
         assert!(
             (waveform(&result, node).last().unwrap() - expected).abs() < 1e-8,
             "{node}"

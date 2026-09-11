@@ -40,47 +40,18 @@
 //! section 3.9 gives a `real` an initial value of zero, and it has no `x` to
 //! start at, which is why it needs its own answer rather than section 4.2.2's.
 //!
-//! # Who owns a module-level `real`
+//! # Numeric variable ownership
 //!
-//! A module-level `real` is written with the *continuous* domain's declaration
-//! — the same production every shipped Verilog-A model uses — so which half of
-//! the language owns its storage is a question this compiler has to answer
-//! rather than read off the keyword. The rule, applied by
-//! `SemanticAnalyzer::promote_module_level_reals`, is:
+//! Semantic analysis assigns module-level real/integer storage to its writing
+//! context, excludes lexical shadows and refuses writes from both domains
+//! (VAMS-2023 7.2.2). Analog reads of digital variables use state-input bindings;
+//! digital reads of analog variables use retained evaluation probes.
 //!
-//! Verilog-AMS LRM 2.4 section 7.3: "Read operations of nets and variables in
-//! both domains are allowed from both contexts. Write operations of nets and
-//! variables are only allowed from the context of their domain." A variable
-//! belongs to whichever domain writes it, and that is the whole rule:
-//!
-//! * A `real` that some `always`, `initial` or continuous assignment **writes**
-//!   and the analog body does **not** write becomes a **digital-owned real
-//!   variable** — an entry in [`CanonicalDigitalPlan::signals`] with
-//!   [`DigitalSignalKind::Real`] and `procedurally_assignable`, written
-//!   straight into the signal store and never through a driver.
-//! * A `real` **both** halves write is refused by name, citing section 7.3.
-//!   That is not a scheduling problem to be solved later; it is a program the
-//!   standard does not admit.
-//! * A `real` a process writes and the analog body **reads** also has a
-//!   canonical state-variable input. The mixed host samples the digital store
-//!   before analog evaluation and restores this input when rejecting a trial.
-//! * A `real` no process writes is left exactly where it was. So a pure-analog
-//!   module cannot be affected by any of it — it has no processes to satisfy
-//!   the first condition.
-//!
-//! A real variable is not a real net, and the difference is IEEE 1364-2005
-//! section 6.2's: a `wreal` is driven by continuous assignments and resolved
-//! from its drivers (Verilog-AMS LRM 2.4 section 3.7), a `real` is written
-//! procedurally and has no drivers to resolve. `procedurally_assignable` is
-//! what tells them apart wherever it matters — including in
-//! `reject_overdriven_real_nets`, which is a rule about nets and skips
-//! variables rather than counting the drivers they cannot have.
-//!
-//! An `output real` port does not go through the ownership question at all. It
-//! is an explicit discrete-domain declaration — section 12.3.4's variable port
-//! form with section 3.9's `real` as the type, which is `output reg q;` with a
-//! different variable type — so it is a digital real variable wherever it
-//! appears.
+//! A digital real has no bits. A digital integer has signed [31:0] four-state
+//! storage and retains its authored integer identity independently of a packed
+//! reg's digital signedness. This distinction also survives hierarchy flattening.
+//! Variables are written procedurally, without resolved net drivers. Unwritten
+//! module numeric variables retain the compiler's existing analog-domain choice.
 //!
 //! # The subset
 //!
@@ -631,6 +602,10 @@ fn lower_signal(
         width: signal.width,
         bounds: signal.range.map(|range| (range.msb, range.lsb)),
         signed: signal.signedness.is_signed(),
+        integer: matches!(
+            signal.class,
+            crate::semantic::DigitalSignalClass::Variable(crate::ast::DigitalVariableKind::Integer)
+        ),
         procedurally_assignable: signal.class.is_variable(),
         span: signal.span.into(),
     }

@@ -312,7 +312,7 @@ mod tests {
         let source = r#"
 `timescale 1ns/1ns
 module sampled(p); inout p; electrical p;
-reg [7:0] gain; real measured,captured;
+integer gain; real measured,captured;
 analog begin measured=gain*V(p); I(p)<+V(p)/1000+ddt(1e-12*V(p)); end
 initial begin gain=2; captured=measured; #1 gain=3; captured=measured; end
 endmodule

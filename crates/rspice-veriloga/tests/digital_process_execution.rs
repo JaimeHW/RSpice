@@ -5241,3 +5241,34 @@ endmodule
     assert_eq!(harness.get_real("total"), 19.0);
     expect_finished(harness.resume(0, final_delay.resume_state()));
 }
+
+#[test]
+fn module_integer_ownership_executes_signed_state_nba_and_partial_writes() {
+    let mut harness = Harness::from_source(
+        r#"
+module counter;
+integer state; reg signed [63:0] wide; reg msb,was_unknown;
+initial begin
+  was_unknown=(state===32'bx);
+  state=32'sh7fffffff;
+  state<=state+1;
+  #1;
+  wide=state; msb=state[31]; state[7:0]=8'hff;
+  #1;
+end
+endmodule
+"#,
+    );
+    let state = expect_suspended(harness.start(0)).resume_state().clone();
+    assert_eq!(harness.get("was_unknown"), "1");
+    assert_eq!(harness.get("state"), format!("{:032b}", i32::MAX));
+    harness.flush_nonblocking();
+    assert_eq!(harness.get("state"), format!("{:032b}", 0x80000000_u32));
+    expect_suspended(harness.resume(0, &state));
+    assert_eq!(
+        harness.get("wide"),
+        format!("{:064b}", (i32::MIN as i64) as u64)
+    );
+    assert_eq!(harness.get("msb"), "1");
+    assert_eq!(harness.get("state"), format!("{:032b}", 0x800000ff_u32));
+}

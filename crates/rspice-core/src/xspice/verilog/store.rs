@@ -1148,6 +1148,7 @@ mod tests {
             width,
             bounds: (width > 1).then_some((i64::from(width) - 1, 0)),
             signed: false,
+            integer: false,
             procedurally_assignable: reg,
             span: span(),
         }
@@ -1163,6 +1164,7 @@ mod tests {
             width: 0,
             bounds: None,
             signed: false,
+            integer: false,
             procedurally_assignable: false,
             span: span(),
         }

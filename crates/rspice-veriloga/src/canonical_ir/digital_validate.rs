@@ -104,6 +104,18 @@ impl CanonicalDigitalPlan {
                     && signal.width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
                     && declared == Some(u64::from(signal.width))
             };
+            if signal.integer
+                && (signal.kind.is_real()
+                    || !signal.signed
+                    || !signal.procedurally_assignable
+                    || signal.width != 32
+                    || signal.bounds != Some((31, 0)))
+            {
+                return Err(error(format!(
+                    "digital integer '{}' must be a signed [31:0] variable",
+                    signal.name
+                )));
+            }
             if !valid_width {
                 return Err(error(format!(
                     "digital signal '{}' has invalid width or bounds",

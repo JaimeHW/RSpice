@@ -681,19 +681,16 @@ impl SemanticAnalyzer {
                 continue;
             }
             let is_real = signal.class.is_real();
-            // Analog integer expressions currently have the language's 32-bit
-            // integer representation. Wider packed values need their own typed
-            // conversion and must not be silently truncated into that lane.
-            if !is_real
-                && signal.width
-                    > if signal.signedness == Signedness::Signed {
-                        32
-                    } else {
-                        31
-                    }
-            {
+            let integer = matches!(
+                signal.class,
+                DigitalSignalClass::Variable(DigitalVariableKind::Integer)
+            );
+            // VAMS-2023 Table 7-1 distinguishes integer variables from packed
+            // bit groupings. The latter are zero-extended and limited to 31 bits,
+            // independently of their signedness in a digital expression.
+            if !is_real && !integer && signal.width > 31 {
                 self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                    "analog read of packed discrete signal `{}` exceeds the supported 32-bit signed integer range", signal.name
+                    "analog read of packed discrete signal `{}` exceeds the 31-bit grouping limit; use an integer variable for a signed 32-bit value", signal.name
                 )), signal.span);
             }
             let value_type = if is_real {
@@ -823,67 +820,18 @@ impl SemanticAnalyzer {
                 );
             }
         }
-        self.promote_module_level_reals(module, &mut signals, &mut seen);
+        self.promote_module_level_numeric_variables(module, &mut signals, &mut seen);
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
         signals
     }
 
-    /// Move a module-level `real` into the discrete domain when a process owns
-    /// it, and refuse the case the standard forbids.
+    /// Assign real/integer storage to the context that writes it (VAMS-2023
+    /// 7.2.2 and 7.3). Reads do not transfer ownership; a write in both contexts
+    /// is illegal. Declaration initializers do not choose a domain.
     ///
-    /// # The ownership rule is the standard's, not this compiler's
-    ///
-    /// Verilog-AMS LRM 2.4 section 7.3: "Read operations of nets and variables
-    /// in both domains are allowed from both contexts. **Write operations of
-    /// nets and variables are only allowed from the context of their domain.**"
-    /// So a variable belongs to whichever domain writes it, that domain is the
-    /// only one that may, and either domain may read it. That is a rule, not
-    /// an implementation-defined area, and it decides all three cases here.
-    ///
-    /// `real state;` at module level is the *continuous* domain's declaration —
-    /// it is the same production a Verilog-A model writes, and every one of the
-    /// shipped analog models is full of them. What makes it a discrete-domain
-    /// variable is a process writing it, so it becomes one exactly when:
-    ///
-    /// 1. some `always`, `initial` or continuous assignment **writes** it, and
-    /// 2. the analog body does **not** write it.
-    ///
-    /// Condition 1 is what makes the promotion necessary: a variable no process
-    /// writes has nothing to gain from moving, and leaving it where it was
-    /// keeps it the continuous body's own state.
-    ///
-    /// Condition 2 is section 7.3's sentence. Both halves writing one variable
-    /// is not a synchronization problem to be solved with a rule about clocks —
-    /// it is a program the standard does not admit, so it is refused by name
-    /// and cited, permanently rather than "not yet".
-    ///
-    /// This used to be a question about the *module* — any analog block at all
-    /// disqualified every module-level `real` — which refused a module whose
-    /// analog body never mentions the variable, and refused it with a message
-    /// about clocks that did not apply. The question is about the name.
-    ///
-    /// A pure-analog module is still untouched by construction: it has no
-    /// processes, so condition 1 fails for every one of its variables and
-    /// neither question can change how it compiles.
-    ///
-    /// # What is still refused, and what it is waiting for
-    ///
-    /// A variable a process writes and the **analog body reads**. Section 7.3
-    /// allows that read and section 7.3.6.5 fixes its value — "the digital
-    /// value calculated for the greatest digital time tick which is less than
-    /// or equal to the analog time when the expression is evaluated", which is
-    /// the same zero-order hold the D/A bridge already implements. What is
-    /// missing is the seam, not the semantics: the analog body is evaluated by
-    /// compiled code that has no route to the digital signal store, so the
-    /// refusal names the clause it is short of rather than the boundary in
-    /// general.
-    ///
-    /// An `output real` port does not come through here at all. It is an
-    /// explicit discrete-domain declaration — IEEE 1364-2005 section 12.3.4's
-    /// variable port form, with section 3.9's `real` as the type — so the
-    /// parser already put it in `digital_variables`, exactly as it does for
-    /// `output reg`.
-    fn promote_module_level_reals(
+    /// Process-local shadows are excluded before looking up module declarations.
+    /// Analog reads of a promoted variable acquire a state-input binding below.
+    fn promote_module_level_numeric_variables(
         &mut self,
         module: &Module,
         signals: &mut Vec<AnalyzedDigitalSignal>,
@@ -891,7 +839,7 @@ impl SemanticAnalyzer {
     ) {
         let mut written: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
         for process in &module.digital_processes {
-            collect_written_names(&process.body, &mut written);
+            super::digital_walk::collect_module_writes(&process.body, &mut written);
         }
         for assignment in &module.continuous_assigns {
             for (name, _) in assignment.target.written_names() {
@@ -921,9 +869,16 @@ impl SemanticAnalyzer {
             }
         }
         for declaration in &module.variables {
-            if declaration.var_type != VarType::Real {
-                continue;
-            }
+            let (kind, signedness, range, width) = match declaration.var_type {
+                VarType::Real => (DigitalVariableKind::Real, Signedness::Unsigned, None, 0),
+                VarType::Integer => (
+                    DigitalVariableKind::Integer,
+                    Signedness::Signed,
+                    Some(INTEGER_BOUNDS),
+                    32,
+                ),
+                VarType::String => continue,
+            };
             for item in &declaration.items {
                 if !written.contains(&item.name) || seen.contains_key(&item.name) {
                     continue;
@@ -948,9 +903,10 @@ impl SemanticAnalyzer {
                 if !item.dimensions.is_empty() {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
-                            "`{}` is an array of `real`, and a process writes it; an array has \
+                            "`{}` is an array of `{}`, and a process writes it; an array has \
                              no discrete-domain signal form yet",
-                            item.name
+                            item.name,
+                            kind.keyword()
                         )),
                         item.span,
                     );
@@ -959,9 +915,10 @@ impl SemanticAnalyzer {
                 if item.init.is_some() {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(format!(
-                            "a declaration initializer on the module-level `real` `{}` that a \
-                             process writes is not supported yet; IEEE 1364-2005 section 6.2.1 \
-                             makes it equivalent to an `initial` assignment, so write one",
+                            "a declaration initializer on the module-level `{}` `{}` that a \
+                             process writes is not supported yet; initialization must be \
+                             scheduled in its owning domain",
+                            kind.keyword(),
                             item.name
                         )),
                         item.span,
@@ -971,11 +928,10 @@ impl SemanticAnalyzer {
                 seen.insert(item.name.clone(), item.span);
                 signals.push(AnalyzedDigitalSignal {
                     name: item.name.clone(),
-                    class: DigitalSignalClass::Variable(DigitalVariableKind::Real),
-                    signedness: Signedness::Unsigned,
-                    range: None,
-                    // No bits, the way every real quantity says it here.
-                    width: 0,
+                    class: DigitalSignalClass::Variable(kind),
+                    signedness,
+                    range,
+                    width,
                     redeclares_port: false,
                     span: item.span,
                 });
@@ -2370,13 +2326,13 @@ const OPAQUE_ANALOG_READ: &str = "$opaque";
 /// on it rather than the read refusal.
 ///
 /// Over-approximating in one direction on purpose, the same way
-/// [`collect_written_names`] does: a name inside a branch that never runs still
+/// the digital module-write walk does: a name inside a branch that never runs still
 /// counts, because whether it runs is a question about a simulation and this is
 /// a question about a declaration.
 ///
 /// A `read` entry that is not a variable at all — a parameter, a net inside a
 /// branch access, a function name — is harmless: the caller only ever asks
-/// about names it has already established are module-level `real` variables a
+/// about names it has already established are module-level numeric variables a
 /// process writes.
 fn collect_analog_names(
     statement: &AnalogStatement,
@@ -2445,11 +2401,70 @@ fn collect_analog_names(
             }
         }
         AnalogStatement::EventControl(event) => {
+            collect_analog_event_reads(&event.event, read);
             collect_analog_names(&event.statement, written, read);
         }
         AnalogStatement::Call(call) => {
             for argument in &call.args {
                 collect_expression_names(argument, read);
+            }
+        }
+    }
+}
+
+/// Event arguments participate in state-input binding even when no ordinary
+/// assignment or contribution reads the variable.
+fn collect_analog_event_reads(event: &EventExpr, read: &mut std::collections::HashSet<SmolStr>) {
+    let mut pending = vec![event];
+    while let Some(event) = pending.pop() {
+        match event {
+            EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+                collect_expression_names(signal, read);
+            }
+            EventExpr::Cross {
+                signal,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                collect_expression_names(signal, read);
+                for expression in [direction, time_tol, expr_tol, enable]
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_expression_names(expression, read);
+                }
+            }
+            EventExpr::Above {
+                signal,
+                time_tol,
+                expr_tol,
+                enable,
+                ..
+            } => {
+                collect_expression_names(signal, read);
+                for expression in [time_tol, expr_tol, enable].into_iter().flatten() {
+                    collect_expression_names(expression, read);
+                }
+            }
+            EventExpr::Timer {
+                start,
+                period,
+                time_tol,
+                enable,
+                ..
+            } => {
+                collect_expression_names(start, read);
+                for expression in [period, time_tol, enable].into_iter().flatten() {
+                    collect_expression_names(expression, read);
+                }
+            }
+            EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => {}
+            EventExpr::Or { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
             }
         }
     }
@@ -2540,73 +2555,6 @@ fn collect_expression_names(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-/// Every name a process assigns to, anywhere in its body.
-///
-/// Over-approximating on purpose in one direction only: a name inside a branch
-/// that never runs still counts, because whether it runs is a question about a
-/// simulation and this is a question about a declaration. It does not
-/// over-approximate the other way — a name is here only if it is an assignment
-/// *target*, so reading one does not claim it.
-///
-/// A process-local declaration is not filtered out. A local shadows the module
-/// name for the statements under it, so a body that declares `real acc;` and
-/// writes `acc` never means the module's — but the module's `acc` is then not
-/// promoted, and stays exactly where it was. Erring toward "the process writes
-/// it" would promote a variable the process cannot reach; erring the other way,
-/// which is what would happen if this filtered, would leave a written variable
-/// behind. The match is exhaustive so a new statement form cannot slip past it.
-fn collect_written_names(
-    statement: &DigitalStatement,
-    written: &mut std::collections::HashSet<SmolStr>,
-) {
-    match statement {
-        DigitalStatement::Null(_) => {}
-        DigitalStatement::Block(block) => {
-            for statement in &block.statements {
-                collect_written_names(statement, written);
-            }
-        }
-        DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
-            for (name, _) in assign.target.written_names() {
-                written.insert(name.clone());
-            }
-        }
-        DigitalStatement::Conditional(conditional) => {
-            collect_written_names(&conditional.then_branch, written);
-            if let Some(branch) = &conditional.else_branch {
-                collect_written_names(branch, written);
-            }
-        }
-        DigitalStatement::Case(case) => {
-            for item in &case.items {
-                collect_written_names(&item.statement, written);
-            }
-            if let Some(default) = &case.default {
-                collect_written_names(default, written);
-            }
-        }
-        DigitalStatement::For(statement) => {
-            collect_written_names(
-                &DigitalStatement::BlockingAssign((*statement.init).clone()),
-                written,
-            );
-            collect_written_names(
-                &DigitalStatement::BlockingAssign((*statement.update).clone()),
-                written,
-            );
-            collect_written_names(&statement.body, written);
-        }
-        DigitalStatement::While(statement) => collect_written_names(&statement.body, written),
-        DigitalStatement::Repeat(statement) => collect_written_names(&statement.body, written),
-        DigitalStatement::Forever(statement) => collect_written_names(&statement.body, written),
-        DigitalStatement::Timing(timing) => {
-            if let Some(statement) = &timing.statement {
-                collect_written_names(statement, written);
             }
         }
     }
