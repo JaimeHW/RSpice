@@ -12,11 +12,13 @@
 //!
 //! That the connect module's *body* ran. It did not: the engine delegates each
 //! built-in connect module to the XSPICE bridge code model that implements it.
-//! Running a connect module's own body needs the Verilog-AMS mixed host, which
-//! is not wired to the engine and refuses any trial time off its
-//! integer-nanosecond grid — and an LTE-controlled transient does not land
-//! there. What the delegation makes checkable is that the module's parameters
-//! reached the boundary and changed the conversion, which is what
+//! Running a connect module's own body needs the Verilog-AMS mixed host with
+//! executable connect-body elaboration and insertion, which this boundary route
+//! does not implement — so a module the delegation does not cover is refused by
+//! name rather than silently bridged, which
+//! `a_connect_module_outside_the_library_is_refused` pins against the engine's
+//! own wording. What the delegation makes checkable is that the module's
+//! parameters reached the boundary and changed the conversion, which is what
 //! `a_supplied_connect_module_moves_the_threshold` does by moving the threshold
 //! far enough that the digital edge lands at a different time.
 
@@ -264,7 +266,23 @@ endconnectrules
     let error = format!("{error}");
     assert!(error.contains("my_a2d"), "names the module: {error}");
     assert!(
-        error.contains("integer-nanosecond grid"),
-        "names the blocker: {error}"
+        error.contains("DIN__my_a2d__logic"),
+        "names section 7.8.5's generated instance: {error}"
+    );
+    assert!(
+        error.contains("which RSpice cannot execute"),
+        "says the module is what cannot run, not the deck: {error}"
+    );
+    // Both halves of the reason: what the engine does support, and what
+    // executing this module's body would take. A refusal that named only the
+    // module would leave a reader no way to tell this case from a node whose
+    // connect rules do not settle, which fails on the same route.
+    assert!(
+        error.contains("only the built-in library"),
+        "names the blocker -- delegation covers the library and nothing else: {error}"
+    );
+    assert!(
+        error.contains("Verilog-AMS mixed host"),
+        "names what executing an arbitrary body would need: {error}"
     );
 }
