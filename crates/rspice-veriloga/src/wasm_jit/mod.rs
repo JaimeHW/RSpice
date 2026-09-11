@@ -39,7 +39,7 @@ use std::borrow::Cow;
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::CompiledModel;
 use crate::jit::assignment::NativeAssignment;
-use crate::jit::model_plan::NativeModelPlan;
+use crate::jit::model_plan::{NativeAssignmentCoverage, NativeModelPlan};
 use crate::jit::plan_program::PlanProgramRef;
 use thiserror::Error;
 use wasm_encoder::{
@@ -243,6 +243,7 @@ pub struct WasmJitModelArtifact {
     module: WasmJitArtifact,
     cache_key: String,
     entries: Vec<WasmJitValueEntry>,
+    assignment_coverage: NativeAssignmentCoverage,
     /// The module assignment pass, when it has steps to run.
     assignment_export: Option<String>,
     /// The CFG route's assignment pass, when the plan carried one.
@@ -756,6 +757,7 @@ fn emit_model_value_module(
         },
         cache_key,
         entries,
+        assignment_coverage: plan.assignment_coverage,
         assignment_export: assignment_kernel_index
             .map(|_| codegen::WASM_JIT_ASSIGNMENT_EXPORT.to_owned()),
         prelude_export: prelude_export_name,
@@ -2001,6 +2003,68 @@ endmodule
                     harness.store.data_mut().context_mut().limiter_active,
                     active
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_observation_coverage_matches_published_variables() {
+        for (expression, has_limiter) in [
+            ("V(p,n)", false),
+            ("$limit(V(p,n),0.25)", true),
+            ("$limit(V(p,n),clip)", true),
+            ("$limit(V(n,p),\"clip\",\"typed\",-1.0)", true),
+        ] {
+            let source = format!(
+                "module observed(p,n,c); inout p,n,c; electrical p,n,c;
+                 real limited, observed;
+                 analog function real clip; input real proposed,previous;
+                   clip=min(proposed,previous+0.25); endfunction
+                 analog begin limited={expression}; observed=3*limited;
+                   I(p,n)<+limited*limited; end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, Some("observed"))
+                .unwrap();
+            let slot = report
+                .model
+                .variable_names
+                .iter()
+                .position(|name| name == "observed")
+                .expect("declared observable variable");
+            let offset = FusedKernelHarness::VARIABLES as usize + slot * size_of::<f64>();
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "observed", postfix);
+                let published = harness.executable.publishes_observable_variables();
+                assert_eq!(published, postfix || has_limiter, "{expression}");
+                harness.reset();
+                for (proposal, expected) in [(0.0, 0.0), (1.0, 0.75)] {
+                    harness.write_f64(offset, f64::NAN);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, proposal);
+                    harness
+                        .store
+                        .data_mut()
+                        .context_mut()
+                        .begin_stateful_evaluation();
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    let value = harness.stamp_value_export(0);
+                    assert_eq!(harness.call(&value), 0);
+                    let observed = harness.read_f64(offset);
+                    if published {
+                        assert_eq!(
+                            observed,
+                            if has_limiter {
+                                expected
+                            } else {
+                                3.0 * proposal
+                            }
+                        );
+                    } else {
+                        assert!(observed.is_nan(), "CFG readback still requires observation");
+                    }
+                }
             }
         }
     }

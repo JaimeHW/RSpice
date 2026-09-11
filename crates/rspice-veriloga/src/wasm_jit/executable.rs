@@ -1,6 +1,7 @@
 //! Dense, validated solver lookup table for one emitted model module.
 
 use crate::codegen::CompiledModel;
+use crate::jit::model_plan::NativeAssignmentCoverage;
 
 use super::{WasmJitError, WasmJitModelArtifact, WasmJitResult, WasmJitValueRole};
 
@@ -24,6 +25,7 @@ pub(crate) enum WasmJitExecutableEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WasmJitExecutable {
     cache_key: String,
+    assignment_coverage: NativeAssignmentCoverage,
     /// The module assignment pass, when it has steps to run.
     assignment_export: Option<String>,
     /// The CFG route's assignment pass, run once between the assignment pass
@@ -54,6 +56,7 @@ impl WasmJitExecutable {
     ) -> WasmJitResult<Self> {
         let mut executable = Self {
             cache_key: artifact.cache_key().to_owned(),
+            assignment_coverage: artifact.assignment_coverage,
             assignment_export: artifact.assignment_export().map(str::to_owned),
             prelude_export: artifact.prelude_export().map(str::to_owned),
             prelude_slots: artifact.prelude_slots(),
@@ -177,6 +180,12 @@ impl WasmJitExecutable {
             )?;
         }
         Ok(executable)
+    }
+
+    /// Whether evaluation already published every declared variable. This is
+    /// a property of assignment liveness, independent of prelude exports.
+    pub(crate) fn publishes_observable_variables(&self) -> bool {
+        self.assignment_coverage == NativeAssignmentCoverage::ObservableVariables
     }
 
     pub(crate) fn export(&self, entry: WasmJitExecutableEntry) -> Option<&str> {

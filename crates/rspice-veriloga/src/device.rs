@@ -4782,11 +4782,14 @@ impl VerilogADevice {
     /// sixty-four — or an interpreted pass over the assignment steps the
     /// `CompiledModel` already carries. The second costs nothing until it is
     /// called, and the readback it serves is not on any hot path in a browser.
+    /// Plans rooted on observable variables already published the readback.
+    /// Skip their replay, including custom limiters whose canonical callbacks
+    /// cannot execute through the bytecode interpreter.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
         self.context.record_task_effects = false;
         Self::validate_observation_artifact(&self.model, artifact)?;
-        if !self.model.event_state_variables.is_empty() {
+        if self.wasm_jit_model.publishes_observable_variables() {
             return Ok(());
         }
         let context = &mut self.context;
