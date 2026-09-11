@@ -1167,8 +1167,8 @@ pub(super) fn semantic_result_summary(
                     .map(|row| {
                         vec![
                             row.parameter.clone(),
-                            exact_number(row.raw),
-                            exact_number(row.normalized),
+                            sensitivity_number(row.raw),
+                            sensitivity_number(row.normalized),
                         ]
                     })
                     .collect(),
@@ -1986,6 +1986,17 @@ pub(super) fn studio_source_identity(
             .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
         format!("{} · {}", pane.page, pane.viewer.label()),
     )
+}
+
+fn sensitivity_number(value: rspice_core::analysis::sensitivity::SensitivityValue<f64>) -> String {
+    match value {
+        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+            exact_number(value)
+        }
+        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable { unavailable } => {
+            format!("Unavailable ({})", unavailable.as_str())
+        }
+    }
 }
 
 pub(super) fn exact_number(value: f64) -> String {

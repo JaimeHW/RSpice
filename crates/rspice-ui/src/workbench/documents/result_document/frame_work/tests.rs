@@ -384,8 +384,8 @@ fn sensitivity_analysis() -> AnalysisResult {
             rows: (0..SENSITIVITY_PARAMETERS)
                 .map(|index| crate::state::SensitivityResultRow {
                     parameter: format!("p{index:06}"),
-                    raw: index as f64,
-                    normalized: (index as f64).sin(),
+                    raw: (index as f64).into(),
+                    normalized: ((index as f64).sin()).into(),
                 })
                 .collect(),
         },

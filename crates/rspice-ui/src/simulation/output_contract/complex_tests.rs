@@ -216,7 +216,7 @@ fn complex_schema_24_migration_authenticates_before_preserving_legacy_arithmetic
     historical
         .migrate_to_current(crate::product::ProjectId::new())
         .unwrap();
-    assert_eq!(historical.schema_version, 25);
+    assert_eq!(historical.schema_version, 26);
     let mut state = historical.into_simulation_state().unwrap();
     let analysis = &mut state.runs[0].analyses[0];
     assert_eq!(

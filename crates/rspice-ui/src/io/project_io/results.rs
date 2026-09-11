@@ -161,6 +161,23 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION
+            && self.runs.iter().flat_map(|run| &run.analyses).any(|analysis| {
+                matches!(analysis.result_payload.as_ref(), Some(AnalysisResultPayload::Sensitivity { rows, .. })
+                    if rows.iter().any(|row| row.raw.value().is_none() || row.normalized.value().is_none()))
+            }) {
+            return Err("result schemas before v26 cannot contain sensitivity availability reasons".to_owned());
+        }
+        if source_schema == COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                legacy_digests::validate_v25_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION
             && self
                 .runs

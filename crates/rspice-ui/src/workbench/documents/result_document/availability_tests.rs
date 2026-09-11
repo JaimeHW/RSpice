@@ -558,8 +558,8 @@ fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
         result_mode: SensitivityResultMode::Dc,
         rows: vec![SensitivityResultRow {
             parameter: "r1".to_owned(),
-            raw: 0.25,
-            normalized: 0.5,
+            raw: (0.25).into(),
+            normalized: (0.5).into(),
         }],
     };
     let state = state_with_analysis(
@@ -1316,8 +1316,8 @@ fn sensitivity_app(parameters: usize) -> RSpiceApp {
                     // Zero-padded: the payload requires strictly sorted
                     // parameter names, and "p10" sorts before "p2".
                     parameter: format!("p{index:06}"),
-                    raw: index as f64 * 1.0e-3,
-                    normalized: (index as f64 * 1.0e-3).tanh(),
+                    raw: (index as f64 * 1.0e-3).into(),
+                    normalized: ((index as f64 * 1.0e-3).tanh()).into(),
                 })
                 .collect(),
         },

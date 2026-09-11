@@ -279,9 +279,9 @@ pub enum SimulationResult {
         /// Resolved AC frequency in hertz. `None` for DC sensitivity.
         frequency_hz: Option<f64>,
         /// Parameter sensitivities
-        sensitivities: HashMap<String, f64>,
+        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
         /// Normalized sensitivities (% change in output / % change in param)
-        normalized: HashMap<String, f64>,
+        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
     },
 
     /// Scalar DC small-signal transfer function around the converged

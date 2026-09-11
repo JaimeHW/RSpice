@@ -2358,6 +2358,32 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
 }
 
 #[test]
+fn typed_sensitivity_summary_preserves_unavailable_quantities_and_exact_zero() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let payload = AnalysisResultPayload::Sensitivity {
+        output: "V(out)".to_owned(),
+        result_mode: crate::state::SensitivityResultMode::Dc,
+        rows: vec![crate::state::SensitivityResultRow {
+            parameter: "gain".to_owned(),
+            raw: 0.0.into(),
+            normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+        }],
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS")
+        .with_result_payload(payload.clone());
+    let summary = semantic_result_summary(ResultViewer::Contribution, &analysis).unwrap();
+    assert_eq!(summary.payload, Some(payload));
+    assert_eq!(
+        summary.tables[0].rows,
+        vec![vec![
+            "gain".to_owned(),
+            exact_number(0.0),
+            "Unavailable (zero-output)".to_owned()
+        ]]
+    );
+}
+
+#[test]
 fn typed_pole_zero_summary_preserves_native_payload_and_exact_values() {
     let payload = AnalysisResultPayload::PoleZero {
         poles: vec![ComplexResultValue {

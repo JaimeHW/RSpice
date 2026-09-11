@@ -552,7 +552,9 @@ mod tests {
                         &mut runs,
                         &NoAbort,
                     )
-                    .unwrap()[0];
+                    .unwrap()[0]
+                    .value()
+                    .unwrap();
                 assert_eq!(runs, 1, "must use one nominal sweep: {body}");
                 assert!(
                     (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
@@ -722,6 +724,8 @@ mod tests {
                                         &NoAbort,
                                     )
                                     .unwrap()[0]
+                                    .value()
+                                    .unwrap()
                             } else {
                                 engine
                                     .run_output_sensitivity_with_abort(
@@ -853,7 +857,9 @@ mod tests {
                             &mut runs,
                             &NoAbort,
                         )
-                        .unwrap()[0];
+                        .unwrap()[0]
+                        .value()
+                        .unwrap();
                     assert_eq!(runs, 1);
                     assert!(
                         (ac - expected).abs() <= expected.abs() * 2e-12,
@@ -994,7 +1000,9 @@ R2 internal 0 1
                             &mut runs,
                             &NoAbort,
                         )
-                        .unwrap()[0];
+                        .unwrap()[0]
+                        .value()
+                        .unwrap();
                     assert_eq!(runs, 1);
                     assert!(
                         (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
@@ -1097,7 +1105,7 @@ E1 out 0 in 0 {p/1e308}
                     .unwrap();
                 assert_eq!(runs, 1);
                 assert!(
-                    (ac[0] / (value.signum() * 1e-308) - 1.0).abs() < 2e-14,
+                    (ac[0].value().unwrap() / (value.signum() * 1e-308) - 1.0).abs() < 2e-14,
                     "{dialect:?}: {ac:?}"
                 );
             }
@@ -1278,7 +1286,9 @@ B1 out 0 V={p*V(in)}
                         &mut runs,
                         &NoAbort,
                     )
-                    .unwrap()[0];
+                    .unwrap()[0]
+                    .value()
+                    .unwrap();
                 assert_eq!(runs, 1, "{dialect:?} AC {body}");
                 assert!(
                     (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
@@ -1488,7 +1498,9 @@ R1 in out {aunif(2,0.25)*(1+1e-8*q)}
                         &mut runs,
                         &NoAbort,
                     )
-                    .unwrap()[0];
+                    .unwrap()[0]
+                    .value()
+                    .unwrap();
                 assert_eq!(runs, 1, "AC {expression}");
                 assert!(
                     (ac / expected - 1.0).abs() < 2e-12,

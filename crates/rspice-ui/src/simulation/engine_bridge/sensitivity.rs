@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-use rspice_core::analysis::sensitivity::{AcSensitivityOutput, SensitivityValue};
+use rspice_core::analysis::sensitivity::{
+    AcSensitivityOutput, SensitivityUnavailability, SensitivityValue,
+};
 
 use super::{EngineBridge, ensure_not_aborted};
 use crate::output_spec::{
@@ -120,38 +122,39 @@ impl EngineBridge {
                     ))
                 })?
             } else {
-                engine
-                    .run_output_sensitivity_with_abort(
-                        netlist,
-                        probe.clone(),
-                        &param_name,
-                        param_value,
-                        None,
-                        &mut runs,
-                        abort,
-                    )
-                    .map_err(|error| self.translate_error(error))?
+                SensitivityValue::Available(
+                    engine
+                        .run_output_sensitivity_with_abort(
+                            netlist,
+                            probe.clone(),
+                            &param_name,
+                            param_value,
+                            None,
+                            &mut runs,
+                            abort,
+                        )
+                        .map_err(|error| self.translate_error(error))?,
+                )
             };
 
             ensure_not_aborted(abort)?;
-            if !sensitivity.is_finite() {
+            if sensitivity.value().is_some_and(|value| !value.is_finite()) {
                 return Err(SimulationError::SolverError(format!(
                     "Sensitivity parameter '{param_name}' produced a non-finite derivative"
                 )));
             }
             sensitivities.insert(param_name.clone(), sensitivity);
-            match SensitivityValue::normalized(param_value, sensitivity, nominal_value) {
-                SensitivityValue::Available(value) => {
-                    normalized.insert(param_name, value);
+            let value = if nominal_value == 0.0 {
+                SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)
+            } else {
+                match sensitivity {
+                    SensitivityValue::Available(raw) => {
+                        SensitivityValue::normalized(param_value, raw, nominal_value)
+                    }
+                    unavailable => unavailable,
                 }
-                SensitivityValue::Unavailable { unavailable } => {
-                    return Err(SimulationError::SolverError(format!(
-                        "Normalized sensitivity of '{}' to parameter '{param_name}' is unavailable ({})",
-                        config.output_var,
-                        unavailable.as_str()
-                    )));
-                }
-            }
+            };
+            normalized.insert(param_name, value);
         }
 
         ensure_not_aborted(abort)?;
@@ -228,10 +231,10 @@ mod tests {
                 panic!("expected sensitivity data")
             };
             assert!(
-                (sensitivities["GAIN"] - gain.signum()).abs() < 1e-9,
+                (sensitivities["GAIN"].value().unwrap() - gain.signum()).abs() < 1e-9,
                 "gain={gain}: {sensitivities:?}"
             );
-            assert!((normalized["GAIN"] - 1.0).abs() < 1e-9);
+            assert!((normalized["GAIN"].value().unwrap() - 1.0).abs() < 1e-9);
         }
     }
 
@@ -250,10 +253,10 @@ mod tests {
             panic!("expected sensitivity data")
         };
         assert!(
-            (sensitivities["DRIVE"] + 0.5).abs() < 1e-9,
+            (sensitivities["DRIVE"].value().unwrap() + 0.5).abs() < 1e-9,
             "{sensitivities:?}"
         );
-        assert!((normalized["DRIVE"] - 1.0).abs() < 1e-9);
+        assert!((normalized["DRIVE"].value().unwrap() - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -269,11 +272,11 @@ mod tests {
             else {
                 panic!("expected sensitivity data")
             };
-            assert!((sensitivities["DRIVE"] - 1.0).abs() < 1e-9);
+            assert!((sensitivities["DRIVE"].value().unwrap() - 1.0).abs() < 1e-9);
             assert!(
-                normalized
-                    .get("DRIVE")
-                    .is_some_and(|value| (value - 1.0).abs() < 1e-9),
+                normalized.get("DRIVE").is_some_and(|value| value
+                    .value()
+                    .is_some_and(|value| (value - 1.0).abs() < 1e-9)),
                 "drive={drive}: {normalized:?}"
             );
         }
@@ -294,8 +297,10 @@ mod tests {
                 panic!("expected sensitivity data")
             };
             let expected = (gain - 1.0).signum();
-            assert!((sensitivities["GAIN"] - expected).abs() < 1e-9);
-            assert!((normalized["GAIN"] / (gain / (gain - 1.0)) - 1.0).abs() < 1e-9);
+            assert!((sensitivities["GAIN"].value().unwrap() - expected).abs() < 1e-9);
+            assert!(
+                (normalized["GAIN"].value().unwrap() / (gain / (gain - 1.0)) - 1.0).abs() < 1e-9
+            );
         }
     }
 
@@ -314,11 +319,11 @@ mod tests {
             panic!("expected sensitivity data")
         };
         assert!(
-            (sensitivities["DRIVE"] / 1e-300 - 1.0).abs() < 1e-9,
+            (sensitivities["DRIVE"].value().unwrap() / 1e-300 - 1.0).abs() < 1e-9,
             "{sensitivities:?}"
         );
         assert!(
-            (normalized["DRIVE"] / 1e200 - 1.0).abs() < 1e-9,
+            (normalized["DRIVE"].value().unwrap() / 1e200 - 1.0).abs() < 1e-9,
             "{normalized:?}"
         );
     }
@@ -354,11 +359,11 @@ mod tests {
                 panic!("expected sensitivity data")
             };
             assert!(
-                (sensitivities["DRIVE"] - expected).abs() < 1e-9,
+                (sensitivities["DRIVE"].value().unwrap() - expected).abs() < 1e-9,
                 "{source}: {sensitivities:?}"
             );
             assert!(
-                (normalized["DRIVE"] - 1.0).abs() < 1e-9,
+                (normalized["DRIVE"].value().unwrap() - 1.0).abs() < 1e-9,
                 "{source}: {normalized:?}"
             );
         }
@@ -389,23 +394,26 @@ mod tests {
         };
         let expected = -1.0 / (2.0_f64.sqrt() * 2e-15);
         assert!(
-            (sensitivities["CAP"] / expected - 1.0).abs() < 2e-6,
+            (sensitivities["CAP"].value().unwrap() / expected - 1.0).abs() < 2e-6,
             "{sensitivities:?}"
         );
-        assert!((normalized["CAP"] + 0.5).abs() < 2e-6, "{normalized:?}");
+        assert!(
+            (normalized["CAP"].value().unwrap() + 0.5).abs() < 2e-6,
+            "{normalized:?}"
+        );
     }
 
     #[test]
-    fn sensitivity_refuses_undefined_quantities_with_their_actual_reason() {
+    fn sensitivity_retains_valid_rows_and_explicit_unavailable_quantities() {
         let netlist = rspice_core::Netlist::parse(
-            "Zero output\n.param gain=0\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {gain}\n.end\n",
-        )
-        .unwrap();
-        for (ac_mode, reason) in [
-            (false, "zero-output"),
-            (true, "nondifferentiable-magnitude"),
-        ] {
-            let error = EngineBridge::new()
+            "Zero output\n.param gain=0 scale=1\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {gain*scale}\n.end\n"
+        ).unwrap();
+        for ac_mode in [false, true] {
+            let SimulationResult::Sensitivity {
+                sensitivities,
+                normalized,
+                ..
+            } = EngineBridge::new()
                 .run_sensitivity(
                     &netlist,
                     &SensitivityConfig {
@@ -415,10 +423,25 @@ mod tests {
                     },
                     &NoAbort,
                 )
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains(reason), "{error}");
-            assert!(error.contains("GAIN"), "{error}");
+                .unwrap()
+            else {
+                panic!("expected retained sensitivity data")
+            };
+            assert_eq!(sensitivities.len(), 2);
+            assert_eq!(normalized.len(), 2);
+            assert_eq!(sensitivities["SCALE"], SensitivityValue::Available(0.0));
+            if ac_mode {
+                assert_eq!(
+                    sensitivities["GAIN"],
+                    SensitivityValue::unavailable(
+                        SensitivityUnavailability::NondifferentiableMagnitude
+                    )
+                );
+            } else {
+                assert!((sensitivities["GAIN"].value().unwrap() - 1.0).abs() < 1e-9);
+            }
+            assert!(normalized.values().all(|value| *value
+                == SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)));
         }
     }
 

@@ -848,10 +848,21 @@ impl Engine {
             delta,
             &mut 0,
             abort,
-        )
+        )?
+        .into_iter()
+        .zip(frequencies)
+        .map(|(value, frequency)| match value {
+            SensitivityValue::Available(value) => Ok(value),
+            SensitivityValue::Unavailable { unavailable } => Err(SimulationError::Circuit(format!(
+                "AC output-magnitude sensitivity to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
+                unavailable.as_str()
+            ))),
+        })
+        .collect()
     }
 
     /// Differentiate AC probe magnitude with respect to an authored design parameter.
+    /// Undefined or unrepresentable magnitudes retain their explicit reason per point.
     /// Qualified linear circuits use captured field derivatives and a sparse
     /// adjoint. Other circuits replay expressions through the refinement driver.
     /// `runs` includes prior study runs and each nominal or refinement run.
@@ -867,7 +878,7 @@ impl Engine {
         delta: Option<Value>,
         runs: &mut usize,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>, SimulationError> {
+    ) -> Result<Vec<SensitivityValue<Value>>, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -883,13 +894,7 @@ impl Engine {
             runs,
             abort,
         )? {
-            return Self::project_parameter_magnitude(
-                param_name,
-                frequencies,
-                &nominal,
-                derivatives,
-                abort,
-            );
+            return Self::project_parameter_magnitude(&nominal, derivatives, abort);
         }
         let h = Self::sensitivity_step(param_value, delta)?;
         *runs = runs.saturating_add(1);
@@ -916,33 +921,22 @@ impl Engine {
         let nominal = evaluate(param_value)?;
         let derivatives =
             self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
-        Self::project_parameter_magnitude(param_name, frequencies, &nominal, derivatives, abort)
+        Self::project_parameter_magnitude(&nominal, derivatives, abort)
     }
 
     fn project_parameter_magnitude(
-        param_name: &str,
-        frequencies: &[Value],
         nominal: &[Complex64],
         derivatives: Vec<Complex64>,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>, SimulationError> {
+    ) -> Result<Vec<SensitivityValue<Value>>, SimulationError> {
         nominal
             .iter()
             .zip(derivatives)
-            .zip(frequencies)
-            .map(|((&value, derivative), frequency)| {
+            .map(|(&value, derivative)| {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                match SensitivityValue::magnitude(value, derivative) {
-                    SensitivityValue::Available(value) => Ok(value),
-                    SensitivityValue::Unavailable { unavailable } => {
-                        Err(SimulationError::Circuit(format!(
-                            "AC output-magnitude sensitivity to parameter '{param_name}' at {frequency} Hz is unavailable ({})",
-                            unavailable.as_str()
-                        )))
-                    }
-                }
+                Ok(SensitivityValue::magnitude(value, derivative))
             })
             .collect()
     }

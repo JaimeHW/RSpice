@@ -41,6 +41,8 @@ const RESULT_DIGEST_ENCODING_VERSION_V12: u16 = 12;
 const RESULT_DIGEST_ENCODING_VERSION_V13: u16 = 13;
 // Arithmetic interpretation is part of an immutable saved-output recipe.
 const RESULT_DIGEST_ENCODING_VERSION_V14: u16 = 14;
+// Explicit availability for sensitivity quantities.
+const RESULT_DIGEST_ENCODING_VERSION_V15: u16 = 15;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -178,7 +180,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -190,7 +192,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -290,6 +292,11 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V13)
     }
 
+    /// Schema-v25 identity, solely for authenticated migration.
+    pub(crate) fn legacy_v14_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
+    }
+
     fn result_data_writer_with_encoding(&self, version: u16) -> ResultDigestWriter {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.analysis-result-data/v1",
@@ -306,6 +313,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.analysis-result-data/v12",
             RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.analysis-result-data/v13",
             RESULT_DIGEST_ENCODING_VERSION_V14 => "rspice.analysis-result-data/v14",
+            RESULT_DIGEST_ENCODING_VERSION_V15 => "rspice.analysis-result-data/v15",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -446,7 +454,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V15)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -524,6 +532,11 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V13)
     }
 
+    /// Schema-v25 identity, solely for authenticated migration.
+    pub(crate) fn legacy_v14_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V14)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -540,6 +553,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V12 => "rspice.simulation-dataset-data/v12",
             RESULT_DIGEST_ENCODING_VERSION_V13 => "rspice.simulation-dataset-data/v13",
             RESULT_DIGEST_ENCODING_VERSION_V14 => "rspice.simulation-dataset-data/v14",
+            RESULT_DIGEST_ENCODING_VERSION_V15 => "rspice.simulation-dataset-data/v15",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -560,7 +574,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V11 => analysis.legacy_v11_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V12 => analysis.legacy_v12_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V13 => analysis.legacy_v13_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V14 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V14 => analysis.legacy_v14_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V15 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -886,8 +901,23 @@ fn encode_result_payload(
             writer.sequence(rows.len());
             for row in rows {
                 writer.string(&row.parameter);
-                writer.f64(row.raw);
-                writer.f64(row.normalized);
+                for value in [row.raw, row.normalized] {
+                    match value {
+                        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+                            if encoding_version >= RESULT_DIGEST_ENCODING_VERSION_V15 {
+                                writer.u8(0);
+                            }
+                            writer.f64(value);
+                        }
+                        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
+                            unavailable,
+                        } => {
+                            // Legacy imports reject this shape before checking their digest.
+                            writer.u8(1);
+                            writer.string(unavailable.as_str());
+                        }
+                    }
+                }
             }
         }
         AnalysisResultPayload::ScalarMeasurements { values } => {
@@ -2158,8 +2188,8 @@ mod tests {
                 },
                 rows: vec![SensitivityResultRow {
                     parameter: "gain".to_owned(),
-                    raw: 2.0,
-                    normalized: 0.5,
+                    raw: (2.0).into(),
+                    normalized: (0.5).into(),
                 }],
             });
         let mut changed = sensitivity.clone();
@@ -2167,7 +2197,7 @@ mod tests {
         else {
             panic!("sensitivity payload")
         };
-        rows[0].normalized = 0.500_000_000_000_000_1;
+        rows[0].normalized = 0.500_000_000_000_000_1.into();
         assert_ne!(
             sensitivity.result_data_digest(),
             changed.result_data_digest()

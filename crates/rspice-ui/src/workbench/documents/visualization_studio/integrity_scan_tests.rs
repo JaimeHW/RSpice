@@ -1143,13 +1143,13 @@ fn append_retained_sensitivity_run(app: &mut RSpiceApp) -> (DatasetId, u64) {
             rows: vec![
                 SensitivityResultRow {
                     parameter: "c1".to_owned(),
-                    raw: -1.25e3,
-                    normalized: -0.75,
+                    raw: (-1.25e3).into(),
+                    normalized: (-0.75).into(),
                 },
                 SensitivityResultRow {
                     parameter: "r1".to_owned(),
-                    raw: 4.5e-3,
-                    normalized: 0.25,
+                    raw: (4.5e-3).into(),
+                    normalized: (0.25).into(),
                 },
             ],
         });
@@ -1226,6 +1226,19 @@ fn sensitivity_exact_data_rows_preserve_parameter_values_output_and_basis() {
     assert_eq!(rows[1].value, format!("{:.17e}", -0.75));
     assert_eq!(rows[2].stable_row, "31:sensitivity[1].raw");
     assert_eq!(rows[3].stable_row, "31:sensitivity[1].normalized");
+
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let Some(AnalysisResultPayload::Sensitivity { rows, .. }) =
+        &mut app.state.simulation.runs[1].analyses[0].result_payload
+    else {
+        panic!("sensitivity fixture")
+    };
+    rows[0].raw = 0.0.into();
+    rows[0].normalized = SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput);
+    let rows = exact_source_rows(&app.state);
+    assert_eq!(rows[0].value, "0.00000000000000000e0");
+    assert_eq!(rows[1].value, "unavailable:zero-output");
+    assert_eq!(rows[1].stable_row, "31:sensitivity[0].normalized");
 }
 
 #[test]

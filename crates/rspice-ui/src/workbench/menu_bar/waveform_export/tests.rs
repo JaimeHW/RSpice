@@ -621,8 +621,8 @@ fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
             },
             rows: vec![SensitivityResultRow {
                 parameter: "width".to_owned(),
-                raw: 2.0,
-                normalized: 0.5,
+                raw: (2.0).into(),
+                normalized: (0.5).into(),
             }],
         },
     );
@@ -636,9 +636,37 @@ fn csv_export_publishes_canonical_sensitivity_rows_and_basis() {
     assert_eq!(
         files[0].1,
         concat!(
-            "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz\n",
-            "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4\n",
+            "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status\n",
+            "width,2.00000000000000000e0,5.00000000000000000e-1,\"V(out), differential\",ac,1.00000000000000000e4,available,available\n",
         )
+    );
+}
+
+#[test]
+fn csv_export_preserves_unavailable_sensitivity_without_fabricating_zero() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let analysis = AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
+        AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: SensitivityResultMode::Dc,
+            rows: vec![SensitivityResultRow {
+                parameter: "gain".to_owned(),
+                raw: 0.0.into(),
+                normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+            }],
+        },
+    );
+    let mut state = state_with_typed_result(analysis);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+    let files = io.text_files.borrow();
+    assert_eq!(files.len(), 1);
+    assert!(
+        files[0]
+            .1
+            .ends_with("gain,0.00000000000000000e0,,V(out),dc,,available,zero-output\n"),
+        "{}",
+        files[0].1
     );
 }
 

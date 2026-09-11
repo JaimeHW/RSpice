@@ -41,6 +41,12 @@ pub enum SensitivityValue<T> {
     },
 }
 
+impl<T> From<T> for SensitivityValue<T> {
+    fn from(value: T) -> Self {
+        Self::Available(value)
+    }
+}
+
 /// Why a derived sensitivity cannot be reported as a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

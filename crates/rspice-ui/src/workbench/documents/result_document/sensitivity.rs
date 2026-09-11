@@ -4,6 +4,7 @@
 //! [`AnalysisResultPayload::Sensitivity`] attached to the selected analysis
 //! and never falls back to console text or the legacy mutable analysis cache.
 
+use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
 use std::cmp::Ordering;
 
 use egui::{Sense, Ui};
@@ -94,13 +95,13 @@ fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<usize> {
     let mut ranked: Vec<usize> = (0..rows.len()).collect();
     ranked.sort_by(|left, right| {
         let (left, right) = (&rows[*left], &rows[*right]);
-        right
-            .normalized
-            .abs()
-            .total_cmp(&left.normalized.abs())
-            .then_with(|| left.parameter.cmp(&right.parameter))
-            .then_with(|| right.normalized.total_cmp(&left.normalized))
-            .then_with(|| right.raw.total_cmp(&left.raw))
+        match (left.normalized.value(), right.normalized.value()) {
+            (Some(left), Some(right)) => right.abs().total_cmp(&left.abs()),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+        .then_with(|| left.parameter.cmp(&right.parameter))
     });
     ranked
 }
@@ -154,7 +155,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     let order = ranked_rows(view.rows);
     let max_magnitude = order
         .iter()
-        .map(|index| view.rows[*index].normalized.abs())
+        .filter_map(|index| view.rows[*index].normalized.value().map(f64::abs))
         .fold(0.0_f64, f64::max);
     let built = Arc::new(SensitivityPlan {
         source,
@@ -190,7 +191,30 @@ fn exact_value(value: f64) -> String {
     format!("{value:.17e}")
 }
 
-fn chart_value(value: f64) -> String {
+fn unavailable_reason(reason: SensitivityUnavailability) -> &'static str {
+    match reason {
+        SensitivityUnavailability::ZeroOutput => "zero output",
+        SensitivityUnavailability::NondifferentiableMagnitude => {
+            "magnitude derivative is undefined"
+        }
+        SensitivityUnavailability::OutOfRange => "outside numeric range",
+        SensitivityUnavailability::InvalidInput => "invalid input",
+    }
+}
+
+fn exact_sensitivity(value: SensitivityValue<f64>) -> String {
+    match value {
+        SensitivityValue::Available(value) => exact_value(value),
+        SensitivityValue::Unavailable { unavailable } => {
+            format!("Unavailable ({})", unavailable_reason(unavailable))
+        }
+    }
+}
+
+fn chart_value(value: SensitivityValue<f64>) -> String {
+    let Some(value) = value.value() else {
+        return "Unavailable".to_owned();
+    };
     if value == 0.0 {
         "0".to_owned()
     } else {
@@ -199,17 +223,27 @@ fn chart_value(value: f64) -> String {
 }
 
 fn highest_magnitude_sensitivity_label(rows: &[SensitivityResultRow], ranked: &[usize]) -> String {
-    ranked.first().map_or_else(
-        || "Not retained".to_owned(),
-        |index| {
-            let row = &rows[*index];
-            format!(
-                "{} · {} normalized sensitivity",
-                row.parameter,
-                exact_value(row.normalized)
-            )
-        },
-    )
+    ranked
+        .iter()
+        .find(|index| rows[**index].normalized.value().is_some())
+        .map_or_else(
+            || {
+                if rows.is_empty() {
+                    "Not retained"
+                } else {
+                    "No normalized sensitivity available"
+                }
+                .to_owned()
+            },
+            |index| {
+                let row = &rows[*index];
+                format!(
+                    "{} · {} normalized sensitivity",
+                    row.parameter,
+                    exact_sensitivity(row.normalized)
+                )
+            },
+        )
 }
 
 fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
@@ -388,11 +422,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
                 let accessible_label = format!(
-                    "Rank {}, parameter {}, normalized sensitivity {}, raw sensitivity {}",
-                    rank + 1,
+                    "{}, parameter {}, normalized sensitivity {}, raw sensitivity {}",
+                    if row.normalized.value().is_some() {
+                        format!("Rank {}", rank + 1)
+                    } else {
+                        "Unranked".to_owned()
+                    },
                     row.parameter,
-                    exact_value(row.normalized),
-                    exact_value(row.raw),
+                    exact_sensitivity(row.normalized),
+                    exact_sensitivity(row.raw),
                 );
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -412,9 +450,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     );
                     ui.label(format!(
                         "Normalized sensitivity: {}",
-                        exact_value(row.normalized)
+                        exact_sensitivity(row.normalized)
                     ));
-                    ui.label(format!("Raw: {}", exact_value(row.raw)));
+                    ui.label(format!("Raw: {}", exact_sensitivity(row.raw)));
                     ui.label(format!("Output: {}", view.output));
                     ui.label(format!("Basis: {}", exact_basis_label(view.result_mode)));
                 });
@@ -434,7 +472,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 paint_cell(
                     ui,
                     column_rect(rect, 0.0, RANK_WIDTH),
-                    rank + 1,
+                    if row.normalized.value().is_some() {
+                        (rank + 1).to_string()
+                    } else {
+                        "—".to_owned()
+                    },
                     egui::Align2::LEFT_CENTER,
                     theme::mono(tokens::FS_0, FontWeight::Regular),
                     c.text_faint,
@@ -449,39 +491,50 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
 
                 let sensitivity_cell = column_rect(rect, sensitivity_offset, sensitivity_width);
-                let bar_area = sensitivity_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
-                let center_x = bar_area.center().x;
-                let half_width = bar_area.width() * 0.5;
-                let ratio = if max_magnitude > 0.0 {
-                    (row.normalized.abs() / max_magnitude).clamp(0.0, 1.0) as f32
-                } else {
-                    0.0
-                };
-                let signed_width = half_width * ratio;
-                let (left, right) = match row.normalized.total_cmp(&0.0) {
-                    Ordering::Less => (center_x - signed_width, center_x),
-                    Ordering::Equal => (center_x - 0.5, center_x + 0.5),
-                    Ordering::Greater => (center_x, center_x + signed_width),
-                };
-                let bar_color = if row.normalized < 0.0 {
-                    c.traces[2]
-                } else {
-                    c.accent
-                };
-                let sensitivity_painter = ui.painter().with_clip_rect(sensitivity_cell);
-                sensitivity_painter.vline(
-                    center_x,
-                    rect.y_range(),
-                    egui::Stroke::new(1.0, c.border_strong),
-                );
-                sensitivity_painter.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(left, bar_area.top()),
-                        egui::pos2(right, bar_area.bottom()),
-                    ),
-                    2.0,
-                    bar_color.gamma_multiply(if hovered { 0.92 } else { 0.72 }),
-                );
+                if let SensitivityValue::Available(normalized) = row.normalized {
+                    let bar_area = sensitivity_cell.shrink2(egui::vec2(CELL_INSET, 7.0));
+                    let center_x = bar_area.center().x;
+                    let half_width = bar_area.width() * 0.5;
+                    let ratio = if max_magnitude > 0.0 {
+                        (normalized.abs() / max_magnitude).clamp(0.0, 1.0) as f32
+                    } else {
+                        0.0
+                    };
+                    let signed_width = half_width * ratio;
+                    let (left, right) = match normalized.total_cmp(&0.0) {
+                        Ordering::Less => (center_x - signed_width, center_x),
+                        Ordering::Equal => (center_x - 0.5, center_x + 0.5),
+                        Ordering::Greater => (center_x, center_x + signed_width),
+                    };
+                    let bar_color = if normalized < 0.0 {
+                        c.traces[2]
+                    } else {
+                        c.accent
+                    };
+                    let sensitivity_painter = ui.painter().with_clip_rect(sensitivity_cell);
+                    sensitivity_painter.vline(
+                        center_x,
+                        rect.y_range(),
+                        egui::Stroke::new(1.0, c.border_strong),
+                    );
+                    sensitivity_painter.rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(left, bar_area.top()),
+                            egui::pos2(right, bar_area.bottom()),
+                        ),
+                        2.0,
+                        bar_color.gamma_multiply(if hovered { 0.92 } else { 0.72 }),
+                    );
+                } else if let SensitivityValue::Unavailable { unavailable } = row.normalized {
+                    paint_cell(
+                        ui,
+                        sensitivity_cell,
+                        unavailable_reason(unavailable),
+                        egui::Align2::LEFT_CENTER,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        c.text_faint,
+                    );
+                }
 
                 paint_cell(
                     ui,
@@ -527,7 +580,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Basis", basis.as_str()),
             ("Method", NOT_RETAINED),
             ("Normalization", "Retained per parameter"),
-            ("Parameters ranked", count.as_str()),
+            ("Parameters retained", count.as_str()),
             ("Highest magnitude", highest_magnitude.as_str()),
             ("Cross-terms", NOT_RETAINED),
         ],
@@ -576,19 +629,23 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                         .map(|(offset, row)| (first + offset, row))
                     {
                         ui.label(
-                            egui::RichText::new((rank + 1).to_string())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                            egui::RichText::new(if row.normalized.value().is_some() {
+                                (rank + 1).to_string()
+                            } else {
+                                "—".to_owned()
+                            })
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                         );
                         ui.label(
                             egui::RichText::new(row.parameter.as_str())
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                         );
                         ui.label(
-                            egui::RichText::new(exact_value(row.normalized))
+                            egui::RichText::new(exact_sensitivity(row.normalized))
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                         );
                         ui.label(
-                            egui::RichText::new(exact_value(row.raw))
+                            egui::RichText::new(exact_sensitivity(row.raw))
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
                         );
                         ui.end_row();
@@ -628,18 +685,18 @@ mod tests {
         let rows = vec![
             SensitivityResultRow {
                 parameter: "zeta".to_owned(),
-                raw: 3.0,
-                normalized: -2.0,
+                raw: (3.0).into(),
+                normalized: (-2.0).into(),
             },
             SensitivityResultRow {
                 parameter: "alpha".to_owned(),
-                raw: 2.0,
-                normalized: 2.0,
+                raw: (2.0).into(),
+                normalized: (2.0).into(),
             },
             SensitivityResultRow {
                 parameter: "middle".to_owned(),
-                raw: 1.0,
-                normalized: 0.5,
+                raw: (1.0).into(),
+                normalized: (0.5).into(),
             },
         ];
 
@@ -652,11 +709,45 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_rows_remain_visible_without_ranking_as_zero() {
+        let rows = vec![
+            SensitivityResultRow {
+                parameter: "a_unavailable".to_owned(),
+                raw: 1.0.into(),
+                normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+            },
+            SensitivityResultRow {
+                parameter: "b_zero".to_owned(),
+                raw: 0.0.into(),
+                normalized: 0.0.into(),
+            },
+            SensitivityResultRow {
+                parameter: "c_largest".to_owned(),
+                raw: 2.0.into(),
+                normalized: 3.0.into(),
+            },
+        ];
+        let mut state = state_with_analyses(vec![sensitivity_result(1, "SENS", rows.clone())]);
+        let plan = sensitivity_plan(&mut state).unwrap();
+        assert_eq!(plan.order(), &[2, 1, 0]);
+        assert_eq!(plan.max_magnitude, 3.0);
+        assert_eq!(chart_value(rows[0].normalized), "Unavailable");
+        assert!(exact_sensitivity(rows[0].normalized).contains("zero output"));
+        assert_eq!(chart_value(rows[1].normalized), "0");
+        assert!(highest_magnitude_sensitivity_label(&rows, plan.order()).starts_with("c_largest"));
+        let unavailable = vec![rows[0].clone()];
+        assert_eq!(
+            highest_magnitude_sensitivity_label(&unavailable, &[0]),
+            "No normalized sensitivity available"
+        );
+    }
+
+    #[test]
     fn selection_reads_only_the_active_analysis() {
         let rows = vec![SensitivityResultRow {
             parameter: "r1".to_owned(),
-            raw: 1.0,
-            normalized: 0.25,
+            raw: (1.0).into(),
+            normalized: (0.25).into(),
         }];
         let mut state = state_with_analyses(vec![
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN"),
@@ -684,8 +775,8 @@ mod tests {
             result_mode: SensitivityResultMode::Dc,
             rows: vec![SensitivityResultRow {
                 parameter: "r1".to_owned(),
-                raw: f64::NAN,
-                normalized: 1.0,
+                raw: (f64::NAN).into(),
+                normalized: (1.0).into(),
             }],
         });
         let state = state_with_analyses(vec![invalid]);
@@ -711,13 +802,13 @@ mod tests {
         let rows = vec![
             SensitivityResultRow {
                 parameter: "small".to_owned(),
-                raw: 100.0,
-                normalized: 0.25,
+                raw: (100.0).into(),
+                normalized: (0.25).into(),
             },
             SensitivityResultRow {
                 parameter: "largest".to_owned(),
-                raw: 1.0,
-                normalized: -0.75,
+                raw: (1.0).into(),
+                normalized: (-0.75).into(),
             },
         ];
 
@@ -740,8 +831,8 @@ mod tests {
         let rows = (0..parameters)
             .map(|index| SensitivityResultRow {
                 parameter: format!("p{index:05}"),
-                raw: index as f64,
-                normalized: (index as f64).sin(),
+                raw: (index as f64).into(),
+                normalized: ((index as f64).sin()).into(),
             })
             .collect();
         let mut state = state_with_analyses(vec![sensitivity_result(1, "SENS", rows)]);
@@ -759,8 +850,8 @@ mod tests {
             "SENS",
             vec![SensitivityResultRow {
                 parameter: "only".to_owned(),
-                raw: 1.0,
-                normalized: -2.0,
+                raw: (1.0).into(),
+                normalized: (-2.0).into(),
             }],
         );
         let changed = sensitivity_plan(&mut state).unwrap();
@@ -802,7 +893,7 @@ mod tests {
             first.max_magnitude,
             view.rows
                 .iter()
-                .map(|row| row.normalized.abs())
+                .filter_map(|row| row.normalized.value().map(f64::abs))
                 .fold(0.0_f64, f64::max)
         );
 
@@ -812,8 +903,8 @@ mod tests {
                 result_mode: SensitivityResultMode::Dc,
                 rows: vec![SensitivityResultRow {
                     parameter: "only".to_owned(),
-                    raw: 1.0,
-                    normalized: 2.0,
+                    raw: (1.0).into(),
+                    normalized: (2.0).into(),
                 }],
             });
         state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
@@ -825,6 +916,37 @@ mod tests {
 
     /// The panel ranks the same thousands of parameters the chart does; it
     /// must lay out only the rows its own viewport can show.
+    #[test]
+    fn unavailable_sensitivity_renders_as_unranked_with_accessible_reason() {
+        let mut state = state_with_analyses(vec![sensitivity_result(
+            1,
+            "SENS",
+            vec![SensitivityResultRow {
+                parameter: "gain".to_owned(),
+                raw: 0.0.into(),
+                normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+            }],
+        )]);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+            },
+        );
+        let tree = output.platform_output.accesskit_update.unwrap();
+        assert!(tree.nodes.iter().any(|(_, node)| node.value().is_some_and(|label|
+            label.contains("Unranked, parameter gain, normalized sensitivity Unavailable (zero output), raw sensitivity 0.00000000000000000e0"))), "{tree:?}");
+    }
+
     #[test]
     fn the_panel_lists_only_the_rows_its_viewport_shows() {
         let mut state = ranked_state(4_000);

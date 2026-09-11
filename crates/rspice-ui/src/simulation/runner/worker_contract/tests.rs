@@ -1071,15 +1071,32 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
 
 #[test]
 fn sensitivity_worker_result_round_trips_output_basis_and_exact_values() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let source = SimulationResult::Sensitivity {
         output: "V(out)".to_owned(),
         ac_mode: true,
         frequency_hz: Some(10_000.0),
-        sensitivities: HashMap::from([("length".to_owned(), -1.0), ("width".to_owned(), 2.0)]),
-        normalized: HashMap::from([("length".to_owned(), -0.25), ("width".to_owned(), 0.5)]),
+        sensitivities: HashMap::from([
+            ("length".to_owned(), (-1.0).into()),
+            ("width".to_owned(), (2.0).into()),
+            (
+                "null".to_owned(),
+                SensitivityValue::unavailable(
+                    SensitivityUnavailability::NondifferentiableMagnitude,
+                ),
+            ),
+        ]),
+        normalized: HashMap::from([
+            ("length".to_owned(), (-0.25).into()),
+            ("width".to_owned(), (0.5).into()),
+            (
+                "null".to_owned(),
+                SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+            ),
+        ]),
     };
     let worker = WorkerSimulationResult::try_from(source).expect("worker conversion");
-    assert_eq!(worker.estimated_numeric_payload_bytes(), 40);
+    assert_eq!(worker.estimated_numeric_payload_bytes(), 104);
     let encoded = serde_json::to_vec(&worker).expect("worker result serializes");
     let decoded: WorkerSimulationResult =
         serde_json::from_slice(&encoded).expect("worker result deserializes");
@@ -1098,10 +1115,18 @@ fn sensitivity_worker_result_round_trips_output_basis_and_exact_values() {
     assert_eq!(output, "V(out)");
     assert!(ac_mode);
     assert_eq!(frequency_hz, Some(10_000.0));
-    assert_eq!(sensitivities["length"], -1.0);
-    assert_eq!(sensitivities["width"], 2.0);
-    assert_eq!(normalized["length"], -0.25);
-    assert_eq!(normalized["width"], 0.5);
+    assert_eq!(sensitivities["length"].value().unwrap(), -1.0);
+    assert_eq!(sensitivities["width"].value().unwrap(), 2.0);
+    assert_eq!(normalized["length"].value().unwrap(), -0.25);
+    assert_eq!(normalized["width"].value().unwrap(), 0.5);
+    assert_eq!(
+        sensitivities["null"],
+        SensitivityValue::unavailable(SensitivityUnavailability::NondifferentiableMagnitude)
+    );
+    assert_eq!(
+        normalized["null"],
+        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)
+    );
 }
 
 #[test]

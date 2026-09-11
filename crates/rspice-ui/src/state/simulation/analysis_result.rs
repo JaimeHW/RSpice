@@ -628,8 +628,8 @@ pub enum SensitivityResultMode {
 #[serde(deny_unknown_fields)]
 pub struct SensitivityResultRow {
     pub parameter: String,
-    pub raw: f64,
-    pub normalized: f64,
+    pub raw: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+    pub normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
 }
 
 /// Exact stress metrics retained for one device in a reliability run.
@@ -1605,9 +1605,14 @@ impl AnalysisResultPayload {
                         );
                     }
                     previous_name = Some(&row.parameter);
-                    if !row.raw.is_finite() || !row.normalized.is_finite() {
+                    if [row.raw, row.normalized].into_iter().any(|value| match value {
+                        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => !value.is_finite(),
+                        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable { unavailable } => {
+                            unavailable == rspice_core::analysis::sensitivity::SensitivityUnavailability::InvalidInput
+                        }
+                    }) {
                         return Err(format!(
-                            "sensitivity parameter '{}' has a non-finite value",
+                            "sensitivity parameter '{}' has an invalid value",
                             row.parameter
                         ));
                     }

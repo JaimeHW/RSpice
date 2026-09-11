@@ -1004,8 +1004,8 @@ pub(crate) enum WorkerSimulationResult {
         output: String,
         ac_mode: bool,
         frequency_hz: Option<f64>,
-        sensitivities: HashMap<String, f64>,
-        normalized: HashMap<String, f64>,
+        sensitivities: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
+        normalized: HashMap<String, rspice_core::analysis::sensitivity::SensitivityValue<f64>>,
     },
     TransferFunction {
         input_source: String,
@@ -1550,8 +1550,12 @@ impl WorkerSimulationResult {
                 ..
             } => sum_payload_bytes([
                 f64_payload_bytes(usize::from(frequency_hz.is_some())),
-                f64_payload_bytes(sensitivities.len()),
-                f64_payload_bytes(normalized.len()),
+                sensitivities.len().saturating_mul(std::mem::size_of::<
+                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+                >()),
+                normalized.len().saturating_mul(std::mem::size_of::<
+                    rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+                >()),
             ]),
             WorkerSimulationResult::TransferFunction {
                 gain,

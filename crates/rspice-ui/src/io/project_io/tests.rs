@@ -1497,8 +1497,8 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                 },
                 rows: vec![crate::state::SensitivityResultRow {
                     parameter: "width".to_owned(),
-                    raw: 2.0,
-                    normalized: 0.5,
+                    raw: (2.0).into(),
+                    normalized: (0.5).into(),
                 }],
             },
         ),

@@ -269,7 +269,7 @@ fn schema_21_through_23_authenticate_original_digests_without_inventing_bindings
             }
             old.migrate_to_current(crate::product::ProjectId::new())
                 .unwrap();
-            assert_eq!(old.schema_version, 25);
+            assert_eq!(old.schema_version, 26);
             let mut state = old.into_simulation_state().unwrap();
             let analysis = &mut state.runs[0].analyses[0];
             assert!(analysis.saved_output_receipts[0].source_bindings.is_none());

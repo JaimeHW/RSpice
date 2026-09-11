@@ -116,10 +116,13 @@ impl SimulationResult {
                 sensitivities,
                 normalized,
                 ..
-            } => sensitivities
-                .get(key)
-                .copied()
-                .or_else(|| normalized.get(key).copied()),
+            } => {
+                if let Some(parameter) = key.strip_prefix("normalized:") {
+                    normalized.get(parameter).and_then(|value| value.value())
+                } else {
+                    sensitivities.get(key).and_then(|value| value.value())
+                }
+            }
             SimulationResult::TransferFunction {
                 gain,
                 input_resistance,
@@ -276,13 +279,15 @@ impl SimulationResult {
                 sensitivities,
                 normalized,
                 ..
-            } => {
-                let mut out = sensitivities.clone();
-                for (name, value) in normalized {
-                    out.insert(format!("normalized:{}", name), *value);
-                }
-                out
-            }
+            } => sensitivities
+                .iter()
+                .filter_map(|(name, value)| value.value().map(|value| (name.clone(), value)))
+                .chain(normalized.iter().filter_map(|(name, value)| {
+                    value
+                        .value()
+                        .map(|value| (format!("normalized:{name}"), value))
+                }))
+                .collect(),
             SimulationResult::TransferFunction {
                 gain,
                 input_resistance,
@@ -468,5 +473,45 @@ mod transfer_function_tests {
         assert_eq!(measurements["gain"], 1.0);
         assert!(!measurements.contains_key("input_resistance"));
         assert!(!measurements.contains_key("output_resistance"));
+    }
+    #[test]
+    fn sensitivity_measurements_preserve_unavailability_and_normalized_identity() {
+        use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+        let result = SimulationResult::Sensitivity {
+            output: "V(out)".to_owned(),
+            ac_mode: true,
+            frequency_hz: Some(1.0),
+            sensitivities: HashMap::from([
+                ("zero".to_owned(), 0.0.into()),
+                ("gain".to_owned(), 2.0.into()),
+                (
+                    "null".to_owned(),
+                    SensitivityValue::unavailable(
+                        SensitivityUnavailability::NondifferentiableMagnitude,
+                    ),
+                ),
+            ]),
+            normalized: HashMap::from([
+                (
+                    "zero".to_owned(),
+                    SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+                ),
+                ("gain".to_owned(), 0.5.into()),
+                (
+                    "null".to_owned(),
+                    SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+                ),
+            ]),
+        };
+        assert_eq!(result.measurement("zero"), Some(0.0));
+        assert_eq!(result.measurement("normalized:zero"), None);
+        assert_eq!(result.measurement("gain"), Some(2.0));
+        assert_eq!(result.measurement("normalized:gain"), Some(0.5));
+        assert_eq!(result.measurement("null"), None);
+        let values = result.measurements();
+        assert_eq!(values.len(), 3);
+        for (name, value) in values {
+            assert_eq!(result.measurement(&name), Some(value));
+        }
     }
 }

@@ -233,7 +233,7 @@ fn dc_project_round_trip_preserves_coordinates_units_selection_and_immutable_own
     let digest = analysis.result_data_digest();
     let snapshot = stored(analysis);
     snapshot.validate().unwrap();
-    assert_eq!(snapshot.schema_version, 25);
+    assert_eq!(snapshot.schema_version, 26);
     let serialized = serde_json::to_value(&snapshot).unwrap();
     let restored: ProjectSimulationResults = serde_json::from_value(serialized.clone()).unwrap();
     let mut state = crate::state::SimulationState::default();

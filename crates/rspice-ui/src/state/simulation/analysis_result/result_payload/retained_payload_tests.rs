@@ -572,13 +572,13 @@ fn sensitivity_payload_requires_canonical_unique_rows_and_valid_basis() {
         rows: vec![
             SensitivityResultRow {
                 parameter: "length".to_owned(),
-                raw: -1.0,
-                normalized: -0.25,
+                raw: (-1.0).into(),
+                normalized: (-0.25).into(),
             },
             SensitivityResultRow {
                 parameter: "width".to_owned(),
-                raw: 2.0,
-                normalized: 0.5,
+                raw: (2.0).into(),
+                normalized: (0.5).into(),
             },
         ],
     };
@@ -590,13 +590,13 @@ fn sensitivity_payload_requires_canonical_unique_rows_and_valid_basis() {
         rows: vec![
             SensitivityResultRow {
                 parameter: "width".to_owned(),
-                raw: 1.0,
-                normalized: 1.0,
+                raw: (1.0).into(),
+                normalized: (1.0).into(),
             },
             SensitivityResultRow {
                 parameter: "width".to_owned(),
-                raw: 2.0,
-                normalized: 2.0,
+                raw: (2.0).into(),
+                normalized: (2.0).into(),
             },
         ],
     };
@@ -1015,4 +1015,35 @@ fn a_bus_is_judged_against_the_traces_it_names() {
         .validate_for(AnalysisType::Transient)
         .expect_err("two buses of one name are refused");
     assert!(error.contains("count"), "{error}");
+}
+
+#[test]
+fn sensitivity_availability_round_trips_and_rejects_invalid_input_markers() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let mut payload = AnalysisResultPayload::Sensitivity {
+        output: "V(out)".to_owned(),
+        result_mode: SensitivityResultMode::Ac { frequency_hz: 1.0 },
+        rows: vec![SensitivityResultRow {
+            parameter: "gain".to_owned(),
+            raw: SensitivityValue::unavailable(
+                SensitivityUnavailability::NondifferentiableMagnitude,
+            ),
+            normalized: SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+        }],
+    };
+    assert!(payload.validate_for(AnalysisType::Sensitivity).is_ok());
+    assert_eq!(
+        serde_json::from_str::<AnalysisResultPayload>(&serde_json::to_string(&payload).unwrap())
+            .unwrap(),
+        payload
+    );
+    assert_eq!(
+        ron::from_str::<AnalysisResultPayload>(&ron::to_string(&payload).unwrap()).unwrap(),
+        payload
+    );
+    let AnalysisResultPayload::Sensitivity { rows, .. } = &mut payload else {
+        unreachable!()
+    };
+    rows[0].raw = SensitivityValue::unavailable(SensitivityUnavailability::InvalidInput);
+    assert!(payload.validate_for(AnalysisType::Sensitivity).is_err());
 }

@@ -264,13 +264,13 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
                 rows: vec![
                     SensitivityResultRow {
                         parameter: "r1".to_owned(),
-                        raw: 0.25,
-                        normalized: 0.5,
+                        raw: (0.25).into(),
+                        normalized: (0.5).into(),
                     },
                     SensitivityResultRow {
                         parameter: "r2".to_owned(),
-                        raw: -0.125,
-                        normalized: -0.25,
+                        raw: (-0.125).into(),
+                        normalized: (-0.25).into(),
                     },
                 ],
             }),

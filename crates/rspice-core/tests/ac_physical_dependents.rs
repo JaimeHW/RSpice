@@ -315,7 +315,7 @@ fn sensitivity_refinement_resolves_zero_mos_body_effect() {
         assert_relative(dc, expected, 1e-5, "authored DC body effect sensitivity");
         for derivative in ac {
             assert_relative(
-                derivative,
+                derivative.value().unwrap(),
                 -expected,
                 1e-5,
                 "authored AC magnitude body effect sensitivity",

@@ -466,7 +466,7 @@ fn schema_22_saved_outputs_authenticate_and_reseal_their_result_digests() {
         snapshot
             .migrate_to_current(crate::product::ProjectId::new())
             .unwrap();
-        assert_eq!(snapshot.schema_version, 25);
+        assert_eq!(snapshot.schema_version, 26);
         let mut state = crate::state::SimulationState::default();
         snapshot.apply_to_state(&mut state).unwrap();
         assert_ne!(state.runs[0].analyses[0].result_data_digest(), digest);

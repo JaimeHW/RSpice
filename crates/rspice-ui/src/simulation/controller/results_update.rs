@@ -256,28 +256,37 @@ impl SimulationController {
                 normalized,
                 ..
             } => {
-                // Sensitivity: Display in console as table
+                use rspice_core::analysis::sensitivity::SensitivityValue;
+                let unavailable = normalized
+                    .values()
+                    .filter(|value| value.value().is_none())
+                    .count();
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Sensitivity Analysis: {} parameters",
-                    sensitivities.len()
+                    "Sensitivity Analysis: {} parameters, {unavailable} normalized values unavailable", sensitivities.len()
                 )));
-
-                // Sort by normalized sensitivity magnitude
                 let mut sorted: Vec<_> = normalized.iter().collect();
                 sorted.sort_by(|a, b| {
-                    b.1.abs()
-                        .partial_cmp(&a.1.abs())
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                    use std::cmp::Ordering;
+                    match (a.1.value(), b.1.value()) {
+                        (Some(a), Some(b)) => b.abs().total_cmp(&a.abs()),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        _ => Ordering::Equal,
+                    }
+                    .then_with(|| a.0.cmp(b.0))
                 });
-
-                for (param, norm_sens) in sorted.iter().take(10) {
-                    if let Some(sens) = sensitivities.get(*param) {
+                let format_quantity = |quantity: SensitivityValue<f64>| match quantity {
+                    SensitivityValue::Available(value) => format!("{value:.3e}"),
+                    SensitivityValue::Unavailable { unavailable } => {
+                        format!("unavailable ({})", unavailable.as_str())
+                    }
+                };
+                for (parameter, normalized) in sorted.into_iter().take(10) {
+                    if let Some(raw) = sensitivities.get(parameter) {
                         state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                            "  {}: dV/d{} = {:.3e}, norm = {:.2}%",
-                            param,
-                            param,
-                            sens,
-                            **norm_sens * 100.0
+                            "  {parameter}: derivative = {}, normalized = {}",
+                            format_quantity(*raw),
+                            format_quantity(*normalized)
                         )));
                     }
                 }

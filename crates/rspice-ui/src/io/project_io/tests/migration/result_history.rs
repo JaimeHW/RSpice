@@ -1,6 +1,112 @@
 //! Migration coverage for retained simulation-result history and corrupted payload recovery.
 
 use super::*;
+use crate::state::{SensitivityResultMode, SensitivityResultRow};
+
+fn sensitivity_history(
+    normalized: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+) -> (SimulationRun, ProjectSimulationResults) {
+    let mut run = SimulationRun::new(1);
+    run.mark_running().unwrap();
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .unwrap();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Sensitivity, "SENS").with_result_payload(
+            AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Dc,
+                rows: vec![SensitivityResultRow {
+                    parameter: "gain".to_owned(),
+                    raw: 0.0.into(),
+                    normalized,
+                }],
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run.clone()].into();
+    simulation.next_run_id = 1;
+    (run, ProjectSimulationResults::from_state(&simulation))
+}
+
+#[test]
+fn sensitivity_availability_survives_project_results_serialization_and_authentication() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let (run, saved) = sensitivity_history(SensitivityValue::unavailable(
+        SensitivityUnavailability::ZeroOutput,
+    ));
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let project = ProjectFile::new_with_simulation_results(workspace, libraries, saved.clone());
+    let text = serialize_project_file(&project).unwrap();
+    let loaded = load_project_text(&text, None).unwrap();
+    assert!(loaded.simulation_results_warning.is_none());
+    let restored = loaded.simulation_results.into_simulation_state().unwrap();
+    assert_eq!(
+        restored.runs[0].analyses[0].result_payload,
+        run.analyses[0].result_payload
+    );
+    for replacement in [
+        0.0.into(),
+        SensitivityValue::unavailable(SensitivityUnavailability::OutOfRange),
+    ] {
+        let mut tampered = saved.clone();
+        let PersistedField::Value(AnalysisResultPayload::Sensitivity { rows, .. }) =
+            &mut tampered.runs[0].analyses[0].result_payload
+        else {
+            panic!("sensitivity payload")
+        };
+        rows[0].normalized = replacement;
+        assert!(
+            tampered.validate().is_err(),
+            "changing availability changes authenticated evidence"
+        );
+    }
+}
+
+#[test]
+fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let (run, mut legacy) = sensitivity_history(0.0.into());
+    legacy.schema_version = COMPLEX_EXPRESSION_RESULTS_SCHEMA_VERSION;
+    legacy.runs[0].analyses[0].result_data_digest =
+        PersistedField::Value(run.analyses[0].legacy_v14_result_data_digest());
+    legacy.runs[0].dataset_content_digest =
+        PersistedField::Value(run.legacy_v14_dataset_content_digest());
+    let mut migrated: ProjectSimulationResults =
+        serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
+    migrated.migrate_to_current(ProjectId::new()).unwrap();
+    migrated.validate().unwrap();
+    assert_eq!(
+        migrated.schema_version,
+        SENSITIVITY_AVAILABILITY_RESULTS_SCHEMA_VERSION
+    );
+    assert_eq!(
+        migrated.runs[0].analyses[0].result_payload,
+        legacy.runs[0].analyses[0].result_payload
+    );
+    assert_ne!(
+        migrated.runs[0].dataset_content_digest,
+        legacy.runs[0].dataset_content_digest
+    );
+
+    for replacement in [
+        1.0.into(),
+        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+    ] {
+        let mut tampered = legacy.clone();
+        let PersistedField::Value(AnalysisResultPayload::Sensitivity { rows, .. }) =
+            &mut tampered.runs[0].analyses[0].result_payload
+        else {
+            panic!("sensitivity payload")
+        };
+        rows[0].normalized = replacement;
+        let before = tampered.clone();
+        assert!(tampered.migrate_to_current(ProjectId::new()).is_err());
+        assert_eq!(tampered, before, "failed migration must be transactional");
+    }
+}
 
 #[test]
 fn cleared_run_sequence_survives_project_round_trip() {

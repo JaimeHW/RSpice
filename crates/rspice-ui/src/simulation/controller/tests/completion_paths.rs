@@ -450,12 +450,12 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
             ac_mode: true,
             frequency_hz: Some(10_000.0),
             sensitivities: std::collections::HashMap::from([
-                ("width".to_owned(), 2.0),
-                ("length".to_owned(), -1.0),
+                ("width".to_owned(), (2.0).into()),
+                ("length".to_owned(), (-1.0).into()),
             ]),
             normalized: std::collections::HashMap::from([
-                ("width".to_owned(), 0.5),
-                ("length".to_owned(), -0.25),
+                ("width".to_owned(), (0.5).into()),
+                ("length".to_owned(), (-0.25).into()),
             ]),
         },
         AnalysisType::Sensitivity,
@@ -471,13 +471,13 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
             rows: vec![
                 SensitivityResultRow {
                     parameter: "length".to_owned(),
-                    raw: -1.0,
-                    normalized: -0.25,
+                    raw: (-1.0).into(),
+                    normalized: (-0.25).into(),
                 },
                 SensitivityResultRow {
                     parameter: "width".to_owned(),
-                    raw: 2.0,
-                    normalized: 0.5,
+                    raw: (2.0).into(),
+                    normalized: (0.5).into(),
                 },
             ],
         })
@@ -546,6 +546,61 @@ fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads(
 }
 
 #[test]
+fn sensitivity_completion_preserves_unavailable_results_and_finite_console_values() {
+    use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
+    let mut controller = SimulationController::new();
+    let result = crate::simulation::SimulationResult::Sensitivity {
+        output: "I(V1)".to_owned(),
+        ac_mode: false,
+        frequency_hz: None,
+        sensitivities: std::collections::HashMap::from([
+            ("gain".to_owned(), 0.0.into()),
+            ("large".to_owned(), 1.0.into()),
+        ]),
+        normalized: std::collections::HashMap::from([
+            (
+                "gain".to_owned(),
+                SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput),
+            ),
+            ("large".to_owned(), 1e308.into()),
+        ]),
+    };
+    let mut state = AppState::default();
+    controller.apply_result_side_effects(&mut state, &result);
+    let messages: Vec<_> = state
+        .log_buffer
+        .entries()
+        .map(|entry| entry.message.as_str())
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|text| text.contains("normalized = unavailable (zero-output)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|text| text.contains("normalized = 1.000e308")),
+        "{messages:?}"
+    );
+    let retained = controller.convert_to_analysis_result_with_metadata_owned(
+        result,
+        AnalysisType::Sensitivity,
+        "SENS",
+    );
+    assert!(retained.success);
+    let Some(AnalysisResultPayload::Sensitivity { rows, .. }) = retained.result_payload else {
+        panic!("sensitivity retained")
+    };
+    assert_eq!(rows[0].raw.value(), Some(0.0));
+    assert_eq!(
+        rows[0].normalized,
+        SensitivityValue::unavailable(SensitivityUnavailability::ZeroOutput)
+    );
+}
+
+#[test]
 fn invalid_sensitivity_result_contract_fails_closed() {
     let controller = SimulationController::new();
     let analysis = controller.convert_to_analysis_result_with_metadata_owned(
@@ -553,7 +608,7 @@ fn invalid_sensitivity_result_contract_fails_closed() {
             output: "V(out)".to_owned(),
             ac_mode: false,
             frequency_hz: None,
-            sensitivities: std::collections::HashMap::from([("width".to_owned(), 2.0)]),
+            sensitivities: std::collections::HashMap::from([("width".to_owned(), (2.0).into())]),
             normalized: std::collections::HashMap::new(),
         },
         AnalysisType::Sensitivity,

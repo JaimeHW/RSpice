@@ -548,7 +548,14 @@ pub(super) fn exact_sensitivity_rows(
                 binding: short_dataset(run.dataset_id),
                 stable_row: format!("{}:sensitivity[{index}].{quantity}", analysis.id),
                 coordinate: format!("parameter={};basis={basis}", row.parameter),
-                value: format!("{value:.17e}"),
+                value: match value {
+                    rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+                        format!("{value:.17e}")
+                    }
+                    rspice_core::analysis::sensitivity::SensitivityValue::Unavailable {
+                        unavailable,
+                    } => format!("unavailable:{}", unavailable.as_str()),
+                },
                 origin: output.to_owned(),
             });
         }

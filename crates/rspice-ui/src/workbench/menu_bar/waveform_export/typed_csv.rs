@@ -392,14 +392,14 @@ pub(super) fn prepare_typed_result_csv(
             };
             let escaped_output = csv_text(output);
             let mut contents = String::from(
-                "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz\n",
+                "parameter,raw_sensitivity,normalized_sensitivity,output,mode,frequency_hz,raw_status,normalized_status\n",
             );
             for row in rows {
+                let (raw, raw_status) = sensitivity_csv_value(row.raw);
+                let (normalized, normalized_status) = sensitivity_csv_value(row.normalized);
                 contents.push_str(&format!(
-                    "{},{:.17e},{:.17e},{escaped_output},{mode},{frequency}\n",
+                    "{},{raw},{normalized},{escaped_output},{mode},{frequency},{raw_status},{normalized_status}\n",
                     csv_text(&row.parameter),
-                    row.raw,
-                    row.normalized,
                 ));
             }
             Some(PreparedTypedResultCsv {
@@ -816,4 +816,17 @@ fn serialized_enum_name<T: serde::Serialize>(value: &T) -> String {
         .expect("retained evidence enums are JSON-serializable")
         .trim_matches('"')
         .to_owned()
+}
+
+fn sensitivity_csv_value(
+    value: rspice_core::analysis::sensitivity::SensitivityValue<f64>,
+) -> (String, &'static str) {
+    match value {
+        rspice_core::analysis::sensitivity::SensitivityValue::Available(value) => {
+            (format!("{value:.17e}"), "available")
+        }
+        rspice_core::analysis::sensitivity::SensitivityValue::Unavailable { unavailable } => {
+            (String::new(), unavailable.as_str())
+        }
+    }
 }
