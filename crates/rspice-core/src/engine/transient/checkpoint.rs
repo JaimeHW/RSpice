@@ -1077,7 +1077,7 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     hasher.update(domain);
     // Native BJT transport, heating, junction geometry and physical state topology
     // must not resume state captured under earlier constitutive/runtime laws.
-    hash_field(&mut hasher, "native_bjt_junction_area_law", 12_u8);
+    hash_field(&mut hasher, "native_bjt_junction_area_law", 13_u8);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);

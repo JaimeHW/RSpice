@@ -47,7 +47,7 @@ pub use pnoise::PnoiseAnalysisResult;
 pub use psp::{PreparedPsp, PspAnalysisResult};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 33;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 34;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());

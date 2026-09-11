@@ -618,7 +618,10 @@ impl Bjt {
         let minus_branches = self.with_temperature_derivative_variant(vrth - h, vrth, |model| {
             model.dynamic_charge_branches_from_inputs(&minus_bias, minus_inputs)
         });
-        for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
+        // Thermal storage is exactly CTH*rise; the delay charges have no
+        // temperature dependence. Keep those analytic derivatives instead of
+        // subtracting nearly equal charges at a large temperature rise.
+        for branch_idx in 0..IDX_QCTH {
             branches[branch_idx].d_internal[IDX_VRTH] =
                 (plus_branches[branch_idx].charge - minus_branches[branch_idx].charge) / denom;
         }

@@ -1593,7 +1593,7 @@ mod tests {
             (12.0, 0.0),
         ] {
             for p in [1.0, -1.0] {
-                let params = std::collections::HashMap::from_iter(
+                let mut params = std::collections::HashMap::from_iter(
                     [
                         ("LEVEL", level),
                         ("IS", 1e-14),
@@ -1626,6 +1626,16 @@ mod tests {
                     ]
                     .map(|(key, value)| (key.to_string(), value)),
                 );
+                if level != 1.0 {
+                    for (name, value) in [
+                        ("SELFT", 1.0),
+                        ("RTH", 1000.0),
+                        ("CTH", 1e-9),
+                        ("TD", 100e-9),
+                    ] {
+                        params.insert(name.into(), value);
+                    }
+                }
                 let mut bjt = if p > 0.0 {
                     Bjt::new_npn("QP".into(), 1, 2, 3)
                 } else {
@@ -1662,6 +1672,12 @@ mod tests {
                         bias[node - 1] = p * value;
                     }
                 }
+                if level != 1.0 {
+                    assert!(bjt.node_rth != 0 && bjt.node_xf1 != 0 && bjt.node_xf2 != 0);
+                    bias[bjt.node_rth - 1] = 20.0;
+                    bias[bjt.node_xf1 - 1] = 2e-4;
+                    bias[bjt.node_xf2 - 1] = 3e-4;
+                }
                 let sample = |bjt: &mut Bjt, point: &[Value]| {
                     let mut f = DenseStamper::new(n);
                     let mut q = DenseStamper::new(n);
@@ -1670,7 +1686,13 @@ mod tests {
                 };
                 let base = sample(&mut bjt, &bias);
                 for col in 0..n {
-                    let step = if col == n - 1 { 1e-8 } else { 1e-6 };
+                    let step = if col + 1 == bjt.node_rth {
+                        1e-3
+                    } else if col == n - 1 || [bjt.node_xf1, bjt.node_xf2].contains(&(col + 1)) {
+                        1e-8
+                    } else {
+                        1e-6
+                    };
                     let mut plus = bias.clone();
                     plus[col] += step;
                     let mut minus = bias.clone();
