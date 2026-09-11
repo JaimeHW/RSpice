@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 256] = [0, 306, 308, 307, 309, 312, 319, 324, 315, 321, 325, 326, 313, 314, 330, 331, 332, 333, 334, 335, 1, 2, 310, 336, 3, 4, 5, 6, 7, 8, 339, 340, 342, 343, 344, 345, 346, 347, 10, 9, 12, 11, 13, 14, 15, 348, 349, 17, 16, 350, 351, 352, 19, 18, 20, 353, 354, 355, 21, 22, 23, 356, 357, 358, 359, 360, 26, 25, 24, 27, 28, 361, 362, 363, 364, 365, 33, 30, 29, 32, 31, 366, 367, 368, 369, 370, 35, 34, 36, 38, 37, 39, 40, 41, 42, 43, 44, 372, 45, 46, 311, 119, 118, 221, 56, 63, 55, 58, 57, 101, 386, 59, 60, 62, 61, 64, 65, 316, 317, 72, 75, 73, 388, 76, 318, 389, 80, 81, 390, 391, 82, 83, 85, 87, 88, 320, 91, 92, 93, 94, 97, 98, 99, 183, 184, 392, 178, 179, 102, 322, 323, 106, 112, 220, 206, 214, 218, 393, 219, 210, 394, 208, 209, 395, 207, 115, 116, 117, 120, 121, 122, 124, 123, 125, 128, 133, 132, 260, 135, 137, 400, 139, 140, 143, 144, 151, 158, 170, 174, 175, 177, 180, 181, 182, 186, 454, 455, 185, 187, 188, 189, 190, 456, 194, 457, 195, 196, 458, 459, 198, 199, 201, 202, 204, 211, 212, 213, 215, 217, 224, 462, 230, 237, 238, 463, 246, 464, 327, 328, 329, 250, 468, 469, 259, 264, 269, 283, 286, 285, 284, 473, 478, 479, 480, 481, 482, 483, 289, 290, 291, 292, 296, 301, 303, 304, 305];
@@ -2841,13 +2841,13 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17])];
-        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
+        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
-        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
+        let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            if dynamic_operators_enabled {
+            if integration_operators_enabled {
                 match rspice_eval_ddt(
                     &mut ddt_state.ddt_current,
                     &ddt_state.ddt_previous,
@@ -2867,6 +2867,7 @@ impl Instance {
                     }
                 }
             } else {
+                if !value.is_finite() { ctx.report_ddt_candidate_error(slot, GeneratedDdtCandidateError::NonFiniteInput { field: "input" }); }
                 0.0
             }
         };

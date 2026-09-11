@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L10, L11, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L10, L11, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 283] = [620, 204, 158, 323, 621, 0, 1, 2, 3, 626, 628, 630, 631, 4, 5, 6, 7, 8, 9, 10, 632, 633, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 634, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 635, 50, 51, 52, 640, 53, 54, 56, 55, 57, 58, 59, 903, 61, 62, 66, 69, 71, 72, 909, 191, 124, 125, 126, 123, 931, 132, 133, 134, 190, 153, 149, 146, 148, 152, 182, 181, 162, 177, 179, 183, 186, 943, 944, 945, 301, 302, 946, 304, 305, 947, 307, 308, 948, 303, 306, 309, 312, 313, 949, 315, 316, 950, 318, 319, 951, 314, 317, 320, 321, 322, 324, 325, 952, 953, 954, 330, 336, 342, 344, 349, 956, 351, 352, 353, 959, 354, 357, 390, 365, 366, 368, 961, 960, 964, 383, 965, 387, 389, 966, 962, 970, 974, 971, 972, 442, 444, 985, 990, 1004, 1005, 1006, 1008, 1007, 1011, 479, 1012, 481, 483, 484, 1013, 491, 492, 1009, 494, 495, 1016, 497, 498, 1017, 493, 496, 499, 500, 501, 1018, 503, 504, 1019, 506, 507, 1020, 502, 505, 508, 1022, 1023, 513, 1029, 1026, 1030, 1031, 521, 523, 524, 1033, 530, 531, 532, 533, 1034, 537, 1035, 1036, 1037, 541, 545, 548, 550, 555, 557, 558, 559, 1041, 560, 563, 575, 576, 577, 1053, 578, 1062, 1077, 589, 588, 592, 591, 593, 595, 596, 975, 976, 977, 978, 979, 980, 981, 982, 1044, 1045, 1046, 1047, 1048, 1049, 1050, 1051, 1052, 983, 597, 604, 605, 607, 608, 609, 610, 611, 613, 614, 615, 616, 617];
@@ -6776,13 +6776,13 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21])];
-        let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
+        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
-        let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
+        let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
-            if dynamic_operators_enabled {
+            if integration_operators_enabled {
                 match rspice_eval_ddt(
                     &mut ddt_state.ddt_current,
                     &ddt_state.ddt_previous,
@@ -6802,6 +6802,7 @@ impl Instance {
                     }
                 }
             } else {
+                if !value.is_finite() { ctx.report_ddt_candidate_error(slot, GeneratedDdtCandidateError::NonFiniteInput { field: "input" }); }
                 0.0
             }
         };

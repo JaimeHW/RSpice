@@ -2109,14 +2109,24 @@ impl<'a> GeneratedEvalContext<'a> {
         matches!(self.evaluation_mode, GeneratedEvaluationMode::NewtonLimited)
     }
 
-    /// Whether transient dynamic operators may contribute and update their
-    /// trial state during this evaluation.
+    /// Whether stateful model evaluation, including event controls, is enabled.
+    /// Integration operators additionally check [`Self::integration_operators_enabled`].
     #[inline]
     pub fn dynamic_operators_enabled(&self) -> bool {
         !matches!(
             self.evaluation_mode,
             GeneratedEvaluationMode::StaticDaeProbe
         )
+    }
+
+    /// Whether `ddt` and `idt` may evaluate a companion and update trial history.
+    /// Small-signal points freeze integration while still allowing their
+    /// initial/final-step event bodies. Their preceding equilibrium solve uses
+    /// the ordinary DC value and Jacobian.
+    #[inline]
+    pub fn integration_operators_enabled(&self) -> bool {
+        self.dynamic_operators_enabled()
+            && (!self.analysis_smallsig() || self.analysis_phase.is_equilibrium())
     }
 
     #[inline]
@@ -8526,6 +8536,31 @@ mod fixed_lane_tests {
     }
 
     #[test]
+    fn small_signal_integration_freezes_without_disabling_analysis_events() {
+        for analysis in [GeneratedAnalysisKind::Ac, GeneratedAnalysisKind::Noise] {
+            for (phase, integrates) in [
+                (AnalogAnalysisPhase::Point, false),
+                (AnalogAnalysisPhase::Equilibrium, true),
+                (AnalogAnalysisPhase::Nodeset, true),
+            ] {
+                let context = GeneratedEvalContext::with_analysis_step(
+                    &[0.0],
+                    300.15,
+                    1,
+                    analysis,
+                    true,
+                    true,
+                )
+                .with_analysis_phase(phase);
+                assert_eq!(context.integration_operators_enabled(), integrates);
+                assert!(context.dynamic_operators_enabled());
+                assert!(context.analysis_initial_step());
+                assert!(context.analysis_final_step());
+            }
+        }
+    }
+
+    #[test]
     fn static_dae_probe_is_the_only_mode_that_disables_dynamic_operators() {
         let voltages = [0.0];
         let dynamic = GeneratedEvalContext::with_analysis_step_simparams_and_mode(
@@ -8562,6 +8597,9 @@ mod fixed_lane_tests {
         assert!(dynamic.dynamic_operators_enabled());
         assert!(static_probe.dynamic_operators_enabled());
         assert!(!static_dae_probe.dynamic_operators_enabled());
+        assert!(dynamic.integration_operators_enabled());
+        assert!(static_probe.integration_operators_enabled());
+        assert!(!static_dae_probe.integration_operators_enabled());
         for context in [&dynamic, &static_probe, &static_dae_probe] {
             assert!(context.analysis("tran"));
             assert!(context.analysis("__rspice_scope_tran"));

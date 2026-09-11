@@ -4499,6 +4499,128 @@ assert_eq!(rollback_after, rollback_before, "static DAE probe mutated trial hist
 }
 
 #[test]
+fn generated_frozen_integrators_reject_invalid_inputs_without_mutating_history() {
+    for operator in [
+        "ddt(1.0/divisor)",
+        "idt(1.0/divisor,2.0)",
+        "idt(1.0,1.0/divisor)",
+    ] {
+        let label = format!("frozen integrator validation {operator}");
+        let (state, stamp, noise) = generated_parts(
+            &format!(
+                "module frozen_integrator(p,n); inout p,n; electrical p,n;
+             parameter real divisor=1.0; analog I(p,n)<+{operator}; endmodule"
+            ),
+            &label,
+        );
+        run_generated_main(
+            &label,
+            &state,
+            &stamp,
+            &noise,
+            r#"
+for initialized in [false,true] {
+for (temperature,static_probe) in [(123.0,false),(124.0,false),(300.15,true)] {
+    runtime::clear_evaluation_error();
+    runtime::set_dynamic_operators_enabled(true);
+    let mut instance=device::state::Instance::new(&[0,1]);
+    instance.finalize_parameters().unwrap();
+    if initialized {
+        let seed=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+        instance.stamp(&seed,&mut runtime::GeneratedStamper::default());
+        instance.validate_advance_state().unwrap();
+        instance.apply_validated_advance_state();
+    }
+    runtime::set_dynamic_operators_enabled(!static_probe);
+    instance.set_parameter("divisor",0.0).unwrap();
+    let before=instance.capture_rollback_state();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature};
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert!(ctx.evaluation_failed(),"a frozen integrator silently discarded its infinite input");
+    assert_eq!(instance.capture_rollback_state(),before);
+    runtime::clear_evaluation_error();
+    instance.set_parameter("divisor",1.0).unwrap();
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert!(!ctx.evaluation_failed());
+    assert_eq!(instance.capture_rollback_state(),before);
+}
+}
+"#,
+        )
+        .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_small_signal_integrators_preserve_candidates_and_freeze_ic_tangents() {
+    let (state, stamp, noise) = generated_parts(
+        "module frozen_integrators(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+idt(V(p),V(n)*V(n))+ddt(V(p)*V(p)); endmodule",
+        "small-signal integral state",
+    );
+    run_generated_main("small-signal integral state", &state, &stamp, &noise, r#"
+let inactive=runtime::GeneratedDdtCoefficients::inactive();
+let active=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:4.0, previous_value_scale:4.0,
+    older_value_scale:0.0, previous_derivative_scale:0.0,
+};
+for initialized in [false,true] {
+for coefficients in [inactive,active] {
+    let mut instance=device::state::Instance::new(&[0,1]);
+    instance.finalize_parameters().unwrap();
+    if initialized {
+        let ctx=runtime::GeneratedEvalContext {voltages:&[1.5,5.0],temperature:300.15};
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+        instance.validate_advance_state().unwrap();
+        instance.apply_validated_advance_state();
+    }
+    instance.set_timepoint(0.25,0.25,coefficients);
+    instance.begin_stateful_evaluation();
+    let trial=runtime::GeneratedEvalContext {voltages:&[2.0,6.0],temperature:300.15};
+    instance.stamp(&trial,&mut runtime::GeneratedStamper::default());
+    let history=instance.capture_rollback_state();
+    let accepted=instance.capture_persistent_state();
+    for temperature in [123.0,124.0] {
+    let ctx=runtime::GeneratedEvalContext {voltages:&[3.0,7.0],temperature};
+    assert!(ctx.analysis_smallsig());
+    assert!(ctx.dynamic_operators_enabled(),"small-signal event evaluation remains enabled");
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!((sink[12],sink[13]),(0.0,0.0),"AC conductance: {sink:?}");
+    assert_eq!(sink[9],49.0,"AC primal uses the current operating-point initial condition");
+    assert_eq!(instance.capture_rollback_state(),history,"AC changed trial integration history");
+    assert_eq!(instance.capture_persistent_state(),accepted);
+    for w in [0.5_f64,2.0] {
+        runtime::FREQUENCY_OMEGA.store(w.to_bits(),std::sync::atomic::Ordering::SeqCst);
+        let mut reactive=[0.0;6];
+        instance.stamp_reactive(&ctx,&mut runtime::GeneratedReactiveStamper {sink:Some(&mut reactive)});
+        assert_eq!(reactive[0],6.0*w-1.0/w,"AC integrand and derivative transfer");
+        assert_eq!(reactive[3],0.0);
+        assert_eq!(instance.capture_rollback_state(),history);
+        assert!(!ctx.evaluation_failed());
+    }
+    }
+}
+}
+runtime::set_event_analysis(false,true);
+for temperature in [123.0,124.0] {
+for coefficients in [inactive,runtime::GeneratedDdtCoefficients {active:false,..active}] {
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(0.0,0.0,coefficients);
+let ctx=runtime::GeneratedEvalContext {voltages:&[3.0,7.0],temperature};
+let mut sink=[0.0;32];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+assert_eq!((sink[12],sink[13]),(0.0,14.0),"AC equilibrium must retain the DC initial-condition tangent");
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+assert_eq!(instance.capture_persistent_state().idt_previous,vec![49.0]);
+}
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
 fn generated_integral_derivatives_follow_each_sites_initialization() {
     let (state, stamp, noise) = generated_parts(
         "module initialized_integral(p,n); inout p,n; electrical p,n;
@@ -7290,7 +7412,10 @@ pub mod runtime {
     pub use integration::*;
 
     #[derive(Debug, Clone, Copy)]
-    pub struct GeneratedDdtCandidateError;
+    pub enum GeneratedDdtCandidateError {
+        NonFiniteInput { field: &'static str },
+        NonFiniteResult,
+    }
 
     #[allow(clippy::too_many_arguments)]
     pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
@@ -7318,7 +7443,7 @@ pub mod runtime {
             0.0
         };
         if !result.is_finite() {
-            return Err(GeneratedDdtCandidateError);
+            return Err(GeneratedDdtCandidateError::NonFiniteResult);
         }
         current[slot] = value;
         derivative_current[slot] = result;
@@ -7576,12 +7701,13 @@ pub mod runtime {
         }
         pub fn analysis(&self, query: &str) -> bool {
             ((query.eq_ignore_ascii_case("ac") || query == "__rspice_scope_ac") && self.temperature == 123.0)
+                || ((query.eq_ignore_ascii_case("noise") || query == "__rspice_scope_noise") && self.temperature == 124.0)
                 || ((query.eq_ignore_ascii_case("tran") || query == "__rspice_scope_tran")
                     && ANALYSIS_TRAN.load(std::sync::atomic::Ordering::SeqCst))
                 || (query.eq_ignore_ascii_case("static") && self.analysis_static())
         }
         pub fn analysis_code(&self) -> u8 {
-            if self.analysis("ac") { 1 } else if self.analysis("tran") { 2 } else { 0 }
+            if self.analysis("ac") { 1 } else if self.analysis("noise") { 3 } else if self.analysis("tran") { 2 } else { 0 }
         }
         pub fn analysis_initial_step(&self) -> bool {
             self.dynamic_operators_enabled() && ANALYSIS_INITIAL_STEP.load(std::sync::atomic::Ordering::SeqCst)
@@ -7594,6 +7720,9 @@ pub mod runtime {
         }
         pub fn analysis_static(&self) -> bool {
             ANALYSIS_STATIC.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        pub fn analysis_smallsig(&self) -> bool {
+            self.analysis("ac") || self.analysis("noise")
         }
         pub fn simparam_or(&self, name: &str, fallback: Value) -> Value {
             let value = f64::from_bits(SIMPARAM_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst));
@@ -7614,8 +7743,11 @@ pub mod runtime {
         pub fn dynamic_operators_enabled(&self) -> bool {
             DYNAMIC_OPERATORS_ENABLED.load(std::sync::atomic::Ordering::SeqCst)
         }
-        pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) {}
-        pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) {}
+        pub fn integration_operators_enabled(&self) -> bool {
+            self.dynamic_operators_enabled() && (!self.analysis_smallsig() || self.analysis_static())
+        }
+        pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
+        pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }

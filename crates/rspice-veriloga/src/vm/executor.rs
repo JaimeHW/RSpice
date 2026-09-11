@@ -795,7 +795,9 @@ impl<'a> Vm<'a> {
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
                 let coefficients = self.context.integration_coefficients();
-                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
+                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled()
+                    && (!matches!(self.context.analysis_type, 1 | 3)
+                        || self.context.analysis_phase.is_equilibrium());
                 self.unary_op(|a| {
                     if dynamic && coefficients.active {
                         a * coefficients.derivative_scale
@@ -808,7 +810,9 @@ impl<'a> Vm<'a> {
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
                 let coefficients = self.context.state_integration_coefficients();
-                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled();
+                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled()
+                    && (!matches!(self.context.analysis_type, 1 | 3)
+                        || self.context.analysis_phase.is_equilibrium());
                 self.unary_op(|a| {
                     if dynamic && coefficients.active {
                         a / coefficients.derivative_scale
@@ -2699,6 +2703,40 @@ mod tests {
             .is_err(),
             "static observation still validates authored event tolerances"
         );
+    }
+
+    #[test]
+    fn integration_jacobians_freeze_at_small_signal_points() {
+        use rspice_veriloga_runtime::AnalogAnalysisPhase;
+        let mut context = VmContext::with_states(0, 1);
+        context.set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5).unwrap());
+        for analysis in [0, 1, 2, 3] {
+            for phase in [
+                AnalogAnalysisPhase::Point,
+                AnalogAnalysisPhase::Equilibrium,
+                AnalogAnalysisPhase::Nodeset,
+            ] {
+                context.analysis_type = analysis;
+                context.analysis_phase = phase;
+                let integrates = !matches!(analysis, 1 | 3) || phase.is_equilibrium();
+                let before = format!("{context:?}");
+                for (instruction, active_gain) in [
+                    (Instruction::DdtJacobian, 4.0),
+                    (Instruction::IdtJacobian, 1.0),
+                ] {
+                    assert_eq!(
+                        execute_with_context(
+                            &mut context,
+                            vec![Instruction::PushConst(2.0), instruction],
+                        )
+                        .unwrap(),
+                        if integrates { active_gain } else { 0.0 },
+                        "analysis {analysis}, phase {phase:?}",
+                    );
+                    assert_eq!(format!("{context:?}"), before);
+                }
+            }
+        }
     }
 
     #[test]

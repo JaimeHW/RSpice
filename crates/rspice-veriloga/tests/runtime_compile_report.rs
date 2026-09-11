@@ -168,6 +168,7 @@ fn runtime_integrity_rejects_modified_digital_control_flow() {
 
 #[test]
 fn runtime_integrity_refuses_malformed_digital_tables_and_indices_without_panicking() {
+    use rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget;
     use rspice_veriloga::canonical_ir::{
         CanonicalDigitalPlan, CfgTerminator, CfgValueKind, CfgValueType,
     };
@@ -225,7 +226,11 @@ fn runtime_integrity_refuses_malformed_digital_tables_and_indices_without_panick
         }),
         ("probe ID", |p| p.analog_probes[0].id = 999usize.into()),
         ("probe endpoint", |p| {
-            p.analog_probes[0].positive = "different_net".into()
+            let DigitalAnalogProbeTarget::Nodes { positive, .. } = &mut p.analog_probes[0].target
+            else {
+                panic!("the integrity fixture must contain a node probe");
+            };
+            *positive = "different_net".into();
         }),
         ("driver index", |p| p.drivers[0].id.index = 999),
         ("driver target", |p| {

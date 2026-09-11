@@ -2468,6 +2468,16 @@ impl ModelPlan {
             "rspice_limited_exp".to_string(),
             "rspice_limited_exp_derivative".to_string(),
         ]);
+        if !self.ddt_slots.is_empty() {
+            runtime_support.push("GeneratedDdtCandidateError".to_string());
+        }
+        if !self.idt_slots.is_empty() {
+            runtime_support.extend([
+                "evaluate_generated_idt_candidate".to_string(),
+                "GeneratedDdtCoefficients".to_string(),
+                "GeneratedIdtAcceptedHistory".to_string(),
+            ]);
+        }
         if self
             .function
             .values
@@ -3841,7 +3851,7 @@ impl ModelPlan {
         if wants.ddt_scale {
             let _ = writeln!(
                 out,
-                "{pad}let ddt_scale_value = if ctx.dynamic_operators_enabled() {{ self.ddt_coefficients.derivative_scale }} else {{ 0.0 }};"
+                "{pad}let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() {{ self.ddt_coefficients.derivative_scale }} else {{ 0.0 }};"
             );
             let _ = writeln!(out, "{pad}let ddt_scale = move || ddt_scale_value;");
         }
@@ -3853,7 +3863,7 @@ impl ModelPlan {
             // boundary.
             let _ = writeln!(
                 out,
-                "{pad}let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() && self.ddt_coefficients.derivative_scale.is_finite() && self.ddt_coefficients.derivative_scale != 0.0 {{\n\
+                "{pad}let idt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() && self.ddt_coefficients.derivative_scale.is_finite() && self.ddt_coefficients.derivative_scale != 0.0 {{\n\
                  {pad}    let inverse = 1.0 / self.ddt_coefficients.derivative_scale;\n\
                  {pad}    if inverse.is_finite() {{ inverse }} else {{ 0.0 }}\n\
                  {pad}}} else {{ 0.0 }};\n\
@@ -3873,7 +3883,7 @@ impl ModelPlan {
                 out,
                 "{pad}let idt_derivative_coefficients = self.ddt_coefficients;\n\
                  {pad}let idt_derivative = |slot: usize, primal: f64, input: f64, ic: f64| -> f64 {{\n\
-                 {pad}    if !ctx.dynamic_operators_enabled() {{ return 0.0; }}\n\
+                 {pad}    if !ctx.integration_operators_enabled() {{ return 0.0; }}\n\
                  {pad}    let result = if primal.is_finite() {{\n\
                  {pad}        evaluate_generated_idt_derivative(idt_derivative_coefficients, ddt_state.idt_initialized[slot], [input, ic])\n\
                  {pad}    }} else {{ Err(GeneratedIdtCandidateError::NonFiniteResult {{ field: \"primal value\" }}) }};\n\
@@ -3897,10 +3907,10 @@ impl ModelPlan {
             }
             let _ = writeln!(
                 out,
-                "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
+                "{pad}let integration_operators_enabled = ctx.integration_operators_enabled();\n\
                  {pad}let idt_coefficients = self.ddt_coefficients;\n\
                  {pad}let mut idt = |slot: usize, value: f64, ic: f64| -> f64 {{\n\
-                 {pad}    if dynamic_operators_enabled {{\n\
+                 {pad}    if integration_operators_enabled {{\n\
                  {pad}        match rspice_eval_idt(\n\
                  {pad}            &mut ddt_state.idt_current,\n\
                  {pad}            &mut ddt_state.idt_candidate_previous,\n\
@@ -3921,10 +3931,12 @@ impl ModelPlan {
                  {pad}                0.0\n\
                  {pad}            }}\n\
                  {pad}        }}\n\
-                 {pad}    }} else if ddt_state.idt_initialized[slot] {{\n\
-                 {pad}        ddt_state.idt_current[slot]\n\
                  {pad}    }} else {{\n\
-                 {pad}        ic\n\
+                 {pad}        let initial = match evaluate_generated_idt_candidate(GeneratedDdtCoefficients::inactive(), value, ic, GeneratedIdtAcceptedHistory {{ initialized: false, integral_previous: 0.0, integral_older: 0.0, input_previous: 0.0 }}) {{\n\
+                 {pad}            Ok(candidate) => candidate.value,\n\
+                 {pad}            Err(source) => {{ ctx.report_idt_candidate_error(slot, source); return 0.0; }}\n\
+                 {pad}        }};\n\
+                 {pad}        if (ctx.analysis_smallsig() && !ctx.analysis_static()) || !ddt_state.idt_initialized[slot] {{ initial }} else {{ ddt_state.idt_current[slot] }}\n\
                  {pad}    }}\n\
                  {pad}}};"
             );
@@ -4035,10 +4047,10 @@ impl ModelPlan {
             }
             let _ = writeln!(
                 out,
-                "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
+                "{pad}let integration_operators_enabled = ctx.integration_operators_enabled();\n\
                  {pad}let ddt_coefficients = self.ddt_coefficients;\n\
                  {pad}let mut ddt = |slot: usize, value: f64| -> f64 {{\n\
-                 {pad}    if dynamic_operators_enabled {{\n\
+                 {pad}    if integration_operators_enabled {{\n\
                  {pad}        match rspice_eval_ddt(\n\
                  {pad}            &mut ddt_state.ddt_current,\n\
                  {pad}            &ddt_state.ddt_previous,\n\
@@ -4058,6 +4070,7 @@ impl ModelPlan {
                  {pad}            }}\n\
                  {pad}        }}\n\
                  {pad}    }} else {{\n\
+                 {pad}        if !value.is_finite() {{ ctx.report_ddt_candidate_error(slot, GeneratedDdtCandidateError::NonFiniteInput {{ field: \"input\" }}); }}\n\
                  {pad}        0.0\n\
                  {pad}    }}\n\
                  {pad}}};"

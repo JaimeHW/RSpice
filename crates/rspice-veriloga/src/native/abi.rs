@@ -1797,7 +1797,10 @@ pub unsafe extern "C" fn rspice_ddt_jacobian_native(
         );
     }
     let ctx = unsafe { &*ctx };
-    if ctx.static_dae_probe == 0 && ctx.integration_active != 0 {
+    if ctx.static_dae_probe == 0
+        && ctx.integration_active != 0
+        && (!matches!(ctx.analysis_type, 1 | 3) || ctx.analysis_phase.is_equilibrium())
+    {
         (unsafe { *operands }) * ctx.integration_derivative_scale
     } else {
         0.0
@@ -2120,7 +2123,10 @@ pub unsafe extern "C" fn rspice_idt_jacobian_native(
     }
     let ctx = unsafe { &*ctx };
     let coefficients = state_integration_coefficients(ctx);
-    if ctx.static_dae_probe == 0 && coefficients.active {
+    if ctx.static_dae_probe == 0
+        && coefficients.active
+        && (!matches!(ctx.analysis_type, 1 | 3) || ctx.analysis_phase.is_equilibrium())
+    {
         (unsafe { *operands }) / coefficients.derivative_scale
     } else {
         0.0
@@ -3504,6 +3510,37 @@ mod tests {
             assert!(error.contains("table"), "{name}: {error}");
             assert!(error.contains("outside table length"), "{name}: {error}");
             assert!(error.contains("no interpreter fallback"), "{name}: {error}");
+        }
+    }
+
+    #[test]
+    fn integration_jacobians_freeze_at_small_signal_points() {
+        use rspice_veriloga_runtime::AnalogAnalysisPhase;
+        let mut ctx = empty_eval_context();
+        ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 2.0;
+        let operands = [2.0];
+        for analysis in [0, 1, 2, 3] {
+            for phase in [
+                AnalogAnalysisPhase::Point,
+                AnalogAnalysisPhase::Equilibrium,
+                AnalogAnalysisPhase::Nodeset,
+            ] {
+                ctx.analysis_type = analysis;
+                ctx.analysis_phase = phase;
+                let integrates = !matches!(analysis, 1 | 3) || phase.is_equilibrium();
+                assert_eq!(
+                    unsafe { super::rspice_ddt_jacobian_native(operands.as_ptr(), &ctx, 0) },
+                    if integrates { 4.0 } else { 0.0 },
+                    "ddt analysis {analysis}, phase {phase:?}",
+                );
+                assert_eq!(
+                    unsafe { super::rspice_idt_jacobian_native(operands.as_ptr(), &ctx, 0) },
+                    if integrates { 1.0 } else { 0.0 },
+                    "idt analysis {analysis}, phase {phase:?}",
+                );
+                assert!(ctx.take_runtime_error().is_none());
+            }
         }
     }
 
