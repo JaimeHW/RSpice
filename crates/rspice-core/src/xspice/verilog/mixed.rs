@@ -773,6 +773,28 @@ struct DiscreteAnalogInput {
     name: String,
 }
 
+/// An exclusive reservation of one validated mixed candidate. A failed later
+/// participant drops earlier reservations and unwinds their speculative state.
+pub(crate) struct PreparedMixedAcceptance<'a> {
+    host: &'a mut MixedSignalHost,
+    trial: Option<ActiveTrial>,
+}
+
+impl PreparedMixedAcceptance<'_> {
+    pub(crate) fn commit(mut self) {
+        let trial = self.trial.take().expect("unconsumed mixed acceptance");
+        self.host.apply_prepared_acceptance(trial);
+    }
+}
+
+impl Drop for PreparedMixedAcceptance<'_> {
+    fn drop(&mut self) {
+        if let Some(trial) = self.trial.take() {
+            self.host.unwind(trial);
+        }
+    }
+}
+
 impl fmt::Debug for MixedSignalHost {
     /// Hand-written because neither the compiled analog device nor the digital
     /// host is `Debug`, and because the useful summary of a running mixed
@@ -1914,6 +1936,31 @@ impl MixedSignalHost {
     /// advance the analog integrator over a boundary state the analog solution
     /// was never solved against.
     pub fn accept_trial(&mut self) -> Result<(), MixedSignalError> {
+        let trial = self.prepare_trial_acceptance()?;
+        self.apply_prepared_acceptance(trial);
+        Ok(())
+    }
+
+    /// Reserve a validated candidate for the circuit's acceptance barrier.
+    /// Dropping the reservation restores this host; committing cannot fail.
+    pub(crate) fn prepare_circuit_acceptance(
+        &mut self,
+    ) -> Result<PreparedMixedAcceptance<'_>, (String, MixedSignalError)> {
+        match self.prepare_trial_acceptance() {
+            Ok(trial) => Ok(PreparedMixedAcceptance {
+                host: self,
+                trial: Some(trial),
+            }),
+            Err(error) => {
+                if let Some(trial) = self.trial.take() {
+                    self.unwind(trial);
+                }
+                Err((self.instance_name().to_string(), error))
+            }
+        }
+    }
+
+    fn prepare_trial_acceptance(&mut self) -> Result<ActiveTrial, MixedSignalError> {
         let trial = self
             .trial
             .as_ref()
@@ -1939,7 +1986,7 @@ impl MixedSignalHost {
             self.unwind(trial);
             return Err(analog_error(error));
         }
-        let mut trial = self.trial.take().expect("checked above");
+        let trial = self.trial.take().expect("checked above");
         // Fold this timepoint into each boundary net's accepted history before
         // anything is committed, so a boundary that has been moving at every
         // accepted timepoint is refused with the analog integrator still where
@@ -1956,12 +2003,16 @@ impl MixedSignalHost {
             self.unwind(trial);
             return Err(oscillation);
         }
-        // Swapped rather than assigned, so the bank the accepted state is
-        // giving up becomes next acceptance's scratch instead of a free.
-        std::mem::swap(&mut self.state.adc_history, &mut histories.0);
-        std::mem::swap(&mut self.state.dac_history, &mut histories.1);
         self.scratch.adc_history = histories.0;
         self.scratch.dac_history = histories.1;
+        Ok(trial)
+    }
+
+    /// Called only with the candidate returned by prepare_trial_acceptance,
+    /// while a reservation excludes any mutation of this host.
+    fn apply_prepared_acceptance(&mut self, mut trial: ActiveTrial) {
+        std::mem::swap(&mut self.state.adc_history, &mut self.scratch.adc_history);
+        std::mem::swap(&mut self.state.dac_history, &mut self.scratch.dac_history);
         self.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
@@ -1991,7 +2042,6 @@ impl MixedSignalHost {
         );
         self.scratch.trial = trial.vectors;
         self.scratch.probe_history.time = None;
-        Ok(())
     }
 
     /// Put a trial back the way it found things, and take its vectors back.

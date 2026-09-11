@@ -13,6 +13,15 @@ use crate::xspice::{EventInputKind, XspiceEventInputs, XspiceInstanceCheckpoint}
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+/// Copy-on-write event/model state staged by the circuit acceptance barrier.
+/// Dispatch topology is immutable, and per-evaluation scratch is recomputed.
+pub(crate) struct XspiceAcceptanceRollback {
+    instances: Vec<SharedXspiceInstance>,
+    values: SharedXspiceEventValues,
+    queue: SharedXspiceEventQueue,
+    error: Option<String>,
+}
+
 /// Accepted Verilog-A state carried between circuits rebuilt for adjacent DC
 /// sweep points.
 ///
@@ -958,53 +967,52 @@ impl CircuitData {
         timestep: Value,
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
-    ) {
-        let XspiceCompanionPolicy {
-            coefficients,
-            xyce_one_step_order2,
-        } = companion;
-        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
+    ) -> crate::xspice::CmResult<()> {
+        self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
             voltages,
             crate::xspice::AnalysisType::Transient,
             crate::xspice::EvaluationPhase::AcceptedStep,
-            XspiceCompanionPolicy {
-                coefficients,
-                xyce_one_step_order2,
-            },
-        ) {
-            log::warn!("XSPICE evaluation error: {e}");
+            companion,
+        )
+    }
+
+    pub(crate) fn capture_xspice_acceptance(&self) -> XspiceAcceptanceRollback {
+        XspiceAcceptanceRollback {
+            instances: self.xspice_instances.clone(),
+            values: self.xspice_event_values.clone(),
+            queue: self.xspice_event_queue.clone(),
+            error: self.xspice_evaluation_error.clone(),
         }
     }
 
-    /// Commit XSPICE state for an accepted transient timepoint using the
-    /// integrator's selected companion coefficients.
+    pub(crate) fn restore_xspice_acceptance(&mut self, rollback: XspiceAcceptanceRollback) {
+        self.xspice_instances = rollback.instances;
+        self.xspice_event_values = rollback.values;
+        self.xspice_event_queue = rollback.queue;
+        self.xspice_evaluation_error = rollback.error;
+    }
+
+    /// Standalone XSPICE acceptance has the same failure contract as the joint
+    /// circuit barrier: restore model state and pending events before reporting.
+    #[cfg(test)]
     pub(crate) fn accept_xspice_transient_timestep_with_coefficients(
         &mut self,
         time: Value,
         timestep: Value,
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
-    ) {
-        let XspiceCompanionPolicy {
-            coefficients,
-            xyce_one_step_order2,
-        } = companion;
-        if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
-            time,
-            timestep,
-            voltages,
-            crate::xspice::AnalysisType::Transient,
-            crate::xspice::EvaluationPhase::AcceptedStep,
-            XspiceCompanionPolicy {
-                coefficients,
-                xyce_one_step_order2,
-            },
+    ) -> crate::xspice::CmResult<()> {
+        let rollback = self.capture_xspice_acceptance();
+        if let Err(error) = self.evaluate_xspice_transient_timestep_with_coefficients(
+            time, timestep, voltages, companion,
         ) {
-            log::warn!("XSPICE evaluation error: {e}");
+            self.restore_xspice_acceptance(rollback);
+            return Err(error);
         }
         self.accept_xspice_timestep();
+        Ok(())
     }
 
     /// Stamp XSPICE analog contributions into matrix and RHS
@@ -1975,15 +1983,28 @@ impl CircuitData {
         }
     }
 
-    /// Project committed ideal XSPICE voltage outputs back into the accepted
-    /// solution vector after event-driven models settle.
-    pub(crate) fn project_xspice_voltage_outputs(&self, solution: &mut [Value], num_nodes: usize) {
+    /// Project evaluated ideal XSPICE voltage outputs into the candidate
+    /// solution vector after event-driven models settle. The returned writes
+    /// restore the original candidate when replayed in reverse order.
+    pub(crate) fn project_xspice_voltage_outputs(
+        &self,
+        solution: &mut [Value],
+        num_nodes: usize,
+    ) -> Vec<(usize, Value)> {
         #[inline]
-        fn set_node(solution: &mut [Value], node: usize, value: Value) {
+        fn set_node(
+            solution: &mut [Value],
+            node: usize,
+            value: Value,
+            rollback: &mut Vec<(usize, Value)>,
+        ) {
             if node > 0
                 && let Some(slot) = solution.get_mut(node - 1)
             {
-                *slot = value;
+                if *slot != value {
+                    rollback.push((node - 1, *slot));
+                    *slot = value;
+                }
             }
         }
 
@@ -1997,14 +2018,20 @@ impl CircuitData {
         }
 
         #[inline]
-        fn project_voltage_pair(solution: &mut [Value], pos: usize, neg: usize, value: Value) {
+        fn project_voltage_pair(
+            solution: &mut [Value],
+            pos: usize,
+            neg: usize,
+            value: Value,
+            rollback: &mut Vec<(usize, Value)>,
+        ) {
             if !value.is_finite() {
                 return;
             }
             match (pos, neg) {
                 (0, 0) => {}
-                (node, 0) => set_node(solution, node, value),
-                (0, node) => set_node(solution, node, -value),
+                (node, 0) => set_node(solution, node, value, rollback),
+                (0, node) => set_node(solution, node, -value, rollback),
                 (pos, neg) => {
                     let Some(pos_value) = node_value(solution, pos) else {
                         return;
@@ -2013,14 +2040,15 @@ impl CircuitData {
                         return;
                     };
                     let correction = value - (pos_value - neg_value);
-                    set_node(solution, pos, pos_value + 0.5 * correction);
-                    set_node(solution, neg, neg_value - 0.5 * correction);
+                    set_node(solution, pos, pos_value + 0.5 * correction, rollback);
+                    set_node(solution, neg, neg_value - 0.5 * correction, rollback);
                 }
             }
         }
 
+        let mut rollback = Vec::new();
         if num_nodes == 0 || solution.is_empty() {
-            return;
+            return rollback;
         }
 
         for instance in &self.xspice_instances {
@@ -2054,7 +2082,7 @@ impl CircuitData {
                                 }
                                 let (_, value) =
                                     instance.analog_vector_contribution_at(port_idx, index);
-                                project_voltage_pair(solution, node, 0, value);
+                                project_voltage_pair(solution, node, 0, value, &mut rollback);
                             }
                         }
                         crate::xspice::PortConnection::TypedAnalogVector(elements) => {
@@ -2069,7 +2097,13 @@ impl CircuitData {
                                     instance.analog_vector_contribution_at(port_idx, index);
                                 match element {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
-                                        project_voltage_pair(solution, *node, 0, value);
+                                        project_voltage_pair(
+                                            solution,
+                                            *node,
+                                            0,
+                                            value,
+                                            &mut rollback,
+                                        );
                                     }
                                     crate::xspice::AnalogInputConnection::Differential(
                                         pos,
@@ -2080,7 +2114,13 @@ impl CircuitData {
                                         neg,
                                         ..
                                     } => {
-                                        project_voltage_pair(solution, *pos, *neg, value);
+                                        project_voltage_pair(
+                                            solution,
+                                            *pos,
+                                            *neg,
+                                            value,
+                                            &mut rollback,
+                                        );
                                     }
                                     _ => {}
                                 }
@@ -2099,16 +2139,17 @@ impl CircuitData {
                 };
                 match connection {
                     crate::xspice::PortConnection::Analog(node) => {
-                        project_voltage_pair(solution, *node, 0, value);
+                        project_voltage_pair(solution, *node, 0, value, &mut rollback);
                     }
                     crate::xspice::PortConnection::Differential(pos, neg)
                     | crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
-                        project_voltage_pair(solution, *pos, *neg, value);
+                        project_voltage_pair(solution, *pos, *neg, value, &mut rollback);
                     }
                     _ => {}
                 }
             }
         }
+        rollback
     }
 
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
@@ -2948,6 +2989,33 @@ impl CircuitData {
         self.generated_veriloga_devices
             .apply_validated_state_acceptance();
         Ok(discontinuity)
+    }
+
+    /// One acceptance entry point for generated, runtime and mixed HDL models.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn accept_model_transient_timestep(
+        &mut self,
+        time: Value,
+        dt: Value,
+        voltages: &[Value],
+        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<bool, crate::SimulationError> {
+        #[cfg(feature = "veriloga")]
+        if self.has_mixed_signal_hosts() {
+            return self.accept_mixed_and_analog_transient_timestep(
+                time,
+                dt,
+                voltages,
+                coefficients,
+                initial_step,
+                final_step,
+            );
+        }
+        let _ = (time, dt, voltages, coefficients, initial_step, final_step);
+        self.accept_all_veriloga_timestep()
+            .map_err(crate::SimulationError::Circuit)
     }
 
     /// Candidate discontinuities must reach LTE control before acceptance.
@@ -4201,16 +4269,18 @@ endmodule"#;
         circuit.get_or_create_node("n1");
         circuit.add_xspice_instance(breakpoint_instance());
 
-        circuit.accept_xspice_transient_timestep_with_coefficients(
-            2.0e-9,
-            1.0e-9,
-            &[0.0],
-            XspiceCompanionPolicy {
-                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
-                ),
-                xyce_one_step_order2: false,
-            },
-        );
+        circuit
+            .accept_xspice_transient_timestep_with_coefficients(
+                2.0e-9,
+                1.0e-9,
+                &[0.0],
+                XspiceCompanionPolicy {
+                    coefficients:
+                        &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+            )
+            .unwrap();
 
         let breakpoints = circuit.take_xspice_requested_breakpoints();
         assert_eq!(breakpoints.len(), 1);
@@ -4229,16 +4299,18 @@ endmodule"#;
         let mut rhs = vec![0.0];
 
         circuit.stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0]);
-        circuit.accept_xspice_transient_timestep_with_coefficients(
-            1.0e-9,
-            1.0e-9,
-            &[0.0],
-            XspiceCompanionPolicy {
-                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
-                ),
-                xyce_one_step_order2: false,
-            },
-        );
+        circuit
+            .accept_xspice_transient_timestep_with_coefficients(
+                1.0e-9,
+                1.0e-9,
+                &[0.0],
+                XspiceCompanionPolicy {
+                    coefficients:
+                        &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+            )
+            .unwrap();
 
         assert_eq!(
             *seen_phases
@@ -4289,7 +4361,7 @@ endmodule"#;
 
         let mut solution = vec![0.0; circuit.matrix_size()];
         circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
-        circuit.project_xspice_voltage_outputs(&mut solution, circuit.num_nodes);
+        let _ = circuit.project_xspice_voltage_outputs(&mut solution, circuit.num_nodes);
 
         assert_eq!(solution[out_node - 1], 1.0);
     }
@@ -4752,16 +4824,18 @@ endmodule"#;
             1.0e-9,
             &[0.0, 0.0, 0.0],
         );
-        circuit.accept_xspice_transient_timestep_with_coefficients(
-            2.0e-9,
-            1.0e-9,
-            &[0.0, 0.0, 0.0],
-            XspiceCompanionPolicy {
-                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
-                ),
-                xyce_one_step_order2: false,
-            },
-        );
+        circuit
+            .accept_xspice_transient_timestep_with_coefficients(
+                2.0e-9,
+                1.0e-9,
+                &[0.0, 0.0, 0.0],
+                XspiceCompanionPolicy {
+                    coefficients:
+                        &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+            )
+            .unwrap();
 
         // The breakpoint sweep skips an instance whose queue is empty. A model
         // that requests one on every evaluation must not be swept past.
@@ -5022,16 +5096,18 @@ endmodule"#;
             1.0e-9,
             &[0.0, 0.0, 0.0],
         );
-        circuit.accept_xspice_transient_timestep_with_coefficients(
-            2.0e-9,
-            1.0e-9,
-            &[0.0, 0.0, 0.0],
-            XspiceCompanionPolicy {
-                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
-                ),
-                xyce_one_step_order2: false,
-            },
-        );
+        circuit
+            .accept_xspice_transient_timestep_with_coefficients(
+                2.0e-9,
+                1.0e-9,
+                &[0.0, 0.0, 0.0],
+                XspiceCompanionPolicy {
+                    coefficients:
+                        &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+            )
+            .unwrap();
 
         // The pass genuinely ran: the time-driven model evaluated and queued a
         // breakpoint request. Without that, an untouched world would prove

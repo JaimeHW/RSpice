@@ -26,14 +26,14 @@
 //!   an ordinary `VerilogADevice` carries between the Newton iterations of one
 //!   timepoint, recomputed from the accepted record by the next evaluation. See
 //!   `MixedSignalHost::analog`.
-//! * [`CircuitData::accept_mixed_transient_timestep`] opens the one trial that
+//! * [`CircuitData::accept_mixed_and_analog_transient_timestep`] opens the one trial that
 //!   *is* committable, evaluates the module against the solution the engine
 //!   kept, settles the boundary to quiet, and commits both domains atomically.
 //!
-//! There is deliberately no third state. A trial is never left open across a
-//! call, so a `CircuitData` clone — an AC sweep worker, a checkpoint — never
-//! captures speculative state, and no engine path can reach a half-open module
-//! by taking a branch this module did not anticipate.
+//! Circuit-facing calls return only committed or restored hosts. Exclusive
+//! acceptance reservations span participants inside one call; dropping them
+//! restores speculative state. Their mutable borrows prevent a circuit clone
+//! or another evaluation from observing a partially prepared barrier.
 //!
 //! # The breakpoint
 //!
@@ -326,7 +326,8 @@ impl CircuitData {
         )
     }
 
-    /// Commit every mixed module at an accepted transient timepoint.
+    /// Validate every mixed and analog model, then promote all their states.
+    /// A later participant cannot leave an earlier participant committed.
     ///
     /// The analog half is evaluated once more against the solution the engine
     /// kept — the same thing `evaluate_veriloga_timepoint` does for an analog
@@ -335,7 +336,7 @@ impl CircuitData {
     /// boundary is then settled to quiet and both domains commit together.
     /// Returns whether an analog half newly raised `$discontinuity`.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn accept_mixed_transient_timestep(
+    pub(crate) fn accept_mixed_and_analog_transient_timestep(
         &mut self,
         time: Value,
         dt: Value,
@@ -345,23 +346,37 @@ impl CircuitData {
         final_step: bool,
     ) -> Result<bool, SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, coefficients)?;
-        let mut discontinuity = false;
+        self.validate_nonmixed_model_acceptance()
+            .map_err(SimulationError::Circuit)?;
+        let mut discontinuity = self.veriloga_discontinuity_rising();
+        let mut prepared = Vec::with_capacity(self.mixed_signal_hosts.len());
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
-            let committed = settle_to_quiet(host, voltages)
-                .and_then(|()| host.stamp(voltages, |_, _, _| {}, |_, _| {}))
-                .and_then(|()| {
-                    let rising = host.analog_device().discontinuity_rising();
-                    host.accept_trial()?;
-                    Ok(rising)
-                });
-            if committed.is_err() && host.trial_active() {
-                let rolled_back = host.reject_trial();
-                named(host, rolled_back)?;
+            let evaluated = settle_to_quiet(host, voltages)
+                .and_then(|()| host.stamp(voltages, |_, _, _| {}, |_, _| {}));
+            if let Err(error) = evaluated {
+                let failure = mixed_error(host.instance_name(), error);
+                if host.trial_active() {
+                    let _ = host.reject_trial();
+                }
+                return Err(failure);
             }
-            discontinuity |= named(host, committed)?;
+            discontinuity |= host.analog_device().discontinuity_rising();
+            prepared.push(
+                host.prepare_circuit_acceptance()
+                    .map_err(|(instance, error)| mixed_error(&instance, error))?,
+            );
         }
+        // Every fallible evaluation and acceptance check is finished. Earlier
+        // reservations roll back automatically if a later host refused above.
+        for candidate in prepared {
+            candidate.commit();
+        }
+        self.veriloga_devices.apply_validated_timestep_acceptance();
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .apply_validated_state_acceptance();
         Ok(discontinuity)
     }
 

@@ -635,6 +635,63 @@ The authoritative generator completed all 43 built-ins. Only the manifest
 generator identity changed; the emitted analog model bundle is unchanged.
 Generator digest: `9033856958cb8394330fcc8b75d26d1fe4599a0dab5055de7993efc873abeb6a`.
 
+## MS05 increment: staged acceptance of owned HDL and XSPICE state
+
+Mixed-host acceptance is now split into preparation and infallible promotion.
+An exclusive reservation owns each validated trial; dropping it restores the
+trial. The circuit validates runtime/generated analog models and prepares every
+mixed host before promoting any of those states. A later host failure therefore
+cannot leave an earlier host or an analog-only model committed. Initial,
+ordinary and force-accepted engine paths use the joint HDL entry point.
+
+The two transient acceptance tails now share an external-model acceptance
+function. XSPICE candidate evaluation returns its error instead of logging it
+and proceeding with acceptance. Copy-on-write instance/event snapshots retain
+owned XSPICE state while analog and mixed candidates are evaluated and checked.
+A failure restores those contexts, event values, pending events and the prior
+error latch. Projected ideal-voltage outputs retain a compact undo list, so a
+failed candidate also restores the solution entries the projection overwrote.
+After the joint HDL barrier succeeds, XSPICE promotion has no fallible model
+calls left. Xyce static-history capture occurs before promotion and is returned
+only on success. Pure native-SPICE steps retain their external-model-free path.
+
+Three focused cases pass. Two acceptance cases use two HDL instances, an
+analog-only observer, two stateful XSPICE participants and native resistive
+loads. They inject a failure in the later HDL or XSPICE participant, compare
+owned XSPICE context images exactly, check earlier digital state and pending
+2 ns timers, restore projected voltages, retry at physical 0.65 ns, and replay
+a circuit checkpoint. An analog `$finish` candidate is absent after failure
+and delivered once after successful acceptance. These cases exercise the
+acceptance protocol with supplied candidates; they are not a proof of a full
+multi-instance feedback solve. The existing deck-level
+`rejected_timepoints_leave_the_digital_half_exactly_where_they_found_it`
+regression also passes through the changed transient engine route.
+
+The first new fixture omitted the engine's explicit digital-start operation;
+that fixture was corrected before the passing checks. The two acceptance cases
+were rerun once on the combined source after incorporating `5a7ccf963`,
+`c937c7526` and `d5c03954b` (parameter derivatives, sensitivity refinement and
+physical shunt options). The engine-route case also ran on that combined base.
+The final fast-path guard excludes circuits with no external models. No broad
+suite, platform execution, generator refresh or performance run was performed;
+compiler/generated-model inputs and artifact schemas are unchanged.
+
+MS05 remains open. This increment protects circuit-owned model/context state;
+`CmContext` resources may contain shared external state. In particular,
+`d_cosim` can advance an external runtime during `AcceptedStep`, and other
+resource-backed models have their own probe/commit conventions. Their resource
+transactions and deferred effects must join the barrier before a general
+atomicity claim is valid. Native SPICE reactive histories and controller state
+also remain in the parent stepper's acceptance sequence. The typed circuit
+graph, one scheduling/precision authority, cross-instance event connections,
+whole-circuit root/retry coordination and the complete MS00–MS15 qualification
+remain required. Spectre reference execution is still unavailable.
+
+The final rebase also includes `c3a3c36fc` and `a1ec45a3f`, which change
+passive instance assignment replacement and expression evaluation during
+netlist parsing. The checks above ran before those last parser-only commits;
+the acceptance implementation is unchanged by that integration.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;

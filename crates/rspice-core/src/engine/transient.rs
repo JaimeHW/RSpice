@@ -376,6 +376,7 @@ use state_commit::{AcceptedReactiveSnapshots, AcceptedReactiveStep, ReactiveBrea
 use state_recovery::{ForceAcceptLimits, SourceActivityRecovery};
 use step_control::{SourceActivityDeltas, StepBiasFloors};
 
+mod acceptance;
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
@@ -4483,25 +4484,15 @@ impl Engine {
             let origin_state = circuit.nonlinear_state_snapshot();
             let origin_result = (|| -> Result<(), SimulationError> {
                 Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
-                #[cfg(feature = "veriloga")]
-                if circuit.has_mixed_signal_hosts() {
-                    circuit.accept_mixed_transient_timestep(
-                        0.0,
-                        0.0,
-                        &solution,
-                        &CompanionCoefficients::backward_euler(),
-                        true,
-                        origin_model_finish.is_some(),
-                    )?;
-                    Self::collect_xspice_runtime_breakpoints(
-                        &mut circuit,
-                        &mut breakpoints,
-                        tstop,
-                    )?;
-                }
-                circuit
-                    .accept_all_veriloga_timestep()
-                    .map_err(SimulationError::Circuit)?;
+                circuit.accept_model_transient_timestep(
+                    0.0,
+                    0.0,
+                    &solution,
+                    &CompanionCoefficients::backward_euler(),
+                    true,
+                    origin_model_finish.is_some(),
+                )?;
+                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
                 pending_veriloga_event_time =
                     accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
                 if circuit.has_any_veriloga_devices()
@@ -8698,84 +8689,35 @@ impl Engine {
                             pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
                         },
                     )?;
-                    if circuit.has_xspice_devices() {
-                        if capture_xyce_static_history {
-                            circuit.evaluate_xspice_transient_timestep_with_coefficients(
-                                t,
-                                dt,
-                                &new_solution,
-                                XspiceCompanionPolicy {
-                                    coefficients: &coeff,
-                                    xyce_one_step_order2,
-                                },
-                            );
-                            circuit.accept_xspice_timestep();
-                        } else {
-                            circuit.accept_xspice_transient_timestep_with_coefficients(
-                                t,
-                                dt,
-                                &new_solution,
-                                XspiceCompanionPolicy {
-                                    coefficients: &coeff,
-                                    xyce_one_step_order2,
-                                },
-                            );
-                        }
-                        circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
-                        Self::collect_xspice_runtime_breakpoints(
+                    let has_external_models =
+                        circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
+                    let (veriloga_discontinuity, static_history) = if has_external_models {
+                        self.accept_external_transient_models(
                             &mut circuit,
-                            &mut breakpoints,
-                            tstop,
-                        )?;
-                        if capture_xyce_static_history {
-                            xyce_static_history_candidate =
-                                Some(self.capture_xyce_static_residual(
-                                    &mut circuit,
-                                    &mut matrix,
-                                    &new_solution,
-                                    t,
-                                    transient_baseline_diag_gmin,
-                                )?);
-                        }
-                    }
-                    #[cfg(feature = "veriloga")]
-                    if circuit.has_veriloga_devices() {
-                        circuit
-                            .evaluate_veriloga_timepoint(&new_solution)
-                            .map_err(SimulationError::Circuit)?;
-                    }
-                    #[cfg(feature = "veriloga-builtins-base")]
-                    if circuit.has_generated_veriloga_devices() {
-                        circuit
-                            .evaluate_generated_veriloga_timepoint(&mut matrix, &new_solution)
-                            .map_err(SimulationError::Circuit)?;
-                    }
-                    let veriloga_discontinuity = if circuit.has_any_veriloga_devices() {
-                        circuit
-                            .accept_all_veriloga_timestep()
-                            .map_err(SimulationError::Circuit)?
-                    } else {
-                        false
-                    };
-                    #[cfg(feature = "veriloga")]
-                    let veriloga_discontinuity = if circuit.has_mixed_signal_hosts() {
-                        let mixed_discontinuity = circuit.accept_mixed_transient_timestep(
+                            &mut matrix,
+                            &mut new_solution,
                             t,
                             dt,
-                            &new_solution,
                             &coeff,
+                            xyce_one_step_order2,
+                            capture_xyce_static_history,
+                            transient_baseline_diag_gmin,
                             analysis_initial_step,
                             analysis_final_step,
-                        )?;
+                        )?
+                    } else {
+                        (false, None)
+                    };
+                    if let Some(history) = static_history {
+                        xyce_static_history_candidate = Some(history);
+                    }
+                    if has_external_models {
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
                             &mut breakpoints,
                             tstop,
                         )?;
-                        veriloga_discontinuity || mixed_discontinuity
-                    } else {
-                        veriloga_discontinuity
-                    };
+                    }
                     let model_restart_dt = (veriloga_discontinuity && !hit_breakpoint)
                         .then(|| breakpoints.mark_external_breakpoint_solved(t, dt));
                     hit_breakpoint |= veriloga_discontinuity;
@@ -8792,8 +8734,8 @@ impl Engine {
                         tstop = t;
                     }
 
-                    // XSPICE voltage outputs are projected only when their
-                    // model state is accepted. Commit controller histories
+                    // XSPICE voltage outputs are now projected and every external
+                    // model has accepted the candidate. Commit controller histories
                     // afterward so their latest vector is the circuit
                     // solution that is checkpointed and starts the next step.
                     if fixed_method.is_none() {
@@ -9224,76 +9166,32 @@ impl Engine {
             )?;
             total_history_nanos += history_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-            // Accept XSPICE timestep (commit state changes)
-            if circuit.has_xspice_devices() {
-                if capture_xyce_static_history {
-                    circuit.evaluate_xspice_transient_timestep_with_coefficients(
-                        t,
-                        dt,
-                        &new_solution,
-                        XspiceCompanionPolicy {
-                            coefficients: &coeff,
-                            xyce_one_step_order2,
-                        },
-                    );
-                    circuit.accept_xspice_timestep();
-                } else {
-                    circuit.accept_xspice_transient_timestep_with_coefficients(
-                        t,
-                        dt,
-                        &new_solution,
-                        XspiceCompanionPolicy {
-                            coefficients: &coeff,
-                            xyce_one_step_order2,
-                        },
-                    );
-                }
-                circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
-                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
-                if capture_xyce_static_history {
-                    xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
-                        &mut circuit,
-                        &mut matrix,
-                        &new_solution,
-                        t,
-                        transient_baseline_diag_gmin,
-                    )?);
-                }
-            }
-            #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                circuit
-                    .evaluate_veriloga_timepoint(&new_solution)
-                    .map_err(SimulationError::Circuit)?;
-            }
-            #[cfg(feature = "veriloga-builtins-base")]
-            if circuit.has_generated_veriloga_devices() {
-                circuit
-                    .evaluate_generated_veriloga_timepoint(&mut matrix, &new_solution)
-                    .map_err(SimulationError::Circuit)?;
-            }
-            let veriloga_discontinuity = if circuit.has_any_veriloga_devices() {
-                circuit
-                    .accept_all_veriloga_timestep()
-                    .map_err(SimulationError::Circuit)?
-            } else {
-                false
-            };
-            #[cfg(feature = "veriloga")]
-            let veriloga_discontinuity = if circuit.has_mixed_signal_hosts() {
-                let mixed_discontinuity = circuit.accept_mixed_transient_timestep(
+            // All external participants validate before their accepted state advances.
+            let has_external_models =
+                circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
+            let (veriloga_discontinuity, static_history) = if has_external_models {
+                self.accept_external_transient_models(
+                    &mut circuit,
+                    &mut matrix,
+                    &mut new_solution,
                     t,
                     dt,
-                    &new_solution,
                     &coeff,
+                    xyce_one_step_order2,
+                    capture_xyce_static_history,
+                    transient_baseline_diag_gmin,
                     analysis_initial_step,
                     analysis_final_step,
-                )?;
-                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
-                veriloga_discontinuity || mixed_discontinuity
+                )?
             } else {
-                veriloga_discontinuity
+                (false, None)
             };
+            if let Some(history) = static_history {
+                xyce_static_history_candidate = Some(history);
+            }
+            if has_external_models {
+                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+            }
             pending_veriloga_event_time =
                 accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
             if analysis_final_step {
