@@ -264,8 +264,59 @@ impl DelayBuffer {
         Ok(evaluation)
     }
 
+    /// Read transport history with the settled current sample held fixed.
+    /// A variable delay can move the read point through that history, but the
+    /// observation cannot replace the sample or change its frozen definition.
+    pub(crate) fn static_dae_with_coefficients(
+        &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<DelayEvaluation, String> {
+        let configuration = self
+            .configuration
+            .or_else(|| self.candidate.map(|sample| sample.configuration));
+        Self::validate_runtime_configuration(configuration, time, value, delay, max_delay)?;
+        let retained_value = match self.candidate {
+            Some(sample) if sample.time.to_bits() == time.to_bits() => sample.value,
+            Some(sample) => {
+                return Err(format!(
+                    "absdelay candidate belongs to time {}, not observation time {time}",
+                    sample.time
+                ));
+            }
+            None => self
+                .samples
+                .back()
+                .filter(|sample| sample.0.to_bits() == time.to_bits())
+                .map(|sample| sample.1)
+                .ok_or_else(|| {
+                    format!("static observation requires a settled absdelay sample at time {time}")
+                })?,
+        };
+        let (_, effective_delay, delay_scale) =
+            Self::resolve_frozen_configuration(configuration, delay, max_delay)?;
+        let mut evaluation =
+            self.candidate_evaluation(time, retained_value, effective_delay, delay_scale)?;
+        // Even when interpolation uses the in-flight endpoint, its value is
+        // retained history in this observation rather than the new input.
+        evaluation.input_coefficient = 0.0;
+        Ok(evaluation)
+    }
+
     fn validate_runtime(
         &self,
+        time: f64,
+        value: f64,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(), String> {
+        Self::validate_runtime_configuration(self.configuration, time, value, delay, max_delay)
+    }
+
+    fn validate_runtime_configuration(
+        configuration: Option<DelayConfiguration>,
         time: f64,
         value: f64,
         delay: f64,
@@ -279,7 +330,7 @@ impl DelayBuffer {
         if !value.is_finite() {
             return Err(format!("absdelay input must be finite, got {value}"));
         }
-        match (self.configuration, max_delay) {
+        match (configuration, max_delay) {
             (None, maximum) => {
                 Self::validate_delay(delay)?;
                 if maximum.is_some_and(|value| !value.is_finite() || value <= 0.0) {
@@ -328,7 +379,15 @@ impl DelayBuffer {
         delay: f64,
         max_delay: Option<f64>,
     ) -> Result<(DelayConfiguration, f64, f64), String> {
-        match (self.configuration, max_delay) {
+        Self::resolve_frozen_configuration(self.configuration, delay, max_delay)
+    }
+
+    fn resolve_frozen_configuration(
+        configuration: Option<DelayConfiguration>,
+        delay: f64,
+        max_delay: Option<f64>,
+    ) -> Result<(DelayConfiguration, f64, f64), String> {
+        match (configuration, max_delay) {
             (None, None) => Ok((DelayConfiguration::Fixed { delay }, delay, 0.0)),
             (None, Some(maximum)) => {
                 let effective = delay.min(maximum);

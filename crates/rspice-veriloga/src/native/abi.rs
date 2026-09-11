@@ -2520,6 +2520,21 @@ unsafe fn rspice_absdelay_native_impl(
 
     let buffers =
         unsafe { std::slice::from_raw_parts_mut(ctx.delay_buffers, ctx.delay_buffers_len) };
+    if ctx.static_dae_probe != 0 {
+        return match buffers[buffer_id]
+            .static_dae_with_coefficients(ctx.time, input, delay_time, max_delay)
+        {
+            Ok(evaluation) if derivative => evaluation.delay_coefficient.mul_add(
+                delay_derivative,
+                evaluation.input_coefficient * input_derivative,
+            ),
+            Ok(evaluation) => evaluation.output,
+            Err(error) => {
+                set_native_context_error(ctx, error);
+                0.0
+            }
+        };
+    }
     if ctx.analysis_type != 2 {
         if !matches!(ctx.analysis_type, 0 | 1 | 3 | 4) {
             set_native_context_error(

@@ -1727,6 +1727,53 @@ runtime/mixed F/Q integration remain open under MS08. The complete companion
 formulation remains selected for runtime and mixed models. Shipping-platform,
 release and licensed-reference qualification remain open.
 
+## Delay observations retain the waveform and its control derivative
+
+Static DAE observation of absdelay now reads the settled sample and retained
+transport history without replacing the sample or changing its frozen delay
+definition. A bounded variable delay can move the read position through that
+history; its Jacobian retains the negative interpolation slope, with zero
+control action at the maximum-delay clamp and time-zero anchor. The observation
+input cannot resample the waveform. Pending and accepted samples are supported;
+missing or mismatched settled times and invalid runtime operands fail cleanly.
+VM, native and emitted Wasm use the same read-only filter operation. Native ABI
+and checkpoint payloads are unchanged, and ordinary transient sampling remains
+on its existing path.
+
+The shared authored fixture combines fixed and voltage-controlled delay with
+conductance and ddt. It exposed a separate production compiler defect: the
+canonical native derivative simplifier classified absdelay as unary and erased
+the delay-control column when the signal was independent of that column. The
+zero proof now includes both the signal and td. The second-derivative zero
+proof also includes both operands so unsupported mixed curvature cannot be
+silently replaced by zero. maxdelay remains a frozen definition.
+
+The initial focused selection passed the VM and emitted-Wasm input-column
+checks, while native stamping reproduced the missing control derivative:
+[6.5, 0] instead of [6.5, -4]. After the simplifier fix and extension of Wasm
+coverage to the control column, both native and emitted-Wasm automatic/postfix
+cases passed in 0.01 seconds after a 12.66-second build. A preceding harness
+compile needed matches! because ColumnAxis does not implement PartialEq.
+The VM case covers accepted fallback, frozen definitions, bounded delay,
+invalid operands and missing settled samples. Native also verifies atomic
+failure after a later invalid contribution and unchanged original context.
+Logs under target/unified-mixed-fixes: static-dae-delay.log,
+static-dae-delay-control.log, static-dae-delay-control-final.log.
+No full suite or shipping-platform execution was run for this increment.
+Native automatic selection uses its compiled postfix plan because AbsDelay
+CFG block-model lowering remains unavailable; this is not interpreter fallback.
+
+The authoritative generator regenerated all 43 built-ins against the final
+compiler sources. Only the manifest generator digest changed, to
+b21376311c6bc47d1cbe8719c6b539fa619329d8fb05297feb19a1c6c3d88301.
+Log: target/unified-mixed-fixes/static-dae-delay-generator.log.
+
+Transition and slew observation semantics, complete shared static-history
+capture and general runtime/mixed F/Q integration remain open under MS08.
+Runtime and mixed models continue to use complete ordinary companions.
+The user confirmed that no licensed Spectre reference installation is available;
+reference parity and production qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

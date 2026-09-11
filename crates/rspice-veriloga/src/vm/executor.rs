@@ -819,7 +819,12 @@ impl<'a> Vm<'a> {
                             "absdelay buffer {buffer_id} is not preallocated"
                         ))
                     })?;
-                let result = if !is_transient {
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    buffer
+                        .static_dae_with_coefficients(current_time, current_value, delay_time, None)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
+                        .output
+                } else if !is_transient {
                     buffer
                         .eval_operating_point(current_time, current_value, delay_time, None)
                         .map_err(VmError::InvalidRuntimeConfiguration)?
@@ -846,7 +851,17 @@ impl<'a> Vm<'a> {
                             "absdelay buffer {buffer_id} is not preallocated"
                         ))
                     })?;
-                let result = if is_transient {
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    buffer
+                        .static_dae_with_coefficients(
+                            current_time,
+                            current_value,
+                            delay_time,
+                            Some(max_delay),
+                        )
+                        .map_err(VmError::InvalidRuntimeConfiguration)?
+                        .output
+                } else if is_transient {
                     buffer
                         .eval(current_time, current_value, delay_time, Some(max_delay))
                         .map_err(VmError::InvalidRuntimeConfiguration)?
@@ -885,7 +900,15 @@ impl<'a> Vm<'a> {
                             "absdelay buffer {buffer_id} is not preallocated"
                         ))
                     })?;
-                let result = if is_transient {
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    let evaluation = buffer
+                        .static_dae_with_coefficients(current_time, input, delay_time, max_delay)
+                        .map_err(VmError::InvalidRuntimeConfiguration)?;
+                    evaluation.delay_coefficient.mul_add(
+                        delay_derivative,
+                        evaluation.input_coefficient * input_derivative,
+                    )
+                } else if is_transient {
                     let evaluation = buffer
                         .eval_with_coefficients(current_time, input, delay_time, max_delay)
                         .map_err(VmError::InvalidRuntimeConfiguration)?;
@@ -2089,6 +2112,125 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_delay_reads_retained_samples_and_variable_delay_action() {
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.delay_buffers.resize_with(2, Default::default);
+        for (time, input) in [(0.0, 1.0), (1.0, 5.0), (2.0, 9.0)] {
+            context.time = time;
+            context.evaluation_mode = Mode::NewtonLimited;
+            context.begin_stateful_evaluation();
+            for index in [0, 1] {
+                let mut code = vec![Instruction::PushConst(input), Instruction::PushConst(0.25)];
+                if index == 0 {
+                    code.push(Instruction::AbsDelayState(0));
+                } else {
+                    code.extend([
+                        Instruction::PushConst(0.5),
+                        Instruction::AbsDelayStateMax(1),
+                    ]);
+                }
+                execute_with_context(&mut context, code).unwrap();
+            }
+            context.evaluation_mode = Mode::StaticDaeProbe;
+            context.begin_stateful_evaluation();
+            for accepted in [false, true] {
+                if accepted {
+                    for buffer in &mut context.delay_buffers {
+                        buffer.commit().unwrap();
+                    }
+                }
+                let before = format!("{:?}", context.delay_buffers);
+                // Even a definition waiting for its first acceptance is frozen
+                // for observation. A changed fixed td or maxdelay cannot replace it.
+                let fixed = execute_with_context(
+                    &mut context,
+                    vec![
+                        Instruction::PushConst(20.0),
+                        Instruction::PushConst(0.75),
+                        Instruction::AbsDelayState(0),
+                    ],
+                )
+                .unwrap();
+                assert_eq!(fixed, if time == 0.0 { 1.0 } else { input - 1.0 });
+                for delay in [0.125, 0.5, 0.75] {
+                    let value = execute_with_context(
+                        &mut context,
+                        vec![
+                            Instruction::PushConst(20.0),
+                            Instruction::PushConst(delay),
+                            Instruction::PushConst(0.01),
+                            Instruction::AbsDelayStateMax(1),
+                        ],
+                    )
+                    .unwrap();
+                    let expected = if time == 0.0 {
+                        1.0
+                    } else {
+                        input - 4.0 * delay.min(0.5)
+                    };
+                    assert_eq!(value, expected);
+                    let derivative = execute_with_context(
+                        &mut context,
+                        vec![
+                            Instruction::PushConst(20.0),
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(delay),
+                            Instruction::PushConst(2.0),
+                            Instruction::PushConst(0.01),
+                            Instruction::AbsDelayStateDerivativeMax(1),
+                        ],
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        derivative,
+                        if time > 0.0 && delay < 0.5 { -8.0 } else { 0.0 }
+                    );
+                }
+                assert!(
+                    execute_with_context(
+                        &mut context,
+                        vec![
+                            Instruction::PushConst(f64::NAN),
+                            Instruction::PushConst(0.25),
+                            Instruction::AbsDelayState(0),
+                        ]
+                    )
+                    .is_err()
+                );
+                assert!(
+                    execute_with_context(
+                        &mut context,
+                        vec![
+                            Instruction::PushConst(1.0),
+                            Instruction::PushConst(-1.0),
+                            Instruction::PushConst(0.5),
+                            Instruction::AbsDelayStateMax(1),
+                        ]
+                    )
+                    .is_err()
+                );
+                assert_eq!(format!("{:?}", context.delay_buffers), before);
+            }
+        }
+        context.time = 3.0;
+        assert!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.25),
+                    Instruction::AbsDelayState(0),
+                ]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("settled absdelay sample")
+        );
     }
 
     #[test]

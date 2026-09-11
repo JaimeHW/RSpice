@@ -1664,6 +1664,11 @@ endmodule
             );
             context.laplace_filters = report.model.laplace_filters.clone();
             context.zi_filters = report.model.zi_filters.clone();
+            context.delay_buffers.resize_with(
+                state_layout
+                    .family_len(crate::canonical_ir::state::CanonicalStateFamily::DelayBuffer),
+                Default::default,
+            );
             context.variables.resize(report.model.num_variables, 0.0);
             context
                 .configure_event_state_variables(&report.model.event_state_variables)
@@ -2024,6 +2029,87 @@ endmodule
                 harness.call_prelude();
                 assert_eq!(harness.call(&export), 0);
                 assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn static_dae_wasm_delay_retains_waveform_and_control_jacobian() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/static_dae_delay.va");
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, None)
+            .unwrap();
+        let control_entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .expect("voltage-controlled delay Jacobian column");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_delayed", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let control_jacobian = harness.jacobian_export(0, control_entry);
+            for (time, voltage) in [(0.0, 1.0), (1.0, 5.0), (2.0, 9.0)] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(1.0);
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, 0.25);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.call(&jacobian), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    if time == 0.0 { 7.0 } else { 6.5 }
+                );
+                assert_eq!(harness.call(&control_jacobian), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    if time == 0.0 { 0.0 } else { -4.0 }
+                );
+                let context = harness.store.data_mut().context_mut();
+                let before = format!("{:?}", context.delay_buffers);
+                let states = context.state_values.clone();
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                for (probe, delay) in [(voltage, 0.25), (voltage + 1.0, 0.125), (voltage, 0.25)] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, probe);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, delay);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    let expected = 2.0 * probe
+                        + if time == 0.0 {
+                            2.0
+                        } else {
+                            2.0 * voltage - 1.0 - 4.0 * delay
+                        };
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 2.0);
+                    assert_eq!(harness.call(&control_jacobian), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if time == 0.0 { 0.0 } else { -4.0 }
+                    );
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(format!("{:?}", context.delay_buffers), before);
+                    assert_eq!(context.state_values, states);
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
             }
         }
     }

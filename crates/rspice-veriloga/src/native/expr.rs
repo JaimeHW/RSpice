@@ -3695,6 +3695,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
                 Ok(true)
             }
+            "absdelay" if (2..=3).contains(&args.len()) => {
+                // The read position depends on td as well as the current
+                // sample. maxdelay is a frozen definition, not a runtime axis.
+                Ok(self.expr_derivative_is_zero(args[0], wrt)?
+                    && self.expr_derivative_is_zero(args[1], wrt)?)
+            }
             "abs"
             | "fabs"
             | "sqrt"
@@ -3722,7 +3728,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "ddt"
             | "idt"
             | "transition"
-            | "absdelay"
                 if !args.is_empty() =>
             {
                 self.expr_derivative_is_zero(args[0], wrt)
@@ -3774,6 +3779,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
                 Ok(true)
             }
+            "absdelay" if (2..=3).contains(&args.len()) => {
+                // Changing both the sample and read position can produce a
+                // mixed derivative even when each operand is affine.
+                let independent_first = self.expr_derivative_is_zero(args[0], first)?
+                    && self.expr_derivative_is_zero(args[1], first)?;
+                let independent_second = self.expr_derivative_is_zero(args[0], second)?
+                    && self.expr_derivative_is_zero(args[1], second)?;
+                Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
+                    && self.expr_second_derivative_is_zero(args[1], first, second)?
+                    && (independent_first || independent_second))
+            }
             "sqrt"
             | "exp"
             | "ln"
@@ -3797,7 +3813,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "ddt"
             | "idt"
             | "transition"
-            | "absdelay"
                 if !args.is_empty() =>
             {
                 Ok(self.expr_second_derivative_is_zero(args[0], first, second)?
