@@ -1171,8 +1171,21 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 self.stack.push(V::new(0.0, 0.0));
             }
             Instruction::LastCrossingState(_) => {
-                let _direction = self.pop_real("last_crossing direction")?;
-                let _input = self.pop_real("last_crossing input")?;
+                let direction = self.pop_real("last_crossing direction")?;
+                let input = self.pop_real("last_crossing input")?;
+                // Freeze the operator at its static value, retaining the same
+                // operand checks as transient and generated noise evaluation.
+                rspice_veriloga_runtime::evaluate_generated_last_crossing(
+                    rspice_veriloga_runtime::GeneratedCrossState::INITIAL,
+                    input,
+                    0.0,
+                    direction,
+                )
+                .map_err(|error| {
+                    VmError::InvalidNumericResult(format!(
+                        "last_crossing evaluation failed: {error}"
+                    ))
+                })?;
                 self.stack.push(V::new(-1.0, 0.0));
             }
             Instruction::WhiteNoise => {
@@ -1281,6 +1294,47 @@ mod tests {
         let mut context = VmContext::new(0);
         context.analysis_type = 1;
         context
+    }
+
+    #[test]
+    fn last_crossing_checks_frozen_operands_without_history() {
+        let context = ac_context();
+        let program = |input, direction| BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(input),
+                Instruction::PushConst(direction),
+                Instruction::LastCrossingState(0),
+            ],
+        };
+        for frequency in [0.0, 1.0, 1e9] {
+            for input in [-f64::MAX, 0.0, f64::MAX] {
+                for direction in [-1.0, 0.0, 1.0] {
+                    let mut vm = SmallSignalVm::new(&context, frequency).unwrap();
+                    assert_eq!(
+                        vm.execute(&program(input, direction)).unwrap(),
+                        Complex64::new(-1.0, 0.0)
+                    );
+                }
+            }
+            for (input, direction) in [
+                (1.0, -2.0),
+                (1.0, 2.0),
+                (1.0, 0.5),
+                (1.0, f64::NAN),
+                (1.0, f64::INFINITY),
+                (1.0, f64::NEG_INFINITY),
+                (f64::NAN, 0.0),
+                (f64::INFINITY, 0.0),
+                (f64::NEG_INFINITY, 0.0),
+            ] {
+                let mut vm = SmallSignalVm::new(&context, frequency).unwrap();
+                let error = vm.execute(&program(input, direction)).expect_err(
+                    "invalid last_crossing operands must not become a finite static sentinel",
+                );
+                assert!(error.to_string().contains("last_crossing"), "{error}");
+            }
+        }
+        assert!(context.cross_detectors.is_empty());
     }
 
     #[test]

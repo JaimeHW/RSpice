@@ -282,9 +282,7 @@ pub fn evaluate_generated_last_crossing(
     time: Value,
     direction: Value,
 ) -> Result<GeneratedCrossState, GeneratedEventControlError> {
-    let direction =
-        generated_event_integer(direction, GeneratedEventControlError::NonIntegerDirection)?;
-    if !(-1..=1).contains(&direction) {
+    if !matches!(direction, -1.0 | 0.0 | 1.0) {
         return Err(GeneratedEventControlError::InvalidLastCrossingDirection);
     }
     if !value.is_finite() {
@@ -313,7 +311,7 @@ pub fn evaluate_generated_last_crossing(
     if accepted.initialized {
         let rising = accepted.value < 0.0 && value >= 0.0;
         let falling = accepted.value > 0.0 && value <= 0.0;
-        if (rising && direction >= 0) || (falling && direction <= 0) {
+        if (rising && direction >= 0.0) || (falling && direction <= 0.0) {
             candidate.last_crossing_time = generated_crossing_time(accepted, value, time);
         }
     }
@@ -599,16 +597,17 @@ mod tests {
 
     #[test]
     fn last_crossing_rejects_invalid_operands() {
-        for direction in [-2.0, 2.0] {
+        for direction in [
+            -2.0,
+            2.0,
+            0.5,
+            Value::NAN,
+            Value::INFINITY,
+            Value::NEG_INFINITY,
+        ] {
             assert_eq!(
                 evaluate_generated_last_crossing(GeneratedCrossState::INITIAL, 1.0, 0.0, direction),
                 Err(GeneratedEventControlError::InvalidLastCrossingDirection)
-            );
-        }
-        for direction in [0.5, Value::NAN, Value::INFINITY] {
-            assert_eq!(
-                evaluate_generated_last_crossing(GeneratedCrossState::INITIAL, 1.0, 0.0, direction),
-                Err(GeneratedEventControlError::NonIntegerDirection)
             );
         }
         assert_eq!(
