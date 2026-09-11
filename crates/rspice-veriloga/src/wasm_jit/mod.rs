@@ -52,7 +52,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// emitted modules and the browser worker.
 /// Version 13 adds simulation-parameter helper opcodes 470 and 471.
 /// Version 14 adds bounded range-protected sum-products quotient helpers.
-pub const WASM_JIT_ABI_VERSION: u32 = 14;
+/// Version 15 adds site-aware integral derivative helpers 480 and 481.
+pub const WASM_JIT_ABI_VERSION: u32 = 15;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -123,7 +124,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// Version 36 uses one canonical unknown per physical potential branch.
 /// Version 37 preserves ordered source retention on switch branches.
 /// Version 38 lowers circular integrators through the canonical CFG plan.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 38;
+/// Version 39 preserves initial-condition and modulus derivatives of integrals.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 39;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2559,12 +2561,22 @@ endmodule
               phase=idtmod(V(p,n),5.0,V(m,n),0.25);
               I(p,n)<+phase; I(m,n)<+2.0*phase;
             end endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("circular"))
+            .unwrap();
+        let modulus_entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .unwrap();
         for postfix in [false, true] {
             let mut harness = FusedKernelHarness::for_source_with_plan(source, "circular", postfix);
             assert_eq!(harness.artifact.prelude_export().is_some(), !postfix);
             harness.reset();
             let first = harness.stamp_value_export(0);
             let second = harness.stamp_value_export(1);
+            let integrand_jacobian = harness.jacobian_export(0, 0);
+            let modulus_jacobian = harness.jacobian_export(0, modulus_entry);
             harness.store.data_mut().context_mut().analysis_type = 2;
             harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
             for (step, (modulus, expected)) in
@@ -2588,6 +2600,20 @@ endmodule
                             "postfix={postfix}; step={step}"
                         );
                     }
+                }
+                for (export, expected) in [
+                    (&integrand_jacobian, if step == 0 { 0.0 } else { 0.25 }),
+                    (
+                        &modulus_jacobian,
+                        -((5.0 + step as f64 * 0.25 - 0.25) / modulus).floor(),
+                    ),
+                ] {
+                    assert_eq!(harness.call(export), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        expected,
+                        "postfix={postfix}; step={step}"
+                    );
                 }
                 let context = harness.store.data_mut().context_mut();
                 assert_eq!(context.idtmod_origins.len(), 1);

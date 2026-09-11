@@ -823,6 +823,13 @@ pub enum Instruction {
     /// The integral folds into [offset, offset + modulus)
     /// Stack: `[expr, ic, modulus, offset] -> [wrapped integral]`
     IdtModState(usize),
+    /// Derivative of the current integral candidate using this site's history.
+    /// Stack: `[candidate, input_derivative, ic_derivative] -> [derivative]`
+    IdtDerivativeState(usize),
+    /// Derivative on the current circular-integrator branch.
+    /// Stack: `[candidate, modulus, offset, input_derivative, ic_derivative,
+    /// modulus_derivative] -> [derivative]`
+    IdtModDerivativeState(usize),
     /// Companion Jacobian factor for ddt: top-of-stack / dt (0 at DC)
     DdtJacobian,
     /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)

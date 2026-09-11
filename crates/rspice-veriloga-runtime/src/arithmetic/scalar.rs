@@ -547,7 +547,7 @@ fn scaled_sum_products(
     scaled_sum_triple_products(terms.into_iter().map(|(a, b)| [a, b, 1.0]), -2148)
 }
 
-fn scaled_sum_triple_products(
+pub(super) fn scaled_sum_triple_products(
     terms: impl IntoIterator<Item = [f64; 3]>,
     exponent_floor: i32,
 ) -> Result<ExactValue, ArithmeticError> {

@@ -135,8 +135,12 @@ impl BlockProgram {
 fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
     let (operator, slot) = match op {
         NativeOp::DdtState(slot) => (CanonicalStateOperator::Ddt, slot),
-        NativeOp::IdtState(slot) => (CanonicalStateOperator::Idt, slot),
-        NativeOp::IdtModState(slot) => (CanonicalStateOperator::IdtMod, slot),
+        NativeOp::IdtState(slot) | NativeOp::IdtDerivativeState(slot) => {
+            (CanonicalStateOperator::Idt, slot)
+        }
+        NativeOp::IdtModState(slot) | NativeOp::IdtModDerivativeState(slot) => {
+            (CanonicalStateOperator::IdtMod, slot)
+        }
         NativeOp::TransitionState(slot) | NativeOp::TransitionStateDerivative(slot) => {
             (CanonicalStateOperator::Transition, slot)
         }

@@ -11,6 +11,184 @@ fn assert_close(actual: f64, expected: f64, label: &str) {
 }
 
 #[test]
+fn circular_integrator_jacobians_follow_the_initialization_and_wrap_branch() {
+    let model = DeviceFixture::compile(
+        r#"
+module circular_jacobian(p,n,x,m,c,o);
+    inout p,n,x,m,c,o; electrical p,n,x,m,c,o;
+    analog I(p,n) <+ idtmod(V(x,n),V(c,n),V(m,n),V(o,n));
+endmodule
+"#,
+    );
+    let check = |device: &mut rspice_veriloga::device::VerilogADevice,
+                 voltages: [f64; 5],
+                 expected: [f64; 4]| {
+        let mut jacobian = [0.0; 5];
+        device
+            .try_stamp(
+                &voltages,
+                |row, col, value| {
+                    assert_eq!(row, 0);
+                    jacobian[col] += value;
+                },
+                |_, _| {},
+            )
+            .unwrap();
+        for (column, expected) in (1..5).zip(expected) {
+            let mut values = [0.0; 2];
+            for (value, delta) in values.iter_mut().zip([-1.0e-6, 1.0e-6]) {
+                let mut probe = voltages;
+                probe[column] += delta;
+                device.update_voltages(&probe);
+                *value = device.try_evaluate().unwrap()[0];
+            }
+            let finite_difference = (values[1] - values[0]) / 2.0e-6;
+            assert!(
+                (finite_difference - expected).abs() < 1.0e-8,
+                "column {column}: finite difference {finite_difference}, expected {expected}"
+            );
+            assert_close(
+                jacobian[column],
+                expected,
+                &format!("Jacobian column {column}"),
+            );
+        }
+        device.update_voltages(&voltages);
+        device.try_evaluate().unwrap();
+    };
+    let mut device = model.device("A1", &[1, 0, 2, 3, 4, 5]);
+    check(
+        &mut device,
+        [0.0, 1.5, 3.0, 5.0, 0.25],
+        [0.0, -1.0, 1.0, 0.0],
+    );
+    device.advance_state();
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    for (modulus, modulus_gain) in [(3.0, -1.0), (2.0, -2.0), (4.0, -1.0)] {
+        check(
+            &mut device,
+            [0.0, 1.5, modulus, 5.0, 0.25],
+            [0.25, modulus_gain, 0.0, 0.0],
+        );
+    }
+    let mut direct = model.device("A2", &[1, 0, 2, 3, 4, 5]);
+    direct.set_analysis_type(2);
+    direct.set_integration_coefficients(IntegrationCoefficients {
+        active: true,
+        derivative_scale: 8.0,
+        previous_value_scale: 8.0,
+        older_value_scale: 0.0,
+        previous_derivative_scale: 1.0,
+    });
+    check(
+        &mut direct,
+        [0.0, 1.5, 3.0, 5.0, 0.25],
+        [0.25, -1.0, 1.0, 0.0],
+    );
+}
+
+#[test]
+fn integral_jacobians_preserve_dc_initialization_and_complex_ac_transfer() {
+    for operator in [
+        "idt(V(x,n),V(c,n)*V(c,n))",
+        "idtmod(V(x,n),V(c,n)*V(c,n),V(m,n),0.25)",
+    ] {
+        let source = format!(
+            "module integral(p,n,x,c,m); inout p,n,x,c,m; electrical p,n,x,c,m;
+            analog I(p,n)<+{operator}; endmodule"
+        );
+        let model = DeviceFixture::compile(&source);
+        let wrapped = operator.starts_with("idtmod");
+        let bias = [0.0, 1.5, 5.0, 3.0];
+        for (coefficients, input_gain, ic_gain) in [
+            (IntegrationCoefficients::inactive(), 0.0, 10.0),
+            (
+                IntegrationCoefficients {
+                    active: true,
+                    derivative_scale: 8.0,
+                    previous_value_scale: 8.0,
+                    older_value_scale: 0.0,
+                    previous_derivative_scale: 1.0,
+                },
+                0.25,
+                10.0,
+            ),
+        ] {
+            let mut device = model.device("A1", &[1, 0, 2, 3, 4]);
+            device.set_analysis_type(if coefficients.active { 2 } else { 0 });
+            device.set_integration_coefficients(coefficients);
+            let mut jacobian = [0.0; 4];
+            device
+                .try_stamp(
+                    &bias,
+                    |row, col, value| {
+                        assert_eq!(row, 0);
+                        jacobian[col] += value;
+                    },
+                    |_, _| {},
+                )
+                .unwrap();
+            assert_eq!(
+                jacobian,
+                [0.0, input_gain, ic_gain, if wrapped { -8.0 } else { 0.0 }],
+                "{operator}"
+            );
+        }
+        let mut device = model.device("A1", &[1, 0, 2, 3, 4]);
+        device.set_analysis_type(1);
+        let frequency = 2.0;
+        let mut jacobian = [(0.0, 0.0); 4];
+        device
+            .try_stamp_small_signal_complex(&bias, frequency, |row, col, re, im| {
+                assert_eq!(row, 0);
+                jacobian[col].0 += re;
+                jacobian[col].1 += im;
+            })
+            .unwrap();
+        assert_close(
+            jacobian[1].1,
+            -1.0 / (std::f64::consts::TAU * frequency),
+            "AC integrand derivative",
+        );
+        assert_eq!(jacobian[1].0, 0.0);
+        assert_eq!(
+            jacobian[2],
+            (0.0, 0.0),
+            "AC holds the initial condition fixed"
+        );
+        assert_eq!(jacobian[3], (if wrapped { -8.0 } else { 0.0 }, 0.0));
+    }
+}
+
+#[test]
+fn integral_initial_conditions_retain_higher_order_derivatives() {
+    for expression in [
+        "idt(0.0,V(c,n)*V(c,n)*V(c,n))",
+        "idtmod(0.0,V(c,n)*V(c,n)*V(c,n),7.0,0.25)",
+    ] {
+        let model = DeviceFixture::compile(&format!(
+            "module curvature(p,n,c); inout p,n,c; electrical p,n,c;
+            analog I(p,n)<+ddx({expression},V(c,n)); endmodule"
+        ));
+        let mut device = model.device("A1", &[1, 0, 2]);
+        let mut jacobian = 0.0;
+        device
+            .try_stamp(
+                &[0.0, 5.0],
+                |row, col, value| {
+                    assert_eq!((row, col), (0, 1));
+                    jacobian += value;
+                },
+                |_, _| {},
+            )
+            .unwrap();
+        assert_eq!(jacobian, 30.0, "{expression}");
+        assert_eq!(device.try_evaluate().unwrap(), vec![75.0]);
+    }
+}
+
+#[test]
 fn analog_integrators_follow_solver_companion_coefficients() {
     let model = DeviceFixture::compile(
         r#"

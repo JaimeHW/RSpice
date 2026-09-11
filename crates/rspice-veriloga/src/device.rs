@@ -2394,6 +2394,7 @@ impl CanonicalNoiseRuntimePlan {
                 .map(SmolStr::new)
                 .collect();
         let inputs = crate::canonical_ir::CfgEvalInputs {
+            integral_derivatives: Default::default(),
             parameters: context.parameters.clone(),
             parameter_given: context
                 .param_given
@@ -3023,13 +3024,17 @@ impl VerilogADevice {
 
         let mut scan_program = |program: &crate::codegen::BytecodeProgram| {
             for instruction in &program.instructions {
-                if let Instruction::IdtModState(slot) = instruction {
+                if let Instruction::IdtModState(slot) | Instruction::IdtModDerivativeState(slot) =
+                    instruction
+                {
                     context.idtmod_origins.entry(*slot).or_default();
                 }
                 match instruction {
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
                     | Instruction::IdtModState(idx)
+                    | Instruction::IdtDerivativeState(idx)
+                    | Instruction::IdtModDerivativeState(idx)
                     | Instruction::LimitState(idx)
                     | Instruction::CanonicalLimitState(idx) => update_max(&mut max_state, *idx),
                     Instruction::AbsDelayState(idx)

@@ -1984,6 +1984,122 @@ pub unsafe extern "C" fn rspice_idtmod_state_native(
     unsafe { rspice_integral_state_native(operands, ctx, state_id, true) }
 }
 
+unsafe fn rspice_integral_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+    wrapped: bool,
+) -> f64 {
+    use rspice_veriloga_runtime::{
+        GeneratedIdtModBranch, evaluate_generated_idt_derivative,
+        evaluate_generated_idtmod_derivative,
+    };
+    let operator = if wrapped {
+        "idtmod derivative"
+    } else {
+        "idt derivative"
+    };
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "missing operands or context",
+        );
+    }
+    let ctx = unsafe { &*ctx };
+    if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "has invalid state storage",
+        );
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 6 } else { 3 }) };
+    if operands.iter().any(|value| !value.is_finite()) {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "operands must be finite",
+        );
+    }
+    if ctx.static_dae_probe != 0
+        || (matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium())
+    {
+        return 0.0;
+    }
+    if unsafe { *ctx.state_candidate_valid.add(state_id) } != 1 {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "requires its current primal candidate",
+        );
+    }
+    let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
+    let coefficients = state_integration_coefficients(ctx).into();
+    let result = if wrapped {
+        let Some(origin) = (unsafe { ctx.idtmod_origins.as_ref() })
+            .and_then(|origins| origins.get(&state_id))
+            .and_then(|state| state.candidate.as_ref())
+        else {
+            return invalid_native_integration_context(
+                ctx,
+                operator,
+                state_id,
+                "missing candidate origin",
+            );
+        };
+        evaluate_generated_idtmod_derivative(
+            coefficients,
+            initialized,
+            [operands[3], operands[4], operands[5]],
+            GeneratedIdtModBranch {
+                origin,
+                value: operands[0],
+                modulus: operands[1],
+                offset: operands[2],
+            },
+        )
+        .map_err(|error| error.to_string())
+    } else {
+        evaluate_generated_idt_derivative(coefficients, initialized, [operands[1], operands[2]])
+            .map_err(|error| error.to_string())
+    };
+    match result {
+        Ok(value) => value,
+        Err(error) => invalid_native_integration_context(ctx, operator, state_id, &error),
+    }
+}
+
+/// Evaluate an initialized or initial-condition integral derivative.
+///
+/// # Safety
+/// `operands` contains three f64 values; `ctx` owns the live state buffers.
+#[unsafe(export_name = "rspice_idt_derivative_state_native")]
+pub unsafe extern "C" fn rspice_idt_derivative_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    unsafe { rspice_integral_derivative_native(operands, ctx, state_id, false) }
+}
+
+/// Evaluate a derivative on the current circular-integrator branch.
+///
+/// # Safety
+/// `operands` contains six f64 values; `ctx` owns the live state buffers.
+#[unsafe(export_name = "rspice_idtmod_derivative_state_native")]
+pub unsafe extern "C" fn rspice_idtmod_derivative_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    unsafe { rspice_integral_derivative_native(operands, ctx, state_id, true) }
+}
+
 /// Native companion Jacobian evaluation for `idt` and `idtmod`.
 ///
 /// # Safety

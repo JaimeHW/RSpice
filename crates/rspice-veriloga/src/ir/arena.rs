@@ -296,6 +296,8 @@ pub enum Node {
 /// in the node so a walk can classify one without touching the side table.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum HeavyKind {
+    /// [`Heavy::IntegralDerivative`].
+    IntegralDerivative,
     /// [`Heavy::AbsDelay`].
     AbsDelay,
     /// [`Heavy::AbsDelayDerivative`].
@@ -352,6 +354,17 @@ pub enum ZiPolynomial {
 /// assignment forest at all.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Heavy {
+    /// Local derivative action of the original integral candidate.
+    IntegralDerivative {
+        /// Original `Idt` or `IdtMod` node, preserving its state slot.
+        primal: NodeId,
+        /// Derivative of the integrand.
+        input_derivative: NodeId,
+        /// Derivative of the initial condition.
+        ic_derivative: NodeId,
+        /// Derivative of the modulus, for a circular integral.
+        modulus_derivative: Option<NodeId>,
+    },
     /// `absdelay` — absolute transport delay.
     AbsDelay {
         /// Site identity shared with the derivative.
@@ -594,6 +607,7 @@ impl Heavy {
     /// Which kind this payload is, for the inline tag on [`Node::Heavy`].
     pub fn kind(&self) -> HeavyKind {
         match self {
+            Self::IntegralDerivative { .. } => HeavyKind::IntegralDerivative,
             Self::AbsDelay { .. } => HeavyKind::AbsDelay,
             Self::AbsDelayDerivative { .. } => HeavyKind::AbsDelayDerivative,
             Self::Transition { .. } => HeavyKind::Transition,
@@ -976,6 +990,17 @@ fn for_each_heavy_child<F: FnMut(NodeId)>(heavy: &Heavy, f: &mut F) {
         }
     };
     match heavy {
+        Heavy::IntegralDerivative {
+            primal,
+            input_derivative,
+            ic_derivative,
+            modulus_derivative,
+        } => {
+            f(*primal);
+            f(*input_derivative);
+            f(*ic_derivative);
+            optional(*modulus_derivative, f);
+        }
         Heavy::AbsDelay {
             expr,
             delay_time,
@@ -1383,6 +1408,17 @@ fn rebuild_heavy(
     descend: &mut impl FnMut(&mut ExprArena, NodeId) -> NodeId,
 ) -> Heavy {
     match heavy {
+        Heavy::IntegralDerivative {
+            primal,
+            input_derivative,
+            ic_derivative,
+            modulus_derivative,
+        } => Heavy::IntegralDerivative {
+            primal: descend(arena, *primal),
+            input_derivative: descend(arena, *input_derivative),
+            ic_derivative: descend(arena, *ic_derivative),
+            modulus_derivative: rebuild_optional(arena, *modulus_derivative, descend),
+        },
         Heavy::AbsDelay {
             site,
             expr,

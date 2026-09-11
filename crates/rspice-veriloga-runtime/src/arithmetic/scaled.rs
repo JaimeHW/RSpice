@@ -189,7 +189,7 @@ impl ScaledValue {
         }
     }
 
-    fn scaled(value: f64, exponent: i64) -> Self {
+    pub(super) fn scaled(value: f64, exponent: i64) -> Self {
         let (value, exponent) = Self { value, exponent }.normalized();
         if value == 0.0 || !value.is_finite() {
             return Self::new(value);

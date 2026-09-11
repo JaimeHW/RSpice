@@ -201,6 +201,8 @@ pub(crate) enum NativeOp {
     IdtState(usize),
     IdtJacobian,
     IdtModState(usize),
+    IdtDerivativeState(usize),
+    IdtModDerivativeState(usize),
     /// Read one per-evaluation prelude slot.
     ///
     /// The slot array is `EvalContext::prelude_slots`: scratch a CFG prelude
@@ -2095,6 +2097,24 @@ impl NativeProgram {
                     depth -= 3;
                     ops.push(NativeOp::IdtModState(*index));
                 }
+                Instruction::IdtDerivativeState(index)
+                | Instruction::IdtModDerivativeState(index) => {
+                    let wrapped = matches!(instruction, Instruction::IdtModDerivativeState(_));
+                    let arity = if wrapped { 6 } else { 3 };
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        arity,
+                    )?;
+                    depth -= arity - 1;
+                    ops.push(if wrapped {
+                        NativeOp::IdtModDerivativeState(*index)
+                    } else {
+                        NativeOp::IdtDerivativeState(*index)
+                    });
+                }
                 Instruction::Gt
                 | Instruction::Lt
                 | Instruction::Ge
@@ -3687,7 +3707,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => Ok(false),
             },
             "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" => Ok(true),
-            "slew" if (1..=3).contains(&args.len()) => {
+            "slew" | "idt" if (1..=3).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_derivative_is_zero(*argument, wrt)? {
                         return Ok(false);
@@ -3726,7 +3746,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "ceil"
             | "limit"
             | "ddt"
-            | "idt"
             | "transition"
                 if !args.is_empty() =>
             {
@@ -3771,7 +3790,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             },
             "white_noise" | "flicker_noise" | "noise_table" | "noise_table_log" | "floor"
             | "ceil" | "abs" | "fabs" => Ok(true),
-            "slew" if (1..=3).contains(&args.len()) => {
+            "slew" | "idt" | "idtmod" if (1..=4).contains(&args.len()) => {
                 for argument in args {
                     if !self.expr_second_derivative_is_zero(*argument, first, second)? {
                         return Ok(false);
@@ -3811,7 +3830,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "__rspice_limited_exp"
             | "limit"
             | "ddt"
-            | "idt"
             | "transition"
                 if !args.is_empty() =>
             {
@@ -4821,7 +4839,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_ddx_projection_derivative(*expr, *probe, wrt)
             }
             "ddt" => self.lower_ddt_derivative(name, args, wrt),
-            "idt" | "idtmod" => self.lower_idt_derivative(name, args, wrt),
+            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, wrt, None),
             "slew" => {
                 let (expr, max_rise, max_fall) = match args {
                     [expr] => (*expr, None, None),
@@ -5036,7 +5054,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 };
                 self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
             }
-            "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
+            "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, first, Some(second)),
+            "ddt" => Err(self.unsupported(format!(
                 "second derivative of stateful intrinsic at expression {expr_id}"
             ))),
             "slew" => {
@@ -5885,13 +5904,54 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_idt_derivative(
         &mut self,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
+        second: Option<CanonicalDerivativeAxis>,
     ) -> JitResult<()> {
         self.require_intrinsic_arity_range(name, args, 1, 4)?;
-        self.lower_derivative(args[0], wrt)?;
-        self.append_unary(NativeOp::IdtJacobian)
+        let wrapped = normalize_intrinsic_name(name) == "idtmod" && args.len() >= 3;
+        let slot = if wrapped {
+            self.limits.canonical_idtmod_slot(expr_id)
+        } else {
+            self.limits.canonical_idt_slot(expr_id)
+        }
+        .ok_or_else(|| {
+            self.unsupported(format!("{name} derivative at {expr_id} has no state slot"))
+        })?;
+        self.lower(expr_id)?;
+        if wrapped {
+            self.lower(args[2])?;
+            if let Some(offset) = args.get(3) {
+                self.lower(*offset)?;
+            } else {
+                self.push(NativeOp::Const(0.0))?;
+            }
+        }
+        let derivative = |this: &mut Self, argument| {
+            if let Some(second) = second {
+                this.lower_second_derivative(argument, wrt, second)
+            } else {
+                this.lower_derivative(argument, wrt)
+            }
+        };
+        derivative(self, args[0])?;
+        if let Some(ic) = args.get(1) {
+            derivative(self, *ic)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if wrapped {
+            derivative(self, args[2])?;
+        }
+        self.depth -= if wrapped { 5 } else { 2 };
+        self.ops.push(if wrapped {
+            NativeOp::IdtModDerivativeState(slot)
+        } else {
+            NativeOp::IdtDerivativeState(slot)
+        });
+        Ok(())
     }
 
     fn lower_limit_derivative(
@@ -8566,6 +8626,8 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IdtState(_) => "IdtState",
         NativeOp::IdtJacobian => "IdtJacobian",
         NativeOp::IdtModState(_) => "IdtModState",
+        NativeOp::IdtDerivativeState(_) => "IdtDerivativeState",
+        NativeOp::IdtModDerivativeState(_) => "IdtModDerivativeState",
         NativeOp::LoadPreludeSlot(_) => "LoadPreludeSlot",
         NativeOp::StorePreludeSlot(_) => "StorePreludeSlot",
     }
@@ -9531,7 +9593,10 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::FlickerNoise
         | NativeOp::IdtState(_) => (2, 1),
 
-        NativeOp::SlewState(_) | NativeOp::AbsDelayStateMax(_) | NativeOp::IfElse => (3, 1),
+        NativeOp::SlewState(_)
+        | NativeOp::IdtDerivativeState(_)
+        | NativeOp::AbsDelayStateMax(_)
+        | NativeOp::IfElse => (3, 1),
         NativeOp::TransitionState(_)
         | NativeOp::TimerState(_)
         | NativeOp::AboveState(_)
@@ -9542,7 +9607,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         NativeOp::TransitionStateDerivative(_)
         | NativeOp::AbsDelayStateDerivativeMax(_)
         | NativeOp::CrossState(_) => (5, 1),
-        NativeOp::SlewStateDerivative(_) => (6, 1),
+        NativeOp::SlewStateDerivative(_) | NativeOp::IdtModDerivativeState(_) => (6, 1),
     }
 }
 
@@ -9733,6 +9798,8 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::DdtState(_) => "DdtState",
         Instruction::IdtState(_) => "IdtState",
         Instruction::IdtModState(_) => "IdtModState",
+        Instruction::IdtDerivativeState(_) => "IdtDerivativeState",
+        Instruction::IdtModDerivativeState(_) => "IdtModDerivativeState",
         Instruction::DdtJacobian => "DdtJacobian",
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",

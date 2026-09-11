@@ -199,7 +199,11 @@ impl NativeRequiredStorage {
                 match instruction {
                     Instruction::DdtState(index)
                     | Instruction::IdtState(index)
-                    | Instruction::IdtModState(index) => update_max(&mut max_state, *index),
+                    | Instruction::IdtModState(index)
+                    | Instruction::IdtDerivativeState(index)
+                    | Instruction::IdtModDerivativeState(index) => {
+                        update_max(&mut max_state, *index)
+                    }
                     Instruction::LimitState(index) | Instruction::CanonicalLimitState(index) => {
                         update_max(&mut max_state, *index);
                     }

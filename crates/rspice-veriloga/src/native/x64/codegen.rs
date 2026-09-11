@@ -48,6 +48,9 @@ use crate::native::abi::{
     rspice_transition_derivative_native, rspice_transition_state_native,
 };
 use crate::native::abi::{NativeRuntimeStatus, OperandArrayCall, operand_array_call};
+use crate::native::abi::{
+    rspice_idt_derivative_state_native, rspice_idtmod_derivative_state_native,
+};
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp, runtime_integer_operation};
@@ -1312,18 +1315,19 @@ impl FunctionCompiler {
                         NativeOp::AbsDelayState(buffer_id) => {
                             self.emit_absdelay_state(buffer_id)?
                         }
-                        NativeOp::AbsDelayStateMax(buffer_id) => self.emit_absdelay_helper(
+                        NativeOp::AbsDelayStateMax(buffer_id) => self.emit_state_operand_helper(
                             buffer_id,
                             3,
                             rspice_absdelay_state_max_native,
                         )?,
-                        NativeOp::AbsDelayStateDerivative(buffer_id) => self.emit_absdelay_helper(
-                            buffer_id,
-                            4,
-                            rspice_absdelay_derivative_native,
-                        )?,
+                        NativeOp::AbsDelayStateDerivative(buffer_id) => self
+                            .emit_state_operand_helper(
+                                buffer_id,
+                                4,
+                                rspice_absdelay_derivative_native,
+                            )?,
                         NativeOp::AbsDelayStateDerivativeMax(buffer_id) => self
-                            .emit_absdelay_helper(
+                            .emit_state_operand_helper(
                                 buffer_id,
                                 5,
                                 rspice_absdelay_derivative_max_native,
@@ -1340,6 +1344,16 @@ impl FunctionCompiler {
                         NativeOp::IdtState(index) => self.emit_idt_state(index)?,
                         NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
                         NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
+                        NativeOp::IdtDerivativeState(index) => self.emit_state_operand_helper(
+                            index,
+                            3,
+                            rspice_idt_derivative_state_native,
+                        )?,
+                        NativeOp::IdtModDerivativeState(index) => self.emit_state_operand_helper(
+                            index,
+                            6,
+                            rspice_idtmod_derivative_state_native,
+                        )?,
                     }
                     if self.logical_depth() != 1 {
                         return Err(JitError::Verifier {
@@ -3592,10 +3606,10 @@ impl FunctionCompiler {
     }
 
     fn emit_absdelay_state(&mut self, buffer_id: usize) -> JitResult<()> {
-        self.emit_absdelay_helper(buffer_id, 2, rspice_absdelay_state_native)
+        self.emit_state_operand_helper(buffer_id, 2, rspice_absdelay_state_native)
     }
 
-    fn emit_absdelay_helper(
+    fn emit_state_operand_helper(
         &mut self,
         buffer_id: usize,
         operand_count: usize,
@@ -3605,7 +3619,7 @@ impl FunctionCompiler {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
                 detail: format!(
-                    "absdelay state requires stack depth {operand_count}, found {}",
+                    "state helper requires stack depth {operand_count}, found {}",
                     self.depth
                 )
                 .into(),

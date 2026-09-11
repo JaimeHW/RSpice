@@ -33,6 +33,9 @@ use crate::native::abi::{
     rspice_transition_derivative_native, rspice_transition_state_native,
 };
 use crate::native::abi::{NativeRuntimeStatus, OperandArrayCall, operand_array_call};
+use crate::native::abi::{
+    rspice_idt_derivative_state_native, rspice_idtmod_derivative_state_native,
+};
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
     BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram,
@@ -1857,6 +1860,18 @@ impl FunctionCompiler {
                 4,
                 state_id,
                 rspice_idtmod_state_native as *const () as usize,
+            )?,
+            NativeOp::IdtDerivativeState(state_id) => self.emit_operand_context_helper(
+                prepared,
+                3,
+                state_id,
+                rspice_idt_derivative_state_native as *const () as usize,
+            )?,
+            NativeOp::IdtModDerivativeState(state_id) => self.emit_operand_context_helper(
+                prepared,
+                6,
+                state_id,
+                rspice_idtmod_derivative_state_native as *const () as usize,
             )?,
             NativeOp::WhiteNoise | NativeOp::FlickerNoise => self.emit_literal(result, 0.0)?,
         }

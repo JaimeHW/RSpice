@@ -1550,6 +1550,48 @@ impl CodeGenerator {
         program: &mut BytecodeProgram,
     ) -> CompileResult<()> {
         match heavy {
+            Heavy::IntegralDerivative {
+                primal,
+                input_derivative,
+                ic_derivative,
+                modulus_derivative,
+            } => {
+                self.emit_expr(arena, *primal, emit_ctx, program)?;
+                let state_id = emit_ctx.integration_slot(*primal, &self.limit_state_count);
+                let wrapped = match (*arena.node(*primal), modulus_derivative) {
+                    (Node::Idt(_, _), None) => false,
+                    (
+                        Node::IdtMod {
+                            modulus, payload, ..
+                        },
+                        Some(_),
+                    ) => {
+                        self.emit_expr(arena, modulus, emit_ctx, program)?;
+                        if let Some(offset) = arena.optional_pair(payload).1 {
+                            self.emit_expr(arena, offset, emit_ctx, program)?;
+                        } else {
+                            program.instructions.push(Instruction::PushConst(0.0));
+                        }
+                        true
+                    }
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::Internal(
+                            "integral derivative has an incompatible primal".into(),
+                        ))
+                        .into());
+                    }
+                };
+                self.emit_expr(arena, *input_derivative, emit_ctx, program)?;
+                self.emit_expr(arena, *ic_derivative, emit_ctx, program)?;
+                if let Some(derivative) = modulus_derivative {
+                    self.emit_expr(arena, *derivative, emit_ctx, program)?;
+                }
+                program.instructions.push(if wrapped {
+                    Instruction::IdtModDerivativeState(state_id)
+                } else {
+                    Instruction::IdtDerivativeState(state_id)
+                });
+            }
             Heavy::AbsDelay {
                 site,
                 expr,

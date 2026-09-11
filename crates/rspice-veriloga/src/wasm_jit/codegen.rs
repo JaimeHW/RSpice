@@ -2062,10 +2062,13 @@ fn emit_helper_call(
         }
         return emit_slice_helper_call(body, descriptor, operands, result);
     }
-    if matches!(op, NativeOp::SlewStateDerivative(_)) {
+    if matches!(
+        op,
+        NativeOp::SlewStateDerivative(_) | NativeOp::IdtModDerivativeState(_)
+    ) {
         if operands.len() != 6 {
             return Err(WasmJitError::Encoding(format!(
-                "slew derivative lowering supplied {} operands; exactly 6 are required",
+                "{op:?} lowering supplied {} operands; exactly 6 are required",
                 operands.len()
             )));
         }
@@ -2290,6 +2293,8 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::IdtState(index) => set_index(&mut descriptor, 442, index)?,
         NativeOp::IdtJacobian => descriptor.opcode = 443,
         NativeOp::IdtModState(index) => set_index(&mut descriptor, 444, index)?,
+        NativeOp::IdtDerivativeState(index) => set_index(&mut descriptor, 480, index)?,
+        NativeOp::IdtModDerivativeState(index) => set_index(&mut descriptor, 481, index)?,
         _ => {
             return Err(WasmJitError::Encoding(format!(
                 "native op {op:?} reached helper fallback without an ABI opcode"

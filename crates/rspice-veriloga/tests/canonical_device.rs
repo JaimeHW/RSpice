@@ -4499,6 +4499,38 @@ assert_eq!(rollback_after, rollback_before, "static DAE probe mutated trial hist
 }
 
 #[test]
+fn generated_integral_derivatives_follow_each_sites_initialization() {
+    let (state, stamp, noise) = generated_parts(
+        "module initialized_integral(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+idt(V(p),V(n)*V(n)); endmodule",
+        "initialized integral derivatives",
+    );
+    run_generated_main("initialized integral derivatives", &state, &stamp, &noise, r#"
+let active = runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:8.0, previous_value_scale:8.0,
+    older_value_scale:0.0, previous_derivative_scale:1.0,
+};
+for (coefficients, input_gain) in [(runtime::GeneratedDdtCoefficients::inactive(),0.0), (active,0.25)] {
+    let mut instance=device::state::Instance::new(&[0,1]);
+    instance.finalize_parameters().unwrap();
+    instance.set_timepoint(0.25,0.25,coefficients);
+    instance.begin_stateful_evaluation();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.5,5.0],temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!((sink[12],sink[13]),(input_gain,10.0),"first candidate {sink:?}");
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    instance.set_timepoint(0.5,0.25,active);
+    instance.begin_stateful_evaluation();
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!((sink[12],sink[13]),(0.125,0.0),"accepted history {sink:?}");
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
 fn generated_integral_recovers_intermediate_overflow() {
     let (state, stamp, noise) = generated_parts(
         r#"

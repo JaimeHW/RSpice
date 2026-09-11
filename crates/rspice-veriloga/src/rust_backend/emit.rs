@@ -106,6 +106,7 @@ pub struct EmitBindings {
     pub idt: String,
     pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
+    pub idt_derivative: String,
     /// Stateful generated event-control evaluators.
     pub cross: String,
     pub cross_slots: HashMap<crate::canonical_ir::ExprId, usize>,
@@ -157,6 +158,7 @@ impl Default for EmitBindings {
             idt: "idt".into(),
             idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
+            idt_derivative: "idt_derivative".into(),
             cross: "cross".into(),
             cross_slots: HashMap::new(),
             above: "above".into(),
@@ -1841,6 +1843,38 @@ impl Emitter<'_> {
                 self.numeric_operand(*ic)
             ),
             CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap: None,
+            } => {
+                let slot = bindings
+                    .idt_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator));
+                let width = self.function.lanes_of(value).map_or(1, |lanes| lanes.len());
+                if width == 1 {
+                    format!(
+                        "{}({slot},{},{},{})",
+                        bindings.idt_derivative,
+                        self.numeric_operand(*primal),
+                        self.lane_element(*input_derivative, 0),
+                        self.lane_element(*ic_derivative, 0)
+                    )
+                } else {
+                    format!(
+                        "{}(std::array::from_fn(|i| {}({slot},{},({})[i],({})[i])))",
+                        lane_type_name(width),
+                        bindings.idt_derivative,
+                        self.numeric_operand(*primal),
+                        self.operand(*input_derivative),
+                        self.operand(*ic_derivative)
+                    )
+                }
+            }
             CfgValueKind::Cross {
                 operator,
                 input,
@@ -1927,7 +1961,8 @@ impl Emitter<'_> {
                 self.numeric_operand(*proposed)
             ),
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
-            CfgValueKind::IdtMod { .. } => {
+            CfgValueKind::IdtMod { .. }
+            | CfgValueKind::IntegralDerivative { wrap: Some(_), .. } => {
                 return Err(EmitError::UnsupportedStatefulOperator {
                     value,
                     operator: "idtmod",

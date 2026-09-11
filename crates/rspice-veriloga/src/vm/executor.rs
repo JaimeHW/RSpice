@@ -715,6 +715,83 @@ impl<'a> Vm<'a> {
                 self.stack.push(value);
             }
 
+            Instruction::IdtDerivativeState(idx) | Instruction::IdtModDerivativeState(idx) => {
+                use rspice_veriloga_runtime::{
+                    GeneratedIdtModBranch, evaluate_generated_idt_derivative,
+                    evaluate_generated_idtmod_derivative,
+                };
+                let wrapped = matches!(instruction, Instruction::IdtModDerivativeState(_));
+                let modulus_derivative = if wrapped { self.pop()? } else { 0.0 };
+                let ic_derivative = self.pop()?;
+                let input_derivative = self.pop()?;
+                let offset = if wrapped { self.pop()? } else { 0.0 };
+                let modulus = if wrapped { self.pop()? } else { 1.0 };
+                let value = self.pop()?;
+                if [
+                    value,
+                    modulus,
+                    offset,
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative,
+                ]
+                .iter()
+                .any(|value| !value.is_finite())
+                {
+                    return Err(VmError::InvalidNumericResult(
+                        "integral derivative operands must be finite".into(),
+                    ));
+                }
+                if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    || (matches!(self.context.analysis_type, 1 | 3)
+                        && !self.context.analysis_phase.is_equilibrium())
+                {
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
+                let initialized = self.context.state_initialized.get(*idx).copied().ok_or(
+                    VmError::InvalidInstruction("missing integral derivative state"),
+                )?;
+                if self.context.state_candidate_valid.get(*idx)
+                    != Some(&INTEGRATION_CANDIDATE_VALID)
+                {
+                    return Err(VmError::InvalidInstruction(
+                        "integral derivative requires its current primal candidate",
+                    ));
+                }
+                let coefficients = self.context.state_integration_coefficients().into();
+                let result = if wrapped {
+                    let origin = self
+                        .context
+                        .idtmod_origins
+                        .get(idx)
+                        .and_then(|state| state.candidate.as_ref())
+                        .ok_or(VmError::InvalidInstruction(
+                            "missing circular-integrator candidate origin",
+                        ))?;
+                    evaluate_generated_idtmod_derivative(
+                        coefficients,
+                        initialized,
+                        [input_derivative, ic_derivative, modulus_derivative],
+                        GeneratedIdtModBranch {
+                            origin,
+                            value,
+                            modulus,
+                            offset,
+                        },
+                    )
+                    .map_err(|error| VmError::InvalidNumericResult(error.to_string()))
+                } else {
+                    evaluate_generated_idt_derivative(
+                        coefficients,
+                        initialized,
+                        [input_derivative, ic_derivative],
+                    )
+                    .map_err(|error| VmError::InvalidNumericResult(error.to_string()))
+                };
+                self.stack.push(result?);
+            }
+
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
                 let coefficients = self.context.integration_coefficients();

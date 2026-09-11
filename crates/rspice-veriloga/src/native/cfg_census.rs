@@ -253,6 +253,7 @@ impl OperatingPoint {
             ddt_scale: 0.0,
             idt: 0.0,
             idt_scale: 0.0,
+            integral_derivatives: Default::default(),
             event_controls: std::collections::HashMap::new(),
             staged: Vec::new(),
         }
@@ -313,6 +314,7 @@ impl OperatingPoint {
             ddt_scale: ComplexStep::from_f64(0.0),
             idt: ComplexStep::from_f64(0.0),
             idt_scale: ComplexStep::from_f64(0.0),
+            integral_derivatives: Default::default(),
             event_controls: std::collections::HashMap::new(),
             staged: Vec::new(),
         }

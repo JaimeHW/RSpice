@@ -416,12 +416,24 @@ fn lane_liveness_with_control(
                         changed |= live.union_from(value.id, *input);
                         changed |= live.union_from(value.id, *ic);
                     }
-                    // The modulus and the offset place the fold, which is a
-                    // translation the derivative does not see, so they carry no
-                    // lanes any more than a `%`'s divisor does.
-                    CfgValueKind::IdtMod { input, ic, .. } => {
+                    CfgValueKind::IdtMod {
+                        input, ic, modulus, ..
+                    } => {
                         changed |= live.union_from(value.id, *input);
                         changed |= live.union_from(value.id, *ic);
+                        changed |= live.union_from(value.id, *modulus);
+                    }
+                    CfgValueKind::IntegralDerivative {
+                        input_derivative,
+                        ic_derivative,
+                        wrap,
+                        ..
+                    } => {
+                        changed |= live.union_from(value.id, *input_derivative);
+                        changed |= live.union_from(value.id, *ic_derivative);
+                        if let Some((_, _, derivative)) = wrap {
+                            changed |= live.union_from(value.id, *derivative);
+                        }
                     }
                     // A delay that depends on an unknown moves the sample
                     // point, so it carries lanes.
@@ -509,11 +521,8 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         CfgValueKind::Select { .. }
         | CfgValueKind::Ddt { .. }
         | CfgValueKind::Idt { .. }
-        // The wrapped integral takes the unwrapped one's rule: the fold is a
-        // translation by a whole number of periods, and a constant offset has
-        // no derivative. It is discontinuous exactly at the wrap, which is a
-        // measure-zero set the companion form does not linearise across.
         | CfgValueKind::IdtMod { .. }
+        | CfgValueKind::IntegralDerivative { .. }
         | CfgValueKind::AbsDelay { .. }
         | CfgValueKind::AbsDelayDerivative { .. }
         | CfgValueKind::Slew { .. }
@@ -816,10 +825,31 @@ fn ddx_direction_liveness(
                 CfgValueKind::Unary { input, .. } if differentiable(&value.kind) => {
                     changed |= needed.union_from(*input, value.id);
                 }
-                CfgValueKind::Ddt { input, .. }
-                | CfgValueKind::Idt { input, .. }
-                | CfgValueKind::IdtMod { input, .. } => {
+                CfgValueKind::Ddt { input, .. } => {
                     changed |= needed.union_from(*input, value.id);
+                }
+                CfgValueKind::Idt { input, ic, .. } => {
+                    changed |= needed.union_from(*input, value.id);
+                    changed |= needed.union_from(*ic, value.id);
+                }
+                CfgValueKind::IdtMod {
+                    input, ic, modulus, ..
+                } => {
+                    changed |= needed.union_from(*input, value.id);
+                    changed |= needed.union_from(*ic, value.id);
+                    changed |= needed.union_from(*modulus, value.id);
+                }
+                CfgValueKind::IntegralDerivative {
+                    input_derivative,
+                    ic_derivative,
+                    wrap,
+                    ..
+                } => {
+                    changed |= needed.union_from(*input_derivative, value.id);
+                    changed |= needed.union_from(*ic_derivative, value.id);
+                    if let Some((_, _, derivative)) = wrap {
+                        changed |= needed.union_from(*derivative, value.id);
+                    }
                 }
                 CfgValueKind::AbsDelay { input, delay, .. } => {
                     changed |= needed.union_from(*input, value.id);
@@ -1046,7 +1076,6 @@ struct ScalarDdxBuilder<'a> {
     constants: HashMap<u64, ValueId>,
     one: ValueId,
     ddt_scale: Option<ValueId>,
-    idt_scale: Option<ValueId>,
     added_params: HashMap<BlockId, Vec<(usize, usize)>>,
     emitted: Vec<CfgInstruction>,
 }
@@ -1098,7 +1127,6 @@ impl<'a> ScalarDdxBuilder<'a> {
             constants,
             one,
             ddt_scale: None,
-            idt_scale: None,
             added_params: HashMap::new(),
             emitted: Vec::new(),
         };
@@ -1329,11 +1357,39 @@ impl<'a> ScalarDdxBuilder<'a> {
                 let scale = self.ddt_scale();
                 Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
             }
-            CfgValueKind::Idt { input, .. } | CfgValueKind::IdtMod { input, .. } => {
-                let derivative = self.derivative(*input, lane)?;
-                let scale = self.idt_scale();
-                Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
-            }
+            CfgValueKind::Idt {
+                operator,
+                input,
+                ic,
+            } => self.integral_rule(*operator, result, *input, *ic, None, lane),
+            CfgValueKind::IdtMod {
+                operator,
+                input,
+                ic,
+                modulus,
+                offset,
+            } => self.integral_rule(
+                *operator,
+                result,
+                *input,
+                *ic,
+                Some((*modulus, *offset, *modulus)),
+                lane,
+            ),
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => self.integral_rule(
+                *operator,
+                *primal,
+                *input_derivative,
+                *ic_derivative,
+                *wrap,
+                lane,
+            ),
             CfgValueKind::AbsDelay {
                 operator,
                 input,
@@ -1822,15 +1878,6 @@ impl<'a> ScalarDdxBuilder<'a> {
         value
     }
 
-    fn idt_scale(&mut self) -> ValueId {
-        if let Some(value) = self.idt_scale {
-            return value;
-        }
-        let value = self.new_value(CfgValueType::Real, CfgValueKind::IdtScale);
-        self.idt_scale = Some(value);
-        value
-    }
-
     fn constant(&mut self, value: f64) -> ValueId {
         if let Some(existing) = self.constants.get(&value.to_bits()) {
             return *existing;
@@ -1917,8 +1964,37 @@ impl<'a> ScalarDdxBuilder<'a> {
         }
     }
 
-    /// The input and delay derivatives of one `absdelay`, or `None` when
-    /// neither operand moves with this lane.
+    /// Derivative action retaining the candidate of the original integral.
+    fn integral_rule(
+        &mut self,
+        operator: super::ExprId,
+        primal: ValueId,
+        input: ValueId,
+        ic: ValueId,
+        wrap: Option<(ValueId, ValueId, ValueId)>,
+        lane: usize,
+    ) -> Option<ValueId> {
+        let input = self.derivative(input, lane);
+        let ic = self.derivative(ic, lane);
+        let modulus = wrap.and_then(|(_, _, derivative)| self.derivative(derivative, lane));
+        if input.is_none() && ic.is_none() && modulus.is_none() {
+            return None;
+        }
+        let input_derivative = self.or_zero(input);
+        let ic_derivative = self.or_zero(ic);
+        let wrap = wrap.map(|(value, offset, _)| (value, offset, self.or_zero(modulus)));
+        Some(self.push(
+            CfgValueType::Real,
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            },
+        ))
+    }
+
     fn delayed_derivatives(
         &mut self,
         input: ValueId,
@@ -2088,7 +2164,6 @@ struct AdBuilder<'a> {
     /// The shared `d/dt` coefficient, created on first use so a purely
     /// resistive model carries no reference to it.
     ddt_scale: Option<ValueId>,
-    idt_scale: Option<ValueId>,
     /// The lane reserved for [`AdSeed::LimiterCorrection`], if the caller asked
     /// for one. Without it a `$limit` differentiates to its proposed value's
     /// row and the displacement is dropped, which is what a consumer that does
@@ -2129,7 +2204,6 @@ impl<'a> AdBuilder<'a> {
             constants: HashMap::from([(1.0f64.to_bits(), one)]),
             one,
             ddt_scale: None,
-            idt_scale: None,
             correction_lane: correction_lane(lanes)
                 .map(|lane| u32::try_from(lane).expect("lane count fits a u32")),
             added_params: HashMap::new(),
@@ -2207,20 +2281,6 @@ impl<'a> AdBuilder<'a> {
         }
     }
 
-    fn idt_scale(&mut self) -> ValueId {
-        match self.idt_scale {
-            Some(value) => value,
-            None => {
-                let value = self.new_value(CfgValueType::Real, CfgValueKind::IdtScale);
-                self.idt_scale = Some(value);
-                value
-            }
-        }
-    }
-
-    // ---- packed builders ---------------------------------------------------
-
-    /// `value` re-laid-out over `target`, or itself when it already is.
     fn widen(&mut self, value: ValueId, target: ShapeId) -> ValueId {
         if self.shape_of(value) == Some(target) {
             return value;
@@ -2558,25 +2618,39 @@ impl<'a> AdBuilder<'a> {
                 let scale = self.ddt_scale();
                 Some(self.scale(derivative, scale))
             }
-            // The same companion-form argument, integrated rather than
-            // differentiated: the running total contributes `dt` times this
-            // step's input, so that is what the unknowns see. The initial
-            // condition is not differentiated — it is where the integral starts,
-            // not something the solve moves.
-            CfgValueKind::Idt { input, .. } => {
-                let derivative = self.derivatives[usize::from(*input)]?;
-                let scale = self.idt_scale();
-                Some(self.scale(derivative, scale))
-            }
-            // The fold is a translation by a whole number of periods, so it
-            // drops out of the derivative and the companion coefficient is the
-            // unwrapped integral's. The modulus and offset place the branch;
-            // they do not scale what crosses it.
-            CfgValueKind::IdtMod { input, .. } => {
-                let derivative = self.derivatives[usize::from(*input)]?;
-                let scale = self.idt_scale();
-                Some(self.scale(derivative, scale))
-            }
+            CfgValueKind::Idt {
+                operator,
+                input,
+                ic,
+            } => self.integral_lane_rule(*operator, result, *input, *ic, None, target),
+            CfgValueKind::IdtMod {
+                operator,
+                input,
+                ic,
+                modulus,
+                offset,
+            } => self.integral_lane_rule(
+                *operator,
+                result,
+                *input,
+                *ic,
+                Some((*modulus, *offset, *modulus)),
+                target,
+            ),
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => self.integral_lane_rule(
+                *operator,
+                *primal,
+                *input_derivative,
+                *ic_derivative,
+                *wrap,
+                target,
+            ),
             CfgValueKind::AbsDelay {
                 operator,
                 input,
@@ -3144,8 +3218,38 @@ impl<'a> AdBuilder<'a> {
         )
     }
 
-    /// The input and delay derivatives of one `absdelay`, or `None` when
-    /// neither operand moves with any lane of `target`.
+    /// Packed derivative action retaining the original integral candidate.
+    fn integral_lane_rule(
+        &mut self,
+        operator: super::ExprId,
+        primal: ValueId,
+        input: ValueId,
+        ic: ValueId,
+        wrap: Option<(ValueId, ValueId, ValueId)>,
+        target: ShapeId,
+    ) -> Option<ValueId> {
+        let input = self.derivatives[usize::from(input)];
+        let ic = self.derivatives[usize::from(ic)];
+        let modulus = wrap.and_then(|(_, _, derivative)| self.derivatives[usize::from(derivative)]);
+        if input.is_none() && ic.is_none() && modulus.is_none() {
+            return None;
+        }
+        let input_derivative = self.or_zero_lanes(input, target);
+        let ic_derivative = self.or_zero_lanes(ic, target);
+        let wrap =
+            wrap.map(|(value, offset, _)| (value, offset, self.or_zero_lanes(modulus, target)));
+        Some(self.push(
+            CfgValueType::Lanes(target),
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            },
+        ))
+    }
+
     fn delayed_lane_derivatives(
         &mut self,
         input: ValueId,

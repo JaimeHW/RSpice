@@ -51,8 +51,10 @@ pub use compatibility_catalog::{
 
 pub use integration::{
     GeneratedIdtAcceptedHistory, GeneratedIdtCandidate, GeneratedIdtCandidateError,
-    GeneratedIdtModCandidate, GeneratedIdtModCandidateError, evaluate_generated_idt_candidate,
-    evaluate_generated_idtmod_candidate, idtmod_wrapped_value, rspice_eval_idt,
+    GeneratedIdtModBranch, GeneratedIdtModCandidate, GeneratedIdtModCandidateError,
+    evaluate_generated_idt_candidate, evaluate_generated_idt_derivative,
+    evaluate_generated_idtmod_candidate, evaluate_generated_idtmod_derivative,
+    idtmod_wrapped_value, rspice_eval_idt,
 };
 
 pub use event_control::{

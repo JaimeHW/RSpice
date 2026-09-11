@@ -331,6 +331,10 @@ pub struct CfgEvalInputs<S> {
     /// interpreter does not keep.
     pub idt: S,
     pub idt_scale: S,
+    /// Optional per-site local weights for integrand, initial-condition and
+    /// modulus derivatives. With no history owner, omitted sites retain the
+    /// supplied `idt_scale` and zero initial-condition/modulus weights.
+    pub integral_derivatives: HashMap<ExprId, [S; 3]>,
     /// Results supplied for stateful event controls, keyed by their canonical
     /// call expression. The reference interpreter has no accepted-history
     /// owner, so omitted sites evaluate false while still evaluating every
@@ -668,6 +672,38 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::AnalogTask(_) => {
                 return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
             }
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => {
+                self.read(primal)?;
+                let weights = self
+                    .inputs
+                    .integral_derivatives
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or([self.inputs.idt_scale, S::from_f64(0.0), S::from_f64(0.0)]);
+                let input = self.read_lanes(input_derivative)?;
+                let ic = self.read_lanes(ic_derivative)?;
+                let modulus = if let Some((modulus, offset, derivative)) = wrap {
+                    self.read(modulus)?;
+                    self.read(offset)?;
+                    self.read_lanes(derivative)?
+                } else {
+                    vec![S::from_f64(0.0); width]
+                };
+                (0..width)
+                    .map(|lane| {
+                        input[lane]
+                            .mul(weights[0])
+                            .add(ic[lane].mul(weights[1]))
+                            .add(modulus[lane].mul(weights[2]))
+                    })
+                    .collect()
+            }
             CfgValueKind::LaneSplat(constant) => vec![S::from_f64(constant); width],
             CfgValueKind::LaneWiden { input } => {
                 let source = self.read_lanes(input)?;
@@ -919,6 +955,31 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => {
+                self.read(primal)?;
+                let weights = self
+                    .inputs
+                    .integral_derivatives
+                    .get(&operator)
+                    .copied()
+                    .unwrap_or([self.inputs.idt_scale, S::from_f64(0.0), S::from_f64(0.0)]);
+                let mut value = self
+                    .read(input_derivative)?
+                    .mul(weights[0])
+                    .add(self.read(ic_derivative)?.mul(weights[1]));
+                if let Some((modulus, offset, derivative)) = wrap {
+                    self.read(modulus)?;
+                    self.read(offset)?;
+                    value = value.add(self.read(derivative)?.mul(weights[2]));
+                }
+                value
+            }
             // The wrapped integral takes the same static treatment as `idt`:
             // the running total is supplied, and every operand is still
             // evaluated because any of them may carry a side condition. The

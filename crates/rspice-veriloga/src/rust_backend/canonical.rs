@@ -459,6 +459,11 @@ fn kernel_region_metrics(
                 write!(out, "idt:{}", operator_indices[operator])
             }
             CfgValueKind::IdtScale => write!(out, "idt-scale"),
+            CfgValueKind::IntegralDerivative { operator, wrap, .. } => write!(
+                out,
+                "integral-derivative {operator} wrapped={}",
+                wrap.is_some()
+            ),
             CfgValueKind::IdtMod { operator, .. } => {
                 write!(out, "idtmod:{}", operator_indices[operator])
             }
@@ -2461,6 +2466,17 @@ impl ModelPlan {
             "rspice_limited_exp".to_string(),
             "rspice_limited_exp_derivative".to_string(),
         ]);
+        if self
+            .function
+            .values
+            .iter()
+            .any(|value| matches!(value.kind, CfgValueKind::IntegralDerivative { .. }))
+        {
+            runtime_support.extend([
+                "evaluate_generated_idt_derivative".to_string(),
+                "GeneratedIdtCandidateError".to_string(),
+            ]);
+        }
         let _ = writeln!(
             out,
             "use {}::{{{}}};",
@@ -3847,8 +3863,24 @@ impl ModelPlan {
         // binding *after* the closure that read it whenever a model had both —
         // and only PSP-NQS has both, so nothing caught it until the corpus was
         // compiled. The two closures reach disjoint fields through it.
-        if wants.ddt || wants.idt {
+        if wants.ddt || wants.idt || wants.idt_derivative {
             let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
+        }
+        if wants.idt_derivative {
+            let _ = writeln!(
+                out,
+                "{pad}let idt_derivative_coefficients = self.ddt_coefficients;\n\
+                 {pad}let idt_derivative = |slot: usize, primal: f64, input: f64, ic: f64| -> f64 {{\n\
+                 {pad}    if !ctx.dynamic_operators_enabled() {{ return 0.0; }}\n\
+                 {pad}    let result = if primal.is_finite() {{\n\
+                 {pad}        evaluate_generated_idt_derivative(idt_derivative_coefficients, ddt_state.idt_initialized[slot], [input, ic])\n\
+                 {pad}    }} else {{ Err(GeneratedIdtCandidateError::NonFiniteResult {{ field: \"primal value\" }}) }};\n\
+                 {pad}    match result {{\n\
+                 {pad}        Ok(value) => value,\n\
+                 {pad}        Err(source) => {{ ctx.report_idt_candidate_error(slot, source); 0.0 }}\n\
+                 {pad}    }}\n\
+                 {pad}}};"
+            );
         }
         if wants.idt {
             for value in &function.values {
@@ -5132,6 +5164,7 @@ struct Wants {
     ddt_scale: bool,
     idt: bool,
     idt_scale: bool,
+    idt_derivative: bool,
     cross: bool,
     above: bool,
     last_crossing: bool,
@@ -5161,6 +5194,7 @@ impl Wants {
             CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,
+            CfgValueKind::IntegralDerivative { .. } => self.idt_derivative = true,
             CfgValueKind::Cross { .. } => self.cross = true,
             CfgValueKind::Above { .. } => self.above = true,
             CfgValueKind::LastCrossing { .. } => self.last_crossing = true,
@@ -5542,6 +5576,7 @@ endmodule
                 ddt_scale: 0.0,
                 idt: 0.0,
                 idt_scale: 0.0,
+                integral_derivatives: HashMap::new(),
                 staged: Vec::new(),
             },
         )

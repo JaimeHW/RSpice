@@ -223,6 +223,7 @@ fn inputs<S: CfgScalar>(bias: &Bias, promote: impl Fn(f64) -> S) -> CfgEvalInput
         ddt_scale: promote(0.0),
         idt: promote(0.0),
         idt_scale: promote(0.0),
+        integral_derivatives: Default::default(),
         staged: Vec::new(),
     }
 }

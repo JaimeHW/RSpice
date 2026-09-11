@@ -15,6 +15,8 @@ use crate::complex_arithmetic::FrequencyValue;
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 use num_complex::Complex64;
+use rspice_veriloga_runtime::arithmetic::IdtModOrigin;
+use std::collections::BTreeMap;
 
 const MAX_RUNTIME_LOOP_ITERATIONS: usize = 1_000_000;
 
@@ -69,6 +71,16 @@ trait FrequencyScalar: Copy + std::fmt::Debug + std::ops::Neg<Output = Self> {
     const TRACK_RANGE: bool;
     fn new(real: f64, imaginary: f64) -> Self;
     fn binary64(self) -> Complex64;
+    fn is_zero(self) -> bool;
+    fn circular_derivative(
+        self,
+        origin: &IdtModOrigin,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        modulus_derivative: Self,
+        range_lost: &mut bool,
+    ) -> Result<Self, VmError>;
     fn is_real(self) -> bool;
     fn is_finite(self) -> bool;
     fn add(self, other: Self, range_lost: &mut bool) -> Self;
@@ -93,6 +105,33 @@ trait FrequencyScalar: Copy + std::fmt::Debug + std::ops::Neg<Output = Self> {
 
 impl FrequencyScalar for Complex64 {
     const TRACK_RANGE: bool = true;
+    fn is_zero(self) -> bool {
+        self.re == 0.0 && self.im == 0.0
+    }
+    fn circular_derivative(
+        self,
+        origin: &IdtModOrigin,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        modulus_derivative: Self,
+        range_lost: &mut bool,
+    ) -> Result<Self, VmError> {
+        let value = FrequencyValue::from_complex(self)
+            .circular_derivative(
+                origin,
+                phase,
+                modulus,
+                offset,
+                FrequencyValue::from_complex(modulus_derivative),
+            )
+            .map_err(|detail| VmError::InvalidNumericResult(detail.into()))?;
+        let result = value.binary64();
+        if !value.has_regular_components() || !result.is_finite() {
+            *range_lost = true;
+        }
+        Ok(result)
+    }
     fn sum_products_div(
         pairs: &[[Self; 2]],
         divisor: Self,
@@ -197,6 +236,21 @@ impl FrequencyScalar for Complex64 {
 
 impl FrequencyScalar for FrequencyValue {
     const TRACK_RANGE: bool = false;
+    fn is_zero(self) -> bool {
+        self.is_zero()
+    }
+    fn circular_derivative(
+        self,
+        origin: &IdtModOrigin,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        modulus_derivative: Self,
+        _range_lost: &mut bool,
+    ) -> Result<Self, VmError> {
+        self.circular_derivative(origin, phase, modulus, offset, modulus_derivative)
+            .map_err(|detail| VmError::InvalidNumericResult(detail.into()))
+    }
     fn sum_products_div(
         pairs: &[[Self; 2]],
         divisor: Self,
@@ -362,6 +416,7 @@ struct SmallSignalEngine<'a, V: FrequencyScalar> {
     frequency_hz: f64,
     omega: f64,
     range_lost: bool,
+    integral_origins: BTreeMap<usize, IdtModOrigin>,
 }
 
 impl<V: FrequencyScalar> Drop for SmallSignalEngine<'_, V> {
@@ -425,6 +480,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
             frequency_hz,
             omega,
             range_lost: false,
+            integral_origins: BTreeMap::new(),
         })
     }
 
@@ -1020,7 +1076,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 let _input = self.pop_real("IdtState input")?;
                 self.stack.push(V::new(initial, 0.0));
             }
-            Instruction::IdtModState(_) => {
+            Instruction::IdtModState(slot) => {
                 let offset = self.pop_real("IdtModState offset")?;
                 let modulus = self.pop_real("IdtModState modulus")?;
                 let initial = self.pop_real("IdtModState initial condition")?;
@@ -1032,6 +1088,10 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                         ))
                     },
                 )?;
+                let origin = IdtModOrigin::ZERO
+                    .rebased(initial, wrapped)
+                    .map_err(|detail| VmError::InvalidNumericResult(detail.into()))?;
+                self.integral_origins.insert(*slot, origin);
                 self.stack.push(V::new(wrapped, 0.0));
             }
             Instruction::DdtJacobian => {
@@ -1047,6 +1107,55 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                     ));
                 }
                 let result = V::divide(input, V::new(0.0, self.omega), &mut self.range_lost);
+                self.stack.push(result);
+            }
+            Instruction::IdtDerivativeState(slot) | Instruction::IdtModDerivativeState(slot) => {
+                let wrapped = matches!(instruction, Instruction::IdtModDerivativeState(_));
+                let modulus_derivative = if wrapped {
+                    self.pop("integral modulus derivative")?
+                } else {
+                    V::new(0.0, 0.0)
+                };
+                let _ic_derivative = self.pop("integral initial-condition derivative")?;
+                let input = self.pop("integral input derivative")?;
+                let offset = if wrapped {
+                    self.pop_real("integral offset")?
+                } else {
+                    0.0
+                };
+                let modulus = if wrapped {
+                    self.pop_real("integral modulus")?
+                } else {
+                    1.0
+                };
+                let primal = self.pop_real("integral primal")?;
+                let mut result = if input.is_zero() {
+                    input
+                } else {
+                    if self.omega == 0.0 {
+                        return Err(VmError::InvalidNumericResult(
+                            "idt/idtmod small-signal transfer is singular at zero frequency".into(),
+                        ));
+                    }
+                    V::divide(input, V::new(0.0, self.omega), &mut self.range_lost)
+                };
+                self.check_range()?;
+                if wrapped {
+                    let origin =
+                        self.integral_origins
+                            .get(slot)
+                            .ok_or(VmError::InvalidInstruction(
+                                "circular integral derivative has no operating-point origin",
+                            ))?;
+                    result = result.circular_derivative(
+                        origin,
+                        primal,
+                        modulus,
+                        offset,
+                        modulus_derivative,
+                        &mut self.range_lost,
+                    )?;
+                }
                 self.stack.push(result);
             }
             Instruction::TableDerivative(table_id) => {

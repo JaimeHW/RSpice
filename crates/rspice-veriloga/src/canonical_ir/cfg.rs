@@ -404,6 +404,17 @@ pub enum CfgValueKind {
         modulus: ValueId,
         offset: ValueId,
     },
+    /// Local derivative of the named integral's current candidate. The primal
+    /// dependency orders evaluation before the state read. Optional wrap data
+    /// is `(modulus, offset, modulus_derivative)`; only the derivative operands
+    /// carry lanes or participate in higher derivatives on this branch.
+    IntegralDerivative {
+        operator: ExprId,
+        primal: ValueId,
+        input_derivative: ValueId,
+        ic_derivative: ValueId,
+        wrap: Option<(ValueId, ValueId, ValueId)>,
+    },
     /// `absdelay(x, delay, max_delay)` — transport delay.
     ///
     /// `max_delay` stays optional rather than defaulting to zero: absent, the
@@ -1177,6 +1188,7 @@ impl CfgValueKind {
             | Self::Idt { .. }
             | Self::IdtScale
             | Self::IdtMod { .. }
+            | Self::IntegralDerivative { .. }
             | Self::AbsDelay { .. }
             | Self::AbsDelayDerivative { .. }
             | Self::Slew { .. }
@@ -1262,6 +1274,14 @@ impl CfgValueKind {
             Self::IdtMod { operator, .. } => {
                 CfgStateSite(*operator, CanonicalStateOperator::IdtMod)
             }
+            Self::IntegralDerivative { operator, wrap, .. } => CfgStateSite(
+                *operator,
+                if wrap.is_some() {
+                    CanonicalStateOperator::IdtMod
+                } else {
+                    CanonicalStateOperator::Idt
+                },
+            ),
             Self::AbsDelay { operator, .. } | Self::AbsDelayDerivative { operator, .. } => {
                 CfgStateSite(*operator, CanonicalStateOperator::Absdelay)
             }
@@ -1339,6 +1359,19 @@ impl CfgValueKind {
                 offset,
                 ..
             } => vec![*input, *ic, *modulus, *offset],
+            Self::IntegralDerivative {
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+                ..
+            } => {
+                let mut operands = vec![*primal, *input_derivative, *ic_derivative];
+                if let Some((modulus, offset, derivative)) = wrap {
+                    operands.extend([*modulus, *offset, *derivative]);
+                }
+                operands
+            }
             Self::AbsDelay {
                 input,
                 delay,
@@ -1560,6 +1593,22 @@ impl CfgValueKind {
                 *ic = map(*ic);
                 *modulus = map(*modulus);
                 *offset = map(*offset);
+            }
+            Self::IntegralDerivative {
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+                ..
+            } => {
+                *primal = map(*primal);
+                *input_derivative = map(*input_derivative);
+                *ic_derivative = map(*ic_derivative);
+                if let Some((modulus, offset, derivative)) = wrap {
+                    *modulus = map(*modulus);
+                    *offset = map(*offset);
+                    *derivative = map(*derivative);
+                }
             }
             Self::AbsDelay {
                 input,
@@ -2249,6 +2298,21 @@ impl CfgFunction {
                 // They cannot go through the catch-all below, which reads any
                 // packed operand as a mistake — correctly, for arithmetic, and
                 // wrongly for these.
+                CfgValueKind::IntegralDerivative {
+                    primal,
+                    input_derivative,
+                    ic_derivative,
+                    wrap,
+                    ..
+                } => {
+                    let mut primals = vec![*primal];
+                    let mut derivatives = vec![*input_derivative, *ic_derivative];
+                    if let Some((modulus, offset, derivative)) = wrap {
+                        primals.extend([*modulus, *offset]);
+                        derivatives.push(*derivative);
+                    }
+                    self.validate_stateful_derivative(value.id, lanes, &primals, &derivatives)?;
+                }
                 CfgValueKind::AbsDelayDerivative {
                     input,
                     input_derivative,

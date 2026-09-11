@@ -24,6 +24,7 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
             value.kind,
             CfgValueKind::Ddt { .. }
                 | CfgValueKind::Idt { .. }
+                | CfgValueKind::IntegralDerivative { .. }
                 | CfgValueKind::DdtScale
                 | CfgValueKind::IdtScale
         )
@@ -52,6 +53,16 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 right: ic,
             },
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
+            CfgValueKind::IntegralDerivative {
+                primal,
+                ic_derivative,
+                wrap: None,
+                ..
+            } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: primal,
+                right: ic_derivative,
+            },
             _ => continue,
         };
     }
@@ -586,6 +597,14 @@ fn value_powers(
     Ok(match kind {
         CfgValueKind::DdtScale => Powers::from([DynamicPower { ddt: 1, idt: 0 }]),
         CfgValueKind::IdtScale => Powers::from([DynamicPower { ddt: 0, idt: 1 }]),
+        CfgValueKind::IntegralDerivative {
+            input_derivative,
+            wrap: None,
+            ..
+        } => at(input_derivative)
+            .iter()
+            .map(|power| power.product(DynamicPower { ddt: 0, idt: 1 }))
+            .collect(),
         CfgValueKind::BlockParameter => inputs
             .iter()
             .flat_map(|input| at(input).iter().copied())
@@ -727,6 +746,35 @@ impl Expansion<'_> {
         let ty = value.value_type;
         let kind = match &value.kind {
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
+            CfgValueKind::IntegralDerivative {
+                input_derivative,
+                wrap: None,
+                ..
+            } => {
+                let input_power = DynamicPower {
+                    ddt: power.ddt,
+                    idt: power.idt - 1,
+                };
+                let input = self.coefficient(*input_derivative, input_power, ty);
+                let one = self.push(
+                    CfgValueType::Real,
+                    CfgValueKind::RealConstant(1.0),
+                    instructions,
+                );
+                if ty.shape().is_some() {
+                    CfgValueKind::LaneScalar {
+                        op: CfgBinaryOp::Mul,
+                        input,
+                        scalar: one,
+                    }
+                } else {
+                    CfgValueKind::Binary {
+                        op: CfgBinaryOp::Mul,
+                        left: input,
+                        right: one,
+                    }
+                }
+            }
             CfgValueKind::Select {
                 condition,
                 then_value,

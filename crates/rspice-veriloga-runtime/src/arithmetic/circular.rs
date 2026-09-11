@@ -1,6 +1,9 @@
 //! Exact accumulated translations for circular integrators.
 
-use super::scalar::{BigMagnitude, SmallExact, exact_binary_to_f64, small_exact_ratio_to_f64};
+use super::scalar::{
+    BigMagnitude, SmallExact, exact_binary_to_f64, scaled_exact_ratio_to_f64,
+    scaled_sum_triple_products, small_exact_ratio_to_f64,
+};
 
 const FLOOR: i32 = -1074;
 // More than the complete binary64 exponent span plus 1900 carry bits. This
@@ -80,6 +83,20 @@ fn power_of_two_mod(mut exponent: u32, modulus: u64) -> u64 {
         factor = ((u128::from(factor) * u128::from(factor)) % u128::from(modulus)) as u64;
     }
     value
+}
+
+fn circular_interval(modulus: f64, offset: f64) -> Result<f64, &'static str> {
+    if !offset.is_finite() {
+        return Err("offset must be finite");
+    }
+    if !modulus.is_finite() || modulus <= 0.0 {
+        return Err("modulus must be finite and greater than zero");
+    }
+    let upper = offset + modulus;
+    if !upper.is_finite() || upper <= offset {
+        return Err("offset and modulus must form a finite, nonempty interval");
+    }
+    Ok(upper)
 }
 
 impl IdtModOrigin {
@@ -260,16 +277,7 @@ impl IdtModOrigin {
         if !raw.is_finite() {
             return Err("integral candidate must be finite");
         }
-        if !offset.is_finite() {
-            return Err("offset must be finite");
-        }
-        if !modulus.is_finite() || modulus <= 0.0 {
-            return Err("modulus must be finite and greater than zero");
-        }
-        let upper = offset + modulus;
-        if !upper.is_finite() || upper <= offset {
-            return Err("offset and modulus must form a finite, nonempty interval");
-        }
+        let upper = circular_interval(modulus, offset)?;
         if matches!(&self.0, Origin::Small(value) if value.value == 0) {
             if raw >= offset && raw < upper {
                 return Ok(raw);
@@ -286,6 +294,151 @@ impl IdtModOrigin {
         phase.add(offset)?;
         let rounded = phase.rounded()?;
         Ok(if rounded >= upper { offset } else { rounded })
+    }
+
+    /// Differentiate the current branch: `dY - floor((Y-offset)/m) * dm`.
+    /// `self + phase` retains Y exactly, including translations larger than
+    /// binary64. Both terms cancel before the final ratio is rounded.
+    pub(crate) fn branch_derivative(
+        &self,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        integral_terms: &[[f64; 2]],
+        divisor: f64,
+        modulus_derivative: f64,
+    ) -> Result<f64, &'static str> {
+        circular_interval(modulus, offset)?;
+        if !phase.is_finite()
+            || !divisor.is_finite()
+            || divisor == 0.0
+            || !modulus_derivative.is_finite()
+        {
+            return Err(
+                "circular-integrator derivative operands must be finite with a nonzero divisor",
+            );
+        }
+        if modulus_derivative == 0.0 {
+            let value = super::sum_products_div(integral_terms, divisor);
+            return if value.is_finite() {
+                Ok(value)
+            } else {
+                Err("circular-integrator derivative is not finite")
+            };
+        }
+        let (translation_negative, translation) =
+            self.branch_translation(phase, modulus, offset)?;
+
+        let mut numerator =
+            scaled_sum_triple_products(integral_terms.iter().map(|&[a, b]| [a, b, modulus]), -3222)
+                .map_err(|_| "invalid circular-integrator derivative terms")?;
+        let factor = SmallExact::product(modulus_derivative, divisor)
+            .ok_or("invalid circular-integrator modulus derivative")?;
+        if factor.value != 0 && !translation.is_zero() {
+            let shift = (FLOOR + factor.exponent + 3222) as usize;
+            let mantissa = factor.value.unsigned_abs();
+            let mut action = BigMagnitude::default();
+            for index in 0..translation.significant_len() {
+                let word = u128::from(translation.word(index));
+                action.add_shifted(word * u128::from(mantissa as u64), shift + index * 64);
+                action.add_shifted(word * (mantissa >> 64), shift + (index + 1) * 64);
+            }
+            let negative = !(translation_negative ^ (factor.value < 0));
+            if numerator.negative == negative {
+                for index in 0..action.significant_len() {
+                    numerator.magnitude.add_word(index, action.word(index));
+                }
+            } else if numerator.magnitude.compare(&action) == std::cmp::Ordering::Less {
+                numerator.magnitude = action.subtract(&numerator.magnitude);
+                numerator.negative = negative;
+            } else {
+                numerator.magnitude = numerator.magnitude.subtract(&action);
+            }
+        }
+        if numerator.magnitude.is_zero() {
+            return Ok(0.0);
+        }
+        let denominator = SmallExact::product(divisor, modulus)
+            .ok_or("invalid circular-integrator derivative denominator")?;
+        let mut magnitude = BigMagnitude::default();
+        magnitude.add_shifted(denominator.value.unsigned_abs(), 0);
+        scaled_exact_ratio_to_f64(
+            &numerator.magnitude,
+            &magnitude,
+            numerator.negative ^ (denominator.value < 0),
+            -3222 - denominator.exponent,
+        )
+        .map_err(|_| "circular-integrator derivative is not finite")
+    }
+
+    fn branch_translation(
+        &self,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+    ) -> Result<(bool, BigMagnitude), &'static str> {
+        let mut total = self.clone();
+        total.add(phase)?;
+        total.add(-offset)?;
+        let (_, remainder) = total.remainder(modulus)?.wide();
+        let (negative, mut translation) = total.wide();
+        if negative {
+            for index in 0..remainder.significant_len() {
+                translation.add_word(index, remainder.word(index));
+            }
+        } else {
+            translation = translation.subtract(&remainder);
+        }
+        Ok((negative, translation))
+    }
+
+    /// Apply the local circular branch to a frequency-domain component without
+    /// narrowing its exponent or rounding the wrap count before multiplication.
+    #[doc(hidden)]
+    pub fn branch_derivative_scaled(
+        &self,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        integral_derivative: super::ScaledValue,
+        modulus_derivative: super::ScaledValue,
+    ) -> Result<super::ScaledValue, &'static str> {
+        use super::ScaledValue;
+        circular_interval(modulus, offset)?;
+        if !phase.is_finite() || !integral_derivative.is_finite() || !modulus_derivative.is_finite()
+        {
+            return Err("circular-integrator frequency derivative operands must be finite");
+        }
+        if modulus_derivative.is_zero() {
+            return Ok(integral_derivative);
+        }
+        let (negative, translation) = self.branch_translation(phase, modulus, offset)?;
+        let one = ScaledValue::new(1.0);
+        let modulus = ScaledValue::new(modulus);
+        let action = if negative {
+            modulus_derivative
+        } else {
+            modulus_derivative.negated()
+        };
+        // Two 32-bit limbs retain every bit of each word in a binary64 factor.
+        let terms = (0..translation.significant_len() * 2).map(|index| {
+            let word = translation.word(index / 2);
+            let limb = if index % 2 == 0 {
+                word as u32
+            } else {
+                (word >> 32) as u32
+            };
+            [
+                ScaledValue::scaled(f64::from(limb), i64::from(FLOOR) + index as i64 * 32),
+                action,
+                one,
+            ]
+        });
+        ScaledValue::sum_triple_products_ratio(
+            std::iter::once([integral_derivative, modulus, one]).chain(terms),
+            [[modulus, one, one]].into_iter(),
+        )
+        .map_err(|_| "circular-integrator frequency derivative exceeds arithmetic capacity")
     }
 
     /// Propose the exact new origin after publishing a rounded local phase.

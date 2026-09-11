@@ -1383,6 +1383,17 @@ impl DeviceIR {
         /// at its input, its derivative at every rate operand).
         fn contains_ddt_heavy(arena: &ExprArena, heavy: &Heavy) -> bool {
             match heavy {
+                Heavy::IntegralDerivative {
+                    primal,
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative,
+                } => {
+                    contains_ddt(arena, *primal)
+                        || contains_ddt(arena, *input_derivative)
+                        || contains_ddt(arena, *ic_derivative)
+                        || contains_ddt_opt(arena, *modulus_derivative)
+                }
                 Heavy::AbsDelay {
                     expr,
                     delay_time,
@@ -2360,8 +2371,15 @@ pub mod autodiff {
             Node::Unary(UnaryOp::Neg | UnaryOp::Pos, inner) => recurse(inner),
             Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => 0,
             Node::Limexp(inner) | Node::Ddt(inner) => recurse(inner),
-            Node::Idt(inner, _) => recurse(inner),
-            Node::IdtMod { expr: inner, .. } => recurse(inner),
+            Node::Idt(inner, ic) => recurse(inner) | optional(ic),
+            Node::IdtMod {
+                expr: inner,
+                modulus,
+                payload,
+            } => {
+                let (ic, _) = arena.optional_pair(payload);
+                recurse(inner) | recurse(modulus) | optional(ic)
+            }
             Node::Limit(inner, _) | Node::CanonicalLimit(inner) => recurse(inner),
             Node::Call { func, a, b, .. } => match func {
                 IrFunction::Floor | IrFunction::Ceil => 0,
@@ -2384,6 +2402,16 @@ pub mod autodiff {
             // Jacobian
             Node::LastCrossing { .. } => 0,
             Node::Heavy(_, payload) => match arena.heavy(payload) {
+                Heavy::IntegralDerivative {
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative,
+                    ..
+                } => {
+                    recurse(*input_derivative)
+                        | recurse(*ic_derivative)
+                        | optional(*modulus_derivative)
+                }
                 Heavy::AbsDelay {
                     expr,
                     delay_time,
@@ -3421,14 +3449,30 @@ pub mod autodiff {
                 }
             }
             Node::CallSpilled { .. } => {}
-            Node::Limexp(inner) | Node::Ddt(inner) | Node::Idt(inner, _) => collect!(inner),
+            Node::Limexp(inner) | Node::Ddt(inner) => collect!(inner),
+            Node::Idt(inner, ic) => {
+                collect!(inner);
+                if let Some(ic) = ic {
+                    collect!(ic);
+                }
+            }
             Node::Limit(inner, _) | Node::CanonicalLimit(inner) => {
                 collect!(inner);
                 if family == AuxiliaryAxes::LimiterCorrection {
                     axes.insert(DerivativeWrt::LimiterCorrection);
                 }
             }
-            Node::IdtMod { expr: inner, .. } => collect!(inner),
+            Node::IdtMod {
+                expr: inner,
+                modulus,
+                payload,
+            } => {
+                collect!(inner);
+                collect!(modulus);
+                if let Some(ic) = arena.optional_pair(payload).0 {
+                    collect!(ic);
+                }
+            }
             Node::TableLookup { input, .. } => collect!(input),
             Node::Ddx { .. } => {
                 // ddx is resolved along its solver axis before the outer noise
@@ -3442,6 +3486,18 @@ pub mod autodiff {
                 axes.extend(expression_auxiliary_axes(arena, resolved, deps, family));
             }
             Node::Heavy(_, payload) => match arena.heavy(payload).clone() {
+                Heavy::IntegralDerivative {
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative,
+                    ..
+                } => {
+                    collect!(input_derivative);
+                    collect!(ic_derivative);
+                    if let Some(derivative) = modulus_derivative {
+                        collect!(derivative);
+                    }
+                }
                 Heavy::WhiteNoise { site, .. }
                 | Heavy::FlickerNoise { site, .. }
                 | Heavy::NoiseTable { site, .. } => {
@@ -4653,17 +4709,37 @@ pub mod autodiff {
                 arena.push(Node::DdtCompanion(di))
             }
 
-            // idt companion: d(idt(x))/dV = dt * dx/dV (zero at DC)
-            Node::Idt(inner, _) => {
-                let di = differentiate!(inner);
-                arena.push(Node::IdtCompanion(di))
+            // Retain the primal site: initialization and the local wrap count
+            // are properties of this candidate, not global timestep factors.
+            Node::Idt(inner, ic) => {
+                let input_derivative = differentiate!(inner);
+                let ic_derivative = ic
+                    .map(|ic| differentiate!(ic))
+                    .unwrap_or_else(|| arena.push(Node::Const(0.0)));
+                arena.push_heavy(Heavy::IntegralDerivative {
+                    primal: expr,
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative: None,
+                })
             }
-
-            // idtmod: the wrap is the identity almost everywhere, so the
-            // small-signal derivative matches idt
-            Node::IdtMod { expr: inner, .. } => {
-                let di = differentiate!(inner);
-                arena.push(Node::IdtCompanion(di))
+            Node::IdtMod {
+                expr: inner,
+                modulus,
+                payload,
+            } => {
+                let (ic, _) = arena.optional_pair(payload);
+                let input_derivative = differentiate!(inner);
+                let ic_derivative = ic
+                    .map(|ic| differentiate!(ic))
+                    .unwrap_or_else(|| arena.push(Node::Const(0.0)));
+                let modulus_derivative = Some(differentiate!(modulus));
+                arena.push_heavy(Heavy::IntegralDerivative {
+                    primal: expr,
+                    input_derivative,
+                    ic_derivative,
+                    modulus_derivative,
+                })
             }
 
             // Physical/noise tangents pass through the proposal. The separate
@@ -4689,6 +4765,23 @@ pub mod autodiff {
             Node::Heavy(_, payload) => {
                 let heavy = arena.heavy(payload).clone();
                 match heavy {
+                    Heavy::IntegralDerivative {
+                        primal,
+                        input_derivative,
+                        ic_derivative,
+                        modulus_derivative,
+                    } => {
+                        let input_derivative = differentiate!(input_derivative);
+                        let ic_derivative = differentiate!(ic_derivative);
+                        let modulus_derivative =
+                            modulus_derivative.map(|derivative| differentiate!(derivative));
+                        arena.push_heavy(Heavy::IntegralDerivative {
+                            primal,
+                            input_derivative,
+                            ic_derivative,
+                            modulus_derivative,
+                        })
+                    }
                     // Transport delay passes the DC small-signal through.
                     // Transition instead needs the exact
                     // accepted-state-dependent transient coefficient: zero on

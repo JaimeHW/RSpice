@@ -147,6 +147,32 @@ pub(crate) struct FrequencyValue {
 }
 
 impl FrequencyValue {
+    pub(crate) fn circular_derivative(
+        self,
+        origin: &rspice_veriloga_runtime::arithmetic::IdtModOrigin,
+        phase: f64,
+        modulus: f64,
+        offset: f64,
+        modulus_derivative: Self,
+    ) -> Result<Self, &'static str> {
+        Ok(Self {
+            real: origin.branch_derivative_scaled(
+                phase,
+                modulus,
+                offset,
+                self.real,
+                modulus_derivative.real,
+            )?,
+            imaginary: origin.branch_derivative_scaled(
+                phase,
+                modulus,
+                offset,
+                self.imaginary,
+                modulus_derivative.imaginary,
+            )?,
+        })
+    }
+
     pub(crate) fn sum_products_div(
         pairs: &[[Self; 2]],
         divisor: Self,
@@ -219,6 +245,10 @@ impl FrequencyValue {
     }
 
     #[inline]
+    pub(crate) fn is_zero(self) -> bool {
+        self.real.is_zero() && self.imaginary.is_zero()
+    }
+
     pub(crate) fn is_real(self) -> bool {
         self.imaginary.is_zero()
     }

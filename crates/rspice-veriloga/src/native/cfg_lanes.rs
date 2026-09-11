@@ -376,6 +376,27 @@ impl<'a> Scalarizer<'a> {
             // operands carry this value's lanes and take the lane; everything
             // else is a primal scalar the runtime reads its local coefficient
             // from, and takes none.
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => CfgValueKind::IntegralDerivative {
+                operator: *operator,
+                primal: self.plain_of(*primal)?,
+                input_derivative: self.lane_of(*input_derivative, lane, 0)?,
+                ic_derivative: self.lane_of(*ic_derivative, lane, 0)?,
+                wrap: wrap
+                    .map(|(modulus, offset, derivative)| {
+                        Ok::<_, JitError>((
+                            self.plain_of(modulus)?,
+                            self.plain_of(offset)?,
+                            self.lane_of(derivative, lane, 0)?,
+                        ))
+                    })
+                    .transpose()?,
+            },
             CfgValueKind::AbsDelayDerivative {
                 operator,
                 input,
@@ -610,6 +631,7 @@ mod tests {
             ddt_scale: 0.0,
             idt: 0.0,
             idt_scale: 0.0,
+            integral_derivatives: Default::default(),
             staged: Vec::new(),
         }
     }

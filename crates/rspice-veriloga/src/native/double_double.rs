@@ -1012,6 +1012,11 @@ pub(super) fn lift_inputs(real: &CfgEvalInputs<f64>) -> CfgEvalInputs<DoubleDoub
         ddt_scale: DoubleDouble::from_f64(real.ddt_scale),
         idt: DoubleDouble::from_f64(real.idt),
         idt_scale: DoubleDouble::from_f64(real.idt_scale),
+        integral_derivatives: real
+            .integral_derivatives
+            .iter()
+            .map(|(key, values)| (*key, values.map(DoubleDouble::from_f64)))
+            .collect(),
         event_controls: real
             .event_controls
             .iter()

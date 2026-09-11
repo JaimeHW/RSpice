@@ -3686,6 +3686,8 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
+            | NativeOp::IdtDerivativeState(_)
+            | NativeOp::IdtModDerivativeState(_)
     ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(op))
         || matches!(
             op,
@@ -3811,6 +3813,8 @@ fn op_reads_state(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
+            | NativeOp::IdtDerivativeState(_)
+            | NativeOp::IdtModDerivativeState(_)
     )
 }
 
@@ -3874,6 +3878,8 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
+            | NativeOp::IdtDerivativeState(_)
+            | NativeOp::IdtModDerivativeState(_)
             | NativeOp::CheckedValue
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)

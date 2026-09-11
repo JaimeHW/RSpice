@@ -131,17 +131,106 @@ pub fn evaluate_generated_idt_candidate(
             field: "candidate value",
         });
     }
-    let jacobian_scale = coefficients.derivative_scale.recip();
-    if !jacobian_scale.is_finite() {
-        return Err(GeneratedIdtCandidateError::NonFiniteResult {
-            field: "Jacobian scale",
-        });
-    }
+    let jacobian_scale =
+        evaluate_generated_idt_derivative(coefficients, history.initialized, [1.0, 0.0]).map_err(
+            |error| match error {
+                GeneratedIdtCandidateError::NonFiniteResult { .. } => {
+                    GeneratedIdtCandidateError::NonFiniteResult {
+                        field: "Jacobian scale",
+                    }
+                }
+                error => error,
+            },
+        )?;
 
     Ok(GeneratedIdtCandidate {
         value,
         jacobian_scale,
     })
+}
+
+fn idt_derivative_terms(
+    coefficients: GeneratedDdtCoefficients,
+    initialized: bool,
+    [input, ic]: [Value; 2],
+) -> Result<([[Value; 2]; 4], Value), GeneratedIdtCandidateError> {
+    for (field, value) in [
+        ("input derivative", input),
+        ("initial-condition derivative", ic),
+        ("derivative scale", coefficients.derivative_scale),
+        ("previous-value scale", coefficients.previous_value_scale),
+        ("older-value scale", coefficients.older_value_scale),
+        (
+            "previous-derivative scale",
+            coefficients.previous_derivative_scale,
+        ),
+    ] {
+        if !value.is_finite() {
+            return Err(GeneratedIdtCandidateError::NonFiniteInput { field });
+        }
+    }
+    if !coefficients.active {
+        return Ok(([[ic, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]], 1.0));
+    }
+    if coefficients.derivative_scale == 0.0 {
+        return Err(GeneratedIdtCandidateError::ZeroDerivativeScale);
+    }
+    let mut terms = [[input, 1.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]];
+    if !initialized {
+        terms[1] = [input, coefficients.previous_derivative_scale];
+        terms[2] = [ic, coefficients.previous_value_scale];
+        terms[3] = [ic, coefficients.older_value_scale];
+    }
+    Ok((terms, coefficients.derivative_scale))
+}
+
+/// Differentiate an integral using this site's initialization state.
+pub fn evaluate_generated_idt_derivative(
+    coefficients: GeneratedDdtCoefficients,
+    initialized: bool,
+    derivatives: [Value; 2],
+) -> Result<Value, GeneratedIdtCandidateError> {
+    let (terms, divisor) = idt_derivative_terms(coefficients, initialized, derivatives)?;
+    let value = sum_products_div(&terms, divisor);
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(GeneratedIdtCandidateError::NonFiniteResult {
+            field: "derivative",
+        })
+    }
+}
+
+/// The exact current branch published by a circular-integrator candidate.
+#[derive(Debug, Clone, Copy)]
+pub struct GeneratedIdtModBranch<'a> {
+    pub origin: &'a IdtModOrigin,
+    pub value: Value,
+    pub modulus: Value,
+    pub offset: Value,
+}
+
+/// Differentiate the input, initial condition, and modulus on one wrap branch.
+pub fn evaluate_generated_idtmod_derivative(
+    coefficients: GeneratedDdtCoefficients,
+    initialized: bool,
+    derivatives: [Value; 3],
+    branch: GeneratedIdtModBranch<'_>,
+) -> Result<Value, GeneratedIdtModCandidateError> {
+    let [input, ic, modulus] = derivatives;
+    let (terms, divisor) = idt_derivative_terms(coefficients, initialized, [input, ic])
+        .map_err(GeneratedIdtModCandidateError::Integral)?;
+    branch
+        .origin
+        .branch_derivative(
+            branch.value,
+            branch.modulus,
+            branch.offset,
+            &terms,
+            divisor,
+            modulus,
+        )
+        .map_err(GeneratedIdtModCandidateError::Wrapping)
 }
 
 /// Evaluate one generated `idt` Newton candidate without publishing it as
@@ -290,6 +379,152 @@ pub fn evaluate_generated_idtmod_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integral_derivatives_follow_initialization_and_companion_weights() {
+        let trap = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 8.0,
+            previous_value_scale: 8.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 1.0,
+        };
+        for (coefficients, initialized, derivatives, expected) in [
+            (GeneratedDdtCoefficients::inactive(), false, [7.0, 3.0], 3.0),
+            (trap, false, [1.0, 0.0], 0.25),
+            (trap, false, [0.0, 1.0], 1.0),
+            (trap, true, [1.0, 0.0], 0.125),
+            (trap, true, [0.0, 1.0], 0.0),
+        ] {
+            assert_eq!(
+                evaluate_generated_idt_derivative(coefficients, initialized, derivatives).unwrap(),
+                expected
+            );
+        }
+        let history = GeneratedIdtAcceptedHistory {
+            initialized: false,
+            integral_previous: 0.0,
+            integral_older: 0.0,
+            input_previous: 0.0,
+        };
+        assert_eq!(
+            evaluate_generated_idt_candidate(trap, 1.5, 5.0, history)
+                .unwrap()
+                .jacobian_scale,
+            0.25
+        );
+        let candidate = evaluate_generated_idtmod_candidate(
+            trap,
+            1.5,
+            5.0,
+            3.0,
+            0.25,
+            history,
+            &IdtModOrigin::ZERO,
+        )
+        .unwrap();
+        for (derivatives, expected) in [
+            ([1.0, 0.0, 0.0], 0.25),
+            ([0.0, 1.0, 0.0], 1.0),
+            ([0.0, 0.0, 1.0], -1.0),
+            ([4.0, 2.0, 3.0], 0.0),
+        ] {
+            assert_eq!(
+                evaluate_generated_idtmod_derivative(
+                    trap,
+                    false,
+                    derivatives,
+                    GeneratedIdtModBranch {
+                        origin: &candidate.origin,
+                        value: candidate.value,
+                        modulus: 3.0,
+                        offset: 0.25,
+                    },
+                )
+                .unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn circular_derivatives_preserve_wide_branch_counts_and_cancellation() {
+        use crate::arithmetic::ScaledValue;
+        let origin = IdtModOrigin::ZERO.rebased(1.0e308, 1.0).unwrap();
+        assert_eq!(
+            origin
+                .branch_derivative_scaled(
+                    1.0,
+                    1.0,
+                    0.25,
+                    ScaledValue::new(1.0e308),
+                    ScaledValue::new(1.0)
+                )
+                .unwrap()
+                .binary64(),
+            1.0
+        );
+        assert_eq!(
+            evaluate_generated_idtmod_derivative(
+                GeneratedDdtCoefficients::inactive(),
+                false,
+                [0.0, 1.0e308, 1.0],
+                GeneratedIdtModBranch {
+                    origin: &origin,
+                    value: 1.0,
+                    modulus: 1.0,
+                    offset: 0.25
+                },
+            )
+            .unwrap(),
+            1.0
+        );
+        let origin = IdtModOrigin::ZERO
+            .rebased(f64::MAX, 0.0)
+            .unwrap()
+            .rebased(f64::MAX, 0.0)
+            .unwrap();
+        let branch = GeneratedIdtModBranch {
+            origin: &origin,
+            value: 0.0,
+            modulus: 1.0,
+            offset: 0.0,
+        };
+        let wide = origin
+            .branch_derivative_scaled(0.0, 1.0, 0.0, ScaledValue::new(0.0), ScaledValue::new(1.0))
+            .unwrap();
+        assert!(wide.is_finite());
+        assert_eq!(
+            wide.multiply(ScaledValue::new(f64::MIN_POSITIVE))
+                .binary64(),
+            -2.0 * (f64::MAX * f64::MIN_POSITIVE)
+        );
+        assert_eq!(
+            evaluate_generated_idtmod_derivative(
+                GeneratedDdtCoefficients::inactive(),
+                false,
+                [0.0, 0.0, f64::MIN_POSITIVE],
+                branch,
+            )
+            .unwrap(),
+            -2.0 * (f64::MAX * f64::MIN_POSITIVE)
+        );
+        for derivatives in [
+            [f64::NAN, 0.0, 0.0],
+            [0.0, f64::INFINITY, 0.0],
+            [0.0, 0.0, f64::NAN],
+        ] {
+            assert!(
+                evaluate_generated_idtmod_derivative(
+                    GeneratedDdtCoefficients::inactive(),
+                    false,
+                    derivatives,
+                    branch,
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn circular_integral_seeds_local_phase_before_direct_transient() {

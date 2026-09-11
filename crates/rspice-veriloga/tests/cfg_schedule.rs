@@ -583,6 +583,7 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
         ddt_scale: 0.0,
         idt: 0.0,
         idt_scale: 0.0,
+        integral_derivatives: Default::default(),
         staged: staged.to_vec(),
     }
 }

@@ -230,7 +230,7 @@ fn evaluate_stateful_helper(
     operands: [f64; 5],
     session: &mut WasmJitRuntimeSession,
 ) -> Result<f64, HelperError> {
-    if matches!(opcode, 421 | 429 | 445) {
+    if matches!(opcode, 421 | 429 | 445 | 481) {
         return Err(session.fail(
             "WASM JIT variable-arity operation reached the five-operand scalar helper; the slice helper is required",
         ));
@@ -404,6 +404,10 @@ fn evaluate_stateful_helper(
             require_integration_state(session, index)?;
             (Instruction::IdtModState(index), 4)
         }
+        480 => {
+            require_integration_state(session, index)?;
+            (Instruction::IdtDerivativeState(index), 3)
+        }
         _ => return Err(HelperError::InvalidOpcode),
     };
     let operands = operands.get(..instruction.1).ok_or_else(|| {
@@ -460,14 +464,15 @@ pub(super) fn evaluate_slice_helper_with_session(
     if opcode == 251 {
         return evaluate_sum_products_div(aux0, aux1, aux2, operands);
     }
-    if opcode == 445 {
+    if matches!(opcode, 445 | 481) {
         if aux1 != 0 || aux2 != 0 {
-            return Err(session
-                .fail("WASM JIT slew derivative slice helper received nonzero reserved metadata"));
+            return Err(session.fail(
+                "WASM JIT state derivative slice helper received nonzero reserved metadata",
+            ));
         }
         if operands.len() != 6 {
             return Err(session.fail(format!(
-                "WASM JIT slew derivative slice helper requires 6 operands, received {}",
+                "WASM JIT state derivative slice helper requires 6 operands, received {}",
                 operands.len()
             )));
         }
@@ -475,15 +480,21 @@ pub(super) fn evaluate_slice_helper_with_session(
             .ok()
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| {
-                session.fail("WASM JIT slew derivative slice helper has a negative filter slot")
+                session.fail("WASM JIT state derivative slice helper has a negative state slot")
             })?;
-        require_slot(
-            session,
-            filter_id,
-            session.context.slew_filters.len(),
-            "slew derivative filter",
-        )?;
-        return session.execute_instruction(Instruction::SlewStateDerivative(filter_id), operands);
+        let instruction = if opcode == 445 {
+            require_slot(
+                session,
+                filter_id,
+                session.context.slew_filters.len(),
+                "slew derivative filter",
+            )?;
+            Instruction::SlewStateDerivative(filter_id)
+        } else {
+            require_integration_state(session, filter_id)?;
+            Instruction::IdtModDerivativeState(filter_id)
+        };
+        return session.execute_instruction(instruction, operands);
     }
 
     let storage = match opcode {
@@ -501,7 +512,7 @@ pub(super) fn evaluate_slice_helper_with_session(
     let filter_id = u32::try_from(aux0)
         .ok()
         .and_then(|value| usize::try_from(value).ok())
-        .ok_or_else(|| session.fail("WASM JIT Zi slice helper has a negative filter slot"))?;
+        .ok_or_else(|| session.fail("WASM JIT Zi slice helper has a negative state slot"))?;
     let layout = decode_zi_layout_descriptor(filter_id, aux1)
         .ok_or_else(|| session.fail("WASM JIT Zi slice helper received an invalid layout"))?;
     let operand_count = layout

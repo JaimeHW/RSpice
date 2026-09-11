@@ -896,6 +896,34 @@ impl Lowerer<'_> {
                 let offset = operand(*offset)?;
                 push(NativeOp::IdtModState(slot), &[input, ic, modulus, offset])
             }
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap,
+            } => {
+                let kind = if wrap.is_some() {
+                    CanonicalStateOperator::IdtMod
+                } else {
+                    CanonicalStateOperator::Idt
+                };
+                let slot = self.state_slot(*operator, kind)?;
+                let primal = operand(*primal)?;
+                let input = operand(*input_derivative)?;
+                let ic = operand(*ic_derivative)?;
+                if let Some((modulus, offset, derivative)) = wrap {
+                    let modulus = operand(*modulus)?;
+                    let offset = operand(*offset)?;
+                    let derivative = operand(*derivative)?;
+                    push(
+                        NativeOp::IdtModDerivativeState(slot),
+                        &[primal, modulus, offset, input, ic, derivative],
+                    )
+                } else {
+                    push(NativeOp::IdtDerivativeState(slot), &[primal, input, ic])
+                }
+            }
             // `limexp`'s derivative is a clamp rather than a call, and the
             // block model already has every piece of it. Spelling it out here
             // rather than adding a `NativeOp` is what keeps this route from
@@ -1645,6 +1673,7 @@ mod tests {
             ddt_scale: 0.0,
             idt: 0.0,
             idt_scale: 0.0,
+            integral_derivatives: Default::default(),
             staged: Vec::new(),
         }
     }

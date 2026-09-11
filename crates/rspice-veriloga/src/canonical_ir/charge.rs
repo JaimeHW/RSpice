@@ -700,6 +700,15 @@ mod tests {
             ("if(ddt(V(p,n))>0) I(p,n)<+V(p,n);", false),
             ("I(p,n)<+idt(V(p,n),2)+ddt(V(p,n));", true),
             ("I(p,n)<+idt(ddt(V(p,n)),2);", false),
+            (
+                "I(p,n)<+ddx(idt(V(p,n),V(p,n)*V(p,n)),V(p,n))+ddt(V(p,n));",
+                true,
+            ),
+            ("I(p,n)<+ddx(idt(ddt(V(p,n)),2),V(p,n));", false),
+            (
+                "I(p,n)<+ddx(idtmod(V(p,n),2,V(p,n),0.25),V(p,n))+ddt(V(p,n));",
+                true,
+            ),
             ("I(p,n)<+white_noise(1e-12,\"n\")+ddt(V(p,n));", true),
             ("I(p,n)<+white_noise(abs(ddt(V(p,n))),\"n\");", false),
             (

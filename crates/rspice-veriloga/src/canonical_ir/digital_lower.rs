@@ -2257,7 +2257,10 @@ impl ProcessLowerer<'_> {
                     // after the signal table for the reason `constant` is: a
                     // name that denotes a signal is a runtime value and is
                     // never a constant, whatever else shares its spelling.
-                    None => self.constants.real(&identifier.name).is_some(),
+                    None => {
+                        self.constants.real(&identifier.name).is_some()
+                            || self.constants.non_finite_real(&identifier.name).is_some()
+                    }
                 },
             },
             // Section 5.1 permits real operands for `+ - * /`; the result is

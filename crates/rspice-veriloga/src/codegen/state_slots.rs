@@ -29,10 +29,14 @@ use crate::codegen::{BytecodeProgram, Instruction};
 impl CanonicalStateOperator {
     pub(crate) fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
         match (self, instruction) {
-            (Self::Ddt, Instruction::DdtState(slot)) | (Self::Idt, Instruction::IdtState(slot)) => {
+            (Self::Ddt, Instruction::DdtState(slot))
+            | (Self::Idt, Instruction::IdtState(slot) | Instruction::IdtDerivativeState(slot)) => {
                 Some(*slot)
             }
-            (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
+            (
+                Self::IdtMod,
+                Instruction::IdtModState(slot) | Instruction::IdtModDerivativeState(slot),
+            ) => Some(*slot),
             (
                 Self::Transition,
                 Instruction::TransitionState(slot) | Instruction::TransitionStateDerivative(slot),
@@ -77,8 +81,11 @@ impl CanonicalStateOperator {
     pub(crate) fn rewrite_bytecode_slot(self, instruction: &mut Instruction, slot: usize) -> bool {
         match (self, instruction) {
             (Self::Ddt, Instruction::DdtState(held))
-            | (Self::Idt, Instruction::IdtState(held))
-            | (Self::IdtMod, Instruction::IdtModState(held))
+            | (Self::Idt, Instruction::IdtState(held) | Instruction::IdtDerivativeState(held))
+            | (
+                Self::IdtMod,
+                Instruction::IdtModState(held) | Instruction::IdtModDerivativeState(held),
+            )
             | (
                 Self::Transition,
                 Instruction::TransitionState(held) | Instruction::TransitionStateDerivative(held),
