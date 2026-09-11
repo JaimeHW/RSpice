@@ -405,7 +405,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 
 pub(crate) type CanonicalModelValues = [f64; 184];
 pub struct Instance {
-	pub nodes: [usize; 15],
+	pub nodes: [usize; 22],
 	pub branches: [usize; 6],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
@@ -416,7 +416,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 121]>,
+	pub(crate) canonical_reactive: Box<[f64; 135]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 241]>,
 	pub(crate) canonical_instance_valid: bool,
@@ -606,11 +606,11 @@ impl Instance {
 		P::model("type", Some(1.0)).integer().minimum(B::inclusive(-1.0)).maximum(B::inclusive(1.0)).excluded_values(&[0.0]),
 		P::model("minr", None).minimum(B::inclusive(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 10;
-	pub const NODE_COUNT: usize = 15;
-	pub const INTERNAL_NODE_NAMES: [&str; 10] = ["ci", "ei", "bp", "bi", "si", "xf1", "xf2", "xf", "n1", "n2"];
+	pub const INTERNAL_NODE_COUNT: usize = 17;
+	pub const NODE_COUNT: usize = 22;
+	pub const INTERNAL_NODE_NAMES: [&str; 17] = ["ci", "ei", "bp", "bi", "si", "xf1", "xf2", "xf", "n1", "n2", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[];
+	pub const INTERNAL_STATE_NODES: &[usize] = &[10, 11, 12, 13, 14, 15, 16];
 	pub const BRANCH_COUNT: usize = 6;
 	pub const PARAMETER_COUNT: usize = 150;
 	pub const VARIABLE_COUNT: usize = 572;
@@ -620,7 +620,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "5cbf80ffa6cc57743a0cfb66b1b0e623ee7995ea24bb790c473dc99338623285";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "2323ba68a5bf643a8dabec38ad48488b7e776ebec01490142a272b74502d0328";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

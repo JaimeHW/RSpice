@@ -1089,7 +1089,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 
 pub(crate) type CanonicalModelValues = [f64; 429];
 pub struct Instance {
-	pub nodes: [usize; 21],
+	pub nodes: [usize; 22],
 	pub branches: [usize; 25],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
@@ -1100,7 +1100,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 190]>,
+	pub(crate) canonical_reactive: Box<[f64; 185]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 1697]>,
 	pub(crate) canonical_instance_valid: bool,
@@ -2072,11 +2072,11 @@ impl Instance {
 		P::model("VJUNREFD", Some(2.5)).minimum(B::inclusive(0.5)),
 		P::model("FJUNQD", Some(0.03)).minimum(B::inclusive(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 17;
-	pub const NODE_COUNT: usize = 21;
-	pub const INTERNAL_NODE_NAMES: [&str; 17] = ["noi", "gp", "si", "di", "bp", "bi", "bs", "bd", "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8", "int9"];
+	pub const INTERNAL_NODE_COUNT: usize = 18;
+	pub const NODE_COUNT: usize = 22;
+	pub const INTERNAL_NODE_NAMES: [&str; 18] = ["noi", "gp", "si", "di", "bp", "bi", "bs", "bd", "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8", "int9", "__flow_state0"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[];
+	pub const INTERNAL_STATE_NODES: &[usize] = &[17];
 	pub const BRANCH_COUNT: usize = 25;
 	pub const PARAMETER_COUNT: usize = 932;
 	pub const VARIABLE_COUNT: usize = 3438;
@@ -2086,7 +2086,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6a568825c63380a742a50729e0cc151ee7210843f3de8596a96611542e2804da";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3f5a8c005cf7d979ba9c80b9bd965ba7c7902cf901c5c34c8bfbd89feabf0af4";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

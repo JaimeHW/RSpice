@@ -1702,7 +1702,7 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_with_canonical_ir_evaluates_prior_named_branch_current_without_fallback() {
+fn native_device_with_canonical_ir_evaluates_solved_named_branch_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"
 module native_canonical_named_current_probe(p, n);
@@ -1717,7 +1717,7 @@ endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler.compile(source).expect("compile bytecode model");
-    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.internal_nodes, 2);
     let artifact = compiler
         .compile_canonical_ir(source)
         .expect("compile canonical IR");
@@ -1725,15 +1725,14 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("NCURPROBE1", model, &artifact, &[1, 0])
             .expect("named branch current probe uses canonical native JIT path");
     assert!(device.is_using_native());
-    device.set_internal_node_indices(&[2]);
-    device.update_all_voltages(&[2.0, 0.0]);
+    device.set_internal_node_indices(&[2, 3]);
+    device.update_all_voltages(&[2.0, 0.0, 2.0]);
 
     let currents = device
         .try_evaluate()
         .expect("native named branch current probe evaluates");
 
-    assert!((currents[0] - 2.0).abs() < 1e-12, "currents: {currents:?}");
-    assert!((currents[1] - 4.0).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(currents, [-2.0, 4.0, 2.0, 2.0]);
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -2911,12 +2910,11 @@ fn native_device_executes_solver_branch_flow_ddx_without_fallback() {
 module native_flow_ddx(p, n, ctrl, out, reverse, monitor);
     inout p, n, ctrl, out, reverse, monitor;
     electrical p, n, ctrl, out, reverse, monitor;
-    branch (p, n) sense;
     analog begin
-        V(sense) <+ 0.25;
-        I(out, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(sense));
-        I(reverse, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(n, p));
-        I(monitor, n) <+ I(sense) * I(sense) + V(ctrl, n) * I(sense);
+        V(p,n) <+ 0.25;
+        I(out, n) <+ ddx(I(p,n) * I(p,n) + V(ctrl, n) * I(p,n), I(p,n));
+        I(reverse, n) <+ ddx(I(p,n) * I(p,n) + V(ctrl, n) * I(p,n), I(n, p));
+        I(monitor, n) <+ I(p,n) * I(p,n) + V(ctrl, n) * I(p,n);
     end
 endmodule
 "#;
@@ -4715,25 +4713,20 @@ module native_internal_current_probe_alias(p, n);
 endmodule
 "#;
     let model = compile(source);
-    assert_eq!(model.internal_nodes, 1);
-    assert_eq!(model.stamp_programs.len(), 2);
+    assert_eq!(model.internal_nodes, 2);
+    assert_eq!(model.stamp_programs.len(), 4);
 
     let mut device =
         native_contract_try_new("ICPA1", model, &[1, 0]).expect("current probe alias uses native");
     assert!(device.is_using_native());
-    device.set_internal_node_indices(&[2]);
-    device.update_all_voltages(&[2.0, 0.5]);
+    device.set_internal_node_indices(&[2, 3]);
+    device.update_all_voltages(&[2.0, 0.5, -1.5]);
 
     let currents = device
         .try_evaluate()
         .expect("native internal-node current probe alias evaluates");
 
-    assert_eq!(currents.len(), 2);
-    assert!((currents[0] - 1.5).abs() < 1e-12, "currents: {currents:?}");
-    assert!(
-        (currents[1] - 0.375).abs() < 1e-12,
-        "currents: {currents:?}"
-    );
+    assert_eq!(currents, [1.5, 0.375, -1.5, -1.5]);
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -4752,35 +4745,33 @@ module native_internal_current_probe_alias_jacobian(p, n);
 endmodule
 "#;
     let model = compile(source);
-    assert_eq!(model.internal_nodes, 1);
-    assert_eq!(model.stamp_programs.len(), 2);
+    assert_eq!(model.internal_nodes, 2);
+    assert_eq!(model.stamp_programs.len(), 4);
 
     let mut device =
         native_contract_try_new("ICPJ1", model, &[1, 0]).expect("jacobian alias uses native");
     assert!(device.is_using_native());
-    device.set_internal_node_indices(&[2]);
+    device.set_internal_node_indices(&[2, 3]);
 
-    let (matrix, rhs) = stamp_device(&mut device, &[2.0, 0.5]);
-
+    let (matrix, rhs) = stamp_device(&mut device, &[2.0, 0.5, -1.5]);
+    let entry = |row, col| matrix.get(&(row, col)).copied().unwrap_or_default();
+    // Eliminate the private current unknown to recover the physical Jacobian.
+    // d[(Vp - Vm) * (1 + Vp)]/dVp = 4.5 at Vp=2, Vm=0.5.
+    for (row, col, expected) in [(0, 0, 4.5), (0, 1, -3.0), (1, 0, -1.0), (1, 1, 1.0)] {
+        let reduced = entry(row, col) - entry(row, 2) * entry(2, col) / entry(2, 2);
+        assert!((reduced - expected).abs() < 1e-12, "matrix: {matrix:?}");
+    }
+    assert_eq!(entry(0, 2), -3.0);
+    assert_eq!(entry(1, 2), 1.0);
+    assert_eq!(entry(2, 2), 1.0);
     assert!(
-        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 2.5).abs() < 1e-12,
-        "matrix: {matrix:?}, rhs: {rhs:?}"
+        (rhs.get(&0).copied().unwrap_or_default() - 3.0).abs() < 1e-12,
+        "rhs: {rhs:?}"
     );
     assert!(
-        (matrix.get(&(0, 1)).copied().unwrap_or_default() + 1.0).abs() < 1e-12,
-        "matrix: {matrix:?}, rhs: {rhs:?}"
-    );
-    assert!(
-        (matrix.get(&(1, 0)).copied().unwrap_or_default() + 1.0).abs() < 1e-12,
-        "matrix: {matrix:?}, rhs: {rhs:?}"
-    );
-    assert!(
-        (matrix.get(&(1, 1)).copied().unwrap_or_default() - 1.0).abs() < 1e-12,
-        "matrix: {matrix:?}, rhs: {rhs:?}"
-    );
-    assert!(
-        rhs.values().map(|value| value.abs()).sum::<f64>() < 1e-12,
-        "matrix: {matrix:?}, rhs: {rhs:?}"
+        rhs.iter()
+            .filter(|(row, _)| **row != 0)
+            .all(|(_, value)| value.abs() < 1e-12)
     );
 }
 
@@ -5525,10 +5516,11 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("NOISECP1", model, &artifact, &[1, 0])
             .expect("canonical current-probe noise model uses native JIT");
     assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
     device.set_analysis_type(3);
 
     let sources = device
-        .try_noise_sources(&[3.0])
+        .try_noise_sources(&[3.0, -0.006])
         .expect("native current-probe noise evaluation succeeds");
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].name, "shot");
@@ -5552,7 +5544,7 @@ endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = compiler.compile(source).expect("compile bytecode model");
-    assert_eq!(model.internal_nodes, 1);
+    assert_eq!(model.internal_nodes, 2);
     assert_eq!(model.noise_sources.len(), 1);
     let artifact = compiler
         .compile_canonical_ir(source)
@@ -5562,11 +5554,11 @@ endmodule
         VerilogADevice::try_new_with_canonical_ir("NOISENAMEDCP1", model, &artifact, &[1, 0])
             .expect("canonical named-branch current-probe noise model uses native JIT");
     assert!(device.is_using_native());
-    device.set_internal_node_indices(&[2]);
+    device.set_internal_node_indices(&[2, 3]);
     device.set_analysis_type(3);
 
     let sources = device
-        .try_noise_sources(&[3.0, 0.0])
+        .try_noise_sources(&[3.0, 0.0, 0.006])
         .expect("native named-branch current-probe noise evaluation succeeds");
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].name, "shot");
@@ -5851,38 +5843,48 @@ fn native_device_executes_zi_current_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_executes_terminal_pair_current_probes_in_source_order() {
+fn native_device_executes_terminal_pair_current_probes_using_solver_current() {
     let model = current_probe_model();
     let mut device = native_contract_try_new("CP1", model, &[1, 0])
         .expect("current probe model uses native JIT");
     assert!(device.is_using_native());
-    device.update_voltages(&[4.0]);
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[4.0, -4.0 / 0.9]);
 
     let currents = device
         .try_evaluate()
         .expect("native current-probe evaluation succeeds");
 
-    assert_eq!(currents.len(), 2);
-    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
-    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(currents.len(), 4);
+    for (actual, expected) in currents
+        .iter()
+        .zip([4.0, 0.4 / 0.9, -4.0 / 0.9, -4.0 / 0.9])
+    {
+        assert!((actual - expected).abs() < 1e-12, "currents: {currents:?}");
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_device_executes_single_ended_current_probes_in_source_order() {
+fn native_device_executes_single_ended_current_probes_using_solver_current() {
     let model = single_ended_current_probe_model();
     let mut device = native_contract_try_new("CG1", model, &[1])
         .expect("single-ended current probe model uses native JIT");
     assert!(device.is_using_native());
-    device.update_voltages(&[4.0]);
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[4.0, -4.0 / 0.9]);
 
     let currents = device
         .try_evaluate()
         .expect("native single-ended current-probe evaluation succeeds");
 
-    assert_eq!(currents.len(), 2);
-    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
-    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(currents.len(), 4);
+    for (actual, expected) in currents
+        .iter()
+        .zip([4.0, 0.4 / 0.9, -4.0 / 0.9, -4.0 / 0.9])
+    {
+        assert!((actual - expected).abs() < 1e-12, "currents: {currents:?}");
+    }
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
@@ -5927,15 +5929,20 @@ endmodule
     let mut device = VerilogADevice::try_new_with_canonical_ir("CGCANON1", model, &artifact, &[1])
         .expect("canonical single-ended current probe uses native JIT path");
     assert!(device.is_using_native());
-    device.update_voltages(&[4.0]);
+    device.set_internal_node_indices(&[2]);
+    device.update_all_voltages(&[4.0, -4.0 / 0.9]);
 
     let currents = device
         .try_evaluate()
         .expect("native canonical single-ended current-probe evaluation succeeds");
 
-    assert_eq!(currents.len(), 2);
-    assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
-    assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+    assert_eq!(currents.len(), 4);
+    for (actual, expected) in currents
+        .iter()
+        .zip([4.0, 0.4 / 0.9, -4.0 / 0.9, -4.0 / 0.9])
+    {
+        assert!((actual - expected).abs() < 1e-12, "currents: {currents:?}");
+    }
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]

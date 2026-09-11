@@ -35,6 +35,58 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
 }
 
 #[test]
+fn flow_probe_feedback_preserves_dc_ac_noise_and_private_state_equations() {
+    for feedback in [0.0, 0.1] {
+        let model = write_model(
+            "flow_probe_feedback",
+            &format!(
+                "module flow_probe_feedback(p,n,q); inout p,n,q; electrical p,n,q; analog begin
+             I(q,n)<+3*I(p,n);
+             I(p,n)<+2*V(p,n)+{feedback}*I(p,n)+white_noise(1,\"shot\");
+             end endmodule"
+            ),
+        );
+        for (options, resistance) in [("", 1.0), (".options rshunt=2\n", 2.0 / 3.0)] {
+            let netlist = Netlist::parse_validated(&format!(
+                "* simultaneous branch currents\n{options}V1 in 0 DC 1 AC 1\nR1 out 0 1\nX1 in 0 out flow_probe_feedback\n.va \"{}\" flow_probe_feedback\n.end\n", deck_path(&model)
+            )).unwrap();
+            let engine = Engine::default();
+            let expected = -6.0 * resistance / (1.0 - feedback);
+            let dc = engine.run_dc_op(&netlist).unwrap();
+            assert!(
+                (node_voltage(&dc, "out") - expected).abs() < 1e-8,
+                "feedback={feedback}; {options}"
+            );
+            for point in engine.run_ac(&netlist, &[0.0, 1.0, 1e6]).unwrap() {
+                let output = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let value = point.voltages[output];
+                assert!(
+                    (value.re - expected).abs() < 1e-8 && value.im.abs() < 1e-12,
+                    "{value}"
+                );
+            }
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let output = circuit.get_node_by_name("out").unwrap();
+            let expected_noise = (3.0 * resistance / (1.0 - feedback)).powi(2);
+            for point in engine
+                .run_noise(&netlist, output, &[1.0, 1e6], 300.15)
+                .unwrap()
+            {
+                assert!(
+                    (point.output_noise_density / expected_noise - 1.0).abs() < 1e-8,
+                    "{point:?}"
+                );
+            }
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
 fn disk_includes_select_modules_independently_of_model_aliases() {
     let model = write_model(
         "module_selection",

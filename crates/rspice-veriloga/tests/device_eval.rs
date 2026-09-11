@@ -1483,6 +1483,19 @@ fn custom_flow_access_reads_the_branch_unknown() {
             -56.0,
         ),
     ] {
+        // The reversed unnamed probe must read an unnamed source. Named
+        // branches are distinct even when their endpoints are identical.
+        let unnamed_flow = expression.contains("TestQ(n,p)");
+        let expression = if unnamed_flow {
+            expression.replace("TestQ(b)", "TestQ(p,n)")
+        } else {
+            expression.to_owned()
+        };
+        let source_probe = if unnamed_flow {
+            "TestU(p,n)"
+        } else {
+            "TestU(b)"
+        };
         let source = format!(
             r#"
 `include "disciplines.vams"
@@ -1492,7 +1505,7 @@ discipline testdisc potential TestPotential; flow TestFlow; enddiscipline
 module probe(p,n,o);
 inout p,n,o; testdisc p,n; electrical o;
 branch(p,n) b;
-analog begin TestU(b) <+ 2.0; I(o) <+ {expression}; end
+analog begin {source_probe} <+ 2.0; I(o) <+ {expression}; end
 endmodule
 "#
         );
@@ -2518,16 +2531,17 @@ endmodule
     );
 
     let mut device = model.device("X1", &[1, 0]);
+    device.set_internal_node_indices(&[2]);
     device.set_analysis_type(3);
     let sources = device
-        .try_noise_sources(&[3.0])
+        .try_noise_sources(&[3.0, -0.006])
         .expect("checked current-probe noise evaluation");
 
     let shot = sources
         .iter()
         .find(|source| source.name == "shot")
         .expect("shot noise source");
-    assert_eq!(shot.node_pos, 1);
+    assert_eq!(shot.node_pos, 2);
     assert_eq!(shot.node_neg, 0);
     assert!((shot.psd - 2.4e-2).abs() < 1.0e-15, "shot={shot:?}");
 }

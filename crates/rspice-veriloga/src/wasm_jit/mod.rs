@@ -116,7 +116,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 28 to 29 evaluates simulator queries and their selected fallbacks at runtime.
 /// 29 to 30 protects quotient numerators against intermediate range loss in scalar and packed AD.
 /// 30 to 31 publishes limiter affine residual correction entries.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 31;
+/// 31 to 32 resolves flow probes through simultaneous current equations.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 32;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2229,6 +2230,56 @@ endmodule
                     expected,
                     "postfix={postfix}, degree={degree}, voltage={voltage}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_flow_probes_use_simultaneous_current_unknowns_in_both_plans() {
+        use super::abi::{
+            FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
+            FRAME_RESULT_OFFSET,
+        };
+        use crate::codegen::ColumnAxis;
+        let source = "module flow(p,n,q); inout p,n,q; electrical p,n,q; analog begin I(q,n)<+3*I(p,n); I(p,n)<+2*V(p,n)+0.1*I(p,n); end endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, None)
+            .unwrap();
+        assert_eq!(report.model.internal_state_nodes.len(), 1);
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "flow", postfix);
+            harness.reset();
+            let internal = FusedKernelHarness::VOLTAGES + 64;
+            harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_PTR_OFFSET, internal);
+            harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, 1);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+            harness.write_f64(internal as usize, -2.0 / 0.9);
+            harness.call_assignments();
+            harness.call_prelude();
+            for (stamp, expected) in [6.0 / 0.9, 2.0 / 0.9, -2.0 / 0.9, -2.0 / 0.9]
+                .into_iter()
+                .enumerate()
+            {
+                let export = harness.stamp_value_export(stamp);
+                assert_eq!(harness.call(&export), 0);
+                assert!((harness.read_f64(FRAME_RESULT_OFFSET as usize) - expected).abs() < 1e-12);
+                for (entry, derivative) in report.model.stamp_programs[stamp]
+                    .jacobian_programs
+                    .iter()
+                    .enumerate()
+                {
+                    let expected = match (stamp, derivative.col_axis) {
+                        (0, ColumnAxis::Node(3)) => -3.0,
+                        (1, ColumnAxis::Node(0)) => 2.0,
+                        (1, ColumnAxis::Node(1)) => -2.0,
+                        (1, ColumnAxis::Node(3)) => -0.1,
+                        (2 | 3, ColumnAxis::Node(3)) => 1.0,
+                        _ => panic!("unexpected current-probe derivative"),
+                    };
+                    let export = harness.jacobian_export(stamp, entry);
+                    assert_eq!(harness.call(&export), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+                }
             }
         }
     }

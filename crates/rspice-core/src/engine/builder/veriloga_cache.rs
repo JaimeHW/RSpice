@@ -273,7 +273,8 @@ use super::*;
 // Version 64 resets simulator-control tasks once before all runtime loops.
 // Version 65 distinguishes transient discontinuities from Newton convergence hints.
 // Version 66 retains limiter affine residual corrections for Newton stamping.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 66;
+// Version 67 solves flow probes as simultaneous branch equations.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 67;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

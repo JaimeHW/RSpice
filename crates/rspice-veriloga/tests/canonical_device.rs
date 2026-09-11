@@ -22,6 +22,42 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_flow_probes_preserve_simultaneous_jacobians() {
+    let (state, stamp, noise) = generated_parts(
+        "module flow(p,q); inout p,q; electrical p,q; analog begin I(q)<+3*I(p); I(p)<+2*V(p)+0.1*I(p); end endmodule",
+        "simultaneous flow probes",
+    );
+    run_generated_main(
+        "simultaneous flow probes",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+assert_eq!(device::state::Instance::INTERNAL_STATE_NODES, &[0]);
+let mut instance=device::state::Instance::new(&[0,1,2]);
+instance.finalize_parameters().unwrap();
+let bias=[1.0,0.0,-2.0/0.9];
+let ctx=runtime::GeneratedEvalContext { voltages:&bias, temperature:300.15 };
+let mut sink=[0.0;32];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut sink) });
+let matrix=|row:usize,col:usize| sink[12+4*row+col];
+let pivot=matrix(2,2);
+assert!((pivot-0.9).abs()<1e-12);
+for (row,expected) in [(0,2.0/0.9),(1,6.0/0.9)] {
+    let reduced=matrix(row,0)-matrix(row,2)*matrix(2,0)/pivot;
+    assert!((reduced-expected).abs()<1e-12,"{row}: {reduced}");
+}
+for row in 0..3 {
+    let rhs=(0..3).map(|col| matrix(row,col)*bias[col]).sum::<f64>()-sink[28+row];
+    assert!(rhs.abs()<1e-12,"{row}: {rhs}");
+}
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_limit_function_identifiers_preserve_state_and_unit_slope() {
     let source = r#"
 module callback(p);
@@ -2682,7 +2718,7 @@ module port_flow(p, n, out);
             V(p, n) <+ 0.0;
         if (mode == 2)
             V(p, n) <+ 0.0;
-        I(out, n) <+ I(p);
+        I(out, n) <+ I(<p>);
     end
 endmodule
 "#,
@@ -2694,14 +2730,14 @@ instance.set_branch_indices(&[3, 4]);
 instance.set_parameter("mode", 2.0).unwrap();
 instance.finalize_parameters().unwrap();
 // The first contribution is inactive but its branch is the physical leader.
-// A later active duplicate must not redirect or double-count I(p).
+// A later active duplicate must not redirect or double-count I(<p>).
 let voltages = [0.0, 0.0, 0.0, 0.5, 40.0];
 let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
 let mut sink = [0.0; 10];
 let mut stamper = runtime::GeneratedStamper { sink: Some(&mut sink) };
 instance.stamp(&ctx, &mut stamper);
 assert_eq!(sink[0], 1.5, "one topology call plus 0.5 A current: {sink:?}");
-assert_eq!(sink[9], 0.5, "I(p) reads the physical leader exactly once: {sink:?}");
+assert_eq!(sink[9], 0.5, "I(<p>) reads the physical leader exactly once: {sink:?}");
 assert_eq!(sink[1], 1.0, "duplicate unknown remains pinned: {sink:?}");
 "#;
     run_generated_main(
@@ -7162,6 +7198,18 @@ pub mod runtime {
             _branch_derivatives: [Value; BRANCH_COUNT],
             _scale: Value,
         ) {
+            // Extended captures retain a small complete matrix and residual
+            // for tests that eliminate private solver unknowns.
+            if let Some(sink) = self.sink.as_deref_mut().filter(|sink| sink.len() >= 32) {
+                for (row, sign) in [(_pos, 1.0), (_neg, -1.0)] {
+                    if let Some(row) = row.filter(|row| *row < 4) {
+                        sink[28 + row] += sign * _value * _scale;
+                        for (col, derivative) in _node_indices.iter().zip(_node_derivatives) {
+                            if *col < 4 { sink[12 + 4 * row + *col] += sign * derivative * _scale; }
+                        }
+                    }
+                }
+            }
             if let Some(sink) = self.sink.as_deref_mut()
                 && let Some(first) = sink.first_mut()
             {
