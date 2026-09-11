@@ -82,6 +82,7 @@ pub(super) struct SubcktFrame {
 
 #[derive(Debug)]
 pub(super) struct ParseState {
+    pub(super) parameter_overrides: Vec<ParameterOverride>,
     pub(super) elements: Vec<Element>,
     pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
@@ -134,6 +135,7 @@ pub(super) struct ParseState {
 impl ParseState {
     pub(super) fn new() -> Self {
         Self {
+            parameter_overrides: Vec::new(),
             elements: Vec::new(),
             element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
@@ -329,6 +331,7 @@ fn apply_temp_directive_to_options(netlist: &mut Netlist) {
 }
 
 pub(super) struct ParseLineContext<'a> {
+    pub(super) parameter_overrides: &'a [ParameterOverride],
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
     pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
     pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
@@ -356,6 +359,7 @@ pub(super) struct ParseLineContext<'a> {
 }
 
 pub(super) struct ParseCommandContext<'a> {
+    pub(super) parameter_overrides: &'a [ParameterOverride],
     /// Complete logical card text used for byte-exact output operand slices.
     pub(super) logical_line: &'a str,
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,

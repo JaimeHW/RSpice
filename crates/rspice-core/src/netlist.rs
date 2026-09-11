@@ -737,6 +737,8 @@ pub(crate) enum NetlistReplayContext {
 /// previously applied electrical change can disappear behind stale source.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetlistAstOverlay {
+    /// Root parameter values retained across nested studies and source replay.
+    pub parameters: BTreeMap<String, Value>,
     pub(crate) device_parameters: BTreeMap<(String, String), crate::Value>,
 }
 
@@ -1010,6 +1012,18 @@ pub struct Netlist {
 }
 
 impl Netlist {
+    /// Retained root input, including parameter values materialized by a study.
+    pub(crate) fn retained_source_bytes(&self) -> usize {
+        self.ast_overlay.parameters.iter().fold(
+            self.source_text.as_ref().map_or(0, String::len),
+            |bytes, (name, _)| {
+                bytes
+                    .saturating_add(name.len())
+                    .saturating_add(std::mem::size_of::<Value>())
+            },
+        )
+    }
+
     /// Return the number of authored PSpice E/G CHEBYSHEV source cards that
     /// were accepted while parsing this netlist and its expanded includes.
     ///
@@ -1321,10 +1335,21 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_parameter_overrides_and_abort(input, options, &[], abort)
+    }
+
+    fn parse_with_parameter_overrides_and_abort(
+        input: &str,
+        options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_control_regions_with_abort(input, abort)?;
-        let mut netlist = parser::parse_netlist_with_options_and_abort(&sanitized, options, abort)?;
+        let mut netlist = parser::parse_netlist_with_parameter_overrides_and_abort(
+            &sanitized, options, overrides, abort,
+        )?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
@@ -1429,7 +1454,12 @@ impl Netlist {
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::parse_with_path_execution_dir_options_and_abort(
-            input, file_path, None, options, abort,
+            input,
+            file_path,
+            None,
+            options,
+            &[],
+            abort,
         )
     }
 
@@ -1447,6 +1477,24 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        Self::parse_with_sealed_sources_and_parameter_overrides_and_abort(
+            input,
+            file_path,
+            sources,
+            options,
+            &[],
+            abort,
+        )
+    }
+
+    fn parse_with_sealed_sources_and_parameter_overrides_and_abort(
+        input: &str,
+        file_path: &std::path::Path,
+        sources: SealedSourceBundle,
+        options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
         let replay_sources = sources.clone();
         let include_processor = IncludeProcessor::new_sealed(file_path, sources.clone())
             .with_resource_limits(options.resource_limits);
@@ -1460,6 +1508,7 @@ impl Netlist {
             input,
             file_path,
             options,
+            overrides,
             abort,
             NetlistSourceResolution {
                 include_processor,
@@ -1506,6 +1555,7 @@ impl Netlist {
             file_path,
             Some(execution_dir),
             options,
+            &[],
             abort,
         )
     }
@@ -1515,6 +1565,7 @@ impl Netlist {
         file_path: &std::path::Path,
         execution_dir: Option<&std::path::Path>,
         options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         let default_execution_dir = if execution_dir.is_none() {
@@ -1539,6 +1590,7 @@ impl Netlist {
             input,
             file_path,
             options,
+            overrides,
             abort,
             NetlistSourceResolution {
                 include_processor,
@@ -1555,6 +1607,7 @@ impl Netlist {
         input: &str,
         file_path: &std::path::Path,
         options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
         abort: &dyn AbortSignal,
         sources: NetlistSourceResolution,
     ) -> Result<Self, ParseWithAbortError> {
@@ -1569,8 +1622,9 @@ impl Netlist {
             include_processor.expand_content_mapped_with_abort(input, file_path, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist =
-            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
+        let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
+            &sanitized, options, overrides, abort,
+        )?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
@@ -1607,31 +1661,34 @@ impl Netlist {
     /// This is intentionally crate-private: callers must layer any AST-only
     /// overrides back onto the returned netlist before exposing it as a
     /// materialized analysis row.
-    pub(crate) fn replay_root_source_with_options_and_abort(
+    pub(crate) fn replay_root_source_with_parameter_overrides_and_abort(
         &self,
         input: &str,
         options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         match (&self.replay_context, self.source_path.as_deref()) {
             (Some(NetlistReplayContext::InMemory), _) | (None, None) => {
-                Self::parse_with_options_and_abort(input, options, abort)
+                Self::parse_with_parameter_overrides_and_abort(input, options, overrides, abort)
             }
             (Some(NetlistReplayContext::Sealed(sources)), Some(path)) => {
-                Self::parse_with_path_and_sealed_sources_and_options_and_abort(
+                Self::parse_with_sealed_sources_and_parameter_overrides_and_abort(
                     input,
                     path,
                     sources.clone(),
                     options,
+                    overrides,
                     abort,
                 )
             }
             (Some(NetlistReplayContext::PathWithExecutionDir(execution_dir)), Some(path)) => {
-                Self::parse_with_path_and_execution_dir_and_abort(
+                Self::parse_with_path_execution_dir_options_and_abort(
                     input,
                     path,
-                    execution_dir,
+                    Some(execution_dir),
                     options,
+                    overrides,
                     abort,
                 )
             }
@@ -1647,11 +1704,12 @@ impl Netlist {
                 search_paths,
                 execution_dir,
                 options,
+                overrides,
                 abort,
             ),
-            (None, Some(path)) => {
-                Self::parse_with_path_and_options_and_abort(input, path, options, abort)
-            }
+            (None, Some(path)) => Self::parse_with_path_execution_dir_options_and_abort(
+                input, path, None, options, overrides, abort,
+            ),
             (Some(context), None) => Err(ParseError::Syntax {
                 line: 0,
                 message: format!(
@@ -1901,6 +1959,7 @@ impl Netlist {
             search_paths,
             &execution_dir,
             options,
+            &[],
             abort,
         )
     }
@@ -1911,6 +1970,7 @@ impl Netlist {
         search_paths: &[std::path::PathBuf],
         execution_dir: &std::path::Path,
         options: NetlistParseOptions,
+        overrides: &[parser::ParameterOverride],
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
@@ -1923,8 +1983,9 @@ impl Netlist {
         let expanded = processor.expand_content_mapped_with_abort(input, path, abort)?;
         let (sanitized, mut diagnostics, dispositions) =
             Self::sanitize_expanded_source_with_abort(expanded, abort)?;
-        let mut netlist =
-            parser::parse_expanded_netlist_with_options_and_abort(&sanitized, options, abort)?;
+        let mut netlist = parser::parse_expanded_netlist_with_parameter_overrides_and_abort(
+            &sanitized, options, overrides, abort,
+        )?;
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
@@ -3650,9 +3711,10 @@ mod tests {
         }
 
         let replayed = parsed
-            .replay_root_source_with_options_and_abort(
+            .replay_root_source_with_parameter_overrides_and_abort(
                 "Xyce include precedence replay\n.include sub/nested.inc\nRROOT 2 0 4\n.end\n",
                 NetlistParseOptions::default(),
+                &[],
                 &NoAbort,
             )
             .expect("replay uses the captured include resolver contract");
@@ -3713,9 +3775,10 @@ mod tests {
         }
 
         let replayed = parsed
-            .replay_root_source_with_options_and_abort(
+            .replay_root_source_with_parameter_overrides_and_abort(
                 &source,
                 NetlistParseOptions::default(),
+                &[],
                 &NoAbort,
             )
             .expect("search-path replay uses the captured resolver contract");

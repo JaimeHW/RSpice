@@ -406,6 +406,25 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_replays_same_card_dependencies_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        let netlist = rspice_core::Netlist::parse(
+            "Same-card dependencies\n.param base=2 derived={3*base}\n\
+             V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {base+derived}\n.end\n",
+        )
+        .unwrap();
+        let engine = rspice_core::Engine::default();
+        let dc = engine
+            .run_sensitivity_with_abort(&netlist, 2, "base", 2.0, None, &NoAbort)
+            .unwrap();
+        let ac = engine
+            .run_sensitivity_ac_with_abort(&netlist, 2, "base", 2.0, &[1.0], None, &NoAbort)
+            .unwrap();
+        assert!((dc - 4.0).abs() < 4e-8);
+        assert!((ac[0] - 4.0).abs() < 4e-8);
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_resolves_zero_model_parameter_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::AcSensitivityOutput;

@@ -374,6 +374,7 @@ pub(super) fn process_line(
                 &mut frame.local_params,
                 &mut dummy_measurements,
                 ParseLineContext {
+                    parameter_overrides: &[],
                     analyses,
                     lin_analysis,
                     fft_analyses,
@@ -436,6 +437,7 @@ pub(super) fn process_line(
         &mut state.params,
         &mut state.measurements,
         ParseLineContext {
+            parameter_overrides: &state.parameter_overrides,
             analyses: &mut state.analyses,
             lin_analysis: &mut state.lin_analysis,
             fft_analyses: &mut state.fft_analyses,
@@ -488,6 +490,7 @@ pub(super) fn parse_line(
     let defer_simple_param_refs =
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
+        parameter_overrides,
         analyses,
         lin_analysis,
         fft_analyses,
@@ -540,6 +543,7 @@ pub(super) fn parse_line(
             &mut stream,
             line_num,
             ParseCommandContext {
+                parameter_overrides,
                 logical_line: line,
                 analyses,
                 lin_analysis,

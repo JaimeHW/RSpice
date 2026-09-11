@@ -116,6 +116,80 @@ fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
 }
 
 #[test]
+fn sensitivity_replays_same_card_and_included_parameter_dependencies() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
+    let parameters = ".param base=2 derived={3*base}\n";
+    let circuit = "V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {base+derived}\n.end\n";
+    use std::io::Write;
+    struct ParameterFile(std::path::PathBuf);
+    impl Drop for ParameterFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let directory = std::env::temp_dir();
+    let filename = format!(
+        "rspice-parameter-replay-{}-{}.inc",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let path = directory.join(&filename);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .unwrap();
+    let _cleanup = ParameterFile(path);
+    file.write_all(parameters.as_bytes()).unwrap();
+    drop(file);
+    let included = Netlist::parse_with_path(
+        &format!("Included dependencies\n.include {filename}\n{circuit}"),
+        &directory.join("main.cir"),
+    )
+    .unwrap();
+    let inline = Netlist::parse(&format!("Same-card dependencies\n{parameters}{circuit}")).unwrap();
+    let root = directory.join("sealed.cir");
+    let child = directory.join("sealed.inc");
+    let source = format!("Sealed dependencies\n.include sealed.inc\n{circuit}");
+    let bundle = SealedSourceBundle::try_new_with_edges(
+        [
+            (root.clone(), source.clone()),
+            (child.clone(), parameters.to_owned()),
+        ],
+        [SealedSourceEdge {
+            owner: root.clone(),
+            requested_path: "sealed.inc".into(),
+            target: child,
+        }],
+    )
+    .unwrap();
+    let sealed = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        &source,
+        &root,
+        bundle,
+        NetlistParseOptions::default(),
+        &NoAbort,
+    )
+    .unwrap();
+    let engine = physical_engine();
+    for netlist in [&inline, &included, &sealed] {
+        let output = node_id(&engine, netlist, "out");
+        let dc = engine
+            .run_sensitivity(netlist, output, "base", 2.0, None)
+            .unwrap();
+        let ac = engine
+            .run_sensitivity_ac(netlist, output, "base", 2.0, &[1.0], None)
+            .unwrap();
+        assert_relative(dc, 4.0, 1e-8, "dependent parameter DC sensitivity");
+        assert_relative(ac[0], 4.0, 1e-8, "dependent parameter AC sensitivity");
+    }
+}
+
+#[test]
 fn sensitivity_retains_the_zero_resistor_flicker_domain_boundary() {
     use rspice_core::analysis::AcSensitivityOutput;
     let netlist = Netlist::parse(

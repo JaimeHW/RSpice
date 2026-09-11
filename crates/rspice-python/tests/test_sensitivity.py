@@ -9,6 +9,14 @@ import rspice
 
 
 class TestSensitivity:
+    def test_parameter_sensitivity_replays_same_card_dependencies(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Same-card dependencies\n.param base=2 derived={3*base}\n"
+            "V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {base+derived}\n.end\n"
+        )
+        assert engine.run_sensitivity(netlist, "out", "base", 2.0) == pytest.approx(4.0, rel=1e-8)
+        assert engine.run_sensitivity_ac(netlist, "out", "base", 2.0, [1.0]) == pytest.approx([4.0], rel=1e-8)
+
     def test_xspice_sensitivity_excludes_boolean_controls(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "Typed sensitivity\nV1 in 0 DC 0.2 AC 1\nA1 in out lim\n"

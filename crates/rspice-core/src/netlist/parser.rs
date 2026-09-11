@@ -193,6 +193,15 @@ impl Default for NetlistParseOptions {
     }
 }
 
+/// A study override of a root-scope binding, applied before its dependents
+/// are evaluated. It is separate from authored redefinition policy.
+#[derive(Debug, Clone)]
+pub(crate) struct ParameterOverride {
+    pub name: String,
+    pub value: Value,
+    pub global: bool,
+}
+
 #[derive(Debug)]
 struct DataTableBuilder {
     opened_at_line: usize,
@@ -437,14 +446,24 @@ pub fn parse_netlist_with_options_and_abort(
     options: NetlistParseOptions,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
+    parse_netlist_with_parameter_overrides_and_abort(input, options, &[], abort)
+}
+
+pub(crate) fn parse_netlist_with_parameter_overrides_and_abort(
+    input: &str,
+    options: NetlistParseOptions,
+    overrides: &[ParameterOverride],
+    abort: &dyn AbortSignal,
+) -> Result<Netlist, ParseWithAbortError> {
     parse_with_consistent_random_seed(|seed| {
-        parse_netlist_impl(input, options, None, None, seed, abort)
+        parse_netlist_impl(input, options, None, None, seed, overrides, abort)
     })
 }
 
-pub(crate) fn parse_expanded_netlist_with_options_and_abort(
+pub(crate) fn parse_expanded_netlist_with_parameter_overrides_and_abort(
     expanded: &ExpandedSource,
     options: NetlistParseOptions,
+    overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     let rendered = expanded.render();
@@ -455,6 +474,7 @@ pub(crate) fn parse_expanded_netlist_with_options_and_abort(
             Some(SourceEventSchedule::from_expanded(expanded)),
             expanded.implicit_title(),
             seed,
+            overrides,
             abort,
         )
     })
@@ -520,6 +540,7 @@ fn parse_netlist_impl(
     mut source_schedule: Option<SourceEventSchedule>,
     implicit_title: Option<&str>,
     seed_override: Option<u64>,
+    overrides: &[ParameterOverride],
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ParseWithAbortError> {
     ensure_parse_not_aborted(abort)?;
@@ -583,6 +604,22 @@ fn parse_netlist_impl(
     // an out-of-band title and parsing begins at physical line one.
     let title = implicit_title.map_or_else(|| lines[0].to_string(), str::to_owned);
     let mut state = ParseState::new();
+    for (index, parameter) in overrides.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        if !parameter.value.is_finite() {
+            return Err(ParseError::InvalidValue(format!(
+                "Parameter override '{}' must be finite",
+                parameter.name
+            ))
+            .into());
+        }
+        if parameter.global {
+            state.params.set_global(&parameter.name, parameter.value);
+        } else {
+            state.params.set(&parameter.name, parameter.value);
+        }
+    }
+    state.parameter_overrides = overrides.to_vec();
     state.max_analysis_points = options.resource_limits.max_analysis_points;
     state.allow_unmatched_subckt_ends = options.expression_dialect == ExpressionDialect::Xyce;
     // Both ngspice and Xyce close the currently open subcircuit and treat the
@@ -3076,9 +3113,10 @@ mod spectre_root_title_tests {
         )
         .expect("sealed native Spectre root parses");
         let replayed = netlist
-            .replay_root_source_with_options_and_abort(
+            .replay_root_source_with_parameter_overrides_and_abort(
                 source,
                 NetlistParseOptions::default(),
+                &[],
                 &NoAbort,
             )
             .expect("sealed native Spectre root replays");
@@ -4664,6 +4702,7 @@ mod cancellation_tests {
             None,
             None,
             None,
+            &[],
             &counter,
         )
         .unwrap();

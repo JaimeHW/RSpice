@@ -395,7 +395,7 @@ impl Engine {
 
     /// Clone a netlist with parameter overrides applied.
     ///
-    /// Returns the rewritten netlist and the number of substitutions made, so a
+    /// Returns the materialized netlist and the number of substitutions made, so a
     /// caller can tell "applied nothing" from "applied everything".
     pub fn create_perturbed_netlist_multi(
         netlist: &Netlist,
@@ -446,6 +446,11 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "Parameter override '{name}' must be finite"
+                )));
+            }
             override_map.insert(name.to_ascii_uppercase(), *value);
         }
 
@@ -466,9 +471,35 @@ impl Engine {
         }
 
         let mut perturbed = netlist.clone();
-        for (name, value) in &param_overrides {
-            perturbed.params.set(name, *value);
+        let mut retained_parameters = netlist.ast_overlay.parameters.clone();
+        retained_parameters.extend(param_overrides.iter().cloned());
+        let effective_overrides: Vec<_> = retained_parameters
+            .iter()
+            .map(|(name, value)| crate::netlist::ParameterOverride {
+                name: name.clone(),
+                value: *value,
+                global: !netlist.params.has_parameter_binding(name)
+                    && netlist.params.has_any_parameter_binding(name),
+            })
+            .collect();
+        for (index, parameter) in effective_overrides.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if parameter.global {
+                perturbed
+                    .params
+                    .set_global(&parameter.name, parameter.value);
+            } else {
+                perturbed.params.set(&parameter.name, parameter.value);
+            }
         }
+        perturbed.ast_overlay.parameters = retained_parameters.clone();
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::NetlistBytes,
+            perturbed.retained_source_bytes(),
+            resource_limits.max_netlist_bytes,
+        )?;
         let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
             &mut perturbed,
             &device_overrides,
@@ -483,9 +514,6 @@ impl Engine {
             .iter()
             .filter(|(name, _)| Self::source_references_param(source, name))
             .count();
-        let overridden_source =
-            Self::build_overridden_source_multi_with_abort(source, &param_overrides, abort)?;
-
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
             statistical_seed: Some(netlist.params.random().seed()),
@@ -497,7 +525,12 @@ impl Engine {
             resource_limits,
         };
         let mut reparsed = netlist
-            .replay_root_source_with_options_and_abort(&overridden_source, parse_options, abort)
+            .replay_root_source_with_parameter_overrides_and_abort(
+                source,
+                parse_options,
+                &effective_overrides,
+                abort,
+            )
             .map_err(|error| match error {
                 crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
                 crate::netlist::ParseWithAbortError::Parse(
@@ -510,10 +543,8 @@ impl Engine {
                     ))
                 }
             })?;
-        for (name, value) in &param_overrides {
-            reparsed.params.set(name, *value);
-        }
         Self::reapply_ast_overlay_with_abort(&mut reparsed, &netlist.ast_overlay, abort)?;
+        reparsed.ast_overlay.parameters = retained_parameters;
         let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
             &mut reparsed,
             &device_overrides,
@@ -649,49 +680,6 @@ impl Engine {
         b.is_ascii_alphanumeric() || b == b'_'
     }
 
-    pub(in crate::engine) fn param_assignment_present(line: &str, param_upper: &str) -> bool {
-        let trimmed = line.trim();
-        let upper = trimmed.to_ascii_uppercase();
-        if !Self::is_parameter_assignment_command(&upper) {
-            return false;
-        }
-
-        let mut idx = trimmed
-            .split_whitespace()
-            .next()
-            .map(str::len)
-            .unwrap_or_default();
-        let bytes = trimmed.as_bytes();
-        while idx < bytes.len() {
-            while idx < bytes.len() && (bytes[idx].is_ascii_whitespace() || bytes[idx] == b',') {
-                idx += 1;
-            }
-            if idx >= bytes.len() {
-                break;
-            }
-
-            let start = idx;
-            while idx < bytes.len() && Self::is_identifier_byte(bytes[idx]) {
-                idx += 1;
-            }
-            if idx == start {
-                idx += 1;
-                continue;
-            }
-
-            let name = &trimmed[start..idx];
-            while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
-                idx += 1;
-            }
-
-            if idx < bytes.len() && bytes[idx] == b'=' && name.eq_ignore_ascii_case(param_upper) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     fn is_parameter_assignment_command(upper_trimmed_line: &str) -> bool {
         matches!(
             upper_trimmed_line
@@ -735,112 +723,6 @@ impl Engine {
         trimmed
             .find(|c: char| c.is_ascii_whitespace() || c == ',')
             .map_or("", |idx| &trimmed[idx..])
-    }
-
-    pub(in crate::engine) fn build_overridden_source_multi_with_abort(
-        source: &str,
-        overrides: &[(String, Value)],
-        abort: &dyn AbortSignal,
-    ) -> Result<String, SimulationError> {
-        use std::fmt::Write;
-
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let title = source.lines().next().unwrap_or("Untitled");
-        let mut out = String::new();
-
-        let _ = writeln!(out, "{}", title);
-        for (index, (name, value)) in overrides.iter().enumerate() {
-            if index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let _ = writeln!(out, ".PARAM {}={:.17e}", name, value);
-        }
-
-        let lines =
-            Self::logical_lines_after_title_preserving_data_blocks_with_abort(source, abort)?;
-        for (line_index, line) in lines.into_iter().enumerate() {
-            if line_index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let mut override_suffix = String::new();
-            for (override_index, (name, value)) in overrides.iter().enumerate() {
-                if override_index.is_multiple_of(64) && abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                if Self::param_assignment_present(&line, name) {
-                    let _ = write!(override_suffix, " {}={:.17e}", name, value);
-                }
-            }
-
-            if override_suffix.is_empty() {
-                let _ = writeln!(out, "{}", line);
-            } else {
-                let _ = writeln!(out, "{}{}", line, override_suffix);
-            }
-        }
-
-        Ok(out)
-    }
-
-    fn logical_lines_after_title_preserving_data_blocks_with_abort(
-        source: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<String>, SimulationError> {
-        let mut lines = Vec::new();
-        let mut continuation = String::new();
-        let mut in_data_block = false;
-
-        for (line_index, raw) in source.lines().skip(1).enumerate() {
-            if line_index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let line = raw.split(';').next().unwrap_or("").trim();
-            if line.is_empty() || line.starts_with('*') || line.starts_with('$') {
-                continue;
-            }
-
-            let head = line.split_whitespace().next().unwrap_or("");
-            if in_data_block {
-                if !continuation.is_empty() {
-                    lines.push(std::mem::take(&mut continuation));
-                }
-                lines.push(line.to_string());
-                if head.eq_ignore_ascii_case(".enddata") {
-                    in_data_block = false;
-                }
-                continue;
-            }
-
-            if head.eq_ignore_ascii_case(".data") {
-                if !continuation.is_empty() {
-                    lines.push(std::mem::take(&mut continuation));
-                }
-                lines.push(line.to_string());
-                in_data_block = true;
-                continue;
-            }
-
-            if line.starts_with('+') {
-                if !continuation.is_empty() {
-                    continuation.push(' ');
-                    continuation.push_str(line.trim_start_matches('+').trim());
-                }
-                continue;
-            }
-
-            if !continuation.is_empty() {
-                lines.push(std::mem::take(&mut continuation));
-            }
-            continuation.push_str(line);
-        }
-
-        if !continuation.is_empty() {
-            lines.push(continuation);
-        }
-
-        Ok(lines)
     }
 
     fn sensitivity_step(
@@ -3322,16 +3204,140 @@ mod tests {
     }
 
     #[test]
-    fn source_override_construction_honors_mid_build_cancellation() {
+    fn parameter_replay_honors_mid_build_cancellation() {
+        let netlist =
+            Netlist::parse("override cancellation\n.param p=1\nR1 1 0 {p}\n.end\n").unwrap();
         let abort = crate::abort_signal::CountingAbort::new(1);
-        let error = Engine::build_overridden_source_multi_with_abort(
-            "override cancellation\n.param p=1\nR1 1 0 {p}\n.end\n",
+        let error = Engine::create_perturbed_netlist_multi_with_abort(
+            &netlist,
             &[("P".to_string(), 2.0)],
             &abort,
         )
-        .expect_err("source rewrite must poll while applying overrides");
+        .expect_err("parameter replay must poll while applying overrides");
         assert!(matches!(error, crate::SimulationError::Aborted));
         assert!(abort.count() >= 2);
+    }
+
+    #[test]
+    fn parameter_replay_evaluates_dependencies_after_the_override() {
+        use crate::netlist::expr::{
+            ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy,
+        };
+        let source = "Parameter dependencies\n.param base=2 derived={3*base} factor=1\n\
+            V1 in 0 1\nE1 out 0 in 0 {derived*factor}\n.end\n";
+        for policy in [
+            ParameterRedefinitionPolicy::UseFirst,
+            ParameterRedefinitionPolicy::UseLast,
+        ] {
+            let netlist = Netlist::parse_with_options(
+                source,
+                crate::netlist::NetlistParseOptions {
+                    parameter_redefinition_policy: policy,
+                    parameter_redefinition_diagnostic_policy:
+                        ParameterRedefinitionDiagnosticPolicy::Error,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let (first, _) =
+                Engine::create_perturbed_netlist_multi(&netlist, &[("base".into(), 3.0)]).unwrap();
+            assert_eq!(first.params.get("derived"), Some(9.0));
+            assert_eq!(first.source_text.as_deref(), Some(source));
+            assert!(first.diagnostics.is_empty());
+            let (second, _) =
+                Engine::create_perturbed_netlist_multi(&first, &[("factor".into(), 2.0)]).unwrap();
+            assert_eq!(second.params.get("derived"), Some(9.0));
+            assert_eq!(second.params.get("factor"), Some(2.0));
+            let result = Engine::default().run_dc_op(&second).unwrap();
+            assert!((result.voltage(2) - 18.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn parameter_replay_enforces_retained_input_limits_and_finite_values() {
+        use crate::resource::{ResourceKind, ResourceLimits};
+        use crate::{NoAbort, Value};
+        let source = "Replay limits\n.param p=1\nR1 1 0 {p}\n.end\n";
+        for retain_source in [true, false] {
+            let mut netlist = Netlist::parse(source).unwrap();
+            // Cover retained source and programmatically materialized netlists.
+            if !retain_source {
+                netlist.source_text = None;
+            }
+            let bytes = netlist.retained_source_bytes() + "P".len() + std::mem::size_of::<Value>();
+            let limits = ResourceLimits {
+                max_netlist_bytes: bytes,
+                ..Default::default()
+            };
+            let (perturbed, _) = Engine::create_perturbed_netlist_multi_with_limits_and_abort(
+                &netlist,
+                &[("p".into(), 2.0)],
+                limits,
+                &NoAbort,
+            )
+            .unwrap();
+            let mut engine = Engine::default();
+            engine.config.resource_limits = limits;
+            engine.build_circuit(&perturbed).unwrap();
+            engine.config.resource_limits.max_netlist_bytes = bytes - 1;
+            assert!(matches!(engine.build_circuit(&perturbed),
+                Err(crate::SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::NetlistBytes));
+            assert!(
+                matches!(Engine::create_perturbed_netlist_multi_with_limits_and_abort(
+                &netlist, &[("p".into(), 2.0)], engine.config.resource_limits, &NoAbort,
+            ), Err(crate::SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::NetlistBytes)
+            );
+            for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+                assert!(matches!(
+                    Engine::create_perturbed_netlist_multi(&netlist, &[("p".into(), invalid)]),
+                    Err(crate::SimulationError::Circuit(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn parameter_replay_preserves_local_shadowing_and_global_namespace() {
+        let source = "Local parameter\n.param gain=2\nV1 in 0 1\nX1 in out buffer\n\
+            .subckt buffer a b\n.param gain=7\nE1 b 0 a 0 {gain}\n.ends\n.end\n";
+        let netlist = Netlist::parse(source).unwrap();
+        let (perturbed, _) =
+            Engine::create_perturbed_netlist_multi(&netlist, &[("gain".into(), 3.0)]).unwrap();
+        let result = Engine::default().run_dc_op(&perturbed).unwrap();
+        assert!((result.voltage(2) - 7.0).abs() < 1e-10);
+        let source =
+            "Global parameter\n.GLOBAL_PARAM gain=2\nV1 in 0 1\nE1 out 0 in 0 {gain}\n.end\n";
+        let netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (perturbed, _) =
+            Engine::create_perturbed_netlist_multi(&netlist, &[("gain".into(), 3.0)]).unwrap();
+        assert!(!perturbed.params.has_parameter_binding("gain"));
+        assert_eq!(perturbed.params.get("gain"), Some(3.0));
+        let result = Engine::default().run_dc_op(&perturbed).unwrap();
+        assert!((result.voltage(2) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn parameter_replay_preserves_draws_from_overridden_defaults() {
+        let netlist = Netlist::parse(
+            "Overridden draw\n.options seed=7\n\
+            .param chosen={aunif(0,1)} following={aunif(0,1)}\n\
+            V1 out 0 {chosen+following}\n.end\n",
+        )
+        .unwrap();
+        let (perturbed, _) =
+            Engine::create_perturbed_netlist_multi(&netlist, &[("chosen".into(), 3.0)]).unwrap();
+        assert_eq!(perturbed.params.get("chosen"), Some(3.0));
+        assert_eq!(
+            perturbed.params.get("following"),
+            netlist.params.get("following")
+        );
     }
 
     const PARAMETRIC_DIVIDER: &str = "\
