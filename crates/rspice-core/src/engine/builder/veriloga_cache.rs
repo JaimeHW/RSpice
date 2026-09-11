@@ -281,7 +281,8 @@ use super::*;
 // Version 72 records potential branch identity in each compiled solver source.
 // Version 73 resolves declared grounds and rejects conflicting net disciplines.
 // Version 74 retains declared module timing and delays in resolved design ticks.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 74;
+// Version 75 resolves module time queries and scales retained analog $realtime.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 75;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

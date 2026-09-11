@@ -440,6 +440,7 @@ pub struct SemanticAnalyzer {
     /// section 4.5.15).
     dynamic_analog_operator_guard_depth: usize,
     current_default_transition: f64,
+    current_time_scale: crate::time_scale::ModuleTimeScale,
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
     /// Public parameter-array declarations. Until element lowering is wired
@@ -507,6 +508,7 @@ impl SemanticAnalyzer {
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
+            current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
@@ -771,6 +773,7 @@ impl SemanticAnalyzer {
         module: &Module,
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
+        self.current_time_scale = module.time_scale;
         let mut analyzed = AnalyzedModule {
             name: module.name.clone(),
             default_transition,
@@ -5174,6 +5177,9 @@ impl SemanticAnalyzer {
             | Expression::Digital(_)
             | Expression::BranchAccess(_) => expr.clone(),
             Expression::SystemFunction(function) => {
+                if let Some(resolved) = self.lower_module_time_function(function)? {
+                    return Ok(resolved);
+                }
                 let mut function = SystemFunction {
                     name: function.name.clone(),
                     args: function.args.iter()
@@ -5698,6 +5704,11 @@ impl SemanticAnalyzer {
             return Ok(Expression::ArrayLiteral(array));
         }
         resolve_integer_operator_tree(expr, |expression| {
+            if let Expression::SystemFunction(function) = expression
+                && let Some(resolved) = self.lower_module_time_function(function)?
+            {
+                return Ok((resolved, ValueType::Real));
+            }
             let mut expression = expression.clone();
             match &mut expression {
                 Expression::Conditional(c) => {
@@ -5728,6 +5739,117 @@ impl SemanticAnalyzer {
             let value_type = self.infer_type(&expression)?;
             Ok((expression, value_type))
         })
+    }
+
+    /// Resolve declaration-owned queries before flattening and before any
+    /// function call in an unused fallback can acquire executable side effects.
+    fn lower_module_time_function(
+        &self,
+        function: &SystemFunction,
+    ) -> CompileResult<Option<Expression>> {
+        let invalid = |detail: String| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(detail),
+                function.span,
+            ))
+        };
+        let real = |value| {
+            Expression::Number(NumberLit {
+                value,
+                raw: format!("{value:e}").into(),
+                span: function.span,
+            })
+        };
+        if function.name.eq_ignore_ascii_case("$realtime") {
+            if !function.args.is_empty() {
+                return Err(invalid("$realtime expects no arguments".into()));
+            }
+            let unit = self
+                .current_time_scale
+                .unit_seconds()
+                .map_err(|detail| invalid(detail.into()))?;
+            return Ok(Some(Expression::Binary(BinaryExpr {
+                op: BinaryOp::Div,
+                left: Box::new(Expression::SystemFunction(SystemFunction {
+                    name: "$abstime".into(),
+                    args: Vec::new(),
+                    span: function.span,
+                })),
+                right: Box::new(real(unit)),
+                span: function.span,
+            })));
+        }
+        if !function.name.eq_ignore_ascii_case("$simparam") {
+            return Ok(None);
+        }
+        let Some(Expression::StringLit(name)) = function.args.first() else {
+            return Ok(None);
+        };
+        let Some(value) = self
+            .current_time_scale
+            .parameter_value(&name.value)
+            .map_err(|detail| invalid(detail.into()))?
+        else {
+            return Ok(None);
+        };
+        if !(1..=2).contains(&function.args.len()) {
+            return Err(invalid(
+                "$simparam expects a query name and at most one numeric fallback".into(),
+            ));
+        }
+        if let Some(fallback) = function.args.get(1) {
+            // Retain static name/type checks, but do not execute a fallback for
+            // a module declaration that is always available.
+            self.validate_discarded_query_names(fallback)?;
+            let fallback = self.normalize_integer_expression(fallback)?;
+            if self.infer_type(&fallback)? == ValueType::String {
+                return Err(invalid("$simparam fallback must be numeric".into()));
+            }
+        }
+        Ok(Some(real(value)))
+    }
+
+    fn validate_discarded_query_names(&self, expression: &Expression) -> CompileResult<()> {
+        let mut result = Ok(());
+        flow_probes::visit_expression(expression, &mut |expression| {
+            if result.is_err() {
+                return;
+            }
+            let name = match expression {
+                Expression::Identifier(identifier) => Some(&identifier.name),
+                Expression::ArrayAccess(access) => Some(&access.array),
+                _ => None,
+            };
+            if let Some(name) = name
+                && name != "inf"
+                && self.symbols.lookup(name).is_none()
+                && self.lookup_substitution(name).is_none()
+                && !name
+                    .split_once('[')
+                    .is_some_and(|(base, _)| self.arrays.contains_key(base))
+            {
+                result = Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                    expression.span(),
+                )));
+            }
+            if let Expression::Call(call) = expression {
+                result = self.validate_builtin_call_arity(call);
+                if let Some(function) = self.user_functions.get(&call.name)
+                    && call.args.len() != function.params.len()
+                {
+                    result = Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::ArgumentCountMismatch {
+                            name: call.name.to_string(),
+                            expected: function.params.len().to_string(),
+                            got: call.args.len(),
+                        },
+                        call.span,
+                    )));
+                }
+            }
+        });
+        result
     }
 
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
@@ -5792,6 +5914,9 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::SystemFunction(f) => {
+                if let Some(resolved) = self.lower_module_time_function(f)? {
+                    return Ok(resolved);
+                }
                 self.validate_limit_call(f)?;
                 if let Some(limit) = self.lower_custom_limit_call(f)? {
                     return Ok(limit);

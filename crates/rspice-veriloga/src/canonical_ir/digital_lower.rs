@@ -2023,6 +2023,7 @@ impl ProcessLowerer<'_> {
             return self.constant(expression).map(|value| value as f64);
         }
         match expression {
+            Expression::SystemFunction(function) => self.module_time_query(function),
             Expression::Number(number) => Some(number.value),
             Expression::Identifier(identifier)
                 if self.lookup_local(&identifier.name).is_none()
@@ -2190,7 +2191,9 @@ impl ProcessLowerer<'_> {
             // the whole point of it: it is the standard's own crossing, and
             // classifying it by its operand would send it down the four-state
             // path it exists to leave.
-            Expression::SystemFunction(function) => function.name == "$bitstoreal",
+            Expression::SystemFunction(function) => {
+                function.name == "$bitstoreal" || self.module_time_query(function).is_some()
+            }
             // A probe of a continuous net is a real, whichever net it names
             // (Verilog-AMS LRM 2.4 section 7.3.3, and Table 7-1's converse —
             // a continuous quantity crossing into the discrete domain arrives
@@ -2296,7 +2299,24 @@ impl ProcessLowerer<'_> {
     /// what is not here is refused by name, because a real-number model that
     /// silently lost an operator would produce a plausible waveform and no way
     /// to tell it was wrong.
+    fn module_time_query(&self, function: &crate::ast::SystemFunction) -> Option<f64> {
+        if !function.name.eq_ignore_ascii_case("$simparam")
+            || !(1..=2).contains(&function.args.len())
+        {
+            return None;
+        }
+        let Expression::StringLit(name) = function.args.first()? else {
+            return None;
+        };
+        self.time_scale.parameter_value(&name.value).ok().flatten()
+    }
+
     fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        if let Expression::SystemFunction(function) = expression
+            && let Some(value) = self.module_time_query(function)
+        {
+            return self.real_constant(value);
+        }
         match expression {
             Expression::Number(number) if is_real_literal(&number.raw) => {
                 self.real_constant(number.value)

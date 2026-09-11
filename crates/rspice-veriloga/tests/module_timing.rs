@@ -4,6 +4,78 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::{
     CompilerOptions, VerilogACompiler, VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile,
 };
+mod support;
+
+#[test]
+fn module_time_queries_preserve_scope_defaults_types_and_unused_fallbacks() {
+    use rspice_veriloga_runtime::{GeneratedSimulationParameters, SimulationParameter};
+    let compiler = VerilogACompiler::default();
+    let report = compiler
+        .compile_runtime(include_str!("testdata/module_time_queries.va"), Some("top"))
+        .unwrap();
+    let fixture = support::DeviceFixture {
+        model: report.model,
+        canonical_ir: report.canonical_ir,
+    };
+    let mut device = fixture.device("timing", &[1]);
+    let mut environment = GeneratedSimulationParameters::default();
+    environment
+        .try_set(SimulationParameter::TimeUnit, Some(17.0))
+        .unwrap();
+    environment
+        .try_set(SimulationParameter::TimePrecision, Some(23.0))
+        .unwrap();
+    device.set_simulation_parameters(environment);
+    for time in [0.0, 2e-9, 7.25e-9] {
+        device.try_set_time(time).unwrap();
+        let mut conductance = 0.0;
+        let mut rhs = 0.0;
+        device
+            .try_stamp(
+                &[1.0],
+                |row, column, value| {
+                    assert_eq!((row, column), (0, 0));
+                    conductance += value;
+                },
+                |row, value| {
+                    assert_eq!(row, 0);
+                    rhs += value;
+                },
+            )
+            .unwrap();
+        let expected = 4.0 + time / 1e-9 + time / 1e-8;
+        assert!(
+            (conductance - expected).abs() < 1e-12,
+            "t={time:e}: {conductance}, expected {expected}"
+        );
+        assert!(
+            rhs.abs() < 1e-12,
+            "a linear conductance has no companion offset"
+        );
+    }
+    // A seconds-sized query is still real-valued, so division must not become
+    // integer division merely because its resolved value is a whole number.
+    let model = support::DeviceFixture::compile(
+        "`timescale 1s/1ms\nmodule whole(p); inout p; electrical p; analog I(p)<+$simparam(\"timeUnit\")/2; endmodule",
+    );
+    assert_eq!(model.device("whole", &[1]).try_evaluate().unwrap(), [0.5]);
+    for expression in [
+        "$realtime(1)",
+        "$simparam(\"timeUnit\",0,1)",
+        "$simparam(\"timePrecision\",missing)",
+        "$simparam(\"timePrecision\",1 ? 0 : missing+1)",
+        "$simparam(\"timePrecision\",sin())",
+        "$simparam(\"timeUnit\",\"bad\")",
+    ] {
+        let source = format!(
+            "module invalid(p); inout p; electrical p; analog I(p)<+{expression}; endmodule"
+        );
+        assert!(
+            compiler.compile_runtime(&source, None).is_err(),
+            "{expression}"
+        );
+    }
+}
 
 fn delay_ticks(artifact: &CanonicalIrArtifact) -> Vec<i64> {
     artifact

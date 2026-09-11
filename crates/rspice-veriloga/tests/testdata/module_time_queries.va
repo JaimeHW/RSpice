@@ -1,0 +1,22 @@
+`timescale 10ns/1ps
+module slow(p);
+    inout p; electrical p;
+    parameter real captured = $simparam("timeUnit", 1.0/0.0);
+    analog I(p) <+ V(p)*($realtime + captured/1e-8 + $simparam("timePrecision")/1e-12);
+endmodule
+`timescale 1ns/100ps
+module top(p);
+    inout p; electrical p;
+    real marker;
+    slow child(p);
+    analog function real unused;
+        input x; output changed;
+        real x, changed;
+        begin changed=99.0; unused=x; end
+    endfunction
+    analog begin
+        marker=3.0;
+        I(p) <+ V(p)*($realtime + $simparam("timeUnit",unused(0.0,marker))/1e-9
+            + $simparam("timePrecision",1.0/0.0)/1e-10 + marker-3.0);
+    end
+endmodule

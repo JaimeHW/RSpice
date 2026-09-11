@@ -22,6 +22,37 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn module_time_queries_execute_in_generated_hierarchy() {
+    let (state, stamp, noise) = generated_parts_selected(
+        include_str!("testdata/module_time_queries.va"),
+        "module time queries",
+        Some("top"),
+    );
+    let main = r#"
+use runtime::{GeneratedSimulationParameters,SimulationParameter};
+let mut environment=GeneratedSimulationParameters::default();
+environment.try_set(SimulationParameter::TimeUnit,Some(17.0)).unwrap();
+environment.try_set(SimulationParameter::TimePrecision,Some(23.0)).unwrap();
+let mut instance=device::state::Instance::try_new_with_simulation_parameters(&[0],&[],&environment).unwrap();
+let bias=[1.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+for time in [0.0,2e-9,7.25e-9] {
+    instance.time=time;
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    let expected=4.0+time/1e-9+time/1e-8;
+    // The extended capture applies each branch's reference direction to KCL.
+    for actual in [sink[12],sink[28]] {
+        assert!((actual-expected).abs()<1e-12,"t={time:e}: {actual}, expected {expected}");
+    }
+    assert!(!ctx.evaluation_failed());
+}
+"#;
+    run_generated_main("module time queries", &state, &stamp, &noise, main)
+        .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_potential_sources_preserve_parallel_branch_identity() {
     for (source, active, sum) in [
         (

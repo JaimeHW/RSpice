@@ -77,7 +77,7 @@ checkpoint representation, before optimizing partitions or caches.
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
 | Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
-| Complete resolved module timing and scheduling regions | MS02 | Declared module scales, constant delay rounding and local HDL hierarchy implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
+| Complete resolved module timing and scheduling regions | MS02 | Declared module scales, constant delays, declaration-owned time queries and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
 | Global scheduling, resolution, atomic acceptance and effects | MS05 | Open | Pending |
@@ -133,6 +133,9 @@ invented throughput numbers do not qualify parity.
 | Physical mixed timing from files and sealed sources | Core `veriloga_module_timing`, portable Verilog feature | Passed: 451 ps and 1.3 ns breakpoints within 1e-20 s; SPICE-loaded conductance produces 1/3, 1/2, 1/3 V within 1e-9 V through both entry points |
 | Existing native digital timing entry points | Core library `timescale` filter, portable Verilog feature | 5 existing cases passed: 2 digital-host cases and 3 VCD/projection cases selected by that filter; no full suite |
 | Shipped artifact refresh for canonical schema 37 | Authoritative `rspice-veriloga-gen regenerate-builtins --jobs 2`, generator profile, isolated target directory | All 43 models regenerated; analog output bytes remain unchanged, generator manifest refreshed |
+| Declaration-owned time queries | Compiler `module_timing` and `canonical_device` targets, `module_time_queries` filter, no default features | Portable device and executable generated Rust agree on the shared-terminal conductance at three physical times within 1e-12 S; seconds-sized query retains real division; malformed arity, missing fallback names and string fallback refuse |
+| Time queries in digital defaults, delays and analog coupling | Core `veriloga_module_timing`, `module_time_queries` filter, portable Verilog feature | Passed: parent/child declarations resolve separately; query-based delay switches a loaded circuit at 0.5 ns within 1e-20 s and produces 1/4 V then 1/3 V within 1e-9 V |
+| Shipped artifact refresh for canonical schema 38 | Authoritative `rspice-veriloga-gen regenerate-builtins --jobs 2`, generator profile | All 43 models regenerated; analog output bytes unchanged; generator digest `d53ce225d4e027cfb790448eb459e16aeed9f01b366bbab53eec844784b104a3` |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -314,6 +317,37 @@ module before analog hierarchy flattening so every backend agrees. Global
 precision/causality across separate SPICE/HDL/XSPICE participants remains MS04/05
 work, and actual browser/tablet qualification remains pending.
 
+The following increment resolves `$simparam("timeUnit")` and `timePrecision`
+before hierarchy flattening. Both values retain real-number typing, even for
+1 s, 10 s and 100 s units. Parameter defaults, constant delay expressions,
+digital arithmetic and analog equations use the owning module's declaration.
+Host simulator-parameter overrides no longer substitute for these declarations.
+Known timing queries discard unused fallbacks before function materialization;
+numeric domain errors and output-argument writes in those fallbacks do not run.
+Discarding them retains declared-name checks, registered/user function arity
+checks and the numeric fallback requirement. Digital fallbacks retain the
+existing digital-expression checks.
+
+Analog `$realtime` now lowers to seconds-valued `$abstime` divided by the owning
+module's time unit. This is an explicit retained compatibility behavior: the
+[VAMS-2023 LRM](https://www.accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf),
+section 9.10, deprecates analog `$realtime` and defines `$abstime` in seconds.
+Digital clock-query execution is still open. Canonical schema advances to 38
+and the core disk cache format to 75 so artifacts using the old alias/query
+semantics cannot be reused.
+
+The first new backend assertions incorrectly summed opposite branch reference
+directions after hierarchy flattening. They were corrected to compare the
+assembled shared-terminal Jacobian and KCL contribution, retaining the 1e-12
+budget. The negative fixture then exposed and fixed an undeclared fallback name
+being hidden by early query resolution; only the failing portable case was
+rerun after that correction. The three focused cases pass. No full suite,
+actual browser, physical tablet or vendor-reference run was performed.
+The refresh retains the same source-tree digest and updates the authoritative
+generator manifest. The concurrent `00aca9e51` finite-tanh derivative fix touches
+native SPICE behavioral expressions and is preserved at integration; none of
+these timing fixtures uses tanh. Combined release verification remains pending.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;
@@ -322,7 +356,7 @@ profiles, terminal contracts and backend qualification consistent with the mixed
 model routes. Qualify the actual
 browser-worker path at its integrated target milestone.
 Continue hierarchical library/view binding with the typed design graph.
-Continue MS02 with module-correct time queries and remaining delay semantics,
+Continue MS02 with digital clock queries and remaining delay semantics,
 then MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must
 include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
 off-grid timing and a rejected trial. Continue through every remaining milestone

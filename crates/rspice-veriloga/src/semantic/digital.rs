@@ -1023,7 +1023,10 @@ impl SemanticAnalyzer {
             let Some(default) = &parameter.default else {
                 continue;
             };
-            let Some(value) = self.eval_const(default) else {
+            let Ok(default) = self.normalize_integer_expression(default) else {
+                continue;
+            };
+            let Some(value) = self.eval_const(&default) else {
                 continue;
             };
             // A parameter array is a name with no scalar value at all; folding
@@ -2025,6 +2028,24 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::SystemFunction(function) => {
+                let module_query = function.name.eq_ignore_ascii_case("$simparam")
+                    && matches!(function.args.first(), Some(Expression::StringLit(name))
+                        if self.current_time_scale.parameter_value(&name.value).ok().flatten().is_some());
+                if module_query {
+                    if !(1..=2).contains(&function.args.len()) {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(
+                                "$simparam expects a query name and at most one numeric fallback"
+                                    .into(),
+                            ),
+                            function.span,
+                        );
+                    }
+                    for argument in function.args.iter().skip(1) {
+                        self.check_digital_expression(argument, signals, index);
+                    }
+                    return;
+                }
                 // The two the standard leaves open. Verilog-AMS LRM 2.4 section
                 // 3.7 names them as the *only* bridge between a real net and
                 // bits — "connection to explicitly declared 64-bit wires can be

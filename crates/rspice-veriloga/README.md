@@ -208,11 +208,19 @@ checked integer rescaling to the compiled HDL design's finest precision. Integer
 delays use checked integer arithmetic; values above 32 bits are retained without
 clamping. The event host still enforces its exact tick-to-seconds range.
 
-This completes a delay-timing increment, not MS02. Runtime-valued delays,
-min:typ:max selection, complete delayed-assignment semantics, time reporting
-functions and SystemVerilog `timeunit`/`timeprecision` remain open. In particular,
-the existing analog `$realtime` lowering still aliases seconds-valued `$abstime`,
-and timing-related `$simparam` values are not yet bound to these declarations.
+`$simparam("timeUnit")` and `$simparam("timePrecision")` resolve to the owning
+module's declarations in seconds, including parameter defaults, analog hierarchy
+and digital expressions. A simulator-environment override cannot replace these
+declarations. The optional fallback is not executed for these known queries.
+Analog `$realtime` is retained as a compatibility function returning continuous
+simulation time divided by the owning module's time unit; `$abstime` remains
+seconds-valued. This changes the former unscaled alias. VAMS-2023 section 9.10
+deprecates analog `$realtime` in favor of `$abstime`; the retained compatibility
+behavior is not a vendor qualification claim.
+
+MS02 remains open. Runtime-valued delays, min:typ:max selection, complete
+delayed-assignment semantics, digital time reporting functions and SystemVerilog
+`timeunit`/`timeprecision` still require implementation and qualification.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.
 
 `strict_mode` and `integration_order` are **reserved**. They participate in

@@ -709,7 +709,7 @@ fn rewrite_regions(
     }
 }
 
-fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
+pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
     enum Pending<'a> {
         Expression(&'a Expression),
         Element(&'a ArrayLiteralElement),

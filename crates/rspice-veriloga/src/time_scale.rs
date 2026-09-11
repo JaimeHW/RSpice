@@ -20,6 +20,35 @@ impl Default for ModuleTimeScale {
 }
 
 impl ModuleTimeScale {
+    /// Seconds-valued queries are module declarations, independent of a
+    /// process's current tick or an externally supplied simulator environment.
+    pub fn parameter_value(self, name: &str) -> Result<Option<f64>, &'static str> {
+        self.validate()?;
+        let exponent = if name.eq_ignore_ascii_case("timeUnit") {
+            self.unit_exponent
+        } else if name.eq_ignore_ascii_case("timePrecision") {
+            self.precision_exponent
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(Self::seconds(exponent)))
+    }
+
+    pub fn unit_seconds(self) -> Result<f64, &'static str> {
+        self.validate()?;
+        Ok(Self::seconds(self.unit_exponent))
+    }
+
+    fn seconds(exponent: i8) -> f64 {
+        // Use the same correctly rounded decimal values as the event host,
+        // without repeated multiplication or a runtime powi implementation.
+        const SECONDS: [f64; 18] = [
+            1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3,
+            1e-2, 1e-1, 1e0, 1e1, 1e2,
+        ];
+        SECONDS[(exponent + 15) as usize]
+    }
+
     pub fn new(unit_exponent: i8, precision_exponent: i8) -> Result<Self, &'static str> {
         let result = Self {
             unit_exponent,
