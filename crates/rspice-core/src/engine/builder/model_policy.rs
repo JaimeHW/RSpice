@@ -750,11 +750,8 @@ pub(super) fn validate_bjt_model_level(
 
     // Parameter-based VBIC inference must agree with device construction.
     let native_vbic_model = crate::device::Bjt::uses_vbic_charge_model(params);
-    let mut emission_temperature_given = false;
-    for &name in crate::device::Bjt::LEGACY_EMISSION_TEMPERATURE_PARAMS
-        .iter()
-        .flatten()
-    {
+    let mut temperature_parameters_given = false;
+    for name in crate::device::Bjt::legacy_temperature_parameter_names() {
         let authored = params.contains_key(name)
             || expr_params
                 .iter()
@@ -763,20 +760,29 @@ pub(super) fn validate_bjt_model_level(
         if !authored {
             continue;
         }
-        emission_temperature_given = true;
+        temperature_parameters_given = true;
         if native_vbic_model || spice_dialect == SpiceDialect::Xyce {
             return Err(SimulationError::Circuit(format!(
                 "BJT '{element_name}': model '{model}' parameter {name} requires a native ngspice Gummel-Poon model"
             )));
         }
-        if !params.get(name).is_some_and(|value| value.is_finite()) {
+        if !params.get(name).is_some_and(|value| {
+            value.is_finite() && (name != "TLEV" || [0.0, 1.0, 3.0].contains(value))
+        }) {
             return Err(SimulationError::Circuit(format!(
-                "BJT '{element_name}': model '{model}' parameter {name} must be a finite scalar"
+                "BJT '{element_name}': model '{model}' parameter {name} must be {}",
+                if name == "TLEV" {
+                    "one of 0, 1, 3"
+                } else {
+                    "a finite scalar"
+                }
             )));
         }
     }
-    if emission_temperature_given {
-        for name in ["NF", "NR", "NE", "NLE", "NC", "NS"] {
+    if temperature_parameters_given {
+        for name in [
+            "NF", "NR", "NE", "NLE", "NEN", "NC", "NCN", "NS", "BF", "BFM", "BR", "BRM",
+        ] {
             let authored = params.contains_key(name)
                 || expr_params
                     .iter()
@@ -788,7 +794,27 @@ pub(super) fn validate_bjt_model_level(
                     .is_some_and(|value| value.is_finite() && *value > 0.0)
             {
                 return Err(SimulationError::Circuit(format!(
-                    "BJT '{element_name}': model '{model}' parameter {name} must be finite and positive for temperature-dependent emission coefficients"
+                    "BJT '{element_name}': model '{model}' parameter {name} must be finite and positive for temperature-dependent junctions"
+                )));
+            }
+        }
+        for name in [
+            "IS", "ISE", "JLE", "IBEN", "ISC", "JLC", "IBCN", "XTB", "TB", "TCB", "TNF",
+        ] {
+            let authored = params.contains_key(name)
+                || expr_params
+                    .iter()
+                    .chain(string_params)
+                    .any(|(key, _)| key.eq_ignore_ascii_case(name));
+            let signed = ["XTB", "TB", "TCB", "TNF"].contains(&name);
+            if authored
+                && !params
+                    .get(name)
+                    .is_some_and(|value| value.is_finite() && (signed || *value >= 0.0))
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': model '{model}' parameter {name} must be a finite {}scalar for temperature-dependent junctions",
+                    if signed { "" } else { "nonnegative " }
                 )));
             }
         }

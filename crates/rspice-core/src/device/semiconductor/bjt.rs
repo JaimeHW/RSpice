@@ -631,9 +631,12 @@ struct LegacyCurrentScale {
 }
 
 #[derive(Debug, Clone)]
-struct LegacyEmissionTemperature {
-    coefficients: [[Value; 2]; 5],
-    operating: [Value; 5],
+struct LegacyTemperatureParameters {
+    emission_coefficients: [[Value; 2]; 5],
+    operating_emission: [Value; 5],
+    current_law: Value,
+    beta_coefficients: [Option<[Value; 2]>; 2],
+    current_coefficients: [[Value; 2]; 4],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -641,13 +644,13 @@ struct LegacyJunctionParameters {
     base: Option<Value>,
     collector: Option<Value>,
     split_saturation: Option<(Value, Value)>,
-    substrate_saturation: Value,
+    substrate_saturation: Option<Value>,
     substrate_emission: Option<Value>,
     // Operating values are independent: IBE may be zero while IBC is not.
     bc_saturation: Option<Value>,
     substrate_current: Value,
     current_scales: Option<Box<[Option<LegacyCurrentScale>; 6]>>,
-    emission_temperature: Option<Box<LegacyEmissionTemperature>>,
+    temperature_parameters: Option<Box<LegacyTemperatureParameters>>,
 }
 
 /// BJT device using the Ebers-Moll model

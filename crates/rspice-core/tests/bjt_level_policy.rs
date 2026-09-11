@@ -2984,6 +2984,388 @@ fn legacy_substrate_current_and_charge_flow_through_the_intrinsic_lead() {
 }
 
 #[test]
+fn legacy_tlev_current_laws_match_ngspice_and_dynamic_equations() {
+    use rspice_core::Complex64;
+    // Independent, isolated ngspice 46 models avoid its function-local
+    // bfactor carrying a previous model's value into TLEV=3.
+    for (celsius, law, split, overrides, reference) in [
+        (
+            -40.0,
+            0,
+            false,
+            false,
+            [
+                -8.493252766471543e-11,
+                -1.103849536058198e-12,
+                -9.940788323765207e-13,
+            ],
+        ),
+        (
+            70.0,
+            0,
+            true,
+            true,
+            [
+                -2.2173739521600132e-5,
+                -9.361498354605891e-7,
+                3.0167221726167253e-7,
+            ],
+        ),
+        (
+            -40.0,
+            1,
+            true,
+            false,
+            [
+                -5.158663697463515e-10,
+                -6.17223420033702e-11,
+                3.0580605488986184e-11,
+            ],
+        ),
+        (
+            70.0,
+            1,
+            false,
+            true,
+            [
+                -1.822490746694588e-5,
+                -4.546219106333904e-7,
+                -7.632402221885548e-7,
+            ],
+        ),
+        (
+            -40.0,
+            3,
+            false,
+            false,
+            [
+                -0.00026993014910731,
+                -3.098803876574745e-6,
+                -1.7179210838732885e-7,
+            ],
+        ),
+        (
+            70.0,
+            3,
+            true,
+            true,
+            [
+                -2.4542758845987297e-8,
+                -7.453704259823823e-9,
+                5.866059314880829e-9,
+            ],
+        ),
+        (
+            70.0,
+            3,
+            false,
+            false,
+            [
+                -9.120406855725484e-9,
+                -4.5055650192679e-10,
+                -3.910706209920567e-9,
+            ],
+        ),
+        (
+            27.0,
+            3,
+            true,
+            true,
+            [
+                -8.352723017911185e-7,
+                -4.415171648529216e-8,
+                1.7789689855209342e-8,
+            ],
+        ),
+    ] {
+        let t = celsius + 273.15;
+        let dt = celsius - 27.0;
+        let vt = rspice_core::constants::thermal_voltage(t);
+        let ratio = t / 300.15;
+        let factlog = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
+        let xtb = if law == 1 { 0.005 } else { -0.7 };
+        let beta = match law {
+            1 => 1.0 + xtb * dt,
+            3 => 1.0,
+            _ => ratio.powf(xtb),
+        };
+        let bf = 100.0
+            * if overrides {
+                1.0 + 0.002 * dt + 3e-6 * dt * dt
+            } else {
+                beta
+            };
+        let br = 2.0
+            * if overrides {
+                1.0 - 0.001 * dt + 2e-6 * dt * dt
+            } else {
+                beta
+            };
+        let bc_area = if split { 5.0 } else { 3.0 };
+        let current = |nominal: f64, area: f64, exponent: f64, index: usize| {
+            if law == 3 {
+                let coefficients = [
+                    (1e-3, 2e-6),
+                    (-1.5e-3, 3e-6),
+                    (0.7e-3, -1e-6),
+                    (-0.4e-3, 1e-6),
+                ];
+                let (first, second) = coefficients[index];
+                nominal.powf(1.0 + first * dt + second * dt * dt) * area * 3.0
+            } else {
+                nominal * area * 3.0 * exponent.exp()
+            }
+        };
+        let saturation = [
+            current(
+                if split { 2e-14 } else { 1e-14 },
+                2.0,
+                if split { factlog / 1.1 } else { factlog },
+                0,
+            ),
+            current(
+                if split { 7e-14 } else { 1e-14 },
+                if split { bc_area } else { 2.0 * bc_area },
+                if split { factlog / 1.3 } else { factlog },
+                0,
+            ),
+            current(1e-16, 2.0, factlog / 1.5 - beta.ln(), 1),
+            current(3e-16, bc_area, factlog / 1.7 - beta.ln(), 2),
+            current(
+                5e-15,
+                if split { 3.0 } else { 2.0 },
+                if split { factlog / 1.3 } else { factlog },
+                3,
+            ),
+        ];
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            temperature: t,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                current_abstol: 1e-24,
+                voltage_reltol: 1e-10,
+                ..Default::default()
+            },
+            integration_method:
+                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=4).map(|i| f64::from(i) * 1e-8).collect(),
+            )),
+            ..Default::default()
+        });
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let response = |vb: f64| {
+                let vsub = if split { vb - 0.05 } else { 0.4 };
+                let [(f, gf), (r, gr), (be, gbe), (bc, gbc), (sub, gs)] =
+                    core::array::from_fn(|i| {
+                        let nvt = [1.1, 1.3, 1.5, 1.7, 1.2][i] * vt;
+                        let v = [vb, vb - 0.1, vb, vb - 0.1, vsub][i];
+                        (
+                            saturation[i] * (v / nvt).exp_m1(),
+                            saturation[i] * (v / nvt).exp() / nvt,
+                        )
+                    });
+                let dc = [
+                    p * (-f + (1.0 + 1.0 / br) * r + bc + if split { 0.0 } else { sub }),
+                    -p * (f / bf + r / br + be + bc + if split { sub } else { 0.0 }),
+                    p * if split { sub } else { -sub },
+                ];
+                let omega = core::f64::consts::TAU * 1e6;
+                let ac = [
+                    Complex64::new(-gf + (1.0 + 1.0 / br) * gr + gbc, omega * 2e-9 * gr),
+                    Complex64::new(
+                        -gf / bf - gr / br - gbe - gbc - if split { gs } else { 0.0 },
+                        -omega * (1e-9 * gf + 2e-9 * gr),
+                    ),
+                    Complex64::new(if split { gs } else { 0.0 }, 0.0),
+                ];
+                (dc, ac, [p * 1e-9 * f, p * 2e-9 * r])
+            };
+            let split_fields = if split { "IBE=2e-14 IBC=7e-14" } else { "" };
+            let gain_fields = if overrides {
+                "TBF1=2m TBF2=3u TBR1=-1m TBR2=2u"
+            } else {
+                ""
+            };
+            let subs = if split { -1 } else { 1 };
+            let device = format!(
+                "Q1 c b 0 s qm AREA=2 AREAB=3 AREAC=5 M=3\n.model qm {kind}(IS=1e-14 {split_fields} ISS=5e-15 NS=1.2 BF=100 BR=2 NF=1.1 NR=1.3 ISE=1e-16 NE=1.5 ISC=3e-16 NC=1.7 XTB={xtb} TF=1n TR=2n SUBS={subs} TLEV={{mode}} TIS1=1m TIS2=2u TISE1=-1.5m TISE2=3u TISC1=.7m TISC2=-1u TISS1=-.4m TISS2=1u {gain_fields})"
+            );
+            let device = if split {
+                format!("X1 c b s cell mode={law}\n.subckt cell c b s mode=2\n{device}\n.ends")
+            } else {
+                format!(".param mode={law}\n{device}")
+            };
+            let deck=Netlist::parse(&format!("TLEV currents\nVC c 0 {}\nVB b 0 PWL(0 {} 40n {}) DC {} AC 1\nVS s 0 {}\n{device}\n.end",p*0.1,p*0.45,p*0.4505,p*0.45,p*if split {0.05} else {0.5})).unwrap();
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            let (expected_dc, expected_ac, _) = response(0.45);
+            for (i, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                let actual = dc.branch_current_named(name).unwrap();
+                let label = format!(
+                    "T={celsius} TLEV={law} split={split} overrides={overrides} {kind} {name}"
+                );
+                assert_rel_close(&label, actual, p * reference[i], 1e-5);
+                assert!(
+                    (actual - expected_dc[i]).abs() < expected_dc[i].abs() * 1e-9 + 1e-24,
+                    "{label}: {actual:e} != {:e}",
+                    expected_dc[i]
+                );
+                let branch = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|key| key.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    (ac[0].currents[branch] - expected_ac[i]).norm()
+                        < expected_ac[i].norm() * 1e-9 + 1e-23,
+                    "{label} AC"
+                );
+            }
+            if celsius == 70.0 && law == 3 && split && p == 1.0 {
+                let result = engine.run_tran(&deck, 40e-9, 10e-9).unwrap();
+                let voltage = result.try_voltage_waveform_named("b").unwrap();
+                let currents = ["VC", "VB", "VS"]
+                    .map(|name| result.try_branch_current_waveform_named(name).unwrap());
+                for i in 1..result.time.len() {
+                    let (mut expected, _, q) = response(voltage[i]);
+                    let (_, _, previous) = response(voltage[i - 1]);
+                    let step = result.time[i] - result.time[i - 1];
+                    expected[0] += (q[1] - previous[1]) / step;
+                    expected[1] -= (q[0] - previous[0] + q[1] - previous[1]) / step;
+                    for terminal in 0..3 {
+                        assert!(
+                            (currents[terminal][i] - expected[terminal]).abs()
+                                < expected[terminal].abs() * 1e-9 + 1e-22
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_tlev_validates_domains_and_preserves_power_limits() {
+    let config = SimulationConfig {
+        spice_dialect: SpiceDialect::Ngspice,
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let engine = Engine::new(config.clone());
+    for value in [-1.0, 2.0, 4.0, 0.5, f64::NAN, f64::INFINITY] {
+        let mut deck = Netlist::parse("Invalid TLEV\nQ1 0 0 0 qm\n.model qm NPN\n.end").unwrap();
+        deck.models[0].params.push(("TLEV".into(), value));
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains("TLEV")
+        );
+    }
+    for name in [
+        "TBF1", "TBF2", "TBR1", "TBR2", "TIS1", "TIS2", "TISE1", "TISE2", "TISC1", "TISC2",
+        "TISS1", "TISS2",
+    ] {
+        let mut deck =
+            Netlist::parse("Invalid current coefficient\nQ1 0 0 0 qm\n.model qm NPN\n.end")
+                .unwrap();
+        deck.models[0].params.push((name.into(), f64::NAN));
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+        for (dialect, family) in [
+            (SpiceDialect::Xyce, "LEVEL=1"),
+            (SpiceDialect::Ngspice, "TNF=0"),
+        ] {
+            let deck = Netlist::parse(&format!(
+                "Wrong temperature family\nQ1 0 0 0 qm\n.model qm NPN({family} {name}=0)\n.end"
+            ))
+            .unwrap();
+            assert!(
+                Engine::new(config.clone().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+    }
+    for (fields, expected) in [
+        ("TLEV=1 XTB=-2", "positive"),
+        ("TBF1=-2", "TBF"),
+        ("TBR2=-2", "TBR"),
+        ("TLEV=3 IS=0 TIS1=-2", "TIS"),
+        ("TLEV=3 ISS=0 TISS2=-2", "TISS"),
+        ("TLEV=3 ISE=0 TISE1=-2", "TISE"),
+        ("TLEV=3 ISC=0 TISC2=-2", "TISC"),
+    ] {
+        let deck = Netlist::parse(&format!(
+            "Invalid mapped temperature\nQ1 0 0 0 qm TEMP=28\n.model qm NPN({fields})\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(expected)
+        );
+    }
+    // Zero nominal values follow pow's zero-exponent rule, but an absent
+    // ISS never creates a substrate diode, even for a zero or negative power.
+    let vt = rspice_core::constants::thermal_voltage(301.15);
+    for (substrate, power, current) in [
+        ("", -1.0, 0.0),
+        ("", -2.0, 0.0),
+        ("ISS=0", -1.0, -(1e-8 / vt).exp_m1()),
+    ] {
+        let deck=Netlist::parse(&format!("Zero power\nVC c 0 0\nVB b 0 1e-8\nVS s 0 1e-8\nQ1 c b 0 s qm TEMP=28\n.model qm NPN(TLEV=3 IS=0 TIS1=-1 TISS1={power} {substrate})\n.end")).unwrap();
+        let dc = engine.run_dc_op(&deck).unwrap();
+        let actual = dc.branch_current_named("VS").unwrap();
+        assert!((actual - current).abs() < current.abs() * 1e-10 + 1e-22);
+        assert!(dc.branch_current_named("VB").unwrap().abs() > 1e-7);
+    }
+    let deck=Netlist::parse("Zero beta override\nVC c 0 .1\nVB b 0 .45\nQ1 c b 0 qm TEMP=70\n.model qm NPN(TLEV=1 XTB=5m TBF1=0 TBR2=0 IS=1e-14)\n.end").unwrap();
+    let reference = Netlist::parse(
+        "Nominal beta\nVC c 0 .1\nVB b 0 .45\nQ1 c b 0 qm TEMP=70\n.model qm NPN(IS=1e-14)\n.end",
+    )
+    .unwrap();
+    assert_eq!(
+        engine.run_dc_op(&deck).unwrap().branch_current_named("VB"),
+        engine
+            .run_dc_op(&reference)
+            .unwrap()
+            .branch_current_named("VB")
+    );
+    // IS^2 cannot be stored in f64; the bias exponential restores a finite
+    // current and derivative. This exercises the shared retained-scale map.
+    let bias = 1400.0 * vt;
+    let deck=Netlist::parse(&format!("Power-law range\nVC c 0 0\nVB b 0 {bias} AC 1\nQ1 c b 0 qm TEMP=28\n.model qm NPN(TLEV=3 IS=1e-300 TIS1=1 BR=1)\n.end")).unwrap();
+    let expected = (2.0 * 1e-300_f64.ln() + 1400.0).exp();
+    let dc = engine.run_dc_op(&deck).unwrap();
+    assert!((dc.branch_current_named("VC").unwrap() / expected - 1.0).abs() < 1e-10);
+    let ac = engine.run_ac(&deck, &[1.0]).unwrap();
+    let branch = ac[0]
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("VC"))
+        .unwrap();
+    assert!((ac[0].currents[branch].re / (expected / vt) - 1.0).abs() < 1e-10);
+}
+
+#[test]
 fn legacy_emission_temperature_controls_match_ngspice_and_dynamic_equations() {
     use rspice_core::Complex64;
     // ngspice 46 DC measurements, with all ten temperature coefficients.

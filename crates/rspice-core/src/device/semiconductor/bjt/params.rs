@@ -19,18 +19,87 @@ impl Bjt {
         ["TNS1", "TNS2"],
     ];
 
-    pub(crate) fn validate_legacy_emission_temperature(&self) -> Result<(), String> {
+    pub(crate) const LEGACY_BETA_TEMPERATURE_PARAMS: [[&str; 2]; 2] =
+        [["TBF1", "TBF2"], ["TBR1", "TBR2"]];
+    pub(crate) const LEGACY_CURRENT_TEMPERATURE_PARAMS: [[&str; 2]; 4] = [
+        ["TIS1", "TIS2"],
+        ["TISE1", "TISE2"],
+        ["TISC1", "TISC2"],
+        ["TISS1", "TISS2"],
+    ];
+
+    pub(crate) fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
+        Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
+            .iter()
+            .chain(Self::LEGACY_BETA_TEMPERATURE_PARAMS.iter())
+            .chain(Self::LEGACY_CURRENT_TEMPERATURE_PARAMS.iter())
+            .flatten()
+            .copied()
+            .chain(core::iter::once("TLEV"))
+    }
+
+    #[inline]
+    fn legacy_polynomial_delta(coefficients: [Value; 2], delta_t: Value) -> Value {
+        delta_t * (coefficients[0] + delta_t * coefficients[1])
+    }
+
+    pub(crate) fn validate_legacy_temperature_parameters(&self) -> Result<(), String> {
         let Some(mapping) = self
             .legacy_junction_params
             .as_ref()
-            .and_then(|junctions| junctions.emission_temperature.as_ref())
+            .and_then(|junctions| junctions.temperature_parameters.as_ref())
         else {
             return Ok(());
         };
         if self.charge_model != BjtChargeModel::LegacyGummelPoon || self.xyce_compatibility {
             return Ok(());
         }
-        for (index, value) in mapping.operating.iter().enumerate() {
+        let delta_t = self.temperature - self.tnom.max(1.0);
+        let linear_beta = 1.0 + self.beta_exp * delta_t;
+        if mapping.current_law == 1.0 && (!linear_beta.is_finite() || linear_beta <= 0.0) {
+            return Err(format!(
+                "BJT '{}': TLEV=1 requires 1+XTB*(T-TNOM) to be positive at {} K",
+                self.name, self.temperature
+            ));
+        }
+        for (name, value) in [("BF/TBF1/TBF2", self.bf), ("BR/TBR1/TBR2", self.br)] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(format!(
+                    "BJT '{}': {name} at {} K must yield a finite positive current gain, got {value}",
+                    self.name, self.temperature
+                ));
+            }
+        }
+        if mapping.current_law == 3.0 {
+            let junctions = self
+                .legacy_junction_params
+                .as_ref()
+                .expect("temperature parameters");
+            let (be, bc) = junctions
+                .split_saturation
+                .unwrap_or((self.is_nominal, self.is_nominal));
+            for (name, nominal, index) in [
+                ("IS/IBE", be, 0),
+                ("IS/IBC", bc, 0),
+                ("ISE", self.iben_nominal, 1),
+                ("ISC", self.ibcn_nominal, 2),
+                ("ISS", junctions.substrate_saturation.unwrap_or(0.0), 3),
+            ] {
+                if index == 3 && junctions.substrate_saturation.is_none() {
+                    continue;
+                }
+                let power = 1.0
+                    + Self::legacy_polynomial_delta(mapping.current_coefficients[index], delta_t);
+                if !power.is_finite() || (nominal == 0.0 && power < 0.0) {
+                    let [first, second] = Self::LEGACY_CURRENT_TEMPERATURE_PARAMS[index];
+                    return Err(format!(
+                        "BJT '{}': TLEV=3 {first}/{second} gives invalid power {power} for {name}={nominal} at {} K",
+                        self.name, self.temperature
+                    ));
+                }
+            }
+        }
+        for (index, value) in mapping.operating_emission.iter().enumerate() {
             if !value.is_finite()
                 || *value <= 0.0
                 || !(value * self.vt).is_finite()
@@ -679,115 +748,156 @@ impl Bjt {
             .unwrap_or(self.is * self.isrr.max(0.0))
     }
 
-    fn refresh_legacy_current_scales(
+    fn refresh_legacy_junction_currents(
         &mut self,
         factlog: Value,
         log_beta_scale: Value,
         reverse_ratio: Value,
         bc_area: Value,
         substrate_area: Value,
+        delta_t: Value,
     ) {
-        let retain = |mapped: Value, factors: &[Value], exponent: Value| {
-            if mapped.is_normal() || factors.iter().any(|value| *value <= 0.0) {
-                return None;
-            }
-            let (mantissa, binary_exponent) = if factors.iter().all(|v| v.is_finite()) {
-                crate::numerics::product_binary_normalization(factors, &[])
-            } else {
-                (Value::NAN, 0)
-            };
-            Some(LegacyCurrentScale {
-                mantissa,
-                binary_exponent,
-                thermal_exponent: exponent,
-            })
-        };
+        let junctions = self.legacy_junction_params.as_deref();
+        let split = junctions
+            .and_then(|j| j.split_saturation)
+            .filter(|_| !self.xyce_compatibility);
+        let temperature = junctions
+            .and_then(|j| j.temperature_parameters.as_deref())
+            .filter(|_| !self.xyce_compatibility);
+        let power_law = temperature.filter(|t| t.current_law == 3.0);
+        let (be, bc) = split.unwrap_or((self.is_nominal, self.is_nominal));
+        let substrate_nominal = junctions
+            .and_then(|j| j.substrate_saturation)
+            .filter(|_| !self.xyce_compatibility);
+        let mut currents = [0.0; 6];
         let mut scales = [None; 6];
-        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
-            let junctions = self.legacy_junction_params.as_deref();
-            let split = junctions
-                .and_then(|j| j.split_saturation)
-                .filter(|_| !self.xyce_compatibility);
-            let (forward, forward_exponent) = split
-                .map_or((self.is_nominal, factlog), |(be, _)| {
-                    (be, factlog / self.nf_nominal)
-                });
-            scales[LegacyCurrent::Forward as usize] =
-                retain(self.is, &[forward, self.area, self.m], forward_exponent);
-            scales[LegacyCurrent::Reverse as usize] = if let Some((_, bc)) = split {
-                retain(
-                    self.legacy_reverse_saturation_current(),
-                    &[bc, bc_area, self.m],
-                    factlog / self.nr_nominal,
-                )
-            } else {
-                // Even a normal final product may have lost precision in the
-                // intermediate IS or reverse geometry multiplication.
-                let mapped = if self.is.is_normal() && self.isrr.is_normal() {
-                    self.legacy_reverse_saturation_current()
+        // Each tuple owns its source, geometry and thermal law once. The
+        // scalar value and retained scale are derived together from it.
+        for (kind, mut factors, mut exponent, power_index) in [
+            (
+                LegacyCurrent::Forward,
+                [be, self.area, self.m, 1.0, 1.0],
+                if split.is_some() {
+                    factlog / self.nf_nominal
                 } else {
-                    0.0
-                };
-                retain(
-                    mapped,
-                    &[
-                        self.is_nominal,
-                        self.area,
-                        self.m,
-                        reverse_ratio,
-                        if self.xyce_compatibility {
-                            1.0
-                        } else {
-                            bc_area
-                        },
-                    ],
-                    factlog,
-                )
-            };
-            for (kind, mapped, nominal, area, emission) in [
-                (
-                    LegacyCurrent::BaseLeakage,
-                    self.iben,
-                    self.iben_nominal,
-                    self.area,
-                    self.nen,
-                ),
-                (
-                    LegacyCurrent::CollectorIdealLeakage,
-                    self.ibci,
-                    self.ibci_nominal,
-                    bc_area,
-                    self.nci,
-                ),
-                (
-                    LegacyCurrent::CollectorLeakage,
-                    self.ibcn,
-                    self.ibcn_nominal,
-                    bc_area,
-                    self.ncn,
-                ),
-            ] {
-                scales[kind as usize] = retain(
-                    mapped,
-                    &[nominal, area, self.m],
-                    factlog / emission.max(1e-12) - log_beta_scale,
-                );
-            }
-            if !self.xyce_compatibility {
-                if let Some(junctions) = junctions {
-                    let (area, exponent) = if split.is_some() {
-                        (substrate_area, factlog / self.nr_nominal)
+                    factlog
+                },
+                Some(0),
+            ),
+            (
+                LegacyCurrent::Reverse,
+                [
+                    bc,
+                    if split.is_some() { bc_area } else { self.area },
+                    self.m,
+                    if split.is_some() { 1.0 } else { reverse_ratio },
+                    if split.is_some() || self.xyce_compatibility {
+                        1.0
                     } else {
-                        (self.area, factlog)
+                        bc_area
+                    },
+                ],
+                if split.is_some() {
+                    factlog / self.nr_nominal
+                } else {
+                    factlog
+                },
+                Some(0),
+            ),
+            (
+                LegacyCurrent::BaseLeakage,
+                [self.iben_nominal, self.area, self.m, 1.0, 1.0],
+                factlog / self.nen.max(1e-12) - log_beta_scale,
+                Some(1),
+            ),
+            (
+                LegacyCurrent::CollectorIdealLeakage,
+                [self.ibci_nominal, bc_area, self.m, 1.0, 1.0],
+                factlog / self.nci.max(1e-12) - log_beta_scale,
+                None,
+            ),
+            (
+                LegacyCurrent::CollectorLeakage,
+                [self.ibcn_nominal, bc_area, self.m, 1.0, 1.0],
+                factlog / self.ncn.max(1e-12) - log_beta_scale,
+                Some(2),
+            ),
+            (
+                LegacyCurrent::Substrate,
+                [
+                    substrate_nominal.unwrap_or(0.0),
+                    if split.is_some() {
+                        substrate_area
+                    } else {
+                        self.area
+                    },
+                    self.m,
+                    1.0,
+                    1.0,
+                ],
+                if split.is_some() {
+                    factlog / self.nr_nominal
+                } else {
+                    factlog
+                },
+                substrate_nominal.map(|_| 3),
+            ),
+        ] {
+            if let Some((law, index)) = power_law.zip(power_index) {
+                let power_delta =
+                    Self::legacy_polynomial_delta(law.current_coefficients[index], delta_t);
+                // nominal^(1+delta) retains its exact nominal value at TNOM.
+                // Match pow(0,0)=1; a zero base and negative power is invalid.
+                if factors[0] == 0.0 {
+                    factors[0] = if power_delta == -1.0 {
+                        1.0
+                    } else if power_delta < -1.0 {
+                        Value::NAN
+                    } else {
+                        0.0
                     };
-                    scales[LegacyCurrent::Substrate as usize] = retain(
-                        junctions.substrate_current,
-                        &[junctions.substrate_saturation, area, self.m],
-                        exponent,
-                    );
+                    exponent = 0.0;
+                } else {
+                    exponent = power_delta * factors[0].ln();
                 }
             }
+            let mapped = crate::numerics::scaled_exp_product(&factors, &[], exponent);
+            let index = kind as usize;
+            currents[index] = mapped;
+            // Ordinary common-IS transport retains the existing product.
+            // Preserve a scale if either intermediate lost precision, even
+            // when the completed reverse coefficient is normal.
+            let reverse_loss = matches!(kind, LegacyCurrent::Reverse)
+                && split.is_none()
+                && (!currents[LegacyCurrent::Forward as usize].is_normal()
+                    || !self.isrr.is_normal());
+            if (!mapped.is_normal() || reverse_loss) && !factors.iter().any(|v| *v <= 0.0) {
+                let (mantissa, binary_exponent) = if factors.iter().all(|v| v.is_finite()) {
+                    crate::numerics::product_binary_normalization(&factors, &[])
+                } else {
+                    (Value::NAN, 0)
+                };
+                scales[index] = Some(LegacyCurrentScale {
+                    mantissa,
+                    binary_exponent,
+                    thermal_exponent: exponent,
+                });
+            }
         }
+        self.is = currents[LegacyCurrent::Forward as usize];
+        self.iben = currents[LegacyCurrent::BaseLeakage as usize];
+        self.ibci = currents[LegacyCurrent::CollectorIdealLeakage as usize];
+        self.ibcn = currents[LegacyCurrent::CollectorLeakage as usize];
+        // GP's ideal BE branch comes from transport/BF; preserve this unused
+        // VBIC-style coefficient for existing nominal parameter snapshots.
+        self.ibei = Self::legacy_temp_scaled_current(
+            self.ibei_nominal,
+            factlog,
+            log_beta_scale,
+            self.nei,
+            self.area,
+            self.m,
+        );
         if scales.iter().any(Option::is_some) {
             let junctions = self
                 .legacy_junction_params
@@ -799,6 +909,10 @@ impl Bjt {
             }
         } else if let Some(junctions) = &mut self.legacy_junction_params {
             junctions.current_scales = None;
+        }
+        if let Some(junctions) = &mut self.legacy_junction_params {
+            junctions.bc_saturation = split.map(|_| currents[LegacyCurrent::Reverse as usize]);
+            junctions.substrate_current = currents[LegacyCurrent::Substrate as usize];
         }
     }
 
@@ -817,34 +931,35 @@ impl Bjt {
         let vt = self.thermal_voltage_at(temp);
         let ratio = (temp / tnom).max(1e-12);
         let delta_t = temp - tnom;
-        let beta_scale = ratio.powf(self.beta_exp);
         let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
         // Classic SPICE/Xyce BJT scaling is parameterized by the model's EG
         // bandgap. EA is a distinct VBIC activation-energy parameter.
         let legacy_factlog = (ratio - 1.0) * self.eg / vt.max(1e-18) + self.xis * ratio.ln();
-        let log_beta_scale = self.beta_exp * ratio.ln();
-        let scale = self.instance_scale();
-        let is_temp = if legacy_model {
-            // Preserve the constitutive exponential, combining geometry before
-            // rounding so small thermal factors do not erase finite currents.
-            crate::numerics::scaled_exp_product(
-                &[self.is_nominal, self.area, self.m],
-                &[],
-                legacy_factlog,
-            )
-        } else {
-            // Saturation-current mapping uses nominal emission coefficients;
-            // TNF adjusts the junction slope separately. Reusing nf/nr here
-            // makes the result depend on previous temperature refreshes.
-            Self::vbic_temp_scaled_current(
-                self.is_nominal,
-                ratio,
-                vt,
-                self.xis,
-                self.ea,
-                self.nf_nominal,
-            ) * scale
+        let temperature_parameters = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|j| j.temperature_parameters.as_deref())
+            .filter(|_| legacy_model && !self.xyce_compatibility);
+        let current_law = temperature_parameters.map_or(0.0, |t| t.current_law);
+        let (beta_scale, log_beta_scale) = match current_law {
+            1.0 => (
+                1.0 + self.beta_exp * delta_t,
+                (self.beta_exp * delta_t).ln_1p(),
+            ),
+            // bfactor must start from one for every model/instance. ngspice's
+            // function-local default can inherit another model's last value.
+            3.0 => (1.0, 0.0),
+            _ => (ratio.powf(self.beta_exp), self.beta_exp * ratio.ln()),
         };
+        let beta_factors = temperature_parameters.map_or([beta_scale; 2], |t| {
+            t.beta_coefficients.map(|c| {
+                c.map_or(beta_scale, |c| {
+                    1.0 + Self::legacy_polynomial_delta(c, delta_t)
+                })
+            })
+        });
+        let explicit_temperature = temperature_parameters.is_some();
+        let scale = self.instance_scale();
         let (bc_area, substrate_area) = self.junction_area_factors();
         let isrr_temp = Self::vbic_temp_scaled_current(
             self.isrr_nominal,
@@ -857,82 +972,6 @@ impl Bjt {
         let gamm_ratio_term = ratio.powf(self.xis);
         let gamm_energy_term = (-self.ea * (1.0 - ratio) / vt.max(1e-18)).clamp(-80.0, 80.0);
         let gamm_temp = self.gamm_nominal * gamm_ratio_term * gamm_energy_term.exp();
-        let ibei_temp = if legacy_model {
-            Self::legacy_temp_scaled_current(
-                self.ibei_nominal,
-                legacy_factlog,
-                log_beta_scale,
-                self.nei,
-                self.area,
-                self.m,
-            )
-        } else {
-            Self::vbic_temp_scaled_current(
-                self.ibei_nominal,
-                ratio,
-                vt,
-                self.xii,
-                self.eaie,
-                self.nei,
-            )
-        };
-        let iben_temp = if legacy_model {
-            Self::legacy_temp_scaled_current(
-                self.iben_nominal,
-                legacy_factlog,
-                log_beta_scale,
-                self.nen,
-                self.area,
-                self.m,
-            )
-        } else {
-            Self::vbic_temp_scaled_current(
-                self.iben_nominal,
-                ratio,
-                vt,
-                self.xin,
-                self.eane,
-                self.nen,
-            )
-        };
-        let ibci_temp = if legacy_model {
-            Self::legacy_temp_scaled_current(
-                self.ibci_nominal,
-                legacy_factlog,
-                log_beta_scale,
-                self.nci,
-                bc_area,
-                self.m,
-            )
-        } else {
-            Self::vbic_temp_scaled_current(
-                self.ibci_nominal,
-                ratio,
-                vt,
-                self.xii,
-                self.eaic,
-                self.nci,
-            )
-        };
-        let ibcn_temp = if legacy_model {
-            Self::legacy_temp_scaled_current(
-                self.ibcn_nominal,
-                legacy_factlog,
-                log_beta_scale,
-                self.ncn,
-                bc_area,
-                self.m,
-            )
-        } else {
-            Self::vbic_temp_scaled_current(
-                self.ibcn_nominal,
-                ratio,
-                vt,
-                self.xin,
-                self.eanc,
-                self.ncn,
-            )
-        };
         let isp_temp = Self::vbic_temp_scaled_current(
             self.isp_nominal,
             ratio,
@@ -1066,7 +1105,7 @@ impl Bjt {
         let mut nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
         if legacy_model && !self.xyce_compatibility {
             if let Some(junctions) = &mut self.legacy_junction_params {
-                if let Some(mapping) = &mut junctions.emission_temperature {
+                if let Some(mapping) = &mut junctions.temperature_parameters {
                     // bjttemp.c maps the junction slopes independently; the
                     // saturation-current temperature law still uses nominal N.
                     let nominal = [
@@ -1077,15 +1116,15 @@ impl Bjt {
                         junctions.substrate_emission.unwrap_or(1.0),
                     ];
                     for ((operating, nominal), [first, second]) in mapping
-                        .operating
+                        .operating_emission
                         .iter_mut()
                         .zip(nominal)
-                        .zip(mapping.coefficients)
+                        .zip(mapping.emission_coefficients)
                     {
                         *operating = nominal * (1.0 + delta_t * (first + delta_t * second));
                     }
-                    nf_temp = mapping.operating[0];
-                    nr_temp = mapping.operating[1];
+                    nf_temp = mapping.operating_emission[0];
+                    nr_temp = mapping.operating_emission[1];
                 }
             }
         }
@@ -1100,21 +1139,24 @@ impl Bjt {
 
         self.vt = vt;
         self.temperature = temp;
-        self.bf = (self.bf_nominal * beta_scale).max(1e-18);
-        self.br = (self.br_nominal * beta_scale).max(1e-18);
-        self.is = is_temp;
-        let explicit_emission_temperature = legacy_model
-            && !self.xyce_compatibility
-            && self
-                .legacy_junction_params
-                .as_ref()
-                .is_some_and(|j| j.emission_temperature.is_some());
-        self.nf = if explicit_emission_temperature {
+        let bf = self.bf_nominal * beta_factors[0];
+        let br = self.br_nominal * beta_factors[1];
+        self.bf = if explicit_temperature {
+            bf
+        } else {
+            bf.max(1e-18)
+        };
+        self.br = if explicit_temperature {
+            br
+        } else {
+            br.max(1e-18)
+        };
+        self.nf = if explicit_temperature {
             nf_temp
         } else {
             nf_temp.max(1e-12)
         };
-        self.nr = if explicit_emission_temperature {
+        self.nr = if explicit_temperature {
             nr_temp
         } else {
             nr_temp.max(1e-12)
@@ -1169,47 +1211,66 @@ impl Bjt {
             } else {
                 1.0
             };
-        if let Some(junctions) = &mut self.legacy_junction_params {
-            junctions.bc_saturation = None;
-            junctions.substrate_current = 0.0;
-            if legacy_model && !self.xyce_compatibility {
-                let (substrate_log_factor, substrate_area) =
-                    if let Some((be, bc)) = junctions.split_saturation {
-                        self.is = crate::numerics::scaled_exp_product(
-                            &[be, self.area, self.m],
-                            &[],
-                            legacy_factlog / self.nf_nominal,
-                        );
-                        junctions.bc_saturation = Some(crate::numerics::scaled_exp_product(
-                            &[bc, bc_area, self.m],
-                            &[],
-                            legacy_factlog / self.nr_nominal,
-                        ));
-                        // bjttemp.c reuses the reverse temperature factor for
-                        // ISS when both split transport currents are supplied.
-                        (legacy_factlog / self.nr_nominal, substrate_area)
-                    } else {
-                        (legacy_factlog, self.area)
-                    };
-                junctions.substrate_current = crate::numerics::scaled_exp_product(
-                    &[junctions.substrate_saturation, substrate_area, self.m],
-                    &[],
-                    substrate_log_factor,
-                );
+        if legacy_model {
+            self.refresh_legacy_junction_currents(
+                legacy_factlog,
+                log_beta_scale,
+                isrr_temp,
+                bc_area,
+                substrate_area,
+                delta_t,
+            );
+        } else {
+            self.is = Self::vbic_temp_scaled_current(
+                self.is_nominal,
+                ratio,
+                vt,
+                self.xis,
+                self.ea,
+                self.nf_nominal,
+            ) * scale;
+            self.ibei = (Self::vbic_temp_scaled_current(
+                self.ibei_nominal,
+                ratio,
+                vt,
+                self.xii,
+                self.eaie,
+                self.nei,
+            ) * scale)
+                .max(0.0);
+            self.iben = (Self::vbic_temp_scaled_current(
+                self.iben_nominal,
+                ratio,
+                vt,
+                self.xin,
+                self.eane,
+                self.nen,
+            ) * scale)
+                .max(0.0);
+            self.ibci = (Self::vbic_temp_scaled_current(
+                self.ibci_nominal,
+                ratio,
+                vt,
+                self.xii,
+                self.eaic,
+                self.nci,
+            ) * scale)
+                .max(0.0);
+            self.ibcn = (Self::vbic_temp_scaled_current(
+                self.ibcn_nominal,
+                ratio,
+                vt,
+                self.xin,
+                self.eanc,
+                self.ncn,
+            ) * scale)
+                .max(0.0);
+            if let Some(junctions) = &mut self.legacy_junction_params {
+                junctions.bc_saturation = None;
+                junctions.substrate_current = 0.0;
+                junctions.current_scales = None;
             }
         }
-        let current_scale = if legacy_model { 1.0 } else { scale };
-        self.ibei = (ibei_temp * current_scale).max(0.0);
-        self.iben = (iben_temp * current_scale).max(0.0);
-        self.ibci = (ibci_temp * current_scale).max(0.0);
-        self.ibcn = (ibcn_temp * current_scale).max(0.0);
-        self.refresh_legacy_current_scales(
-            legacy_factlog,
-            log_beta_scale,
-            isrr_temp,
-            bc_area,
-            substrate_area,
-        );
         self.vbbe = if vbbe_temp.is_finite() {
             vbbe_temp
         } else {
@@ -1356,7 +1417,7 @@ impl Bjt {
                     .get("IBE")
                     .zip(params.get("IBC"))
                     .map(|(&be, &bc)| (be, bc));
-                junctions.substrate_saturation = params.get("ISS").copied().unwrap_or(0.0);
+                junctions.substrate_saturation = params.get("ISS").copied();
                 junctions.substrate_emission = params.get("NS").copied();
             }
         }
@@ -2075,12 +2136,9 @@ impl Bjt {
                 self.cth_nominal = 1e-12;
             }
         }
-        let emission_controls = self.charge_model == BjtChargeModel::LegacyGummelPoon
-            && Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
-                .iter()
-                .flatten()
-                .any(|key| params.contains_key(*key));
-        if emission_controls {
+        let temperature_controls = self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && Self::legacy_temperature_parameter_names().any(|key| params.contains_key(key));
+        if temperature_controls {
             let coefficients = core::array::from_fn(|index| {
                 let [first, second] = Self::LEGACY_EMISSION_TEMPERATURE_PARAMS[index];
                 // Retain the existing shared TNF extension for an axis with
@@ -2098,12 +2156,29 @@ impl Bjt {
             });
             self.legacy_junction_params
                 .get_or_insert_with(Default::default)
-                .emission_temperature = Some(Box::new(LegacyEmissionTemperature {
-                coefficients,
-                operating: [0.0; 5],
+                .temperature_parameters = Some(Box::new(LegacyTemperatureParameters {
+                emission_coefficients: coefficients,
+                operating_emission: [0.0; 5],
+                current_law: params.get("TLEV").copied().unwrap_or(0.0),
+                beta_coefficients: Self::LEGACY_BETA_TEMPERATURE_PARAMS.map(|[first, second]| {
+                    (params.contains_key(first) || params.contains_key(second)).then(|| {
+                        [
+                            params.get(first).copied().unwrap_or(0.0),
+                            params.get(second).copied().unwrap_or(0.0),
+                        ]
+                    })
+                }),
+                current_coefficients: Self::LEGACY_CURRENT_TEMPERATURE_PARAMS.map(
+                    |[first, second]| {
+                        [
+                            params.get(first).copied().unwrap_or(0.0),
+                            params.get(second).copied().unwrap_or(0.0),
+                        ]
+                    },
+                ),
             }));
         } else if let Some(junctions) = &mut self.legacy_junction_params {
-            junctions.emission_temperature = None;
+            junctions.temperature_parameters = None;
         }
         self.refresh_operating_scaling();
         self

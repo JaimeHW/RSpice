@@ -6231,7 +6231,7 @@ impl Engine {
                     bjt.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
                     bjt.set_vbic_pnjmaxi(netlist.options.device_pnjmaxi.unwrap_or(1.0));
                     bjt.set_temperature(self.config.temperature);
-                    bjt.validate_legacy_emission_temperature()
+                    bjt.validate_legacy_temperature_parameters()
                         .map_err(SimulationError::Circuit)?;
                     bjt.refresh_noise_temperature_offset(
                         self.config.temperature,

@@ -135,13 +135,13 @@ impl Bjt {
         let n = if !self.xyce_compatibility {
             self.legacy_junction_params
                 .as_ref()
-                .and_then(|junctions| junctions.emission_temperature.as_ref())
+                .and_then(|junctions| junctions.temperature_parameters.as_ref())
                 .map_or(n, |mapping| match kind {
-                    LegacyCurrent::Forward => mapping.operating[0],
-                    LegacyCurrent::Reverse => mapping.operating[1],
-                    LegacyCurrent::BaseLeakage => mapping.operating[2],
-                    LegacyCurrent::CollectorLeakage => mapping.operating[3],
-                    LegacyCurrent::Substrate => mapping.operating[4],
+                    LegacyCurrent::Forward => mapping.operating_emission[0],
+                    LegacyCurrent::Reverse => mapping.operating_emission[1],
+                    LegacyCurrent::BaseLeakage => mapping.operating_emission[2],
+                    LegacyCurrent::CollectorLeakage => mapping.operating_emission[3],
+                    LegacyCurrent::Substrate => mapping.operating_emission[4],
                     LegacyCurrent::CollectorIdealLeakage => n,
                 })
         } else {
