@@ -26,7 +26,7 @@
 //! Everything crossing a `Wait` crosses as a resume argument: every static
 //! local, any additional in-scope temporary, and the right-hand side of an
 //! intra-assignment timing control
-//! (`q <= #5 d`, section 9.2.2), whose value is read before the suspension and
+//! (`q = #5 d`, section 9.2.2), whose value is read before the suspension and
 //! written after it. Nothing else survives — the interpreter starts a
 //! resumption with an empty value table, which is what proves the lowering
 //! routed the state through the terminator rather than assuming a register
@@ -1572,12 +1572,8 @@ impl ProcessLowerer<'_> {
         join
     }
 
-    /// Lower one assignment, blocking or nonblocking.
-    ///
-    /// An intra-assignment timing control (`q <= #5 d`) evaluates the
-    /// right-hand side *before* suspending, per IEEE 1364-2005 section 9.2.2 —
-    /// which is why the value node is emitted into the current block and only
-    /// the write lands after the wait.
+    /// Capture the RHS at encounter. A delay-controlled nonblocking assignment queues
+    /// the captured value and continues; a blocking one suspends until delivery.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
         // A real target takes the real half of the expression grammar and none
         // of the section 5.4.1 sizing: there is no width for the target to seed
@@ -1588,9 +1584,12 @@ impl ProcessLowerer<'_> {
             let context = self.lvalue_width(&assign.target);
             [self.assigned_value(block, &assign.value, context)]
         };
+        if nonblocking && let Some(TimingControl::Delay(delay)) = &assign.timing {
+            let delay = self.delay(block, &delay.value);
+            self.write_with_delay(block, &assign.target, carried[0], true, Some(delay));
+            return block;
+        }
         let block = match &assign.timing {
-            // The value crosses the suspension as a resume argument; without
-            // that the write would read a value the interpreter no longer has.
             Some(control) => self.wait(block, control, None, &mut carried),
             None => block,
         };
@@ -1638,6 +1637,17 @@ impl ProcessLowerer<'_> {
     /// the defect this fixes did not fail loudly, it wrote `x` into the top of
     /// every concatenation target narrower than the sum of its parts.
     fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
+        self.write_with_delay(block, target, value, nonblocking, None);
+    }
+
+    fn write_with_delay(
+        &mut self,
+        block: BlockId,
+        target: &DigitalLValue,
+        value: ValueId,
+        nonblocking: bool,
+        delay: Option<ValueId>,
+    ) {
         if self.refuse_real_in_concatenation(target) {
             return;
         }
@@ -1661,7 +1671,7 @@ impl ProcessLowerer<'_> {
                             lsb: i64::from(offset),
                         },
                     );
-                    self.write(block, element, slice, nonblocking);
+                    self.write_with_delay(block, element, slice, nonblocking, delay);
                 }
             }
             // A process-local is an SSA variable, not a signal: writing one is
@@ -1703,6 +1713,7 @@ impl ProcessLowerer<'_> {
                         target: resolved,
                         value,
                         region: DigitalSchedulingRegion::NonBlockingAssign,
+                        delay,
                     }
                 } else {
                     CfgValueKind::DigitalBlockingWrite {
@@ -1920,7 +1931,7 @@ impl ProcessLowerer<'_> {
     /// resume state and nothing else. Static declarations cross even outside
     /// their lexical scope; synthesized counters cross while in scope.
     /// Values explicitly named by `carried` cross too, which is how
-    /// `q <= #5 d` gets the `d` it read *before* the delay (IEEE 1364-2005
+    /// `q = #5 d` gets the `d` it read *before* the delay (IEEE 1364-2005
     /// section 9.2.2) to the write that lands after it.
     ///
     /// Every such local crosses, not only the ones the resumed half reads.

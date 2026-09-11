@@ -307,6 +307,9 @@ pub(crate) struct DigitalSignalStore {
     /// Nonblocking and otherwise deferred updates, in the order they were
     /// evaluated. The host partitions them by region when it drains.
     deferred: Vec<DigitalDeferredUpdate>,
+    /// Captures awaiting transfer to the host's future event queue. Kept apart
+    /// so an untimed process never scans every update already ready for NBA.
+    delayed: Vec<DigitalDeferredUpdate>,
     /// Value changes since the host last drained, oldest first.
     transitions: Vec<SignalTransition>,
     /// The continuous-domain potential each of the plan's probes reads
@@ -398,6 +401,7 @@ impl DigitalSignalStore {
             contributions,
             spans,
             deferred: Vec::new(),
+            delayed: Vec::new(),
             transitions: Vec::new(),
             analog_potentials: vec![None; plan.analog_probes.len()],
             activation_clock: None,
@@ -527,6 +531,18 @@ impl DigitalSignalStore {
         }
         self.publish_real(signal, value);
         Ok(())
+    }
+
+    /// Remove timed captures for transfer to the host's event schedule.
+    pub(crate) fn take_delayed_updates(&mut self) -> Vec<DigitalDeferredUpdate> {
+        std::mem::take(&mut self.delayed)
+    }
+
+    /// The scheduler has reached this capture's due tick. It now waits for its
+    /// NBA region, with the same ordering as other updates already made ready.
+    pub(crate) fn release_delayed_update(&mut self, mut update: DigitalDeferredUpdate) {
+        update.delay_ticks = 0;
+        self.deferred.push(update);
     }
 
     /// Take every deferred update belonging to one region, oldest first.
@@ -761,7 +777,11 @@ impl DigitalEnvironment for DigitalSignalStore {
     }
 
     fn defer_update(&mut self, update: DigitalDeferredUpdate) {
-        self.deferred.push(update);
+        if update.delay_ticks == 0 {
+            self.deferred.push(update);
+        } else {
+            self.delayed.push(update);
+        }
     }
 
     fn drive_signal(&mut self, drive: DigitalDrive) {

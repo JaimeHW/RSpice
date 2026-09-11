@@ -2804,6 +2804,91 @@ endmodule
     }
 
     #[test]
+    fn delayed_nonblocking_updates_survive_mixed_rejection_and_checkpoint() {
+        let source = "module timed(p,adc); inout p; electrical p; input adc; wire adc;
+            real held; reg issued, independent;
+            initial begin held=0.0; issued=0; independent=0; independent<=#1 1; end
+            always @(posedge adc) begin
+                held <= #($realtime/2.0) $abstime;
+                issued=1;
+            end
+            analog I(p)<+held*1e6+issued*1e-3;
+            endmodule";
+        let mut host =
+            MixedSignalHost::compile(source, None, "nba", &[1], SchedulerLimits::default())
+                .unwrap();
+        host.add_adc_bridge("adc", 0, (2, 0), 0.4, 0.6).unwrap();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0, 0.0]);
+        let stamp = |host: &mut MixedSignalHost| {
+            while host.settle_analog_bridges(&[0.0, 0.6]).unwrap() {}
+            let mut rhs = 0.0;
+            host.stamp(
+                &[0.0, 0.6],
+                |_, _, _| {},
+                |row, value| {
+                    if row == 0 {
+                        rhs += value;
+                    }
+                },
+            )
+            .unwrap();
+            rhs
+        };
+        for reject in [true, false] {
+            host.begin_trial(
+                0.65e-9,
+                0.65e-9,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .unwrap();
+            assert!(
+                (stamp(&mut host) + 1e-3).abs() < 1e-12,
+                "continuation runs immediately, held value waits"
+            );
+            assert_eq!(host.read_digital("issued").unwrap(), "1");
+            assert_eq!(
+                host.read_digital("independent").unwrap(),
+                "0",
+                "unrelated tick-1 NBA stays queued"
+            );
+            assert!((host.next_event_time().unwrap().unwrap() - 1e-9).abs() < 1e-20);
+            if reject {
+                host.reject_trial().unwrap();
+                assert_eq!(host.read_digital("issued").unwrap(), "0");
+            } else {
+                host.accept_trial().unwrap();
+            }
+        }
+        let checkpoint = host.checkpoint().unwrap();
+        for replay in 0..2 {
+            if replay == 1 {
+                host.restore(&checkpoint).unwrap();
+            }
+            begin(&mut host, 1);
+            assert!((stamp(&mut host) + 1e-3).abs() < 1e-12);
+            assert_eq!(host.read_digital("independent").unwrap(), "1");
+            host.accept_trial().unwrap();
+            assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
+            for reject in [true, false] {
+                begin(&mut host, 2);
+                assert!(
+                    (stamp(&mut host) + 1.65e-3).abs() < 1e-12,
+                    "delivered RHS keeps the captured 0.65 ns physical time"
+                );
+                if reject {
+                    host.reject_trial().unwrap();
+                } else {
+                    host.accept_trial().unwrap();
+                }
+            }
+            assert!(host.next_event_time().unwrap().is_none());
+        }
+    }
+
+    #[test]
     fn discrete_analog_inputs_restore_on_rejection_and_checkpoint() {
         let source = "module shared(p); inout p; electrical p; real state; initial begin state=0.25; #1 state=1.25; end analog I(p)<+state; endmodule";
         let mut host =

@@ -1085,6 +1085,8 @@ pub enum CfgValueKind {
         /// in source; carried explicitly so the region is read off the node
         /// rather than assumed from the kind.
         region: DigitalSchedulingRegion,
+        /// Optional converted design-tick delay, captured when the write executes.
+        delay: Option<ValueId>,
     },
     /// A continuous driver's contribution to a net (IEEE 1364-2005 section
     /// 6.1).
@@ -1449,9 +1451,12 @@ impl CfgValueKind {
                 then_value,
                 else_value,
             } => vec![*condition, *then_value, *else_value],
-            Self::DigitalBlockingWrite { value, .. }
-            | Self::DigitalNonblockingWrite { value, .. }
-            | Self::DigitalDriverWrite { value, .. } => vec![*value],
+            Self::DigitalNonblockingWrite { value, delay, .. } => std::iter::once(*value)
+                .chain(delay.iter().copied())
+                .collect(),
+            Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
+                vec![*value]
+            }
 
             _ => Vec::new(),
         }
@@ -1707,9 +1712,15 @@ impl CfgValueKind {
                 *then_value = map(*then_value);
                 *else_value = map(*else_value);
             }
-            Self::DigitalBlockingWrite { value, .. }
-            | Self::DigitalNonblockingWrite { value, .. }
-            | Self::DigitalDriverWrite { value, .. } => *value = map(*value),
+            Self::DigitalNonblockingWrite { value, delay, .. } => {
+                *value = map(*value);
+                if let Some(delay) = delay {
+                    *delay = map(*delay);
+                }
+            }
+            Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
+                *value = map(*value)
+            }
 
             _ => {}
         }

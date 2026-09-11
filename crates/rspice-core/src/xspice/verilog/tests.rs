@@ -434,6 +434,85 @@ fn a_delay_resumes_the_process_that_many_time_units_later() {
     );
 }
 
+#[test]
+fn delayed_nonblocking_updates_preserve_capture_order_and_nba_regions() {
+    let source = "module timed(q,held,seen,inactive,done);
+        output [7:0] q,held,seen,inactive; output done;
+        reg [7:0] q,held,seen,inactive,data,duration; reg done;
+        initial begin
+          q=0; held=0; seen=0; inactive=0; done=0; data=1; duration=5;
+          q <= #duration data;
+          q <= #2 2;
+          held[3:0] <= #3 data[3:0]; held[7:4] <= #3 4'ha;
+          data=9; duration=9; done=1;
+          #5 seen=q;
+          q <= #0 3;
+          #0 inactive=q;
+        end endmodule";
+    let report = run_digital_verilog(
+        source,
+        &DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![
+                port("q", 8),
+                port("held", 8),
+                port("seen", 8),
+                port("inactive", 8),
+                port("done", 1),
+            ],
+            clock: None,
+            step: 1,
+            settle: 0,
+            vectors: vec![vec![]; 7],
+        },
+    )
+    .unwrap();
+    let values: Vec<Vec<String>> = report
+        .observations
+        .iter()
+        .map(|row| row.values.iter().map(|(_, value)| value.clone()).collect())
+        .collect();
+    for tick in 0..7 {
+        let q = if tick < 2 {
+            0
+        } else if tick < 5 {
+            2
+        } else {
+            3
+        };
+        let held = if tick < 3 { 0 } else { 0xa1 };
+        let before_nba = if tick < 5 { 0 } else { 2 };
+        assert_eq!(
+            values[tick],
+            [
+                format!("{q:08b}"),
+                format!("{held:08b}"),
+                format!("{before_nba:08b}"),
+                format!("{before_nba:08b}"),
+                "1".to_string()
+            ],
+            "tick {tick}"
+        );
+    }
+    // A completed process's only future work can be an NBA wakeup. Delay
+    // deadlines outside the host's exact physical range must fail explicitly.
+    let error = run_digital_verilog(
+        "module overflow(q); output q; reg q; initial q<=#2251799813685248 1; endmodule",
+        &DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![port("q", 1)],
+            clock: None,
+            step: 1,
+            settle: 0,
+            vectors: vec![vec![]],
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(error, DigitalRunError::TickOverflow), "{error}");
+}
+
 // ===========================================================================
 // Refusals
 // ===========================================================================

@@ -2355,6 +2355,7 @@ mod digital_leaf_class {
                 target,
                 value,
                 region: DigitalSchedulingRegion::NonBlockingAssign,
+                delay: None,
             },
         ]
     }

@@ -239,7 +239,16 @@ budget. Some known based literals of 64 bits or fewer still pass through scalar
 parsing and are refused when their exact integer is not representable by `f64`;
 full literal/type/conversion work in MS06 remains open.
 
-MS02 remains open. Min:typ:max selection, continuous driver delays, complete
+Delay-controlled nonblocking assignments capture their RHS and converted delay
+at encounter, then continue immediately. Positive delays retain every update
+until its due tick; zero/X/Z delays use the current nonblocking region without
+suspending the process. The host delivers these after active and inactive work,
+including real values and partial-vector writes. Captures survive process
+completion, mixed-trial rejection/retry and accepted in-memory checkpoints.
+Custom `DigitalEnvironment` hosts must honor `DigitalDeferredUpdate::delay_ticks`.
+
+MS02 remains open. Event-controlled nonblocking assignments still need independent
+capture subscriptions; their current lowering suspends the process. Min:typ:max selection, continuous driver delays, complete
 delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.

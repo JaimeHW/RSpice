@@ -270,6 +270,18 @@ impl CanonicalDigitalPlan {
                                 "digital procedural write must target a declared variable",
                             ));
                         }
+                        if let CfgValueKind::DigitalNonblockingWrite {
+                            delay: Some(delay), ..
+                        } = kind
+                            && !matches!(
+                                function.value(*delay).value_type,
+                                CfgValueType::Integer | CfgValueType::FourState { .. }
+                            )
+                        {
+                            return Err(error(
+                                "nonblocking delay must contain converted integer ticks",
+                            ));
+                        }
                         if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
                             && *region != DigitalSchedulingRegion::NonBlockingAssign
                         {

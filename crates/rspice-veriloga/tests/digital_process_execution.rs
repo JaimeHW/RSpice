@@ -377,7 +377,10 @@ impl Harness {
 
     /// Drain the nonblocking region, in the order the updates were scheduled.
     fn flush_nonblocking(&mut self) {
-        let updates = std::mem::take(&mut self.store.deferred);
+        let (updates, delayed): (Vec<_>, Vec<_>) = std::mem::take(&mut self.store.deferred)
+            .into_iter()
+            .partition(|update| update.delay_ticks == 0);
+        self.store.deferred = delayed;
         for update in &updates {
             assert_eq!(update.region, DigitalSchedulingRegion::NonBlockingAssign);
             apply_deferred(&self.plan, &mut self.store, update).expect("update must apply");
@@ -410,6 +413,7 @@ impl Harness {
                     target: drive.target.clone(),
                     value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
+                    delay_ticks: 0,
                 },
             )
             .expect("a drive must apply");
@@ -1495,7 +1499,7 @@ fn a_loop_counter_survives_a_suspension_inside_the_loop() {
 fn an_intra_assignment_delay_writes_the_value_read_before_it() {
     let mut harness = Harness::new(
         "    reg d, q;\n\
-     \x20   initial q <= #5 d;",
+     \x20   initial q = #5 d;",
     );
     harness.set("d", "1");
     harness.set("q", "0");
@@ -1509,8 +1513,63 @@ fn an_intra_assignment_delay_writes_the_value_read_before_it() {
     harness.set("d", "0");
     let state = suspension.resume_state().clone();
     expect_finished(harness.resume(0, &state));
-    harness.flush_nonblocking();
     assert_eq!(harness.get("q"), "1", "the value read before the delay");
+}
+
+#[test]
+fn delayed_nonblocking_writes_capture_values_and_continue_without_suspending() {
+    let mut h = Harness::from_source(
+        "`timescale 1ns/100ps\nmodule timed;
+         reg [7:0] q, data, duration, stage; real r;
+         initial begin
+           q=0; data=8'h42; duration=3; stage=0; r=0.0;
+           q <= #duration data;
+           r <= #0.15 1.25;
+           {q[3:0],q[7:4]} <= #duration 8'hab;
+           q <= #0 8'h11;
+           q <= #(1'bx) 8'h22;
+           data=8'h77; duration=9; stage=1;
+           #1 stage=2;
+         end endmodule",
+    );
+    let suspension = expect_suspended(h.run());
+    assert_eq!(
+        *suspension.wait(),
+        DigitalWaitRequest::Delay(10),
+        "only the explicit statement delay suspends"
+    );
+    assert_eq!(h.get("stage"), "00000001");
+    assert_eq!(h.get("q"), "00000000");
+    assert_eq!(h.deferred_count(), 6);
+    h.flush_nonblocking();
+    assert_eq!(
+        h.get("q"),
+        "00100010",
+        "zero and X delays stay in this NBA region"
+    );
+    assert_eq!(h.get_real("r"), 0.0);
+    assert_eq!(h.deferred_count(), 4);
+    let captures = &h.store.deferred;
+    assert_eq!(
+        captures.iter().map(|u| u.delay_ticks).collect::<Vec<_>>(),
+        [30, 2, 30, 30]
+    );
+    assert_eq!(
+        captures[0].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(8, 0x42))
+    );
+    assert_eq!(captures[1].value, DigitalUpdate::Real(1.25));
+    assert_eq!(
+        captures[2].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(4, 0xa))
+    );
+    assert_eq!(
+        captures[3].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(4, 0xb))
+    );
+    expect_finished(h.resume(0, suspension.resume_state()));
+    assert_eq!(h.get("stage"), "00000010");
+    assert_eq!(h.deferred_count(), 4, "completion cannot cancel captures");
 }
 
 /// A process-local declared outside a suspension and read after it keeps what
@@ -3354,6 +3413,7 @@ impl Design {
                     target: drive.target.clone(),
                     value: DigitalUpdate::FourState(drive.value.clone()),
                     region: DigitalSchedulingRegion::Active,
+                    delay_ticks: 0,
                 },
             )
             .expect("a drive must apply");

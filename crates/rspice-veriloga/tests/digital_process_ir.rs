@@ -152,7 +152,7 @@ fn a_delay_control_becomes_a_time_wait_on_converted_ticks() {
 #[test]
 fn an_intra_assignment_delay_reads_before_it_suspends() {
     let section = "    reg q, d;\n\
-                   \x20   initial q <= #5 d;";
+                   \x20   initial q = #5 d;";
     let process = only_process(section);
     let entry = process.function.entry;
     let entry_block = process.function.block(entry);
@@ -180,7 +180,7 @@ fn an_intra_assignment_delay_reads_before_it_suspends() {
         .filter(|instruction| {
             matches!(
                 process.function.value(instruction.result).kind,
-                CfgValueKind::DigitalNonblockingWrite { .. }
+                CfgValueKind::DigitalBlockingWrite { .. }
             )
         })
         .count();

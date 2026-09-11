@@ -77,7 +77,7 @@ checkpoint representation, before optimizing partitions or caches.
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
 | Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
-| Complete resolved module timing and scheduling regions | MS02 | Declared scales, runtime procedural waits, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
+| Complete resolved module timing and scheduling regions | MS02 | Declared scales, runtime waits and delay-controlled NBA delivery, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
 | Global scheduling, resolution, atomic acceptance and effects | MS05 | Open | Pending |
@@ -426,6 +426,48 @@ Delayed nonblocking assignments still require independent captured updates:
 This known semantic bug is the next timing implementation slice. Continuous
 inertial/transport behavior, complete time declarations, persisted restart,
 circuit-wide coordination and all later plan milestones remain open.
+
+Delay-controlled nonblocking writes now carry an optional converted delay operand
+in canonical IR and a captured tick count in the runtime update contract. The
+lowerer emits the write at encounter and continues in the same block; blocking
+intra-assignment waits retain their existing captured-RHS suspension. `#0` and
+X/Z delays enter the current NBA region without an inactive-region suspension.
+The ordinary digital expression evaluator supplies widths, signedness, module
+rounding and range checks before capture.
+
+The host stores future payloads by due tick, with one permanent scheduler target
+and one kernel wakeup per due tick. It does not allocate a process or a driver
+identity per write. Timed requests are collected separately from already-ready
+updates, avoiding scans of the entire NBA queue after every process activation.
+When the event kernel reaches a due tick, the payloads enter the existing NBA
+region queue. Active/inactive work still finishes first. Captures are applied in
+order, retain partial-write behavior and survive source-process completion.
+Deliveries count toward the scheduler's event budget. Existing accepted-state
+clones/checkpoints include the future payloads; persisted restart remains open.
+
+Four focused cases pass: the compiler's capture/continuation case, its existing
+blocking intra-assignment case, an end-to-end digital ordering/range case, and a
+mixed rejection/checkpoint case. Evidence covers runtime delay/RHS capture,
+real and concatenated partial writes, current-slot zero/X delay, independently
+dated writes without cancellation, reads before NBA promotion, source-process
+completion, and explicit host-range refusal. The mixed case retains an unrelated
+tick-1 NBA during a 0.65 ns analog activation; its captured real value is delivered
+at tick 2, retained through rejection/retry, and replayed from an accepted
+in-memory checkpoint. Current and breakpoint budgets remain 1e-12 A and 1e-20 s.
+The initial mixed fixture used the reserved keyword `timer` as an identifier;
+only that case was retried after correction. The two host cases were rerun after
+separating timed requests from the ready queue to remove repeated scans. No full
+suite, actual browser/tablet run or vendor-reference execution was performed.
+Canonical schema is 42 and disk-cache format is 79. The authoritative generator
+regenerated all 43 shipped models. Only the generator manifest digest changed;
+the source-tree and emitted bundle digests are unchanged.
+
+Event-controlled NBA captures (`q <= @(posedge clk) d`) remain a distinct required
+fix: the current event-wait lowering still suspends the process. Implement their
+independent subscriptions next, including changes before/after registration in
+one activation, same-slot ordering, repeated captures and mixed rollback. Dynamic
+LHS selections and deferred process-local storage are still MS06 requirements.
+All other approved milestones remain in scope.
 
 ## Next implementation work
 

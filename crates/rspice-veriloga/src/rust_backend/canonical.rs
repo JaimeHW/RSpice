@@ -611,11 +611,17 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalBlockingWrite { target, .. } => {
                 write!(out, "digital-blocking-write:{target:?}")
             }
-            CfgValueKind::DigitalNonblockingWrite { target, region, .. } => {
+            CfgValueKind::DigitalNonblockingWrite {
+                target,
+                region,
+                delay,
+                ..
+            } => {
                 write!(
                     out,
-                    "digital-nonblocking-write:{target:?}:{}",
-                    region.name()
+                    "digital-nonblocking-write:{target:?}:{}:{}",
+                    region.name(),
+                    delay.is_some()
                 )
             }
         }

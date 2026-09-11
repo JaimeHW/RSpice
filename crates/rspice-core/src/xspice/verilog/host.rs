@@ -17,8 +17,9 @@
 //! What the kernel deliberately does not own is IEEE 1364-2005 section 11's
 //! *later* regions. A nonblocking update is not an event with a target and a
 //! value the kernel could deliver; it is a write the interpreter already
-//! evaluated, held by the store until its region drains. So the stratification
-//! after the active region is [`DigitalHost::promote_region`]'s, and the kernel
+//! evaluated. Timed captures are held by due tick, with one stable kernel
+//! wakeup identity; when due, they join the store's region queue. The
+//! stratification after the active region is [`DigitalHost::promote_region`]'s, and the kernel
 //! sees one region.
 //!
 //! # A delta cycle is one pass of this loop
@@ -55,7 +56,7 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
-use std::{fmt, sync::Arc};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
@@ -63,9 +64,9 @@ use rspice_veriloga::canonical_ir::digital::{
     DigitalSignal,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DEFAULT_PROCESS_STEP_LIMIT, DigitalEvalError, DigitalEvalScratch, DigitalProcessOutcome,
-    DigitalResumeState, DigitalWaitRequest, any_real_term_is_satisfied, any_term_is_satisfied,
-    apply_deferred as apply_deferred_update, resume_in as resume_process,
+    DEFAULT_PROCESS_STEP_LIMIT, DigitalDeferredUpdate, DigitalEvalError, DigitalEvalScratch,
+    DigitalProcessOutcome, DigitalResumeState, DigitalWaitRequest, any_real_term_is_satisfied,
+    any_term_is_satisfied, apply_deferred as apply_deferred_update, resume_in as resume_process,
     start_in as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
@@ -376,6 +377,10 @@ pub(crate) struct DigitalHost {
     plan: Arc<CanonicalDigitalPlan>,
     store: DigitalSignalStore,
     scheduler: EventScheduler,
+    /// One stable wakeup identity, with captured payloads owned by their due tick.
+    /// No process slot or driver identity is allocated per delayed assignment.
+    nba_target: TargetId,
+    delayed_updates: BTreeMap<u64, Vec<DigitalDeferredUpdate>>,
     slots: Vec<ProcessSlot>,
     /// Net to waiting-process index, ascending within each net.
     waiters: Vec<Vec<usize>>,
@@ -460,7 +465,15 @@ impl DigitalHost {
             process_of_target[usize::from(id)] = index;
             targets.push(id);
         }
+        let nba_target = scheduler.intern_target(EventTarget {
+            node_id: usize::MAX,
+            port_name: "nonblocking updates".to_string(),
+            driver_index: 0,
+            instance: "NBA".to_string(),
+        });
         Self {
+            nba_target,
+            delayed_updates: BTreeMap::new(),
             store: DigitalSignalStore::new(&plan),
             scheduler,
             slots: vec![
@@ -693,6 +706,19 @@ impl DigitalHost {
                 // is reachable from neither `self` nor the kernel while a
                 // process runs.
                 for target in fired.iter() {
+                    if *target == self.nba_target {
+                        while self
+                            .delayed_updates
+                            .first_key_value()
+                            .is_some_and(|(due, _)| *due <= tick)
+                        {
+                            let (_, updates) = self.delayed_updates.pop_first().unwrap();
+                            for update in updates {
+                                self.store.release_delayed_update(update);
+                            }
+                        }
+                        continue;
+                    }
                     let index = self.process_of_target[usize::from(*target)];
                     self.run_process(index, tick)?;
                     self.dispatch(tick)?;
@@ -730,6 +756,8 @@ impl DigitalHost {
             let due = self.store.take_deferred_in(region);
             if !due.is_empty() {
                 for update in &due {
+                    self.scheduler
+                        .note_external_activation(tick, self.nba_target)?;
                     apply_deferred_update(&self.plan, &mut self.store, update).map_err(
                         |error| DigitalRunError::Evaluation {
                             process: format!("a {} update", region.name()),
@@ -797,6 +825,24 @@ impl DigitalHost {
             process: self.describe(index),
             error,
         })?;
+
+        // Capture requests were emitted at their statement, and retain that
+        // order even if the process has completed or now suspends elsewhere.
+        for update in self.store.take_delayed_updates() {
+            let due = tick
+                .checked_add(update.delay_ticks)
+                .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
+                .ok_or(DigitalRunError::TickOverflow)?;
+            if !self.delayed_updates.contains_key(&due) {
+                self.scheduler.schedule_id_at(
+                    due,
+                    SchedulerRegion::Active,
+                    self.nba_target,
+                    EventValue::Digital(DigitalValue::default()),
+                )?;
+            }
+            self.delayed_updates.entry(due).or_default().push(update);
+        }
 
         match outcome {
             DigitalProcessOutcome::Finished => {
