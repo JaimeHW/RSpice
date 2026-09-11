@@ -39,6 +39,7 @@ mod network;
 mod noise_params;
 mod port_noise;
 mod ports;
+mod quality;
 mod stability;
 mod touchstone;
 
@@ -56,28 +57,10 @@ pub use ports::{
     PortError, PortRealization, SParameterPort, collect_ports, declare_ports_with_abort,
     normalize_ports, set_excitations,
 };
+pub use quality::{
+    MAX_NETWORK_DIAGNOSTIC_PORTS, NetworkQuality, SampledPassivity, network_quality_with_abort,
+};
 pub use stability::{GainAnalysis, StabilityAnalysis};
 pub use touchstone::{
     TouchstoneFormat, TouchstoneFrequencyUnit, TouchstoneInput, touchstone, touchstone_extension,
 };
-
-/// Complex ratio that reads a vanishing divisor as zero rather than infinity.
-///
-/// The wave ratios in this module divide by a quantity that reaches zero
-/// exactly where the ratio stops describing a measurable network — port
-/// impedances that cancel, a renormalization onto a reflection the network
-/// already presents. The callers are written against a divide that answers
-/// zero there, and their own guards (`|Γ| >= 1`, `|S12|² > 1e-30`) are keyed
-/// to that answer, so the floor is kept verbatim from the hand-rolled complex
-/// type this module used to carry. `Complex64`'s own `/` yields infinities and
-/// NaNs instead, which would propagate through every dB conversion downstream.
-fn wave_ratio(numerator: Complex64, divisor: Complex64) -> Complex64 {
-    let denom = divisor.norm_sqr();
-    if denom < 1e-30 {
-        return Complex64::ZERO;
-    }
-    Complex64::new(
-        (numerator.re * divisor.re + numerator.im * divisor.im) / denom,
-        (numerator.im * divisor.re - numerator.re * divisor.im) / denom,
-    )
-}

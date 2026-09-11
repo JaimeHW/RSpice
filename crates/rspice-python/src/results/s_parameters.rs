@@ -539,8 +539,9 @@ impl PySParameterResult {
     /// Maximum available gain in dB at each frequency.
     ///
     /// MAG is defined only where the device is unconditionally stable; it is
-    /// negative infinity elsewhere, and `max_stable_gain_db` is the figure to
-    /// use there.
+    /// NaN elsewhere, and `max_stable_gain_db` is the figure to use there. A
+    /// device with an exactly zero forward transmission reports negative
+    /// infinity, which is a gain and not an undefined one.
     #[getter]
     fn max_available_gain_db<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
         self.gain_series(py, |analysis| analysis.mag_db)

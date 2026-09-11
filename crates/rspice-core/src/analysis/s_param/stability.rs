@@ -124,11 +124,12 @@ impl StabilityAnalysis {
             )
         };
 
-        // Determine if stable region is inside or outside the circle
-        // If |S11| < 1, origin (Γ=0) is in stable region
-        // Check if origin is inside or outside the stability circle
-        let input_stable_inside = s11_mag_sq > 1.0 || denom_input < 0.0;
-        let output_stable_inside = s22_mag_sq > 1.0 || denom_output < 0.0;
+        // In the source plane, |Γout|² < 1 reduces to
+        // -denom_input * (|Γs - Cs|² - rs²) < 0. The load-plane
+        // inequality is analogous. The center/radius are undefined for the
+        // straight-line boundary at a zero denominator.
+        let input_stable_inside = denom_input < 0.0;
+        let output_stable_inside = denom_output < 0.0;
 
         let unconditionally_stable = k_factor > 1.0 && delta_mag < 1.0;
         let potentially_unstable = !unconditionally_stable;
@@ -197,6 +198,78 @@ mod tests {
         assert!(boundary.k_factor.is_nan());
         assert!(!boundary.unconditionally_stable);
     }
+
+    #[test]
+    fn matched_amplifier_power_gains_follow_the_analytic_solution() {
+        let gain = GainAnalysis::from_s_matrix(&two_port(0.0, 0.1, 2.0, 0.0));
+        assert!((gain.msg_db - 10.0 * 20.0_f64.log10()).abs() < 1e-12);
+        assert!((gain.mag_db - 10.0 * 4.0_f64.log10()).abs() < 1e-12);
+        assert!((gain.mason_u_db - 10.0 * (3.61_f64 / 0.64).log10()).abs() < 1e-12);
+        assert!(gain.mag_valid);
+    }
+
+    #[test]
+    fn unilateral_limit_remains_finite_without_subtraction_or_reverse_gain_floors() {
+        let expected = 10.0 * (4.0_f64 / ((1.0 - 0.04) * (1.0 - 0.09))).log10();
+        for reverse in [0.0, 1e-200, 1e-100, 1e-20] {
+            let gain = GainAnalysis::from_s_matrix(&two_port(0.2, reverse, 2.0, 0.3));
+            assert!(gain.mag_valid);
+            assert!((gain.mag_db - expected).abs() < 1e-10, "{gain:?}");
+            assert!((gain.mason_u_db - expected).abs() < 1e-10, "{gain:?}");
+            if reverse > 0.0 {
+                assert!(gain.msg_db.is_finite());
+                assert!(gain.s12_isolation_db.is_finite());
+            }
+        }
+    }
+
+    #[test]
+    fn undefined_gain_is_distinct_from_a_zero_gain_or_perfect_unilaterality() {
+        let unstable = GainAnalysis::from_s_matrix(&two_port(1.2, 0.0, 2.0, 0.5));
+        assert!(!unstable.mag_valid);
+        assert!(unstable.mag_db.is_nan());
+        assert!(unstable.gtu_max_db.is_nan());
+        assert!(unstable.unilateral_fom.is_nan());
+        assert!(unstable.mason_u_db.is_nan());
+        assert!(!GainAnalysis::from_s_matrix(&SMatrix::new(1e9, 1)).mag_valid);
+        let zero = GainAnalysis::from_s_matrix(&two_port(0.2, 0.0, 0.0, 0.3));
+        assert_eq!(zero.mag_db, Value::NEG_INFINITY);
+        assert!(zero.mag_valid);
+        assert!(zero.msg_db.is_nan());
+        let finite = GainAnalysis::from_s_matrix(&two_port(0.2, 0.1, 2.0, 0.3));
+        assert!((finite.unilateral_fom - 0.012 / 0.8736).abs() < 1e-14);
+    }
+
+    #[test]
+    fn stability_circle_side_matches_loaded_reflection_inequality() {
+        for matrix in [two_port(2.0, 0.5, 0.5, 0.1), two_port(0.1, 0.5, 0.5, 2.0)] {
+            let stability = StabilityAnalysis::from_s_matrix(&matrix);
+            for reflection in [-0.8, 0.0, 0.2, 0.4, 0.6, 0.8] {
+                let gamma = Complex64::new(reflection, 0.05);
+                for (center, radius, inside, direct, feedback) in [
+                    (
+                        stability.input_stability_center,
+                        stability.input_stability_radius,
+                        stability.input_stable_inside,
+                        matrix.s22(),
+                        matrix.s11(),
+                    ),
+                    (
+                        stability.output_stability_center,
+                        stability.output_stability_radius,
+                        stability.output_stable_inside,
+                        matrix.s11(),
+                        matrix.s22(),
+                    ),
+                ] {
+                    let loaded = direct
+                        + matrix.s12() * matrix.s21() * gamma / (Complex64::ONE - feedback * gamma);
+                    let point_inside = (gamma - center).norm() < radius;
+                    assert_eq!(loaded.norm() < 1.0, point_inside == inside);
+                }
+            }
+        }
+    }
 }
 
 //=============================================================================
@@ -227,12 +300,27 @@ pub struct GainAnalysis {
     /// Maximum unilateral transducer gain (Gtu_max) in dB
     pub gtu_max_db: Value,
 
-    /// Unilateral figure of merit
+    /// Unilateral figure of merit |S11 S12 S21 S22| /
+    /// ((1 - |S11|²)(1 - |S22|²)), defined for both reflections below unity.
     pub unilateral_fom: Value,
 }
 
 impl GainAnalysis {
-    /// Compute gain analysis from S-parameters
+    fn undefined() -> Self {
+        Self {
+            mag_db: Value::NAN,
+            msg_db: Value::NAN,
+            mason_u_db: Value::NAN,
+            s21_gain_db: Value::NAN,
+            s12_isolation_db: Value::NAN,
+            mag_valid: false,
+            gtu_max_db: Value::NAN,
+            unilateral_fom: Value::NAN,
+        }
+    }
+
+    /// Compute power gains from a finite two-port S-matrix.
+    /// Undefined metrics are NaN, while an exact zero gain is -infinity dB.
     pub fn from_s_matrix(s: &SMatrix) -> Self {
         let s11 = s.s11();
         let s12 = s.s12();
@@ -240,67 +328,70 @@ impl GainAnalysis {
         let s22 = s.s22();
 
         let s11_mag_sq = s11.norm().powi(2);
-        let s12_mag_sq = s12.norm().powi(2);
-        let s21_mag_sq = s21.norm().powi(2);
         let s22_mag_sq = s22.norm().powi(2);
+        if s.num_ports() != 2
+            || [s11, s12, s21, s22]
+                .iter()
+                .any(|v| !v.re.is_finite() || !v.im.is_finite())
+        {
+            return Self::undefined();
+        }
 
         // Stability check
         let stability = StabilityAnalysis::from_s_matrix(s);
         let k = stability.k_factor;
+        if !s11_mag_sq.is_finite() || !s22_mag_sq.is_finite() || !stability.delta_mag.is_finite() {
+            return Self::undefined();
+        }
 
-        // MSG = |S21/S12|
-        let msg = if s12_mag_sq > 1e-30 {
-            s21_mag_sq / s12_mag_sq
+        // MSG is the magnitude ratio, not the squared magnitude ratio.
+        // Subtract logarithms so a tiny reverse transmission does not vanish
+        // behind a fixed floor or overflow the ratio before conversion to dB.
+        let forward_log = log_magnitude(s21);
+        let reverse_log = log_magnitude(s12);
+        let msg_db = 10.0 * (forward_log - reverse_log);
+        let s21_gain_db = 20.0 * forward_log;
+        let s12_isolation_db = 20.0 * reverse_log;
+
+        // The unilateral limit is also the finite limit of MAG as S12 -> 0.
+        let match_denominator = (1.0 - s11_mag_sq) * (1.0 - s22_mag_sq);
+        let gtu_max_db = if s11_mag_sq < 1.0 && s22_mag_sq < 1.0 {
+            s21_gain_db
+                - 10.0 * ((-s11_mag_sq).ln_1p() + (-s22_mag_sq).ln_1p()) / std::f64::consts::LN_10
         } else {
-            f64::INFINITY
+            Value::NAN
         };
-        let msg_db = 10.0 * msg.log10();
 
-        // MAG = MSG * (K - sqrt(K² - 1))  for K >= 1
+        // MAG = MSG / (K + sqrt(K² - 1)). The reciprocal avoids
+        // catastrophic subtraction at large K; factoring out K also avoids
+        // squaring it. Exact unilateral networks have infinite K.
         let mag_db = if stability.unconditionally_stable && k >= 1.0 {
-            let mag = msg * (k - (k * k - 1.0).sqrt());
-            10.0 * mag.log10()
-        } else {
-            f64::NEG_INFINITY // Not valid
-        };
-
-        // Mason's unilateral gain U = |S21/S12 - 1|² / (2*K*|S21/S12| - 2*Re{S21/S12})
-        let s21_over_s12 = wave_ratio(s21, s12);
-        let ratio_minus_1 = s21_over_s12 - Complex64::ONE;
-        let u = if s12_mag_sq > 1e-30 {
-            let num = ratio_minus_1.norm().powi(2);
-            let denom = 2.0 * k * s21_over_s12.norm() - 2.0 * s21_over_s12.re;
-            if denom > 1e-15 {
-                num / denom
+            if k.is_infinite() {
+                gtu_max_db
             } else {
-                f64::INFINITY
+                msg_db
+                    - 10.0 * (k.log10() + (1.0 + (1.0 - (1.0 / k).powi(2)).max(0.0).sqrt()).log10())
             }
         } else {
-            f64::INFINITY
+            Value::NAN
         };
-        let mason_u_db = 10.0 * u.log10();
 
-        // S21 gain and S12 isolation
-        let s21_gain_db = 10.0 * s21_mag_sq.log10();
-        let s12_isolation_db = 10.0 * s12_mag_sq.log10();
-
-        // Maximum unilateral transducer gain
-        // Gtu_max = |S21|² / ((1-|S11|²)(1-|S22|²))
-        let gtu_max = if (1.0 - s11_mag_sq) > 0.0 && (1.0 - s22_mag_sq) > 0.0 {
-            s21_mag_sq / ((1.0 - s11_mag_sq) * (1.0 - s22_mag_sq))
+        // Multiply the usual ratio expression by |S12|² before evaluating:
+        // U = |S21-S12|² / (1-|S11|²-|S22|²+|Δ|²-2Re(S21*S12*)).
+        // This form includes S12=0 without an infinite intermediate ratio.
+        let mason_denominator = 1.0 - s11_mag_sq - s22_mag_sq + stability.delta_mag.powi(2)
+            - 2.0 * (s21 * s12.conj()).re;
+        let mason_u_db = if mason_denominator > 0.0 && mason_denominator.is_finite() {
+            20.0 * log_magnitude(s21 - s12) - 10.0 * mason_denominator.log10()
+        } else if mason_denominator == 0.0 && s21 != s12 {
+            Value::INFINITY
         } else {
-            f64::INFINITY
+            Value::NAN
         };
-        let gtu_max_db = 10.0 * gtu_max.log10();
-
-        // Unilateral figure of merit
-        // Shows how valid the unilateral assumption is
-        let u_fom = (s11_mag_sq * s12_mag_sq * s21_mag_sq * s22_mag_sq)
-            / ((1.0 - s11_mag_sq).powi(2) * (1.0 - s22_mag_sq).powi(2));
-        let unilateral_fom = if u_fom.is_finite() && u_fom > 0.0 {
-            u_fom
+        let unilateral_fom = if s11_mag_sq < 1.0 && s22_mag_sq < 1.0 {
+            s11.norm() * s12.norm() * s21.norm() * s22.norm() / match_denominator
         } else {
-            0.0
+            Value::NAN
         };
 
         Self {
@@ -309,13 +400,18 @@ impl GainAnalysis {
             mason_u_db,
             s21_gain_db,
             s12_isolation_db,
-            mag_valid: stability.unconditionally_stable,
+            mag_valid: stability.unconditionally_stable && !mag_db.is_nan(),
             gtu_max_db,
             unilateral_fom,
         }
     }
 }
 
-//=============================================================================
-// Touchstone (SnP) Export
-//=============================================================================
+fn log_magnitude(value: Complex64) -> Value {
+    let scale = value.re.abs().max(value.im.abs());
+    if scale == 0.0 {
+        Value::NEG_INFINITY
+    } else {
+        scale.log10() + (value.re / scale).hypot(value.im / scale).log10()
+    }
+}

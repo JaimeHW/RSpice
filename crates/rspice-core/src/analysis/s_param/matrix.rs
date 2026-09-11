@@ -52,6 +52,11 @@ pub struct SMatrix {
 }
 
 impl SMatrix {
+    /// Number of incident and outgoing wave channels in this square matrix.
+    pub(crate) const fn num_ports(&self) -> usize {
+        self.num_ports
+    }
+
     /// Change real power-wave references without requiring a finite Y or Z matrix.
     pub(crate) fn renormalize_with_abort(
         &mut self,
