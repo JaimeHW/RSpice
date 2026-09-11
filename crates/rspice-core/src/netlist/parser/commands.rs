@@ -5832,13 +5832,14 @@ fn parse_param_assignment_value(
                 &name,
                 &expr,
             ) {
-                match eval_expression_complex(&expr, params) {
-                    Ok(value) => {
-                        if retain_global_expression {
-                            params.define_global_expression(&name, &expr, Some(value));
-                        } else {
-                            params.set_complex(&name, value);
-                        }
+                match eval_and_bind_param_expression(
+                    params,
+                    &name,
+                    &expr,
+                    retain_global_expression,
+                    deferred_params.is_none(),
+                ) {
+                    Ok(()) => {
                         upsert_deferred_param_expression(
                             deferred_params.as_deref_mut(),
                             &name,
@@ -5883,13 +5884,14 @@ fn parse_param_assignment_value(
                 &name,
                 &expr,
             ) {
-                match eval_expression_complex(&expr, params) {
-                    Ok(value) => {
-                        if retain_global_expression {
-                            params.define_global_expression(&name, &expr, Some(value));
-                        } else {
-                            params.set_complex(&name, value);
-                        }
+                match eval_and_bind_param_expression(
+                    params,
+                    &name,
+                    &expr,
+                    retain_global_expression,
+                    deferred_params.is_none(),
+                ) {
+                    Ok(()) => {
                         upsert_deferred_param_expression(
                             deferred_params.as_deref_mut(),
                             &name,
@@ -5925,20 +5927,30 @@ fn parse_param_assignment_value(
             );
         }
         TokenKind::Ident(param_name) if params.get_complex(param_name).is_some() => {
-            let value = params
-                .get_complex(param_name)
-                .expect("parameter presence checked");
             let expr = param_name.clone();
             stream.advance();
-            if retain_global_expression {
-                params.define_global_expression(&name, &expr, Some(value));
-            } else {
-                params.set_complex(&name, value);
-            }
+            eval_and_bind_param_expression(
+                params,
+                &name,
+                &expr,
+                retain_global_expression,
+                deferred_params.is_none(),
+            )
+            .map_err(|error| ParseError::InvalidValue(format!("line {line_num}: {error}")))?;
             upsert_deferred_param_expression(deferred_params.as_deref_mut(), &name, &expr);
         }
         _ => {
             let deferred_expr = simple_param_value_expression(stream, params);
+            let capture = if !retain_global_expression && deferred_params.is_none() {
+                deferred_expr
+                    .as_deref()
+                    .map(|expr| params.capture_statistical_parameter_expression(expr))
+                    .transpose()
+                    .map_err(|error| ParseError::InvalidValue(format!("line {line_num}: {error}")))?
+                    .flatten()
+            } else {
+                None
+            };
             let mut value_stream = stream.clone();
             match expect_value(&mut value_stream, line_num, params) {
                 Ok(value) => {
@@ -5952,6 +5964,7 @@ fn parse_param_assignment_value(
                             );
                         } else {
                             params.set(&name, value);
+                            params.retain_statistical_parameter_capture(&name, capture);
                         }
                         upsert_deferred_param_expression(
                             deferred_params.as_deref_mut(),
@@ -5990,6 +6003,30 @@ fn parse_param_assignment_value(
         } else {
             params.set(&name, value);
         }
+    }
+    Ok(())
+}
+
+fn eval_and_bind_param_expression(
+    params: &mut ParamContext,
+    name: &str,
+    expression: &str,
+    global: bool,
+    root_scope: bool,
+) -> Result<(), crate::netlist::expr::ExprError> {
+    // Capture before evaluation so random operators replay the same draw
+    // positions without consuming additional draws from the authored stream.
+    let capture = if root_scope && !global {
+        params.capture_statistical_parameter_expression(expression)?
+    } else {
+        None
+    };
+    let value = eval_expression_complex(expression, params)?;
+    if global {
+        params.define_global_expression(name, expression, Some(value));
+    } else {
+        params.set_complex(name, value);
+        params.retain_statistical_parameter_capture(name, capture);
     }
     Ok(())
 }

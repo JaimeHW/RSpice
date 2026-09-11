@@ -4413,11 +4413,18 @@ mod tests {
             let mut netlist = Netlist::parse(&format!(
                 "statistical expansion\n.param rv=100\n.RSPICE_SPECTRE_STAT {}\n{definitions}\
                  .func hidden(x) {{rv*x}}\n.func nested(x) {{hidden(x)+1}}\n\
+                 .param scale=2 top_alias={{scale*rv}} bare_alias=top_alias\n\
+                 .param z={{3+4J}}\n.func captured(x) {{scale*x+img(z)}}\n\
+                 .param captured_alias={{captured(rv)}} noise_capture={{rv+agauss(0,1,1)}}\n\
+                 .param scale=9 top_alias=123 root_nested={{bare_alias+rv}}\n\
+                 .param z=0\n.func captured(x) {{9*x}}\n\
                  RROOT in 0 {{hidden(2)}}\nVSTAT stat 0 DC {{nested(1)}}\n\
                  .subckt unit a b\n.param derived={{2*rv}}\n.param indirect={{nested(3)}}\n\
                  R1 a b {{if(rv<1e6,derived,3*rv)}}\n\
                  R2 a b {{hidden(2)}}\nR3 a b {{nested(3)}}\nR4 a b {{indirect}}\n\
-                 .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n.ends\n\
+                 .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n\
+                 R6 a b {{bare_alias}}\nR7 a b {{root_nested}}\nR8 a b {{top_alias}}\n\
+                 R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\n.ends\n\
                  X1 in 0 unit\nV1 in 0 1\n.end\n",
                 plan.encode_internal()
             ))
@@ -4434,6 +4441,7 @@ mod tests {
             let sample = sample_for("X1");
             let root_sample = sample_for("RROOT");
             let source_sample = sample_for("VSTAT");
+            let captured_noise = netlist.params.get("noise_capture").unwrap() - 100.0;
             let expected = if sample < 1e6 {
                 2.0 * sample
             } else {
@@ -4451,6 +4459,11 @@ mod tests {
                 ("X1.R3", 3.0 * sample + 1.0),
                 ("X1.R4", 3.0 * sample + 1.0),
                 ("X1.R5", 2.0 * sample),
+                ("X1.R6", 2.0 * sample),
+                ("X1.R7", 3.0 * sample),
+                ("X1.R8", 123.0),
+                ("X1.R9", 2.0 * sample + 4.0),
+                ("X1.R10", sample + captured_noise),
             ] {
                 let index = circuit
                     .resistors

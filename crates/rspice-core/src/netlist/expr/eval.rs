@@ -47,9 +47,9 @@ pub(crate) fn evaluate_complex_raw(
 /// repeatedly without cloning its AST or allocating evaluator stacks. Runtime
 /// parameter reads are exposed through a resolver so live measurements can
 /// implement Xyce's first-read semantics at the exact lazy evaluation point.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PreparedExpression {
-    programs: Vec<PreparedProgram>,
+    programs: std::sync::Arc<[PreparedProgram]>,
     root: PreparedNodeRef,
     frames: Vec<PreparedEvalFrame>,
     values: Vec<EvaluatedValue>,
@@ -103,14 +103,14 @@ struct PreparedArgBinding {
     caller_scope: Option<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PreparedCallScope {
     function_program: usize,
     bindings_start: usize,
     bindings_len: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PreparedEvalFrame {
     Eval {
         expression: PreparedNodeRef,
@@ -179,7 +179,7 @@ impl PreparedExpression {
         let call_scope_capacity = builder.function_programs.len();
         let binding_capacity = builder.maximum_user_args;
         Ok(Self {
-            programs: builder.programs,
+            programs: builder.programs.into(),
             root,
             frames: Vec::with_capacity(frame_capacity),
             values: Vec::with_capacity(node_count.max(1)),
@@ -475,7 +475,7 @@ impl PreparedExpression {
     }
 
     pub(crate) fn visit_runtime_parameters(&self, mut visit: impl FnMut(&str)) {
-        for program in &self.programs {
+        for program in self.programs.iter() {
             for node in &program.nodes {
                 if let PreparedNode::Param {
                     name,
@@ -486,6 +486,10 @@ impl PreparedExpression {
                 }
             }
         }
+    }
+
+    pub(crate) fn checkpoint_semantic_snapshot(&self) -> String {
+        format!("{:?}", self.programs)
     }
 }
 

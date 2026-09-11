@@ -199,7 +199,116 @@ impl FunctionDef {
     }
 }
 
-/// Context for parameter substitution during evaluation
+/// Compiled expression and immutable bindings from its definition site.
+pub(crate) struct CapturedStatisticalParameter {
+    program: PreparedExpression,
+    bindings: std::collections::BTreeMap<String, CapturedStatisticalBinding>,
+    coordinates: BTreeSet<String>,
+    depth: usize,
+    random_seed: u64,
+    random_counter: u64,
+    statistical_mode: StatisticalParamMode,
+    expression_dialect: ExpressionDialect,
+}
+
+impl std::fmt::Debug for CapturedStatisticalParameter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Shared alias graphs can have exponentially many paths. Debug output
+        // must not recursively expand each path; checkpoint snapshots deduplicate
+        // nodes separately when the complete semantic representation is needed.
+        formatter
+            .debug_struct("CapturedStatisticalParameter")
+            .field("coordinates", &self.coordinates)
+            .field("binding_count", &self.bindings.len())
+            .field("depth", &self.depth)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
+enum CapturedStatisticalBinding {
+    Value(Option<ComplexValue>),
+    Parameter(Arc<CapturedStatisticalParameter>),
+    Coordinate,
+}
+
+impl CapturedStatisticalParameter {
+    fn evaluate(
+        &self,
+        coordinates: &ParamContext,
+        memo: &mut HashMap<usize, ComplexValue>,
+    ) -> Result<ComplexValue, ExprError> {
+        let identity = std::ptr::from_ref(self) as usize;
+        if let Some(value) = memo.get(&identity) {
+            return Ok(*value);
+        }
+        let context = ParamContext {
+            random: RandomState {
+                seed: self.random_seed,
+                counter: Arc::new(AtomicU64::new(self.random_counter)),
+            },
+            statistical_mode: self.statistical_mode,
+            expression_dialect: self.expression_dialect,
+            ..ParamContext::default()
+        };
+        let value = self.program.clone().evaluate_with(&context, &mut |name| {
+            let value = match self.bindings.get(name) {
+                Some(CapturedStatisticalBinding::Value(value)) => *value,
+                Some(CapturedStatisticalBinding::Parameter(parameter)) => {
+                    Some(parameter.evaluate(coordinates, memo)?)
+                }
+                Some(CapturedStatisticalBinding::Coordinate) => coordinates.get_complex(name),
+                None => None,
+            };
+            value
+                .map(Some)
+                .ok_or_else(|| ExprError::UndefinedParam(name.to_owned()))
+        })?;
+        let value = if self.expression_dialect == ExpressionDialect::Xyce {
+            normalize_xyce_expression_result(value)
+        } else {
+            value
+        };
+        memo.insert(identity, value);
+        Ok(value)
+    }
+
+    fn snapshot(&self, seen: &mut HashMap<usize, usize>, output: &mut String) -> usize {
+        use std::fmt::Write;
+        let identity = std::ptr::from_ref(self) as usize;
+        if let Some(index) = seen.get(&identity) {
+            return *index;
+        }
+        let index = seen.len();
+        seen.insert(identity, index);
+        writeln!(
+            output,
+            "capture {index}: seed={},counter={},mode={:?},dialect={:?},program={}",
+            self.random_seed,
+            self.random_counter,
+            self.statistical_mode,
+            self.expression_dialect,
+            self.program.checkpoint_semantic_snapshot()
+        )
+        .unwrap();
+        for (name, binding) in &self.bindings {
+            let binding = match binding {
+                CapturedStatisticalBinding::Value(value) => format!(
+                    "value {:?}",
+                    value.map(|value| (value.re.to_bits(), value.im.to_bits()))
+                ),
+                CapturedStatisticalBinding::Coordinate => "coordinate".to_owned(),
+                CapturedStatisticalBinding::Parameter(parameter) => {
+                    format!("capture {}", parameter.snapshot(seen, output))
+                }
+            };
+            writeln!(output, "capture {index} binding {name:?}: {binding}").unwrap();
+        }
+        index
+    }
+}
+
+/// Context for parameter substitution during evaluation.
 #[derive(Debug, Clone, Default)]
 pub struct ParamContext {
     params: HashMap<String, Value>,
@@ -210,6 +319,9 @@ pub struct ParamContext {
     /// expressions remain scoped and settable; a numeric or string binding in
     /// a child scope removes the inherited symbolic definition.
     parameter_expressions: HashMap<String, String>,
+    /// Definition-time bindings for ordinary root parameters that depend on a
+    /// statistical coordinate. Immutable captures share prior alias versions.
+    statistical_captures: HashMap<String, Arc<CapturedStatisticalParameter>>,
     /// Numeric projections owned by the independent `.GLOBAL_PARAM`
     /// namespace. Xyce resolves an ordinary binding first, regardless of
     /// directive order, and consults this namespace only when no ordinary
@@ -261,6 +373,7 @@ impl ParamContext {
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
+        self.statistical_captures.remove(&key);
     }
 
     /// Set a parameter value while preserving its imaginary component.
@@ -269,6 +382,7 @@ impl ParamContext {
         self.params.insert(key.clone(), value.re);
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
+        self.statistical_captures.remove(&key);
         if is_real(value) {
             self.complex_params.remove(&key);
         } else {
@@ -283,6 +397,7 @@ impl ParamContext {
         self.params.remove(&key);
         self.complex_params.remove(&key);
         self.parameter_expressions.remove(&key);
+        self.statistical_captures.remove(&key);
     }
 
     /// Define an ordinary scoped parameter expression with an optional static
@@ -296,6 +411,7 @@ impl ParamContext {
         static_value: Option<ComplexValue>,
     ) {
         let key = name.to_uppercase();
+        self.statistical_captures.remove(&key);
         self.params.remove(&key);
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
@@ -518,6 +634,12 @@ impl ParamContext {
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());
         }
+        self.statistical_captures.extend(
+            other
+                .statistical_captures
+                .iter()
+                .map(|(name, capture)| (name.clone(), capture.clone())),
+        );
     }
 
     /// Reseed the statistical-function stream, restarting it from draw zero.
@@ -572,7 +694,10 @@ impl ParamContext {
     pub(crate) fn spectre_statistical_parameter_names(&self) -> Vec<String> {
         self.spectre_statistical_parameters
             .iter()
+            .chain(self.statistical_captures.keys())
             .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect()
     }
 
@@ -611,7 +736,16 @@ impl ParamContext {
                         !formals
                             .iter()
                             .any(|formal| formal.eq_ignore_ascii_case(name))
-                            && matches_parameter(name)
+                            && (matches_parameter(name)
+                                || self
+                                    .statistical_captures
+                                    .get(&name.to_ascii_uppercase())
+                                    .is_some_and(|capture| {
+                                        capture
+                                            .coordinates
+                                            .iter()
+                                            .any(|name| matches_parameter(name))
+                                    }))
                     }
                 },
             )
@@ -621,6 +755,87 @@ impl ParamContext {
             }
         }
         false
+    }
+
+    pub(crate) fn capture_statistical_parameter_expression(
+        &self,
+        expression: &str,
+    ) -> Result<Option<Arc<CapturedStatisticalParameter>>, ExprError> {
+        if !self.expression_references_spectre_statistics(expression) {
+            return Ok(None);
+        }
+        let program = PreparedExpression::compile(&parse_expression(expression)?, self)?;
+        let mut bindings = std::collections::BTreeMap::new();
+        let mut coordinates = BTreeSet::new();
+        let mut depth = 1;
+        program.visit_runtime_parameters(|name| {
+            let binding = if self.spectre_statistical_parameters.contains(name) {
+                coordinates.insert(name.to_owned());
+                CapturedStatisticalBinding::Coordinate
+            } else if let Some(parameter) = self.statistical_captures.get(name) {
+                depth = depth.max(parameter.depth + 1);
+                coordinates.extend(parameter.coordinates.iter().cloned());
+                CapturedStatisticalBinding::Parameter(parameter.clone())
+            } else {
+                CapturedStatisticalBinding::Value(self.get_complex(name))
+            };
+            bindings.insert(name.to_owned(), binding);
+        });
+        if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
+            return Err(ExprError::InvalidArgument(
+                "Statistical parameter dependency depth exceeds the expression stack safety limit"
+                    .to_owned(),
+            ));
+        }
+        Ok(Some(Arc::new(CapturedStatisticalParameter {
+            program,
+            bindings,
+            coordinates,
+            depth,
+            random_seed: self.random.seed,
+            random_counter: self.random.counter.load(Ordering::Relaxed),
+            statistical_mode: self.statistical_mode,
+            expression_dialect: self.expression_dialect,
+        })))
+    }
+
+    pub(crate) fn retain_statistical_parameter_capture(
+        &mut self,
+        name: &str,
+        capture: Option<Arc<CapturedStatisticalParameter>>,
+    ) {
+        if let Some(capture) = capture {
+            self.statistical_captures
+                .insert(name.to_ascii_uppercase(), capture);
+        }
+    }
+
+    pub(crate) fn materialize_statistical_parameter_captures(&mut self) -> Result<(), ExprError> {
+        let mut memo = HashMap::new();
+        let mut names = self
+            .statistical_captures
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        // Evaluate against the original coordinate environment, then publish
+        // values together. A later alias cannot rebind an earlier capture.
+        let values = names
+            .into_iter()
+            .map(|name| {
+                let value = self.statistical_captures[&name].evaluate(self, &mut memo)?;
+                Ok((name, value))
+            })
+            .collect::<Result<Vec<_>, ExprError>>()?;
+        for (name, value) in values {
+            self.params.insert(name.clone(), value.re);
+            if is_real(value) {
+                self.complex_params.remove(&name);
+            } else {
+                self.complex_params.insert(name, value);
+            }
+        }
+        Ok(())
     }
 
     /// Set dialect-specific expression-function semantics.
@@ -844,14 +1059,23 @@ impl ParamContext {
         parameter_expressions.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let mut functions = self.functions.values().cloned().collect::<Vec<_>>();
         functions.sort_unstable_by(|left, right| left.name.cmp(&right.name));
-        format!(
+        let mut snapshot = format!(
             "numeric={numeric:?}\ncomplex={complex:?}\nstrings={strings:?}\nparameter_expressions={parameter_expressions:?}\nglobal_numeric={global_numeric:?}\nglobal_complex={global_complex:?}\nglobal_strings={global_strings:?}\nglobal_expressions={globals:?}\nfunctions={functions:?}\nrandom_seed={}\nstatistical_mode={:?}\nspectre_statistical_parameters={:?}\nexpression_dialect={:?}\nparameter_redefinition_policy={:?}\n",
             self.random.seed,
             self.statistical_mode,
             self.spectre_statistical_parameters,
             self.expression_dialect,
             self.parameter_redefinition_policy,
-        )
+        );
+        let mut names = self.statistical_captures.keys().collect::<Vec<_>>();
+        names.sort_unstable();
+        let mut seen = HashMap::new();
+        for name in names {
+            use std::fmt::Write;
+            let index = self.statistical_captures[name].snapshot(&mut seen, &mut snapshot);
+            writeln!(snapshot, "statistical parameter {name:?}: capture {index}").unwrap();
+        }
+        snapshot
     }
 
     /// Clone this parameter environment without sharing its mutable random

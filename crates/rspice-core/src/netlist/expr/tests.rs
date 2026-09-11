@@ -2176,6 +2176,51 @@ fn statistical_dependencies_follow_function_captures_and_formal_scopes() {
 }
 
 #[test]
+fn statistical_captures_preserve_binding_versions_complex_semantics_and_draws() {
+    let mut ctx = ParamContext::new();
+    ctx.set_expression_dialect(ExpressionDialect::Xyce);
+    ctx.set_random_seed(41);
+    ctx.set_spectre_statistical_parameters(["RV".into()]);
+    ctx.set("RV", 100.0);
+    ctx.set("offset", 10.0);
+    ctx.set("negative", -1.0);
+    ctx.set_complex("z", ComplexValue::new(3.0, 4.0));
+    ctx.define_function("f", vec!["x".into()], "x+offset");
+    let bind = |ctx: &mut ParamContext, name: &str, expression: &str| {
+        let capture = ctx
+            .capture_statistical_parameter_expression(expression)
+            .unwrap();
+        let nominal = eval_expression_complex(expression, ctx).unwrap();
+        ctx.set_complex(name, nominal);
+        ctx.retain_statistical_parameter_capture(name, capture);
+        nominal
+    };
+    let original = bind(
+        &mut ctx,
+        "a",
+        "f(rv)+img(sqrt(negative))+img(z)+agauss(0,1,1)",
+    );
+    bind(&mut ctx, "b", "a*2");
+    ctx.set("a", 7.0);
+    ctx.set("offset", 900.0);
+    ctx.set("negative", 1.0);
+    ctx.set_complex("z", ComplexValue::new(0.0, 0.0));
+    ctx.define_function("f", vec!["x".into()], "2*x");
+    ctx.set("RV", 200.0);
+    let expected_next_draw = ctx.isolated_random_clone().random().next_uniform();
+    assert_eq!(
+        ctx.checkpoint_semantic_snapshot(),
+        ctx.clone().checkpoint_semantic_snapshot()
+    );
+    ctx.materialize_statistical_parameter_captures().unwrap();
+    let expected = 2.0 * (original.re + 100.0);
+    assert!((ctx.get("b").unwrap() / expected - 1.0).abs() < 1e-14);
+    assert_eq!(ctx.get("a"), Some(7.0));
+    assert_eq!(ctx.get_complex("b").unwrap().im, 0.0);
+    assert_eq!(ctx.random().next_uniform(), expected_next_draw);
+}
+
+#[test]
 fn polynomial_preparation_can_be_cancelled_before_lowering_finishes() {
     let expression = format!("POLY(1) TIME {}", "0 ".repeat(4096));
     let abort = CountingAbort::new(8);

@@ -216,7 +216,7 @@ fn statistical_expression_context(
     netlist: &Netlist,
     mismatch: &BTreeMap<String, Value>,
     temperature_kelvin: Value,
-) -> crate::netlist::ParamContext {
+) -> Result<crate::netlist::ParamContext, SimulationError> {
     let mut context = netlist.params.clone();
     for (name, value) in mismatch {
         context.set(name, *value);
@@ -230,8 +230,15 @@ fn statistical_expression_context(
         "GMIN",
         netlist.options.gmin.unwrap_or(crate::constants::GMIN),
     );
-    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
     context
+        .materialize_statistical_parameter_captures()
+        .map_err(|error| {
+            SimulationError::Circuit(format!(
+                "Spectre parameter capture could not be evaluated: {error}"
+            ))
+        })?;
+    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+    Ok(context)
 }
 
 fn upsert_numeric_parameter(parameters: &mut Vec<(String, Value)>, name: String, value: Value) {
@@ -580,7 +587,7 @@ fn materialize_spectre_statistics_after_flattening(
         } else {
             &empty_mismatch
         };
-        let context = statistical_expression_context(netlist, mismatch, temperature_kelvin);
+        let context = statistical_expression_context(netlist, mismatch, temperature_kelvin)?;
         materialize_statistical_element(element, &context, &plan)?;
         let Some(model_name) = element_model_name_mut(&mut element.kind) else {
             continue;
