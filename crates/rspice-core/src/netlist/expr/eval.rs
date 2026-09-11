@@ -143,6 +143,55 @@ struct PreparedExpressionBuilder<'a> {
     maximum_user_args: usize,
 }
 
+/// Numeric operations are separate from traversal so scalar directional
+/// consumers can reuse the same lazy branches and definition-time functions.
+/// Ordinary complex evaluation monomorphizes the resolver's default methods.
+pub(super) trait PreparedEvaluation {
+    const FOLD_NUMERIC_CONSTANTS: bool = true;
+
+    fn resolve(&mut self, name: &str) -> Result<Option<ComplexValue>, ExprError>;
+
+    fn constant(&mut self, value: ComplexValue) -> Result<ComplexValue, ExprError> {
+        Ok(value)
+    }
+
+    fn unary(&mut self, op: UnaryOpKind, value: ComplexValue) -> Result<ComplexValue, ExprError> {
+        Ok(apply_unary(op, value))
+    }
+
+    fn binary(
+        &mut self,
+        op: BinOpKind,
+        left: ComplexValue,
+        right: ComplexValue,
+        dialect: ExpressionDialect,
+    ) -> Result<ComplexValue, ExprError> {
+        apply_binary(op, left, right, dialect)
+    }
+
+    fn builtin(
+        &mut self,
+        name: &str,
+        args: &[ComplexValue],
+        ctx: &ParamContext,
+    ) -> Result<ComplexValue, ExprError> {
+        eval_builtin_function_values(name, args, ctx)
+    }
+
+    fn discard_condition(&mut self) -> Result<(), ExprError> {
+        Ok(())
+    }
+}
+
+impl<F> PreparedEvaluation for F
+where
+    F: FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+{
+    fn resolve(&mut self, name: &str) -> Result<Option<ComplexValue>, ExprError> {
+        self(name)
+    }
+}
+
 impl PreparedExpression {
     pub(crate) fn compile(expr: &Expr, ctx: &ParamContext) -> Result<Self, ExprError> {
         Self::compile_with_external_parameters(expr, ctx, &HashSet::new())
@@ -194,6 +243,30 @@ impl PreparedExpression {
         ctx: &ParamContext,
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
     ) -> Result<ComplexValue, ExprError> {
+        self.evaluate_using(ctx, resolver)
+    }
+
+    /// Evaluate with the real scalar derivative kernel used by behavioral
+    /// and output expressions. This does not project complex parameter
+    /// arithmetic into a real tangent; non-real leaves are rejected.
+    pub(crate) fn evaluate_scalar_direction_with(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(
+            &str,
+        )
+            -> Result<Option<(ComplexValue, crate::expr::Derivative)>, ExprError>,
+    ) -> Result<(Value, crate::expr::Derivative), ExprError> {
+        let mut evaluation = super::scalar_direction::ScalarDirection::new(resolver);
+        let value = self.evaluate_using(ctx, &mut evaluation)?;
+        Ok((value.re, evaluation.finish()?))
+    }
+
+    fn evaluate_using<E: PreparedEvaluation>(
+        &mut self,
+        ctx: &ParamContext,
+        evaluation: &mut E,
+    ) -> Result<ComplexValue, ExprError> {
         self.frames.clear();
         self.values.clear();
         self.numeric_args.clear();
@@ -208,12 +281,12 @@ impl PreparedExpression {
             match frame {
                 PreparedEvalFrame::Eval { expression, scope } => {
                     match &self.programs[expression.program].nodes[expression.node] {
-                        PreparedNode::Number(value) => self
+                        PreparedNode::Number(value) => self.values.push(EvaluatedValue::literal(
+                            evaluation.constant(ComplexValue::from(*value))?,
+                        )),
+                        PreparedNode::ComplexNumber(value) => self
                             .values
-                            .push(EvaluatedValue::literal(ComplexValue::from(*value))),
-                        PreparedNode::ComplexNumber(value) => {
-                            self.values.push(EvaluatedValue::literal(*value))
-                        }
+                            .push(EvaluatedValue::literal(evaluation.constant(*value)?)),
                         PreparedNode::StringLiteral(value) => {
                             return Err(ExprError::InvalidArgument(format!(
                                 "string literal \"{value}\" is only valid as a file-backed expression argument"
@@ -242,18 +315,19 @@ impl PreparedExpression {
                                     scope: binding.caller_scope,
                                 });
                             } else {
-                                let value = if let Some(value) = resolver(name)? {
+                                let value = if let Some(value) = evaluation.resolve(name)? {
                                     value
                                 } else {
-                                    ctx.get_complex(name).ok_or_else(|| {
-                                        ExprError::UndefinedParam(name.to_string())
-                                    })?
+                                    evaluation.constant(ctx.get_complex(name).ok_or_else(
+                                        || ExprError::UndefinedParam(name.to_string()),
+                                    )?)?
                                 };
                                 self.values.push(EvaluatedValue::runtime(value));
                             }
                         }
                         PreparedNode::External(name) => {
-                            let value = resolver(name)?
+                            let value = evaluation
+                                .resolve(name)?
                                 .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?;
                             self.values.push(EvaluatedValue::runtime(value));
                         }
@@ -371,19 +445,24 @@ impl PreparedExpression {
                 PreparedEvalFrame::ApplyUnary(op) => {
                     let value = pop_value(&mut self.values)?;
                     self.values.push(EvaluatedValue {
-                        numeric: apply_unary(op, value.numeric),
+                        numeric: evaluation.unary(op, value.numeric)?,
                         numval: value.numval && matches!(op, UnaryOpKind::Neg | UnaryOpKind::Pos),
                     });
                 }
                 PreparedEvalFrame::ApplyBinary(op) => {
                     let right = pop_value(&mut self.values)?;
                     let left = pop_value(&mut self.values)?;
-                    let numval = ctx.expression_dialect() == ExpressionDialect::Xyce
+                    let numval = E::FOLD_NUMERIC_CONSTANTS
+                        && ctx.expression_dialect() == ExpressionDialect::Xyce
                         && left.numval
                         && right.numval
                         && xyce_binary_is_constant_foldable(op);
-                    let value =
-                        apply_binary(op, left.numeric, right.numeric, ctx.expression_dialect())?;
+                    let value = evaluation.binary(
+                        op,
+                        left.numeric,
+                        right.numeric,
+                        ctx.expression_dialect(),
+                    )?;
                     self.values.push(EvaluatedValue {
                         numeric: if numval {
                             normalize_xyce_expression_result(value)
@@ -399,6 +478,7 @@ impl PreparedExpression {
                     scope,
                 } => {
                     let condition = pop_value(&mut self.values)?;
+                    evaluation.discard_condition()?;
                     self.frames.push(PreparedEvalFrame::MarkRuntime);
                     self.frames.push(PreparedEvalFrame::Eval {
                         expression: if complex_truth(condition.numeric) {
@@ -421,7 +501,8 @@ impl PreparedExpression {
                         unreachable!("prepared builtin frame references a non-function node")
                     };
                     let args = &self.values[start..];
-                    let numval = ctx.expression_dialect() == ExpressionDialect::Xyce
+                    let numval = E::FOLD_NUMERIC_CONSTANTS
+                        && ctx.expression_dialect() == ExpressionDialect::Xyce
                         && args.iter().all(|arg| arg.numval)
                         && xyce_numeric_function_is_constant_foldable(name);
                     self.numeric_args.clear();
@@ -429,7 +510,7 @@ impl PreparedExpression {
                     let value = if numval {
                         xyce_constant_fold_builtin(name, &self.numeric_args)?
                     } else {
-                        eval_builtin_function_values(name, &self.numeric_args, ctx)?
+                        evaluation.builtin(name, &self.numeric_args, ctx)?
                     };
                     self.values.truncate(start);
                     self.values.push(EvaluatedValue {

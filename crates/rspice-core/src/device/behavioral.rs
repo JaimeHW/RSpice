@@ -1138,8 +1138,8 @@ pub(crate) fn compiled_expression_node_direction(
     )
 }
 
-/// Evaluate the exact directional derivative of a real Xyce expression from
-/// caller-supplied scalar leaves.
+/// Evaluate the exact directional derivative of a real expression from
+/// caller-supplied scalar leaves, including scoped user-defined functions.
 ///
 /// Every entry in `derivative_targets` must be an alias for the same physical
 /// scalar and therefore have the same numeric value in `parameters`. This is
@@ -1155,152 +1155,54 @@ pub fn evaluate_parameter_directional_derivative(
         .iter()
         .map(|target| target.to_ascii_uppercase())
         .collect::<std::collections::BTreeSet<_>>();
-    fn convert(
-        expression: &crate::netlist::expr::Expr,
-        parameters: &crate::netlist::expr::ParamContext,
-        targets: &std::collections::BTreeSet<String>,
-    ) -> Result<Expr, String> {
-        use crate::netlist::expr::{BinOpKind, Expr as NetExpr, UnaryOpKind, is_real};
-        Ok(match expression {
-            NetExpr::Number(value) => Expr::Const(*value),
-            NetExpr::ComplexNumber(value) if is_real(*value) => Expr::Const(value.re),
-            NetExpr::ComplexNumber(_) => {
-                return Err("DDX requires a real-valued expression".to_string());
-            }
-            NetExpr::StringLiteral(_) => {
-                return Err("DDX cannot differentiate a string literal".to_string());
-            }
-            NetExpr::Param(name)
-                if targets.contains(&name.to_ascii_uppercase()) =>
-            {
-                Expr::NodeVoltage("__RSPICE_DDX_TARGET".to_string())
-            }
-            NetExpr::Param(name) => Expr::Const(
-                parameters
-                    .get(name)
-                    .ok_or_else(|| format!("DDX scalar leaf '{name}' has no numeric value"))?,
-            ),
-            NetExpr::UnaryOp { op, operand } => match op {
-                UnaryOpKind::Neg => Expr::Unary {
-                    op: UnaryOp::Neg,
-                    operand: Box::new(convert(operand, parameters, targets)?),
-                },
-                UnaryOpKind::Pos => convert(operand, parameters, targets)?,
-                UnaryOpKind::Not => Expr::Unary {
-                    op: UnaryOp::Not,
-                    operand: Box::new(convert(operand, parameters, targets)?),
-                },
-            },
-            NetExpr::BinOp { op, left, right } => Expr::Binary {
-                op: match op {
-                    BinOpKind::Add => BinaryOp::Add,
-                    BinOpKind::Sub => BinaryOp::Sub,
-                    BinOpKind::Mul => BinaryOp::Mul,
-                    BinOpKind::Div => BinaryOp::Div,
-                    BinOpKind::Mod => BinaryOp::Mod,
-                    BinOpKind::Pow => BinaryOp::Pow,
-                    BinOpKind::Gt => BinaryOp::Gt,
-                    BinOpKind::Lt => BinaryOp::Lt,
-                    BinOpKind::Ge => BinaryOp::Ge,
-                    BinOpKind::Le => BinaryOp::Le,
-                    BinOpKind::Eq => BinaryOp::Eq,
-                    BinOpKind::Ne => BinaryOp::Ne,
-                    BinOpKind::And => BinaryOp::And,
-                    BinOpKind::Or => BinaryOp::Or,
-                },
-                left: Box::new(convert(left, parameters, targets)?),
-                right: Box::new(convert(right, parameters, targets)?),
-            },
-            NetExpr::FnCall { name, args } => Expr::Function {
-                func: Function::from_name(name)
-                    .filter(|function| {
-                        !matches!(
-                            function,
-                            Function::TableFile
-                                | Function::FastTable
-                                | Function::FastTableFile
-                                | Function::Cubic
-                                | Function::CubicFile
-                                | Function::Akima
-                                | Function::AkimaFile
-                                | Function::Wodicka
-                                | Function::WodickaFile
-                                | Function::Barycentric
-                                | Function::BarycentricFile
-                                | Function::Sdt
-                        )
-                    })
-                    .ok_or_else(|| {
-                        format!(
-                            "DDX cannot analytically differentiate unresolved or stateful function '{name}'"
-                        )
-                    })?,
-                args: args
-                    .iter()
-                    .map(|argument| convert(argument, parameters, targets))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-        })
-    }
-
     let parsed =
         crate::netlist::expr::parse_expression(expression).map_err(|error| error.to_string())?;
     if derivative_targets.is_empty() {
         return Err("DDX has no derivative target".to_string());
     }
-    let ast = convert(&parsed, parameters, &derivative_targets)?;
-    let program = compile(&ast);
+    let mut program = crate::netlist::expr::PreparedExpression::compile(&parsed, parameters)
+        .map_err(|error| error.to_string())?;
     let representative = derivative_targets
         .iter()
         .next()
         .expect("non-empty target set");
-    let target_value = parameters.get(representative).ok_or_else(|| {
-        format!(
-            "DDX derivative target '{}' has no numeric value",
-            representative
-        )
-    })?;
+    let real_target = |name: &str| {
+        let value = parameters
+            .get_complex(name)
+            .ok_or_else(|| format!("DDX derivative target '{name}' has no numeric value"))?;
+        if !crate::netlist::expr::is_real(value) {
+            return Err(format!("DDX derivative target '{name}' is not real-valued"));
+        }
+        Ok(value.re)
+    };
+    let target_value = real_target(representative)?;
     for alias in derivative_targets.iter().skip(1) {
-        let alias_value = parameters
-            .get(alias)
-            .ok_or_else(|| format!("DDX derivative target '{alias}' has no numeric value"))?;
-        if alias_value.to_bits() != target_value.to_bits() {
+        if real_target(alias)?.to_bits() != target_value.to_bits() {
             return Err(format!(
                 "DDX derivative aliases '{representative}' and '{alias}' have different values"
             ));
         }
     }
-    let node_values = [target_value];
-    program
-        .node_map
-        .iter()
-        .find_map(|(name, &index)| (name == "__RSPICE_DDX_TARGET").then_some(index))
-        .ok_or_else(|| {
-            format!(
-                "directional output derivative target '{}' is absent from the expression",
-                derivative_targets
-                    .iter()
-                    .next()
-                    .expect("non-empty target set")
-            )
-        })?;
-    compiled_expression_node_direction(
-        &ast,
-        &program,
-        &node_values,
-        &[1.0.into()],
-        BehavioralEnvironment {
-            time: parameters.get("TIME").unwrap_or(0.0),
-            frequency: parameters.get("FREQ").unwrap_or(0.0),
-            temperature: parameters.get("TEMP").unwrap_or(27.0),
-            gmin: parameters.get("GMIN").unwrap_or(crate::constants::GMIN),
-            expression_dialect: parameters.expression_dialect(),
-        },
-    )
-    .map(|(_, derivative)| {
-        normalize_expression_boundary(derivative.binary64(), parameters.expression_dialect())
-    })
-    .ok_or_else(|| "directional output derivative could not be evaluated analytically".to_string())
+    let mut target_present = false;
+    program.visit_runtime_parameters(|name| {
+        target_present |= derivative_targets.contains(name);
+    });
+    if !target_present {
+        return Err(format!(
+            "directional output derivative target '{representative}' is absent from the expression"
+        ));
+    }
+    let (_, derivative) = program
+        .evaluate_scalar_direction_with(parameters, &mut |name| {
+            Ok(derivative_targets
+                .contains(name)
+                .then_some((target_value.into(), 1.0.into())))
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(normalize_expression_boundary(
+        derivative.binary64(),
+        parameters.expression_dialect(),
+    ))
 }
 
 fn eval_behavioral_expr_with_derivative_at_boundary(
@@ -1484,7 +1386,7 @@ fn eval_behavioral_expr_with_derivative(
     }
 }
 
-fn eval_binary_with_derivative(
+pub(crate) fn eval_binary_with_derivative(
     op: BinaryOp,
     left: Value,
     d_left: Derivative,
@@ -3555,6 +3457,92 @@ mod tests {
                     (derivative.binary64() / expected_derivative - 1.0).abs() < 2e-15,
                     "{dialect:?} {expression}: {:?}, expected {expected_derivative}",
                     derivative
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ddx_user_functions_preserve_formal_scope_and_lazy_branches() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let mut parameters = crate::netlist::expr::ParamContext::new();
+            parameters.set_expression_dialect(dialect);
+            parameters.set("P", 4.0);
+            parameters.set("Q", 3.0);
+            parameters.define_function("INNER", vec!["P".to_owned()], "P+Q");
+            parameters.define_function("OUTER", vec!["Q".to_owned()], "INNER(Q)+P");
+            parameters.define_function("LAZY", vec!["X".to_owned()], "IF(X>0,X*X,MISSING)");
+            let targets = vec!["p".to_owned()];
+            for (source, expected) in [
+                ("OUTER(2*P)", 3.0),
+                ("OUTER(2)", 1.0),
+                ("LAZY(P)", 8.0),
+                ("IF(P>0,0,MISSING)", 0.0),
+            ] {
+                let actual =
+                    evaluate_parameter_directional_derivative(source, &parameters, &targets)
+                        .unwrap_or_else(|error| panic!("{dialect:?} {source}: {error}"));
+                assert_eq!(actual, expected, "{dialect:?} {source}");
+            }
+            let error =
+                evaluate_parameter_directional_derivative("INNER(2)", &parameters, &targets)
+                    .unwrap_err();
+            assert!(
+                error.contains("absent"),
+                "formal P is not a root target: {error}"
+            );
+            parameters.set_complex("Q", crate::ComplexValue::new(3.0, 1e-30));
+            assert!(
+                evaluate_parameter_directional_derivative("P*Q", &parameters, &targets)
+                    .unwrap_err()
+                    .contains("real-valued")
+            );
+        }
+    }
+
+    #[test]
+    fn ddx_prepared_traversal_preserves_scalar_kernel_semantics() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let mut parameters = crate::netlist::expr::ParamContext::new();
+            parameters.set_expression_dialect(dialect);
+            let targets = vec!["p".to_owned()];
+            for (source, point) in [
+                ("1+1e-8*v(p)", 0.0),
+                ("log(v(p))+ln(v(p))", 1e-50),
+                ("tanh(21+v(p))", 0.0),
+                ("sqrt(v(p))", -1.0),
+                ("min(v(p),2)+max(-v(p),-3)", 1.0),
+                ("table(v(p),0,0,2,3,4,9)", 3.0),
+                ("if(v(p)>0,exp(v(p)),pow(v(p),2))", -2.0),
+                ("round(v(p))+sign(v(p),-1)", 2.5),
+            ] {
+                parameters.set("P", point);
+                let ast = crate::expr::parse_expression_strict(source).unwrap();
+                let program = compile(&ast);
+                let (_, expected) = compiled_expression_node_direction(
+                    &ast,
+                    &program,
+                    &[point],
+                    &[1.0.into()],
+                    BehavioralEnvironment {
+                        time: 0.0,
+                        frequency: 0.0,
+                        temperature: 27.0,
+                        gmin: crate::constants::GMIN,
+                        expression_dialect: dialect,
+                    },
+                )
+                .unwrap();
+                let actual = evaluate_parameter_directional_derivative(
+                    &source.replace("v(p)", "p"),
+                    &parameters,
+                    &targets,
+                )
+                .unwrap();
+                assert_eq!(
+                    actual,
+                    normalize_expression_boundary(expected.binary64(), dialect),
+                    "{dialect:?} {source} at {point}",
                 );
             }
         }

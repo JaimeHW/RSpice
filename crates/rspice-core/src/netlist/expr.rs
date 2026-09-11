@@ -35,6 +35,7 @@ mod context;
 mod error;
 mod eval;
 mod parser;
+mod scalar_direction;
 mod types;
 
 #[cfg(test)]

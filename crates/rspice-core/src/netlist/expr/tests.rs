@@ -331,6 +331,51 @@ fn prepared_external_nodes_are_disjoint_from_authored_parameters() {
 }
 
 #[test]
+fn prepared_scalar_directions_retain_weights_and_definition_time_functions() {
+    use crate::expr::Derivative;
+    for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+        let mut ctx = ParamContext::new();
+        ctx.set_expression_dialect(dialect);
+        ctx.define_function("SCALE", vec!["P".to_owned()], "1e200*P");
+        let expression = parse_expression("IF(CHOOSE,1+1e-200*SCALE(SCALE(P)),Q)").unwrap();
+        let mut prepared = PreparedExpression::compile(&expression, &ctx).unwrap();
+        // Compiled functions must keep their definition-site version.
+        ctx.define_function("SCALE", vec!["P".to_owned()], "0");
+        for (choose, expected, direction) in
+            [(1.0, 1.0, 2e200), (0.0, 7.0, -3.0), (1.0, 1.0, 2e200)]
+        {
+            let mut reads = Vec::new();
+            let (value, actual) = prepared
+                .evaluate_scalar_direction_with(&ctx, &mut |name| {
+                    reads.push(name.to_owned());
+                    Ok(Some(match name {
+                        "CHOOSE" => (choose.into(), Derivative::from(9.0)),
+                        "P" => (0.0.into(), 2.0.into()),
+                        "Q" => (7.0.into(), (-3.0).into()),
+                        _ => panic!("unexpected leaf {name}"),
+                    }))
+                })
+                .unwrap();
+            assert_eq!(value, expected);
+            assert!((actual.binary64() / direction - 1.0).abs() < 2e-15);
+            assert_eq!(reads, ["CHOOSE", if choose != 0.0 { "P" } else { "Q" }]);
+        }
+        // Reusing scratch for ordinary complex evaluation remains independent
+        // of directional evaluation, including the frozen function program.
+        let value = prepared
+            .evaluate_with(&ctx, &mut |name| {
+                Ok(Some(match name {
+                    "CHOOSE" => 0.0.into(),
+                    "Q" => ComplexValue::new(2.0, 3.0),
+                    _ => panic!("unselected leaf {name}"),
+                }))
+            })
+            .unwrap();
+        assert_eq!(value, ComplexValue::new(2.0, 3.0));
+    }
+}
+
+#[test]
 fn prepared_nested_user_function_scopes_are_reusable() {
     let mut ctx = ParamContext::new();
     ctx.set("BASE", 4.0);
