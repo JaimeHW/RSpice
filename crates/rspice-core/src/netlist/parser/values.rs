@@ -2200,27 +2200,28 @@ pub(super) fn take_deferrable_value(
     defer: bool,
 ) -> Option<DeferrableValue> {
     skip_commas(stream);
-    if !defer {
-        let expression = match (&stream.peek().kind, &stream.peek_n(1).kind) {
-            (TokenKind::Expression(expr), _) => Some(expr.clone()),
-            (TokenKind::Plus, TokenKind::Expression(expr)) => Some(expr.clone()),
-            (TokenKind::Minus, TokenKind::Expression(expr)) => Some(format!("-({expr})")),
-            _ => None,
-        };
-        if let Some(expression) = expression
-            && eval_expression(&expression, params).is_err()
-            && let Ok(prepared) =
-                super::super::expr::prepare_behavioral_expression(&expression, params)
-        {
-            let consumed = take_value_expression_string(stream, params)?;
-            return Some(match eval_expression(&prepared, params) {
-                Ok(value) => DeferrableValue::Resolved(value),
-                Err(_) => DeferrableValue::Deferred(consumed),
-            });
-        }
-    }
+    // Determine the complete expression before evaluating it: an evaluation
+    // used only to classify a token would consume and discard a random draw.
     if let Some(value) = take_contiguous_instance_expression(stream, params, defer) {
         return Some(value);
+    }
+    if !defer
+        && (matches!(stream.peek().kind, TokenKind::Expression(_))
+            || matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus)
+                && matches!(stream.peek_n(1).kind, TokenKind::Expression(_)))
+    {
+        let expression = take_value_expression_string(stream, params)?;
+        return Some(match eval_expression(&expression, params) {
+            Ok(value) => DeferrableValue::Resolved(value),
+            Err(_) => {
+                let prepared =
+                    super::super::expr::prepare_behavioral_expression(&expression, params).ok()?;
+                match eval_expression(&prepared, params) {
+                    Ok(value) => DeferrableValue::Resolved(value),
+                    Err(_) => DeferrableValue::Deferred(expression),
+                }
+            }
+        });
     }
     if defer {
         match &stream.peek().kind {
@@ -2324,6 +2325,43 @@ mod tests {
 
     fn coalesce(line: &str) -> Vec<String> {
         super::coalesce_assignment_fields(super::split_spice_fields(line))
+    }
+
+    #[test]
+    fn instance_value_expressions_consume_each_authored_random_draw_once() {
+        use crate::config::ExpressionDialect;
+        use crate::netlist::expr::{StatisticalParamMode, eval_expression};
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (source, expression) in [
+                ("{aunif(2,0.25)}", "aunif(2,0.25)"),
+                ("-{aunif(2,0.25)}", "-(aunif(2,0.25))"),
+                ("+{aunif(2,0.25)}", "aunif(2,0.25)"),
+                ("{aunif(2,0.25)}+1", "(aunif(2,0.25))+1"),
+                ("2*aunif(2,0.25)", "2*aunif(2,0.25)"),
+                ("{aunif(2,0.25)+aunif(3,0.5)}", "aunif(2,0.25)+aunif(3,0.5)"),
+            ] {
+                let mut context = ParamContext::new();
+                context.set_expression_dialect(dialect);
+                context.set_random_seed(841);
+                context.set_statistical_mode(StatisticalParamMode::Sample);
+                let expected = eval_expression(expression, &context).unwrap();
+                let next_draw = context.random().next_uniform();
+                context.set_random_seed(841);
+                let mut stream =
+                    TokenStream::new(tokenize(&format!("{source} NEXT=99\n")).unwrap());
+                let parsed = super::take_deferrable_value(&mut stream, &context, false).unwrap();
+                let super::DeferrableValue::Resolved(actual) = parsed else {
+                    panic!("{source} was not resolved");
+                };
+                assert_eq!(actual, expected, "{dialect:?}: {source}");
+                assert_eq!(
+                    context.random().next_uniform(),
+                    next_draw,
+                    "{dialect:?}: {source}"
+                );
+                assert_eq!(stream.peek().kind, TokenKind::Ident("NEXT".into()));
+            }
+        }
     }
 
     #[test]
