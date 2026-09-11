@@ -22,6 +22,8 @@ pub(crate) use context::{
 };
 pub use error::VmError;
 pub use executor::Vm;
+#[cfg(feature = "native")]
+pub(crate) use executor::observe_zi_state;
 #[cfg(all(feature = "wasm-jit", any(target_arch = "wasm32", test)))]
 pub(crate) use executor::{execute_zi_state, execute_zi_state_derivative};
 pub(crate) use filters::{

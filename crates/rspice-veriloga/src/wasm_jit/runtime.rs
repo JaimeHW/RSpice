@@ -442,7 +442,7 @@ pub(super) fn evaluate_sum_products_div(
     ))
 }
 
-fn evaluate_slice_helper_with_session(
+pub(super) fn evaluate_slice_helper_with_session(
     opcode: i32,
     aux0: i32,
     aux1: i32,

@@ -1663,6 +1663,7 @@ endmodule
                 Default::default,
             );
             context.laplace_filters = report.model.laplace_filters.clone();
+            context.zi_filters = report.model.zi_filters.clone();
             context.variables.resize(report.model.num_variables, 0.0);
             context
                 .configure_event_state_variables(&report.model.event_state_variables)
@@ -1729,7 +1730,9 @@ endmodule
                     },
                 )
                 .expect("define helper import");
-            super::codegen::define_test_math_imports(&mut linker, memory);
+            super::codegen::define_test_math_imports_with_session(&mut linker, memory, |session| {
+                Some(session)
+            });
             let instance = linker
                 .instantiate_and_start(&mut store, &module)
                 .expect("instantiate fused-kernel module");
@@ -2021,6 +2024,71 @@ endmodule
                 harness.call_prelude();
                 assert_eq!(harness.call(&export), 0);
                 assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn static_dae_wasm_zi_retains_samples_ramps_and_jacobians() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/static_dae_zi.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_sampled", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            for (time, dt, voltage, held_sum, feedthrough) in [
+                (0.0, 0.125, 2.0, 1.0, 0.5),
+                (0.125, 0.125, 4.0, 1.5, 0.0),
+                (0.25, 0.125, 6.0, 2.0, 0.0),
+                (1.0, 0.75, 4.0, 3.5, 0.5),
+            ] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(dt);
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.call(&jacobian), 0);
+                assert!(
+                    (harness.read_f64(FRAME_RESULT_OFFSET as usize)
+                        - (2.0 + 3.0 / dt + feedthrough))
+                        .abs()
+                        < 1e-12
+                );
+                let context = harness.store.data_mut().context_mut();
+                let before = format!("{:?}", context.zi_filters);
+                let states = context.state_values.clone();
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                for probe in [voltage, voltage + 1.0, voltage] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, probe);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    let current = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (current - (2.0 * probe + held_sum)).abs() < 1e-12,
+                        "postfix={postfix}, t={time}, probe={probe}: current={current}"
+                    );
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 2.0);
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(format!("{:?}", context.zi_filters), before);
+                    assert_eq!(context.state_values, states);
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
             }
         }
     }

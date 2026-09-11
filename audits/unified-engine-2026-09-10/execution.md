@@ -1676,6 +1676,57 @@ families, complete shared static-history capture, and general runtime/mixed F/Q
 integration remain open. The newly corrected companion guard stays in place.
 Shipping browser/tablet and licensed-reference qualification remain open.
 
+## Sampled Zi filters preserve their settled observation state
+
+Zi static DAE observations now read a pending sample's retained output or the
+visible start of its pending ramp. Between samples they read the accepted ramp
+and held output. The input Jacobian is zero even at an instantaneous sample
+edge: observation cannot sample a changed input a second time. Invalid operands,
+failed candidates, observations before accepted time, mismatched pending-sample
+times and due samples lacking a settled candidate produce checked errors.
+
+VM, native and emitted Wasm use the same read-only observation helper. If a
+constant definition has not yet been frozen, the helper validates it in temporary
+storage instead of installing it in the device. Native observation returns before
+its ordinary event-bound publication. It changes neither accepted/candidate
+state nor definition, schedule, sample index or pending ramp. Context ABI and
+checkpoint payloads are unchanged; ordinary transient sampling is unchanged.
+
+A shared authored fixture runs two copies of y[k]=0.5*u[k]+0.5*y[k-1], one with
+instantaneous output and one with a 0.25 s ramp, alongside conductance and ddt.
+Native and emitted Wasm execution cover time zero, an intermediate ramp point,
+the ramp endpoint and the next sample edge. The exact retained sums are 1, 1.5,
+2 and 3.5. Changed observation inputs affect only the separate conductance;
+ordinary and static Jacobians are checked independently. Repeated observations
+retain filter and integration state. Native late-invalid-contribution checks
+also verify no callbacks or original-state changes. VM checks cover temporary
+definition validation, accepted-state fallback, invalid value/transition operands
+and a missing settled sample. The native helper test separately confirms that
+observation cannot publish an event bound.
+
+The initial focused selection passed the VM, native-device and native-helper
+cases in 0.01 seconds after an 18.64-second build. The Wasm case exposed a missing
+slice-helper binding in its host harness. That harness now preallocates the
+compiled Zi filters and binds the production session-aware slice helper, while
+stateless harnesses retain the existing pure-arithmetic binding. A first harness
+build required the Rust lifetime/closure corrections recorded in its log. The
+corrected emitted-Wasm automatic/postfix case passed in 0.01 seconds after a
+14.26-second build. This was execution in wasmi, not a shipping browser-worker
+qualification. No broad suite was run. Logs under target/unified-mixed-fixes:
+static-dae-zi.log, static-dae-zi-wasm.log, static-dae-zi-wasm-session.log.
+
+The authoritative generator regenerated all 43 built-ins against the final
+compiler sources. No generated model source changed; only the manifest generator
+digest changed, to
+c8d2d83a8e69ff00d1017959e3f8d896a70e50415a75bda756816e2e3bbce6af.
+Log: target/unified-mixed-fixes/static-dae-zi-generator.log.
+
+This closes the sampled-filter observation prerequisite. Delay, transition and
+slew observation semantics, complete shared static-history capture and general
+runtime/mixed F/Q integration remain open under MS08. The complete companion
+formulation remains selected for runtime and mixed models. Shipping-platform,
+release and licensed-reference qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

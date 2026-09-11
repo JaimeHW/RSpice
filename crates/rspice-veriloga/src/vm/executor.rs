@@ -48,6 +48,51 @@ pub struct Vm<'a> {
     pub stack: Vec<f64>,
 }
 
+/// Shared native/VM/Wasm observation of a Zi site. A not-yet-frozen
+/// definition is validated in temporary storage, never installed by a probe.
+pub(crate) fn observe_zi_state(
+    filter: &crate::zfilter::ZiFilter,
+    layout: crate::codegen::ZiRuntimeLayout,
+    operands: &[f64],
+    time: f64,
+    derivative: bool,
+) -> Result<f64, VmError> {
+    let count = layout.validate_operand_budget().map_err(|error| {
+        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+    })?;
+    if operands.len() != count {
+        return Err(VmError::InvalidInstruction(
+            "invalid zi observation operand count",
+        ));
+    }
+    let definition;
+    let filter = if filter.definition_is_frozen() {
+        filter
+    } else {
+        definition = layout.freeze_filter(operands).map_err(|error| {
+            VmError::InvalidNumericResult(format!(
+                "zi filter {} observation definition failed: {error}",
+                layout.filter_id
+            ))
+        })?;
+        &definition
+    };
+    let output = filter
+        .static_dae_output(
+            operands[count - 2],
+            time,
+            operands[count - 1],
+            layout.direct_assignment,
+        )
+        .map_err(|error| {
+            VmError::InvalidNumericResult(format!(
+                "zi filter {} static observation failed: {error}",
+                layout.filter_id
+            ))
+        })?;
+    Ok(if derivative { 0.0 } else { output })
+}
+
 /// Evaluate a Zi value directly from its canonical operand slice. Browser-WASM
 /// helpers use this entry rather than copying a variable-length definition into
 /// the VM's heap-backed stack.
@@ -69,6 +114,9 @@ pub(crate) fn execute_zi_state(
         .zi_filters
         .get_mut(filter_id)
         .ok_or(VmError::InvalidInstruction("missing zi filter"))?;
+    if !context.evaluation_mode.dynamic_operators_enabled() {
+        return observe_zi_state(filter, layout, operands, context.time, false);
+    }
     if !filter.definition_is_frozen() {
         *filter = layout.freeze_filter(operands).map_err(|error| {
             VmError::InvalidNumericResult(format!(
@@ -113,6 +161,9 @@ pub(crate) fn execute_zi_state_derivative(
         .zi_filters
         .get_mut(filter_id)
         .ok_or(VmError::InvalidInstruction("missing zi filter"))?;
+    if !context.evaluation_mode.dynamic_operators_enabled() {
+        return observe_zi_state(filter, layout, operands, context.time, true);
+    }
     if !filter.definition_is_frozen() {
         *filter = layout.freeze_filter(operands).map_err(|error| {
             VmError::InvalidNumericResult(format!(
@@ -2038,6 +2089,83 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_zi_observations_do_not_freeze_or_resample() {
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.evaluation_mode = Mode::StaticDaeProbe;
+        context
+            .zi_filters
+            .push(crate::zfilter::ZiFilter::unfrozen_placeholder(1, 1).unwrap());
+        let layout = crate::codegen::ZiRuntimeLayout::unit_coefficients(0);
+        let before = format!("{:?}", context.zi_filters);
+        let mut operands = [1.0, 1.0, 1.0, 0.5, 2.0, 0.0];
+        assert_eq!(
+            execute_zi_state(&mut context, layout, &operands).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            execute_zi_state_derivative(&mut context, layout, &operands).unwrap(),
+            0.0
+        );
+        assert_eq!(format!("{:?}", context.zi_filters), before);
+        assert!(!context.zi_filters[0].definition_is_frozen());
+        operands[3] = 0.0;
+        context.evaluation_mode = Mode::NewtonLimited;
+        assert_eq!(
+            execute_zi_state(&mut context, layout, &operands).unwrap(),
+            2.0
+        );
+        context.evaluation_mode = Mode::StaticDaeProbe;
+        operands[4] = 9.0;
+        for time in [0.0, 0.5] {
+            context.time = time;
+            let before = format!("{:?}", context.zi_filters);
+            for _ in 0..2 {
+                assert_eq!(
+                    execute_zi_state(&mut context, layout, &operands).unwrap(),
+                    2.0
+                );
+                assert_eq!(
+                    execute_zi_state_derivative(&mut context, layout, &operands).unwrap(),
+                    0.0
+                );
+            }
+            for (index, invalid) in [(4, f64::NAN), (5, -1.0)] {
+                let mut bad = operands;
+                bad[index] = invalid;
+                assert!(execute_zi_state(&mut context, layout, &bad).is_err());
+                assert!(execute_zi_state_derivative(&mut context, layout, &bad).is_err());
+            }
+            assert_eq!(format!("{:?}", context.zi_filters), before);
+            if time == 0.0 {
+                context.zi_filters[0].commit(0.0).unwrap();
+            }
+        }
+        context.time = 1.0;
+        let before = format!("{:?}", context.zi_filters);
+        assert!(
+            execute_zi_state(&mut context, layout, &operands)
+                .unwrap_err()
+                .to_string()
+                .contains("settled Zi sample")
+        );
+        assert_eq!(format!("{:?}", context.zi_filters), before);
+        context.evaluation_mode = Mode::NewtonLimited;
+        operands[4] = 3.0;
+        assert_eq!(
+            execute_zi_state(&mut context, layout, &operands).unwrap(),
+            3.0
+        );
+        context.evaluation_mode = Mode::StaticDaeProbe;
+        operands[4] = 8.0;
+        assert_eq!(
+            execute_zi_state(&mut context, layout, &operands).unwrap(),
+            3.0
+        );
     }
 
     #[test]

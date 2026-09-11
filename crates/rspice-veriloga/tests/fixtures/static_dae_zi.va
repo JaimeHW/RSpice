@@ -1,0 +1,11 @@
+module static_sampled(p, n, c);
+    inout p, n, c;
+    electrical p, n, c;
+    real instant, ramped;
+    analog begin
+        instant = zi_nd(V(p,n), '{0.5}, '{1.0,-0.5}, 1.0, 0.0);
+        ramped = zi_nd(V(p,n), '{0.5}, '{1.0,-0.5}, 1.0, 0.25);
+        I(p,n)<+2.0*V(p,n)+instant+ramped+ddt(3.0*V(p,n));
+        if (V(p,n)<0.0) I(p,n)<+sqrt(V(p,n));
+    end
+endmodule

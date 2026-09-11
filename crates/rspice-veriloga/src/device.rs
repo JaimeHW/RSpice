@@ -8749,6 +8749,73 @@ mod static_dae_device_tests {
     use crate::{CompilerOptions, VerilogACompiler, vm::VerilogAEvaluationMode as Mode};
 
     #[test]
+    fn static_dae_native_zi_retains_samples_ramps_and_jacobians() {
+        let source = include_str!("../tests/fixtures/static_dae_zi.va");
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "ZI_STATIC",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0, 0],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        // y[k] = 0.5*u[k] + 0.5*y[k-1], once with immediate output and
+        // once with a 0.25 s ramp. Between samples input changes are ignored.
+        for (time, dt, voltage, held_sum, feedthrough) in [
+            (0.0, 0.125, 2.0, 1.0, 0.5),
+            (0.125, 0.125, 4.0, 1.5, 0.0),
+            (0.25, 0.125, 6.0, 2.0, 0.0),
+            (1.0, 0.75, 4.0, 3.5, 0.5),
+        ] {
+            device.set_time(time);
+            device.set_timestep(dt);
+            let mut dynamic_jacobian = 0.0;
+            device
+                .try_stamp(
+                    &[voltage],
+                    |_, _, value| dynamic_jacobian += value,
+                    |_, _| {},
+                )
+                .unwrap();
+            assert!((dynamic_jacobian - (2.0 + 3.0 / dt + feedthrough)).abs() < 1e-12);
+            let before = format!("{:?}", device.context);
+            for probe in [voltage, voltage + 1.0, voltage] {
+                let (mut jacobian, mut rhs) = (0.0, 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[probe],
+                        |_, _, value| jacobian += value,
+                        |_, value| rhs += value,
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(jacobian, 2.0);
+                assert!(
+                    (jacobian * probe - rhs - (2.0 * probe + held_sum)).abs() < 1e-12,
+                    "t={time}, probe={probe}: current={}",
+                    jacobian * probe - rhs
+                );
+                assert_eq!(format!("{:?}", device.context), before);
+            }
+            let mut callbacks = 0;
+            device
+                .try_stamp_with_mode(
+                    &[-1.0],
+                    |_, _, _| callbacks += 1,
+                    |_, _| {},
+                    Mode::StaticDaeProbe,
+                )
+                .expect_err("late invalid contribution");
+            assert_eq!(callbacks, 0);
+            assert_eq!(format!("{:?}", device.context), before);
+            device.context.advance_state().unwrap();
+        }
+    }
+
+    #[test]
     fn static_dae_native_laplace_retains_candidate_and_direct_jacobian() {
         let source = include_str!("../tests/fixtures/static_dae_laplace.va");
         let runtime = VerilogACompiler::new(CompilerOptions::default())

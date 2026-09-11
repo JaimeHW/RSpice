@@ -676,6 +676,67 @@ impl ZiFilter {
         }
     }
 
+    /// Read the settled sample/ramp without sampling a changed input again.
+    /// All sample values are held state in a static DAE observation; even an
+    /// instantaneous sample edge has no derivative through its retained input.
+    pub(crate) fn static_dae_output(
+        &self,
+        input: f64,
+        time: f64,
+        transition: f64,
+        direct_assignment: bool,
+    ) -> Result<f64, ZiFilterError> {
+        self.validate_integrity()?;
+        self.validate_runtime_readonly(input, time)?;
+        validate_transition(transition)?;
+        validate_direct_transition(transition, direct_assignment)?;
+        if self.accepted_time.is_some_and(|accepted| time < accepted) {
+            return Err(ZiFilterError::InvalidEvaluation(
+                "static observation precedes accepted Zi time".into(),
+            ));
+        }
+        let position = self.classify_time_readonly(time)?;
+        let output = match &self.candidate {
+            Some(Candidate::Failed) => {
+                return Err(ZiFilterError::InvalidEvaluation(
+                    "static observation cannot use a failed Zi candidate".into(),
+                ));
+            }
+            Some(Candidate::Sample {
+                time: sample_time,
+                output,
+                transition,
+                visible_start,
+                ..
+            }) => {
+                if sample_time.to_bits() != time.to_bits() {
+                    return Err(ZiFilterError::InvalidEvaluation(format!(
+                        "Zi sample candidate belongs to time {sample_time}, not observation time {time}"
+                    )));
+                }
+                if *transition == 0.0 {
+                    *output
+                } else {
+                    *visible_start
+                }
+            }
+            Some(Candidate::Hold) | None => {
+                if matches!(position, SamplePosition::At) {
+                    return Err(ZiFilterError::InvalidEvaluation(format!(
+                        "static observation requires a settled Zi sample at time {time}"
+                    )));
+                }
+                self.visible_output(time)?
+            }
+        };
+        if !output.is_finite() {
+            return Err(ZiFilterError::InvalidEvaluation(
+                "static Zi observation is not finite".into(),
+            ));
+        }
+        Ok(output)
+    }
+
     /// Exact Jacobian action for the current operating point: H(1) in an
     /// equilibrium analysis, b0/a0 on a sample edge, and zero while holding.
     pub fn eval_derivative(

@@ -1508,6 +1508,23 @@ pub unsafe extern "C" fn rspice_zi_step_native(
 
     let operands = unsafe { std::slice::from_raw_parts(operands, operand_count) };
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
+    if ctx.static_dae_probe != 0 {
+        return match crate::vm::observe_zi_state(
+            &filters[filter_id],
+            layout,
+            operands,
+            ctx.time,
+            false,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!(
+                    "native zi filter {filter_id} static observation failed: {error}"
+                ));
+                0.0
+            }
+        };
+    }
     if !filters[filter_id].definition_is_frozen() {
         match layout.freeze_filter(operands) {
             Ok(filter) => filters[filter_id] = filter,
@@ -1601,6 +1618,23 @@ pub unsafe extern "C" fn rspice_zi_derivative_native(
     }
     let operands = unsafe { std::slice::from_raw_parts(operands, operand_count) };
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
+    if ctx.static_dae_probe != 0 {
+        return match crate::vm::observe_zi_state(
+            &filters[filter_id],
+            layout,
+            operands,
+            ctx.time,
+            true,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!(
+                    "native zi filter {filter_id} static observation failed: {error}"
+                ));
+                0.0
+            }
+        };
+    }
     if !filters[filter_id].definition_is_frozen() {
         match layout.freeze_filter(operands) {
             Ok(filter) => filters[filter_id] = filter,
@@ -3587,6 +3621,19 @@ mod tests {
             0.0_f64.to_bits()
         );
         assert_eq!(timer_bound.to_bits(), 0.9_f64.to_bits());
+        assert!(ctx.take_runtime_error().is_none());
+        let before = format!("{filters:?}");
+        timer_bound = f64::INFINITY;
+        ctx.static_dae_probe = 1;
+        assert_eq!(
+            unsafe { rspice_zi_step_native(operands.as_ptr(), &ctx, descriptor) },
+            0.0
+        );
+        assert!(
+            timer_bound.is_infinite(),
+            "static observations do not publish events"
+        );
+        assert_eq!(format!("{filters:?}"), before);
         assert!(ctx.take_runtime_error().is_none());
     }
 

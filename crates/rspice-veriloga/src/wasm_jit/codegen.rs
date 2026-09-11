@@ -2511,7 +2511,20 @@ fn f64_mem(offset: u64) -> MemArg {
 /// entry points the browser binds, so a test can never disagree with the
 /// browser about what `exp` means.
 #[cfg(test)]
-pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>, memory: wasmi::Memory) {
+pub(super) fn define_test_math_imports<T: 'static>(
+    linker: &mut wasmi::Linker<T>,
+    memory: wasmi::Memory,
+) {
+    define_test_math_imports_with_session(linker, memory, |_| None);
+}
+
+/// Bind the production slice helper when the harness owns runtime state.
+#[cfg(test)]
+pub(super) fn define_test_math_imports_with_session<T: 'static>(
+    linker: &mut wasmi::Linker<T>,
+    memory: wasmi::Memory,
+    runtime_session: fn(&mut T) -> Option<&mut super::runtime::WasmJitRuntimeSession>,
+) {
     linker
         .func_wrap(
             WASM_JIT_IMPORT_MODULE,
@@ -2524,10 +2537,6 @@ pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>, memory:
                   aux2: i64,
                   count: i32|
                   -> f64 {
-                assert_eq!(
-                    opcode, 251,
-                    "stateful slice operation requires a session-aware harness"
-                );
                 let count = usize::try_from(count).expect("nonnegative operand count");
                 assert!(count <= WASM_JIT_MAX_SLICE_OPERANDS);
                 let start = frame as usize + super::abi::WASM_JIT_SLICE_OPERANDS_OFFSET as usize;
@@ -2535,17 +2544,25 @@ pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>, memory:
                     .chunks_exact(8)
                     .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
                     .collect::<Vec<_>>();
-                super::runtime::evaluate_sum_products_div(aux0, aux1, aux2, &operands)
-                    .unwrap_or_else(|_| {
-                        memory
-                            .write(
-                                &mut caller,
-                                frame as usize + FRAME_ERROR_STATUS_OFFSET as usize,
-                                &WASM_JIT_STATUS_RUNTIME_ERROR.to_le_bytes(),
-                            )
-                            .expect("write helper status");
-                        0.0
-                    })
+                let result = if opcode == 251 {
+                    super::runtime::evaluate_sum_products_div(aux0, aux1, aux2, &operands)
+                } else {
+                    let session = runtime_session(caller.data_mut())
+                        .expect("stateful slice operation requires a session-aware harness");
+                    super::runtime::evaluate_slice_helper_with_session(
+                        opcode, aux0, aux1, aux2, &operands, session,
+                    )
+                };
+                result.unwrap_or_else(|_| {
+                    memory
+                        .write(
+                            &mut caller,
+                            frame as usize + FRAME_ERROR_STATUS_OFFSET as usize,
+                            &WASM_JIT_STATUS_RUNTIME_ERROR.to_le_bytes(),
+                        )
+                        .expect("write helper status");
+                    0.0
+                })
             },
         )
         .expect("define slice helper import");
