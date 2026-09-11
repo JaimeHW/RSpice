@@ -13,6 +13,39 @@ use crate::abort_signal::AbortSignal;
 use crate::netlist::VerilogAInclude;
 use crate::{ResourceLimits, SimulationError};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+#[derive(Default)]
+struct DependencyVersions {
+    observed: HashMap<PathBuf, ([u8; 32], PathBuf)>,
+}
+
+impl DependencyVersions {
+    fn record(
+        &mut self,
+        root: &Path,
+        path: &Path,
+        identity: [u8; 32],
+    ) -> Result<(), SimulationError> {
+        match self.observed.entry(path.to_path_buf()) {
+            std::collections::hash_map::Entry::Occupied(previous) => {
+                let (first_identity, first_root) = previous.get();
+                if first_identity != &identity {
+                    return Err(SimulationError::Netlist(format!(
+                        "Verilog-A dependency '{}' changed while sources '{}' and '{}' were being elaborated; retry with a stable source snapshot",
+                        path.display(),
+                        first_root.display(),
+                        root.display()
+                    )));
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert((identity, root.to_path_buf()));
+            }
+        }
+        Ok(())
+    }
+}
 
 pub(super) fn resolve_includes(
     includes: &[VerilogAInclude],
@@ -34,6 +67,7 @@ pub(super) fn resolve_includes(
         groups[group].push(index);
     }
     let mut models = vec![None; includes.len()];
+    let mut dependency_versions = DependencyVersions::default();
     for group in groups {
         let path = &includes[group[0]].file_path;
         let mut needs_preparation = false;
@@ -71,6 +105,9 @@ pub(super) fn resolve_includes(
         }
         if needs_preparation {
             let prepared = prepare_veriloga_source(path, limits, abort)?;
+            for dependency in prepared.dependencies() {
+                dependency_versions.record(path, &dependency.path, dependency.content_identity)?;
+            }
             let specification = prepared.connect_specification();
             let source_identity = specification.source_identity.clone();
             let has_modules = specification.declares_module;
@@ -84,7 +121,7 @@ pub(super) fn resolve_includes(
             // Reuse the complete analyzed tree for every selected module, and
             // release it before preparing the next source group.
             let mut compiled_selections = HashMap::new();
-            for index in group {
+            for &index in &group {
                 let include = &includes[index];
                 if !has_modules {
                     if let Some(module) = &include.selected_module {
@@ -122,12 +159,23 @@ pub(super) fn resolve_includes(
                 }
             }
         } else {
-            for index in group {
+            for &index in &group {
                 if let Some(artifact) = models[index]
                     .as_ref()
                     .and_then(|entry| entry.canonical_ir.as_deref())
                 {
                     rules.register_artifact(&includes[index].file_path, artifact)?;
+                }
+            }
+        }
+        for index in group {
+            if let Some(entry) = &models[index] {
+                for dependency in &entry.dependencies {
+                    dependency_versions.record(
+                        path,
+                        &dependency.canonical_path,
+                        dependency.content_hash,
+                    )?;
                 }
             }
         }

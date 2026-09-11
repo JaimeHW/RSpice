@@ -76,7 +76,7 @@ checkpoint representation, before optimizing partitions or caches.
 | Required behavior | Packages | Implementation at this checkpoint | Qualification |
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
-| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport and shared file preparation implemented; design-wide configuration work remains | Focused file/virtual and source-refresh cases pass |
+| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation and cross-root dependency consistency implemented; explicit configuration work remains | Focused file/virtual and source-refresh cases pass |
 | Complete resolved module timing and scheduling regions | MS02 | Open | Pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
@@ -120,6 +120,7 @@ invented throughput numbers do not qualify parity.
 | Connection integrity and parameter-source reuse | Compiler target `mixed_runtime_compile`, filtered to `connection_closure_is_retained_validated_and_reused_for_specialization`, no default features | Passed: retained user definitions, specialization, round-trip, missing/lost/altered payload rejection |
 | Immutable preparation (`0b92805e8`) | Compiler target `prepared_source`, no default features | 2 passed: multiple modules compile with a removed include, captured identities remain correct, a new preparation sees changed bytes, source limits apply, standalone libraries need no device module |
 | Engine source groups and cache provenance | Core target `veriloga_connect_source_closure`, portable Verilog feature | Both cases pass: shared virtual rules/cache reuse and a source edit during multi-module compilation followed by a fresh run |
+| Cross-root source consistency | Core target `veriloga_connect_source_closure`, filtered to `snapshot`, portable Verilog feature | 2 passed: same-root frozen compilation and cross-root conflict/retry |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -140,8 +141,11 @@ emission leaves both modules at 1 mS in that run. The next run recompiles both a
 new include's identity. Standalone connection rules keep both logic outputs at
 1 V. All voltage budgets remain 1e-9 V.
 
-Design-wide dependency consistency across different roots and explicit
-configuration selection remain MS01 work; authored body execution remains MS07.
+Different file roots also share a dependency-version ledger during elaboration.
+If the same dependency was consumed with different bytes, the build identifies
+the dependency and both roots and requests a stable source snapshot. A retry
+can reuse or invalidate the captured cache entries normally. Explicit
+configuration selection remains MS01 work; authored body execution remains MS07.
 Generated artifact regeneration and the complete target matrix
 remain integration/release work after the shared schemas stabilize.
 

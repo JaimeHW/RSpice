@@ -179,3 +179,36 @@ fn virtual_models_share_active_included_connection_rules_after_transport_and_cac
         }
     }
 }
+
+#[test]
+fn different_roots_cannot_mix_versions_of_a_shared_source_snapshot() {
+    let tree = SourceTree::new();
+    let header = tree.write("gain.vh", "`define GAIN 1e-3\n");
+    let root_source = |name: &str| {
+        format!(
+            "`include \"gain.vh\"\nmodule {name}(p,n,q); inout p,n; electrical p,n; output q; reg q; parameter real gain=`GAIN; initial q=1; analog I(p,n)<+gain*V(p,n); endmodule\n"
+        )
+    };
+    let first = tree.write("first.va", &root_source("first"));
+    let second = tree.write("second.va", &root_source("second"));
+    let deck = Netlist::parse(&format!(
+        "* root source consistency\nV1 p 0 1\nX1 p 0 q1 first\nX2 p 0 q2 second\n.va \"{}\" first\n.va \"{}\" second\n.end\n",
+        first.to_string_lossy().replace('\\', "/"),
+        second.to_string_lossy().replace('\\', "/"),
+    )).unwrap();
+    let edit = EditDuringCompilation {
+        header,
+        edited: AtomicBool::new(false),
+    };
+    let error = Engine::default()
+        .build_circuit_with_abort(&deck, &edit)
+        .unwrap_err()
+        .to_string();
+    assert!(edit.edited.load(Ordering::SeqCst));
+    for expected in ["gain.vh", "first.va", "second.va", "stable source snapshot"] {
+        assert!(error.contains(expected), "{error}");
+    }
+    // The interrupted build may populate the optimization cache, but all
+    // entries retain their captured identities and the next build can recover.
+    Engine::default().build_circuit(&deck).unwrap();
+}
