@@ -57,8 +57,8 @@ use super::*;
 // fixed at their declared defaults (section 12.2) instead of being refused; and
 // a sized literal keeps the width its author wrote (section 3.5.1) rather than
 // widening to thirty-two. Source that version 27 refused now compiles, and
-// source it compiled can produce a different artifact — a concatenation holding
-// a sized literal is a different width and therefore a different value — so the
+// source it compiled can produce a different artifact â€” a concatenation holding
+// a sized literal is a different width and therefore a different value â€” so the
 // record's identity has to change.
 // Version 29 sizes a digital expression by its context, IEEE 1364-2005 section
 // 5.4.1. The assignment's left-hand side is part of the expression's context,
@@ -66,8 +66,8 @@ use super::*;
 // the largest expression including the target and the operation runs at that
 // width; an unsized literal takes a context wider than its 32-bit floor. A
 // version-28 artifact computed `a * b` at the operand width and widened the
-// product afterwards, which is a different number rather than a narrower one —
-// `{cout, sum} = a + b` had a `cout` that could never be 1 — so every cached
+// product afterwards, which is a different number rather than a narrower one â€”
+// `{cout, sum} = a + b` had a `cout` that could never be 1 â€” so every cached
 // digital artifact has to be rebuilt and the record's identity has to change.
 // Version 30 signs a digital expression, IEEE 1364-2005 section 5.4.2. A net,
 // variable or port declared `signed`, an `integer`, a plain decimal number and
@@ -94,7 +94,7 @@ use super::*;
 // plan signal now records which, a real net starts at 0.0 rather than at
 // `z`, and real arithmetic, real comparison and a real conditional are
 // three new value kinds a process function can hold. A version-31 artifact
-// could not contain any of them — `wreal` was refused at the keyword — so
+// could not contain any of them â€” `wreal` was refused at the keyword â€” so
 // nothing cached is being reinterpreted here. What changes is the *shape*
 // of the record: a plan serialized by version 32 carries a field version
 // 31's reader does not know, and a version-31 plan decodes under version 32
@@ -102,19 +102,19 @@ use super::*;
 // default is the fail-closed reading, so the record's identity changes.
 // Version 33 gives the discrete domain a real *variable*, which is where a
 // real-number model keeps state. `real` is now a discrete-domain signal class
-// beside `wreal` — written procedurally rather than driven, per IEEE 1364-2005
-// section 6.2 — reached either by `output real` or by a module-level `real` a
+// beside `wreal` â€” written procedurally rather than driven, per IEEE 1364-2005
+// section 6.2 â€” reached either by `output real` or by a module-level `real` a
 // process writes in a module with no analog block. `$realtobits` and
 // `$bitstoreal` are two more value kinds, a `parameter real` folds into a real
 // expression, and a deferred nonblocking update carries either a four-state
 // value or a real. A version-32 artifact could contain none of that: every one
 // of those constructs was refused by name, so nothing cached is being
-// reinterpreted. What changes is the shape of the record again — a plan
+// reinterpreted. What changes is the shape of the record again â€” a plan
 // serialized by version 33 can carry a real variable and a deferred real update
-// that version 32's reader has no case for — so the record's identity changes
+// that version 32's reader has no case for â€” so the record's identity changes
 // rather than relying on a decode that would silently drop them.
-// Version 34 reserves the six Verilog-AMS connect keywords — `connect`,
-// `connectrules`, `endconnectrules`, `resolveto`, `merged` and `split` — and
+// Version 34 reserves the six Verilog-AMS connect keywords â€” `connect`,
+// `connectrules`, `endconnectrules`, `resolveto`, `merged` and `split` â€” and
 // reads the two constructs they belong to: `connectmodule`, which LRM 2.4
 // Syntax 7-4 makes a third `module_keyword` and which the parser refused
 // outright before, and the `connectrules` block of Syntax 7-5. It also reads
@@ -122,7 +122,7 @@ use super::*;
 //
 // Unlike versions 32 and 33, this is not a new shape inside the plan: no
 // executable form of a connect module exists yet, so nothing new reaches a
-// cached artifact. What changes is what the *front end accepts* — a source
+// cached artifact. What changes is what the *front end accepts* â€” a source
 // that was a hard parse error under version 33 compiles under 34, and six
 // identifiers that were legal names are not any more. A cached artifact
 // therefore no longer stands for the same compile, and the fail-closed
@@ -133,8 +133,8 @@ use super::*;
 // A compiler directive the preprocessor does not know now takes its operand
 // with it, per the preprocessor's own rule that a line opening with a backtick
 // is a directive line. Under version 34 the operand stayed in the token
-// stream, so `` `default_nettype wire `` was a hard parse error — the `wire`
-// reached the top-level item loop alone — and under 35 the whole line is
+// stream, so `` `default_nettype wire `` was a hard parse error â€” the `wire`
+// reached the top-level item loop alone â€” and under 35 the whole line is
 // dropped and the file compiles. That is the same kind of change as 34's:
 // nothing in a cached plan is reinterpreted, but a cached artifact no longer
 // stands for the same compile, and the fail-closed reading is to rebuild.
@@ -166,8 +166,8 @@ use super::*;
 // makes a third class of source compile that did not: one whose analog body
 // neither reads nor writes the variable a process owns.
 //
-// Nothing cached is reinterpreted — every construct involved was refused under
-// 36, so no version-36 record contains one — but a cached artifact no longer
+// Nothing cached is reinterpreted â€” every construct involved was refused under
+// 36, so no version-36 record contains one â€” but a cached artifact no longer
 // stands for the same compile, and the fail-closed reading is to rebuild.
 //
 // Version 38 follows the canonical IR's own schema from 12 to 13. The HIR now
@@ -175,7 +175,7 @@ use super::*;
 // structured-body expression is a second lowering of, which is what lets a
 // CFG-sourced backend name the state record an operator owns. A version-37
 // record predates the map and would deserialize with an empty one, and an empty
-// correspondence is not "no operators" — it is "every operator unmapped", which
+// correspondence is not "no operators" â€” it is "every operator unmapped", which
 // a CFG-sourced consumer must refuse. Rebuilding is both the fail-closed and the
 // only useful reading. `CANONICAL_IR_SCHEMA_VERSION` would refuse such a record
 // on its own; this constant moves with it so the refusal happens at the cache
@@ -208,7 +208,7 @@ use super::*;
 // snapshot slot filled where the definition reaches. A version-40 record holds
 // a `CompiledModel` with neither the snapshot variables nor the redirected
 // stamp programs, and nothing in the record distinguishes one written before
-// the repair from one written after — reading it would silently stamp the
+// the repair from one written after â€” reading it would silently stamp the
 // defective value on the VM and JIT routes. Rebuilding is the only reading.
 // Version 42 carries the same repair onto the JIT and WASM routes. A version-41
 // record holds the snapshot slots and the redirected stamp programs but not the
@@ -216,13 +216,13 @@ use super::*;
 // executable routes replay statements rather than steps: they would run a
 // version-41 model with the copies never made and the equations still reading
 // the slot the assignment pass finishes with. The plan is not recoverable from
-// the record — it names the statement each definition was written at, and the
+// the record â€” it names the statement each definition was written at, and the
 // record keeps no statement sequence. Rebuilding is the only reading.
 //
 // Version 43 changes how a non-finite float is written. This record is JSON,
 // and JSON has no spelling for an infinity: through version 42 `serde_json`
-// wrote one as `null`, so a `from (0:inf)` parameter — which the compact models
-// are full of — was cached with `CompiledParameter.max` as `null` and read back
+// wrote one as `null`, so a `from (0:inf)` parameter â€” which the compact models
+// are full of â€” was cached with `CompiledParameter.max` as `null` and read back
 // as `None`, the declared bound simply gone. The compiler now encodes a
 // non-finite float as a string (`rspice_veriloga::json_float`), but a
 // version-42 record's `null` is indistinguishable from a parameter that never
@@ -235,7 +235,7 @@ use super::*;
 // record contains, not how an old one reads. A version-43 record written before
 // the convention carries the full twin, which was byte-identical to
 // `assignment_steps` after state renumbering, and the noise replay executes
-// `noise_assignment_steps` when it is non-empty — so the old record replays
+// `noise_assignment_steps` when it is non-empty â€” so the old record replays
 // exactly the steps it always did, and the new one replays the same steps
 // through the ordinary list. Nothing in the record becomes ambiguous, so
 // rebuilding it would buy nothing.
@@ -1769,7 +1769,7 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 ///
 /// For a module with no digital content the option changes nothing at all. Its
 /// entire effect inside the compiler is to skip `reject_digital_content`, which
-/// on an analog-only module is a no-op — so the `CompiledModel` and the
+/// on an analog-only module is a no-op â€” so the `CompiledModel` and the
 /// canonical artifact a deck's analog `.va` produces are the ones it produced
 /// before.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
