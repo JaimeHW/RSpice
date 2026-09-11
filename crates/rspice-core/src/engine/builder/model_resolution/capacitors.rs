@@ -52,8 +52,10 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
 
     let mut capacitance = instance_param(instance_params, &["C", "CAP", "VALUE"]);
-    let explicit_capacitance_given = capacitance.is_some() || value.is_finite();
-    if capacitance.is_none() && value.is_finite() {
+    // NaN is the parser's omitted-value sentinel. Other invalid explicit
+    // values must reach validation instead of selecting a model fallback.
+    let explicit_capacitance_given = capacitance.is_some() || !value.is_nan();
+    if capacitance.is_none() && !value.is_nan() {
         capacitance = Some(value);
     }
 

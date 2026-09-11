@@ -17,6 +17,69 @@ fn negative_explicit_capacitance_cannot_select_a_model_default() {
 }
 
 #[test]
+fn nonpositive_explicit_inductance_cannot_select_a_model_default() {
+    for element in ["L1 in 0 0 LM", "L1 in 0 -1m LM", "L1 in 0 LM L=-1m"] {
+        let source = format!("Invalid inductance\nV1 in 0 1\n{element}\n.model LM L(L=1m)\n.end\n");
+        let netlist = Netlist::parse(&source).unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .err()
+            .unwrap_or_else(|| panic!("{element}: invalid explicit value selected a fallback"));
+        assert!(
+            matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
+            "{element}: {error}"
+        );
+    }
+}
+
+#[test]
+fn infinite_explicit_reactive_values_cannot_select_model_defaults() {
+    for (prefix, model) in [("C", "C(C=1n)"), ("L", "L(L=1m)")] {
+        for invalid in [f64::INFINITY, f64::NEG_INFINITY] {
+            let mut netlist = Netlist::parse(&format!(
+                "SDK value\nV1 in 0 1\n{prefix}1 in 0 MOD\n.model MOD {model}\n.end\n"
+            ))
+            .unwrap();
+            let element = netlist
+                .elements
+                .iter_mut()
+                .find(|element| element.name == format!("{prefix}1"))
+                .unwrap();
+            match &mut element.kind {
+                rspice_core::netlist::ElementKind::Capacitor { value, .. }
+                | rspice_core::netlist::ElementKind::Inductor { value, .. } => *value = invalid,
+                _ => unreachable!(),
+            }
+            let error = Engine::default()
+                .build_circuit(&netlist)
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{prefix}1={invalid}: infinity selected a model fallback")
+                });
+            assert!(
+                matches!(error, rspice_core::SimulationError::Circuit(_)),
+                "arithmetic failure must not establish a parameter boundary: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reactive_scaling_range_failures_do_not_establish_parameter_domains() {
+    for element in ["C1 in 0 1e308 SCALE=2", "L1 in 0 1e-200 SCALE=1e-200"] {
+        let netlist =
+            Netlist::parse(&format!("Scaling range\nV1 in 0 1\n{element}\n.end\n")).unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("unrepresentable effective value");
+        assert!(
+            matches!(error, rspice_core::SimulationError::Circuit(_)),
+            "{element}: {error}"
+        );
+    }
+}
+
+#[test]
 fn invalid_model_expressions_cannot_silently_select_passive_defaults() {
     let models = [
         (

@@ -352,6 +352,44 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn reactive_values_cannot_select_model_defaults_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        let underflow = rspice_core::Netlist::parse(
+            "Scaling range\nV1 in 0 1\nL1 in 0 1e-200 SCALE=1e-200\n.end\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            rspice_core::Engine::default().build_circuit_with_abort(&underflow, &NoAbort),
+            Err(rspice_core::SimulationError::Circuit(_))
+        ));
+        for (prefix, model, finite_invalid) in [("C", "C(C=1n)", -1.0), ("L", "L(L=1m)", 0.0)] {
+            for invalid in [finite_invalid, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut netlist = rspice_core::Netlist::parse(&format!(
+                    "SDK value\nV1 in 0 1\n{prefix}1 in 0 MOD\n.model MOD {model}\n.end\n"
+                ))
+                .unwrap();
+                for element in &mut netlist.elements {
+                    match &mut element.kind {
+                        rspice_core::netlist::ElementKind::Capacitor { value, .. }
+                        | rspice_core::netlist::ElementKind::Inductor { value, .. } => {
+                            *value = invalid
+                        }
+                        _ => {}
+                    }
+                }
+                let error = rspice_core::Engine::default()
+                    .build_circuit_with_abort(&netlist, &NoAbort)
+                    .expect_err("invalid explicit value");
+                assert_eq!(
+                    matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
+                    invalid.is_finite(),
+                    "{prefix}1={invalid}: {error}"
+                );
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_does_not_infer_domains_from_trial_failures_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         let netlist = rspice_core::Netlist::parse(

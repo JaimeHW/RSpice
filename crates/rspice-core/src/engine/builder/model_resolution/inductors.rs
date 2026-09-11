@@ -58,7 +58,9 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         resolve_passive_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
 
     let mut inductance = instance_param(instance_params, &["L", "IND", "VALUE"]);
-    if inductance.is_none() && value.is_finite() && value > 0.0 {
+    // Only NaN denotes an omitted positional value; preserve invalid explicit
+    // values so a model default cannot silently replace the authored input.
+    if inductance.is_none() && !value.is_nan() {
         inductance = Some(value);
     }
 
@@ -142,9 +144,17 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         resolved /= mult;
     }
 
-    if !resolved.is_finite() || resolved <= 0.0 {
+    // A zero produced from a nonzero base may be arithmetic underflow. It
+    // cannot establish a physical boundary for one-sided sensitivity trials.
+    if !resolved.is_finite() || (resolved == 0.0 && inductance != Some(0.0)) {
         return Err(SimulationError::Circuit(format!(
             "Inductor '{}' resolved to invalid inductance {}",
+            element_name, resolved
+        )));
+    }
+    if resolved <= 0.0 {
+        return Err(SimulationError::ParameterDomain(format!(
+            "Inductor '{}' resolved to nonpositive inductance {}",
             element_name, resolved
         )));
     }
