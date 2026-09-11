@@ -836,12 +836,11 @@ fn flow_ddx_matches_a_branch_unknown_finite_difference_with_voltage_coupling() {
 module flow_readback(p, n, ctrl, out, reverse, monitor);
     inout p, n, ctrl, out, reverse, monitor;
     electrical p, n, ctrl, out, reverse, monitor;
-    branch (p, n) sense;
     analog begin
-        V(sense) <+ 0.25;
-        I(out, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(sense));
-        I(reverse, n) <+ ddx(I(sense) * I(sense) + V(ctrl, n) * I(sense), I(n, p));
-        I(monitor, n) <+ I(sense) * I(sense) + V(ctrl, n) * I(sense);
+        V(p,n) <+ 0.25;
+        I(out, n) <+ ddx(I(p,n) * I(p,n) + V(ctrl, n) * I(p,n), I(p,n));
+        I(reverse, n) <+ ddx(I(p,n) * I(p,n) + V(ctrl, n) * I(p,n), I(n, p));
+        I(monitor, n) <+ I(p,n) * I(p,n) + V(ctrl, n) * I(p,n);
     end
 endmodule
 "#,
@@ -986,7 +985,7 @@ endmodule
 }
 
 #[test]
-fn flow_ddx_without_a_solver_branch_unknown_fails_closed() {
+fn flow_ddx_allocates_a_private_solver_axis() {
     let artifact = artifact(
         r#"
 module dependent_flow_axis(p, n);
@@ -996,16 +995,21 @@ module dependent_flow_axis(p, n);
 endmodule
 "#,
     );
-    let diagnostics = CfgModel::from_hir(&artifact.hir, &artifact.mir)
-        .expect_err("a contributed current is dependent, not a Newton axis");
-    assert!(
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("ddx flow probe requires a solver-owned branch-current unknown")
-        }),
-        "{diagnostics:#?}"
-    );
+    let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir).expect("flow axis lowers");
+    assert_eq!(artifact.mir.nodes.len(), 3);
+    let lanes: Vec<_> = (0..artifact.mir.nodes.len())
+        .map(|index| AdSeed::NodePotential(index.into()))
+        .collect();
+    let mut ad = differentiate(&cfg.function, &lanes).expect("flow axis differentiates");
+    let row = ad.derivative_row(cfg.residuals[0]);
+    let mut bias = bias_point(&artifact);
+    bias.node_potentials = vec![2.0, 0.0, -3.0];
+    let snapshot = evaluate_cfg(&ad.function, &inputs(&bias)).expect("flow axis evaluates");
+    // Voltage is independent of the solver current: this partial is zero.
+    assert_eq!(snapshot.value(cfg.residuals[0]), Some(0.0));
+    for value in row.into_iter().flatten() {
+        assert_eq!(snapshot.value(value), Some(0.0));
+    }
 }
 
 #[test]

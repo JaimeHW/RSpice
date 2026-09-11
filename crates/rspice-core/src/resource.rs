@@ -29,7 +29,7 @@ pub(crate) const MAX_POLYNOMIAL_EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ResourceKind {
-    /// Bytes in one root netlist before preprocessing.
+    /// Bytes in one root netlist and its retained typed parameter overrides.
     NetlistBytes,
     /// Logical lines in one root netlist before preprocessing.
     NetlistLines,
@@ -473,7 +473,7 @@ pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ResourceLimits {
-    /// Maximum bytes accepted in one root netlist.
+    /// Maximum bytes accepted in one root netlist and its retained typed parameter overrides.
     pub max_netlist_bytes: usize,
     /// Maximum logical lines accepted in one root netlist.
     pub max_netlist_lines: usize,

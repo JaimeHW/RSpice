@@ -1920,36 +1920,9 @@ endmodule
         }
     }
 
-    /// A noise magnitude over a contribution current reads the *same storage*
-    /// on both routes, which is what let noise take the CFG route.
-    ///
-    /// The shipped route freezes a contribution-current probe and reads it back
-    /// out of the storage the evaluation published — `LoadCurrent(pair)` here,
-    /// which is what `populate_noise_current_probe_cache` in `crate::device`
-    /// fills before a noise sweep reads a magnitude. The CFG route read the
-    /// *running sum* instead, and a magnitude written inside the contribution to
-    /// its own branch — `white_noise(abs(I(p, n)) * 4.0, "shot")`, the shot
-    /// noise idiom — is lowered before that contribution completes, so the sum
-    /// was the entry block's seeded zero. The magnitude evaluated to zero and
-    /// `try_noise_sources` dropped the source before the analysis saw it.
-    ///
-    /// What was missing was not the translation but the *leaf*: nothing built a
-    /// [`CfgValueKind::ContributedCurrent`](crate::canonical_ir::CfgValueKind)
-    /// at all, because `frozen_contributed_flow` names a probe only against a
-    /// contribution the walk has completed. A noise magnitude has no "yet" —
-    /// the consumer runs the whole body and caches every contribution's current
-    /// before evaluating one — so inside a magnitude the probe names the
-    /// branch's last contribution whatever the walk has reached, and the leaf
-    /// translates to the `LoadCurrent(pair)` the shipped route chose.
-    /// `CfgLowerer::noise_magnitude` in `crate::canonical_ir`'s `cfg_lower` is
-    /// that rule.
-    ///
-    /// `try_noise_sources_evaluates_current_probe_psd` in `tests/device_eval.rs`
-    /// is the same claim measured end to end, on the same module. This pin says
-    /// it without compiling and running a device: the two read-sets are equal,
-    /// and neither is empty.
+    // Shot-noise power reads the solved branch current in both plans.
     #[test]
-    fn a_noise_magnitude_over_a_contribution_current_reads_the_shipped_routes_storage() {
+    fn a_noise_magnitude_over_a_flow_source_reads_its_solver_unknown() {
         let source = r#"
 module cfg_noise_current_probe(p, n);
   inout p, n;
@@ -1973,29 +1946,11 @@ endmodule
         );
         assert_eq!(cfg.noise_psd.len(), 1);
 
-        // Both storages, because which one a probe reads depends on whether its
-        // endpoints are a terminal pair or an equation's own slot, and the
-        // claim is about neither being read.
-        let reads = |plan: &NativeModelPlan| {
-            (
-                plan.current_dependencies.noise_psd[0].clone(),
-                plan.current_dependencies.noise_psd_prior_currents[0].clone(),
-            )
-        };
-        // Not vacuous: the shipped magnitude really is a read of the published
-        // current, which is the quantity the CFG entry has to reproduce.
-        let shipped_reads = reads(&shipped);
-        assert!(
-            !shipped_reads.0.is_empty() || !shipped_reads.1.is_empty(),
-            "the shipped noise magnitude reads the contribution current it probes"
-        );
-
-        let cfg_reads = reads(&cfg);
-        assert_eq!(
-            cfg_reads, shipped_reads,
-            "the CFG noise magnitude reads the same contribution-current storage the shipped \
-             one does"
-        );
+        assert_eq!(model.internal_state_nodes.len(), 1);
+        for plan in [&shipped, &cfg] {
+            assert!(plan.current_dependencies.noise_psd[0].is_empty());
+            assert!(plan.current_dependencies.noise_psd_prior_currents[0].is_empty());
+        }
     }
 
     /// A module the CFG route refuses takes the postfix plan whole — every
@@ -2290,36 +2245,9 @@ endmodule
         }
     }
 
-    /// A contribution-current probe reads the storage the shipped route reads,
-    /// and nothing of the equation that filled it.
-    ///
-    /// The identity half of the closure, and the reason the class is closed
-    /// rather than bounded. The two routes are held to two things here.
-    ///
-    /// *The same storage.* A plan's current read-sets are recomputed from the
-    /// programs it actually carries — see the `read_set` calls above — so the
-    /// CFG plan's sets are a statement about the block programs and the postfix
-    /// plan's are a statement about the streams. Equal sets mean the two routes
-    /// load the same slots for the same entries, which is what
-    /// [`CfgRuntimeBindings`](crate::native::cfg_program::CfgRuntimeBindings)
-    /// is translating for.
-    ///
-    /// *Frozen, not recomputed.* The read-sets would also be equal if the CFG
-    /// program loaded the slot and then went on to inline the equation anyway,
-    /// so the second assertion is over the instructions: the entry holds the
-    /// load and holds nothing the inlined equation would have brought with it.
-    /// That is the assertion the 4.5-against-2.5 Jacobian was a symptom of —
-    /// `native_device_stamps_internal_node_current_probe_alias_jacobian_without_fallback`
-    /// in `native_contract` measures the matrix itself, on the plan production
-    /// builds.
+    // A probe is a solver leaf; no entry reads a partially evaluated source.
     #[test]
-    fn a_contribution_current_probe_reads_the_shipped_routes_storage() {
-        use crate::jit::expr::{NativeOp, VoltageNode};
-        use crate::jit::plan_program::PlanProgram;
-
-        // A two-terminal probe of a pair of terminals: the shipped route reads
-        // the pair's own running total, and `I(p, n)` on terminals 0 and 1 of a
-        // two-terminal module is pair `0 * (2 + 1) + 1`.
+    fn contribution_current_probes_use_solver_dependencies_in_both_plans() {
         let terminal_pair = r#"
 module cfg_probe_terminal_pair(p, n);
   inout p, n;
@@ -2330,10 +2258,6 @@ module cfg_probe_terminal_pair(p, n);
   end
 endmodule
 "#;
-        // A probe with an internal endpoint, which has no pair total, so the
-        // shipped route reads the contributing equation's own slot. The
-        // fixture is `native_internal_current_probe_alias_jacobian`, whose
-        // Jacobian is where the divergence was measured.
         let internal_node = r#"
 module cfg_probe_internal_node(p, n);
   inout p, n;
@@ -2346,92 +2270,40 @@ module cfg_probe_internal_node(p, n);
 endmodule
 "#;
 
-        for (case, source, expected, forbidden) in [
-            (
-                "terminal-pair",
-                terminal_pair,
-                NativeOp::LoadCurrent(1),
-                // Inlining `I(p, n)` would bring the first equation's
-                // `V(p, n)` with it, and the second equation reads no
-                // potential of its own.
-                "a node potential" as &str,
-            ),
-            (
-                "internal-node",
-                internal_node,
-                NativeOp::LoadPriorCurrent(0),
-                // This equation does read `V(p)`, so what inlining would add
-                // is the internal node the probed branch ends on.
-                "the internal node's potential",
-            ),
-        ] {
+        for source in [terminal_pair, internal_node] {
             let (model, artifact) = compile(source);
-            let (cfg, refused) = build_default_model_plan_reported(&model, &artifact)
-                .unwrap_or_else(|error| panic!("{case}: the CFG plan builds: {error}"));
-            assert!(
-                refused.is_none(),
-                "{case}: a contribution-current probe is no longer a divergence: {refused:?}"
-            );
-            let postfix = build_model_plan_with_canonical_ir(&model, &artifact)
-                .unwrap_or_else(|error| panic!("{case}: the postfix plan builds: {error}"));
-
-            let cfg_reads = &cfg.current_dependencies;
-            let postfix_reads = &postfix.current_dependencies;
-            assert_eq!(
-                (
-                    &cfg_reads.stamp_values,
-                    &cfg_reads.stamp_value_prior_currents
-                ),
-                (
-                    &postfix_reads.stamp_values,
-                    &postfix_reads.stamp_value_prior_currents
-                ),
-                "{case}: the two routes read the same current storage for every residual"
-            );
-            assert_eq!(
-                (&cfg_reads.jacobians, &cfg_reads.jacobian_prior_currents),
-                (
-                    &postfix_reads.jacobians,
-                    &postfix_reads.jacobian_prior_currents
-                ),
-                "{case}: the two routes read the same current storage for every Jacobian entry"
-            );
-
-            // The probing equation is the second one, and it is the entry the
-            // structural claim is about.
-            let PlanProgram::Blocks(probe) = &cfg.stamp_values[1] else {
-                panic!("{case}: the CFG route's residuals are block programs");
-            };
-            let ops: Vec<NativeOp> = probe
-                .ssa()
-                .instructions()
-                .iter()
-                .map(|instruction| instruction.op())
-                .collect();
-            assert!(
-                ops.contains(&expected),
-                "{case}: the probing residual loads the frozen current {expected:?}: {ops:?}"
-            );
-            let inlined = ops.iter().any(|op| match (case, op) {
-                ("terminal-pair", NativeOp::LoadVoltage { .. }) => true,
-                (
-                    "internal-node",
-                    NativeOp::LoadVoltage {
-                        pos: VoltageNode::Internal(_),
-                        ..
-                    }
-                    | NativeOp::LoadVoltage {
-                        neg: VoltageNode::Internal(_),
-                        ..
-                    },
-                ) => true,
-                _ => false,
-            });
-            assert!(
-                !inlined,
-                "{case}: the probing residual holds the load and not the equation behind it, so \
-                 it must not read {forbidden}: {ops:?}"
-            );
+            assert_eq!(model.internal_state_nodes.len(), 1);
+            let (cfg, refused) = build_default_model_plan_reported(&model, &artifact).unwrap();
+            assert!(refused.is_none(), "{refused:?}");
+            let postfix = build_model_plan_with_canonical_ir(&model, &artifact).unwrap();
+            for plan in [&cfg, &postfix] {
+                assert!(
+                    plan.current_dependencies
+                        .stamp_values
+                        .iter()
+                        .all(Vec::is_empty)
+                );
+                assert!(
+                    plan.current_dependencies
+                        .stamp_value_prior_currents
+                        .iter()
+                        .all(Vec::is_empty)
+                );
+                assert!(
+                    plan.current_dependencies
+                        .jacobians
+                        .iter()
+                        .flatten()
+                        .all(Vec::is_empty)
+                );
+                assert!(
+                    plan.current_dependencies
+                        .jacobian_prior_currents
+                        .iter()
+                        .flatten()
+                        .all(Vec::is_empty)
+                );
+            }
         }
     }
 
@@ -2653,21 +2525,8 @@ endmodule
         );
     }
 
-    /// A declared branch nothing contributes to — the one construct the CFG
-    /// route would have lowered differently and the screen that is gone used to
-    /// name — is refused by the *shipped* route, before a CFG plan is asked
-    /// for.
-    ///
-    /// This is why there is no divergence screen any more, and it is the
-    /// assertion that keeps that true. `I(sense)` on a branch with no
-    /// contribution and no branch unknown is `CfgValueKind::BranchFlow`, a
-    /// runtime-supplied flow that only the generated backend can answer; the
-    /// shipped route has no probe registered for it and says so. A module that
-    /// starts building here would be one carrying a construct nothing has
-    /// compared the two routes on, and this test would go red rather than let
-    /// it through quietly.
     #[test]
-    fn a_branch_nothing_contributes_to_is_refused_before_a_cfg_plan_is_asked_for() {
+    fn a_pure_flow_probe_builds_a_zero_potential_constraint() {
         let source = r#"
 module cfg_div_branch_flow(p, n);
   inout p, n;
@@ -2677,12 +2536,9 @@ module cfg_div_branch_flow(p, n);
 endmodule
 "#;
         let (model, artifact) = compile(source);
-        let error = build_default_model_plan_reported(&model, &artifact)
-            .expect_err("the shipped route cannot lower a probe of a branch with no current");
-        let message = error.to_string();
-        assert!(
-            message.contains("named branch current sense"),
-            "the refusal names the branch: {message}"
-        );
+        assert_eq!(model.internal_state_nodes.len(), 1);
+        let (_, refused) = build_default_model_plan_reported(&model, &artifact)
+            .expect("a pure flow probe is a zero-potential sensor");
+        assert!(refused.is_none(), "{refused:?}");
     }
 }

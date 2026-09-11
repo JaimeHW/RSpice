@@ -7,14 +7,14 @@ pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescripto
 
 use rspice_veriloga_runtime::{integer, rspice_limited_exp};
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 8] = [
-	GeneratedNoiseDescriptor { mechanism: "WHITE_DI_SI_IDS", label: Some("ids"), kind: GeneratedNoiseKind::White, equation: 65, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE___FLOW_STATE0_GND_IDS", label: Some("ids"), kind: GeneratedNoiseKind::White, equation: 65, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(23), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_D_FP4_RD", label: Some("rd"), kind: GeneratedNoiseKind::White, equation: 66, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(18), name: "fp4", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_S_FP4S_RS", label: Some("rs"), kind: GeneratedNoiseKind::White, equation: 67, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(22), name: "fp4s", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_D_DI_RD", label: Some("rd"), kind: GeneratedNoiseKind::White, equation: 68, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_S_SI_RS", label: Some("rs"), kind: GeneratedNoiseKind::White, equation: 69, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGS", label: Some("igs"), kind: GeneratedNoiseKind::White, equation: 70, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGD", label: Some("igd"), kind: GeneratedNoiseKind::White, equation: 71, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "FLICKER_DI_SI_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, equation: 108, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "FLICKER___FLOW_STATE0_GND_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, equation: 108, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(23), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
 ];
 
 impl Instance {
@@ -25,7 +25,7 @@ impl Instance {
 		let parameters = &self.params.values;
 		let parameter_given = &*self.param_given;
 		let temperature = ctx.temperature();
-		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22])];
+		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23])];
 		let A=0f64;
 		let B=1f64;
 		let C=0.01f64;
@@ -1540,14 +1540,14 @@ pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 8] = [
 	GeneratedNoiseProcessDescriptor { process_id: 7, label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 8] = [
-	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 65, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 65, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(23), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 	GeneratedNoiseInjectionDescriptor { process_id: 1, equation: 66, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(18), name: "fp4", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 67, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(22), name: "fp4s", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 3, equation: 68, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 4, equation: 69, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 5, equation: 70, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 6, equation: 71, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 7, equation: 108, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 7, equation: 108, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(23), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 ];
 
 impl Instance {
@@ -1564,7 +1564,7 @@ impl Instance {
 		let thermal_voltage = ctx.thermal_voltage();
 		let multiplicity = self.multiplicity;
 		let time = self.time;
-		let node_potentials: [f64; 23] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22])];
+		let node_potentials: [f64; 24] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23])];
 		let branch_flows: [f64; 0] = [];
 		let branch_unknown_flows: [f64; 57] = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5]), ctx.branch_current(self.branches[6]), ctx.branch_current(self.branches[7]), ctx.branch_current(self.branches[8]), ctx.branch_current(self.branches[9]), ctx.branch_current(self.branches[10]), ctx.branch_current(self.branches[11]), ctx.branch_current(self.branches[12]), ctx.branch_current(self.branches[13]), ctx.branch_current(self.branches[14]), ctx.branch_current(self.branches[15]), ctx.branch_current(self.branches[16]), ctx.branch_current(self.branches[17]), ctx.branch_current(self.branches[18]), ctx.branch_current(self.branches[19]), ctx.branch_current(self.branches[20]), ctx.branch_current(self.branches[21]), ctx.branch_current(self.branches[22]), ctx.branch_current(self.branches[23]), ctx.branch_current(self.branches[24]), ctx.branch_current(self.branches[25]), ctx.branch_current(self.branches[26]), ctx.branch_current(self.branches[27]), ctx.branch_current(self.branches[28]), ctx.branch_current(self.branches[29]), ctx.branch_current(self.branches[30]), ctx.branch_current(self.branches[31]), ctx.branch_current(self.branches[32]), ctx.branch_current(self.branches[33]), ctx.branch_current(self.branches[34]), ctx.branch_current(self.branches[35]), ctx.branch_current(self.branches[36]), ctx.branch_current(self.branches[37]), ctx.branch_current(self.branches[38]), ctx.branch_current(self.branches[39]), ctx.branch_current(self.branches[40]), ctx.branch_current(self.branches[41]), ctx.branch_current(self.branches[42]), ctx.branch_current(self.branches[43]), ctx.branch_current(self.branches[44]), ctx.branch_current(self.branches[45]), ctx.branch_current(self.branches[46]), ctx.branch_current(self.branches[47]), ctx.branch_current(self.branches[48]), ctx.branch_current(self.branches[49]), ctx.branch_current(self.branches[50]), ctx.branch_current(self.branches[51]), ctx.branch_current(self.branches[52]), ctx.branch_current(self.branches[53]), ctx.branch_current(self.branches[54]), ctx.branch_current(self.branches[55]), ctx.branch_current(self.branches[56])];
 		use rspice_veriloga_runtime::integer;
@@ -1687,16 +1687,14 @@ impl Instance {
 		let ABH=1f64;
 		let ABI=1f64;
 		let ABJ=1f64;
-		let ABK=1f64;
-		let ABL=1f64;
+		let ACA=0f64;
+		let ACB=0f64;
 		let ACC=0f64;
 		let ACD=0f64;
 		let ACE=0f64;
-		let ACF=0f64;
 		let ACG=0f64;
 		let ACH=0f64;
 		let ACI=0f64;
-		let ACJ=0f64;
 		let F=E== B;
 		let QS;
 		if F{
@@ -2588,17 +2586,18 @@ impl Instance {
 		let AAO;
 		let AAR;
 		let AAU;
+		let ABK;
+		let ABL;
 		let ABM;
 		let ABN;
 		let ABO;
-		let ABP;
-		let ABQ;
 		if TV{
 		let TW=KB/ KE;
 		let TX=((parameters[265]/ (((if !(KF).is_nan()&&(KF>=1e-10f64||(1e-10f64).is_nan()){KF}else{1e-10f64})* DS)* DS))* (((((((((5.522438177818063e-23f64* AB)* DU)* DT)* KC)* CL)* DU)* DT)* KC)* CL))* (TW* TW);
 		let TY=JW* JW;
 		let TZ=HH* HH;
 		let UA=(TX* (((EF* JY)+ (((TY* JW)- (TZ* HH))/ AY))- (DZ* (TY- TZ))))* KH;
+		let ACF=1f64* -1f64;
 		let AAA;
 		let AAD;
 		let AAG;
@@ -2607,10 +2606,10 @@ impl Instance {
 		let AAP;
 		let AAS;
 		let AAV;
+		let ABP;
+		let ABQ;
 		let ABR;
 		let ABS;
-		let ABT;
-		let ABU;
 		if QU{
 		let UB=E== A;
 		let AAB;
@@ -2621,10 +2620,10 @@ impl Instance {
 		let AAQ;
 		let AAT;
 		let AAW;
+		let ABT;
+		let ABU;
 		let ABV;
 		let ABW;
-		let ABX;
-		let ABY;
 		if UB{
 		let UC=(BC* AD)* DU;
 		let UE=(UC* UD)* KH;
@@ -2637,10 +2636,10 @@ impl Instance {
 		AAQ=A;
 		AAT=A;
 		AAW=A;
-		ABV=ABF;
-		ABW=ABG;
-		ABX=ACF;
-		ABY=ACG;
+		ABT=ABE;
+		ABU=ABF;
+		ABV=ACD;
+		ABW=ACE;
 		}else{
 		let UH=(BC* AD)* DU;
 		let UI=(UH* UD)* KH;
@@ -2653,10 +2652,10 @@ impl Instance {
 		AAQ=UI;
 		AAT=B;
 		AAW=UJ;
-		ABV=ACD;
-		ABW=ACE;
-		ABX=ABH;
-		ABY=ABI;
+		ABT=ACB;
+		ABU=ACC;
+		ABV=ABG;
+		ABW=ABH;
 		}
 		AAA=AAB;
 		AAD=AAE;
@@ -2666,10 +2665,10 @@ impl Instance {
 		AAP=AAQ;
 		AAS=AAT;
 		AAV=AAW;
+		ABP=ABT;
+		ABQ=ABU;
 		ABR=ABV;
 		ABS=ABW;
-		ABT=ABX;
-		ABU=ABY;
 		}else{
 		AAA=A;
 		AAD=A;
@@ -2679,10 +2678,10 @@ impl Instance {
 		AAP=A;
 		AAS=A;
 		AAV=A;
+		ABP=ACB;
+		ABQ=ACC;
 		ABR=ACD;
 		ABS=ACE;
-		ABT=ACF;
-		ABU=ACG;
 		}
 		ZX=B;
 		ZY=UA;
@@ -2694,11 +2693,11 @@ impl Instance {
 		AAO=AAP;
 		AAR=AAS;
 		AAU=AAV;
-		ABM=ABE;
+		ABK=ACF;
+		ABL=ABP;
+		ABM=ABQ;
 		ABN=ABR;
 		ABO=ABS;
-		ABP=ABT;
-		ABQ=ABU;
 		}else{
 		ZX=A;
 		ZY=A;
@@ -2710,19 +2709,19 @@ impl Instance {
 		AAO=A;
 		AAR=A;
 		AAU=A;
+		ABK=ACA;
+		ABL=ACB;
 		ABM=ACC;
 		ABN=ACD;
 		ABO=ACE;
-		ABP=ACF;
-		ABQ=ACG;
 		}
 		let UK=KR!= A;
 		let AAX;
 		let AAY;
 		let AAZ;
 		let ABA;
-		let ABZ;
-		let ACA;
+		let ABX;
+		let ABY;
 		if UK{
 		let UL=(3.204353268e-19f64* (QC.abs()))* KH;
 		let UM=(3.204353268e-19f64* (QJ.abs()))* KH;
@@ -2730,15 +2729,15 @@ impl Instance {
 		AAY=UL;
 		AAZ=B;
 		ABA=UM;
-		ABZ=ABJ;
-		ACA=ABK;
+		ABX=ABI;
+		ABY=ABJ;
 		}else{
 		AAX=A;
 		AAY=A;
 		AAZ=A;
 		ABA=A;
-		ABZ=ACH;
-		ACA=ACI;
+		ABX=ACG;
+		ABY=ACH;
 		}
 		let UN=E== A;
 		let ZC;
@@ -3010,7 +3009,7 @@ impl Instance {
 		let ABB;
 		let ABC;
 		let ABD;
-		let ACB;
+		let ABZ;
 		if YN{
 		let ZN=if !(YK).is_nan()&&(YK>=1e-22f64||(1e-22f64).is_nan()){YK}else{1e-22f64};
 		let ZO=if !(YM).is_nan()&&(YM>=1e-22f64||(1e-22f64).is_nan()){YM}else{1e-22f64};
@@ -3023,24 +3022,25 @@ impl Instance {
 		ZS
 		};
 		let ZV=ZU* parameters[8];
+		let ACJ=1f64* -1f64;
 		ABB=B;
 		ABC=ZV;
 		ABD=ZW;
-		ACB=ABL;
+		ABZ=ACJ;
 		}else{
 		ABB=A;
 		ABC=A;
 		ABD=A;
-		ACB=ACJ;
+		ABZ=ACI;
 		}
-		let ACK=ABM;
-		let ACL=ABN;
-		let ACM=ABO;
-		let ACN=ABP;
-		let ACO=ABQ;
-		let ACP=ABZ;
-		let ACQ=ACA;
-		let ACR=ACB;
+		let ACK=ABK;
+		let ACL=ABL;
+		let ACM=ABM;
+		let ACN=ABN;
+		let ACO=ABO;
+		let ACP=ABX;
+		let ACQ=ABY;
+		let ACR=ABZ;
 		ctx.check_noise_evaluation()?;
 		let process_0_active = ZX != 0.0;
 		let process_0_psd = (ZY).abs();

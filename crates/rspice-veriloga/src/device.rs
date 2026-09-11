@@ -9481,14 +9481,13 @@ endmodule
         let mut device =
             VerilogADevice::try_new_with_canonical_ir("POSTCURRENT1", model, &artifact, &[1, 0])
                 .expect("build completed-current native device");
-        let solution = [2.0_f64, 0.0_f64];
+        device.set_internal_node_indices(&[2, 3]);
+        let solution = [2.0_f64, 0.0_f64, -5.0_f64];
         device
             .try_update_all_voltages(&solution)
             .expect("update terminal and internal voltages");
 
-        // Every one of these names is a post-current assignment, so reading it
-        // back exercises the observation image's second phase as well as its
-        // first.
+        // Readback uses the converged solver current on every value path.
         let assert_outputs = |device: &mut VerilogADevice| {
             device
                 .observe_variables(&artifact)
@@ -9500,7 +9499,7 @@ endmodule
 
         assert_eq!(
             device.try_evaluate().expect("native device evaluation"),
-            vec![4.0, 1.0]
+            vec![4.0, 1.0, -5.0, -5.0]
         );
         assert_outputs(&mut device);
 
@@ -9673,7 +9672,7 @@ endmodule
     }
 
     #[test]
-    fn native_scalar_stamp_preserves_inactive_contribution_current_slots() {
+    fn native_scalar_stamp_preserves_guarded_current_feedback() {
         let source = r#"
 `include "disciplines.vams"
 module inactive_prior_current_slot(p, n);
@@ -9684,7 +9683,7 @@ module inactive_prior_current_slot(p, n);
     analog begin
         if (enabled)
             I(x, n) <+ 10.0;
-        I(x, n) <+ I(x, n) + 1.0;
+        I(x, n) <+ 0.5 * I(x, n) + 1.0;
         sensed = I(x, n);
     end
 endmodule
@@ -9700,15 +9699,16 @@ endmodule
             VerilogADevice::try_new_with_canonical_ir("INACTIVEPRIOR1", model, &artifact, &[1, 0])
                 .expect("build inactive prior-current native device");
 
+        device.set_internal_node_indices(&[2, 3]);
         device
-            .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+            .try_stamp(&[0.0, 0.0, -2.0], |_, _, _| {}, |_, _| {})
             .expect("scalar stamp retains the inactive contribution slot");
 
-        assert_eq!(device.context.currents, vec![0.0, 1.0]);
+        assert_eq!(device.context.currents, vec![0.0, 2.0, -2.0, -2.0]);
         device
             .observe_variables(&artifact)
             .expect("observation pass publishes the named variables");
-        assert_eq!(device.variable("sensed"), Some(1.0));
+        assert_eq!(device.variable("sensed"), Some(2.0));
     }
 
     #[test]

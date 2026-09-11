@@ -2611,26 +2611,14 @@ endmodule
         compile_model_with_canonical_ir(&model, &artifact)
             .expect("canonical guarded assignment current compiles");
 
-        // The phase split is a property of the pass that publishes
-        // `operating_current`, and under a CFG plan no entry reads it, so the
-        // pass that has it is the observation image's. Every claim below is the
-        // one the evaluation image used to carry, unchanged.
         let observation = observation_image(&model, &artifact);
-        assert_eq!(
-            observation.assignment_current_pairs().len(),
-            0,
-            "pre-current assignments must not read the terminal-current cache"
-        );
-        assert_eq!(observation.plan_stats().assignment_entry_points, 2);
-        assert_eq!(
-            observation.post_assignment_prior_currents(),
-            &[0],
-            "the post-current assignment reads the exact contribution slot"
-        );
+        assert!(observation.assignment_current_pairs().is_empty());
+        assert_eq!(observation.plan_stats().assignment_entry_points, 1);
+        assert!(observation.post_assignment_prior_currents().is_empty());
     }
 
     #[test]
-    fn canonical_post_current_assignments_preserve_source_order() {
+    fn canonical_current_probe_assignments_preserve_source_order() {
         let source = r#"
 module native_canonical_post_current_order(p, n);
   inout p, n;
@@ -2666,24 +2654,20 @@ endmodule
         let before = variable("before");
         let sensed = variable("sensed");
         let after = variable("after");
-        let currents = [3.0_f64];
+        let internal_voltages = [-3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
-        ctx.currents = currents.as_ptr();
-        ctx.currents_len = currents.len();
+        ctx.internal_voltages = internal_voltages.as_ptr();
         let mut variables = vec![0.0_f64; native.num_variables.max(1)];
-
         run_assignment_and_prelude(&native, &ctx, variables.as_mut_ptr());
-        assert_eq!(variables[before].to_bits(), 1.0_f64.to_bits());
-        assert_eq!(variables[sensed].to_bits(), 0.0_f64.to_bits());
-
-        assert!(native.run_post_assignments(&ctx, variables.as_mut_ptr()));
-        assert_eq!(variables[sensed].to_bits(), 4.0_f64.to_bits());
-        assert_eq!(variables[before].to_bits(), 2.0_f64.to_bits());
-        assert_eq!(variables[after].to_bits(), 6.0_f64.to_bits());
+        assert_eq!(variables[sensed], 4.0);
+        assert_eq!(variables[before], 2.0);
+        assert_eq!(variables[after], 6.0);
+        assert!(!native.run_post_assignments(&ctx, variables.as_mut_ptr()));
+        assert_eq!(variables[after], 6.0);
     }
 
     #[test]
-    fn canonical_current_dependent_stamp_assignment_is_rejected_as_a_cycle() {
+    fn canonical_current_feedback_assignment_compiles_as_a_solver_equation() {
         let source = r#"
 module native_canonical_current_assignment_cycle(p, n);
   inout p, n;
@@ -2700,15 +2684,9 @@ endmodule
         let artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
-        let error = compile_model_with_canonical_ir(&model, &artifact)
-            .expect_err("current-dependent stamp assignment must be rejected");
-
-        let message = error.to_string();
-        assert!(message.contains("sensed"), "{message}");
-        assert!(
-            message.contains("required before contribution-current evaluation"),
-            "{message}"
-        );
+        compile_model_with_canonical_ir(&model, &artifact)
+            .expect("current feedback is a solver equation, not an evaluation-order cycle");
+        assert_eq!(model.internal_state_nodes.len(), 1);
     }
 
     #[test]

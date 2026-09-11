@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 138] = [176, 109, 1, 177, 0, 178, 82, 86, 179, 25, 26, 89, 93, 180, 27, 28, 2, 3, 4, 5, 7, 192, 194, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 197, 18, 19, 20, 21, 22, 23, 24, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 199, 201, 203, 48, 52, 205, 206, 54, 56, 207, 208, 74, 81, 87, 209, 96, 99, 101, 104, 107, 210, 110, 112, 115, 212, 211, 123, 121, 122, 127, 131, 138, 139, 142, 146, 213, 214, 156, 158, 215, 160, 161, 162, 163, 164, 216, 217, 218, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 238, 239, 240, 241, 244, 246, 248, 219, 220, 236, 237, 242, 243, 245, 247, 249, 250, 170, 171, 172, 174, 175];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 138] = [176, 109, 1, 177, 0, 178, 82, 86, 179, 25, 26, 89, 93, 180, 27, 28, 2, 3, 4, 5, 7, 192, 194, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 197, 18, 19, 20, 21, 22, 23, 24, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 199, 201, 203, 48, 52, 205, 206, 54, 56, 207, 208, 74, 81, 87, 209, 96, 99, 101, 104, 107, 210, 110, 112, 115, 212, 211, 123, 121, 122, 127, 131, 138, 139, 142, 146, 213, 214, 156, 158, 215, 160, 161, 162, 163, 164, 216, 217, 218, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 238, 239, 240, 219, 220, 236, 237, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 170, 171, 172, 174, 175];
 pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 3] = [6, 41, 169];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 110] = [45, 42, 181, 182, 183, 184, 185, 186, 187, 188, 189, 51, 88, 143, 145, 47, 137, 60, 190, 124, 191, 119, 46, 193, 195, 196, 43, 68, 77, 79, 71, 75, 78, 80, 69, 84, 83, 85, 91, 90, 92, 64, 63, 168, 153, 198, 65, 200, 202, 204, 44, 49, 50, 53, 59, 58, 55, 57, 61, 62, 66, 67, 70, 72, 73, 76, 94, 95, 97, 98, 100, 102, 103, 105, 106, 108, 111, 113, 114, 116, 117, 120, 118, 125, 126, 128, 129, 130, 132, 133, 134, 150, 135, 136, 141, 140, 144, 148, 147, 151, 149, 152, 154, 155, 157, 159, 165, 166, 167, 173];
 
@@ -311,8 +311,8 @@ pub(super) fn canonical_model_preprocess(
 	let FA=N+ EZ;
 	let FC=N+ FB;
 	let FE=N+ FD;
-	let FG=N+ FF;
-	let FI=N+ FH;
+	let FG=N+ (-FF);
+	let FI=N+ (-FH);
 	let FK=N+ FJ;
 	let FM=N+ FL;
 	let FO=N+ FN;
@@ -321,8 +321,8 @@ pub(super) fn canonical_model_preprocess(
 	let FU=N+ FT;
 	let FW=N+ FV;
 	let FY=N+ FX;
-	let GA=N+ FZ;
-	let GC=N+ GB;
+	let GA=N+ (-FZ);
+	let GC=N+ (-GB);
 	let GH;
 	let GI;
 	if BO{
@@ -334,9 +334,9 @@ pub(super) fn canonical_model_preprocess(
 	GH=N;
 	GI=GG;
 	}
-	let GK=N+ GJ;
-	let GM=N+ GL;
-	let GO=N+ GN;
+	let GK=N+ (-GJ);
+	let GM=N+ (-GL);
+	let GO=N+ (-GN);
 	let GP;
 	let GQ;
 	let GR;
@@ -352,57 +352,57 @@ pub(super) fn canonical_model_preprocess(
 	let HK;
 	let HL;
 	if CL{
-	let GY=N+ GX;
+	let GY=N+ (-GX);
 	let HA=N+ GZ;
 	let HC=N+ HB;
 	HH=GY;
-	HI=N;
-	HJ=HA;
-	HK=HC;
+	HI=HA;
+	HJ=HC;
+	HK=N;
 	HL=N;
 	}else{
-	let HE=N+ HD;
+	let HE=N+ (-HD);
 	let HG=N+ HF;
 	HH=N;
-	HI=HE;
+	HI=N;
 	HJ=N;
-	HK=N;
+	HK=HE;
 	HL=HG;
 	}
 	GP=HH;
 	GQ=HI;
-	GR=N;
-	GS=N;
-	GT=HJ;
-	GU=HK;
-	GV=HL;
+	GR=HJ;
+	GS=HK;
+	GT=HL;
+	GU=N;
+	GV=N;
 	GW=N;
 	}else{
 	let HS;
 	let HT;
 	let HU;
 	if CL{
-	let HN=N+ HM;
+	let HN=N+ (-HM);
 	let HP=N+ HO;
 	HS=HN;
-	HT=N;
-	HU=HP;
-	}else{
-	let HR=N+ HQ;
-	HS=N;
-	HT=HR;
+	HT=HP;
 	HU=N;
+	}else{
+	let HR=N+ (-HQ);
+	HS=N;
+	HT=N;
+	HU=HR;
 	}
 	GP=N;
 	GQ=N;
-	GR=HS;
-	GS=HT;
+	GR=N;
+	GS=N;
 	GT=N;
-	GU=N;
-	GV=N;
+	GU=HS;
+	GV=HT;
 	GW=HU;
 	}
-    [C as u8 as f64, K, L, O as u8 as f64, Q, R as u8 as f64, U, V, AB as u8 as f64, AF, AG, AI, AJ, AN as u8 as f64, AR, AS, AU, AE, AQ, AV, AY, AZ as u8 as f64, BA as u8 as f64, BD, BE, BF, BH, BI, BJ, BK, BL, BM, BN, BO as u8 as f64, oBP, oBQ, oBR, BS, BT, BU, BV, BX, BY, CA, CB, CC, CD, CE, CF, CG, CH, CI, H, CJ as u8 as f64, CK as u8 as f64, CL as u8 as f64, CM, CN, CR as u8 as f64, oCS as u8 as f64, CT, CV, CX as u8 as f64, oCZ as u8 as f64, oDA, DB as u8 as f64, DC as u8 as f64, DD as u8 as f64, oDF, oDG, oDH, oDI, DJ, DM as u8 as f64, oDN, oDP, oDQ, oDR as u8 as f64, DO as u8 as f64, oDT, oDV, oDW, I, DX, DY, EA, EB, ED, EE as u8 as f64, EF as u8 as f64, oEH, oEI, EG as u8 as f64, oEJ, oEL, oEM, EN, EO, EV as u8 as f64, EX as u8 as f64, oEY as u8 as f64, FA, FC, FE, FG, FI, FK, FM, FO, FQ, FS, FU, FW, FY, GA, GC, GK, GM, GO, GP, GQ, GR, GS, EQ, ET, GH, GI, GT, GU, GV, GW, ER, EU, CP, CU, CW, EC, oEK]
+    [C as u8 as f64, K, L, O as u8 as f64, Q, R as u8 as f64, U, V, AB as u8 as f64, AF, AG, AI, AJ, AN as u8 as f64, AR, AS, AU, AE, AQ, AV, AY, AZ as u8 as f64, BA as u8 as f64, BD, BE, BF, BH, BI, BJ, BK, BL, BM, BN, BO as u8 as f64, oBP, oBQ, oBR, BS, BT, BU, BV, BX, BY, CA, CB, CC, CD, CE, CF, CG, CH, CI, H, CJ as u8 as f64, CK as u8 as f64, CL as u8 as f64, CM, CN, CR as u8 as f64, oCS as u8 as f64, CT, CV, CX as u8 as f64, oCZ as u8 as f64, oDA, DB as u8 as f64, DC as u8 as f64, DD as u8 as f64, oDF, oDG, oDH, oDI, DJ, DM as u8 as f64, oDN, oDP, oDQ, oDR as u8 as f64, DO as u8 as f64, oDT, oDV, oDW, I, DX, DY, EA, EB, ED, EE as u8 as f64, EF as u8 as f64, oEH, oEI, EG as u8 as f64, oEJ, oEL, oEM, EN, EO, EV as u8 as f64, EX as u8 as f64, oEY as u8 as f64, FA, FC, FE, FG, FI, FK, FM, FO, FQ, FS, FU, FW, FY, GA, GC, GK, GM, GO, EQ, ET, GH, GI, GP, GQ, GR, GS, GT, GU, GV, GW, ER, EU, CP, CU, CW, EC, oEK]
 }
 
 pub(super) fn canonical_instance_preprocess(
@@ -993,7 +993,7 @@ impl Instance {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
-        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11])];
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23])];
         let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
@@ -3269,22 +3269,22 @@ impl Instance {
 		BFF=AKO;
 		BFG=BFB;
 		}
-		let BFH=(AIN* L)* BDE;
-		let BFI=C+ ((L* AII)* BDE);
-		let BFJ=(AHK* L)* BDE;
-		let BFK=C+ ((L* AHI)* BDE);
-		let BFL=(AIO* L)* BDE;
-		let BFM=C+ ((L* AIJ)* BDE);
+		let BFH=((AIN* L)* BDE)* AW;
+		let BFI=C+ (-((L* AII)* BDE));
+		let BFJ=((AHK* L)* BDE)* AW;
+		let BFK=C+ (-((L* AHI)* BDE));
+		let BFL=((AIO* L)* BDE)* AW;
+		let BFM=C+ (-((L* AIJ)* BDE));
 		let BFN=(AHR* L)* BDE;
 		let BFO=C+ ((L* AHQ)* BDE);
 		let BFP=(ANE* L)* BDE;
 		let BFQ=C+ ((L* AND)* BDE);
 		let BFR=((ANJ* -1f64)* L)* BDE;
 		let BFS=C+ ((L* (-1f64* ANI))* BDE);
-		let BFT=((AF* L)/ AUQ)* BDE;
-		let BFU=C+ (((L* AE)/ AUQ)* BDE);
-		let BFV=((AI* L)/ AUM)* BDE;
-		let BFW=C+ (((L* AH)/ AUM)* BDE);
+		let BFT=(((AF* L)/ AUQ)* BDE)* AW;
+		let BFU=C+ (-(((L* AE)/ AUQ)* BDE));
+		let BFV=(((AI* L)/ AUM)* BDE)* AW;
+		let BFW=C+ (-(((L* AH)/ AUM)* BDE));
 		let BFX=L* ((AVW+ BCW)+ BCX);
 		let BFY=((L4([AVX[0],AVX[1],0.0,0.0])+ BDA)+ L4([BDB[0],BDB[1],0.0,0.0]))* L;
 		let BFZ=ddt(0, BFX);
@@ -3323,28 +3323,28 @@ impl Instance {
 		let BHJ=BHI* AJ;
 		let BHK=AK* BHI;
 		let BHL=ddt(5, BHJ);
-		let BHM=(BHK* BGA)* BDE;
-		let BHN=BHJ* BGC;
-		let BHO=BHK* BGC;
-		let BHP=C+ (BHL* BDE);
+		let BHM=((BHK* BGA)* BDE)* AW;
+		let BHN=-(BHJ* BGC);
+		let BHO=(BHK* BGC)* AW;
+		let BHP=C+ (-(BHL* BDE));
 		let BHR=BHQ* AL;
 		let BHS=AM* BHQ;
 		let BHT=ddt(6, BHR);
-		let BHU=(BHS* BGA)* BDE;
-		let BHV=BHR* BGC;
-		let BHW=BHS* BGC;
-		let BHX=C+ (BHT* BDE);
-		let BHY=(ALC* L)* BDE;
-		let BHZ=C+ ((L* ALA)* BDE);
-		let BIB=((BB* L)* BIA)* BDE;
-		let BIC=C+ (((L* BA)* BIA)* BDE);
+		let BHU=((BHS* BGA)* BDE)* AW;
+		let BHV=-(BHR* BGC);
+		let BHW=(BHS* BGC)* AW;
+		let BHX=C+ (-(BHT* BDE));
+		let BHY=((ALC* L)* BDE)* AW;
+		let BHZ=C+ (-((L* ALA)* BDE));
+		let BIB=(((BB* L)* BIA)* BDE)* AW;
+		let BIC=C+ (-(((L* BA)* BIA)* BDE));
 		let BID=L* (AYL+ BBF);
 		let BIE=(L9([AYM[0],AYM[1],0.0,AYM[2],AYM[3],AYM[4],AYM[5],AYM[6],AYM[7]])+ BBH)* L;
 		let BIF=ddt(7, BID);
-		let BIG=(BIE* BGA)* BDE;
-		let BIH=BID* BGC;
-		let BII=BIE* BGC;
-		let BIJ=C+ (BIF* BDE);
+		let BIG=((BIE* BGA)* BDE)* AW;
+		let BIH=-(BID* BGC);
+		let BII=(BIE* BGC)* AW;
+		let BIJ=C+ (-(BIF* BDE));
 		let BIK=(((AKZ+ (AV* D))+ AKW)* L)* BDE;
 		let BIL=C+ ((L* ((AKX+ (D* AU))+ AKU))* BDE);
 		let BIM=L* (AXT+ BBG);
@@ -3438,167 +3438,191 @@ impl Instance {
 		let BKQ=BJM* BKH;
 		let BKR=L5([BKQ[0],BKQ[1],BKQ[2],BKQ[3],0.0])+ L5([0.0,0.0,0.0,0.0,(1f64* BJL)]);
 		let BKS=C+ (BJL* BKH);
-		let BKT=BDF[0];
-		let BKU=BDF[1];
-		let BKV=BDF[2];
-		let BKW=BDH[0];
-		let BKX=BDH[1];
-		let BKY=BDH[2];
-		let BKZ=BDH[3];
-		let BLA=BDJ[0];
-		let BLB=BDJ[1];
-		let BLC=BDM[0];
-		let BLD=BDM[1];
-		let BLE=BDM[2];
-		let BLF=BDM[3];
-		let BLG=BFF[0];
-		let BLH=BFF[1];
-		let BLI=BFF[2];
-		let BLJ=BFG[0];
-		let BLK=BFG[1];
-		let BLL=BFG[2];
-		let BLM=BFH[0];
-		let BLN=BFH[1];
-		let BLO=BFH[2];
-		let BLP=BFH[3];
-		let BLQ=BFH[4];
-		let BLR=BFH[5];
-		let BLS=BFJ[0];
-		let BLT=BFJ[1];
-		let BLU=BFJ[2];
-		let BLV=BFJ[3];
-		let BLW=BFL[0];
-		let BLX=BFL[1];
-		let BLY=BFL[2];
-		let BLZ=BFL[3];
-		let BMA=BFL[4];
-		let BMB=BFL[5];
-		let BMC=BFL[6];
-		let BMD=BFL[7];
-		let BME=BFL[8];
-		let BMF=BFN[0];
-		let BMG=BFN[1];
-		let BMH=BFP[0];
-		let BMI=BFP[1];
-		let BMJ=BFP[2];
-		let BMK=BFP[3];
-		let BML=BFP[4];
-		let BMM=BFR[0];
-		let BMN=BFR[1];
-		let BMO=BFR[2];
-		let BMP=BFR[3];
-		let BMQ=BFT[0];
-		let BMR=BFT[1];
-		let BMS=BFV[0];
-		let BMT=BFV[1];
-		let BMU=BGB[0];
-		let BMV=BGB[1];
-		let BMW=BGB[2];
-		let BMX=BGB[3];
-		let BMY=BGJ[0];
-		let BMZ=BGJ[1];
-		let BNA=BGQ[0];
-		let BNB=BGQ[1];
-		let BNC=BGQ[2];
-		let BND=BGQ[3];
-		let BNE=BGX[0];
-		let BNF=BGX[1];
-		let BNG=BHE[0];
-		let BNH=BHE[1];
-		let BNI=BHE[2];
-		let BNJ=BHE[3];
-		let BNK=BHE[4];
-		let BNL=BHM[0];
-		let BNM=BHM[1];
-		let BNN=BHU[0];
-		let BNO=BHU[1];
-		let BNP=BHY[0];
-		let BNQ=BHY[1];
-		let BNR=BHY[2];
-		let BNS=BHY[3];
-		let BNT=BHY[4];
-		let BNU=BHY[5];
-		let BNV=BHY[6];
-		let BNW=BHY[7];
-		let BNX=BHY[8];
-		let BNY=BIB[0];
-		let BNZ=BIB[1];
-		let BOA=BIB[2];
-		let BOB=BIB[3];
-		let BOC=BIB[4];
-		let BOD=BIB[5];
-		let BOE=BIB[6];
-		let BOF=BIB[7];
-		let BOG=BIG[0];
-		let BOH=BIG[1];
-		let BOI=BIG[2];
-		let BOJ=BIG[3];
-		let BOK=BIG[4];
-		let BOL=BIG[5];
-		let BOM=BIG[6];
-		let BON=BIG[7];
-		let BOO=BIG[8];
-		let BOP=BIK[0];
-		let BOQ=BIK[1];
-		let BOR=BIK[2];
-		let BOS=BIK[3];
-		let BOT=BIK[4];
-		let BOU=BIP[0];
-		let BOV=BIP[1];
-		let BOW=BIP[2];
-		let BOX=BIP[3];
-		let BOY=BIP[4];
-		let BOZ=BIY[0];
-		let BPA=BIY[1];
-		let BPB=BJE[0];
-		let BPC=BJE[1];
-		let BPD=1f64;
-		let BPE=BKL[0];
-		let BPF=BKL[1];
-		let BPG=BKL[2];
-		let BPH=BKL[3];
-		let BPI=BKL[4];
-		let BPJ=BKR[0];
-		let BPK=BKR[1];
-		let BPL=BKR[2];
-		let BPM=BKR[3];
-		let BPN=BKR[4];
-		let BPO=BGE[0];
-		let BPP=BGE[1];
-		let BPQ=BGE[2];
-		let BPR=BGE[3];
-		let BPS=BGL[0];
-		let BPT=BGL[1];
-		let BPU=BGS[0];
-		let BPV=BGS[1];
-		let BPW=BGS[2];
-		let BPX=BGS[3];
-		let BPY=BGZ[0];
-		let BPZ=BGZ[1];
-		let BQA=BHG[0];
-		let BQB=BHG[1];
-		let BQC=BHG[2];
-		let BQD=BHG[3];
-		let BQE=BHG[4];
-		let BQF=BHO[0];
-		let BQG=BHO[1];
-		let BQH=BHW[0];
-		let BQI=BHW[1];
-		let BQJ=BII[0];
-		let BQK=BII[1];
-		let BQL=BII[2];
-		let BQM=BII[3];
-		let BQN=BII[4];
-		let BQO=BII[5];
-		let BQP=BII[6];
-		let BQQ=BII[7];
-		let BQR=BII[8];
-		let BQS=BIR[0];
-		let BQT=BIR[1];
-		let BQU=BIR[2];
-		let BQV=BIR[3];
-		let BQW=BIR[4];
-		let BQX=BKO;
+		let BKT=C+ node_potentials[12];
+		let BKU=C+ node_potentials[13];
+		let BKV=C+ node_potentials[14];
+		let BKW=C+ node_potentials[15];
+		let BKX=C+ node_potentials[16];
+		let BKY=C+ node_potentials[17];
+		let BKZ=C+ node_potentials[18];
+		let BLA=C+ node_potentials[19];
+		let BLB=C+ node_potentials[20];
+		let BLC=C+ node_potentials[21];
+		let BLD=C+ node_potentials[22];
+		let BLE=C+ node_potentials[23];
+		let BLF=BDF[0];
+		let BLG=BDF[1];
+		let BLH=BDF[2];
+		let BLI=BDH[0];
+		let BLJ=BDH[1];
+		let BLK=BDH[2];
+		let BLL=BDH[3];
+		let BLM=BDJ[0];
+		let BLN=BDJ[1];
+		let BLO=BDM[0];
+		let BLP=BDM[1];
+		let BLQ=BDM[2];
+		let BLR=BDM[3];
+		let BLS=BFF[0];
+		let BLT=BFF[1];
+		let BLU=BFF[2];
+		let BLV=BFG[0];
+		let BLW=BFG[1];
+		let BLX=BFG[2];
+		let BLY=BFH[0];
+		let BLZ=BFH[1];
+		let BMA=BFH[2];
+		let BMB=BFH[3];
+		let BMC=BFH[4];
+		let BMD=BFH[5];
+		let BME=BFJ[0];
+		let BMF=BFJ[1];
+		let BMG=BFJ[2];
+		let BMH=BFJ[3];
+		let BMI=BFL[0];
+		let BMJ=BFL[1];
+		let BMK=BFL[2];
+		let BML=BFL[3];
+		let BMM=BFL[4];
+		let BMN=BFL[5];
+		let BMO=BFL[6];
+		let BMP=BFL[7];
+		let BMQ=BFL[8];
+		let BMR=BFN[0];
+		let BMS=BFN[1];
+		let BMT=BFP[0];
+		let BMU=BFP[1];
+		let BMV=BFP[2];
+		let BMW=BFP[3];
+		let BMX=BFP[4];
+		let BMY=BFR[0];
+		let BMZ=BFR[1];
+		let BNA=BFR[2];
+		let BNB=BFR[3];
+		let BNC=BFT[0];
+		let BND=BFT[1];
+		let BNE=BFV[0];
+		let BNF=BFV[1];
+		let BNG=BGB[0];
+		let BNH=BGB[1];
+		let BNI=BGB[2];
+		let BNJ=BGB[3];
+		let BNK=BGJ[0];
+		let BNL=BGJ[1];
+		let BNM=BGQ[0];
+		let BNN=BGQ[1];
+		let BNO=BGQ[2];
+		let BNP=BGQ[3];
+		let BNQ=BGX[0];
+		let BNR=BGX[1];
+		let BNS=BHE[0];
+		let BNT=BHE[1];
+		let BNU=BHE[2];
+		let BNV=BHE[3];
+		let BNW=BHE[4];
+		let BNX=BHM[0];
+		let BNY=BHM[1];
+		let BNZ=BHU[0];
+		let BOA=BHU[1];
+		let BOB=BHY[0];
+		let BOC=BHY[1];
+		let BOD=BHY[2];
+		let BOE=BHY[3];
+		let BOF=BHY[4];
+		let BOG=BHY[5];
+		let BOH=BHY[6];
+		let BOI=BHY[7];
+		let BOJ=BHY[8];
+		let BOK=BIB[0];
+		let BOL=BIB[1];
+		let BOM=BIB[2];
+		let BON=BIB[3];
+		let BOO=BIB[4];
+		let BOP=BIB[5];
+		let BOQ=BIB[6];
+		let BOR=BIB[7];
+		let BOS=BIG[0];
+		let BOT=BIG[1];
+		let BOU=BIG[2];
+		let BOV=BIG[3];
+		let BOW=BIG[4];
+		let BOX=BIG[5];
+		let BOY=BIG[6];
+		let BOZ=BIG[7];
+		let BPA=BIG[8];
+		let BPB=BIK[0];
+		let BPC=BIK[1];
+		let BPD=BIK[2];
+		let BPE=BIK[3];
+		let BPF=BIK[4];
+		let BPG=BIP[0];
+		let BPH=BIP[1];
+		let BPI=BIP[2];
+		let BPJ=BIP[3];
+		let BPK=BIP[4];
+		let BPL=BIY[0];
+		let BPM=BIY[1];
+		let BPN=BJE[0];
+		let BPO=BJE[1];
+		let BPP=1f64;
+		let BPQ=BKL[0];
+		let BPR=BKL[1];
+		let BPS=BKL[2];
+		let BPT=BKL[3];
+		let BPU=BKL[4];
+		let BPV=BKR[0];
+		let BPW=BKR[1];
+		let BPX=BKR[2];
+		let BPY=BKR[3];
+		let BPZ=BKR[4];
+		let BQA=1f64;
+		let BQB=1f64;
+		let BQC=1f64;
+		let BQD=1f64;
+		let BQE=1f64;
+		let BQF=1f64;
+		let BQG=1f64;
+		let BQH=1f64;
+		let BQI=1f64;
+		let BQJ=1f64;
+		let BQK=1f64;
+		let BQL=1f64;
+		let BQM=BGE[0];
+		let BQN=BGE[1];
+		let BQO=BGE[2];
+		let BQP=BGE[3];
+		let BQQ=BGL[0];
+		let BQR=BGL[1];
+		let BQS=BGS[0];
+		let BQT=BGS[1];
+		let BQU=BGS[2];
+		let BQV=BGS[3];
+		let BQW=BGZ[0];
+		let BQX=BGZ[1];
+		let BQY=BHG[0];
+		let BQZ=BHG[1];
+		let BRA=BHG[2];
+		let BRB=BHG[3];
+		let BRC=BHG[4];
+		let BRD=BHO[0];
+		let BRE=BHO[1];
+		let BRF=BHW[0];
+		let BRG=BHW[1];
+		let BRH=BII[0];
+		let BRI=BII[1];
+		let BRJ=BII[2];
+		let BRK=BII[3];
+		let BRL=BII[4];
+		let BRM=BII[5];
+		let BRN=BII[6];
+		let BRO=BII[7];
+		let BRP=BII[8];
+		let BRQ=BIR[0];
+		let BRR=BIR[1];
+		let BRS=BIR[2];
+		let BRT=BIR[3];
+		let BRU=BIR[4];
+		let BRV=BKO;
         if (staged[249] != 0.0) {
             stamper.stamp_potential_branch_local(Some(9), Some(10), 0, multiplicity);
         } else {
@@ -3614,7 +3638,7 @@ impl Instance {
             Some(8),
             multiplicity * (BDG),
             [6, 7, 8],
-            [BKT, BKU, BKV],
+            [BLF, BLG, BLH],
             [],
             [],
             multiplicity,
@@ -3624,7 +3648,7 @@ impl Instance {
             Some(4),
             multiplicity * (BDI),
             [4, 6, 7, 8],
-            [BKW, BKX, BKY, BKZ],
+            [BLI, BLJ, BLK, BLL],
             [],
             [],
             multiplicity,
@@ -3634,7 +3658,7 @@ impl Instance {
             Some(4),
             multiplicity * (BDK),
             [4, 5],
-            [BLA, BLB],
+            [BLM, BLN],
             [],
             [],
             multiplicity,
@@ -3644,7 +3668,7 @@ impl Instance {
             Some(4),
             multiplicity * (BDN),
             [4, 6, 7, 8],
-            [BLC, BLD, BLE, BLF],
+            [BLO, BLP, BLQ, BLR],
             [],
             [],
             multiplicity,
@@ -3654,7 +3678,7 @@ impl Instance {
             Some(7),
             multiplicity * (BFD),
             [5, 6, 7],
-            [BLG, BLH, BLI],
+            [BLS, BLT, BLU],
             [],
             [],
             multiplicity,
@@ -3664,47 +3688,47 @@ impl Instance {
             Some(8),
             multiplicity * (BFE),
             [5, 6, 7],
-            [BLJ, BLK, BLL],
+            [BLV, BLW, BLX],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<6, 0>(
-            Some(5),
-            Some(3),
+            Some(17),
+            None,
             multiplicity * (BFI),
             [3, 5, 6, 7, 8, 10],
-            [BLM, BLN, BLO, BLP, BLQ, BLR],
+            [BLY, BLZ, BMA, BMB, BMC, BMD],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<4, 0>(
-            Some(6),
-            Some(3),
+            Some(18),
+            None,
             multiplicity * (BFK),
             [3, 6, 7, 8],
-            [BLS, BLT, BLU, BLV],
+            [BME, BMF, BMG, BMH],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<9, 0>(
-            Some(1),
-            Some(3),
+            Some(16),
+            None,
             multiplicity * (BFM),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [BLW, BLX, BLY, BLZ, BMA, BMB, BMC, BMD, BME],
+            [BMI, BMJ, BMK, BML, BMM, BMN, BMO, BMP, BMQ],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(3),
-            Some(7),
+            Some(22),
+            None,
             multiplicity * (BFO),
             [3, 7],
-            [BMF, BMG],
+            [BMR, BMS],
             [],
             [],
             multiplicity,
@@ -3714,7 +3738,7 @@ impl Instance {
             Some(6),
             multiplicity * (BFQ),
             [4, 5, 6, 7, 8],
-            [BMH, BMI, BMJ, BMK, BML],
+            [BMT, BMU, BMV, BMW, BMX],
             [],
             [],
             multiplicity,
@@ -3724,27 +3748,27 @@ impl Instance {
             Some(8),
             multiplicity * (BFS),
             [4, 6, 7, 8],
-            [BMM, BMN, BMO, BMP],
+            [BMY, BMZ, BNA, BNB],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(2),
-            Some(4),
+            Some(23),
+            None,
             multiplicity * (BFU),
             [2, 4],
-            [BMQ, BMR],
+            [BNC, BND],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(1),
-            Some(5),
+            Some(12),
+            None,
             multiplicity * (BFW),
             [1, 5],
-            [BMS, BMT],
+            [BNE, BNF],
             [],
             [],
             multiplicity,
@@ -3754,7 +3778,7 @@ impl Instance {
             Some(4),
             multiplicity * (BGF),
             [4, 6, 7, 8],
-            [BMU, BMV, BMW, BMX],
+            [BNG, BNH, BNI, BNJ],
             [],
             [],
             multiplicity,
@@ -3764,7 +3788,7 @@ impl Instance {
             Some(4),
             multiplicity * (BGM),
             [4, 5],
-            [BMY, BMZ],
+            [BNK, BNL],
             [],
             [],
             multiplicity,
@@ -3774,17 +3798,17 @@ impl Instance {
             Some(8),
             multiplicity * (BGT),
             [4, 6, 7, 8],
-            [BNA, BNB, BNC, BND],
+            [BNM, BNN, BNO, BNP],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(3),
-            Some(7),
+            Some(22),
+            None,
             multiplicity * (BHA),
             [3, 7],
-            [BNE, BNF],
+            [BNQ, BNR],
             [],
             [],
             multiplicity,
@@ -3794,57 +3818,57 @@ impl Instance {
             Some(6),
             multiplicity * (BHH),
             [4, 5, 6, 7, 8],
-            [BNG, BNH, BNI, BNJ, BNK],
+            [BNS, BNT, BNU, BNV, BNW],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(1),
-            Some(2),
+            Some(15),
+            None,
             multiplicity * (BHP),
             [1, 2],
-            [BNL, BNM],
+            [BNX, BNY],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<2, 0>(
-            Some(1),
-            Some(0),
+            Some(13),
+            None,
             multiplicity * (BHX),
             [0, 1],
-            [BNN, BNO],
+            [BNZ, BOA],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<9, 0>(
-            Some(1),
-            Some(9),
+            Some(14),
+            None,
             multiplicity * (BHZ),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [BNP, BNQ, BNR, BNS, BNT, BNU, BNV, BNW, BNX],
+            [BOB, BOC, BOD, BOE, BOF, BOG, BOH, BOI, BOJ],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<8, 0>(
-            Some(0),
-            Some(9),
+            Some(20),
+            None,
             multiplicity * (BIC),
             [0, 1, 5, 6, 7, 8, 9, 10],
-            [BNY, BNZ, BOA, BOB, BOC, BOD, BOE, BOF],
+            [BOK, BOL, BOM, BON, BOO, BOP, BOQ, BOR],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<9, 0>(
-            Some(1),
-            Some(9),
+            Some(14),
+            None,
             multiplicity * (BIJ),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [BOG, BOH, BOI, BOJ, BOK, BOL, BOM, BON, BOO],
+            [BOS, BOT, BOU, BOV, BOW, BOX, BOY, BOZ, BPA],
             [],
             [],
             multiplicity,
@@ -3854,7 +3878,7 @@ impl Instance {
             Some(10),
             multiplicity * (BIL),
             [5, 6, 7, 8, 10],
-            [BOP, BOQ, BOR, BOS, BOT],
+            [BPB, BPC, BPD, BPE, BPF],
             [],
             [],
             multiplicity,
@@ -3864,7 +3888,7 @@ impl Instance {
             Some(10),
             multiplicity * (BIS),
             [5, 6, 7, 8, 10],
-            [BOU, BOV, BOW, BOX, BOY],
+            [BPG, BPH, BPI, BPJ, BPK],
             [],
             [],
             multiplicity,
@@ -3874,7 +3898,7 @@ impl Instance {
             Some(10),
             multiplicity * (BIX),
             [9, 10],
-            [BOZ, BPA],
+            [BPL, BPM],
             [],
             [],
             multiplicity,
@@ -3894,7 +3918,7 @@ impl Instance {
             Some(7),
             multiplicity * (BJD),
             [7, 10],
-            [BPB, BPC],
+            [BPN, BPO],
             [],
             [],
             multiplicity,
@@ -3924,7 +3948,7 @@ impl Instance {
             None,
             multiplicity * (BKI),
             [11],
-            [BPD],
+            [BPP],
             [],
             [],
             multiplicity,
@@ -3934,7 +3958,7 @@ impl Instance {
             Some(4),
             multiplicity * (BKP),
             [4, 6, 7, 8, 11],
-            [BPE, BPF, BPG, BPH, BPI],
+            [BPQ, BPR, BPS, BPT, BPU],
             [],
             [],
             multiplicity,
@@ -3944,7 +3968,7 @@ impl Instance {
             Some(6),
             multiplicity * (BKS),
             [4, 6, 7, 8, 11],
-            [BPJ, BPK, BPL, BPM, BPN],
+            [BPV, BPW, BPX, BPY, BPZ],
             [],
             [],
             multiplicity,
@@ -3954,7 +3978,7 @@ impl Instance {
             Some(4),
             multiplicity * (BKI),
             [11],
-            [BPD],
+            [BPP],
             [],
             [],
             multiplicity,
@@ -3980,8 +4004,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(2),
-            Some(4),
+            Some(23),
+            None,
             multiplicity * (staged[224]),
             [],
             [],
@@ -3990,8 +4014,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(1),
-            Some(5),
+            Some(12),
+            None,
             multiplicity * (staged[225]),
             [],
             [],
@@ -4080,8 +4104,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(1),
-            Some(9),
+            Some(14),
+            None,
             multiplicity * (staged[234]),
             [],
             [],
@@ -4090,8 +4114,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(1),
-            Some(9),
+            Some(14),
+            None,
             multiplicity * (staged[235]),
             [],
             [],
@@ -4120,8 +4144,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(6),
-            Some(3),
+            Some(18),
+            None,
             multiplicity * (staged[238]),
             [],
             [],
@@ -4130,8 +4154,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
-            Some(3),
+            Some(17),
+            None,
             multiplicity * (staged[239]),
             [],
             [],
@@ -4140,8 +4164,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(1),
-            Some(3),
+            Some(16),
+            None,
             multiplicity * (staged[240]),
             [],
             [],
@@ -4150,8 +4174,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(0),
-            Some(9),
+            Some(20),
+            None,
             multiplicity * (staged[241]),
             [],
             [],
@@ -4180,8 +4204,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(0),
-            Some(9),
+            Some(20),
+            None,
             multiplicity * (staged[244]),
             [],
             [],
@@ -4200,8 +4224,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(0),
-            Some(10),
+            Some(21),
+            None,
             multiplicity * (staged[246]),
             [],
             [],
@@ -4220,11 +4244,251 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(0),
-            Some(7),
+            Some(19),
+            None,
             multiplicity * (staged[248]),
             [],
             [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(1),
+            Some(5),
+            multiplicity * (BKT),
+            [12],
+            [BQA],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(12),
+            None,
+            multiplicity * (BKT),
+            [12],
+            [BQA],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(1),
+            Some(0),
+            multiplicity * (BKU),
+            [13],
+            [BQB],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(13),
+            None,
+            multiplicity * (BKU),
+            [13],
+            [BQB],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(1),
+            Some(9),
+            multiplicity * (BKV),
+            [14],
+            [BQC],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(14),
+            None,
+            multiplicity * (BKV),
+            [14],
+            [BQC],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(1),
+            Some(2),
+            multiplicity * (BKW),
+            [15],
+            [BQD],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(15),
+            None,
+            multiplicity * (BKW),
+            [15],
+            [BQD],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(1),
+            Some(3),
+            multiplicity * (BKX),
+            [16],
+            [BQE],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(16),
+            None,
+            multiplicity * (BKX),
+            [16],
+            [BQE],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(5),
+            Some(3),
+            multiplicity * (BKY),
+            [17],
+            [BQF],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(17),
+            None,
+            multiplicity * (BKY),
+            [17],
+            [BQF],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(6),
+            Some(3),
+            multiplicity * (BKZ),
+            [18],
+            [BQG],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(18),
+            None,
+            multiplicity * (BKZ),
+            [18],
+            [BQG],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(0),
+            Some(7),
+            multiplicity * (BLA),
+            [19],
+            [BQH],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(19),
+            None,
+            multiplicity * (BLA),
+            [19],
+            [BQH],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(0),
+            Some(9),
+            multiplicity * (BLB),
+            [20],
+            [BQI],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(20),
+            None,
+            multiplicity * (BLB),
+            [20],
+            [BQI],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(0),
+            Some(10),
+            multiplicity * (BLC),
+            [21],
+            [BQJ],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(21),
+            None,
+            multiplicity * (BLC),
+            [21],
+            [BQJ],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(7),
+            Some(3),
+            multiplicity * (BLD),
+            [22],
+            [BQK],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(22),
+            None,
+            multiplicity * (BLD),
+            [22],
+            [BQK],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(2),
+            Some(4),
+            multiplicity * (BLE),
+            [23],
+            [BQL],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(23),
+            None,
+            multiplicity * (BLE),
+            [23],
+            [BQL],
             [],
             [],
             multiplicity,
@@ -4244,52 +4508,52 @@ impl Instance {
         self.canonical_reactive[12] = BFU;
         self.canonical_reactive[13] = BFW;
         self.canonical_reactive[14] = BGD;
-        self.canonical_reactive[15] = BPO;
-        self.canonical_reactive[16] = BPP;
-        self.canonical_reactive[17] = BPQ;
-        self.canonical_reactive[18] = BPR;
+        self.canonical_reactive[15] = BQM;
+        self.canonical_reactive[16] = BQN;
+        self.canonical_reactive[17] = BQO;
+        self.canonical_reactive[18] = BQP;
         self.canonical_reactive[19] = BGK;
-        self.canonical_reactive[20] = BPS;
-        self.canonical_reactive[21] = BPT;
+        self.canonical_reactive[20] = BQQ;
+        self.canonical_reactive[21] = BQR;
         self.canonical_reactive[22] = BGR;
-        self.canonical_reactive[23] = BPU;
-        self.canonical_reactive[24] = BPV;
-        self.canonical_reactive[25] = BPW;
-        self.canonical_reactive[26] = BPX;
+        self.canonical_reactive[23] = BQS;
+        self.canonical_reactive[24] = BQT;
+        self.canonical_reactive[25] = BQU;
+        self.canonical_reactive[26] = BQV;
         self.canonical_reactive[27] = BGY;
-        self.canonical_reactive[28] = BPY;
-        self.canonical_reactive[29] = BPZ;
+        self.canonical_reactive[28] = BQW;
+        self.canonical_reactive[29] = BQX;
         self.canonical_reactive[30] = BHF;
-        self.canonical_reactive[31] = BQA;
-        self.canonical_reactive[32] = BQB;
-        self.canonical_reactive[33] = BQC;
-        self.canonical_reactive[34] = BQD;
-        self.canonical_reactive[35] = BQE;
+        self.canonical_reactive[31] = BQY;
+        self.canonical_reactive[32] = BQZ;
+        self.canonical_reactive[33] = BRA;
+        self.canonical_reactive[34] = BRB;
+        self.canonical_reactive[35] = BRC;
         self.canonical_reactive[36] = BHN;
-        self.canonical_reactive[37] = BQF;
-        self.canonical_reactive[38] = BQG;
+        self.canonical_reactive[37] = BRD;
+        self.canonical_reactive[38] = BRE;
         self.canonical_reactive[39] = BHV;
-        self.canonical_reactive[40] = BQH;
-        self.canonical_reactive[41] = BQI;
+        self.canonical_reactive[40] = BRF;
+        self.canonical_reactive[41] = BRG;
         self.canonical_reactive[42] = BHZ;
         self.canonical_reactive[43] = BIC;
         self.canonical_reactive[44] = BIH;
-        self.canonical_reactive[45] = BQJ;
-        self.canonical_reactive[46] = BQK;
-        self.canonical_reactive[47] = BQL;
-        self.canonical_reactive[48] = BQM;
-        self.canonical_reactive[49] = BQN;
-        self.canonical_reactive[50] = BQO;
-        self.canonical_reactive[51] = BQP;
-        self.canonical_reactive[52] = BQQ;
-        self.canonical_reactive[53] = BQR;
+        self.canonical_reactive[45] = BRH;
+        self.canonical_reactive[46] = BRI;
+        self.canonical_reactive[47] = BRJ;
+        self.canonical_reactive[48] = BRK;
+        self.canonical_reactive[49] = BRL;
+        self.canonical_reactive[50] = BRM;
+        self.canonical_reactive[51] = BRN;
+        self.canonical_reactive[52] = BRO;
+        self.canonical_reactive[53] = BRP;
         self.canonical_reactive[54] = BIL;
         self.canonical_reactive[55] = BIQ;
-        self.canonical_reactive[56] = BQS;
-        self.canonical_reactive[57] = BQT;
-        self.canonical_reactive[58] = BQU;
-        self.canonical_reactive[59] = BQV;
-        self.canonical_reactive[60] = BQW;
+        self.canonical_reactive[56] = BRQ;
+        self.canonical_reactive[57] = BRR;
+        self.canonical_reactive[58] = BRS;
+        self.canonical_reactive[59] = BRT;
+        self.canonical_reactive[60] = BRU;
         self.canonical_reactive[61] = BIX;
         self.canonical_reactive[62] = staged[219];
         self.canonical_reactive[63] = BJD;
@@ -4297,7 +4561,7 @@ impl Instance {
         self.canonical_reactive[65] = staged[221];
         self.canonical_reactive[66] = BKI;
         self.canonical_reactive[67] = BKN;
-        self.canonical_reactive[68] = BQX;
+        self.canonical_reactive[68] = BRV;
         self.canonical_reactive[69] = BKS;
         self.canonical_reactive[70] = BKI;
         self.canonical_reactive[71] = staged[222];
@@ -4327,6 +4591,30 @@ impl Instance {
         self.canonical_reactive[95] = staged[246];
         self.canonical_reactive[96] = staged[247];
         self.canonical_reactive[97] = staged[248];
+        self.canonical_reactive[98] = BKT;
+        self.canonical_reactive[99] = BKT;
+        self.canonical_reactive[100] = BKU;
+        self.canonical_reactive[101] = BKU;
+        self.canonical_reactive[102] = BKV;
+        self.canonical_reactive[103] = BKV;
+        self.canonical_reactive[104] = BKW;
+        self.canonical_reactive[105] = BKW;
+        self.canonical_reactive[106] = BKX;
+        self.canonical_reactive[107] = BKX;
+        self.canonical_reactive[108] = BKY;
+        self.canonical_reactive[109] = BKY;
+        self.canonical_reactive[110] = BKZ;
+        self.canonical_reactive[111] = BKZ;
+        self.canonical_reactive[112] = BLA;
+        self.canonical_reactive[113] = BLA;
+        self.canonical_reactive[114] = BLB;
+        self.canonical_reactive[115] = BLB;
+        self.canonical_reactive[116] = BLC;
+        self.canonical_reactive[117] = BLC;
+        self.canonical_reactive[118] = BLD;
+        self.canonical_reactive[119] = BLD;
+        self.canonical_reactive[120] = BLE;
+        self.canonical_reactive[121] = BLE;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -4360,8 +4648,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(3),
-            Some(7),
+            Some(22),
+            None,
             &[3, 7],
             &[cached[28], cached[29]],
             &[],
@@ -4378,8 +4666,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(1),
-            Some(2),
+            Some(15),
+            None,
             &[1, 2],
             &[cached[37], cached[38]],
             &[],
@@ -4387,8 +4675,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(1),
-            Some(0),
+            Some(13),
+            None,
             &[0, 1],
             &[cached[40], cached[41]],
             &[],
@@ -4396,8 +4684,8 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(1),
-            Some(9),
+            Some(14),
+            None,
             &[0, 1, 3, 5, 6, 7, 8, 9, 10],
             &[cached[45], cached[46], cached[47], cached[48], cached[49], cached[50], cached[51], cached[52], cached[53]],
             &[],

@@ -9,6 +9,14 @@ import rspice
 
 
 class TestSensitivity:
+    def test_parameter_sensitivity_replays_same_card_dependencies(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Same-card dependencies\n.param base=2 derived={3*base}\n"
+            "V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {base+derived}\n.end\n"
+        )
+        assert engine.run_sensitivity(netlist, "out", "base", 2.0) == pytest.approx(4.0, rel=1e-8)
+        assert engine.run_sensitivity_ac(netlist, "out", "base", 2.0, [1.0]) == pytest.approx([4.0], rel=1e-8)
+
     def test_xspice_sensitivity_excludes_boolean_controls(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "Typed sensitivity\nV1 in 0 DC 0.2 AC 1\nA1 in out lim\n"
@@ -50,6 +58,22 @@ class TestSensitivity:
             engine.run_sensitivity(netlist, "out", "gain", 0.0)
         with pytest.raises(rspice.SimulationError, match="last trial failure"):
             engine.run_sensitivity_ac(netlist, "out", "gain", 0.0, [1.0])
+
+    def test_zero_model_parameter_sensitivity_resolves_body_effect(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "MOS body effect\nVG gate 0 DC 2 AC 1\nVD drain 0 2\nVB body 0 -1\n"
+            "M1 drain gate 0 body NM W=1u L=1u\n"
+            ".model NM NMOS(LEVEL=1 VTO=1 KP=1m GAMMA=0 PHI=0.6)\n.end\n"
+        )
+        expected = 1e-3 * (np.sqrt(1.6) - np.sqrt(0.6))
+        dc = engine.run_sensitivity_dc_complete(
+            netlist, "VD", filters=["NM:GAMMA"], output_is_current=True
+        )
+        ac = engine.run_sensitivity_ac_complete(
+            netlist, "VD", [1.0, 1e9], filters=["NM:GAMMA"], output_is_current=True
+        )
+        assert dc.get("NM:GAMMA").absolute == pytest.approx(expected, rel=1e-5)
+        assert ac.get("NM:GAMMA").absolute == pytest.approx([expected + 0j] * 2, rel=1e-5)
 
     def test_parameter_ac_magnitude_sensitivity_uses_the_nominal_phasor(self, engine):
         netlist = rspice.Netlist.parse_spice(

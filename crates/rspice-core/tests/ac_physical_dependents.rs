@@ -11,8 +11,7 @@ use rspice_core::netlist::Netlist;
 
 const TEMPERATURE_K: f64 = 300.15;
 const HIGH_RESISTANCE_OHM: f64 = 1.0e18;
-// Primitive resistor-noise collection currently models finite resistors below
-// 1e12 ohm. This value remains high enough that a 1e-15 S blanket shunt would
+// This resistor value is high enough that a 1e-15 S blanket shunt would
 // introduce a readily detectable ~2e-4 relative error in the output PSD.
 const HIGH_NOISE_RESISTANCE_OHM: f64 = 1.0e11;
 
@@ -97,6 +96,142 @@ fn sensitivity_refinement_rejects_a_hidden_parameter_kink() {
 }
 
 #[test]
+fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
+    let netlist = Netlist::parse(
+        "Nearby branch\n.param gain=0\nV1 in 0 DC 1 AC 1\n\
+         E1 out 0 in 0 {1+if(abs(gain)<=1e-12,gain,2*gain)}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    for result in [
+        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+            .map(|values| values[0]),
+    ] {
+        let error = result.expect_err("a distant slope cannot replace unresolved local evidence");
+        assert!(error.to_string().contains("could not resolve"), "{error}");
+    }
+}
+
+#[test]
+fn sensitivity_replays_same_card_and_included_parameter_dependencies() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
+    let parameters = ".param base=2 derived={3*base}\n";
+    let circuit = "V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {base+derived}\n.end\n";
+    use std::io::Write;
+    struct ParameterFile(std::path::PathBuf);
+    impl Drop for ParameterFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let directory = std::env::temp_dir();
+    let filename = format!(
+        "rspice-parameter-replay-{}-{}.inc",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let path = directory.join(&filename);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .unwrap();
+    let _cleanup = ParameterFile(path);
+    file.write_all(parameters.as_bytes()).unwrap();
+    drop(file);
+    let included = Netlist::parse_with_path(
+        &format!("Included dependencies\n.include {filename}\n{circuit}"),
+        &directory.join("main.cir"),
+    )
+    .unwrap();
+    let inline = Netlist::parse(&format!("Same-card dependencies\n{parameters}{circuit}")).unwrap();
+    let root = directory.join("sealed.cir");
+    let child = directory.join("sealed.inc");
+    let source = format!("Sealed dependencies\n.include sealed.inc\n{circuit}");
+    let bundle = SealedSourceBundle::try_new_with_edges(
+        [
+            (root.clone(), source.clone()),
+            (child.clone(), parameters.to_owned()),
+        ],
+        [SealedSourceEdge {
+            owner: root.clone(),
+            requested_path: "sealed.inc".into(),
+            target: child,
+        }],
+    )
+    .unwrap();
+    let sealed = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        &source,
+        &root,
+        bundle,
+        NetlistParseOptions::default(),
+        &NoAbort,
+    )
+    .unwrap();
+    let engine = physical_engine();
+    for netlist in [&inline, &included, &sealed] {
+        let output = node_id(&engine, netlist, "out");
+        let dc = engine
+            .run_sensitivity(netlist, output, "base", 2.0, None)
+            .unwrap();
+        let ac = engine
+            .run_sensitivity_ac(netlist, output, "base", 2.0, &[1.0], None)
+            .unwrap();
+        assert_relative(dc, 4.0, 1e-8, "dependent parameter DC sensitivity");
+        assert_relative(ac[0], 4.0, 1e-8, "dependent parameter AC sensitivity");
+    }
+}
+
+#[test]
+fn sensitivity_retains_the_zero_resistor_flicker_domain_boundary() {
+    use rspice_core::analysis::AcSensitivityOutput;
+    let netlist = Netlist::parse(
+        "Zero flicker parameter\n.param noise=0\nI1 0 out DC 1 AC 1\n\
+         R1 out 0 RM 1\n.model RM R(KF={noise})\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    let probe = AcSensitivityOutput::Voltage {
+        positive: output,
+        negative: None,
+    };
+    let filters = ["RM:KF".to_owned()];
+    // KF changes resistor noise, so both deterministic transfer derivatives
+    // are zero, including at the nonnegative coefficient's domain boundary.
+    let dc = engine
+        .run_sensitivity_dc_complete(&netlist, probe.clone(), &filters)
+        .unwrap();
+    let ac = engine
+        .run_sensitivity_ac_complete(&netlist, probe, &[1.0], &filters)
+        .unwrap();
+    assert_eq!(dc.get("RM:KF").unwrap().absolute, 0.0);
+    assert_eq!(
+        ac.get("RM:KF").unwrap().absolute,
+        [rspice_core::Complex64::new(0.0, 0.0)]
+    );
+    assert_eq!(
+        engine
+            .run_sensitivity(&netlist, output, "noise", 0.0, None)
+            .unwrap(),
+        0.0
+    );
+    assert_eq!(
+        engine
+            .run_sensitivity_ac(&netlist, output, "noise", 0.0, &[1.0], None)
+            .unwrap(),
+        [0.0]
+    );
+}
+
+#[test]
 fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
     let netlist = Netlist::parse(
         "MOS boundary\nVG gate 0 2\nVD drain 0 2\nVB body 0 -1\n\
@@ -117,6 +252,73 @@ fn sensitivity_refinement_retains_a_level1_mos_domain_boundary() {
         1e-9,
         "MOS boundary derivative",
     );
+}
+
+#[test]
+fn sensitivity_refinement_resolves_zero_mos_body_effect() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::AcSensitivityOutput;
+    let source = "MOS body effect\n.param effect=0\nVG gate 0 DC 2 AC 1\nVD drain 0 2\nVB body 0 -1\n\
+         M1 drain gate 0 body NM W=1u L=1u\n.model NM NMOS(LEVEL=1 VTO=1 KP=1m GAMMA=0 PHI=0.6)\n.end\n";
+    let netlist = Netlist::parse(source).unwrap();
+    let engine = physical_engine();
+    let output = AcSensitivityOutput::BranchCurrent("VD".into());
+    let filters = ["NM:GAMMA".to_owned()];
+    let dc = engine
+        .run_sensitivity_dc_complete(&netlist, output.clone(), &filters)
+        .unwrap();
+    let ac = engine
+        .run_sensitivity_ac_complete(&netlist, output.clone(), &[1.0, 1e9], &filters)
+        .unwrap();
+    // In saturation Id = KP/2*(Vgs-Vto-gamma*body_shift)^2 and gm = KP*(Vgs-Vth).
+    // Vgs-Vto=1, so these two source-current derivatives have the same value.
+    let expected = 1e-3 * (1.6_f64.sqrt() - 0.6_f64.sqrt());
+    assert_relative(
+        dc.get("NM:GAMMA").unwrap().absolute,
+        expected,
+        1e-5,
+        "DC body effect sensitivity",
+    );
+    for derivative in &ac.get("NM:GAMMA").unwrap().absolute {
+        assert_relative(derivative.re, expected, 1e-5, "AC body effect sensitivity");
+        assert_eq!(derivative.im, 0.0);
+    }
+    let parameterized = Netlist::parse(&source.replace("GAMMA=0", "GAMMA={effect}")).unwrap();
+    for delta in [None, Some(1e-3)] {
+        let mut runs = 0;
+        let dc = engine
+            .run_output_sensitivity_with_abort(
+                &parameterized,
+                output.clone(),
+                "effect",
+                0.0,
+                delta,
+                &mut runs,
+                &NoAbort,
+            )
+            .unwrap();
+        let ac = engine
+            .run_output_sensitivity_ac_with_abort(
+                &parameterized,
+                output.clone(),
+                "effect",
+                0.0,
+                &[1.0, 1e9],
+                delta,
+                &mut runs,
+                &NoAbort,
+            )
+            .unwrap();
+        assert_relative(dc, expected, 1e-5, "authored DC body effect sensitivity");
+        for derivative in ac {
+            assert_relative(
+                derivative,
+                -expected,
+                1e-5,
+                "authored AC magnitude body effect sensitivity",
+            );
+        }
+    }
 }
 
 #[test]

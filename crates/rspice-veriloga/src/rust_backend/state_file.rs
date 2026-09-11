@@ -1574,7 +1574,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 17 retains generated transient discontinuities and Newton convergence hints.
 // Version 18 applies typed custom-limiter polarity to values, state, and derivatives.
 // Version 19 supports default limiters and rejects invalid candidates before publication.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 19;
+// Version 20 solves flow-source probes through private current unknowns.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 20;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

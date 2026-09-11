@@ -325,10 +325,16 @@ fn resistor_flicker_rejects_malformed_active_controls() {
             .params
             .retain(|(key, _)| !key.eq_ignore_ascii_case(name));
         model.params.push((name.into(), value));
-        let error = Engine::default()
-            .build_circuit(&deck)
-            .unwrap_err()
-            .to_string();
+        let error = Engine::default().build_circuit(&deck).unwrap_err();
+        if name == "KF" && value.is_finite() {
+            assert!(matches!(
+                error,
+                rspice_core::SimulationError::ParameterDomain(_)
+            ));
+        } else if !value.is_finite() {
+            assert!(matches!(error, rspice_core::SimulationError::Circuit(_)));
+        }
+        let error = error.to_string();
         assert!(
             error.contains(name),
             "{name}={value} must be diagnosed: {error}"

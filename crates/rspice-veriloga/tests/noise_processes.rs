@@ -1230,33 +1230,35 @@ endmodule
     }
 
     #[test]
-    fn contribution_current_suffix_required_by_stamp_fails_closed() {
+    fn contribution_current_suffix_preserves_solver_feedback() {
         let source = r#"
-module current_suffix_cycle(p, n);
+module current_suffix_feedback(p, n);
     inout p, n; electrical p, n;
     real sensed, required;
     analog begin
         sensed = I(p, n);
-        required = sensed;
+        required = 0.5 * sensed + V(p,n);
         I(p, n) <+ required + white_noise(1.0, "live");
     end
 endmodule
 "#;
         let compiler =
             rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions::default());
-        let model = compiler.compile(source).expect("cycle model compiles");
+        let model = compiler.compile(source).expect("feedback model compiles");
         let canonical = compiler
             .compile_canonical_ir(source)
-            .expect("cycle canonical IR compiles");
-        let error =
+            .expect("feedback canonical IR compiles");
+        let mut device =
             VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model), &canonical, &[1, 0])
-                .expect_err("current-dependent suffix required by the stamp must fail closed");
-        assert!(
-            error
-                .to_string()
-                .contains("required before contribution-current evaluation"),
-            "{error}"
-        );
+                .expect("current-dependent assignments use the solver current");
+        device.set_internal_node_indices(&[2]);
+        device.update_all_voltages(&[1.0, -2.0]);
+        assert_eq!(device.try_evaluate().unwrap(), [2.0, -2.0, -2.0]);
+        device.observe_variables(&canonical).unwrap();
+        assert_eq!(device.variable("sensed"), Some(2.0));
+        let sources = device.try_noise_sources(&[1.0, -2.0]).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].psd, 1.0);
     }
 
     #[test]

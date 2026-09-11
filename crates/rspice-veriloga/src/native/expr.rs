@@ -10358,7 +10358,7 @@ endmodule
     }
 
     #[test]
-    fn mir_static_condition_rejects_current_pair_load() {
+    fn mir_static_condition_rejects_current_solver_unknown() {
         let source = r#"
 module mir_static_condition_current_pair(p, n);
   inout p, n;
@@ -10384,11 +10384,11 @@ endmodule
             &artifact.mir,
             equation_id,
             root,
-            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_available_current_pairs(&available),
+            NativeLoweringLimits::new(2, 1, 0, 0, 0).with_available_current_pairs(&available),
         )
         .expect_err("static conditions must not read terminal-pair currents");
         let msg = error.to_string();
-        assert!(msg.contains("StaticCondition LoadCurrent"), "got: {msg}");
+        assert!(msg.contains("StaticCondition LoadVoltage"), "got: {msg}");
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
     }
 
@@ -11091,7 +11091,7 @@ endmodule
     }
 
     #[test]
-    fn lowers_canonical_named_branch_current_from_prior_contribution() {
+    fn lowers_canonical_named_branch_current_from_solver_unknown() {
         let source = r#"
 module mir_named_branch_current_probe(p, n);
   inout p, n;
@@ -11112,21 +11112,23 @@ endmodule
             EntryKind::StampValue,
             &artifact.mir,
             crate::canonical_ir::EquationId::new(1),
-            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+            NativeLoweringLimits::new(2, 2, 0, 0, 0),
         )
         .expect("lower canonical named branch current from prior contribution");
 
-        assert_eq!(
-            program.ops(),
-            &[NativeOp::LoadPriorCurrent(0), NativeOp::MulConst(2.0)]
-        );
-        assert_eq!(program.max_stack_depth(), 1);
+        assert!(program.ops().iter().any(|op| matches!(
+            op,
+            NativeOp::LoadVoltage {
+                pos: VoltageNode::Internal(1),
+                neg: VoltageNode::Ground
+            }
+        )));
         assert!(program.current_pair_dependencies().is_empty());
-        assert_eq!(program.prior_current_dependencies(), &[0]);
+        assert!(program.prior_current_dependencies().is_empty());
     }
 
     #[test]
-    fn lowers_canonical_named_branch_current_as_sum_of_prior_contributions() {
+    fn lowers_canonical_named_branch_current_sums_in_its_solver_equation() {
         let source = r#"
 module mir_named_branch_current_sum(p, n);
   inout p, n;
@@ -11148,20 +11150,19 @@ endmodule
             EntryKind::StampValue,
             &artifact.mir,
             crate::canonical_ir::EquationId::new(2),
-            NativeLoweringLimits::new(2, 1, 0, 0, 0),
+            NativeLoweringLimits::new(2, 2, 0, 0, 0),
         )
         .expect("lower canonical named branch current sum from prior contributions");
 
-        assert_eq!(
-            program.ops(),
-            &[
-                NativeOp::LoadPriorCurrent(0),
-                NativeOp::LoadPriorCurrent(1),
-                NativeOp::Add,
-            ]
-        );
-        assert_eq!(program.max_stack_depth(), 2);
-        assert_eq!(program.prior_current_dependencies(), &[0, 1]);
+        assert!(program.ops().iter().any(|op| matches!(
+            op,
+            NativeOp::LoadVoltage {
+                pos: VoltageNode::Internal(1),
+                neg: VoltageNode::Ground
+            }
+        )));
+        assert!(program.current_pair_dependencies().is_empty());
+        assert!(program.prior_current_dependencies().is_empty());
     }
 
     #[test]

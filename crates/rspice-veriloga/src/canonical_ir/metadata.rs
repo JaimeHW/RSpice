@@ -14,7 +14,9 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
-/// Version 31 retains authenticated mixed parameter source and discrete analog state inputs.
+/// Version 32 combines authenticated mixed parameter source and discrete analog state inputs
+/// with the simultaneous flow-source probe equations introduced independently in version 31.
+/// Version 31 gives flow-source probes simultaneous solver equations.
 /// Version 30 distinguishes transient discontinuities from Newton convergence hints.
 /// Version 29 retains control tasks in structured HIR and resets them before runtime loops.
 /// Version 28 gives implicit integrators feedback-determined solver unknowns.
@@ -32,7 +34,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 31;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 32;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

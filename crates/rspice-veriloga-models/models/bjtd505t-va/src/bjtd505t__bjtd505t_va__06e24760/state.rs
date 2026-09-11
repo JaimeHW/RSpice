@@ -415,7 +415,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 }
 
 pub struct Instance {
-	pub nodes: [usize; 12],
+	pub nodes: [usize; 20],
 	pub branches: [usize; 2],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
@@ -426,7 +426,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 97]>,
+	pub(crate) canonical_reactive: Box<[f64; 113]>,
 }
 
 impl Clone for Instance {
@@ -601,11 +601,11 @@ impl Instance {
 		P::model("vbtbt", Some(0.16)).minimum(B::inclusive(0.0)),
 		P::model("kbtbt", Some(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 8;
-	pub const NODE_COUNT: usize = 12;
-	pub const INTERNAL_NODE_NAMES: [&str; 8] = ["e1", "b1", "b2", "c1", "c2", "c3", "c4", "noi"];
+	pub const INTERNAL_NODE_COUNT: usize = 16;
+	pub const NODE_COUNT: usize = 20;
+	pub const INTERNAL_NODE_NAMES: [&str; 16] = ["e1", "b1", "b2", "c1", "c2", "c3", "c4", "noi", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6", "__flow_state7"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[];
+	pub const INTERNAL_STATE_NODES: &[usize] = &[8, 9, 10, 11, 12, 13, 14, 15];
 	pub const BRANCH_COUNT: usize = 2;
 	pub const PARAMETER_COUNT: usize = 147;
 	pub const VARIABLE_COUNT: usize = 585;
@@ -615,7 +615,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "44e8dd03fe3fb3c38a0697ff0853fd7b3861aed071eb6b140673287d461dd3e2";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "63cc4e0ad214dfde6fdcd33f88168bd4be3f8b7881e317afc6003f7cc8ea1b77";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

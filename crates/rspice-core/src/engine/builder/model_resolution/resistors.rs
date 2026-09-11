@@ -45,7 +45,7 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     };
     let kf = parameter(&["KF"], 0.0)?;
     if kf < 0.0 {
-        return Err(SimulationError::Circuit(format!(
+        return Err(SimulationError::ParameterDomain(format!(
             "Resistor model '{model_name}' flicker KF must be nonnegative, got {kf}"
         )));
     }

@@ -969,14 +969,14 @@ fn check_netlist_source_resource_limits(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<(), SimulationError> {
+    ResourceLimitError::ensure(
+        ResourceKind::NetlistBytes,
+        netlist.retained_source_bytes(),
+        engine.config.resource_limits.max_netlist_bytes,
+    )?;
     let Some(source) = netlist.source_text.as_deref() else {
         return Ok(());
     };
-    ResourceLimitError::ensure(
-        ResourceKind::NetlistBytes,
-        source.len(),
-        engine.config.resource_limits.max_netlist_bytes,
-    )?;
     for (index, line) in source.lines().enumerate() {
         if index.is_multiple_of(64) {
             check_build_abort(abort)?;

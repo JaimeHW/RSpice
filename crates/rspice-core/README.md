@@ -377,8 +377,20 @@ must agree to a relative threshold of 1e-4 plus a scale-dependent arithmetic
 roundoff allowance; there is no absolute voltage or current floor. A study that
 cannot resolve a consistent derivative within twelve refinements is diagnosed
 with its parameter identity, rather than returning the first stencil's value.
+Before refinement, observed changes that are too small relative to the probe's
+arithmetic noise trigger up to twelve step doublings. A response first observed
+as nonzero must remain resolved; equal samples at larger steps cannot erase that
+evidence. The final stencil also checks response resolution, so smaller steps
+cannot use a growing roundoff allowance to excuse lost probe digits. Initial
+steps, including explicit deltas, may grow during this calibration.
+An expanded stencil must also reproduce the original nearby samples within
+arithmetic noise; it cannot discard evidence of a different local response or
+reinterpret nearby failed trials as physical domain boundaries.
 These checks provide numerical consistency evidence, not a proof of model
-regularity or an independent bound on operating-point solver error.
+regularity or an independent bound on operating-point solver error. A response
+that never changes at the sampled coordinates can still conceal variation below
+the evaluator's precision; owning-parameter scales and error evidence remain
+necessary for broader accuracy qualification.
 
 At physical or finite-range boundaries the driver compares successive one-sided
 quadratic stencils. Only explicit `ParameterDomain` errors or exhausted finite

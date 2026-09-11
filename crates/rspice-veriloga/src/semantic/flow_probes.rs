@@ -1,0 +1,660 @@
+//! Resolve flow probes through simultaneous branch equations.
+//!
+//! A probed flow source owns one private mathematical unknown. Its authored
+//! contributions form the equation `i - sum(f) = 0`; a single physical source
+//! injects `i`. This preserves source sites and stateful operators while AD,
+//! AC and noise use the same solver dependency as ordinary voltage probes.
+
+use super::*;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum BranchKey {
+    Named(SmolStr),
+    Nodes(SmolStr, SmolStr),
+}
+
+struct BranchResolver<'a> {
+    declared: &'a [AnalyzedBranch],
+    grounds: &'a [SmolStr],
+}
+
+impl BranchResolver<'_> {
+    fn ground(&self, name: &str) -> SmolStr {
+        if name.is_empty()
+            || is_global_ground_name(name)
+            || self.grounds.iter().any(|ground| ground == name)
+        {
+            "0".into()
+        } else {
+            name.into()
+        }
+    }
+
+    fn nodes(&self, pos: &str, neg: &str) -> (BranchKey, SmolStr, SmolStr, f64) {
+        let pos = self.ground(pos);
+        let neg = self.ground(neg);
+        if pos <= neg {
+            (BranchKey::Nodes(pos.clone(), neg.clone()), pos, neg, 1.0)
+        } else {
+            (BranchKey::Nodes(neg.clone(), pos.clone()), neg, pos, -1.0)
+        }
+    }
+
+    fn named(&self, name: &SmolStr) -> Option<(BranchKey, SmolStr, SmolStr, f64)> {
+        self.declared
+            .iter()
+            .find(|branch| branch.name == *name)
+            .map(|branch| {
+                (
+                    BranchKey::Named(name.clone()),
+                    self.ground(&branch.pos_node),
+                    self.ground(&branch.neg_node),
+                    1.0,
+                )
+            })
+    }
+
+    fn access(&self, access: &BranchAccess) -> Option<(BranchKey, SmolStr, SmolStr, f64)> {
+        if access.kind() != Some(AccessKind::Flow) {
+            return None;
+        }
+        self.resolve(access)
+    }
+
+    fn resolve(&self, access: &BranchAccess) -> Option<(BranchKey, SmolStr, SmolStr, f64)> {
+        match access {
+            BranchAccess::Nodes { pos, neg: None, .. } => {
+                self.named(pos).or_else(|| Some(self.nodes(pos, "0")))
+            }
+            BranchAccess::Nodes {
+                pos,
+                neg: Some(neg),
+                ..
+            } => Some(self.nodes(pos, neg)),
+            BranchAccess::Branch { name, .. } => self.named(name),
+        }
+    }
+
+    fn contribution(
+        &self,
+        contribution: &AnalyzedContribution,
+    ) -> (BranchKey, SmolStr, SmolStr, f64) {
+        if let Some(name) = &contribution.declared_branch
+            && let Some(branch) = self.named(name)
+        {
+            return branch;
+        }
+        let (pos, neg) = contribution
+            .branch
+            .split_once(',')
+            .unwrap_or((&contribution.branch, "0"));
+        self.nodes(pos.trim(), neg.trim())
+    }
+}
+
+#[derive(Clone)]
+struct FlowBranch {
+    pos: SmolStr,
+    neg: SmolStr,
+    state: SmolStr,
+    span: Span,
+    source: bool,
+}
+
+pub(crate) fn lower<'a>(
+    mut module: Cow<'a, AnalyzedModule>,
+) -> CompileResult<Cow<'a, AnalyzedModule>> {
+    let resolver = BranchResolver {
+        declared: &module.branches,
+        grounds: &module.ground_nodes,
+    };
+    let mut branches = BTreeMap::new();
+    let mut port_reads = std::collections::BTreeSet::new();
+    let mut potential_reads = HashSet::new();
+    let mut inspect = |expression: &Expression| {
+        visit_expression(expression, &mut |expression| {
+            if let Expression::BranchAccess(access) = expression
+                && access.kind() == Some(AccessKind::Potential)
+                && let Some((key, ..)) = resolver.resolve(access)
+            {
+                potential_reads.insert(key);
+            }
+            if let Expression::BranchAccess(BranchAccess::Branch {
+                name,
+                kind: Some(AccessKind::Flow),
+                ..
+            }) = expression
+                && resolver.named(name).is_none()
+                && module.ports.iter().any(|port| port.name == *name)
+            {
+                port_reads.insert(name.clone());
+            }
+            if let Expression::BranchAccess(access) = expression
+                && let Some((key, pos, neg, _)) = resolver.access(access)
+            {
+                branches.entry(key).or_insert(FlowBranch {
+                    pos,
+                    neg,
+                    state: SmolStr::default(),
+                    span: access.span(),
+                    source: false,
+                });
+            }
+        });
+    };
+    for contribution in &module.contributions {
+        inspect(&contribution.expression);
+    }
+    visit_statements(&module.statements, &mut inspect);
+    let mut existing_unknowns = HashSet::new();
+    let mut incident = branches.clone();
+    for contribution in &module.contributions {
+        let (key, pos, neg, _) = resolver.contribution(contribution);
+        incident
+            .entry(key.clone())
+            .or_insert(FlowBranch {
+                pos,
+                neg,
+                state: SmolStr::default(),
+                span: contribution.span,
+                source: false,
+            })
+            .source |= contribution.is_current;
+        if !contribution.is_current || contribution.indirect {
+            existing_unknowns.insert(key);
+        } else if let Some(branch) = branches.get_mut(&key) {
+            branch.source = true;
+        }
+    }
+    for (key, branch) in &incident {
+        if port_reads.contains(&branch.pos) || port_reads.contains(&branch.neg) {
+            branches
+                .entry(key.clone())
+                .or_insert_with(|| branch.clone());
+        }
+    }
+    // Potential and indirect branches already carry solver-owned currents.
+    branches.retain(|key, _| !existing_unknowns.contains(key));
+    for (key, branch) in &branches {
+        if !branch.source && potential_reads.contains(key) {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(
+                    "cannot probe both flow and potential on a branch without a source contribution".into(),
+                ),
+                branch.span,
+            )));
+        }
+    }
+    if branches.is_empty() && port_reads.is_empty() {
+        return Ok(module);
+    }
+
+    let rewrites: HashMap<_, _> = module
+        .contributions
+        .iter()
+        .filter_map(|contribution| {
+            let (key, _, _, sign) = resolver.contribution(contribution);
+            branches
+                .contains_key(&key)
+                .then_some((contribution.site, (key, sign)))
+        })
+        .collect();
+    // Preserve the resolver's authored declarations while the owned module
+    // gains its private nodes. No expression forest is cloned for this map.
+    let declared = module.branches.clone();
+    let ground_nodes = module.ground_nodes.clone();
+    let target = module.to_mut();
+    for (ordinal, branch) in branches.values_mut().enumerate() {
+        let mut suffix = ordinal;
+        loop {
+            let name: SmolStr = format!("__flow_state{suffix}").into();
+            if target.symbol_table.lookup(&name).is_none()
+                && !target.internal_nodes.iter().any(|node| node.name == name)
+                && !target.ports.iter().any(|port| port.name == name)
+                && !target
+                    .variables
+                    .iter()
+                    .any(|variable| variable.name == name)
+                && !target
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.name == name)
+                && !target.branches.iter().any(|branch| branch.name == name)
+            {
+                branch.state = name;
+                break;
+            }
+            suffix += 1;
+        }
+        let index = target.internal_nodes.len();
+        target.internal_nodes.push(AnalyzedInternalNode {
+            is_state: true,
+            name: branch.state.clone(),
+            discipline: "electrical".into(),
+            index,
+        });
+    }
+
+    let port_values: BTreeMap<_, _> = port_reads
+        .into_iter()
+        .map(|port| {
+            let mut value = SemanticAnalyzer::number_expr(0.0, Span::dummy());
+            for (key, branch) in &incident {
+                let sign = if branch.pos == port {
+                    1.0
+                } else if branch.neg == port {
+                    -1.0
+                } else {
+                    continue;
+                };
+                let term = if let Some(lowered) = branches.get(key) {
+                    potential(&lowered.state, "0", branch.span)
+                } else {
+                    Expression::BranchAccess(match key {
+                        BranchKey::Named(name) => BranchAccess::Nodes {
+                            access: "I".into(),
+                            kind: Some(AccessKind::Flow),
+                            pos: name.clone(),
+                            neg: None,
+                            span: branch.span,
+                        },
+                        BranchKey::Nodes(pos, neg) => BranchAccess::Nodes {
+                            access: "I".into(),
+                            kind: Some(AccessKind::Flow),
+                            pos: pos.clone(),
+                            neg: Some(neg.clone()),
+                            span: branch.span,
+                        },
+                    })
+                };
+                value = SemanticAnalyzer::binary_expr(BinaryOp::Add, value, signed(term, sign));
+            }
+            (port, value)
+        })
+        .collect();
+    let resolver = BranchResolver {
+        declared: &declared,
+        grounds: &ground_nodes,
+    };
+    let rewrite = |expression: &mut Expression| {
+        rewrite_expression(expression, &branches, &resolver, &port_values);
+    };
+    rewrite_statements(&mut target.statements, &rewrite);
+    rewrite_regions(&mut target.body, &rewrite, &branches, &rewrites);
+    for contribution in &mut target.contributions {
+        rewrite(&mut contribution.expression);
+        redirect_contribution(contribution, &branches, &rewrites);
+    }
+    for (key, branch) in &branches {
+        let state = potential(&branch.state, "0", branch.span);
+        let balance = if branch.source {
+            state.clone()
+        } else {
+            potential(&branch.pos, &branch.neg, branch.span)
+        };
+        for (label, declared_branch, expression) in [
+            (
+                format!("{},{}", branch.pos, branch.neg).into(),
+                match key {
+                    BranchKey::Named(name) => Some(name.clone()),
+                    BranchKey::Nodes(..) => None,
+                },
+                state,
+            ),
+            (branch.state.clone(), None, balance),
+        ] {
+            let site = AnalogSiteId(target.analog_site_count);
+            target.analog_site_count =
+                target.analog_site_count.checked_add(1).ok_or_else(|| {
+                    CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "too many analog equation sites".into(),
+                        ),
+                        branch.span,
+                    ))
+                })?;
+            let contribution = AnalyzedContribution {
+                branch: label,
+                declared_branch,
+                is_current: true,
+                indirect: false,
+                expression,
+                site,
+                expression_guard: AnalogSiteGuard::None,
+                expr_type: ValueType::Real,
+                span: branch.span,
+            };
+            target
+                .body
+                .push(AnalyzedRegion::Contribution(contribution.clone()));
+            target.contributions.push(contribution);
+        }
+    }
+    Ok(module)
+}
+
+fn potential(pos: &str, neg: &str, span: Span) -> Expression {
+    Expression::BranchAccess(BranchAccess::Nodes {
+        access: "V".into(),
+        kind: Some(AccessKind::Potential),
+        pos: pos.into(),
+        neg: Some(neg.into()),
+        span,
+    })
+}
+
+fn signed(expression: Expression, sign: f64) -> Expression {
+    if sign > 0.0 {
+        expression
+    } else {
+        let span = expression.span();
+        Expression::Unary(UnaryExpr {
+            op: UnaryOp::Neg,
+            operand: Box::new(expression),
+            span,
+        })
+    }
+}
+
+fn redirect_contribution(
+    contribution: &mut AnalyzedContribution,
+    branches: &BTreeMap<BranchKey, FlowBranch>,
+    rewrites: &HashMap<AnalogSiteId, (BranchKey, f64)>,
+) {
+    let Some((key, sign)) = rewrites.get(&contribution.site) else {
+        return;
+    };
+    contribution.branch = branches[key].state.clone();
+    contribution.declared_branch = None;
+    // Keep the recorded guard path aligned with the structured expression.
+    let negate = |expression: &mut Expression| {
+        *expression = signed(
+            std::mem::replace(
+                expression,
+                SemanticAnalyzer::number_expr(0.0, contribution.span),
+            ),
+            -*sign,
+        );
+    };
+    match (&contribution.expression_guard, &mut contribution.expression) {
+        (AnalogSiteGuard::Select, Expression::Conditional(conditional)) => {
+            negate(&mut conditional.then_expr);
+            negate(&mut conditional.else_expr);
+        }
+        (_, expression) => negate(expression),
+    }
+}
+
+fn rewrite_expression(
+    expression: &mut Expression,
+    branches: &BTreeMap<BranchKey, FlowBranch>,
+    resolver: &BranchResolver<'_>,
+    ports: &BTreeMap<SmolStr, Expression>,
+) {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        if let Expression::BranchAccess(BranchAccess::Branch {
+            name,
+            kind: Some(AccessKind::Flow),
+            ..
+        }) = expression
+            && let Some(value) = ports.get(name)
+        {
+            *expression = value.clone();
+            continue;
+        }
+        if let Expression::BranchAccess(access) = expression
+            && let Some((key, _, _, sign)) = resolver.access(access)
+            && let Some(branch) = branches.get(&key)
+        {
+            // Retain a branch probe for ddx's second argument. A unary
+            // negation has the same value but is not a valid derivative axis.
+            *expression = if sign > 0.0 {
+                potential(&branch.state, "0", access.span())
+            } else {
+                potential("0", &branch.state, access.span())
+            };
+            continue;
+        }
+        for_child_mut(expression, &mut |child| pending.push(child));
+    }
+}
+
+fn visit_statements(body: &[AnalyzedStatement], visit: &mut impl FnMut(&Expression)) {
+    for statement in body {
+        match statement {
+            AnalyzedStatement::Assignment(assignment) => {
+                visit(&assignment.expression);
+                if let Some(index) = &assignment.index {
+                    visit(index);
+                }
+            }
+            AnalyzedStatement::Loop(loop_) => {
+                visit(&loop_.condition);
+                visit_statements(&loop_.body, visit);
+            }
+            AnalyzedStatement::Initialization { body, .. } => visit_statements(body, visit),
+            AnalyzedStatement::Task(task) => task.expressions().for_each(&mut *visit),
+        }
+    }
+}
+
+fn rewrite_statements(body: &mut [AnalyzedStatement], rewrite: &impl Fn(&mut Expression)) {
+    for statement in body {
+        match statement {
+            AnalyzedStatement::Assignment(assignment) => {
+                rewrite(&mut assignment.expression);
+                if let Some(index) = &mut assignment.index {
+                    rewrite(index);
+                }
+            }
+            AnalyzedStatement::Loop(loop_) => {
+                rewrite(&mut loop_.condition);
+                rewrite_statements(&mut loop_.body, rewrite);
+            }
+            AnalyzedStatement::Initialization { body, .. } => rewrite_statements(body, rewrite),
+            AnalyzedStatement::Task(task) => task.expressions_mut().for_each(rewrite),
+        }
+    }
+}
+
+fn rewrite_regions(
+    body: &mut [AnalyzedRegion],
+    rewrite: &impl Fn(&mut Expression),
+    branches: &BTreeMap<BranchKey, FlowBranch>,
+    rewrites: &HashMap<AnalogSiteId, (BranchKey, f64)>,
+) {
+    for region in body {
+        match region {
+            AnalyzedRegion::Assignment(assignment) => {
+                rewrite(&mut assignment.expression);
+                if let Some(index) = &mut assignment.index {
+                    rewrite(index);
+                }
+            }
+            AnalyzedRegion::Contribution(contribution) => {
+                rewrite(&mut contribution.expression);
+                // Structured expressions are unguarded, even when their flat
+                // counterpart records a select wrapper.
+                let guard = contribution.expression_guard;
+                contribution.expression_guard = AnalogSiteGuard::None;
+                redirect_contribution(contribution, branches, rewrites);
+                contribution.expression_guard = guard;
+            }
+            AnalyzedRegion::Conditional {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                rewrite(condition);
+                rewrite_regions(then_body, rewrite, branches, rewrites);
+                rewrite_regions(else_body, rewrite, branches, rewrites);
+            }
+            AnalyzedRegion::Loop {
+                condition, body, ..
+            } => {
+                rewrite(condition);
+                rewrite_regions(body, rewrite, branches, rewrites);
+            }
+            AnalyzedRegion::Initialization { body, .. } => {
+                rewrite_regions(body, rewrite, branches, rewrites)
+            }
+            AnalyzedRegion::Task(task) => task.expressions_mut().for_each(rewrite),
+        }
+    }
+}
+
+fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
+    enum Pending<'a> {
+        Expression(&'a Expression),
+        Element(&'a ArrayLiteralElement),
+    }
+    let mut pending = vec![Pending::Expression(expression)];
+    while let Some(next) = pending.pop() {
+        let expression = match next {
+            Pending::Expression(expression) => expression,
+            Pending::Element(ArrayLiteralElement::Value(expression)) => expression,
+            Pending::Element(ArrayLiteralElement::Replication(replication)) => {
+                pending.extend(replication.elements.iter().map(Pending::Element));
+                &replication.count
+            }
+        };
+        visit(expression);
+        match expression {
+            Expression::Binary(expr) => {
+                pending.push(Pending::Expression(&expr.left));
+                pending.push(Pending::Expression(&expr.right));
+            }
+            Expression::Unary(expr) => pending.push(Pending::Expression(&expr.operand)),
+            Expression::Conditional(expr) => {
+                pending.push(Pending::Expression(&expr.condition));
+                pending.push(Pending::Expression(&expr.then_expr));
+                pending.push(Pending::Expression(&expr.else_expr));
+            }
+            Expression::Call(expr) => pending.extend(expr.args.iter().map(Pending::Expression)),
+            Expression::SystemFunction(expr) => {
+                pending.extend(expr.args.iter().map(Pending::Expression))
+            }
+            Expression::ArrayAccess(expr) => pending.push(Pending::Expression(&expr.index)),
+            Expression::ArrayLiteral(expr) => {
+                pending.extend(expr.elements.iter().map(Pending::Element))
+            }
+            Expression::AnalogOperator(AnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                ..
+            }) => {
+                pending.push(Pending::Expression(proposed));
+                pending.push(Pending::Expression(candidate));
+                if let Some(value) = type_metadata {
+                    pending.push(Pending::Expression(value));
+                }
+            }
+            Expression::NoiseSource(NoiseSource::White { power, .. }) => {
+                pending.push(Pending::Expression(power))
+            }
+            Expression::NoiseSource(NoiseSource::Flicker {
+                power, exponent, ..
+            }) => {
+                pending.push(Pending::Expression(power));
+                pending.push(Pending::Expression(exponent));
+            }
+            Expression::NoiseSource(NoiseSource::Table { data, .. }) => {
+                pending.extend(data.iter().map(Pending::Expression))
+            }
+            Expression::Digital(expr) => {
+                pending.extend(expr.children().into_iter().map(Pending::Expression))
+            }
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::Identifier(_)
+            | Expression::NullArgument(_)
+            | Expression::BranchAccess(_)
+            | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
+        }
+    }
+}
+
+fn for_child_mut<'a>(expression: &'a mut Expression, visit: &mut impl FnMut(&'a mut Expression)) {
+    match expression {
+        Expression::Binary(expr) => {
+            visit(&mut expr.left);
+            visit(&mut expr.right);
+        }
+        Expression::Unary(expr) => visit(&mut expr.operand),
+        Expression::Conditional(expr) => {
+            visit(&mut expr.condition);
+            visit(&mut expr.then_expr);
+            visit(&mut expr.else_expr);
+        }
+        Expression::Call(expr) => expr.args.iter_mut().for_each(visit),
+        Expression::SystemFunction(expr) => expr.args.iter_mut().for_each(visit),
+        Expression::ArrayAccess(expr) => visit(&mut expr.index),
+        Expression::ArrayLiteral(expr) => rewrite_elements(&mut expr.elements, visit),
+        Expression::AnalogOperator(AnalogOperator::Limit {
+            proposed,
+            candidate,
+            type_metadata,
+            ..
+        }) => {
+            visit(proposed);
+            visit(candidate);
+            if let Some(value) = type_metadata {
+                visit(value);
+            }
+        }
+        Expression::NoiseSource(NoiseSource::White { power, .. }) => visit(power),
+        Expression::NoiseSource(NoiseSource::Flicker {
+            power, exponent, ..
+        }) => {
+            visit(power);
+            visit(exponent);
+        }
+        Expression::NoiseSource(NoiseSource::Table { data, .. }) => data.iter_mut().for_each(visit),
+        Expression::Digital(digital) => match digital {
+            DigitalExpr::FourState(_) => {}
+            DigitalExpr::PartSelect(expr) => {
+                visit(&mut expr.msb);
+                visit(&mut expr.lsb);
+            }
+            DigitalExpr::Xnor(expr) => {
+                visit(&mut expr.left);
+                visit(&mut expr.right);
+            }
+            DigitalExpr::CaseEquality(expr) => {
+                visit(&mut expr.left);
+                visit(&mut expr.right);
+            }
+            DigitalExpr::Reduction(expr) => visit(&mut expr.operand),
+            DigitalExpr::ArithmeticShiftRight(expr) => {
+                visit(&mut expr.left);
+                visit(&mut expr.right);
+            }
+        },
+        Expression::Number(_)
+        | Expression::StringLit(_)
+        | Expression::Identifier(_)
+        | Expression::NullArgument(_)
+        | Expression::BranchAccess(_)
+        | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
+    }
+}
+
+fn rewrite_elements<'a>(
+    elements: &'a mut [ArrayLiteralElement],
+    visit: &mut impl FnMut(&'a mut Expression),
+) {
+    for element in elements {
+        match element {
+            ArrayLiteralElement::Value(value) => visit(value),
+            ArrayLiteralElement::Replication(replication) => {
+                visit(&mut replication.count);
+                rewrite_elements(&mut replication.elements, visit);
+            }
+        }
+    }
+}

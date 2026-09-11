@@ -712,7 +712,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 
 pub(crate) type CanonicalModelValues = [f64; 250];
 pub struct Instance {
-	pub nodes: [usize; 10],
+	pub nodes: [usize; 11],
 	pub branches: [usize; 4],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
@@ -723,7 +723,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 95]>,
+	pub(crate) canonical_reactive: Box<[f64; 91]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 482]>,
 	pub(crate) canonical_instance_valid: bool,
@@ -1256,11 +1256,11 @@ impl Instance {
 		P::model("RSHD", Some(0.0)).minimum(B::inclusive(0.0)),
 		P::model("RWELLO", Some(0.0)).minimum(B::inclusive(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 5;
-	pub const NODE_COUNT: usize = 10;
-	pub const INTERNAL_NODE_NAMES: [&str; 5] = ["NSIG", "si", "di", "bp", "gp"];
+	pub const INTERNAL_NODE_COUNT: usize = 6;
+	pub const NODE_COUNT: usize = 11;
+	pub const INTERNAL_NODE_NAMES: [&str; 6] = ["NSIG", "si", "di", "bp", "gp", "__flow_state0"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[];
+	pub const INTERNAL_STATE_NODES: &[usize] = &[5];
 	pub const BRANCH_COUNT: usize = 4;
 	pub const PARAMETER_COUNT: usize = 493;
 	pub const VARIABLE_COUNT: usize = 1901;
@@ -1268,9 +1268,9 @@ impl Instance {
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([26, 56, 81, 92, 83, 224, 189, 193, 217, 208, 198, 108, 114, 109, 65, 31, 187, 170, 90, 168, 164, 210, 93, 210, 49, 227, 94, 161, 47, 213, 0, 207]);
 	pub const EVENT_STATE_COUNT: usize = 0;
-	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
+	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "dad767e93c244c31d1080241da3d7a8b17bb08f0c5a953c24300aec98544cdc4";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "c36efb66bd0ab2b5a978cae77bc4fa60f1db78fea0323144232728e2b0742e10";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

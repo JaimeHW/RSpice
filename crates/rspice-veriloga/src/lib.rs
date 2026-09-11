@@ -1297,7 +1297,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
     ) -> CompileResult<std::borrow::Cow<'a, semantic::AnalyzedModule>> {
         let selected = self.select_analyzed_module(analyzed, module_name)?;
-        semantic::elaborate_executable_module(analyzed, selected)
+        semantic::lower_flow_probes(semantic::elaborate_executable_module(analyzed, selected)?)
     }
 
     fn canonical_ir_error(diagnostics: Vec<canonical_ir::IrDiagnostic>) -> CompileError {

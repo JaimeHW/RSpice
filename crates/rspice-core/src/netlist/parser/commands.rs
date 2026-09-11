@@ -15,6 +15,7 @@ pub(super) fn parse_command(
     context: ParseCommandContext<'_>,
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
+        parameter_overrides,
         logical_line,
         analyses,
         lin_analysis,
@@ -291,6 +292,7 @@ pub(super) fn parse_command(
                 false,
                 diagnostics,
                 origin,
+                parameter_overrides,
             )?;
         }
         ".GLOBAL_PARAM" => {
@@ -302,6 +304,7 @@ pub(super) fn parse_command(
                 true,
                 diagnostics,
                 origin,
+                parameter_overrides,
             )?;
         }
         ".STEP" => {
@@ -5605,6 +5608,7 @@ fn parse_measure_equation_options(
     Ok((from, to, td))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_param_statement(
     stream: &mut TokenStream,
     line_num: usize,
@@ -5613,6 +5617,7 @@ pub(super) fn parse_param_statement(
     retain_global_expression: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
     origin: &NetlistSourceLocation,
+    overrides: &[ParameterOverride],
 ) -> Result<(), ParseError> {
     if retain_global_expression && deferred_params.is_some() {
         return Err(ParseError::Syntax {
@@ -5676,6 +5681,13 @@ pub(super) fn parse_param_statement(
         let error_policy = params.parameter_redefinition_diagnostic_policy()
             == ParameterRedefinitionDiagnosticPolicy::Error;
         if acceptance.authoritative && (acceptance.first_origin.is_none() || !error_policy) {
+            let override_value = overrides
+                .iter()
+                .find(|parameter| {
+                    parameter.global == retain_global_expression
+                        && parameter.name.eq_ignore_ascii_case(&name)
+                })
+                .map(|parameter| parameter.value);
             parse_param_assignment_value(
                 stream,
                 line_num,
@@ -5683,6 +5695,7 @@ pub(super) fn parse_param_statement(
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 name.clone(),
+                override_value,
             )?;
         } else {
             // The ignored definition is still tokenized and syntax-checked,
@@ -5700,6 +5713,7 @@ pub(super) fn parse_param_statement(
                 ignored_deferred,
                 retain_global_expression,
                 name.clone(),
+                None,
             )?;
         }
         handle_parameter_redefinition(
@@ -5764,7 +5778,9 @@ fn parse_param_assignment_value(
     mut deferred_params: Option<&mut Vec<(String, String)>>,
     retain_global_expression: bool,
     name: String,
+    override_value: Option<Value>,
 ) -> Result<(), ParseError> {
+    let override_binding = override_value.map(|value| (name.clone(), value));
     // Get the value (could be number, expression, or string-valued vector).
     match &stream.peek().kind {
         TokenKind::StringLit(value) => {
@@ -5950,6 +5966,15 @@ fn parse_param_assignment_value(
                     )?;
                 }
             }
+        }
+    }
+    if let Some((name, value)) = override_binding {
+        // Validate and consume the authored default, including its random
+        // draws, then install the study value before any dependent assignment.
+        if retain_global_expression {
+            params.set_global(&name, value);
+        } else {
+            params.set(&name, value);
         }
     }
     Ok(())

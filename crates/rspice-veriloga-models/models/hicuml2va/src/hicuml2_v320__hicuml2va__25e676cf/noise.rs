@@ -8,11 +8,11 @@ pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescripto
 use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
 use rspice_veriloga_runtime::{integer, install_generated_stage_values, rspice_limexp};
 pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 19] = [
-	GeneratedNoiseDescriptor { mechanism: "WHITE_B_BP_RBX", label: Some("rbx"), kind: GeneratedNoiseKind::White, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "b", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE___FLOW_STATE0_GND_RBX", label: Some("rbx"), kind: GeneratedNoiseKind::White, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(15), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_BP_BI_RBI", label: Some("rbi"), kind: GeneratedNoiseKind::White, equation: 48, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_CI_C_RCX", label: Some("rcx"), kind: GeneratedNoiseKind::White, equation: 49, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "ci", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(0), name: "c", is_internal: false }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE___FLOW_STATE4_GND_RCX", label: Some("rcx"), kind: GeneratedNoiseKind::White, equation: 49, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(19), name: "__flow_state4", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "WHITE_EI_E_RE", label: Some("re"), kind: GeneratedNoiseKind::White, equation: 50, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "e", is_internal: false }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_SI_S_RSU", label: Some("rsu"), kind: GeneratedNoiseKind::White, equation: 51, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "si", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(3), name: "s", is_internal: false }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE___FLOW_STATE6_GND_RSU", label: Some("rsu"), kind: GeneratedNoiseKind::White, equation: 51, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(21), name: "__flow_state6", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "FLICKER_BI_EI_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, equation: 52, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "FLICKER_BP_EI_FLICKER", label: Some("flicker"), kind: GeneratedNoiseKind::Flicker, equation: 53, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, table_len: 0, table_log_interp: false },
 	GeneratedNoiseDescriptor { mechanism: "FLICKER_EI_E_FLICKER_RE", label: Some("flicker_re"), kind: GeneratedNoiseKind::Flicker, equation: 54, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "e", is_internal: false }, table_len: 0, table_log_interp: false },
@@ -56,7 +56,7 @@ impl Instance {
 		install_generated_stage_values(&mut prepared[..], &produced, &CANONICAL_TEMPERATURE_STAGE_SLOTS);
 		let parameters = &self.params.values;
 		let staged = &prepared[..];
-		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14])];
+		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21])];
 		let A=0f64;
 		let B=parameters[148];
 		let C=node_potentials[8];
@@ -1757,11 +1757,11 @@ pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 19] = [
 	GeneratedNoiseProcessDescriptor { process_id: 18, label: Some("ibei"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 19] = [
-	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "b", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 47, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(15), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 	GeneratedNoiseInjectionDescriptor { process_id: 1, equation: 48, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 49, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "ci", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(0), name: "c", is_internal: false } },
+	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 49, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(19), name: "__flow_state4", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 	GeneratedNoiseInjectionDescriptor { process_id: 3, equation: 50, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "e", is_internal: false } },
-	GeneratedNoiseInjectionDescriptor { process_id: 4, equation: 51, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "si", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(3), name: "s", is_internal: false } },
+	GeneratedNoiseInjectionDescriptor { process_id: 4, equation: 51, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(21), name: "__flow_state6", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
 	GeneratedNoiseInjectionDescriptor { process_id: 5, equation: 52, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "bi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 6, equation: 53, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(7), name: "bp", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true } },
 	GeneratedNoiseInjectionDescriptor { process_id: 7, equation: 54, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(6), name: "ei", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(2), name: "e", is_internal: false } },
@@ -1792,7 +1792,7 @@ impl Instance {
 		let thermal_voltage = ctx.thermal_voltage();
 		let multiplicity = self.multiplicity;
 		let time = self.time;
-		let node_potentials: [f64; 15] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14])];
+		let node_potentials: [f64; 22] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21])];
 		let branch_flows: [f64; 0] = [];
 		let branch_unknown_flows: [f64; 6] = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5])];
 		use rspice_veriloga_runtime::integer;
@@ -1923,14 +1923,11 @@ impl Instance {
 		let AIG=1f64;
 		let AIH=1f64;
 		let AII=1f64;
-		let AIJ=1f64;
-		let AIK=1f64;
-		let AIL=1f64;
+		let AIW=0f64;
+		let AIY=0f64;
 		let AIZ=0f64;
-		let AJA=0f64;
 		let AJB=0f64;
 		let AJC=0f64;
-		let AJD=0f64;
 		let AJE=0f64;
 		let AJF=0f64;
 		let AJG=0f64;
@@ -3393,68 +3390,71 @@ impl Instance {
 		let AFV=(CQ* T)* AFU;
 		let AGR;
 		let AGS;
-		let AIM;
+		let AIJ;
 		if AFP{
 		let AFW=AFV/ AFI;
+		let AIX=1f64* -1f64;
 		AGR=Y;
 		AGS=AFW;
-		AIM=AHZ;
+		AIJ=AIX;
 		}else{
 		AGR=A;
 		AGS=A;
-		AIM=AIZ;
+		AIJ=AIW;
 		}
 		let AGT;
 		let AGU;
-		let AIN;
+		let AIK;
 		if AFJ{
 		let AFX=AFV/ AFE;
 		AGT=Y;
 		AGU=AFX;
-		AIN=AIA;
+		AIK=AHZ;
 		}else{
 		AGT=A;
 		AGU=A;
-		AIN=AJA;
+		AIK=AIY;
 		}
 		let AGV;
 		let AGW;
-		let AIO;
+		let AIL;
 		if AFR{
 		let AFY=AFV/ AFH;
+		let AJA=1f64* -1f64;
 		AGV=Y;
 		AGW=AFY;
-		AIO=AIB;
+		AIL=AJA;
 		}else{
 		AGV=A;
 		AGW=A;
-		AIO=AJB;
+		AIL=AIZ;
 		}
 		let AGX;
 		let AGY;
-		let AIP;
+		let AIM;
 		if AFQ{
 		let AFZ=AFV/ AFG;
 		AGX=Y;
 		AGY=AFZ;
-		AIP=AIC;
+		AIM=AIA;
 		}else{
 		AGX=A;
 		AGY=A;
-		AIP=AJC;
+		AIM=AJB;
 		}
 		let AGZ;
 		let AHA;
-		let AIQ;
+		let AIN;
 		if AFT{
 		let AGA=AFV/ AFS;
+		let AJD=1f64* -1f64;
 		AGZ=Y;
 		AHA=AGA;
-		AIQ=AID;
+		AIN=AJD;
 		}else{
 		AGZ=A;
 		AHA=A;
-		AIQ=AJD;
+		AIN=AJC;
 		}
 		let AGB=parameters[110]* (((ACO+ AFB).abs()).powf(parameters[111]));
 		let AGC=parameters[112]== -1f64;
@@ -3464,8 +3464,8 @@ impl Instance {
 		let AHE;
 		let AHF;
 		let AHG;
-		let AIR;
-		let AIS;
+		let AIO;
+		let AIP;
 		if AGC{
 		AHB=Y;
 		AHC=AGB;
@@ -3473,8 +3473,8 @@ impl Instance {
 		AHE=A;
 		AHF=A;
 		AHG=A;
-		AIR=AIE;
-		AIS=AJF;
+		AIO=AIB;
+		AIP=AJF;
 		}else{
 		AHB=A;
 		AHC=A;
@@ -3482,38 +3482,38 @@ impl Instance {
 		AHE=Y;
 		AHF=AGB;
 		AHG=Y;
-		AIR=AJE;
-		AIS=AIF;
+		AIO=AJE;
+		AIP=AIC;
 		}
 		let AHH;
 		let AHI;
 		let AHJ;
-		let AIT;
+		let AIQ;
 		if AFQ{
 		let AGD=parameters[113]* ((((D- node_potentials[2])/ AFG).abs()).powf(parameters[114]));
 		AHH=Y;
 		AHI=AGD;
 		AHJ=Y;
-		AIT=AIG;
+		AIQ=AID;
 		}else{
 		AHH=A;
 		AHI=A;
 		AHJ=A;
-		AIT=AJG;
+		AIQ=AJG;
 		}
 		let AGE=CN* U;
 		let AHK;
 		let AHL;
-		let AIU;
+		let AIR;
 		if RQ{
 		let AGF=AGE* (AFK.abs());
 		AHK=Y;
 		AHL=AGF;
-		AIU=AIH;
+		AIR=AIE;
 		}else{
 		AHK=A;
 		AHL=A;
-		AIU=AJH;
+		AIR=AJH;
 		}
 		let AGG=AGE* (AFB.abs());
 		let AGH=AGE* AEX;
@@ -3530,10 +3530,10 @@ impl Instance {
 		let AHR;
 		let AHS;
 		let AHT;
+		let AIS;
+		let AIT;
+		let AIU;
 		let AIV;
-		let AIW;
-		let AIX;
-		let AIY;
 		if AGM{
 		let AGN=AGE* (ACO.abs());
 		let AGO=AGE* (AAI.abs());
@@ -3545,10 +3545,10 @@ impl Instance {
 		AHR=A;
 		AHS=A;
 		AHT=A;
-		AIV=AII;
-		AIW=AIJ;
-		AIX=AJK;
-		AIY=AJL;
+		AIS=AIF;
+		AIT=AIG;
+		AIU=AJK;
+		AIV=AJL;
 		}else{
 		let AGP=AGE* (AAI.abs());
 		let AGQ=AGE* (ACO.abs());
@@ -3560,30 +3560,30 @@ impl Instance {
 		AHR=AGP;
 		AHS=Y;
 		AHT=AGQ;
-		AIV=AJI;
-		AIW=AJJ;
-		AIX=AIK;
-		AIY=AIL;
+		AIS=AJI;
+		AIT=AJJ;
+		AIU=AIH;
+		AIV=AII;
 		}
-		let AJM=AIM;
-		let AJN=AIN;
-		let AJO=AIO;
-		let AJP=AIP;
-		let AJQ=AIQ;
-		let AJR=AIR;
-		let AJS=AIS;
-		let AJT=AIT;
-		let AJU=AIU;
+		let AJM=AIJ;
+		let AJN=AIK;
+		let AJO=AIL;
+		let AJP=AIM;
+		let AJQ=AIN;
+		let AJR=AIO;
+		let AJS=AIP;
+		let AJT=AIQ;
+		let AJU=AIR;
 		let AJV=1f64;
 		let AJW=1f64;
 		let AJX=1f64;
 		let AJY=1f64;
 		let AJZ=1f64;
 		let AKA=1f64;
-		let AKB=AIV;
-		let AKC=AIW;
-		let AKD=AIX;
-		let AKE=AIY;
+		let AKB=AIS;
+		let AKC=AIT;
+		let AKD=AIU;
+		let AKE=AIV;
 		ctx.check_noise_evaluation()?;
 		let process_0_active = AGR != 0.0;
 		let process_0_psd = (AGS).abs();
