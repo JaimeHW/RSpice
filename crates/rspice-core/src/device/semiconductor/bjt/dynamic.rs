@@ -829,6 +829,53 @@ impl Bjt {
         }
     }
 
+    /// Frozen-time shot and flicker currents follow the private transient bias.
+    pub(crate) fn legacy_noise_branch_currents_at_state(
+        &self,
+        snapshot: &BjtChargeSnapshot,
+    ) -> (Value, Value, Value) {
+        let v = snapshot.reduction.internal_voltages;
+        let (linearized, _) = self.linearize_currents_with_branches(
+            v[IDX_VBI] - v[IDX_VEI],
+            v[IDX_VBX] - v[IDX_VEI],
+            v[IDX_VBI] - v[IDX_VCI],
+        );
+        (linearized.ic.abs(), linearized.ib.abs(), 0.0)
+    }
+
+    /// Native noise sources use the same physical intrinsic nodes as charge.
+    pub(crate) fn legacy_noise_terminals(&self) -> [(Option<usize>, Option<usize>); 3] {
+        [
+            self.legacy_charge_collector_terminal(),
+            self.legacy_charge_base_terminal(),
+            self.legacy_charge_emitter_terminal(),
+        ]
+    }
+
+    pub(crate) fn legacy_private_base_noise(
+        &self,
+        snapshot: &BjtChargeSnapshot,
+    ) -> Option<(Value, [(Option<usize>, Option<usize>); 2])> {
+        if !self.uses_legacy_gummel_poon() || !Self::series_active(self.rbi) {
+            return None;
+        }
+        let v = snapshot.reduction.internal_voltages;
+        let (linearized, _) = self.linearize_currents_with_branches(
+            v[IDX_VBI] - v[IDX_VEI],
+            v[IDX_VBX] - v[IDX_VEI],
+            v[IDX_VBI] - v[IDX_VCI],
+        );
+        let conductance = self
+            .irbi_branch(linearized, v[IDX_VBX], v[IDX_VBI])
+            .d_internal[IDX_VBX];
+        let base = if Self::series_active(self.rbx) {
+            (Some(IDX_VBX), None)
+        } else {
+            (None, Some(EXT_B))
+        };
+        Some((conductance, [base, (Some(IDX_VBI), None)]))
+    }
+
     #[inline]
     pub(super) fn legacy_charge_collector_terminal(&self) -> (Option<usize>, Option<usize>) {
         if Self::series_active(self.rci) {

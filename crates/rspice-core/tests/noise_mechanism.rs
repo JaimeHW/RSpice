@@ -788,3 +788,227 @@ fn semiconductor_flicker_frequency_extension_preserves_signed_ef() {
         }
     }
 }
+
+#[test]
+#[allow(clippy::excessive_precision)] // Preserve the reference simulator output.
+fn legacy_bjt_private_noise_matches_ngspice_spectra() {
+    use rspice_core::config::SpiceDialect;
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    let frequencies = [1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9];
+    // ngspice46, warning-free decks, native constants, TEMP=TNOM=27 C.
+    // Rows contain voltage-noise amplitudes RB, IB, IC, FN and total.
+    let references = [
+        (
+            0.6,
+            [
+                [
+                    1.45835369555683571e-08,
+                    4.77020120440513412e-09,
+                    1.51985965955829115e-08,
+                    2.66481156704834749e-07,
+                    2.69699817573397112e-07,
+                ],
+                [
+                    1.45834747507604178e-08,
+                    4.77018088751242284e-09,
+                    1.51985345401757767e-08,
+                    8.42683819590839080e-08,
+                    9.39517445573075686e-08,
+                ],
+                [
+                    1.45772582709423545e-08,
+                    4.76815050565130629e-09,
+                    1.51923330475881555e-08,
+                    2.66366597055764096e-08,
+                    4.93337784903671384e-08,
+                ],
+                [
+                    1.39929560818041036e-08,
+                    4.57731582162920218e-09,
+                    1.46099613624188065e-08,
+                    8.08612937539054824e-09,
+                    4.06846532003670419e-08,
+                ],
+                [
+                    4.64907480021584599e-09,
+                    1.53039909520825017e-09,
+                    5.67762665835209283e-09,
+                    8.54937776491514551e-10,
+                    1.36920612611850220e-08,
+                ],
+                [
+                    1.52116447943927008e-10,
+                    1.08233598155512314e-10,
+                    2.06061859005888532e-09,
+                    1.91201767925639399e-11,
+                    2.32171960170999119e-09,
+                ],
+                [
+                    2.81982981585604505e-10,
+                    2.78795033220673499e-12,
+                    3.01437795880345936e-10,
+                    1.55745260530310558e-13,
+                    4.41791209160966918e-10,
+                ],
+            ],
+        ),
+        (
+            0.75,
+            [
+                [
+                    6.74718378185420759e-11,
+                    3.68905786953502420e-10,
+                    1.98389529720041548e-10,
+                    2.06084474448779450e-08,
+                    2.06145615885095139e-08,
+                ],
+                [
+                    6.74718347037219541e-11,
+                    3.68905773951455690e-10,
+                    1.98389585708916467e-10,
+                    6.51696306687945869e-09,
+                    6.53627195125713711e-09,
+                ],
+                [
+                    6.74715232233158573e-11,
+                    3.68904473753616369e-10,
+                    1.98395184476705292e-10,
+                    2.06083740846548353e-09,
+                    2.12110701905097846e-09,
+                ],
+                [
+                    6.74403911123387412e-11,
+                    3.68774522362398757e-10,
+                    1.98953867852339503e-10,
+                    6.51464442125569491e-10,
+                    8.22511804265781525e-10,
+                ],
+                [
+                    6.44780771733106248e-11,
+                    3.56425525906296973e-10,
+                    2.45567362463083289e-10,
+                    1.99112537087381766e-10,
+                    5.46635482886592345e-10,
+                ],
+                [
+                    3.54361973885330582e-11,
+                    1.25348094878078312e-10,
+                    5.43929623161296082e-10,
+                    2.21435651731391098e-11,
+                    5.71739754126798757e-10,
+                ],
+                [
+                    1.56126640340755819e-10,
+                    5.50117323294929042e-12,
+                    2.30547836284465098e-10,
+                    3.07315969187260670e-13,
+                    2.82871155248379438e-10,
+                ],
+            ],
+        ),
+    ];
+    for (bias, reference) in references {
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let deck = Netlist::parse(&format!(
+                "Private BJT noise\nVCC supply 0 {}\nRL supply c 1000\nVB drive 0 {} AC 1\nRIN drive b 100\nQ1 c b 0 qm AREA=2 M=3\n.model qm {kind}(IS=1e-14 BF=100 VAF=50 RB=120 RBM=20 IRB=1e-5 CJE=2p CJC=3p XCJC=.35 TF=2n KF=1e-12 AF=1 SUBS=1)\n.options GMIN=0 RELTOL=1e-10 ABSTOL=1e-18\n.temp 27\n.end", p * 5.0, p * bias,
+            )).unwrap();
+            let noise = engine
+                .run_noise_named_with_input_source(&deck, "c", None, "VB", &frequencies, 300.15)
+                .unwrap_or_else(|error| panic!("{kind} bias={bias}: {error}"));
+            for (point, reference) in noise.iter().zip(reference) {
+                for (index, mechanism) in ["RB", "IB", "IC", "FN"].iter().enumerate() {
+                    let density: f64 = point
+                        .contributions
+                        .iter()
+                        .filter(|source| {
+                            source.identity.device.eq_ignore_ascii_case("Q1")
+                                && source.identity.mechanism.as_deref() == Some(mechanism)
+                        })
+                        .map(|source| source.output_contribution)
+                        .sum();
+                    let expected = reference[index] * reference[index];
+                    assert!(
+                        (density / expected - 1.0).abs() < 5e-5,
+                        "{kind} bias={bias} f={} {mechanism}: {density:e} vs {expected:e}",
+                        point.frequency
+                    );
+                }
+                assert!((point.output_noise_density / reference[4].powi(2) - 1.0).abs() < 5e-5);
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_bjt_base_noise_matches_explicit_network_and_port_correlation() {
+    use rspice_core::config::SpiceDialect;
+    let frequencies = [1e3, 1e5, 1e7, 1e9];
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (kind, rbm) in [("NPN", 0), ("PNP", 20), ("NPN", 120)] {
+            let model = format!(
+                "Q1 c b 0 qm AREA=2 M=3\n.model qm {kind}(IS=0 RB=120 RBM={rbm} CJE=1n MJE=0 CJC=2n MJC=0 XCJC=1 SUBS=1)"
+            );
+            let equivalent = "RB b bi 20\nCBE bi 0 6n\nCBC bi c 12n";
+            for temperature in [233.15, 343.15] {
+                let make = |body: &str, sources: &str| {
+                    Netlist::parse(&format!(
+                        "Passive BJT noise\n{sources}\n{body}\n.options GMIN=0\n.end"
+                    ))
+                    .unwrap()
+                };
+                let sources = "VB b 0 0 AC 1\nVC c 0 0";
+                let actual = engine
+                    .run_port_noise_correlation(
+                        &make(&model, sources),
+                        &["VB".into(), "VC".into()],
+                        &frequencies,
+                        temperature,
+                    )
+                    .unwrap();
+                let expected = engine
+                    .run_port_noise_correlation(
+                        &make(equivalent, sources),
+                        &["VB".into(), "VC".into()],
+                        &frequencies,
+                        temperature,
+                    )
+                    .unwrap();
+                for (a, b) in actual.iter().zip(&expected) {
+                    for (row_a, row_b) in a.current_correlation.iter().zip(&b.current_correlation) {
+                        for (a, b) in row_a.iter().zip(row_b) {
+                            assert!(
+                                (a - b).norm() <= b.norm() * 1e-9 + 1e-35,
+                                "{dialect:?} {kind} RBM={rbm} T={temperature}: {a:?} vs {b:?}"
+                            );
+                        }
+                    }
+                }
+                let sources = "VIN drive 0 0 AC 1\nRS drive b 1000\nVC c 0 0";
+                let actual = engine
+                    .run_noise_named_with_input_source(
+                        &make(&model, sources),
+                        "b",
+                        None,
+                        "VIN",
+                        &frequencies,
+                        temperature,
+                    )
+                    .unwrap();
+                let expected = engine
+                    .run_noise_named_with_input_source(
+                        &make(equivalent, sources),
+                        "b",
+                        None,
+                        "VIN",
+                        &frequencies,
+                        temperature,
+                    )
+                    .unwrap();
+                for (a, b) in actual.iter().zip(expected) {
+                    assert!((a.output_noise_density / b.output_noise_density - 1.0).abs() < 1e-9);
+                }
+            }
+        }
+    }
+}

@@ -18,6 +18,7 @@ pub(in crate::engine) struct PortNoiseLinearization {
     dialect: crate::config::SpiceDialect,
     noise_sources: Vec<NoiseSource>,
     noise_temperatures: Vec<Option<Value>>,
+    private_bjts: Vec<usize>,
     correlated_noise_sources: Vec<CorrelatedNoisePair>,
     runtime_devices: HashSet<String>,
     generated_devices: HashSet<String>,
@@ -277,6 +278,7 @@ impl Engine {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
             correlated: mut correlated_noise_sources,
+            private_bjts,
         } = Self::try_collect_noise_sources(&circuit, &dc_solution, self.config.spice_dialect)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
@@ -332,6 +334,7 @@ impl Engine {
                 dialect: self.config.spice_dialect,
                 noise_sources,
                 noise_temperatures: elementary_absolute_temperatures,
+                private_bjts,
                 correlated_noise_sources,
                 runtime_devices: runtime_veriloga_device_names,
                 generated_devices: generated_veriloga_device_names,
@@ -533,12 +536,35 @@ impl PortNoiseLinearization {
         }
 
         self.refer_adjoint_to_dut(workspace, frequency, abort)?;
+        let stride = self.bias.len()
+            + self.private_bjts.len() * crate::device::semiconductor::BJT_INTERNAL_STATE_DIM;
+        if !self.private_bjts.is_empty() {
+            workspace.port_adjoint.resize(self.num_ports * stride, zero);
+            for port in (0..self.num_ports).rev() {
+                let start = port * stride;
+                workspace
+                    .port_adjoint
+                    .copy_within(port * self.bias.len()..(port + 1) * self.bias.len(), start);
+                for (block, &index) in self.private_bjts.iter().enumerate() {
+                    let recovered = Engine::bjt_noise_adjoint(
+                        &circuit.bjts.devices[index],
+                        &self.bias,
+                        Complex64::new(0.0, omega),
+                        &workspace.port_adjoint[start..start + self.bias.len()],
+                    )?;
+                    let first = start
+                        + self.bias.len()
+                        + block * crate::device::semiconductor::BJT_INTERNAL_STATE_DIM;
+                    workspace.port_adjoint[first..first + recovered.len()]
+                        .copy_from_slice(&recovered);
+                }
+            }
+        }
         let solve_transfer =
             |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
                 (0..self.num_ports)
                     .map(|port| {
-                        let adjoint = &workspace.port_adjoint
-                            [port * self.bias.len()..(port + 1) * self.bias.len()];
+                        let adjoint = &workspace.port_adjoint[port * stride..(port + 1) * stride];
                         Ok(Engine::noise_transfer_from_adjoint(
                             adjoint, node_pos, node_neg,
                         ))

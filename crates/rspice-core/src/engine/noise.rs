@@ -1,3 +1,5 @@
+mod bjt;
+pub(in crate::engine) use bjt::BjtNoiseProjection;
 mod port;
 pub(super) use port::{PortNoiseWorkspace, PreparedPortNoise, validate_port_noise_frequencies};
 
@@ -36,6 +38,8 @@ pub(in crate::engine) struct CollectedNoiseSources {
     pub(in crate::engine) elementary: Vec<NoiseSource>,
     pub(in crate::engine) elementary_absolute_temperatures: Vec<Option<Value>>,
     pub(in crate::engine) correlated: Vec<CorrelatedNoisePair>,
+    /// Appended noise-node blocks, in BJT_INTERNAL_STATE_DIM units after MNA.
+    pub(in crate::engine) private_bjts: Vec<usize>,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -2216,8 +2220,18 @@ impl Engine {
         dc_solution: &[Value],
         dialect: crate::config::SpiceDialect,
     ) -> Result<CollectedNoiseSources, SimulationError> {
+        Self::try_collect_noise_sources_at_bjt_states(circuit, dc_solution, dialect, &[])
+    }
+
+    pub(in crate::engine) fn try_collect_noise_sources_at_bjt_states(
+        circuit: &CircuitData,
+        dc_solution: &[Value],
+        dialect: crate::config::SpiceDialect,
+        bjt_snapshots: &[Option<crate::device::semiconductor::BjtChargeSnapshot>],
+    ) -> Result<CollectedNoiseSources, SimulationError> {
         Self::validate_resistor_noise_storage(circuit)?;
         let mut noise_sources = Vec::new();
+        let mut private_bjts = Vec::new();
         let mut correlated_noise_sources = Vec::new();
         let mut absolute_temperatures = HashMap::new();
         let mut bsim4_series_noise_conductances: HashMap<String, Value> = HashMap::new();
@@ -2757,8 +2771,8 @@ impl Engine {
 
         // Promoted VBIC exposes model-specific sources on its internal nodes.
         // Older VBIC follows ngspice; VBIC 1.3 follows the Xyce VA definition.
-        // Legacy GP keeps its external-node shot and KF flicker sources.
-        for bjt in &circuit.bjts.devices {
+        // GP internal sources retain their physical nodes through Schur reduction.
+        for (bjt_index, bjt) in circuit.bjts.devices.iter().enumerate() {
             if !bjt.noise_enabled() {
                 continue;
             }
@@ -2864,29 +2878,79 @@ impl Engine {
                 continue;
             }
 
-            let (ic, ib, _) = bjt.noise_branch_currents();
-            if ic != 0.0 {
-                noise_sources.push(
-                    NoiseSource::shot(
-                        format!("{}:IC", bjt.name),
-                        bjt.node_collector,
-                        bjt.node_emitter,
-                        ic,
+            let terminals = bjt.legacy_noise_terminals();
+            let offset = dc_solution
+                .len()
+                .checked_add(
+                    private_bjts
+                        .len()
+                        .checked_mul(crate::device::semiconductor::BJT_INTERNAL_STATE_DIM)
+                        .ok_or_else(|| {
+                            SimulationError::Circuit("BJT noise node count overflow".into())
+                        })?,
+                )
+                .ok_or_else(|| SimulationError::Circuit("BJT noise node count overflow".into()))?;
+            if terminals.iter().any(|terminal| terminal.0.is_some()) {
+                private_bjts.push(bjt_index);
+            }
+            let nodes = [
+                bjt.node_collector,
+                bjt.node_base,
+                bjt.node_emitter,
+                bjt.node_substrate,
+            ];
+            let node = |terminal: (Option<usize>, Option<usize>)| {
+                terminal.0.map_or_else(
+                    || nodes[terminal.1.expect("physical noise terminal")],
+                    |index| offset + index + 1,
+                )
+            };
+            let [collector, base, emitter] = terminals.map(node);
+            let frozen_snapshot = bjt_snapshots.get(bjt_index).and_then(Option::as_ref);
+            if bjt.rbi > 0.0 {
+                let voltage = |id| Self::noise_node_voltage(dc_solution, id);
+                let snapshot = frozen_snapshot.copied().unwrap_or_else(|| {
+                    bjt.charge_snapshot(
+                        voltage(nodes[0]),
+                        voltage(nodes[1]),
+                        voltage(nodes[2]),
+                        voltage(nodes[3]),
+                    )
+                });
+                if let Some((conductance, terminals)) = bjt.legacy_private_base_noise(&snapshot)
+                    && let Some(resistance) = Self::noise_resistance_from_conductance(
+                        &format!("{}:RB", bjt.name),
+                        conductance,
+                    )?
+                {
+                    let mut source = NoiseSource::thermal(
+                        bjt.name.clone(),
+                        node(terminals[0]),
+                        node(terminals[1]),
+                        resistance,
                     )
                     .with_identity(
-                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IC"),
-                    ),
+                        crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "RB"),
+                    );
+                    source.temperature_offset = bjt.noise_temperature_offset;
+                    noise_sources.push(source);
+                }
+            }
+            let (ic, ib, _) = frozen_snapshot.map_or_else(
+                || bjt.noise_branch_currents(),
+                |snapshot| bjt.legacy_noise_branch_currents_at_state(snapshot),
+            );
+            if ic != 0.0 {
+                noise_sources.push(
+                    NoiseSource::shot(format!("{}:IC", bjt.name), collector, emitter, ic)
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &bjt.name, "IC",
+                        )),
                 );
             }
             if ib != 0.0 {
                 noise_sources.push(
-                    NoiseSource::shot(
-                        format!("{}:IB", bjt.name),
-                        bjt.node_base,
-                        bjt.node_emitter,
-                        ib,
-                    )
-                    .with_identity(
+                    NoiseSource::shot(format!("{}:IB", bjt.name), base, emitter, ib).with_identity(
                         crate::analysis::NoiseSourceIdentity::mechanism(&bjt.name, "IB"),
                     ),
                 );
@@ -2895,8 +2959,8 @@ impl Engine {
                 noise_sources.push(Self::semiconductor_flicker_source(
                     NoiseSource::flicker_with_frequency_exponent(
                         bjt.name.clone(),
-                        bjt.node_base,
-                        bjt.node_emitter,
+                        base,
+                        emitter,
                         kf,
                         af,
                         ef,
@@ -3065,6 +3129,7 @@ impl Engine {
             elementary: noise_sources,
             elementary_absolute_temperatures,
             correlated: correlated_noise_sources,
+            private_bjts,
         })
     }
 
@@ -3585,6 +3650,7 @@ impl Engine {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
             correlated: mut correlated_noise_sources,
+            private_bjts,
         } = Self::try_collect_noise_sources(&circuit, &dc_solution, engine.config.spice_dialect)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
@@ -3868,6 +3934,16 @@ impl Engine {
                         .map_err(SimulationError::Solver)?;
                 }
                 Err(error) => return Err(SimulationError::Solver(error)),
+            }
+
+            for &index in &private_bjts {
+                let recovered = Self::bjt_noise_adjoint(
+                    &circuit.bjts.devices[index],
+                    &dc_solution,
+                    Complex64::new(0.0, omega),
+                    &transfer_solution[..dc_solution.len()],
+                )?;
+                transfer_solution.extend_from_slice(&recovered);
             }
 
             debug_assert_eq!(point_noise_sources.len(), point_noise_temperatures.len());

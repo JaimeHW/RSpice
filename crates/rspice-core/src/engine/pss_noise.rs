@@ -703,36 +703,39 @@ impl Engine {
                 true,
             )?;
 
-            let mut projection = |node_pos: usize,
-                                  node_neg: usize|
-             -> Result<Value, SimulationError> {
-                if node_pos > size || node_neg > size {
-                    return Err(SimulationError::Circuit(format!(
-                        "oscillator pnoise source injection ({node_pos}, {node_neg}) exceeds matrix size {size}"
-                    )));
-                }
-                let mut injection = vec![0.0; size];
-                if node_pos > 0 {
-                    injection[node_pos - 1] += 1.0;
-                }
-                if node_neg > 0 {
-                    injection[node_neg - 1] -= 1.0;
-                }
-                let delta = matrix.solve(&injection).map_err(SimulationError::Solver)?;
-
-                let value = v1_k
-                    .iter()
-                    .zip(circuit.project_perturbation(&delta))
-                    .map(|(adjoint, perturbation)| adjoint * perturbation / dt_freeze)
-                    .sum();
-                Ok(value)
-            };
-
             let super::noise::CollectedNoiseSources {
                 elementary: mut sources,
                 elementary_absolute_temperatures,
                 correlated: mut correlated_sources,
-            } = Self::try_collect_noise_sources(&circuit, &solution, self.config.spice_dialect)?;
+                private_bjts,
+            } = Self::try_collect_noise_sources_at_bjt_states(
+                &circuit,
+                &solution,
+                self.config.spice_dialect,
+                circuit.bjt_noise_snapshots(),
+            )?;
+            let bjt_projection = super::noise::BjtNoiseProjection::new(
+                &circuit,
+                &solution,
+                &private_bjts,
+                1.0 / dt_freeze,
+                circuit.bjt_noise_snapshots(),
+            );
+            let mut projection =
+                |node_pos: usize, node_neg: usize| -> Result<Value, SimulationError> {
+                    let mut injection = vec![0.0; size];
+                    bjt_projection.stamp(node_pos, 1.0, &mut injection)?;
+                    bjt_projection.stamp(node_neg, -1.0, &mut injection)?;
+                    let delta = matrix.solve(&injection).map_err(SimulationError::Solver)?;
+
+                    let value = v1_k
+                        .iter()
+                        .zip(circuit.project_perturbation(&delta))
+                        .map(|(adjoint, perturbation)| adjoint * perturbation / dt_freeze)
+                        .sum();
+                    Ok(value)
+                };
+
             Self::configure_noise_physical_constants(
                 &mut sources,
                 &mut correlated_sources,

@@ -25,6 +25,14 @@ const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
 
+pub(in crate::engine) struct BjtAcChargeBlocks {
+    pub ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+    pub ie: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+    pub ei: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+    pub ee: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+    pub active: bool,
+}
+
 /// Physical Verilog-A identity of a frequency-domain small-signal operator.
 ///
 /// AC and noise share the same complex matrix assembly, but they are distinct
@@ -1536,6 +1544,35 @@ impl Engine {
         }
     }
 
+    pub(in crate::engine) fn bjt_ac_charge_blocks(
+        snapshot: &BjtChargeSnapshot,
+        include_delay_branches: bool,
+    ) -> BjtAcChargeBlocks {
+        let mut blocks = BjtAcChargeBlocks {
+            ii: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+            ie: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+            ei: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+            ee: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+            active: false,
+        };
+        for (index, branch) in snapshot.branches.iter().enumerate() {
+            if !branch.is_active()
+                || (!include_delay_branches
+                    && (index == BJT_DELAY_XF1_BRANCH_INDEX || index == BJT_DELAY_XF2_BRANCH_INDEX))
+            {
+                continue;
+            }
+            branch.accumulate_derivatives(
+                &mut blocks.ii,
+                &mut blocks.ie,
+                &mut blocks.ei,
+                &mut blocks.ee,
+            );
+            blocks.active = true;
+        }
+        blocks
+    }
+
     fn stamp_bjt_dynamic_ac(
         matrix: &mut ComplexMatrix,
         bjt: &crate::device::Bjt,
@@ -1640,27 +1677,14 @@ impl Engine {
             }
         }
         let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
-        let mut c_ii = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
-        let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
-        let mut c_ei = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-        let mut c_ee = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-        let mut has_dynamic_charge = false;
-        for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
-            if !branch.is_active() {
-                continue;
-            }
-            if !include_delay_branches
-                && (branch_idx == BJT_DELAY_XF1_BRANCH_INDEX
-                    || branch_idx == BJT_DELAY_XF2_BRANCH_INDEX)
-            {
-                // Reduced mode without the xf companion charges (see the
-                // promoted arm above); ngspice-46 includes them in AC.
-                continue;
-            }
-            branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
-            has_dynamic_charge = true;
-        }
-        if !has_dynamic_charge {
+        let BjtAcChargeBlocks {
+            ii: c_ii,
+            ie: c_ie,
+            ei: c_ei,
+            ee: c_ee,
+            active,
+        } = Self::bjt_ac_charge_blocks(&snapshot, include_delay_branches);
+        if !active {
             return Ok(());
         }
 

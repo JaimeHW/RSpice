@@ -666,6 +666,12 @@ impl PssCircuit {
         );
     }
 
+    pub(in crate::engine) fn bjt_noise_snapshots(
+        &self,
+    ) -> &[Option<crate::device::semiconductor::BjtChargeSnapshot>] {
+        &self.bjt_snapshot_cache
+    }
+
     pub(super) fn accept_node_solution(&mut self, solution: &[Value]) {
         self.solution_scratch[1..].copy_from_slice(solution);
     }
