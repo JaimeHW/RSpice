@@ -2159,14 +2159,16 @@ fn seal_pdk_veriloga_sources(
                 contract.source_id
             ))
         })?;
-        let compilation = rspice_veriloga::VerilogACompiler::default()
-            .compile_virtual_runtime(&bundle, &contract.module_name, limits)
-            .map_err(|error| {
-                PdkTechnologyError::ModelMaterialization(format!(
-                    "signed Verilog-A source '{}' module '{}' could not be compiled: {error}",
-                    contract.source_id, contract.module_name
-                ))
-            })?;
+        let compilation = rspice_veriloga::VerilogACompiler::new(
+            crate::simulation::veriloga::unified_runtime_compiler_options(),
+        )
+        .compile_virtual_runtime(&bundle, &contract.module_name, limits)
+        .map_err(|error| {
+            PdkTechnologyError::ModelMaterialization(format!(
+                "signed Verilog-A source '{}' module '{}' could not be compiled: {error}",
+                contract.source_id, contract.module_name
+            ))
+        })?;
         compilation.validate_integrity().map_err(|error| {
             PdkTechnologyError::ModelMaterialization(format!(
                 "compiled Verilog-A source '{}' failed its integrity check: {error}",
@@ -3782,23 +3784,29 @@ pub(crate) mod tests {
 
     pub(crate) fn fixture_archive_with_veriloga()
     -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
-        let (bytes, trust, authority) = fixture_archive();
-        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
-        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
-        let mut manifest: PdkTechnologyManifest =
-            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
-        let root = br#"`include "parts/resistance.vams"
+        fixture_archive_with_veriloga_source(
+            br#"`include "parts/resistance.vams"
 module pdk_resistor(p, n);
     inout p, n;
     electrical p, n;
     parameter real r = `PDK_RESISTANCE;
     analog I(p, n) <+ V(p, n) / r;
 endmodule
-"#
-        .to_vec();
+"#,
+        )
+    }
+
+    pub(crate) fn fixture_archive_with_veriloga_source(
+        root: &[u8],
+    ) -> (Vec<u8>, PdkPublisherTrustStore, PdkAdministrativeAuthority) {
+        let (bytes, trust, authority) = fixture_archive();
+        let signing_key = SigningKey::from_bytes(&[0x42; 32]);
+        let mut archive: SignedPdkTechnologyArchive = serde_json::from_slice(&bytes).unwrap();
+        let mut manifest: PdkTechnologyManifest =
+            serde_json::from_slice(&STANDARD.decode(&archive.manifest_base64).unwrap()).unwrap();
         let dependency = b"`define PDK_RESISTANCE 250.0\n".to_vec();
         for (path, content) in [
-            ("veriloga/pdk_resistor.va", root.as_slice()),
+            ("veriloga/pdk_resistor.va", root),
             ("veriloga/parts/resistance.vams", dependency.as_slice()),
         ] {
             manifest.artifacts.push(PdkTechnologyArtifact {

@@ -124,6 +124,14 @@ original filesystem path. Model-library compilation prepares each source root
 once across its module selections and retains canonical digital plans for mixed
 devices. Connection libraries never enter the device JIT inventory.
 
+Project-editor, configured project-cell and signed-PDK model compilation also
+retain mixed analog/digital artifacts for the unified host. Project execution
+uses the editor's build profile, including macros, include paths, selected entry
+modules, cell-binding checks and required backend qualifications. Signed-PDK
+admission and execution validate the same authenticated source bytes. Standalone
+connection-library entries in project-editor and PDK manifests remain separate
+integration work; these model routes still select an executable module.
+
 Worker request protocol 10 requires the complete source inventory, including an
 explicit empty connection list when there are no libraries. Older requests must
 be rebuilt with the matching application/worker release. Native contract checks

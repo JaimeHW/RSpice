@@ -14,7 +14,10 @@ use sha2::{Digest as _, Sha256};
 
 mod connections;
 use connections::PreparedVerilogAConnectionLibrary;
+pub(crate) mod build_profile;
 
+#[cfg(test)]
+mod project_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -576,6 +579,40 @@ impl PreparedVerilogARuntimeSet {
     }
 }
 
+/// All product compilation routes retain the canonical digital plan and
+/// install it through the unified engine's mixed host when required.
+pub(crate) fn unified_runtime_compiler_options() -> rspice_veriloga::CompilerOptions {
+    rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn compile_project_virtual_runtime(
+    bundle: &crate::state::ProjectSourceBundle,
+    module_name: &str,
+) -> Result<rspice_veriloga::VirtualRuntimeCompilation, PreparedRuntimeError> {
+    let resolved = build_profile::resolve_veriloga_build_profile(bundle)
+        .map_err(PreparedRuntimeError::SourceIdentity)?;
+    resolved
+        .profile
+        .validate_selected_module(module_name)
+        .map_err(PreparedRuntimeError::SourceIdentity)?;
+    let virtual_bundle =
+        build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
+            .map_err(PreparedRuntimeError::SourceBundle)?;
+    let compilation = rspice_veriloga::VerilogACompiler::new(resolved.profile.compiler_options())
+        .compile_virtual_runtime_diagnosed_with_qualifications(
+            &virtual_bundle, module_name, project_virtual_compile_limits(), resolved.profile.qualification_options(),
+        )
+        .map_err(|error| PreparedRuntimeError::Compile(format!(
+            "Could not compile Verilog-A module '{module_name}' from project bundle {}: {error}", bundle.id(),
+        )))?;
+    build_profile::validate_profile_cell_bindings(&compilation.runtime, &resolved.profile)
+        .map_err(PreparedRuntimeError::SourceIdentity)?;
+    Ok(compilation)
+}
+
 pub(crate) fn compile_project_source_bundle_runtime(
     project_id: crate::product::ProjectId,
     bundle: &crate::state::ProjectSourceBundle,
@@ -593,30 +630,7 @@ pub(crate) fn compile_project_source_bundle_runtime(
             .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
     let netlist_alias = crate::state::project_veriloga_bundle_alias(bundle, module_name)
         .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    let files =
-        std::iter::once(rspice_veriloga::VirtualSourceFile::new(
-            bundle.root().logical_path(),
-            bundle.root().content(),
-        ))
-        .chain(bundle.files().iter().map(|file| {
-            rspice_veriloga::VirtualSourceFile::new(file.logical_path(), file.content())
-        }));
-    let virtual_bundle = rspice_veriloga::VirtualSourceBundle::new(
-        bundle.root().logical_path(),
-        files,
-    )
-    .map_err(|error| {
-        PreparedRuntimeError::SourceBundle(format!("Project Verilog-A bundle is invalid: {error}"))
-    })?;
-    let limits = project_virtual_compile_limits();
-    let compilation = rspice_veriloga::VerilogACompiler::default()
-        .compile_virtual_runtime(&virtual_bundle, module_name, limits)
-        .map_err(|error| {
-            PreparedRuntimeError::Compile(format!(
-                "Could not compile Verilog-A module '{module_name}' from project bundle {}: {error}",
-                bundle.id()
-            ))
-        })?;
+    let compilation = compile_project_virtual_runtime(bundle, module_name)?;
     PreparedVerilogARuntime::try_from_virtual_compilation(
         source_key,
         bundle.closure_digest(),
@@ -681,7 +695,7 @@ pub(crate) fn compile_signed_pdk_source_runtime(
                 binding.source_id
             ))
         })?;
-    let compilation = rspice_veriloga::VerilogACompiler::default()
+    let compilation = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options())
         .compile_virtual_runtime(&bundle, &binding.module_name, pdk_virtual_compile_limits())
         .map_err(|error| {
             PreparedRuntimeError::Compile(format!(
@@ -718,10 +732,7 @@ pub(crate) fn compile_model_library_source_runtimes(
     let limits = model_library_virtual_compile_limits();
     // Every retained model includes its canonical digital plan and is installed
     // through the unified engine. Mixed reports are safe on this host path.
-    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-        enable_ams: true,
-        ..Default::default()
-    });
+    let compiler = rspice_veriloga::VerilogACompiler::new(unified_runtime_compiler_options());
     let mut runtimes = Vec::new();
     let mut connections = Vec::new();
     let mut roots_by_path = std::collections::BTreeMap::<_, Vec<_>>::new();

@@ -13,7 +13,7 @@ mod page;
 mod source_files;
 mod source_search;
 mod veriloga;
-mod veriloga_profile;
+use crate::simulation::veriloga::build_profile as veriloga_profile;
 #[cfg(any(target_arch = "wasm32", test))]
 mod veriloga_worker;
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]

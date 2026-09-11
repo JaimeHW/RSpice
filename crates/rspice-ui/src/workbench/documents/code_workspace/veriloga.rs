@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompileDiagnosticSeverity, RuntimeCompileReport, RuntimeTarget,
     RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetReadiness, VerilogACompiler,
-    VirtualRuntimeCompilation, VirtualSourceBundle, VirtualSourceFile,
+    VirtualRuntimeCompilation,
 };
 use sha2::Digest as _;
 
@@ -16,7 +16,12 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
+use super::veriloga_profile::{
+    project_bundle_as_virtual_with_profile, validate_profile_cell_bindings,
+};
 use crate::simulation::veriloga::VerilogASourceOperationToken;
+#[cfg(test)]
+use rspice_veriloga::VirtualSourceBundle;
 
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
@@ -1237,6 +1242,9 @@ pub(super) fn compile_project_bundle_source(
         bundle.role_for_path(file.logical_path()) != Some(ProjectSourceRole::VerilogABuildProfile)
     });
     if let Some(module_name) = selected_module {
+        if let Err(error) = resolved.profile.validate_selected_module(module_name) {
+            return build_profile_error_outcome(error);
+        }
         let bundle = match project_bundle_as_virtual_with_profile(bundle, &resolved.profile) {
             Ok(bundle) => bundle,
             Err(error) => {
@@ -1292,33 +1300,6 @@ fn successful_compile_outcome(
         Ok(()) => VerilogACompileOutcome::Success(Box::new(report)),
         Err(error) => build_profile_error_outcome(error),
     }
-}
-
-fn validate_profile_cell_bindings(
-    report: &RuntimeCompileReport,
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-) -> Result<(), String> {
-    for (instance_path, expected_module) in &profile.cell_bindings {
-        let Some(actual) = report
-            .specialist
-            .evidence
-            .instance_bindings
-            .iter()
-            .find(|binding| binding.instance_path == *instance_path)
-        else {
-            return Err(format!(
-                "Cell-model binding '{instance_path}' references an instance path that is not present in the elaboration graph rooted at selected module '{}'.",
-                report.abi.module_name
-            ));
-        };
-        if actual.module_name != *expected_module {
-            return Err(format!(
-                "Cell-model binding '{instance_path}' expects module '{expected_module}', but the analyzed instance binds '{}'.",
-                actual.module_name
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn build_profile_error_outcome(error: String) -> VerilogACompileOutcome {
@@ -1404,59 +1385,12 @@ fn virtual_compile_error_outcome(
     VerilogACompileOutcome::Failure(diagnostics)
 }
 
-fn project_bundle_as_virtual_with_profile(
-    bundle: &ProjectSourceBundle,
-    profile: &super::veriloga_profile::VerilogABuildProfile,
-) -> Result<VirtualSourceBundle, String> {
-    let files = std::iter::once(VirtualSourceFile::new(
-        bundle.root().logical_path(),
-        bundle.root().content(),
-    ))
-    .chain(
-        bundle
-            .files()
-            .iter()
-            .filter(|file| {
-                bundle.role_for_path(file.logical_path())
-                    != Some(ProjectSourceRole::VerilogABuildProfile)
-            })
-            .map(|file| VirtualSourceFile::new(file.logical_path(), file.content())),
-    );
-    VirtualSourceBundle::new_with_include_paths(
-        bundle.root().logical_path(),
-        files,
-        profile.include_paths.iter().cloned(),
-    )
-    .map_err(|error| error.to_string())
-}
-
 pub(crate) fn compile_project_bundle_virtual_for_provenance(
     bundle: &ProjectSourceBundle,
     selected_module: &str,
 ) -> Result<VirtualRuntimeCompilation, String> {
-    let resolved = super::veriloga_profile::resolve_veriloga_build_profile(bundle)?;
-    if !resolved.profile.entry_modules.is_empty()
-        && !resolved
-            .profile
-            .entry_modules
-            .iter()
-            .any(|module| module == selected_module)
-    {
-        return Err(format!(
-            "Selected module '{selected_module}' is not declared by the Verilog-A build profile."
-        ));
-    }
-    let virtual_bundle = project_bundle_as_virtual_with_profile(bundle, &resolved.profile)?;
-    let compilation = VerilogACompiler::new(resolved.profile.compiler_options())
-        .compile_virtual_runtime_diagnosed_with_qualifications(
-            &virtual_bundle,
-            selected_module,
-            crate::simulation::veriloga::project_virtual_compile_limits(),
-            resolved.profile.qualification_options(),
-        )
-        .map_err(|failure| failure.to_string())?;
-    validate_profile_cell_bindings(&compilation.runtime, &resolved.profile)?;
-    Ok(compilation)
+    crate::simulation::veriloga::compile_project_virtual_runtime(bundle, selected_module)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn compile_project_bundle_receipt(

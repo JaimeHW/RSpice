@@ -1,4 +1,4 @@
-//! Persisted, fail-closed Verilog-A build configuration.
+//! Shared project Verilog-A/AMS build configuration for editing and execution.
 //!
 //! The profile is a project document selected by an explicit semantic role.
 //! Its path is presentation only: compilation never infers policy from a
@@ -172,8 +172,18 @@ impl VerilogABuildProfile {
                 .map(|(name, value)| (name.clone(), Some(value.clone())))
                 .collect(),
             undefines: self.preprocessor.undefines.clone(),
-            ..CompilerOptions::default()
+            ..super::unified_runtime_compiler_options()
         }
+    }
+
+    pub(crate) fn validate_selected_module(&self, module: &str) -> Result<(), String> {
+        if !self.entry_modules.is_empty() && !self.entry_modules.iter().any(|entry| entry == module)
+        {
+            return Err(format!(
+                "Selected module '{module}' is not declared by the Verilog-A build profile."
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) const fn qualification_options(&self) -> RuntimeQualificationOptions {
@@ -239,6 +249,61 @@ impl VerilogABuildProfile {
         }
         Ok(())
     }
+}
+
+pub(crate) fn project_bundle_as_virtual_with_profile(
+    bundle: &ProjectSourceBundle,
+    profile: &VerilogABuildProfile,
+) -> Result<rspice_veriloga::VirtualSourceBundle, String> {
+    let files = std::iter::once(rspice_veriloga::VirtualSourceFile::new(
+        bundle.root().logical_path(),
+        bundle.root().content(),
+    ))
+    .chain(
+        bundle
+            .files()
+            .iter()
+            .filter(|file| {
+                bundle.role_for_path(file.logical_path())
+                    != Some(ProjectSourceRole::VerilogABuildProfile)
+            })
+            .map(|file| {
+                rspice_veriloga::VirtualSourceFile::new(file.logical_path(), file.content())
+            }),
+    );
+    rspice_veriloga::VirtualSourceBundle::new_with_include_paths(
+        bundle.root().logical_path(),
+        files,
+        profile.include_paths.iter().cloned(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) fn validate_profile_cell_bindings(
+    report: &rspice_veriloga::RuntimeCompileReport,
+    profile: &VerilogABuildProfile,
+) -> Result<(), String> {
+    for (instance_path, expected_module) in &profile.cell_bindings {
+        let Some(actual) = report
+            .specialist
+            .evidence
+            .instance_bindings
+            .iter()
+            .find(|binding| binding.instance_path == *instance_path)
+        else {
+            return Err(format!(
+                "Cell-model binding '{instance_path}' references an instance path that is not present in the elaboration graph rooted at selected module '{}'.",
+                report.abi.module_name
+            ));
+        };
+        if actual.module_name != *expected_module {
+            return Err(format!(
+                "Cell-model binding '{instance_path}' expects module '{expected_module}', but the analyzed instance binds '{}'.",
+                actual.module_name
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn resolve_veriloga_build_profile(

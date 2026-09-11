@@ -128,6 +128,7 @@ invented throughput numbers do not qualify parity.
 | Standalone virtual library circuit registration | Core target `veriloga_connect_source_closure`, filtered to `standalone_virtual`, portable Verilog feature | Passed: a zero-device library selects 1 V/5 V conversion; cache/source budgets, conflicting device registration, no partial installation and wrong-kind module selection preserve valid state |
 | Existing atomic device registration after typed-cache integration | Core library tests filtered to `engine::builder::veriloga_cache::tests::plural_`, portable Verilog feature | 3 passed: whole-batch install, aggregate-budget rollback and installed-key collision rollback |
 | Product connection-source import, snapshot and worker transport | UI library tests with `browser-worker`, filtered to `standalone_connection`; only the worker case rerun after correcting its waveform-label assertion | 4 focused cases passed: HDL-only import/integrity, exact deck dependencies, two-source snapshot provenance, serialized worker execution with 1 V/5 V selected outputs |
+| Project and signed-PDK mixed model adapters | UI library tests with `browser-worker`, filtered to `unified_mixed_`, test debuginfo disabled | 2 passed: explicit editor/configured artifact equality with macros/include paths; module/binding/backend enforcement; authenticated PDK install and transport; both circuits switch from 1/3 V to 1/2 V within 1e-9 V |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -248,13 +249,35 @@ fix. Its changed paths inspect statistics and user functions; the focused mixed
 decks use neither, so those cases were not repeated for that rebase. The full
 combined regression matrix remains an integration/release gate.
 
+Project-editor, configured project-cell and signed-PDK model routes now retain
+the canonical digital plan through shared mixed compiler options. Signed-PDK
+admission uses those options as well as execution, while retaining signed source
+digests, dependency checks and terminal contracts. The project build profile
+lives in the shared simulation layer: configured execution now consumes its
+macros, include paths, exact entry-module restrictions, cell-binding checks and
+backend qualification requirements instead of using compiler defaults. The
+explicit-module editor and configured routes produce identical sealed runtime
+artifacts in the focused case. The legacy implicit single-file editor route
+still uses its in-memory compilation receipt; broader receipt unification remains
+open.
+
+The two product cases execute a digital `reg` changing an analog conductance
+behind a SPICE resistor. Their 1/3 V and 1/2 V expectations use the predeclared
+1e-9 V budget. The first attempt exposed the compiler's existing refusal of a
+module-level `integer` assigned by a digital process: digital lowering reports
+it as an analog variable. The adapter fixtures now use an explicitly supported
+`reg`; the integer ownership/lowering case remains required MS06 work, not a
+qualified language form. Both cases then passed. Required generated-Rust
+qualification continues to reject digital process execution; retaining an
+analog runtime does not certify a missing digital backend. No broad suite or
+actual browser/tablet run was performed.
+
 ## Next implementation work
 
-Carry mixed source and standalone library support through project-editor and
-signed-PDK bindings.
-Review their compile profiles, terminal contracts and backend qualification as
-one capability contract; enabling analog-half emission must never drop the
-digital plan or certify an unsupported executable backend. Qualify the actual
+Carry standalone library entries through project-editor and signed-PDK bindings;
+those adapters still require an executable module selection. Keep their compile
+profiles, terminal contracts and backend qualification consistent with the mixed
+model routes. Qualify the actual
 browser-worker path at its integrated target milestone.
 Continue hierarchical library/view binding with the typed design graph.
 Implement MS02 resolved timing metadata, then
