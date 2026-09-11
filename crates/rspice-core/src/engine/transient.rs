@@ -8706,6 +8706,10 @@ impl Engine {
                             analysis_final_step,
                         )?
                     } else {
+                        circuit
+                            .resistors
+                            .advance_thermal_states(&new_solution, dt)
+                            .map_err(SimulationError::Circuit)?;
                         (false, None)
                     };
                     if let Some(history) = static_history {
@@ -8759,10 +8763,6 @@ impl Engine {
                     ));
 
                     solution.clone_from(&new_solution);
-                    circuit
-                        .resistors
-                        .advance_thermal_states(&solution, dt)
-                        .map_err(SimulationError::Circuit)?;
                     if let Some(history) = xyce_static_history_candidate {
                         xyce_static_history = Some(history);
                     }
@@ -9184,6 +9184,10 @@ impl Engine {
                     analysis_final_step,
                 )?
             } else {
+                circuit
+                    .resistors
+                    .advance_thermal_states(&new_solution, dt)
+                    .map_err(SimulationError::Circuit)?;
                 (false, None)
             };
             if let Some(history) = static_history {
@@ -9241,10 +9245,6 @@ impl Engine {
             xyce_step_failure_count = 0;
 
             solution.clone_from(&new_solution);
-            circuit
-                .resistors
-                .advance_thermal_states(&solution, dt)
-                .map_err(SimulationError::Circuit)?;
             if let Some(history) = xyce_static_history_candidate {
                 xyce_static_history = Some(history);
             }

@@ -54,6 +54,30 @@ pub struct ThermalResistorState {
     pub instance_thermal_heat_capacity: Option<Value>,
 }
 
+/// Only evaluated material values cross the acceptance barrier; expression
+/// definitions and parameter scopes remain in the resistor's immutable setup.
+#[derive(Clone, Copy)]
+struct ThermalMaterialCandidate {
+    temperature_celsius: Value,
+    resistivity: Value,
+    heat_capacity: Value,
+    thermal_heat_capacity: Value,
+    reported_resistance: Value,
+}
+
+struct ThermalStepCandidate {
+    material: ThermalMaterialCandidate,
+    output_resistance: Value,
+    output_conductance: Value,
+}
+
+/// Prepared values for one unchanged resistor topology. Discarding the token
+/// leaves both material state and reported electrical-load values unchanged.
+#[must_use]
+pub(crate) struct PreparedThermalResistorStep {
+    entries: Vec<(usize, ThermalStepCandidate, Value)>,
+}
+
 impl ThermalResistorState {
     fn material_context(
         &self,
@@ -125,6 +149,15 @@ impl ThermalResistorState {
         &mut self,
         temperature_celsius: Value,
     ) -> Result<(), String> {
+        let material = self.prepare_material_at_temperature(temperature_celsius)?;
+        self.apply_material(material);
+        Ok(())
+    }
+
+    fn prepare_material_at_temperature(
+        &self,
+        temperature_celsius: Value,
+    ) -> Result<ThermalMaterialCandidate, String> {
         if !temperature_celsius.is_finite() {
             return Err(format!(
                 "thermal resistor temperature became non-finite: {temperature_celsius}"
@@ -160,12 +193,21 @@ impl ThermalResistorState {
                 "thermal resistor material resistance is invalid: {resistance}"
             ));
         }
-        self.temperature_celsius = temperature_celsius;
-        self.resistivity = resistivity;
-        self.heat_capacity = heat_capacity;
-        self.thermal_heat_capacity = thermal_heat_capacity;
-        self.reported_resistance = resistance;
-        Ok(())
+        Ok(ThermalMaterialCandidate {
+            temperature_celsius,
+            resistivity,
+            heat_capacity,
+            thermal_heat_capacity,
+            reported_resistance: resistance,
+        })
+    }
+
+    fn apply_material(&mut self, material: ThermalMaterialCandidate) {
+        self.temperature_celsius = material.temperature_celsius;
+        self.resistivity = material.resistivity;
+        self.heat_capacity = material.heat_capacity;
+        self.thermal_heat_capacity = material.thermal_heat_capacity;
+        self.reported_resistance = material.reported_resistance;
     }
 
     #[inline]
@@ -181,14 +223,23 @@ impl ThermalResistorState {
         conductance: Value,
         step_size: Value,
     ) -> Result<(), String> {
+        let candidate = self.prepare_accepted_step(voltage, conductance, step_size)?;
+        self.apply_accepted_step(candidate);
+        Ok(())
+    }
+
+    fn prepare_accepted_step(
+        &self,
+        voltage: Value,
+        conductance: Value,
+        step_size: Value,
+    ) -> Result<ThermalStepCandidate, String> {
         if !step_size.is_finite() || step_size < 0.0 {
             return Err(format!(
                 "thermal resistor accepted step size is invalid: {step_size}"
             ));
         }
         let current = voltage * conductance;
-        self.output_resistance = self.reported_resistance;
-        self.output_conductance = conductance;
         let dissipation = current * current * self.reported_resistance;
         let denominator = self.area * self.length * self.heat_capacity
             + self.thermal_area * self.thermal_length * self.thermal_heat_capacity;
@@ -198,7 +249,17 @@ impl ThermalResistorState {
             ));
         }
         let temperature = self.temperature_celsius + dissipation * step_size / denominator;
-        self.update_material_at_temperature(temperature)
+        Ok(ThermalStepCandidate {
+            material: self.prepare_material_at_temperature(temperature)?,
+            output_resistance: self.reported_resistance,
+            output_conductance: conductance,
+        })
+    }
+
+    fn apply_accepted_step(&mut self, candidate: ThermalStepCandidate) {
+        self.apply_material(candidate.material);
+        self.output_resistance = candidate.output_resistance;
+        self.output_conductance = candidate.output_conductance;
     }
 }
 
@@ -333,8 +394,20 @@ impl Resistors {
         solution: &[Value],
         step_size: Value,
     ) -> Result<(), String> {
-        for index in 0..self.thermal.len() {
-            let Some(state) = self.thermal[index].as_mut() else {
+        let prepared = self.prepare_thermal_step(solution, step_size)?;
+        self.commit_thermal_step(prepared);
+        Ok(())
+    }
+
+    /// Evaluate every material law before changing any accepted resistor state.
+    pub(crate) fn prepare_thermal_step(
+        &self,
+        solution: &[Value],
+        step_size: Value,
+    ) -> Result<PreparedThermalResistorStep, String> {
+        let mut entries = Vec::new();
+        for (index, state) in self.thermal.iter().enumerate() {
+            let Some(state) = state else {
                 continue;
             };
             let stamp = self.stamps[index];
@@ -346,18 +419,37 @@ impl Resistors {
                 }
             };
             let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
-            let old_conductance = self.conductances[index];
-            state.advance_after_accepted_step(voltage, old_conductance, step_size)?;
-            let resistance = state.electrical_resistance();
-            if !resistance.is_finite() || resistance <= 0.0 {
+            let candidate = state
+                .prepare_accepted_step(voltage, self.conductances[index], step_size)
+                .map_err(|error| format!("thermal resistor '{}': {error}", self.names[index]))?;
+            let resistance =
+                candidate.material.reported_resistance * state.scale / state.multiplicity;
+            let conductance = 1.0 / resistance;
+            if !resistance.is_finite()
+                || resistance <= 0.0
+                || !conductance.is_finite()
+                || conductance <= 0.0
+            {
                 return Err(format!(
-                    "thermal resistor '{}' resolved to invalid electrical resistance {resistance}",
+                    "thermal resistor '{}' resolved to invalid electrical resistance/conductance {resistance}/{conductance}",
                     self.names[index]
                 ));
             }
-            self.conductances[index] = 1.0 / resistance;
+            entries.push((index, candidate, conductance));
         }
-        Ok(())
+        Ok(PreparedThermalResistorStep { entries })
+    }
+
+    /// Promote a token prepared for this unchanged topology; no material law
+    /// or other fallible model call runs after the acceptance barrier.
+    pub(crate) fn commit_thermal_step(&mut self, prepared: PreparedThermalResistorStep) {
+        for (index, candidate, conductance) in prepared.entries {
+            self.thermal[index]
+                .as_mut()
+                .expect("prepared thermal topology is unchanged")
+                .apply_accepted_step(candidate);
+            self.conductances[index] = conductance;
+        }
     }
 
     /// Set the noise enable of the most recently added resistor.

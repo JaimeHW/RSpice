@@ -727,7 +727,10 @@ reverse restoration, provider failure/panic and invalidation across context
 clones. The acceptance cases check resources created during the first candidate,
 multiple accesses capturing once, a later HDL or XSPICE refusal, and successful
 retry. The two final acceptance checks also passed after incorporating concurrent
-`19d7b65c1`, `8faed906e` and `03c84e746` parser changes. They additionally cover
+`19d7b65c1`, `8faed906e` and `03c84e746` parser changes. The actual combined
+baseline was `e445bfbea`, also including `3375c9d1d`, `db5f6d65d` and
+`a6ac0f977` indirect-source/compiler updates and the guarded-source correction.
+They additionally cover
 failed restoration of a newly registered resource and repeated refusal through
 an earlier circuit clone. Only these affected cases were rerun after the final
 failure-latch change; all runs used the core library with the `veriloga` feature.
@@ -742,6 +745,49 @@ suite, platform execution, generator refresh, performance qualification or
 Spectre reference run was performed. Compiler/artifact schemas are unchanged.
 The user has confirmed that no licensed reference installation is available;
 commercial readiness and vendor parity remain unproven.
+
+## MS05 increment: prepare thermal material state before model promotion
+
+Thermal-resistor material evaluation now produces a compact candidate containing
+only numeric material/load values. It does not copy retained expression scopes
+or definitions. Both single-device advancement and the resistor-family entry
+point prepare before mutation; a later resistor's invalid material can no longer
+leave earlier resistors advanced. The family validates effective resistance and
+conductance before committing any candidate and identifies the failing resistor.
+
+The external-model barrier prepares thermal states from the final XSPICE-projected
+solution before HDL promotion, then applies those states without another material
+callback after the joint HDL barrier succeeds. A later HDL refusal discards the
+thermal candidates. A thermal refusal takes the existing XSPICE context/resource
+and projected-solution rollback path before any HDL state or accepted analog task
+can be published. Ordinary and forced-acceptance tails use this ordering. The
+native-only path uses the same transactional family advancement before controller
+history updates; the old later advancement was removed from both tails.
+
+Two focused cases passed on the `a236b2da9` baseline with the core library
+and `veriloga` feature. One acceptance fixture combines two mixed
+hosts, two XSPICE resources, an analog task observer and two thermal resistors.
+It checks a later HDL failure, a later material failure in standalone family and
+mixed acceptance, exact preservation of thermal/material/output values, resource
+and voltage-projection undo, absence of accepted effects, and successful retry
+using 0.75 V after projection rather than the supplied 1 V candidate. The other
+case runs constant-power decks through the native-only and XSPICE acceptance
+paths, checking every accepted temperature against the analytic energy balance
+to detect skipped or duplicate updates.
+
+This increment does not close native-history or controller atomicity. The
+parent's reactive-history operation still rotates capacitors/inductors and
+hysteresis before fallible behavioral-source and BJT acceptance, and MOS history
+can depend on fallible parallel-worker preparation. Those operations need a
+common prepared state before promotion; elapsed time, breakpoint consumption,
+output retention and effect publication also require the full coordinator
+contract. MS04 typed connectivity, circuit-wide event scheduling/root refinement,
+the actual whole-circuit feedback slice and every remaining MS00–MS15 milestone
+remain open. No broad suite or platform/vendor qualification was run.
+The final rebase includes `4765859de` (controlled-source multiplicity derivatives
+and parser plumbing). The two checks ran before that integration; its changes
+were reviewed and do not modify thermal state or the acceptance implementation.
+Compiler and generated-model inputs were not changed by this increment.
 
 ## Next implementation work
 

@@ -1,5 +1,5 @@
-//! The acceptance barrier for XSPICE and compiled analog/mixed participants.
-//! Native SPICE history and solver-controller acceptance remain in the parent
+//! The acceptance barrier for XSPICE, HDL and thermal resistor participants.
+//! Other native SPICE history and solver-controller acceptance remain in the parent
 //! stepper, along with observation and analog-task publication. External
 //! reversible resources join this barrier through registered undo images.
 
@@ -72,6 +72,12 @@ impl Engine {
                     .evaluate_generated_veriloga_timepoint(matrix, solution)
                     .map_err(SimulationError::Circuit)?;
             }
+            // Use the final projected electrical candidate, but retain the
+            // preceding material/load state until every HDL participant agrees.
+            let thermal = circuit
+                .resistors
+                .prepare_thermal_step(solution, dt)
+                .map_err(SimulationError::Circuit)?;
             let discontinuity = circuit.accept_model_transient_timestep(
                 time,
                 dt,
@@ -80,6 +86,7 @@ impl Engine {
                 initial_step,
                 final_step,
             )?;
+            circuit.resistors.commit_thermal_step(thermal);
             // The joint HDL barrier has completed all fallible operations.
             // XSPICE promotion only swaps/copies already evaluated histories.
             if has_xspice {
@@ -565,6 +572,169 @@ mod tests {
         assert!(circuit.take_xspice_evaluation_error().is_none());
         for (resource, before) in resources.iter().zip(resource_before) {
             assert_eq!(*resource.value.lock().unwrap(), before + 1);
+        }
+    }
+    fn thermal_values(circuit: &crate::CircuitData) -> (Vec<Value>, Vec<Option<[Value; 7]>>) {
+        (
+            circuit.resistors.conductances.clone(),
+            circuit
+                .resistors
+                .thermal
+                .iter()
+                .map(|state| {
+                    state.as_ref().map(|state| {
+                        [
+                            state.temperature_celsius,
+                            state.resistivity,
+                            state.heat_capacity,
+                            state.thermal_heat_capacity,
+                            state.reported_resistance,
+                            state.output_resistance,
+                            state.output_conductance,
+                        ]
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn thermal_acceptance_prepares_every_resistor_before_mixed_promotion() {
+        let (engine, mut circuit, mut matrix, mut solution, resources) = fixture(false);
+        let thermal_deck = Netlist::parse("thermal setup\nRhot a 0 hot L=1 A=1\n.model hot R(LEVEL=2 RESISTIVITY=1000 HEATCAPACITY=1e-12)\n.end\n").unwrap();
+        let thermal_circuit = engine.build_circuit(&thermal_deck).unwrap();
+        let thermal = thermal_circuit.resistors.thermal[0].as_ref().unwrap();
+        let load = circuit
+            .resistors
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("rload"))
+            .unwrap();
+        let later = circuit
+            .resistors
+            .names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("rbad"))
+            .unwrap();
+        for index in [load, later] {
+            circuit.resistors.thermal[index] = Some(thermal.clone());
+        }
+        step(&engine, &mut circuit, &mut matrix, &mut solution, 0.0, 0.0).unwrap();
+        let accepted = thermal_values(&circuit);
+        let p = circuit.get_node_by_name("p").unwrap() - 1;
+        let adc = circuit.get_node_by_name("adc").unwrap() - 1;
+        let bad = circuit.get_node_by_name("bad").unwrap() - 1;
+        solution[p] = 1.0;
+        solution[adc] = 0.6;
+        solution[bad] = 2.0;
+        let dt = 0.65e-9;
+        let error = step(&engine, &mut circuit, &mut matrix, &mut solution, dt, dt).unwrap_err();
+        assert!(error.to_string().contains("second"), "{error}");
+        assert_eq!(
+            thermal_values(&circuit),
+            accepted,
+            "a later HDL refusal must discard prepared heating"
+        );
+        assert_eq!(solution[p], 1.0);
+
+        solution[bad] = 0.0;
+        circuit.resistors.thermal[later]
+            .as_mut()
+            .unwrap()
+            .instance_resistivity = Some(-1.0);
+        let error = circuit
+            .resistors
+            .advance_thermal_states(&solution, dt)
+            .unwrap_err();
+        assert!(error.to_ascii_lowercase().contains("rbad"), "{error}");
+        assert_eq!(
+            thermal_values(&circuit),
+            accepted,
+            "standalone advancement must not partially update earlier resistors"
+        );
+        let error = step(&engine, &mut circuit, &mut matrix, &mut solution, dt, dt).unwrap_err();
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("rbad"),
+            "{error}"
+        );
+        assert_eq!(thermal_values(&circuit), accepted);
+        assert_eq!(
+            solution[p], 1.0,
+            "the XSPICE projection must undo with refused material values"
+        );
+        assert!(
+            resources
+                .iter()
+                .all(|resource| *resource.value.lock().unwrap() == 1)
+        );
+        for host in &circuit.mixed_signal_hosts {
+            assert_eq!(host.read_digital("q").unwrap(), "0");
+        }
+        let mut tasks = 0;
+        circuit
+            .visit_accepted_analog_tasks(&mut |_| tasks += 1)
+            .unwrap();
+        assert_eq!(
+            tasks, 0,
+            "material failure cannot publish the observer's finish"
+        );
+
+        circuit.resistors.thermal[later]
+            .as_mut()
+            .unwrap()
+            .instance_resistivity = None;
+        step(&engine, &mut circuit, &mut matrix, &mut solution, dt, dt).unwrap();
+        assert_eq!(solution[p], 0.75);
+        let expected =
+            thermal.temperature_celsius + (0.75_f64 / 1000.0).powi(2) * 1000.0 * dt / 1e-12;
+        let state = circuit.resistors.thermal[load].as_ref().unwrap();
+        assert!(
+            (state.temperature_celsius - expected).abs() < 1e-12,
+            "heating must use the final projected voltage exactly once: {} versus {expected}",
+            state.temperature_celsius
+        );
+        assert_eq!(state.output_resistance, 1000.0);
+        assert_eq!(state.output_conductance, 1e-3);
+        assert!(
+            resources
+                .iter()
+                .all(|resource| *resource.value.lock().unwrap() == 2)
+        );
+        for host in &circuit.mixed_signal_hosts {
+            assert_eq!(host.read_digital("q").unwrap(), "1");
+        }
+        tasks = 0;
+        circuit
+            .visit_accepted_analog_tasks(&mut |_| tasks += 1)
+            .unwrap();
+        assert_eq!(tasks, 1);
+    }
+
+    #[test]
+    fn thermal_acceptance_engine_paths_preserve_the_constant_power_oracle() {
+        for source in [
+            "V1 in 0 1",
+            "V1 source 0 1\nA1 source in amp\n.model amp gain(gain=1)",
+        ] {
+            let deck = Netlist::parse(&format!("constant power\n{source}\nRhot in 0 hot L=1 A=1\n.model hot R(LEVEL=2 RESISTIVITY=1000 HEATCAPACITY=1e-12)\n.save @rhot[temp] @rhot[r]\n.end\n")).unwrap();
+            let result = Engine::default().run_tran(&deck, 2e-9, 0.5e-9).unwrap();
+            let temperature = result
+                .device_op_traces
+                .iter()
+                .find(|trace| {
+                    trace.device_name.eq_ignore_ascii_case("rhot")
+                        && trace.parameter.eq_ignore_ascii_case("temp")
+                })
+                .unwrap();
+            assert_eq!(temperature.values.len(), result.time.len());
+            assert!(temperature.values.last().unwrap() > &temperature.values[0]);
+            for (&time, &temperature) in result.time.iter().zip(&temperature.values) {
+                let expected = 27.0 + time * 1e9;
+                assert!(
+                    (temperature - expected).abs() < 1e-8,
+                    "{source}: thermal state at {time:e} is {temperature}, expected {expected}"
+                );
+            }
         }
     }
 }
