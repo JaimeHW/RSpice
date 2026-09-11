@@ -331,6 +331,188 @@ fn prepared_external_nodes_are_disjoint_from_authored_parameters() {
 }
 
 #[test]
+fn parameter_directions_preserve_complex_values_and_small_effects() {
+    let mut failures = Vec::new();
+    for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+        let mut ctx = ParamContext::new();
+        ctx.set_expression_dialect(dialect);
+        ctx.set_complex("J", ComplexValue::new(0.0, 1.0));
+        ctx.set("NEGATIVE", -2.0);
+        let small_exp = ((-400.0_f64).exp() * 1e150).powi(2);
+        let cases: &[(&str, Value, ComplexValue)] = &[
+            ("1+1e-8*p", 0.0, 1e-8.into()),
+            ("1+(1e200*p)*1e200*1e-200", 0.0, 1e200.into()),
+            ("1+1e300*exp(p-800)", 0.0, small_exp.into()),
+            ("ln(1e-200+1e-200*p)", 0.0, 1.0.into()),
+            ("j*p", 2.0, ComplexValue::new(0.0, 1.0)),
+            ("ln(p+j)", 2.0, ComplexValue::new(0.4, -0.2)),
+            ("sqrt(-4+p)", 0.0, ComplexValue::new(0.0, -0.25)),
+            // Unary minus also negates the literal's zero imaginary part.
+            ("img(sqrt(-1)*p)", 2.0, (-1.0).into()),
+            ("real((1+2*j)*p)", 2.0, 1.0.into()),
+            ("img((1+2*j)*p)", 2.0, 2.0.into()),
+            ("abs(p+3*j)", 4.0, 0.8.into()),
+            ("db(p+3*j)", 4.0, (3.2 / std::f64::consts::LN_10).into()),
+            (
+                "phase(p+3*j)",
+                4.0,
+                (-0.12 * 180.0 / std::f64::consts::PI).into(),
+            ),
+            ("sin(p)", 0.4, 0.4_f64.cos().into()),
+            ("cos(p)", 0.4, (-0.4_f64.sin()).into()),
+            ("tan(p)", 0.4, (1.0 / 0.4_f64.cos().powi(2)).into()),
+            ("asin(p)", 0.4, (1.0 / 0.84_f64.sqrt()).into()),
+            ("acos(p)", 0.4, (-1.0 / 0.84_f64.sqrt()).into()),
+            ("atan(p)", 2.0, 0.2.into()),
+            ("sinh(p)", 2.0, 2.0_f64.cosh().into()),
+            ("cosh(p)", 2.0, 2.0_f64.sinh().into()),
+            ("tanh(p)", 2.0, (1.0 / 2.0_f64.cosh().powi(2)).into()),
+            ("asinh(p)", 2.0, (1.0 / 5.0_f64.sqrt()).into()),
+            ("acosh(p)", 2.0, (1.0 / 3.0_f64.sqrt()).into()),
+            ("atanh(p)", 0.4, (1.0 / 0.84).into()),
+            ("pow(p,3)", -2.0, 12.0.into()),
+            (
+                "pow(NEGATIVE,p)",
+                2.0,
+                ComplexValue::new(
+                    4.0 * 2.0_f64.ln(),
+                    if dialect == ExpressionDialect::Xyce {
+                        4.0
+                    } else {
+                        -4.0
+                    } * std::f64::consts::PI,
+                ),
+            ),
+            ("limit(0,p,10)", 2.0, 1.0.into()),
+            ("table(3,p,0,4,8)", 2.0, (-2.0).into()),
+            ("table(3,0,p,4,8)", 2.0, 0.25.into()),
+            ("min(p,0,-1)", 0.0, 0.0.into()),
+            ("min(p,p)", 2.0, 1.0.into()),
+            ("if(0,sqrt(p),sin(0)+p)", 2.0, 1.0.into()),
+        ];
+        for &(source, point, expected) in cases {
+            ctx.set("P", point);
+            ctx.seed_parameter_direction("P", false);
+            let ordinary = eval_expression_complex(source, &ctx).unwrap();
+            let (value, direction) = ctx
+                .evaluate_parameter_binding(source)
+                .unwrap_or_else(|error| panic!("{dialect:?} {source}: {error}"));
+            if value != ordinary {
+                failures.push(format!(
+                    "nominal {dialect:?} {source}: {value:?} != {ordinary:?}"
+                ));
+            }
+            let actual = direction.unwrap().binary64();
+            let scale = if expected == ComplexValue::from(0.0) {
+                1.0
+            } else {
+                expected.norm()
+            };
+            if !((actual - expected).norm() / scale < 2e-13) {
+                failures.push(format!(
+                    "{dialect:?} {source}: {actual:?}, expected {expected:?}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn parameter_directions_use_the_authored_random_draws_once() {
+    let source = "AGAUSS(1+1e-8*p,1e-8*p,2)+UNIF(1,p)+LIMIT(1,p)+GAUSS(p,2,3)+AGAUSS(1,3,2+p)";
+    for mode in [StatisticalParamMode::Sample, StatisticalParamMode::Nominal] {
+        let mut ctx = ParamContext::new();
+        ctx.set_random_seed(7523);
+        ctx.set_statistical_mode(mode);
+        ctx.set("P", 0.0);
+        let ordinary = ctx.isolated_random_clone();
+        ctx.seed_parameter_direction("P", false);
+        let expected_value = eval_expression_complex(source, &ordinary).unwrap();
+        let (value, direction) = ctx.evaluate_parameter_binding(source).unwrap();
+        assert_eq!(value, expected_value);
+        assert_eq!(
+            ctx.random().next_uniform(),
+            ordinary.random().next_uniform(),
+            "derivative evaluation changed the authored draw count"
+        );
+        let expected = if mode == StatisticalParamMode::Nominal {
+            1.0 + 1e-8
+        } else {
+            let oracle = RandomState::new(7523);
+            let first = oracle.next_standard_normal();
+            let uniform = oracle.next_symmetric();
+            let limit = if oracle.next_symmetric() > 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            let relative = oracle.next_standard_normal();
+            let sigma = oracle.next_standard_normal();
+            1e-8 + 1e-8 * first / 2.0 + uniform + limit + 1.0 + 2.0 * relative / 3.0
+                - 3.0 * sigma / 4.0
+        };
+        assert!((direction.unwrap().binary64().re - expected).abs() < 2e-14);
+    }
+}
+
+#[test]
+fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
+    use crate::netlist::NetlistParseOptions;
+    use crate::netlist::parser::{
+        ParameterOverride, parse_netlist_with_parameter_overrides_and_abort,
+    };
+    let source = "parameter directions\n.param p=0 q=2\n.func scale(x) {q*x}\n.param a={scale(p)}\n.param q=9 b={a+p}\n.param a=17 c={b+a*p}\n.end\n";
+    for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+        let parsed = parse_netlist_with_parameter_overrides_and_abort(
+            source,
+            NetlistParseOptions {
+                expression_dialect: dialect,
+                ..Default::default()
+            },
+            &[ParameterOverride {
+                name: "P".to_owned(),
+                value: 0.0,
+                global: false,
+                direction: true,
+            }],
+            &crate::abort_signal::NoAbort,
+        )
+        .unwrap();
+        for (name, value, direction) in [("A", 17.0, 0.0), ("B", 0.0, 3.0), ("C", 0.0, 20.0)] {
+            assert_eq!(parsed.params.get(name), Some(value));
+            assert_eq!(
+                parsed.params.parameter_direction(name).binary64(),
+                direction.into(),
+                "{dialect:?} {name}"
+            );
+        }
+    }
+    let source = "namespace directions\n.global_param p=0\n.param before={p+1}\n.param p=2\n.param after={p*3}\n.end\n";
+    let parsed = parse_netlist_with_parameter_overrides_and_abort(
+        source,
+        NetlistParseOptions {
+            expression_dialect: ExpressionDialect::Xyce,
+            ..Default::default()
+        },
+        &[ParameterOverride {
+            name: "P".to_owned(),
+            value: 0.0,
+            global: true,
+            direction: true,
+        }],
+        &crate::abort_signal::NoAbort,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.params.parameter_direction("BEFORE").binary64(),
+        1.0.into()
+    );
+    assert_eq!(parsed.params.get("AFTER"), Some(6.0));
+    assert!(parsed.params.parameter_direction("AFTER").is_zero());
+}
+
+#[test]
 fn prepared_scalar_directions_retain_weights_and_definition_time_functions() {
     use crate::expr::Derivative;
     for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {

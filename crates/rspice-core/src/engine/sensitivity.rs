@@ -480,6 +480,7 @@ impl Engine {
                 value: *value,
                 global: !netlist.params.has_parameter_binding(name)
                     && netlist.params.has_any_parameter_binding(name),
+                direction: false,
             })
             .collect();
         for (index, parameter) in effective_overrides.iter().enumerate() {

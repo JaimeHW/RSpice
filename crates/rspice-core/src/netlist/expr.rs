@@ -34,6 +34,7 @@ mod behavioral;
 mod context;
 mod error;
 mod eval;
+mod parameter_direction;
 mod parser;
 mod scalar_direction;
 mod types;
@@ -72,4 +73,5 @@ pub(crate) use eval::{
     normalize_xyce_expression_result,
 };
 pub use eval::{evaluate, evaluate_complex};
+pub(crate) use parameter_direction::ComplexDirection;
 pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};

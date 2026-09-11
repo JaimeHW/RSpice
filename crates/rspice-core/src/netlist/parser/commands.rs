@@ -5695,13 +5695,10 @@ pub(super) fn parse_param_statement(
         let error_policy = params.parameter_redefinition_diagnostic_policy()
             == ParameterRedefinitionDiagnosticPolicy::Error;
         if acceptance.authoritative && (acceptance.first_origin.is_none() || !error_policy) {
-            let override_value = overrides
-                .iter()
-                .find(|parameter| {
-                    parameter.global == retain_global_expression
-                        && parameter.name.eq_ignore_ascii_case(&name)
-                })
-                .map(|parameter| parameter.value);
+            let parameter_override = overrides.iter().find(|parameter| {
+                parameter.global == retain_global_expression
+                    && parameter.name.eq_ignore_ascii_case(&name)
+            });
             parse_param_assignment_value(
                 stream,
                 line_num,
@@ -5709,8 +5706,11 @@ pub(super) fn parse_param_statement(
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 name.clone(),
-                override_value,
+                parameter_override.map(|parameter| parameter.value),
             )?;
+            if parameter_override.is_some_and(|parameter| parameter.direction) {
+                params.seed_parameter_direction(&name, retain_global_expression);
+            }
         } else {
             // The ignored definition is still tokenized and syntax-checked,
             // but it cannot mutate the authoritative context or its deferred
@@ -6021,13 +6021,14 @@ fn eval_and_bind_param_expression(
     } else {
         None
     };
-    let value = eval_expression_complex(expression, params)?;
+    let (value, direction) = params.evaluate_parameter_binding(expression)?;
     if global {
         params.define_global_expression(name, expression, Some(value));
     } else {
         params.set_complex(name, value);
         params.retain_statistical_parameter_capture(name, capture);
     }
+    params.retain_parameter_direction(name, global, direction);
     Ok(())
 }
 

@@ -9,7 +9,7 @@ use crate::config::ExpressionDialect;
 
 use super::data_table::data_table_parameter_name_is_valid;
 use super::expr::{
-    behavioral_expression_references_runtime_quantity, eval_expression, eval_expression_complex,
+    behavioral_expression_references_runtime_quantity, eval_expression,
     prepare_behavioral_expression,
 };
 use super::include::{ExpandedSource, ExpandedSourceItem};
@@ -201,6 +201,7 @@ pub(crate) struct ParameterOverride {
     pub name: String,
     pub value: Value,
     pub global: bool,
+    pub direction: bool,
 }
 
 #[derive(Debug)]
@@ -618,6 +619,11 @@ fn parse_netlist_impl(
             state.params.set_global(&parameter.name, parameter.value);
         } else {
             state.params.set(&parameter.name, parameter.value);
+        }
+        if parameter.direction {
+            state
+                .params
+                .seed_parameter_direction(&parameter.name, parameter.global);
         }
     }
     state.parameter_overrides = overrides.to_vec();

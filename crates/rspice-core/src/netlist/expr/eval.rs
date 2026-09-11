@@ -178,6 +178,14 @@ pub(super) trait PreparedEvaluation {
         eval_builtin_function_values(name, args, ctx)
     }
 
+    fn folded_builtin(
+        &mut self,
+        name: &str,
+        args: &[ComplexValue],
+    ) -> Result<ComplexValue, ExprError> {
+        xyce_constant_fold_builtin(name, args)
+    }
+
     fn discard_condition(&mut self) -> Result<(), ExprError> {
         Ok(())
     }
@@ -260,6 +268,21 @@ impl PreparedExpression {
         let mut evaluation = super::scalar_direction::ScalarDirection::new(resolver);
         let value = self.evaluate_using(ctx, &mut evaluation)?;
         Ok((value.re, evaluation.finish()?))
+    }
+
+    pub(crate) fn evaluate_parameter_direction_with(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(
+            &str,
+        ) -> Result<
+            Option<(ComplexValue, super::parameter_direction::ComplexDirection)>,
+            ExprError,
+        >,
+    ) -> Result<(ComplexValue, super::parameter_direction::ComplexDirection), ExprError> {
+        let mut evaluation = super::parameter_direction::ParameterDirection::new(resolver);
+        let value = self.evaluate_using(ctx, &mut evaluation)?;
+        Ok((value, evaluation.finish()?))
     }
 
     fn evaluate_using<E: PreparedEvaluation>(
@@ -508,7 +531,7 @@ impl PreparedExpression {
                     self.numeric_args.clear();
                     self.numeric_args.extend(args.iter().map(|arg| arg.numeric));
                     let value = if numval {
-                        xyce_constant_fold_builtin(name, &self.numeric_args)?
+                        evaluation.folded_builtin(name, &self.numeric_args)?
                     } else {
                         evaluation.builtin(name, &self.numeric_args, ctx)?
                     };
@@ -1156,7 +1179,7 @@ fn pop_value(values: &mut Vec<EvaluatedValue>) -> Result<EvaluatedValue, ExprErr
     })
 }
 
-fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
+pub(super) fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
     match op {
         UnaryOpKind::Neg => ComplexValue::new(-value.re, -value.im),
         UnaryOpKind::Pos => value,
@@ -1164,7 +1187,7 @@ fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
     }
 }
 
-fn apply_binary(
+pub(super) fn apply_binary(
     op: BinOpKind,
     left: ComplexValue,
     right: ComplexValue,
@@ -1272,7 +1295,7 @@ fn xyce_binary_is_constant_foldable(op: BinOpKind) -> bool {
     )
 }
 
-fn xyce_constant_fold_builtin(
+pub(super) fn xyce_constant_fold_builtin(
     name: &str,
     args: &[ComplexValue],
 ) -> Result<ComplexValue, ExprError> {
@@ -1518,7 +1541,7 @@ fn complex_arg(value: ComplexValue) -> Value {
 }
 
 #[inline]
-fn complex_ln(value: ComplexValue) -> ComplexValue {
+pub(super) fn complex_ln(value: ComplexValue) -> ComplexValue {
     ComplexValue::new(value.norm().ln(), complex_arg(value))
 }
 
@@ -1577,13 +1600,14 @@ fn eval_builtin_function_values(
     args: &[ComplexValue],
     ctx: &ParamContext,
 ) -> Result<ComplexValue, ExprError> {
-    eval_complex_builtin_function(name, args, ctx)
+    eval_builtin_with_sample(name, args, ctx, &mut |_| {})
 }
 
-fn eval_complex_builtin_function(
+pub(super) fn eval_builtin_with_sample(
     name: &str,
     args: &[ComplexValue],
     ctx: &ParamContext,
+    sample: &mut impl FnMut(Value),
 ) -> Result<ComplexValue, ExprError> {
     match name {
         "SQRT" => {
@@ -1709,6 +1733,7 @@ fn eval_complex_builtin_function(
                 } else {
                     -1.0
                 };
+                sample(sign);
                 Ok(ComplexValue::from(nom + avar * sign))
             }
             3 => {
@@ -1741,9 +1766,9 @@ fn eval_complex_builtin_function(
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
                 return Ok(ComplexValue::from(nom));
             }
-            Ok(ComplexValue::from(
-                nom + deviation / sigma * ctx.random().next_standard_normal(),
-            ))
+            let draw = ctx.random().next_standard_normal();
+            sample(draw);
+            Ok(ComplexValue::from(nom + deviation / sigma * draw))
         }
         "UNIF" | "AUNIF" => {
             require_arg_count(name, args, 2)?;
@@ -1753,9 +1778,9 @@ fn eval_complex_builtin_function(
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
                 return Ok(ComplexValue::from(nom));
             }
-            Ok(ComplexValue::from(
-                nom + deviation * ctx.random().next_symmetric(),
-            ))
+            let draw = ctx.random().next_symmetric();
+            sample(draw);
+            Ok(ComplexValue::from(nom + deviation * draw))
         }
         "IF" => {
             require_arg_count(name, args, 3)?;

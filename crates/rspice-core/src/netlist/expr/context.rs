@@ -308,6 +308,12 @@ impl CapturedStatisticalParameter {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct ParameterDirections {
+    ordinary: HashMap<String, ComplexDirection>,
+    global: HashMap<String, ComplexDirection>,
+}
+
 /// Context for parameter substitution during evaluation.
 #[derive(Debug, Clone, Default)]
 pub struct ParamContext {
@@ -322,6 +328,8 @@ pub struct ParamContext {
     /// Definition-time bindings for ordinary root parameters that depend on a
     /// statistical coordinate. Immutable captures share prior alias versions.
     statistical_captures: HashMap<String, Arc<CapturedStatisticalParameter>>,
+    /// Allocated only for an explicitly requested parameter direction.
+    parameter_directions: Option<Box<ParameterDirections>>,
     /// Numeric projections owned by the independent `.GLOBAL_PARAM`
     /// namespace. Xyce resolves an ordinary binding first, regardless of
     /// directive order, and consults this namespace only when no ordinary
@@ -374,6 +382,9 @@ impl ParamContext {
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
         self.statistical_captures.remove(&key);
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.ordinary.remove(&key);
+        }
     }
 
     /// Set a parameter value while preserving its imaginary component.
@@ -383,6 +394,9 @@ impl ParamContext {
         self.string_params.remove(&key);
         self.parameter_expressions.remove(&key);
         self.statistical_captures.remove(&key);
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.ordinary.remove(&key);
+        }
         if is_real(value) {
             self.complex_params.remove(&key);
         } else {
@@ -398,6 +412,9 @@ impl ParamContext {
         self.complex_params.remove(&key);
         self.parameter_expressions.remove(&key);
         self.statistical_captures.remove(&key);
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.ordinary.remove(&key);
+        }
     }
 
     /// Define an ordinary scoped parameter expression with an optional static
@@ -412,6 +429,9 @@ impl ParamContext {
     ) {
         let key = name.to_uppercase();
         self.statistical_captures.remove(&key);
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.ordinary.remove(&key);
+        }
         self.params.remove(&key);
         self.complex_params.remove(&key);
         self.string_params.remove(&key);
@@ -450,6 +470,9 @@ impl ParamContext {
         static_value: Option<ComplexValue>,
     ) {
         let key = name.to_uppercase();
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.global.remove(&key);
+        }
         self.global_params.remove(&key);
         self.global_complex_params.remove(&key);
         self.global_string_params.remove(&key);
@@ -466,6 +489,9 @@ impl ParamContext {
     /// ordinary `.PARAM` binding.
     pub fn set_global(&mut self, name: &str, value: Value) {
         let key = name.to_uppercase();
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.global.remove(&key);
+        }
         self.global_params.insert(key.clone(), value);
         self.global_complex_params.remove(&key);
         self.global_string_params.remove(&key);
@@ -475,6 +501,9 @@ impl ParamContext {
     /// Set a complex `.GLOBAL_PARAM` value without crossing namespaces.
     pub fn set_global_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.global.remove(&key);
+        }
         self.global_params.insert(key.clone(), value.re);
         self.global_string_params.remove(&key);
         self.global_expressions.remove(&key);
@@ -488,6 +517,9 @@ impl ParamContext {
     /// Set a string `.GLOBAL_PARAM` value without crossing namespaces.
     pub fn set_global_string(&mut self, name: &str, value: impl Into<String>) {
         let key = name.to_uppercase();
+        if let Some(directions) = &mut self.parameter_directions {
+            directions.global.remove(&key);
+        }
         self.global_string_params.insert(key.clone(), value.into());
         self.global_params.remove(&key);
         self.global_complex_params.remove(&key);
@@ -583,6 +615,74 @@ impl ParamContext {
         self.get(&key).map(ComplexValue::from)
     }
 
+    pub(crate) fn seed_parameter_direction(&mut self, name: &str, global: bool) {
+        self.parameter_directions
+            .get_or_insert_with(Default::default);
+        self.retain_parameter_direction(name, global, Some(1.0.into()));
+    }
+
+    pub(crate) fn parameter_direction(&self, name: &str) -> ComplexDirection {
+        let Some(directions) = &self.parameter_directions else {
+            return ComplexDirection::zero();
+        };
+        let key = name.to_ascii_uppercase();
+        let bindings = if self.has_parameter_binding(&key) {
+            &directions.ordinary
+        } else {
+            &directions.global
+        };
+        bindings
+            .get(&key)
+            .copied()
+            .unwrap_or_else(ComplexDirection::zero)
+    }
+
+    pub(crate) fn retain_parameter_direction(
+        &mut self,
+        name: &str,
+        global: bool,
+        direction: Option<ComplexDirection>,
+    ) {
+        let (Some(directions), Some(direction)) = (&mut self.parameter_directions, direction)
+        else {
+            return;
+        };
+        let bindings = if global {
+            &mut directions.global
+        } else {
+            &mut directions.ordinary
+        };
+        if !direction.is_zero() {
+            bindings.insert(name.to_ascii_uppercase(), direction);
+        } else {
+            bindings.remove(&name.to_ascii_uppercase());
+        }
+    }
+
+    /// Evaluate once at the actual binding site. Both ordinary/global shadowing
+    /// and random draws are owned by this context, not reconstructed later.
+    pub(crate) fn evaluate_parameter_binding(
+        &self,
+        expression: &str,
+    ) -> Result<(ComplexValue, Option<ComplexDirection>), ExprError> {
+        if self.parameter_directions.is_none() {
+            return eval_expression_complex(expression, self).map(|value| (value, None));
+        }
+        let expression = parse_expression(expression)?;
+        let mut prepared = PreparedExpression::compile(&expression, self)?;
+        let (value, direction) = prepared.evaluate_parameter_direction_with(self, &mut |name| {
+            Ok(self
+                .get_complex(name)
+                .map(|value| (value, self.parameter_direction(name))))
+        })?;
+        let value = if self.expression_dialect == ExpressionDialect::Xyce {
+            normalize_xyce_expression_result(value)
+        } else {
+            value
+        };
+        Ok((value, Some(direction)))
+    }
+
     /// Get a string parameter value.
     pub fn get_string(&self, name: &str) -> Option<&str> {
         let key = name.to_uppercase();
@@ -633,6 +733,23 @@ impl ParamContext {
         }
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());
+        }
+        if let Some(incoming) = &other.parameter_directions {
+            let directions = self
+                .parameter_directions
+                .get_or_insert_with(Default::default);
+            directions.ordinary.extend(
+                incoming
+                    .ordinary
+                    .iter()
+                    .map(|(name, value)| (name.clone(), *value)),
+            );
+            directions.global.extend(
+                incoming
+                    .global
+                    .iter()
+                    .map(|(name, value)| (name.clone(), *value)),
+            );
         }
         self.statistical_captures.extend(
             other
