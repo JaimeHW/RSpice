@@ -2245,6 +2245,50 @@ target/unified-mixed-fixes/lazy-real-circuit-test.log.
 No full suite was run. This increment does not close MS06, remaining MS00-MS15
 requirements, production qualification, or unavailable licensed-reference parity.
 
+## MS06: lazy four-state conditionals
+
+Four-state conditional expressions now use the same branch lowering as real
+conditionals. Known conditions skip the unused source arm, including real
+conversions or analog probes inside $realtobits. Ambiguous conditions evaluate
+both arms and use the existing bitwise merge table. The common helper retains
+the already-resolved integral width and signedness. A typed merge into the
+false/ambiguous branch carries the first arm only along the ambiguous path;
+the false path supplies a placeholder that the known-false select ignores.
+Each arm is emitted once, so nested source expressions are not duplicated.
+
+Schema 54 forces recompilation of cached eager four-state plans. No new runtime
+value kind is necessary: the preceding pure event-expression CFG representation
+and ordinary jumps, branches, parameters and typed selects supply the behavior.
+
+Ten focused expression checks passed in 0.00 seconds after a 27.28-second build,
+covering skipped and selected analog reads, X/Z ambiguity, nested control flow,
+96-bit signed merging, context-width arithmetic, delayed capture, event
+observations, malformed artifacts and the existing real-conditional behavior.
+Log: target/unified-mixed-fixes/lazy-four-state-tests.log. A linked-circuit
+variant now uses four-state event results from $realtobits, including an
+uninitialized integral-to-real operand in its inactive branch. The authoritative
+generator refreshed all 43 built-ins without numerical source changes.
+Generator digest: f28174522eefc48ec3ae122a028d5a076a363c62141bfb9289e16dda59f691aa.
+Bundle digest: 42d6535f34a94ae96bc3055bb5f2c80aad6cbae8b3a8f67342e87ed49823cc8c.
+Log: target/unified-mixed-fixes/lazy-four-state-generator.log. Both actual
+circuit variants passed in 0.05 seconds after a 1m22s build. Each checks two
+linked receivers, independent parameterized event times, ignored unknown input
+changes and correctly loaded native SPICE RC outputs. The real case confirms
+the common lowering retained its previous behavior; the four-state case
+exercises bit-pattern event results with numeric conversion in an unused arm.
+Log: target/unified-mixed-fixes/lazy-four-state-circuit-tests.log. The broad
+suites remain deferred.
+
+Main through 745a56750 was incorporated before publication. Its BJT noise and
+harmonic-balance changes do not touch this lowering, event execution, transient
+fixture or generator inputs. The rebase was clean; no redundant rerun of the
+unchanged conditional checks was performed.
+
+This closes the identified eager conditional-arm lowering in both value domains,
+subject to the focused evidence above. Remaining ownership, types, events,
+analyses, runtime/backend/platform and MS00-MS15 qualification work remain open.
+No licensed reference is available and vendor parity is not established.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2253,10 +2297,9 @@ and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
 dependencies and feedback convergence. Complete the remaining ownership/type/
-event requirements under MS06. Real conditionals now retain control flow and
-numeric conversion handles the recorded mixed-clock comparison. Four-state
-conditional lowering still computes both arms; extend lazy evaluation there
-while preserving context sizing and bitwise X/Z merging. Extend qualification of the
+event requirements under MS06. Both conditional value domains now retain control
+flow, and numeric conversion handles the recorded mixed-clock comparison.
+Extend qualification of the
 now-enabled conservative OneStep path and preserve correct readbacks while
 improving eligibility of compiler-created flow temporaries. Settled static
 history, distinct companion rules, compiler proof and mixed weighting are

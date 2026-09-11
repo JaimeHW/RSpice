@@ -2202,6 +2202,15 @@ endmodule
 
 #[test]
 fn linked_real_conditional_events_skip_unknown_inputs_and_drive_spice_loads() {
+    conditional_event_circuit("select ? level : data");
+}
+
+#[test]
+fn linked_four_state_conditional_events_skip_unknown_inputs_and_drive_spice_loads() {
+    conditional_event_circuit("select ? $realtobits(level) : $realtobits(data + 0.0)");
+}
+
+fn conditional_event_circuit(event: &str) {
     let source = ModelFile::new(
         "conditional_source",
         r#"
@@ -2214,7 +2223,7 @@ endmodule
     );
     let receiver = ModelFile::new(
         "conditional_receiver",
-        r#"
+        &r#"
 `timescale 1ns/1ps
 module conditional_receiver(data,q);
  input [3:0] data; wire [3:0] data;
@@ -2222,11 +2231,12 @@ module conditional_receiver(data,q);
  parameter real SWITCH=2.0;
  reg select; real level;
  initial begin select=1; level=2.5; q=0;
-   @(select ? level : data) q=(select ? level : data)>6.5;
+   @(EVENT_EXPRESSION) q=(select ? level : data)>6.5;
  end
  initial #SWITCH select=0;
 endmodule
-"#,
+"#
+        .replace("EVENT_EXPRESSION", event),
     );
     let deck = format!(
         "* conditional event programs across linked instances and native loads\n.param vcc=1\nXs d3 d2 d1 d0 conditional_source\nXa d3 d2 d1 d0 qa conditional_receiver SWITCH=2\nXb d3 d2 d1 d0 qb conditional_receiver SWITCH=3\nRa qa 0 1k\nRb qb 0 1k\nCa qa 0 1p\nCb qb 0 1p\n.va \"{}\" conditional_source\n.va \"{}\" conditional_receiver\n.end\n",

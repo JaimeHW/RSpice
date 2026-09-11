@@ -4919,3 +4919,69 @@ fn computed_event_programs_reject_invalid_nested_artifacts() {
         assert!(error.contains(expected), "case {case}: {error}");
     }
 }
+
+#[test]
+fn four_state_conditionals_skip_inactive_real_reads_and_capture_before_wait() {
+    let mut h = Harness::from_source(
+        r#"
+      module lazy_bits(p); inout p; electrical p;
+        reg select; reg [95:0] poison;
+        reg [63:0] q,converted,held,after;
+        initial begin
+          q=select ? 64'h55 : $realtobits(V(p));
+          converted=select ? $realtobits(2.5) : $realtobits(poison);
+          held=#1 (select ? 64'd7 : $realtobits(poison));
+          after=select ? $realtobits(poison) : $realtobits(V(p));
+        end
+      endmodule
+    "#,
+    );
+    h.set("select", "1");
+    let wait = expect_suspended(h.start(0));
+    assert_eq!(h.get("q"), format!("{:064b}", 0x55));
+    assert_eq!(h.get("converted"), format!("{:064b}", 2.5f64.to_bits()));
+    h.set("select", "0");
+    h.set_analog("V(p)", 3.5);
+    expect_finished(h.resume(0, wait.resume_state()));
+    assert_eq!(h.get("held"), format!("{:064b}", 7));
+    assert_eq!(h.get("after"), format!("{:064b}", 3.5f64.to_bits()));
+    // The same unavailable input must still fail when selected, and both
+    // arms are evaluated when the condition is ambiguous.
+    for condition in ["1", "x", "z"] {
+        let mut selected = Harness::from_source(
+            "module selected(p); inout p; electrical p; reg c; reg [63:0] q; initial q=c ? $realtobits(V(p)) : 64'h55; endmodule",
+        );
+        selected.set("c", condition);
+        assert!(
+            matches!(
+                start(
+                    &selected.plan,
+                    &selected.plan.processes[0],
+                    &mut selected.store
+                ),
+                Err(DigitalEvalError::AnalogProbeUnavailable(_))
+            ),
+            "{condition}"
+        );
+    }
+}
+
+#[test]
+fn four_state_conditionals_preserve_wide_signed_merges_and_nested_control_flow() {
+    let mut h = Harness::from_source(
+        "module widths; reg c; reg signed [3:0] a; reg signed [7:0] b; reg signed [95:0] q;
+       initial q=c ? a : (1 ? b : a); endmodule",
+    );
+    h.set("a", "1000");
+    h.set("b", "11111110");
+    for (condition, expected) in [
+        ("1", format!("{}1000", "1".repeat(92))),
+        ("0", format!("{}1110", "1".repeat(92))),
+        ("x", format!("{}1xx0", "1".repeat(92))),
+        ("z", format!("{}1xx0", "1".repeat(92))),
+    ] {
+        h.set("c", condition);
+        expect_finished(h.start(0));
+        assert_eq!(h.get("q"), expected, "{condition}");
+    }
+}

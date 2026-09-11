@@ -810,6 +810,12 @@ impl Context {
     };
 }
 
+#[derive(Clone, Copy)]
+enum ConditionalDomain {
+    Real,
+    FourState(Context),
+}
+
 /// Expression lowering can split a statement's block. Keep its entry identity
 /// for loop back edges, but route subsequent statements through its current
 /// continuation. Target IDs and sealing always refer to the original entry.
@@ -2655,87 +2661,7 @@ impl ProcessLowerer<'_> {
                 )
             }
             Expression::Conditional(conditional) => {
-                // IEEE 1364-2005 5.1.13: known conditions evaluate one arm;
-                // an ambiguous condition evaluates both and returns real zero.
-                let condition = self.condition(block, &conditional.condition);
-                let zero_bit = self.builder.push_leaf(
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 0)),
-                );
-                let one_bit = self.builder.push_leaf(
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 1)),
-                );
-                let is_false = self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalCaseMatch {
-                        selector: condition,
-                        label: zero_bit,
-                        kind: DigitalCaseMatch::Exact,
-                        signed: false,
-                    },
-                );
-                let is_true = self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalCaseMatch {
-                        selector: condition,
-                        label: one_bit,
-                        kind: DigitalCaseMatch::Exact,
-                        signed: false,
-                    },
-                );
-                let then_block = self.builder.create_block();
-                let else_block = self.builder.create_block();
-                let join = self.builder.create_block();
-                self.builder.set_terminator(
-                    block,
-                    CfgTerminator::Branch {
-                        condition: is_false,
-                        then_target: else_block,
-                        then_args: Vec::new(),
-                        else_target: then_block,
-                        else_args: Vec::new(),
-                    },
-                );
-                self.builder.seal_block(then_block);
-                let then_value = self.real_operand(then_block, &conditional.then_expr);
-                self.builder.set_terminator(
-                    then_block,
-                    CfgTerminator::Branch {
-                        condition: is_true,
-                        then_target: join,
-                        then_args: Vec::new(),
-                        else_target: else_block,
-                        else_args: Vec::new(),
-                    },
-                );
-                self.builder.seal_block(else_block);
-                let else_value = self.real_operand(else_block, &conditional.else_expr);
-                let zero = self.real_constant(0.0);
-                let else_result = self.builder.push(
-                    else_block,
-                    CfgValueType::Real,
-                    CfgValueKind::DigitalRealSelect {
-                        condition: is_false,
-                        then_value: else_value,
-                        else_value: zero,
-                    },
-                );
-                self.builder.set_terminator(
-                    else_block,
-                    CfgTerminator::Jump {
-                        target: join,
-                        args: Vec::new(),
-                    },
-                );
-                let result = self
-                    .builder
-                    .merge_values(join, &[(then_block, then_value), (else_block, else_result)]);
-                self.builder.seal_block(join);
-                self.builder.continue_at(block, join);
-                result
+                self.conditional_expression(block, conditional, ConditionalDomain::Real)
             }
             // `$bitstoreal(b)`: the crossing in the other direction. The
             // operand is sized to 64 bits here rather than taken as written,
@@ -2769,6 +2695,134 @@ impl ProcessLowerer<'_> {
                 self.real_constant(0.0)
             }
         }
+    }
+
+    /// Preserve source conditional evaluation without losing value-domain
+    /// rules or the integral expression's already-resolved sizing context.
+    fn conditional_expression(
+        &mut self,
+        block: BlockId,
+        conditional: &crate::ast::ConditionalExpr,
+        domain: ConditionalDomain,
+    ) -> ValueId {
+        // IEEE 1364-2005 5.1.13: known conditions evaluate one arm.
+        // An ambiguous condition evaluates both, merging bits or returning
+        // real zero. Each source arm is emitted once, even when nested.
+        let condition = self.condition(block, &conditional.condition);
+        let zero_bit = self.builder.push_leaf(
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 0)),
+        );
+        let one_bit = self.builder.push_leaf(
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::FourStateConstant(FourStateValue::from_u64(1, 1)),
+        );
+        let is_false = self.builder.push(
+            block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalCaseMatch {
+                selector: condition,
+                label: zero_bit,
+                kind: DigitalCaseMatch::Exact,
+                signed: false,
+            },
+        );
+        let is_true = self.builder.push(
+            block,
+            CfgValueType::FourState { width: 1 },
+            CfgValueKind::DigitalCaseMatch {
+                selector: condition,
+                label: one_bit,
+                kind: DigitalCaseMatch::Exact,
+                signed: false,
+            },
+        );
+        let then_block = self.builder.create_block();
+        let else_block = self.builder.create_block();
+        let join = self.builder.create_block();
+        self.builder.set_terminator(
+            block,
+            CfgTerminator::Branch {
+                condition: is_false,
+                then_target: else_block,
+                then_args: Vec::new(),
+                else_target: then_block,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(then_block);
+        let then_value = match domain {
+            ConditionalDomain::Real => self.real_operand(then_block, &conditional.then_expr),
+            ConditionalDomain::FourState(context) => {
+                self.operand(then_block, &conditional.then_expr, context)
+            }
+        };
+        self.builder.set_terminator(
+            then_block,
+            CfgTerminator::Branch {
+                condition: is_true,
+                then_target: join,
+                then_args: Vec::new(),
+                else_target: else_block,
+                else_args: Vec::new(),
+            },
+        );
+        // The false path never computed the first arm. Its placeholder is
+        // ignored by a known-false select; the ambiguous path carries the
+        // actual first arm so the bitwise merge has both results available.
+        let then_at_else = match domain {
+            ConditionalDomain::Real => None,
+            ConditionalDomain::FourState(context) => {
+                let placeholder = self.unknown(context.width);
+                Some(self.builder.merge_values(
+                    else_block,
+                    &[(block, placeholder), (then_block, then_value)],
+                ))
+            }
+        };
+        self.builder.seal_block(else_block);
+        let else_result = match domain {
+            ConditionalDomain::Real => {
+                let else_value = self.real_operand(else_block, &conditional.else_expr);
+                let zero = self.real_constant(0.0);
+                self.builder.push(
+                    else_block,
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalRealSelect {
+                        condition: is_false,
+                        then_value: else_value,
+                        else_value: zero,
+                    },
+                )
+            }
+            ConditionalDomain::FourState(context) => {
+                let else_value = self.operand(else_block, &conditional.else_expr, context);
+                self.builder.push(
+                    else_block,
+                    CfgValueType::FourState {
+                        width: context.width,
+                    },
+                    CfgValueKind::DigitalSelect {
+                        condition,
+                        then_value: then_at_else.expect("four-state merge"),
+                        else_value,
+                    },
+                )
+            }
+        };
+        self.builder.set_terminator(
+            else_block,
+            CfgTerminator::Jump {
+                target: join,
+                args: Vec::new(),
+            },
+        );
+        let result = self
+            .builder
+            .merge_values(join, &[(then_block, then_value), (else_block, else_result)]);
+        self.builder.seal_block(join);
+        self.builder.continue_at(block, join);
+        result
     }
 
     /// Apply the same numeric conversion at assignments and real operators.
@@ -3127,22 +3181,10 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalConcat { parts },
                 )
             }
-            // Both arms are context-determined; the condition is not. A `?:`
-            // is therefore not a place the context is dropped — `p = s ? a*b :
-            // a+b` computes both at `p`'s width.
+            // Both arms retain the common width and sign; the condition is
+            // self-determined. Evaluation skips the unselected source arm.
             Expression::Conditional(conditional) => {
-                let condition = self.condition(block, &conditional.condition);
-                let then_value = self.operand(block, &conditional.then_expr, inner);
-                let else_value = self.operand(block, &conditional.else_expr, inner);
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalSelect {
-                        condition,
-                        then_value,
-                        else_value,
-                    },
-                )
+                self.conditional_expression(block, conditional, ConditionalDomain::FourState(inner))
             }
             Expression::Unary(unary) => self.unary(block, unary, inner),
             Expression::Binary(binary) => self.binary(block, binary, inner),
