@@ -7424,7 +7424,8 @@ mod tests {
                     Some(
                         &[
                             "<11000000000000 12000000000>".to_string(),
-                            "<0.013 14>".to_string()
+                            // Preserve the binary64 product of 13 and 1e-3.
+                            "<0.013000000000000001 14>".to_string()
                         ][..]
                     )
                 );
@@ -8064,6 +8065,74 @@ mod tests {
                 .map(|(_, value)| value.as_str()),
             Some("0001")
         );
+    }
+
+    #[test]
+    fn xspice_instance_expressions_preserve_numeric_prefixes_and_complex_precision() {
+        for dialect in [
+            crate::config::ExpressionDialect::Ngspice,
+            crate::config::ExpressionDialect::Xyce,
+        ] {
+            for nested in [false, true] {
+                for q in [4.0, 6.0, 1.0_f64.next_up(), 1e-17, 1e-100] {
+                    let body = "A1 in out print_param_types real=2*q real_array=[2*q -1e-3/q] complex=<2*q -3*q> complex_array=[<4*q 5*q>]";
+                    let source = if nested {
+                        format!(
+                            "Numeric instance expressions\nX1 in out cell q={q:e}\n.subckt cell in out q=9\n{body}\n.ends\n.end"
+                        )
+                    } else {
+                        format!("Numeric instance expressions\n.param q={q:e}\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let elements = if nested {
+                        flatten_netlist_with_models(&netlist).unwrap().elements
+                    } else {
+                        netlist.elements
+                    };
+                    let ElementKind::Xspice {
+                        params,
+                        real_vector_params,
+                        string_params,
+                        string_vector_params,
+                        ..
+                    } = &elements[0].kind
+                    else {
+                        panic!("expected code model");
+                    };
+                    let actual = params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("real"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(actual, 2.0 * q, "{dialect:?} nested={nested}");
+                    let vector = &real_vector_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("real_array"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(vector, &[2.0 * q, -1e-3 / q]);
+                    let scalar = &string_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("complex"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(scalar, &format!("<{} {}>", 2.0 * q, -3.0 * q));
+                    let array = &string_vector_params
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("complex_array"))
+                        .unwrap()
+                        .1;
+                    assert_eq!(array, &[format!("<{} {}>", 4.0 * q, 5.0 * q)]);
+                }
+            }
+        }
     }
 
     #[test]

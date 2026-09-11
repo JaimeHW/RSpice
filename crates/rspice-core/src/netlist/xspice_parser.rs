@@ -1243,7 +1243,7 @@ fn try_scalar_expression_param(
     }
 
     let expr = collect_contiguous_expression(stream)?;
-    if let Ok(value) = parse_spice_value(&expr) {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
         return Some(XspiceParamValue::Resolved(value));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
@@ -1609,7 +1609,7 @@ fn parse_real_vector_entry(
         ),
     })?;
 
-    if let Ok(value) = parse_spice_value(&expr_text) {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr_text) {
@@ -1805,11 +1805,7 @@ fn parse_xspice_complex_literal(
 
     match (real, imag) {
         (XspiceComplexComponent::Resolved(real), XspiceComplexComponent::Resolved(imag)) => {
-            Ok(XspiceComplexLiteral::Resolved(format!(
-                "<{} {}>",
-                format_xspice_complex_component(real),
-                format_xspice_complex_component(imag)
-            )))
+            Ok(XspiceComplexLiteral::Resolved(format!("<{real} {imag}>")))
         }
         (real, imag) => Ok(XspiceComplexLiteral::Deferred {
             real: xspice_complex_component_expr(real),
@@ -1850,7 +1846,7 @@ fn parse_xspice_complex_component(
             ),
         })?;
 
-    if let Ok(value) = parse_spice_value(&expr_text) {
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr_text) {
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr_text) {
@@ -1875,40 +1871,9 @@ fn parse_xspice_complex_component(
     })
 }
 
-fn format_xspice_complex_component(value: Value) -> String {
-    let formatted = trim_xspice_decimal(value.to_string());
-    if value.is_finite() {
-        let fixed = trim_xspice_decimal(format!("{value:.15}"));
-        if let Ok(rounded) = fixed.parse::<Value>() {
-            let tolerance = value.abs().max(1.0) * 1.0e-12;
-            if (rounded - value).abs() <= tolerance && fixed.len() <= formatted.len() {
-                return fixed;
-            }
-        }
-    }
-    formatted
-}
-
-fn trim_xspice_decimal(formatted: String) -> String {
-    let trimmed = if formatted.contains('.') {
-        formatted
-            .strip_suffix(".0")
-            .unwrap_or(formatted.as_str())
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-    } else {
-        formatted.as_str()
-    };
-    if trimmed == "-0" {
-        "0".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 fn xspice_complex_component_expr(component: XspiceComplexComponent) -> String {
     match component {
-        XspiceComplexComponent::Resolved(value) => format_xspice_complex_component(value),
+        XspiceComplexComponent::Resolved(value) => value.to_string(),
         XspiceComplexComponent::Deferred(expr) => expr,
     }
 }
