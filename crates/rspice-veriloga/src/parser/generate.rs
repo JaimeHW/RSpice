@@ -771,6 +771,9 @@ impl Unroller<'_> {
         match control {
             TimingControl::Delay(delay) => self.substitute(&mut delay.value),
             TimingControl::Event(event) => {
+                if let Some(count) = &mut event.repeat {
+                    self.substitute(count);
+                }
                 if let Sensitivity::Explicit(terms) = &mut event.sensitivity {
                     for term in terms {
                         self.substitute(&mut term.signal);

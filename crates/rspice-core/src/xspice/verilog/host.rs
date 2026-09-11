@@ -56,6 +56,7 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
+use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -378,6 +379,7 @@ struct ProcessSlot {
     /// which is what a process that has never run does.
     resume: Option<DigitalResumeState>,
     wait_after_sequence: u64,
+    remaining_events: DigitalEventCount,
 }
 
 /// A compiled digital plan, running.
@@ -500,6 +502,7 @@ impl DigitalHost {
                     status: ProcessStatus::Queued,
                     resume: None,
                     wait_after_sequence: 0,
+                    remaining_events: DigitalEventCount::one(),
                 };
                 plan.processes.len()
             ],
@@ -921,14 +924,22 @@ impl DigitalHost {
             DigitalProcessOutcome::Suspended(suspension) => {
                 let (wait, resume) = suspension.into_parts();
                 self.slots[index].resume = Some(resume);
+                let (remaining, wait) = match wait {
+                    DigitalWaitRequest::Repeated { count, event } => (count, *event),
+                    wait => (DigitalEventCount::one(), wait),
+                };
                 match wait {
+                    DigitalWaitRequest::Repeated { .. } => {
+                        unreachable!("interpreter emits a single repeat control")
+                    }
                     DigitalWaitRequest::Expressions(wait) => {
-                        let token = self.store.register_expression_wait(wait);
+                        let token = self.store.register_expression_wait(wait, remaining);
                         self.expression_processes.insert(token, index);
                         self.slots[index].status = ProcessStatus::AwaitingExpression(token);
                         Ok(())
                     }
                     DigitalWaitRequest::Event(terms) => {
+                        self.slots[index].remaining_events = remaining;
                         self.slots[index].wait_after_sequence = self
                             .store
                             .current_sequence()
@@ -1031,7 +1042,7 @@ impl DigitalHost {
                         ) => any_real_term_is_satisfied(terms, transition.signal, *previous, *next),
                         _ => false,
                     };
-                    if satisfied {
+                    if satisfied && self.slots[index].remaining_events.consume() {
                         self.unsubscribe(index);
                         self.queue_ready(index, tick)?;
                         // `unsubscribe` removed this entry, so the next
@@ -1065,7 +1076,10 @@ impl DigitalHost {
                 .copied(),
         );
         for id in candidates.iter().copied() {
-            let capture = self.event_updates.get(&id).expect("indexed event capture");
+            let capture = self
+                .event_updates
+                .get_mut(&id)
+                .expect("indexed event capture");
             let satisfied = match &transition.values {
                 TransitionValues::FourState { previous, next } => {
                     any_term_is_satisfied(&capture.terms, transition.signal, previous, next)
@@ -1074,7 +1088,7 @@ impl DigitalHost {
                     any_real_term_is_satisfied(&capture.terms, transition.signal, *previous, *next)
                 }
             };
-            if satisfied {
+            if satisfied && capture.remaining.consume() {
                 let capture = self.event_updates.remove(&id).unwrap();
                 for term in &capture.terms {
                     self.event_waiters[usize::from(term.signal)].remove(&id);

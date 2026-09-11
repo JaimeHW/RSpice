@@ -1382,11 +1382,10 @@ impl ProcessLowerer<'_> {
             }
             // Section 9.6.2 evaluates the count *once*, before the loop, and
             // runs the body that many times. A count with an `x` or `z` bit
-            // has no number of passes, so the loop runs zero of them — which
-            // is what the truth-value reduction of the counter already says,
-            // without a rule of its own.
+            // has no number of passes. Normalize it and signed negative counts
+            // before testing truth, which alone would treat 2'b1x as true.
             DigitalStatement::Repeat(statement) => {
-                let count = self.expression(block, &statement.count);
+                let count = self.repeat_count(block, &statement.count);
                 let width = self.value_width(count);
                 // The counter lives in a region of its own so that it crosses
                 // a suspension inside the body like any other local, and so
@@ -1584,6 +1583,11 @@ impl ProcessLowerer<'_> {
             let context = self.lvalue_width(&assign.target);
             [self.assigned_value(block, &assign.value, context)]
         };
+        if let Some(TimingControl::Event(event)) = &assign.timing
+            && let Some(count) = &event.repeat
+        {
+            return self.repeated_assignment(block, assign, event, count, carried[0], nonblocking);
+        }
         if nonblocking && let Some(control) = &assign.timing {
             let wait = match control {
                 TimingControl::Delay(delay) => DigitalWait::Delay(self.delay(block, &delay.value)),
@@ -1602,6 +1606,86 @@ impl ProcessLowerer<'_> {
         };
         self.write(block, &assign.target, carried[0], nonblocking);
         block
+    }
+
+    fn repeated_assignment(
+        &mut self,
+        block: BlockId,
+        assign: &DigitalAssign,
+        event: &crate::ast::EventControl,
+        count: &Expression,
+        captured: ValueId,
+        nonblocking: bool,
+    ) -> BlockId {
+        let count = self.repeat_count(block, count);
+        let condition = self.truth_value(block, count);
+        let waiting = self.builder.create_block();
+        let immediate = self.builder.create_block();
+        let join = self.builder.create_block();
+        self.builder.set_terminator(
+            block,
+            CfgTerminator::Branch {
+                condition,
+                then_target: waiting,
+                then_args: Vec::new(),
+                else_target: immediate,
+                else_args: Vec::new(),
+            },
+        );
+        let mut waiting_value = [self.builder.carry_value(captured, block, waiting)];
+        let waiting_count = self.builder.carry_value(count, block, waiting);
+        let immediate_value = self.builder.carry_value(captured, block, immediate);
+        self.builder.seal_block(waiting);
+        self.builder.seal_block(immediate);
+        // A zero count bypasses evaluation of the event expression entirely.
+        // The RHS was already sampled, so both paths use the same captured value.
+        let mut guarded = assign.clone();
+        guarded.timing = None;
+        let event_wait = self.event_wait(
+            waiting,
+            event,
+            Some(&DigitalStatement::BlockingAssign(guarded)),
+        );
+        let wait = DigitalWait::Repeat {
+            count: waiting_count,
+            event: Box::new(event_wait),
+        };
+        let waiting_exit = if nonblocking {
+            self.write_with_wait(waiting, &assign.target, waiting_value[0], true, Some(wait));
+            waiting
+        } else {
+            let resume = self.suspend(waiting, wait, &mut waiting_value);
+            self.write(resume, &assign.target, waiting_value[0], false);
+            resume
+        };
+        self.write(immediate, &assign.target, immediate_value, nonblocking);
+        for exit in [waiting_exit, immediate] {
+            self.builder.set_terminator(
+                exit,
+                CfgTerminator::Jump {
+                    target: join,
+                    args: Vec::new(),
+                },
+            );
+        }
+        self.builder.seal_block(join);
+        join
+    }
+
+    fn repeat_count(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        let real = self.is_real_expression(expression);
+        let signed = real || self.self_signed(expression);
+        let input = if real {
+            self.real_expression(block, expression)
+        } else {
+            self.expression(block, expression)
+        };
+        let width = if real { 32 } else { self.value_width(input) };
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width },
+            CfgValueKind::DigitalRepeatCount { input, signed },
+        )
     }
 
     /// Lower an assignment's right-hand side under the context its target
@@ -1952,7 +2036,6 @@ impl ProcessLowerer<'_> {
         guarded: Option<&DigitalStatement>,
         carried: &mut [ValueId],
     ) -> BlockId {
-        let resume = self.builder.create_block();
         let wait = match control {
             TimingControl::Event(event) => self.event_wait(block, event, guarded),
             TimingControl::Delay(delay) => {
@@ -1960,6 +2043,11 @@ impl ProcessLowerer<'_> {
                 DigitalWait::Delay(value)
             }
         };
+        self.suspend(block, wait, carried)
+    }
+
+    fn suspend(&mut self, block: BlockId, wait: DigitalWait, carried: &mut [ValueId]) -> BlockId {
+        let resume = self.builder.create_block();
         self.builder.set_terminator(
             block,
             CfgTerminator::Wait {
@@ -3771,8 +3859,14 @@ fn collect_reads(statement: &DigitalStatement, reads: &mut BTreeSet<String>) {
         }
         DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
             collect_expression_reads(&assign.value, reads);
-            if let Some(TimingControl::Delay(delay)) = &assign.timing {
-                collect_expression_reads(&delay.value, reads);
+            match &assign.timing {
+                Some(TimingControl::Delay(delay)) => collect_expression_reads(&delay.value, reads),
+                Some(TimingControl::Event(event)) => {
+                    if let Some(count) = &event.repeat {
+                        collect_expression_reads(count, reads);
+                    }
+                }
+                None => {}
             }
             // A select's *index* is read even though the target is written.
             collect_lvalue_index_reads(&assign.target, reads);

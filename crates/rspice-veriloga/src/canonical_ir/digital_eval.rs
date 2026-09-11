@@ -353,6 +353,11 @@ impl DigitalSuspension {
 /// evaluation has happened.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DigitalWaitRequest {
+    /// Repeat an event subscription without resuming on intermediate events.
+    Repeated {
+        count: super::digital_value::DigitalEventCount,
+        event: Box<DigitalWaitRequest>,
+    },
     /// `@(...)`: resume when one of these terms is satisfied.
     Event(Vec<DigitalSensitivityTerm>),
     /// Captured expression baselines, to observe after each dependent input change.
@@ -395,8 +400,9 @@ impl DigitalExpressionWait {
     }
 
     /// Observe one changed input at the instant its value is stored. The host
-    /// must preserve intermediate changes, and remove the subscription when
-    /// this returns true. This never executes the source process or its writes.
+    /// must preserve intermediate changes. True reports one occurrence; all
+    /// dependent baselines are refreshed even when an earlier term matched.
+    /// This never executes the source process or its writes.
     pub fn observe<E: DigitalEnvironment + ?Sized>(
         &mut self,
         plan: &CanonicalDigitalPlan,
@@ -410,6 +416,7 @@ impl DigitalExpressionWait {
         let process = plan
             .process(self.process)
             .ok_or(DigitalEvalError::ProcessNotInPlan(self.process))?;
+        let mut occurred = false;
         for state in &mut self.states {
             if state.program.dependencies.binary_search(&changed).is_err() {
                 continue;
@@ -435,11 +442,9 @@ impl DigitalExpressionWait {
                 }
             };
             state.previous = next;
-            if satisfied {
-                return Ok(true);
-            }
+            occurred |= satisfied;
         }
-        Ok(false)
+        Ok(occurred)
     }
 }
 
@@ -539,6 +544,10 @@ pub enum DigitalEvalError {
     },
     /// A `#delay` operand that is not an integer.
     NonIntegerDelay(ValueId),
+    InvalidRepeatCount {
+        value: ValueId,
+        detail: String,
+    },
     InvalidEventExpression {
         value: ValueId,
         detail: String,
@@ -659,6 +668,9 @@ impl std::fmt::Display for DigitalEvalError {
                 "resume state names block {} of a function with {blocks} blocks",
                 usize::from(*block)
             ),
+            Self::InvalidRepeatCount { value, detail } => {
+                write!(f, "invalid repeat count {value:?}: {detail}")
+            }
             Self::InvalidEventExpression { value, detail } => {
                 write!(f, "event expression {}: {detail}", usize::from(*value))
             }
@@ -1437,21 +1449,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     resume,
                     resume_args,
                 } => {
-                    let wait = match wait {
-                        // Copied into the buffer a previous suspension's list
-                        // was handed back as, rather than into a fresh one.
-                        // `clone_from` reuses that capacity.
-                        DigitalWait::Event(terms) => {
-                            let mut spare = std::mem::take(&mut self.scratch.terms);
-                            spare.clone_from(terms);
-                            DigitalWaitRequest::Event(spare)
-                        }
-                        DigitalWait::Expressions(terms) => {
-                            DigitalWaitRequest::Expressions(self.capture_event_expressions(terms)?)
-                        }
-                        DigitalWait::Delay(delay) => {
-                            DigitalWaitRequest::Delay(self.integer(*delay)?)
-                        }
+                    let Some(wait) = self.capture_wait(wait)? else {
+                        self.cross(*resume, resume_args)?;
+                        block = *resume;
+                        continue;
                     };
                     // Evaluated here, not at resumption: these are the values
                     // the process had when it suspended, and the signals they
@@ -1596,6 +1597,54 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             .ok_or(DigitalEvalError::UndeclaredSignal(id))
     }
 
+    fn capture_wait(
+        &mut self,
+        wait: &DigitalWait,
+    ) -> Result<Option<DigitalWaitRequest>, DigitalEvalError> {
+        Ok(Some(match wait {
+            DigitalWait::Repeat { count, event } => {
+                let count_value = super::digital_value::DigitalEventCount::new(
+                    self.four_state(*count)?.into_owned(),
+                );
+                if count_value.is_zero() {
+                    return Ok(None);
+                }
+                if !matches!(
+                    event.as_ref(),
+                    DigitalWait::Event(_) | DigitalWait::Expressions(_)
+                ) {
+                    return Err(DigitalEvalError::InvalidRepeatCount {
+                        value: *count,
+                        detail: "repeat requires one event control".into(),
+                    });
+                }
+                let event = self.capture_wait(event)?.expect("non-repeated event wait");
+                DigitalWaitRequest::Repeated {
+                    count: count_value,
+                    event: Box::new(event),
+                }
+            }
+            DigitalWait::Event(terms) => {
+                let mut spare = std::mem::take(&mut self.scratch.terms);
+                spare.clone_from(terms);
+                DigitalWaitRequest::Event(spare)
+            }
+            DigitalWait::Expressions(terms) => {
+                DigitalWaitRequest::Expressions(self.capture_event_expressions(terms)?)
+            }
+            DigitalWait::Delay(delay) => {
+                let ticks = self.integer(*delay)?;
+                if ticks < 0 {
+                    return Err(DigitalEvalError::InvalidDelay {
+                        value: *delay,
+                        detail: "converted delay must be nonnegative",
+                    });
+                }
+                DigitalWaitRequest::Delay(ticks)
+            }
+        }))
+    }
+
     fn capture_event_expressions(
         &mut self,
         terms: &[DigitalEventExpression],
@@ -1647,6 +1696,26 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
         let kind = &self.function().value(id).kind;
         match kind {
+            CfgValueKind::DigitalRepeatCount { input, signed } => {
+                let value = match self.scalar(*input)? {
+                    ScalarRef::Real(value) => {
+                        let count =
+                            crate::integer_runtime::real_to_integer(value).map_err(|error| {
+                                DigitalEvalError::InvalidRepeatCount {
+                                    value: id,
+                                    detail: error.to_string(),
+                                }
+                            })?;
+                        FourStateValue::from_u64(32, count.max(0) as u64)
+                    }
+                    ScalarRef::Integer(value) => {
+                        FourStateValue::from_u64(32, value as u32 as u64).repeat_count(*signed)
+                    }
+                    ScalarRef::FourState(value) => value.repeat_count(*signed),
+                    ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(*input)),
+                };
+                Ok(DigitalScalar::FourState(value))
+            }
             CfgValueKind::DigitalDelayTicks { input, signed } => {
                 let scale = self.process.time_scale;
                 let precision = self.plan.timing.precision_exponent;
@@ -2031,22 +2100,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 wait,
             } => {
                 let wait = match wait {
-                    Some(DigitalWait::Delay(delay)) => {
-                        let ticks = self.integer(*delay)?;
-                        if ticks < 0 {
-                            return Err(DigitalEvalError::InvalidDelay {
-                                value: *delay,
-                                detail: "converted nonblocking delay must be nonnegative",
-                            });
-                        }
-                        Some(DigitalWaitRequest::Delay(ticks))
-                    }
-                    Some(DigitalWait::Event(terms)) => {
-                        Some(DigitalWaitRequest::Event(terms.clone()))
-                    }
-                    Some(DigitalWait::Expressions(terms)) => Some(DigitalWaitRequest::Expressions(
-                        self.capture_event_expressions(terms)?,
-                    )),
+                    Some(wait) => self.capture_wait(wait)?,
                     None => None,
                 };
                 let (value, region) = (*value, *region);

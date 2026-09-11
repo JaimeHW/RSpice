@@ -166,29 +166,51 @@ impl CanonicalDigitalPlan {
             if let Some(sensitivity) = &process.static_sensitivity {
                 check_terms(&sensitivity.terms)?;
             }
-            for block in &function.blocks {
-                match &block.terminator {
-                    CfgTerminator::Wait {
-                        wait: DigitalWait::Event(terms),
-                        ..
-                    } => check_terms(terms)?,
-                    CfgTerminator::Wait {
-                        wait: DigitalWait::Expressions(terms),
-                        ..
-                    } => check_expressions(function, terms)?,
-                    CfgTerminator::Wait {
-                        wait: DigitalWait::Delay(value),
-                        ..
-                    } => {
+            let check_wait = |wait: &DigitalWait| -> IrValidationResult {
+                let wait = if let DigitalWait::Repeat { count, event } = wait {
+                    if !matches!(
+                        function.value(*count).value_type,
+                        CfgValueType::FourState { .. }
+                    ) {
+                        return Err(error(
+                            "repeat event count must be normalized four-state data",
+                        ));
+                    }
+                    if !matches!(
+                        event.as_ref(),
+                        DigitalWait::Event(_) | DigitalWait::Expressions(_)
+                    ) {
+                        return Err(error("repeat must contain one event control"));
+                    }
+                    event.as_ref()
+                } else {
+                    wait
+                };
+                match wait {
+                    DigitalWait::Event(terms) => {
+                        if terms.is_empty() {
+                            return Err(error("event wait must have sensitivity terms"));
+                        }
+                        check_terms(terms)
+                    }
+                    DigitalWait::Expressions(terms) => check_expressions(function, terms),
+                    DigitalWait::Delay(value) => {
                         if !matches!(
                             function.value(*value).value_type,
                             CfgValueType::Integer | CfgValueType::FourState { .. }
                         ) {
                             return Err(error(
-                                "digital delay must have an integer or four-state operand",
+                                "digital delay must contain converted integer ticks",
                             ));
                         }
+                        Ok(())
                     }
+                    DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
+                }
+            };
+            for block in &function.blocks {
+                match &block.terminator {
+                    CfgTerminator::Wait { wait, .. } => check_wait(wait)?,
                     CfgTerminator::Branch { condition, .. } => {
                         if !matches!(
                             function.value(*condition).value_type,
@@ -217,6 +239,18 @@ impl CanonicalDigitalPlan {
                     return Err(error("analog value type in digital process"));
                 }
                 match kind {
+                    CfgValueKind::DigitalRepeatCount { input, .. } => {
+                        let expected = match function.value(*input).value_type {
+                            CfgValueType::FourState { width } => CfgValueType::FourState { width },
+                            CfgValueType::Integer | CfgValueType::Real => {
+                                CfgValueType::FourState { width: 32 }
+                            }
+                            _ => return Err(error("repeat count has the wrong value domain")),
+                        };
+                        if value.value_type != expected {
+                            return Err(error("repeat count has the wrong output width"));
+                        }
+                    }
                     CfgValueKind::DigitalDelayTicks { input, .. } => {
                         if value.value_type != (CfgValueType::FourState { width: 64 })
                             || !matches!(
@@ -294,36 +328,10 @@ impl CanonicalDigitalPlan {
                             ));
                         }
                         if let CfgValueKind::DigitalNonblockingWrite {
-                            wait: Some(super::cfg::DigitalWait::Delay(delay)),
-                            ..
-                        } = kind
-                            && !matches!(
-                                function.value(*delay).value_type,
-                                CfgValueType::Integer | CfgValueType::FourState { .. }
-                            )
-                        {
-                            return Err(error(
-                                "nonblocking delay must contain converted integer ticks",
-                            ));
-                        }
-                        if let CfgValueKind::DigitalNonblockingWrite {
-                            wait: Some(super::cfg::DigitalWait::Event(terms)),
-                            ..
+                            wait: Some(wait), ..
                         } = kind
                         {
-                            if terms.is_empty() {
-                                return Err(error(
-                                    "nonblocking event wait must have sensitivity terms",
-                                ));
-                            }
-                            check_terms(terms)?;
-                        }
-                        if let CfgValueKind::DigitalNonblockingWrite {
-                            wait: Some(DigitalWait::Expressions(terms)),
-                            ..
-                        } = kind
-                        {
-                            check_expressions(function, terms)?;
+                            check_wait(wait)?;
                         }
                         if let CfgValueKind::DigitalNonblockingWrite { region, .. } = kind
                             && *region != DigitalSchedulingRegion::NonBlockingAssign

@@ -2162,6 +2162,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalRealSignalRead { .. }
             | CfgValueKind::DigitalTime { .. }
             | CfgValueKind::DigitalDelayTicks { .. }
+            | CfgValueKind::DigitalRepeatCount { .. }
             | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }

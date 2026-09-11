@@ -290,7 +290,8 @@ use super::*;
 // Version 81 retains switch-branch source order and accepted-mode discontinuities.
 // Version 83 carries computed event expressions and runtime bit indices.
 // Version 82 rejects direct/indirect source conflicts across parallel branches.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 83;
+// Version 84 carries normalized repeat counts and repeated event subscriptions.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 84;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

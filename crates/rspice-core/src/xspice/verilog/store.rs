@@ -88,6 +88,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
     DigitalEvalScratch, DigitalExpressionWait, DigitalRealDrive, DigitalWaitRequest,
 };
+use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 use rspice_veriloga::four_state::FourStateBit;
@@ -291,6 +292,7 @@ enum ContributionValue {
 #[derive(Debug, Clone)]
 pub(crate) struct EventCapture {
     pub sequence: u64,
+    pub remaining: DigitalEventCount,
     pub terms: Vec<rspice_veriloga::canonical_ir::digital::DigitalSensitivityTerm>,
     pub update: DigitalDeferredUpdate,
 }
@@ -301,11 +303,17 @@ struct ReadyUpdate {
     update: DigitalDeferredUpdate,
 }
 
+#[derive(Clone)]
+struct ExpressionSubscription {
+    wait: DigitalExpressionWait,
+    remaining: DigitalEventCount,
+}
+
 /// The signal store and driver resolution for one compiled digital plan.
 #[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
     plan: Arc<CanonicalDigitalPlan>,
-    expression_waits: BTreeMap<u64, DigitalExpressionWait>,
+    expression_waits: BTreeMap<u64, ExpressionSubscription>,
     expression_inputs: Vec<BTreeSet<u64>>,
     expression_scratch: DigitalEvalScratch,
     expression_error: Option<(usize, DigitalEvalError)>,
@@ -387,17 +395,27 @@ impl DigitalSignalStore {
         self.ready_update(capture.update, capture.sequence);
     }
 
-    pub(crate) fn register_expression_wait(&mut self, wait: DigitalExpressionWait) -> u64 {
+    pub(crate) fn register_expression_wait(
+        &mut self,
+        wait: DigitalExpressionWait,
+        remaining: DigitalEventCount,
+    ) -> u64 {
         let sequence = self.next_sequence();
-        self.insert_expression_wait(sequence, wait);
+        self.insert_expression_wait(sequence, wait, remaining);
         sequence
     }
 
-    fn insert_expression_wait(&mut self, sequence: u64, wait: DigitalExpressionWait) {
+    fn insert_expression_wait(
+        &mut self,
+        sequence: u64,
+        wait: DigitalExpressionWait,
+        remaining: DigitalEventCount,
+    ) {
         for signal in wait.dependencies() {
             self.expression_inputs[usize::from(*signal)].insert(sequence);
         }
-        self.expression_waits.insert(sequence, wait);
+        self.expression_waits
+            .insert(sequence, ExpressionSubscription { wait, remaining });
     }
 
     pub(crate) fn take_expression_captures(&mut self) -> Vec<(u64, DigitalDeferredUpdate)> {
@@ -433,17 +451,17 @@ impl DigitalSignalStore {
         let mut satisfied = Vec::new();
         for id in candidates {
             let wait = waits.get_mut(&id).expect("indexed expression wait");
-            match wait.observe(&plan, signal, self, &mut scratch) {
-                Ok(true) => {
+            match wait.wait.observe(&plan, signal, self, &mut scratch) {
+                Ok(true) if wait.remaining.consume() => {
                     let wait = waits.remove(&id).unwrap();
-                    for input in wait.dependencies() {
+                    for input in wait.wait.dependencies() {
                         self.expression_inputs[usize::from(*input)].remove(&id);
                     }
                     satisfied.push(id);
                 }
-                Ok(false) => {}
+                Ok(_) => {}
                 Err(error) => {
-                    self.expression_error = Some((usize::from(wait.process()), error));
+                    self.expression_error = Some((usize::from(wait.wait.process()), error));
                     break;
                 }
             }
@@ -945,19 +963,27 @@ impl DigitalEnvironment for DigitalSignalStore {
 
     fn defer_update(&mut self, mut update: DigitalDeferredUpdate) {
         let sequence = self.next_sequence();
-        match update.wait.take() {
+        let (remaining, wait) = match update.wait.take() {
+            Some(DigitalWaitRequest::Repeated { count, event }) => (count, Some(*event)),
+            wait => (DigitalEventCount::one(), wait),
+        };
+        match wait {
             Some(DigitalWaitRequest::Expressions(wait)) => {
-                self.insert_expression_wait(sequence, wait);
+                self.insert_expression_wait(sequence, wait, remaining);
                 self.expression_captures.push((sequence, update));
             }
             Some(DigitalWaitRequest::Event(terms)) => self.event_captures.push(EventCapture {
                 sequence,
+                remaining,
                 terms,
                 update,
             }),
             Some(DigitalWaitRequest::Delay(delay)) if delay != 0 => {
                 update.wait = Some(DigitalWaitRequest::Delay(delay));
                 self.delayed.push(update);
+            }
+            Some(DigitalWaitRequest::Repeated { .. }) => {
+                unreachable!("interpreter emits a single repeat control")
             }
             _ => self.ready_update(update, sequence),
         }

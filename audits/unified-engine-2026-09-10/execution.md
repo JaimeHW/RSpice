@@ -582,6 +582,59 @@ bundle is preserved. Final generator digest:
 The second refresh was required by a concurrent compiler-source change arriving
 during the first generation; it was not an additional simulation-test sweep.
 
+## MS02 increment: counted event controls and exact repeat normalization
+
+Intra-assignment `repeat (count) @(event)` now retains the evaluated count and
+RHS for both blocking and nonblocking assignments. Zero counts branch around
+all event-expression evaluation. Counts containing any X/Z and signed negative
+counts normalize to zero; unsigned values keep their unsigned interpretation.
+Real counts use the shared signed 32-bit integer conversion (nearest with half
+away from zero) and reject nonfinite or out-of-range values before scheduling.
+Integral counts retain their full width. Ordinary repeat loops now use this
+normalization, fixing the previous partially unknown count and signed-negative
+loop behavior. Generate substitution retains the repeat expression.
+
+Runtime subscriptions count transitions without resuming the source process
+on intermediate occurrences. Direct signal and real value-change waits,
+computed event results and implicit RHS sensitivity share this contract.
+Distinct matching transitions at one timestamp count separately. Computed
+subscriptions refresh every dependent expression baseline after a write,
+even if an earlier term already matched; stopping at the first matching term
+would lose later negedges in a repeated posedge/negedge list. Count, RHS,
+baselines and source ordering all belong to checkpointed pending state.
+
+Four focused cases pass on the source integrated with `b60f26a4c` (scoped
+numeric subcircuit parameters): compiler count normalization/zero bypass,
+compiler capture/generate/artifact transport, host transition counting, and
+mixed partial-count rollback/replay. Coverage includes signed and unsigned
+negative expressions, partial X/Z, real rounding and invalid real counts,
+96-bit subtraction across the 64-bit boundary, two generated repeat counts,
+count/RHS mutation after capture, blocking versus NBA delivery, same-activation
+input pulses and independent future timers. The mixed case checks direct and
+computed subscriptions at physical 1.15 ns and 1.65 ns, rejects/retries the
+intermediate and completing occurrences, and replays an accepted checkpoint
+with one occurrence still pending. Current and time budgets remain 1e-12 A
+and 1e-20 s.
+
+The initial core build caught an import inserted inside documentation; that
+edit was corrected before the passing host checks. An added invalid-count
+fixture first exposed the existing ownership refusal for a module-level real
+variable with no discrete owner. The fixture now uses a typed real input
+(`wreal`) to test invalid runtime numeric conversion. General analog-owned
+variable binding remains MS06 work; this increment does not close that gap.
+Only affected focused checks were rerun after those corrections. No full
+suite, browser/tablet execution, performance run or vendor-reference run was
+performed. Schema 47 and cache format 84 distinguish this artifact contract.
+
+Spectre reference qualification remains unavailable: the user confirmed that
+no reference installation is available yet. Implementation of all remaining
+MS00–MS15 requirements continues; these four cases do not establish commercial
+production readiness or vendor parity.
+
+The authoritative generator completed all 43 built-ins. Only the manifest
+generator identity changed; the emitted analog model bundle is unchanged.
+Generator digest: `9033856958cb8394330fcc8b75d26d1fe4599a0dab5055de7993efc873abeb6a`.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;

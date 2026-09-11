@@ -846,6 +846,12 @@ pub enum CfgValueKind {
     DigitalTime {
         query: super::digital::DigitalTimeQuery,
     },
+    /// Normalize a repeat count: X/Z and signed nonpositive values become zero.
+    /// Integral operands retain their width; real operands convert to integer.
+    DigitalRepeatCount {
+        input: ValueId,
+        signed: bool,
+    },
     /// Convert a procedural delay to design ticks at encounter. Real operands
     /// round at module precision; four-state operands retain their signedness.
     DigitalDelayTicks {
@@ -1197,6 +1203,7 @@ impl CfgValueKind {
             | Self::DigitalRealSignalRead { .. }
             | Self::DigitalTime { .. }
             | Self::DigitalDelayTicks { .. }
+            | Self::DigitalRepeatCount { .. }
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
@@ -1280,7 +1287,8 @@ impl CfgValueKind {
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
             Self::AnalogTask(task) => task.expressions().copied().collect(),
-            Self::DigitalDelayTicks { input, .. }
+            Self::DigitalRepeatCount { input, .. }
+            | Self::DigitalDelayTicks { input, .. }
             | Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
@@ -1478,7 +1486,8 @@ impl CfgValueKind {
                     *value = map(*value);
                 }
             }
-            Self::DigitalDelayTicks { input, .. }
+            Self::DigitalRepeatCount { input, .. }
+            | Self::DigitalDelayTicks { input, .. }
             | Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
@@ -1876,6 +1885,11 @@ pub enum DigitalWait {
     Event(Vec<DigitalSensitivityTerm>),
     /// Value changes or edges on computed results, rather than their inputs.
     Expressions(Vec<super::digital::DigitalEventExpression>),
+    /// Count subsequent occurrences of an event control without resuming early.
+    Repeat {
+        count: ValueId,
+        event: Box<DigitalWait>,
+    },
     /// `#delay`: resume after this many resolved design ticks have elapsed.
     ///
     /// The operand contains converted integer ticks, evaluated when the
@@ -1890,6 +1904,9 @@ impl DigitalWait {
         match self {
             Self::Event(_) => Vec::new(),
             Self::Expressions(terms) => terms.iter().map(|term| term.value).collect(),
+            Self::Repeat { count, event } => {
+                std::iter::once(*count).chain(event.operands()).collect()
+            }
             Self::Delay(delay) => vec![*delay],
         }
     }
@@ -1902,6 +1919,10 @@ impl DigitalWait {
     pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
             Self::Event(_) => {}
+            Self::Repeat { count, event } => {
+                *count = map(*count);
+                event.map_operands(map);
+            }
             Self::Expressions(terms) => {
                 for term in terms {
                     term.value = map(term.value);
@@ -1917,6 +1938,7 @@ impl DigitalWait {
             Self::Event(terms) => Some(terms),
             Self::Delay(_) => Some(&[]),
             Self::Expressions(_) => None,
+            Self::Repeat { event, .. } => event.sensitivity(),
         }
     }
 }

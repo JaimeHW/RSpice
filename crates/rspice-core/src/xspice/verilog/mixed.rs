@@ -3000,6 +3000,133 @@ endmodule
     }
 
     #[test]
+    fn repeat_controls_restore_partial_counts_on_mixed_rejection_and_checkpoint() {
+        let source = "module repeated(p,arm,adc); inout p; electrical p;
+            input arm,adc; wire arm,adc; real held,initial_held,blocking_held; reg requested,done,independent;
+            initial begin
+              held=0.0; initial_held=0.0; blocking_held=0.0; requested=0; done=0; independent=0;
+              initial_held <= repeat (2) @(posedge adc) 0.25e-9;
+              independent <= #2 1;
+            end
+            always @(posedge arm) begin
+              held <= repeat (2) @(posedge adc) $abstime; requested=1;
+              blocking_held = repeat (2) @(posedge adc) $abstime; done=1;
+            end
+            analog I(p)<+(held+initial_held+blocking_held)*1e6+requested*1e-3;
+            endmodule";
+        for computed in [false, true] {
+            let source = if computed {
+                source.replace("posedge adc", "posedge (adc & ($abstime > 1e-9))")
+            } else {
+                source.to_string()
+            };
+            let mut host = MixedSignalHost::compile(
+                &source,
+                None,
+                "repeated",
+                &[1],
+                SchedulerLimits::default(),
+            )
+            .unwrap();
+            host.add_adc_bridge("arm", 0, (2, 0), 0.4, 0.6).unwrap();
+            host.add_adc_bridge("adc", 0, (3, 0), 0.4, 0.6).unwrap();
+            begin(&mut host, 0);
+            settle_and_accept(&mut host, &[0.0, 0.0, 0.0]);
+            let stamp = |host: &mut MixedSignalHost, adc: f64| {
+                let voltages = [0.0, 0.6, adc];
+                while host.settle_analog_bridges(&voltages).unwrap() {}
+                let mut rhs = 0.0;
+                host.stamp(
+                    &voltages,
+                    |_, _, _| {},
+                    |row, value| {
+                        if row == 0 {
+                            rhs += value;
+                        }
+                    },
+                )
+                .unwrap();
+                rhs
+            };
+            host.begin_trial(
+                0.65e-9,
+                0.65e-9,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .unwrap();
+            assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
+            host.accept_trial().unwrap();
+            // The first occurrence changes only the pending count. Rejection
+            // must restore it without discarding the captured RHS or baseline.
+            for reject in [true, false] {
+                host.begin_trial(
+                    1.15e-9,
+                    0.5e-9,
+                    IntegrationCoefficients::inactive(),
+                    false,
+                    false,
+                )
+                .unwrap();
+                assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
+                assert_eq!(host.read_digital("done").unwrap(), "0");
+                if reject {
+                    host.reject_trial().unwrap();
+                } else {
+                    host.accept_trial().unwrap();
+                }
+            }
+            let checkpoint = host.checkpoint().unwrap();
+            for replay in 0..2 {
+                if replay == 1 {
+                    host.restore(&checkpoint).unwrap();
+                }
+                host.begin_trial(
+                    1.35e-9,
+                    0.2e-9,
+                    IntegrationCoefficients::inactive(),
+                    false,
+                    false,
+                )
+                .unwrap();
+                assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
+                host.accept_trial().unwrap();
+                for reject in [true, false] {
+                    host.begin_trial(
+                        1.65e-9,
+                        0.3e-9,
+                        IntegrationCoefficients::inactive(),
+                        false,
+                        false,
+                    )
+                    .unwrap();
+                    assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
+                    assert_eq!(host.read_digital("done").unwrap(), "1");
+                    assert_eq!(host.read_digital("independent").unwrap(), "0");
+                    if reject {
+                        host.reject_trial().unwrap();
+                    } else {
+                        host.accept_trial().unwrap();
+                    }
+                }
+                assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
+                host.begin_trial(
+                    2e-9,
+                    0.35e-9,
+                    IntegrationCoefficients::inactive(),
+                    false,
+                    false,
+                )
+                .unwrap();
+                assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
+                assert_eq!(host.read_digital("independent").unwrap(), "1");
+                host.accept_trial().unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn discrete_analog_inputs_restore_on_rejection_and_checkpoint() {
         let source = "module shared(p); inout p; electrical p; real state; initial begin state=0.25; #1 state=1.25; end analog I(p)<+state; endmodule";
         let mut host =

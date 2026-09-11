@@ -794,6 +794,23 @@ impl Parser<'_> {
 
     /// `@(...)`, `@*`, `@(*)`, or `#delay`.
     fn parse_timing_control(&mut self) -> Result<TimingControl, ParseError> {
+        if self.match_token(TokenKind::Repeat) {
+            let start = self.previous_span();
+            self.expect(TokenKind::LParen)?;
+            let count = self.parse_expression()?;
+            self.expect(TokenKind::RParen)?;
+            // A repeat intra-assignment control must be followed by one event
+            // control; it cannot wrap a delay or another repeat.
+            if !self.check(TokenKind::At) {
+                return Err(self.unsupported_digital_statement());
+            }
+            let TimingControl::Event(mut event) = self.parse_timing_control()? else {
+                unreachable!("checked @");
+            };
+            event.repeat = Some(count);
+            event.span = start.extend(event.span);
+            return Ok(TimingControl::Event(event));
+        }
         if self.match_token(TokenKind::Hash) {
             let start = self.previous_span();
             let value = self.parse_delay_value()?;
@@ -810,6 +827,7 @@ impl Parser<'_> {
         // instance, because an attribute requires a name after `(*`.
         if self.match_token(TokenKind::Star) {
             return Ok(TimingControl::Event(EventControl {
+                repeat: None,
                 sensitivity: Sensitivity::Implicit,
                 span: start.extend(self.previous_span()),
             }));
@@ -820,6 +838,7 @@ impl Parser<'_> {
             self.advance();
             self.advance();
             return Ok(TimingControl::Event(EventControl {
+                repeat: None,
                 sensitivity: Sensitivity::Implicit,
                 span: start.extend(self.previous_span()),
             }));
@@ -853,6 +872,7 @@ impl Parser<'_> {
         self.expect(TokenKind::RParen)?;
 
         Ok(TimingControl::Event(EventControl {
+            repeat: None,
             sensitivity: Sensitivity::Explicit(terms),
             span: start.extend(self.previous_span()),
         }))
@@ -917,7 +937,10 @@ impl Parser<'_> {
             false
         };
         // Intra-assignment timing control (IEEE 1364-2005 section 9.2.2).
-        let timing = if self.check(TokenKind::At) || self.check(TokenKind::Hash) {
+        let timing = if self.check(TokenKind::At)
+            || self.check(TokenKind::Hash)
+            || self.check(TokenKind::Repeat)
+        {
             Some(self.parse_timing_control()?)
         } else {
             None

@@ -1376,3 +1376,57 @@ fn computed_event_expressions_preserve_pulses_captures_and_current_clocks() {
         ["0", "0", "1"]
     );
 }
+
+#[test]
+fn repeat_controls_count_each_transition_and_retain_all_expression_baselines() {
+    let source = "module repeated(q,blocked,done,computed,real_ok);
+      output [7:0] q,blocked; output done,computed,real_ok;
+      reg [7:0] q,blocked,data,n; reg done,computed,real_ok,a,b,arm; real r,held;
+      initial begin
+        q=0; blocked=0; done=0; computed=0; real_ok=0;
+        a=0; b=0; arm=0; data=8'h42; n=3; r=0.0; held=0.0;
+        q <= repeat (n) @(posedge a or posedge b) data;
+        computed <= repeat (3) @(posedge (a & 1'b1) or negedge (a & 1'b1)) 1;
+        held <= repeat (2.5) @(r+r) 1.25;
+        #1 arm=1; #1 n=1; data=8'h99;
+        a=1; b=1; a=0; r=1.0; r=2.0;
+        #1 a=1; r=3.0;
+        #1 real_ok=(held==1.25);
+      end
+      initial begin @(posedge arm) blocked = repeat (n) @(posedge a or posedge b) data; done=1; end
+      endmodule";
+    let report = run_digital_verilog(
+        source,
+        &DigitalStimulus {
+            module: None,
+            inputs: vec![],
+            outputs: vec![
+                port("q", 8),
+                port("blocked", 8),
+                port("done", 1),
+                port("computed", 1),
+                port("real_ok", 1),
+            ],
+            clock: None,
+            step: 1,
+            settle: 0,
+            vectors: vec![vec![]; 5],
+        },
+    )
+    .unwrap();
+    for (tick, row) in report.observations.iter().enumerate() {
+        let actual: Vec<_> = row.values.iter().map(|(_, value)| value.as_str()).collect();
+        let delivered = if tick >= 3 { "01000010" } else { "00000000" };
+        assert_eq!(
+            actual,
+            [
+                delivered,
+                delivered,
+                if tick >= 3 { "1" } else { "0" },
+                if tick >= 3 { "1" } else { "0" },
+                if tick >= 4 { "1" } else { "0" }
+            ],
+            "tick {tick}"
+        );
+    }
+}

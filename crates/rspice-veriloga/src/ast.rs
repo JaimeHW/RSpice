@@ -2139,6 +2139,8 @@ pub struct DelayControl {
 /// A digital event control: the sensitivity list of a suspension point.
 #[derive(Debug, Clone)]
 pub struct EventControl {
+    /// Intra-assignment repeat count, sampled once before waiting.
+    pub repeat: Option<Expression>,
     pub sensitivity: Sensitivity,
     pub span: Span,
 }

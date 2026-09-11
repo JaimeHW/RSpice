@@ -267,8 +267,20 @@ The same signal may appear in multiple edge terms. Custom hosts must observe
 `DigitalExpressionWait::observe`, then deliver one wakeup/update when satisfied.
 Prepared expression programs are shared; checkpointed baselines are independent.
 
-MS02 remains open. Repeat-event controls, min:typ:max selection, continuous driver
-delays, complete
+Intra-assignment repeat-event controls such as
+`q <= repeat (3) @(posedge clk) data` capture the count and RHS once. The host
+counts each subsequent matching transition, including distinct transitions at
+one timestamp, before delivering the captured value. Blocking assignments
+suspend their process; nonblocking assignments continue. Direct, computed,
+real and implicit event controls share this behavior. Unknown and signed
+negative counts become zero, bypassing event evaluation; real counts use the
+shared signed 32-bit integer conversion, and positive integral counts retain
+their width. Ordinary repeat loops use the same count normalization. Pending
+counts and expression baselines survive mixed rejection and in-memory restart.
+Custom digital hosts must unwrap `DigitalWaitRequest::Repeated` and consume
+its count once per observed event, releasing the wait only when complete.
+
+MS02 remains open. Min:typ:max selection, continuous driver delays, complete
 delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
 Process-local and analog-owned event dependencies, dynamic write targets and

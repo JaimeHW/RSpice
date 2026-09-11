@@ -560,6 +560,9 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalRealSignalRead { signal } => {
                 write!(out, "digital-real-read:{signal}")
             }
+            CfgValueKind::DigitalRepeatCount { signed, .. } => {
+                write!(out, "digital-repeat-count:{signed}")
+            }
             CfgValueKind::DigitalDelayTicks { input, signed } => {
                 write!(out, "digital-delay-ticks:{input:?}:{signed}")
             }

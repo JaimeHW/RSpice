@@ -1556,12 +1556,17 @@ impl SemanticAnalyzer {
             TimingControl::Delay(delay) => {
                 self.check_digital_expression(&delay.value, signals, index);
             }
-            TimingControl::Event(event) => match &event.sensitivity {
-                Sensitivity::Implicit => {}
-                Sensitivity::Explicit(terms) => {
-                    self.resolve_sensitivity(terms, signals, index);
+            TimingControl::Event(event) => {
+                if let Some(count) = &event.repeat {
+                    self.check_digital_expression(count, signals, index);
                 }
-            },
+                match &event.sensitivity {
+                    Sensitivity::Implicit => {}
+                    Sensitivity::Explicit(terms) => {
+                        self.resolve_sensitivity(terms, signals, index);
+                    }
+                }
+            }
         }
     }
 

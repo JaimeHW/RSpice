@@ -236,6 +236,40 @@ pub struct FourStateValue {
     planes: Planes,
 }
 
+/// Exact remaining event occurrences. Construction normalizes unknown counts
+/// and never truncates a wide integral operand to a machine word.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigitalEventCount(FourStateValue);
+
+impl DigitalEventCount {
+    pub fn one() -> Self {
+        Self(FourStateValue::from_u64(1, 1))
+    }
+    pub(crate) fn new(value: FourStateValue) -> Self {
+        Self(value.repeat_count(false))
+    }
+    pub fn remaining(&self) -> &FourStateValue {
+        &self.0
+    }
+    pub fn is_zero(&self) -> bool {
+        self.0.aval().iter().all(|word| *word == 0)
+    }
+    /// Consume one occurrence; true means the subscription is complete.
+    pub fn consume(&mut self) -> bool {
+        if self.is_zero() {
+            return true;
+        }
+        for word in self.0.plane_words_mut().0 {
+            let (next, borrow) = word.overflowing_sub(1);
+            *word = next;
+            if !borrow {
+                break;
+            }
+        }
+        self.is_zero()
+    }
+}
+
 /// The serialized shape of a value, which is the shape it had when both planes
 /// were `Vec`s.
 ///
@@ -472,6 +506,16 @@ impl FourStateValue {
     pub fn bval(&self) -> &[u32] {
         let words = Self::words_for(self.width);
         &self.plane_words().1[..words]
+    }
+
+    /// IEEE 1364 repeat counts with any X/Z, or signed negative counts,
+    /// execute zero iterations. Positive integral counts retain every bit.
+    pub fn repeat_count(&self, signed: bool) -> Self {
+        if self.has_unknown() || (signed && self.sign_bit() == FourStateBit::One) {
+            Self::zero(self.width)
+        } else {
+            self.clone()
+        }
     }
 
     /// Whether any bit is `x` or `z`.

@@ -4441,3 +4441,120 @@ fn computed_event_dependencies_use_exact_runtime_bit_indices() {
         assert_eq!(h.get("q"), expected, "index {index}");
     }
 }
+
+#[test]
+fn repeat_controls_normalize_counts_and_bypass_zero_event_evaluation() {
+    let mut invalid = Harness::from_source(
+        "module invalid_count; wreal count; reg q; initial q <= repeat(count) @(1'b0) 1; endmodule",
+    );
+    for count in [f64::NAN, f64::INFINITY, 3e10] {
+        invalid.set_real("count", count);
+        assert!(matches!(
+            start(
+                &invalid.plan,
+                &invalid.plan.processes[0],
+                &mut invalid.store
+            ),
+            Err(DigitalEvalError::InvalidRepeatCount { .. })
+        ));
+        assert_eq!(invalid.deferred_count(), 0);
+    }
+
+    for (count, expected) in [
+        ("-1", 0),
+        ("-2'd1", 3),
+        ("2'b1x", 0),
+        ("2'b1z", 0),
+        ("0", 0),
+        ("2.5", 3),
+        ("-0.5", 0),
+        ("3", 3),
+    ] {
+        let mut h = Harness::from_source(&format!(
+            "module counts; reg [7:0] n; initial begin n=0; repeat ({count}) n=n+1; end endmodule"
+        ));
+        expect_finished(h.run());
+        assert_eq!(h.get("n"), format!("{expected:08b}"), "count {count}");
+        if expected == 0 {
+            let mut h = Harness::from_source(&format!(
+                "module skip; reg q,n,seen; initial begin q=0; n=0;
+                 q = repeat ({count}) @($bitstoreal(64'bx)) 1;
+                 n <= repeat ({count}) @($bitstoreal(64'bx)) 1;
+                 seen=q & ~n; end endmodule"
+            ));
+            expect_finished(h.run());
+            assert_eq!(h.get("seen"), "1", "blocking immediate; NBA pending");
+            h.flush_nonblocking();
+            assert_eq!(h.get("n"), "1");
+        }
+    }
+}
+
+#[test]
+fn repeat_controls_capture_wide_counts_data_and_implicit_dependencies_once() {
+    let mut generated = Harness::from_source(
+        "module generated; reg clk; reg [1:0] q; genvar i;
+         generate for(i=0;i<2;i=i+1) begin: g
+           initial q[i] <= repeat(i+1) @(posedge clk) 1'b1;
+         end endgenerate endmodule",
+    );
+    for index in 0..2 {
+        expect_finished(generated.start(index));
+    }
+    assert_eq!(
+        generated
+            .store
+            .deferred
+            .iter()
+            .map(|update| match &update.wait {
+                Some(DigitalWaitRequest::Repeated { count, .. }) =>
+                    count.remaining().to_u64().unwrap(),
+                _ => panic!("generated repeat count"),
+            })
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+
+    let mut h = Harness::from_source(
+        "module capture; reg [95:0] n; reg [7:0] data,q,implicit_q; reg clk,done;
+         initial begin data=8'h42; done=0;
+           q <= repeat (n) @(posedge clk) data;
+           implicit_q <= repeat (2) @* data;
+           n=0; data=8'h99; done=1;
+         end endmodule",
+    );
+    h.set("n", &format!("{}1{}", "0".repeat(31), "0".repeat(64)));
+    let transported: CanonicalDigitalPlan =
+        serde_json::from_str(&serde_json::to_string(&h.plan).unwrap()).unwrap();
+    transported.validate().unwrap();
+    assert_eq!(transported, h.plan);
+    expect_finished(h.run());
+    assert_eq!(h.get("done"), "1");
+    assert_eq!(h.deferred_count(), 2);
+    let Some(DigitalWaitRequest::Repeated { count, event }) = &h.store.deferred[0].wait else {
+        panic!("repeated event");
+    };
+    assert_eq!(count.remaining().width(), 96);
+    let mut count = count.clone();
+    assert!(!count.consume());
+    assert_eq!(
+        count.remaining().spelling(),
+        format!("{}{}", "0".repeat(32), "1".repeat(64))
+    );
+    assert!(matches!(event.as_ref(), DigitalWaitRequest::Event(_)));
+    assert_eq!(
+        h.store.deferred[0].value,
+        DigitalUpdate::FourState(FourStateValue::from_u64(8, 0x42))
+    );
+    let Some(DigitalWaitRequest::Repeated { count, event }) = &h.store.deferred[1].wait else {
+        panic!("repeated implicit event");
+    };
+    assert_eq!(count.remaining().to_u64(), Some(2));
+    let DigitalWaitRequest::Event(terms) = event.as_ref() else {
+        panic!("implicit dependencies");
+    };
+    assert_eq!(
+        terms.iter().map(|term| term.signal).collect::<Vec<_>>(),
+        [h.signal("data")]
+    );
+}
