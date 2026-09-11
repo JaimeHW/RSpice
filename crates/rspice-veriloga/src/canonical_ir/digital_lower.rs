@@ -292,7 +292,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &digital.constants,
             &mut probes,
             digital.time_scale,
-            timing.precision_exponent,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -308,7 +307,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &mut drivers,
             &mut probes,
             digital.time_scale,
-            timing.precision_exponent,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -324,7 +322,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &instance.constants,
                 &mut probes,
                 instance.time_scale,
-                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -340,7 +337,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &mut drivers,
                 &mut probes,
                 instance.time_scale,
-                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -356,7 +352,6 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &mut drivers,
                 &mut probes,
                 instance.time_scale,
-                timing.precision_exponent,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -459,11 +454,9 @@ fn lower_continuous_assign(
     drivers: &mut Vec<DigitalDriver>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
-    precision_exponent: i8,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         time_scale,
-        precision_exponent,
         signals,
         index,
         constants,
@@ -620,11 +613,9 @@ fn lower_process(
     constants: &DigitalConstants,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
-    precision_exponent: i8,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         time_scale,
-        precision_exponent,
         signals,
         index,
         constants,
@@ -821,7 +812,6 @@ impl Context {
 
 struct ProcessLowerer<'a> {
     time_scale: crate::time_scale::ModuleTimeScale,
-    precision_exponent: i8,
     signals: &'a [DigitalSignal],
     index: &'a HashMap<&'a str, DigitalSignalId>,
     /// The elaboration-time constants a name in this body may denote.
@@ -1951,7 +1941,7 @@ impl ProcessLowerer<'_> {
                 DigitalWait::Event(terms)
             }
             TimingControl::Delay(delay) => {
-                let value = self.delay(&delay.value);
+                let value = self.delay(block, &delay.value);
                 DigitalWait::Delay(value)
             }
         };
@@ -1982,76 +1972,19 @@ impl ProcessLowerer<'_> {
         resume
     }
 
-    /// Round at the owning module's precision before scaling to design ticks.
-    ///
-    /// A leaf, not a block instruction: a constant delay reads nothing, and
-    /// the `Wait` that consumes it is the terminator of a block it would
-    /// otherwise have to be placed in.
-    fn delay(&mut self, expression: &Expression) -> ValueId {
-        let ticks = if self.is_real_expression(expression) {
-            self.constant_delay(expression)
-                .ok_or("a delay must be an elaboration-time numeric constant")
-                .and_then(|units| self.time_scale.delay_ticks(units, self.precision_exponent))
+    /// Evaluate once at encounter, with the same sizing for constants and signals.
+    fn delay(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        let signed = self.self_signed(expression);
+        let input = if self.is_real_expression(expression) {
+            self.real_expression(block, expression)
         } else {
-            self.constant(expression)
-                .ok_or("a delay must be an elaboration-time numeric constant")
-                .and_then(|units| {
-                    self.time_scale
-                        .integer_delay_ticks(units, self.precision_exponent)
-                })
+            self.expression(block, expression)
         };
-        let value = match ticks {
-            Ok(value) => value,
-            Err(detail) => {
-                self.error(detail, expression.span());
-                0
-            }
-        };
-        if let Ok(value) = i32::try_from(value) {
-            self.builder
-                .push_leaf(CfgValueType::Integer, CfgValueKind::IntegerConstant(value))
-        } else {
-            self.builder.push_leaf(
-                CfgValueType::FourState { width: 64 },
-                CfgValueKind::FourStateConstant(FourStateValue::from_u64(64, value as u64)),
-            )
-        }
-    }
-
-    fn constant_delay(&self, expression: &Expression) -> Option<f64> {
-        if !self.is_real_expression(expression) {
-            return self.constant(expression).map(|value| value as f64);
-        }
-        match expression {
-            Expression::SystemFunction(function) => self.module_time_query(function),
-            Expression::Number(number) => Some(number.value),
-            Expression::Identifier(identifier)
-                if self.lookup_local(&identifier.name).is_none()
-                    && !self.index.contains_key(identifier.name.as_str()) =>
-            {
-                self.constants.real(&identifier.name)
-            }
-            Expression::Unary(unary) => {
-                let operand = self.constant_delay(&unary.operand)?;
-                match unary.op {
-                    UnaryOp::Neg => Some(-operand),
-                    UnaryOp::Pos => Some(operand),
-                    _ => None,
-                }
-            }
-            Expression::Binary(binary) => {
-                let left = self.constant_delay(&binary.left)?;
-                let right = self.constant_delay(&binary.right)?;
-                match binary.op {
-                    BinaryOp::Add => Some(left + right),
-                    BinaryOp::Sub => Some(left - right),
-                    BinaryOp::Mul => Some(left * right),
-                    BinaryOp::Div => Some(left / right),
-                    _ => None,
-                }
-            }
-            _ => None,
-        }
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width: 64 },
+            CfgValueKind::DigitalDelayTicks { input, signed },
+        )
     }
 
     /// Resolve a sensitivity list to signal terms.
@@ -3091,8 +3024,8 @@ impl ProcessLowerer<'_> {
     /// [`Self::unknown`] leaves behind after the refusal.
     fn self_width(&self, expression: &Expression) -> u32 {
         match expression {
-            // Sized literals keep their written width; unsized ones report the
-            // 32-bit floor, and grow past it only through the context.
+            // Unsized literals have a 32-bit floor and must also retain all
+            // their significant bits before any enclosing context is applied.
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
                 literal.value.width()
             }
@@ -3118,7 +3051,11 @@ impl ProcessLowerer<'_> {
             | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => 1,
             Expression::Number(number) => match crate::four_state::decode(&number.raw) {
                 Ok(literal) => literal.width(),
-                Err(_) => crate::four_state::UNSIZED_FOUR_STATE_WIDTH,
+                Err(_) => crate::numeric_literal::parse_integer_literal(&number.raw)
+                    .ok()
+                    .flatten()
+                    .map(|value| (65 - (value as u64).leading_zeros()).max(32))
+                    .unwrap_or(crate::four_state::UNSIZED_FOUR_STATE_WIDTH),
             },
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
                 Some(local) => self.local_width(local),
@@ -3761,6 +3698,9 @@ fn collect_reads(statement: &DigitalStatement, reads: &mut BTreeSet<String>) {
         }
         DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
             collect_expression_reads(&assign.value, reads);
+            if let Some(TimingControl::Delay(delay)) = &assign.timing {
+                collect_expression_reads(&delay.value, reads);
+            }
             // A select's *index* is read even though the target is written.
             collect_lvalue_index_reads(&assign.target, reads);
         }
@@ -3805,6 +3745,10 @@ fn collect_reads(statement: &DigitalStatement, reads: &mut BTreeSet<String>) {
         }
         DigitalStatement::Forever(statement) => collect_reads(&statement.body, reads),
         DigitalStatement::Timing(timing) => {
+            // IEEE 1364-2005, 9.7.5 excludes event expressions, not delays.
+            if let TimingControl::Delay(delay) = &timing.control {
+                collect_expression_reads(&delay.value, reads);
+            }
             if let Some(statement) = &timing.statement {
                 collect_reads(statement, reads);
             }

@@ -202,11 +202,15 @@ digital processes independently of this option.
 Active `` `timescale `` directives now retain module units and precision through
 includes, HDL hierarchy, specialization and canonical transport. `` `resetall ``
 restores the default 1 ns / 1 ns timing and the supported default discipline and
-transition settings. Constant procedural delay expressions, including fractional
+transition settings. Procedural wait expressions, including runtime, fractional
 and parenthesized expressions, round at the declaring module's precision before
 checked integer rescaling to the compiled HDL design's finest precision. Integer
 delays use checked integer arithmetic; values above 32 bits are retained without
-clamping. The event host still enforces its exact tick-to-seconds range.
+clamping. Expressions are sampled once at encounter. X/Z delays become zero
+and retain inactive-region scheduling; negative delays use unsigned 64-bit time
+conversion followed by range checks. Nonfinite and out-of-range delays produce
+runtime errors before scheduling. Delay-input reads participate in `@*`.
+The event host still enforces its exact tick-to-seconds range.
 
 `$simparam("timeUnit")` and `$simparam("timePrecision")` resolve to the owning
 module's declarations in seconds, including parameter defaults, analog hierarchy
@@ -231,9 +235,11 @@ Known digital arithmetic and relational operands wider than 64 bits use exact
 integer arithmetic, with results wrapping at their declared width. X/Z and
 division-by-zero behavior is preserved. Wide shift counts, based literals and
 unsized based values retain their bits, within the existing 65,536-bit literal
-budget. Remaining type/conversion work in MS06 is still open.
+budget. Some known based literals of 64 bits or fewer still pass through scalar
+parsing and are refused when their exact integer is not representable by `f64`;
+full literal/type/conversion work in MS06 remains open.
 
-MS02 remains open. Runtime-valued delays, min:typ:max selection, complete
+MS02 remains open. Min:typ:max selection, continuous driver delays, complete
 delayed-assignment semantics, time/realtime declarations and SystemVerilog
 `timeunit`/`timeprecision` still require implementation and qualification.
 Separate circuit hosts still await one circuit-wide time/scheduling authority.

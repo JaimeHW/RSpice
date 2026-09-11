@@ -120,10 +120,9 @@ fn sensitivity_terms_keep_their_edge_qualifier() {
     );
 }
 
-/// `#delay` is a time wait, and its operand carries the CFG's integer type
-/// rather than being tunnelled through a real.
+/// A delay wait consumes an explicit conversion to integer design ticks.
 #[test]
-fn a_delay_control_becomes_a_time_wait_on_an_integer() {
+fn a_delay_control_becomes_a_time_wait_on_converted_ticks() {
     let section = "    reg q;\n\
                    \x20   initial #5 q = 1'b1;";
     let process = only_process(section);
@@ -136,12 +135,15 @@ fn a_delay_control_becomes_a_time_wait_on_an_integer() {
     };
     assert_eq!(
         process.function.value(*delay).value_type,
-        CfgValueType::Integer
+        CfgValueType::FourState { width: 64 }
     );
-    assert_eq!(
-        process.function.value(*delay).kind,
-        CfgValueKind::IntegerConstant(5)
-    );
+    let CfgValueKind::DigitalDelayTicks { input, .. } = process.function.value(*delay).kind else {
+        panic!("delay must explicitly convert the expression at encounter");
+    };
+    assert!(matches!(
+        process.function.value(input).kind,
+        CfgValueKind::FourStateConstant(_)
+    ));
 }
 
 /// An intra-assignment delay evaluates the right-hand side *before* the

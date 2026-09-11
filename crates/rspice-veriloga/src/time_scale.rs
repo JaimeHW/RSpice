@@ -117,40 +117,41 @@ impl ModuleTimeScale {
         )
     }
 
-    /// Round a finite, nonnegative delay in module units at its declared
-    /// precision, then exactly rescale that integer to the design precision.
+    /// Round at module precision, then rescale exactly. Negative procedural
+    /// delays convert to unsigned 64-bit time. Unsupported scheduling ranges
+    /// fail explicitly instead of saturating or wrapping the host clock.
     pub(crate) fn delay_ticks(self, units: f64, design_precision: i8) -> Result<i64, &'static str> {
-        self.validate()?;
-        if !(-15..=self.precision_exponent).contains(&design_precision) {
-            return Err("design precision cannot be coarser than a module's precision");
-        }
-        if !units.is_finite() || units < 0.0 {
-            return Err("a delay must be finite and nonnegative");
+        self.ticks_per_unit(design_precision)?;
+        if !units.is_finite() {
+            return Err("a delay must be finite");
         }
         let local_scale = 10_u64.pow((self.unit_exponent - self.precision_exponent) as u32);
         let local_ticks = (units * local_scale as f64).round();
-        // Cast only after checking the exclusive upper bound: i64::MAX as
-        // f64 rounds to 2^63 and must not saturate into a valid delay.
-        if !local_ticks.is_finite() || local_ticks >= 9_223_372_036_854_775_808.0 {
+        const TIME_MODULUS: f64 = 18_446_744_073_709_551_616.0;
+        if !local_ticks.is_finite() || local_ticks >= TIME_MODULUS {
             return Err("delay exceeds the representable tick range");
         }
-        let design_scale = 10_i64.pow((self.precision_exponent - design_precision) as u32);
-        (local_ticks as i64)
-            .checked_mul(design_scale)
-            .ok_or("delay exceeds the representable tick range")
+        let local_ticks = if local_ticks < 0.0 {
+            ((-local_ticks % TIME_MODULUS) as u64).wrapping_neg()
+        } else {
+            local_ticks as u64
+        };
+        let design_scale = 10_u64.pow((self.precision_exponent - design_precision) as u32);
+        Self::checked_delay_product(local_ticks, design_scale)
     }
 
     pub(crate) fn integer_delay_ticks(
         self,
-        units: i64,
+        units: u64,
         design_precision: i8,
     ) -> Result<i64, &'static str> {
-        self.validate()?;
-        if !(-15..=self.precision_exponent).contains(&design_precision) || units < 0 {
-            return Err("a delay must be nonnegative and use a compatible design precision");
-        }
-        units
-            .checked_mul(10_i64.pow((self.unit_exponent - design_precision) as u32))
+        Self::checked_delay_product(units, self.ticks_per_unit(design_precision)?)
+    }
+
+    fn checked_delay_product(ticks: u64, scale: u64) -> Result<i64, &'static str> {
+        ticks
+            .checked_mul(scale)
+            .and_then(|value| i64::try_from(value).ok())
             .ok_or("delay exceeds the representable tick range")
     }
 }

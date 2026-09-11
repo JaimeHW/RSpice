@@ -77,7 +77,7 @@ checkpoint representation, before optimizing partitions or caches.
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
 | Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport, shared file preparation, cross-root dependency consistency and named global rule selection implemented; full configuration binding remains | Focused file/virtual, source-refresh and selection cases pass |
-| Complete resolved module timing and scheduling regions | MS02 | Declared scales, constant delays, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
+| Complete resolved module timing and scheduling regions | MS02 | Declared scales, runtime procedural waits, declaration queries, digital activation clocks and scaled analog compatibility time implemented; remaining timing semantics open | Focused compiler and mixed circuit cases pass; whole-circuit qualification pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
 | Global scheduling, resolution, atomic acceptance and effects | MS05 | Open | Pending |
@@ -385,6 +385,47 @@ mapping and generated model changes. The combined artifact schema is 40 and
 disk-cache format is 77, distinct from that commit's schema 39/cache 76. The five
 focused cases pass on the combined source. No full suite or actual browser,
 tablet or vendor-reference execution was performed for this increment.
+
+Procedural waits now evaluate a typed `DigitalDelayTicks` node at encounter.
+Constants use the same digital width/signedness rules as local variables, signal
+reads, real expressions and time queries. Conversion rounds at module precision
+and then rescales to design ticks. IEEE 1364-2005 sections 9.7.1 and 9.7.5 require
+X/Z delays to become zero and delay-input reads to participate in implicit
+sensitivity. Negative values convert to unsigned 64-bit time; the interpreter's
+signed-tick capacity and the host's exact physical-time capacity remain explicit
+range checks. Dead code containing a finite, out-of-range constant delay no
+longer fails compilation; executing that wait reports a numeric delay error.
+[IEEE standard](https://www-inst.eecs.berkeley.edu/~eecs151/sp20/files/verilog/verilog-std-1364-2005.pdf).
+
+The focused run exposed an unsized decimal sizing defect that the former
+constant-delay shortcut hid. Such literals now retain sufficient signed width,
+with a 32-bit minimum. Sized arithmetic still wraps at its expression width.
+The same run encountered two existing MS06 limitations: module-level real
+variables without discrete ownership are not digital signals, and a known
+64-bit based literal such as `64'd9007199254740993` is rejected by scalar parsing.
+The runtime input fixtures use declared real nets and exact integer expressions;
+those broader ownership/literal gaps remain required work, not qualified support.
+
+Evidence for this increment: six compiler process delay cases, two module-timing
+cases, and one mixed-host case pass. Failed cases alone were retried after the
+observed sizing, fixture-ownership and fixture-resolver corrections. The mixed
+case covers an off-grid analog activation, unknown zero delay, a rounded real
+delay computed from `$realtime`, independent timer isolation, analog stamping,
+rejection/retry and accepted in-memory checkpoint restoration. The small IR
+shape target is native-feature gated and selected zero tests under the portable
+command; it is not counted as executed evidence. No full suite or actual
+browser/tablet/reference run was performed. Canonical schema is 41; cache format
+is 78. The authoritative generator regenerated all 43 shipped models; only the
+generator manifest digest changed. Concurrent core commit `97e921d4f` is retained
+at integration. It changes complex parameter directions and definition-time
+bindings; these timing fixtures do not exercise those paths. Combined release
+verification remains pending.
+
+Delayed nonblocking assignments still require independent captured updates:
+`q <= #d rhs` currently suspends the process through the common wait lowering.
+This known semantic bug is the next timing implementation slice. Continuous
+inertial/transport behavior, complete time declarations, persisted restart,
+circuit-wide coordination and all later plan milestones remain open.
 
 ## Next implementation work
 

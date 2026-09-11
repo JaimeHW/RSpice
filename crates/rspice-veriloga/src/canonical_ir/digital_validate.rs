@@ -213,6 +213,20 @@ impl CanonicalDigitalPlan {
                     return Err(error("analog value type in digital process"));
                 }
                 match kind {
+                    CfgValueKind::DigitalDelayTicks { input, .. } => {
+                        if value.value_type != (CfgValueType::FourState { width: 64 })
+                            || !matches!(
+                                function.value(*input).value_type,
+                                CfgValueType::Integer
+                                    | CfgValueType::Real
+                                    | CfgValueType::FourState { .. }
+                            )
+                        {
+                            return Err(error(
+                                "digital delay conversion has the wrong value domain or width",
+                            ));
+                        }
+                    }
                     CfgValueKind::DigitalTime { query } => {
                         if value.value_type != query.value_type() {
                             return Err(error(

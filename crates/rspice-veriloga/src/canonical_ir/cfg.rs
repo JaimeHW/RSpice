@@ -846,6 +846,12 @@ pub enum CfgValueKind {
     DigitalTime {
         query: super::digital::DigitalTimeQuery,
     },
+    /// Convert a procedural delay to design ticks at encounter. Real operands
+    /// round at module precision; four-state operands retain their signedness.
+    DigitalDelayTicks {
+        input: ValueId,
+        signed: bool,
+    },
     /// A continuous-domain potential, read from inside a process function.
     ///
     /// Verilog-AMS LRM 2.4 section 7.3.3's probe, and the *only* direction the
@@ -1181,6 +1187,7 @@ impl CfgValueKind {
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
             | Self::DigitalTime { .. }
+            | Self::DigitalDelayTicks { .. }
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
@@ -1263,7 +1270,8 @@ impl CfgValueKind {
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
             Self::AnalogTask(task) => task.expressions().copied().collect(),
-            Self::Unary { input, .. }
+            Self::DigitalDelayTicks { input, .. }
+            | Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }
@@ -1456,7 +1464,8 @@ impl CfgValueKind {
                     *value = map(*value);
                 }
             }
-            Self::Unary { input, .. }
+            Self::DigitalDelayTicks { input, .. }
+            | Self::Unary { input, .. }
             | Self::Ddt { input, .. }
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }

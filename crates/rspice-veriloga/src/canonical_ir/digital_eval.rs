@@ -22,7 +22,7 @@
 //!   deferred updates, and changes constantly.
 //!
 //! The interpreter owns neither. It owns no clock either: a `#delay` reports
-//! the number of time units it wants in [`DigitalWaitRequest::Delay`] and stops
+//! the number of design ticks it wants in [`DigitalWaitRequest::Delay`] and stops
 //! there, because the interpreter has no basis for an opinion about when that
 //! is. Time is the kernel's.
 //!
@@ -449,6 +449,11 @@ pub enum DigitalEvalError {
     },
     /// A `#delay` operand that is not an integer.
     NonIntegerDelay(ValueId),
+    /// Numeric conversion failed before the delay could be scheduled.
+    InvalidDelay {
+        value: ValueId,
+        detail: &'static str,
+    },
     /// A four-state value reached an operator that computes on reals, or the
     /// reverse.
     ///
@@ -560,6 +565,9 @@ impl std::fmt::Display for DigitalEvalError {
                 "resume state names block {} of a function with {blocks} blocks",
                 usize::from(*block)
             ),
+            Self::InvalidDelay { value, detail } => {
+                write!(f, "delay value {}: {detail}", usize::from(*value))
+            }
             Self::NonIntegerDelay(value) => write!(
                 f,
                 "value {} is a delay operand but is not an integer",
@@ -1464,15 +1472,13 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn integer(&self, id: ValueId) -> Result<i64, DigitalEvalError> {
         match self.scalar(id)? {
             ScalarRef::Integer(value) => Ok(i64::from(value)),
-            // A four-state delay operand with an unknown bit has no number to
-            // wait for, and picking one would be inventing a schedule.
+            // Waits consume converted design ticks. DigitalDelayTicks handles
+            // the raw expression's X/Z and real conversion before this point.
             ScalarRef::FourState(value) => value
                 .to_u64()
                 .and_then(|bits| i64::try_from(bits).ok())
                 .ok_or(DigitalEvalError::NonIntegerDelay(id)),
-            // A `#r` with a real operand would need section 3.9.2's rounding
-            // and a ruling on what a fractional time unit is; neither is this
-            // wave's, and a rounded delay is a schedule nobody wrote.
+            // A raw real here is malformed IR: conversion was skipped.
             ScalarRef::Real(_) => Err(DigitalEvalError::NonIntegerDelay(id)),
             ScalarRef::Effect => Err(DigitalEvalError::EffectValueRead(id)),
         }
@@ -1487,6 +1493,25 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     fn compute(&mut self, id: ValueId) -> Result<DigitalScalar, DigitalEvalError> {
         let kind = &self.function().value(id).kind;
         match kind {
+            CfgValueKind::DigitalDelayTicks { input, signed } => {
+                let scale = self.process.time_scale;
+                let precision = self.plan.timing.precision_exponent;
+                let ticks = match self.scalar(*input)? {
+                    ScalarRef::Real(value) => scale.delay_ticks(value, precision),
+                    ScalarRef::Integer(value) => {
+                        scale.integer_delay_ticks(value as i64 as u64, precision)
+                    }
+                    ScalarRef::FourState(value) => value
+                        .delay_units(*signed)
+                        .and_then(|units| scale.integer_delay_ticks(units, precision)),
+                    ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(*input)),
+                }
+                .map_err(|detail| DigitalEvalError::InvalidDelay { value: id, detail })?;
+                Ok(DigitalScalar::FourState(FourStateValue::from_u64(
+                    64,
+                    ticks as u64,
+                )))
+            }
             CfgValueKind::DigitalTime { query } => {
                 use super::digital::DigitalTimeQuery;
                 let clock = self

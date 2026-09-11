@@ -3935,16 +3935,12 @@ fn a_single_bit_vector_names_its_one_bit_by_its_bound() {
 }
 
 #[test]
-fn a_local_shadowing_a_parameter_is_not_folded_into_a_select_or_delay() {
-    for statement in ["q[index] = 1'b1;", "#index q = 2'b10;"] {
-        let section = format!(
-            "parameter integer index = 0; reg [1:0] q;
-             initial begin : work integer index; index = 1; {statement} end"
-        );
-        VerilogACompiler::default()
-            .compile_canonical_ir(&digital_module(&section))
-            .expect_err("a runtime local must not be replaced by the shadowed parameter");
-    }
+fn a_local_shadowing_a_parameter_is_not_folded_into_a_select() {
+    let section = "parameter integer index = 0; reg [1:0] q;
+         initial begin : work integer index; index = 1; q[index] = 1'b1; end";
+    VerilogACompiler::default()
+        .compile_canonical_ir(&digital_module(section))
+        .expect_err("a runtime local must not be replaced by the shadowed parameter");
 }
 
 #[test]
@@ -3986,10 +3982,144 @@ fn digital_index_and_delay_boundary_values_execute_exactly() {
 fn parameter_delays_outside_the_executable_range_are_never_clamped() {
     for delay in ["9223372036854775808.0", "1e30", "-2147483649", "-1"] {
         let section = format!("parameter real DELAY = {delay}; reg q; initial #DELAY q = 1'b1;");
-        let error = VerilogACompiler::default()
-            .compile_canonical_ir(&digital_module(&section))
-            .expect_err("an unrepresentable delay must be refused");
-        assert!(error.to_string().contains("delay"), "{delay}: {error}");
+        let mut harness = Harness::new(&section);
+        let error = start(
+            &harness.plan,
+            &harness.plan.processes[0],
+            &mut harness.store,
+        )
+        .expect_err("an unrepresentable delay must fail before scheduling");
+        assert!(
+            matches!(error, DigitalEvalError::InvalidDelay { .. }),
+            "{delay}: {error}"
+        );
+    }
+}
+
+#[test]
+fn runtime_delays_sample_locals_signals_and_time_at_each_encounter() {
+    // A delay expression is a read for @* even when its body writes a constant.
+    for statement in ["#d q=1;", "q = #d 1;"] {
+        let mut h = Harness::new(&format!("reg [7:0] d; reg q; always @* {statement}"));
+        h.set("d", "00000001");
+        let trigger = expect_suspended(h.run());
+        let DigitalWaitRequest::Event(terms) = trigger.wait() else {
+            panic!("implicit event wait")
+        };
+        assert_eq!(terms.len(), 1);
+        assert_eq!(terms[0].signal, h.signal("d"));
+        let delay = expect_suspended(h.resume(0, trigger.resume_state()));
+        assert_eq!(*delay.wait(), DigitalWaitRequest::Delay(1));
+    }
+    use rspice_veriloga::canonical_ir::DigitalClock;
+    let mut h = Harness::from_source(
+        "`timescale 1ns/100ps\nmodule timed;
+         parameter integer count=0; reg [7:0] bits; wreal fraction; reg [3:0] stage;
+         initial begin : work
+           integer count; count=1; stage=0;
+           #count stage=1;
+           #bits stage=2;
+           #fraction stage=3;
+           #(10.0-$realtime) stage=4;
+           #(8'd255+8'd1) stage=5;
+         end endmodule",
+    );
+    h.set("bits", "00000010");
+    h.set_real("fraction", 0.15);
+    h.store.clock = Some(DigitalClock {
+        tick: 0,
+        absolute_seconds: 0.0,
+    });
+    let first = expect_suspended(h.run());
+    assert_eq!(
+        *first.wait(),
+        DigitalWaitRequest::Delay(10),
+        "local shadows parameter"
+    );
+    h.set("bits", "00000011");
+    h.store.clock = Some(DigitalClock {
+        tick: 10,
+        absolute_seconds: 1e-9,
+    });
+    let second = expect_suspended(h.resume(0, first.resume_state()));
+    assert_eq!(*second.wait(), DigitalWaitRequest::Delay(30));
+    h.set("bits", "00000111");
+    h.set_real("fraction", 0.25);
+    assert_eq!(
+        *second.wait(),
+        DigitalWaitRequest::Delay(30),
+        "armed delay is captured"
+    );
+    h.store.clock = Some(DigitalClock {
+        tick: 40,
+        absolute_seconds: 4e-9,
+    });
+    let third = expect_suspended(h.resume(0, second.resume_state()));
+    assert_eq!(
+        *third.wait(),
+        DigitalWaitRequest::Delay(3),
+        "round at module precision"
+    );
+    h.store.clock = Some(DigitalClock {
+        tick: 43,
+        absolute_seconds: 4.3e-9,
+    });
+    let fourth = expect_suspended(h.resume(0, third.resume_state()));
+    assert_eq!(*fourth.wait(), DigitalWaitRequest::Delay(57));
+    h.store.clock = Some(DigitalClock {
+        tick: 100,
+        absolute_seconds: 10e-9,
+    });
+    let fifth = expect_suspended(h.resume(0, fourth.resume_state()));
+    assert_eq!(
+        *fifth.wait(),
+        DigitalWaitRequest::Delay(0),
+        "eight-bit sum wraps before delay conversion"
+    );
+    assert_eq!(h.get("stage"), "0100", "zero delay still suspends");
+    expect_finished(h.resume(0, fifth.resume_state()));
+    assert_eq!(h.get("stage"), "0101");
+}
+
+#[test]
+fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
+    for (expression, ticks) in [
+        ("8'bx0000001", 0),
+        ("8'bz0000001", 0),
+        ("8'hff", 255),
+        ("129'd1", 1),
+        ("64'd9007199254740992+1", 9007199254740993),
+        ("-(129'sd18446744073709551616)", 0),
+    ] {
+        let mut h = Harness::new(&format!("reg q; initial #({expression}) q=1;"));
+        assert_eq!(
+            *expect_suspended(h.run()).wait(),
+            DigitalWaitRequest::Delay(ticks),
+            "{expression}"
+        );
+    }
+    for expression in [
+        "8'shff",
+        "-1",
+        "-1.0",
+        "129'd18446744073709551617",
+        "64'h8000000000000000",
+    ] {
+        let mut h = Harness::new(&format!("reg q; initial #({expression}) q=1;"));
+        let error = start(&h.plan, &h.plan.processes[0], &mut h.store).unwrap_err();
+        assert!(
+            matches!(error, DigitalEvalError::InvalidDelay { .. }),
+            "{expression}: {error}"
+        );
+        assert_eq!(h.get("q"), "x", "failed conversion must not resume");
+    }
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut h = Harness::new("wreal d; reg q; initial #d q=1;");
+        h.set_real("d", value);
+        assert!(matches!(
+            start(&h.plan, &h.plan.processes[0], &mut h.store),
+            Err(DigitalEvalError::InvalidDelay { .. })
+        ));
     }
 }
 

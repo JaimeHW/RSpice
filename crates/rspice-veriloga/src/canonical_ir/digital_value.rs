@@ -593,6 +593,22 @@ impl FourStateValue {
         Some(magnitude)
     }
 
+    /// IEEE 1364-2005, 9.7.1: X/Z means zero; negative delays become unsigned
+    /// 64-bit time. Refuse known positive magnitudes outside that representation.
+    pub(crate) fn delay_units(&self, signed: bool) -> Result<u64, &'static str> {
+        if self.has_unknown() {
+            return Ok(0);
+        }
+        if let Some(value) = self.to_integer(signed) {
+            return Ok(value as u64);
+        }
+        let value = self.to_wide_integer(signed).expect("known bits");
+        if value.sign() == Sign::Minus {
+            return Ok(Self::from_wide_integer(64, value).to_u64().unwrap());
+        }
+        u64::try_from(value).map_err(|_| "delay exceeds the representable tick range")
+    }
+
     fn to_wide_integer(&self, signed: bool) -> Option<BigInt> {
         if self.has_unknown() {
             return None;

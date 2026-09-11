@@ -2731,14 +2731,14 @@ endmodule
     }
 
     #[test]
-    fn digital_clock_queries_retain_physical_activation_and_roll_back() {
+    fn runtime_delays_and_clock_queries_retain_physical_activation_and_roll_back() {
         let source = "module clocked(p,adc); inout p; electrical p; input adc; wire adc;
             real absolute, reported; reg ok, unrelated;
             initial begin absolute=0.0; reported=0.0; ok=0; unrelated=0; #1 unrelated=1; end
             always @(posedge adc) begin
                 absolute=$abstime; reported=$realtime; ok=($time==1 && $stime==1);
-                #0 reported=reported+$realtime;
-                #1 absolute=$abstime;
+                #(adc & 1'bx) reported=reported+$realtime;
+                #($realtime/2.0) absolute=$abstime;
             end
             analog I(p)<+(absolute*1e9+reported+ok)/1000.0;
             endmodule";
@@ -2764,7 +2764,8 @@ endmodule
             rhs
         };
         // This crossing reports tick 1 while its physical time is 0.65 ns.
-        // #0 retains both clocks, and the independent tick-1 timer stays queued.
+        // X delay becomes inactive-region zero; the following real delay rounds
+        // 0.5 module units to one tick. The independent tick-1 timer stays queued.
         for reject in [true, false] {
             host.begin_trial(
                 0.65e-9,
