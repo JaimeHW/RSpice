@@ -514,15 +514,21 @@ impl MixedDigitalCoordinator {
         self.event_nodes.iter().copied().filter(|node| *node > 0)
     }
 
-    pub(crate) fn event_values(&self) -> impl Iterator<Item = (usize, FourStateBit)> + '_ {
-        self.event_nodes.iter().enumerate().map(|(index, &node)| {
-            (
-                node,
-                self.digital
-                    .connected_bit(index)
-                    .expect("elaborated event bit"),
-            )
-        })
+    pub(crate) fn event_values(
+        &self,
+    ) -> impl Iterator<Item = (usize, crate::xspice::DigitalValue)> + '_ {
+        self.event_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, &node)| {
+                (
+                    node,
+                    self.digital
+                        .connected_value(index)
+                        .expect("elaborated event bit"),
+                )
+            })
+            .filter(|(node, _)| *node > 0)
     }
 
     pub(crate) fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {

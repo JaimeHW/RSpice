@@ -558,11 +558,8 @@ impl DigitalHost {
             .map_err(|detail| DigitalRunError::Compile { detail })
     }
 
-    pub(crate) fn connected_bit(
-        &self,
-        net: usize,
-    ) -> Option<rspice_veriloga::four_state::FourStateBit> {
-        self.store.connected_bit(net)
+    pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
+        self.store.connected_value(net)
     }
 
     pub(crate) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {

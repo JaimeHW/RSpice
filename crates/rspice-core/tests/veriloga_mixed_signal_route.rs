@@ -956,7 +956,7 @@ fn saving_one_bus_member_retains_every_member() {
 }
 
 #[test]
-fn a_discrete_port_joined_to_an_xspice_event_net_is_refused() {
+fn a_discrete_port_with_an_unimplemented_xspice_domain_boundary_is_refused() {
     let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
     for (event_card, declaration, kind) in [
         (
@@ -979,12 +979,13 @@ fn a_discrete_port_joined_to_an_xspice_event_net_is_refused() {
                 format!("{event_card}\n{mixed}")
             };
             let deck = format!(
-                "* direct mixed/event connections require the shared scheduler\n\
+                "* loaded or unlike mixed/event boundaries require a conversion contract\n\
                  vin in 0 dc 1\n\
                  r1 in 0 1k\n\
                  {cards}\n\
                  {declaration}\n\
                  rp p 0 1meg\n\
+                 rqdiv qdiv 0 1k\n\
                  .va \"{}\" clock_divider\n\
                  .end\n",
                 model.deck_path()
@@ -2034,7 +2035,9 @@ endmodule
         let result = engine.run_tran(&netlist, 201e-9, max_step).unwrap();
         (result, engine.convergence_quality().timestep_reductions)
     };
-    let (coarse, rejected) = run_replay(1e-9);
+    // Ideal D/A jumps now restart integration directly. Use an interval large
+    // enough for the native RC curvature to exercise actual truncation retries.
+    let (coarse, rejected) = run_replay(4e-9);
     let (fine, _) = run_replay(2e-11);
     assert!(
         rejected > 0,
@@ -2050,6 +2053,108 @@ endmodule
             assert!((left.time - right.time).abs() < 1e-22);
         }
     }
+}
+
+#[test]
+fn shared_hdl_xspice_events_replay_off_grid_after_rejected_analog_steps() {
+    let source = ModelFile::new(
+        "shared_clock",
+        r#"
+`timescale 1ns/1ps
+module shared_clock(clk,future);
+ output clk,future; reg clk,future;
+ initial clk=0;
+ always #5 clk=~clk;
+ initial begin future=0; #10.101 future=1; end
+endmodule
+"#,
+    );
+    let sink = ModelFile::new(
+        "shared_divider",
+        r#"
+`timescale 1ns/1ps
+module shared_divider(fromx,future,q,captured);
+ input fromx,future; wire fromx,future;
+ output q,captured; reg q,captured; reg seen;
+ initial begin q=0; captured=1; seen=0; end
+ always @(posedge fromx) begin
+   q<=~q;
+   if ($realtime>0.0) begin
+     if (!seen) begin captured<=future; seen<=1; end
+   end
+ end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* shared HDL/XSPICE events with a native RC load\n\
+         Xclock clk future shared_clock\n\
+         Ainv clk fromx inverter\n\
+         .model inverter d_inverter (rise_delay=100.6p fall_delay=100.6p)\n\
+         Xdivider fromx future qdiv captured shared_divider\n\
+         R1 qdiv out 1k\nC1 out 0 10p\n\
+         .va \"{}\" shared_clock\n.va \"{}\" shared_divider\n.end\n",
+        source.deck_path(),
+        sink.deck_path()
+    );
+    let run_replay = |max_step| {
+        let netlist = Netlist::parse(&deck).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_tran(&netlist, 201e-9, max_step).unwrap();
+        (result, engine.convergence_quality().timestep_reductions)
+    };
+    let (coarse, rejected) = run_replay(1e-9);
+    let (fine, _) = run_replay(2e-11);
+    assert!(
+        rejected > 0,
+        "the native stepper must reject an actual trial"
+    );
+    for (node, expected) in [
+        ("clk", 41),
+        ("fromx", 41),
+        ("qdiv", 21),
+        ("captured", 2),
+        ("future", 2),
+    ] {
+        let left = coarse.digital_trace_named(node).unwrap();
+        let right = fine.digital_trace_named(node).unwrap();
+        assert_eq!(left.len(), expected, "{node}: {left:?}");
+        assert_eq!(left.len(), right.len(), "{node}");
+        for (left, right) in left.iter().zip(right) {
+            assert_eq!(left.value, right.value, "{node}");
+            assert!(
+                (left.time - right.time).abs() < 2e-20,
+                "{node}: {left:?} vs {right:?}"
+            );
+        }
+    }
+    for (index, point) in coarse
+        .digital_trace_named("fromx")
+        .unwrap()
+        .iter()
+        .enumerate()
+        .skip(1)
+    {
+        let expected = index as f64 * 5e-9 + 100.6e-12;
+        assert!(
+            (point.time - expected).abs() < 2e-20,
+            "{point:?}, expected {expected:.16e}"
+        );
+    }
+    let captured = coarse.digital_trace_named("captured").unwrap();
+    let future = coarse.digital_trace_named("future").unwrap();
+    assert_eq!(
+        final_state(&coarse, "captured"),
+        rspice_core::xspice::DigitalState::Zero
+    );
+    assert!((captured[1].time - 10.1006e-9).abs() < 2e-20);
+    assert!((future[1].time - 10.101e-9).abs() < 2e-20);
+    assert!(
+        captured[1].time < future[1].time,
+        "rounded reporting time must not consume a future timer"
+    );
+    let out = waveform(&coarse, "out");
+    assert!(out.iter().any(|v| *v > 2.0) && out.iter().any(|v| *v < 1.0));
 }
 
 #[test]

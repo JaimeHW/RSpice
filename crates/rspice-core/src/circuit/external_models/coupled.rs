@@ -100,6 +100,10 @@ impl XspiceDigitalBindings {
                 .collect(),
         }))
     }
+    pub(crate) fn contains_node(&self, node: NodeId) -> bool {
+        self.by_node.contains_key(&node)
+    }
+
     pub(crate) fn remap_nodes(&mut self, remap: impl Fn(usize) -> usize) {
         self.by_node = std::mem::take(&mut self.by_node)
             .into_iter()

@@ -70,6 +70,123 @@ impl Engine {
         let rollback = has_xspice.then(|| circuit.capture_xspice_acceptance());
         let mut projected = Vec::new();
         let result = (|| {
+            let finish = |circuit: &mut crate::CircuitData,
+                          solution: &mut [Value],
+                          projected: &[(usize, Value)]| {
+                if !projected.is_empty() {
+                    if let Some(native) = native.as_mut() {
+                        native.snapshots.vbic_snapshots = None;
+                        native.snapshots.capacitor_accepted_states = None;
+                        native.snapshots.mosfet_caps = None;
+                        native.snapshots.mosfet_gate_companion_charges = None;
+                    }
+                    // Static-history capture performs this refresh itself. Other
+                    // paths must update native trial bias after an output projection.
+                    if !capture_static_history && circuit.has_nonlinear_devices() {
+                        self.update_transient_nonlinear_devices(circuit, solution)?;
+                    }
+                }
+                let static_history = if capture_static_history {
+                    Some(self.capture_xyce_static_residual(
+                        circuit,
+                        matrix,
+                        solution,
+                        time,
+                        baseline_diag_gmin,
+                    )?)
+                } else {
+                    None
+                };
+                #[cfg(feature = "veriloga")]
+                if circuit.has_veriloga_devices() {
+                    circuit
+                        .evaluate_veriloga_timepoint(solution)
+                        .map_err(SimulationError::Circuit)?;
+                }
+                #[cfg(feature = "veriloga-builtins-base")]
+                if circuit.has_generated_veriloga_devices() {
+                    circuit
+                        .evaluate_generated_veriloga_timepoint(matrix, solution)
+                        .map_err(SimulationError::Circuit)?;
+                }
+                // Use the final projected electrical candidate, but retain the
+                // preceding material/load state until every HDL participant agrees.
+                let thermal = circuit
+                    .resistors
+                    .prepare_thermal_step(solution, dt)
+                    .map_err(SimulationError::Circuit)?;
+                let prepared_native = native
+                    .as_ref()
+                    .map(|native| {
+                        self.prepare_reactive_history(
+                            circuit,
+                            AcceptedReactiveStep {
+                                accepted_solution: solution,
+                                accepted_time: time,
+                                dt,
+                                coeff: coefficients,
+                                bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
+                            },
+                            &native.histories,
+                            native.snapshots,
+                        )
+                    })
+                    .transpose()?;
+                let discontinuity = circuit.accept_model_transient_timestep(
+                    time,
+                    dt,
+                    solution,
+                    coefficients,
+                    initial_step,
+                    final_step,
+                )?;
+                if let (Some(native), Some(prepared)) = (native, prepared_native) {
+                    self.commit_reactive_history(
+                        circuit,
+                        AcceptedReactiveStep {
+                            accepted_solution: solution,
+                            accepted_time: time,
+                            dt,
+                            coeff: coefficients,
+                            bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
+                        },
+                        native.histories,
+                        native.snapshots,
+                        native.scheduling,
+                        native.sink,
+                        prepared,
+                    );
+                }
+                circuit.resistors.commit_thermal_step(thermal);
+                // The joint HDL barrier has completed all fallible operations.
+                // XSPICE promotion only swaps/copies already evaluated histories.
+                if has_xspice {
+                    circuit.accept_xspice_timestep();
+                }
+                Ok((discontinuity, static_history))
+            };
+            #[cfg(feature = "veriloga")]
+            if circuit.has_coupled_event_nets() {
+                let (mixed_discontinuity, (discontinuity, history)) = circuit
+                    .accept_coupled_transient_with(
+                        time,
+                        dt,
+                        solution,
+                        XspiceCompanionPolicy {
+                            coefficients,
+                            xyce_one_step_order2,
+                        },
+                        initial_step,
+                        final_step,
+                        rollback
+                            .as_ref()
+                            .expect("enrolled XSPICE rollback")
+                            .resources(),
+                        &mut projected,
+                        finish,
+                    )?;
+                return Ok((discontinuity || mixed_discontinuity, history));
+            }
             if has_xspice {
                 circuit
                     .evaluate_xspice_transient_timestep_with_coefficients(
@@ -87,101 +204,9 @@ impl Engine {
                             "XSPICE candidate acceptance failed: {error}"
                         ))
                     })?;
-                // Contributions are available from the evaluated candidate;
-                // accepted model histories need not advance to project them.
                 projected = circuit.project_xspice_voltage_outputs(solution, circuit.num_nodes());
             }
-            if !projected.is_empty() {
-                if let Some(native) = native.as_mut() {
-                    native.snapshots.vbic_snapshots = None;
-                    native.snapshots.capacitor_accepted_states = None;
-                    native.snapshots.mosfet_caps = None;
-                    native.snapshots.mosfet_gate_companion_charges = None;
-                }
-                // Static-history capture performs this refresh itself. Other
-                // paths must update native trial bias after an output projection.
-                if !capture_static_history && circuit.has_nonlinear_devices() {
-                    self.update_transient_nonlinear_devices(circuit, solution)?;
-                }
-            }
-            let static_history = if capture_static_history {
-                Some(self.capture_xyce_static_residual(
-                    circuit,
-                    matrix,
-                    solution,
-                    time,
-                    baseline_diag_gmin,
-                )?)
-            } else {
-                None
-            };
-            #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                circuit
-                    .evaluate_veriloga_timepoint(solution)
-                    .map_err(SimulationError::Circuit)?;
-            }
-            #[cfg(feature = "veriloga-builtins-base")]
-            if circuit.has_generated_veriloga_devices() {
-                circuit
-                    .evaluate_generated_veriloga_timepoint(matrix, solution)
-                    .map_err(SimulationError::Circuit)?;
-            }
-            // Use the final projected electrical candidate, but retain the
-            // preceding material/load state until every HDL participant agrees.
-            let thermal = circuit
-                .resistors
-                .prepare_thermal_step(solution, dt)
-                .map_err(SimulationError::Circuit)?;
-            let prepared_native = native
-                .as_ref()
-                .map(|native| {
-                    self.prepare_reactive_history(
-                        circuit,
-                        AcceptedReactiveStep {
-                            accepted_solution: solution,
-                            accepted_time: time,
-                            dt,
-                            coeff: coefficients,
-                            bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
-                        },
-                        &native.histories,
-                        native.snapshots,
-                    )
-                })
-                .transpose()?;
-            let discontinuity = circuit.accept_model_transient_timestep(
-                time,
-                dt,
-                solution,
-                coefficients,
-                initial_step,
-                final_step,
-            )?;
-            if let (Some(native), Some(prepared)) = (native, prepared_native) {
-                self.commit_reactive_history(
-                    circuit,
-                    AcceptedReactiveStep {
-                        accepted_solution: solution,
-                        accepted_time: time,
-                        dt,
-                        coeff: coefficients,
-                        bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
-                    },
-                    native.histories,
-                    native.snapshots,
-                    native.scheduling,
-                    native.sink,
-                    prepared,
-                );
-            }
-            circuit.resistors.commit_thermal_step(thermal);
-            // The joint HDL barrier has completed all fallible operations.
-            // XSPICE promotion only swaps/copies already evaluated histories.
-            if has_xspice {
-                circuit.accept_xspice_timestep();
-            }
-            Ok((discontinuity, static_history))
+            finish(circuit, solution, &projected)
         })();
         match (result, rollback) {
             (Ok(value), rollback) => {

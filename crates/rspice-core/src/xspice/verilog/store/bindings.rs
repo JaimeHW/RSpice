@@ -155,10 +155,6 @@ impl DigitalSignalStore {
             .map(|connected| ConnectedBits::fresh(Arc::clone(&connected.topology)));
     }
 
-    pub(crate) fn connected_bit(&self, net: usize) -> Option<FourStateBit> {
-        self.connected_value(net).map(hdl_bit)
-    }
-
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         self.connected.as_ref()?.resolved.get(net).copied()
     }

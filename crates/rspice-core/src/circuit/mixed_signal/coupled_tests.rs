@@ -27,6 +27,7 @@ impl TransactionalContextResource for ProbeResource {
 struct ResourceProbe {
     resource: Arc<ProbeResource>,
     ports: Vec<PortSpec>,
+    phase: crate::xspice::EvaluationPhase,
 }
 impl CodeModel for ResourceProbe {
     fn name(&self) -> &str {
@@ -43,9 +44,9 @@ impl CodeModel for ResourceProbe {
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        if ctx.evaluation_phase() != crate::xspice::EvaluationPhase::CircuitTrial {
+        if ctx.evaluation_phase() != self.phase {
             return Err(CmError::EvaluationError(
-                "expected a speculative circuit phase".into(),
+                "unexpected circuit evaluation phase".into(),
             ));
         }
         let resource = ctx
@@ -80,7 +81,9 @@ fn compile_unstarted(
     )
 }
 
-fn fixture() -> (
+fn fixture(
+    phase: crate::xspice::EvaluationPhase,
+) -> (
     crate::CircuitData,
     crate::solver::StaticMatrix,
     Vec<f64>,
@@ -171,6 +174,7 @@ endmodule
             "Aresource",
             Arc::new(ResourceProbe {
                 resource: resource.clone(),
+                phase,
                 ports: vec![PortSpec::output("out", PortType::Current)],
             }),
             vec![PortConnection::Analog(p)],
@@ -224,7 +228,8 @@ fn stamp(
 
 #[test]
 fn coupled_circuit_probe_retains_adc_gate_feedback_then_restores_all_owners_and_resources() {
-    let (mut circuit, mut matrix, mut solution, resource) = fixture();
+    let (mut circuit, mut matrix, mut solution, resource) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
     let p = circuit.get_node_by_name("p").unwrap() - 1;
     let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
     let loaded = circuit.get_node_by_name("loaded").unwrap() - 1;
@@ -281,4 +286,97 @@ fn coupled_circuit_probe_retains_adc_gate_feedback_then_restores_all_owners_and_
     solution[bad] = 0.0;
     let rhs = stamp(&mut circuit, &mut matrix, &solution).unwrap();
     assert!(rhs[p].abs() < 1e-15);
+}
+
+#[test]
+fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_before_retry() {
+    let (mut circuit, _, mut solution, resource) =
+        fixture(crate::xspice::EvaluationPhase::AcceptedStep);
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+    solution[stimulus] = 1.0;
+    let before = circuit.mixed_signal_hosts[0]
+        .read_digital("sampled")
+        .unwrap();
+    let coeff = crate::numerics::integration::CompanionCoefficients::backward_euler();
+    for refuse in [true, true, false] {
+        let rollback = circuit.capture_xspice_acceptance();
+        let captures = resource.captures.load(Ordering::Relaxed);
+        let mut projected = Vec::new();
+        let result = circuit.accept_coupled_transient_with(
+            0.0,
+            0.0,
+            &mut solution,
+            XspiceCompanionPolicy {
+                coefficients: &coeff,
+                xyce_one_step_order2: false,
+            },
+            true,
+            false,
+            rollback.resources(),
+            &mut projected,
+            |_, _, _| {
+                assert!(
+                    *resource.value.lock().unwrap() > 0,
+                    "external candidate must have advanced before native preparation"
+                );
+                if refuse {
+                    Err(SimulationError::Circuit(
+                        "injected late native preparation refusal".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(resource.captures.load(Ordering::Relaxed), captures + 1);
+        assert_eq!(circuit.mixed_signal_hosts.len(), 2);
+        assert!(circuit.mixed_digital_coordinator.is_some());
+        if refuse {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("late native preparation refusal")
+            );
+            for (index, value) in projected.into_iter().rev() {
+                solution[index] = value;
+            }
+            circuit.restore_xspice_acceptance(rollback).unwrap();
+            assert_eq!(*resource.value.lock().unwrap(), 0);
+            assert_eq!(
+                circuit.mixed_signal_hosts[0]
+                    .read_digital("sampled")
+                    .unwrap(),
+                before
+            );
+            assert!(circuit.xspice_event_values.digital_drivers.is_empty());
+            assert!(circuit.xspice_event_queue.next_event_time().is_none());
+        } else {
+            result.unwrap();
+            rollback.resources().commit();
+            assert!(*resource.value.lock().unwrap() > 0);
+            assert_eq!(
+                circuit.mixed_signal_hosts[0]
+                    .read_digital("sampled")
+                    .unwrap(),
+                "0"
+            );
+            let mut snapshot = Vec::new();
+            circuit.fill_xspice_digital_snapshot(&mut snapshot);
+            assert!(
+                snapshot.windows(2).all(|pair| pair[0].0 < pair[1].0),
+                "shared nodes have exactly one snapshot owner: {snapshot:?}"
+            );
+            let bus = circuit.get_node_by_name("bus").unwrap();
+            assert_eq!(
+                snapshot
+                    .iter()
+                    .find(|(node, _)| *node == bus)
+                    .unwrap()
+                    .1
+                    .state,
+                crate::xspice::DigitalState::One
+            );
+        }
+    }
 }

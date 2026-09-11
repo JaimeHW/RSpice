@@ -390,13 +390,20 @@ impl CircuitData {
         !self.xspice_instances.is_empty()
     }
 
+    pub(crate) fn has_coupled_event_nets(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        {
+            self.mixed_xspice_bindings.is_some()
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            false
+        }
+    }
+
     /// Coupled event nets are evaluated with the mixed circuit trial.
     pub(crate) fn has_independent_xspice_evaluation(&self) -> bool {
-        #[cfg(feature = "veriloga")]
-        if self.mixed_xspice_bindings.is_some() {
-            return false;
-        }
-        self.has_xspice_devices()
+        self.has_xspice_devices() && !self.has_coupled_event_nets()
     }
 
     /// Add an XSPICE code model instance and update derived circuit metadata.
@@ -720,6 +727,11 @@ impl CircuitData {
         companion: XspiceCompanionPolicy<'_>,
         resources: Option<&ResourceTransaction>,
     ) -> crate::xspice::CmResult<()> {
+        if self.has_coupled_event_nets() {
+            return Err(crate::xspice::CmError::EvaluationError(
+                "enrolled XSPICE drivers require the joint circuit candidate".into(),
+            ));
+        }
         let mut wave = self.begin_xspice_active_wave(time, timestep, analysis, phase, companion)?;
         while self.step_xspice_active_wave(&mut wave, solution, resources)? {}
         Ok(())
@@ -1083,12 +1095,22 @@ impl CircuitData {
         snapshot: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
     ) {
         snapshot.clear();
-        snapshot.extend(
-            self.xspice_event_values
-                .digital_values
-                .iter()
-                .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
-        );
+        snapshot.extend(self.xspice_event_values.digital_values.iter().filter_map(
+            |(&node_id, &value)| {
+                if node_id == 0 {
+                    return None;
+                }
+                #[cfg(feature = "veriloga")]
+                if self
+                    .mixed_xspice_bindings
+                    .as_ref()
+                    .is_some_and(|bindings| bindings.contains_node(node_id))
+                {
+                    return None;
+                }
+                Some((node_id, value))
+            },
+        ));
         #[cfg(feature = "veriloga")]
         self.append_mixed_digital_snapshot(snapshot);
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);

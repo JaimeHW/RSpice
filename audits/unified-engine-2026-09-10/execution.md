@@ -1339,18 +1339,94 @@ reporting-tick inspection helper is now test-only. No compiler or generator
 inputs were changed by this increment. Full-suite, vendor, platform, capacity
 and commercial qualification remain open.
 
+## Accepted shared HDL/XSPICE circuit events
+
+Direct digital-only HDL/XSPICE deck connections now use the circuit coordinator
+through startup, numerical probes, candidate-control inspection and acceptance.
+Native history preparation runs after shared event settlement, code-model voltage
+projection and HDL candidate validation. Every HDL acceptance is reserved before
+native promotion; a late preparation refusal drops all reservations and restores
+the shared scheduler, instance views, XSPICE models/queues, registered resources
+and projected solution entries. The existing native acceptance implementation is
+shared by the connected and independent paths. Standalone code-model evaluation
+refuses enrolled drivers that require the circuit participant.
+
+The builder permits shared digital-only conductors after continuous-node
+classification. It continues to refuse a shared conductor with physical loading
+or an unlike real event domain, which still requires the MS04/MS07 conversion
+contract. Physical HDL D/A loads elsewhere in the circuit remain stamped. The
+accepted snapshot comes from the common resolver exactly once per shared node
+and preserves the resolved XSPICE drive strength.
+
+The whole-deck check exposed two execution gaps, both corrected here. Origin-time
+acceptance used the old standalone HDL path. It now uses the joint barrier.
+Additionally, an instantaneous HDL D/A change was missing from candidate
+integration-discontinuity reporting: adding XSPICE selected generic voltage LTE,
+which then repeatedly rejected the finite output jump against smooth history.
+Candidate reporting now compares each retained bridge's actual final driven level
+and impedance with its accepted value, including Z release. Pure event-only bits
+and intermediate delta glitches with no final electrical change add no bridge
+discontinuity. The same level mapping drives stamping. Both event queues retain
+an exact absolute pending target outside the general breakpoint manager's
+coalescing tolerance; interval comparison avoids subtraction/addition drift.
+
+Focused evidence: a late injected native-preparation refusal after real ADC/gate
+settlement and mutable-provider evaluation restores all owners/resources on two
+attempts, followed by successful retry and one sorted snapshot entry per node.
+The earlier joint numerical probe also passed. The initial library filter matched
+25 cases (including older coupled-adapter and unrelated names); all passed in
+0.02 seconds after a 46 second build. Subsequent selections are explicit.
+
+The actual deck contains two HDL instances, the built-in delayed inverter and a
+native 1k/10p RC load. Coarse and fine runs agree on all 41 clock/inverter and 21
+divider trace points, with actual coarse-run timestep rejections. The first
+post-start rising inverter event at 10.1006 ns captures a zero before a distinct
+HDL timer at 10.101 ns; both retain their physical timestamps. All 40 interior
+inverter events match the authored 100.6 ps delay within 2e-20 seconds. The loaded
+analog output has a nontrivial RC waveform. This deck passed in 2.70 seconds after
+a 23.51 second build. Logs are hdl-xspice-acceptance-joint.log and
+hdl-xspice-acceptance-discontinuity.log in the owned target. Earlier acceptance
+logs record compiler/startup/discontinuity failures during development; temporary
+step diagnostics have been removed.
+
+After integrating remote main through 48ec49197 (the concurrent BJT transport/
+external-BC charge change), the joint probe, shared acceptance-refusal/retry and
+native-history barrier cases all passed in 0.02 seconds after a 51.57 second
+build. The shared off-grid deck and loaded/unlike-domain refusal passed in the
+three-deck selection after a 34.20 second build. The older direct-HDL fixture
+then correctly reported no rejections at its former 1 ns ceiling: its finite
+D/A edge no longer triggers pointless retries. Increasing only that fixture's
+coarse ceiling to 4 ns exercises native RC curvature/truncation; it passed with
+actual rejections and unchanged trace assertions in 0.63 seconds after a 1.60
+second test-only build. Logs: hdl-xspice-acceptance-integrated-barrier.log,
+hdl-xspice-acceptance-integrated-decks.log and
+hdl-xspice-acceptance-native-curvature.log. All six selected properties now pass.
+No full-suite or platform run was performed for this increment.
+
+Two additional findings remain open in the full plan. MS06 must handle the valid
+mixed numeric comparison in "$realtime > 0": the compiler refused its integer
+literal operand; the scheduler fixture uses an explicit 0.0 operand and nested
+conditions. MS05 controller integration must prevent breakpoint step equalization
+from proposing half an interval below the model integration floor; the failed
+edge approach reproduced 8.4173899133396096e-21 seconds against a 1e-20 floor.
+The electrical-discontinuity fix removes that failing approach from this deck,
+but does not itself close the general controller-floor requirement. Mixed Xyce
+static-history assembly, all-owner startup/history consistency, continuous XSPICE
+root refinement, irreversible provider effects and general feedback re-solving
+remain open. This increment does not qualify advanced analyses, generated/Wasm
+execution, platforms, capacity, production readiness or Spectre parity. No
+licensed reference installation is available, as confirmed by the user.
+
 ## Next implementation work
 
-Extend the joint numerical probe into accepted-candidate preparation and
-candidate-control inspection before enabling direct HDL/XSPICE decks. Settle
-all event participants before native projection/history preparation, promote
-once, include both queues' breakpoints and emit one accepted snapshot per
-shared node. The first whole-circuit deck slice must include two HDL instances,
-an XSPICE participant, a loaded SPICE boundary, off-grid timing and a rejected
-trial. Preserve physical loads and converters while removing unnecessary
-analog unknowns from digital chains. Extend the root handshake to XSPICE
-boundaries and complete flow/analog-owned-variable dependencies and feedback
-convergence.
+Complete the controller's model-floor and all-owner startup/history contracts,
+then the remaining MS05 effect/result/cache transaction. Preserve physical loads
+and converters while implementing shared loaded conductors, RNM and authored
+conversions, and remove unnecessary analog unknowns from digital chains. Extend
+the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
+dependencies and feedback convergence. Close the recorded mixed real/integer
+comparison refusal under MS06 and include mixed contributions in Xyce static
+history before qualifying that integration path.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

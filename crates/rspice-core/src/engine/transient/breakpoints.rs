@@ -114,16 +114,11 @@ impl Engine {
     /// Replace the runtime breakpoint list with what the event-driven devices
     /// now ask for.
     ///
-    /// A mixed Verilog-AMS module's next scheduled digital activation joins the
-    /// XSPICE event queue's here rather than through a mechanism of its own.
-    /// That is what makes D5 clause 2 true of the deck route: the stepper stops
-    /// bit-exactly on a digital event because the event is in the same list a
-    /// source edge is, so every rule about landing on breakpoints, restarting
-    /// the integration order across one, and clamping the step to reach one
-    /// already applies to it.
-    ///
-    /// A circuit with no mixed module contributes nothing extra, so the list is
-    /// the one it always was.
+    /// Include HDL and code-model queues in adaptive step limiting and history
+    /// restarts. The stepper separately retains the exact earliest HDL/shared
+    /// XSPICE event target: this manager's coalescing tolerance must not move
+    /// an activation or consume a nearby, distinct timer.
+    /// A circuit with no mixed module contributes no additional HDL events.
     pub(super) fn collect_xspice_runtime_breakpoints(
         circuit: &mut crate::circuit::CircuitData,
         breakpoints: &mut BreakpointManager,

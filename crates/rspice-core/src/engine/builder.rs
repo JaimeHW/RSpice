@@ -8807,7 +8807,6 @@ impl Engine {
         // connections have completed the event-domain table.
         #[cfg(feature = "veriloga")]
         {
-            circuit.validate_mixed_event_connections()?;
             let mut physical_nodes = BTreeSet::new();
             collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
             for instance in &circuit.xspice_instances {
@@ -8823,6 +8822,7 @@ impl Engine {
                 .flat_map(|host| host.boundary_connections().map(|(_, node)| node))
                 .filter(|node| *node > 0 && !physical_nodes.contains(node))
                 .collect();
+            circuit.validate_mixed_event_connections(&event_nodes)?;
             circuit
                 .finalize_mixed_digital(
                     &event_nodes,

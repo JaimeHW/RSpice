@@ -211,10 +211,18 @@ fn accepted_veriloga_event_time(
     accepted_time: Value,
     hard_min_dt: Value,
 ) -> Result<Option<Value>, SimulationError> {
-    let Some(target) = circuit
+    let mut target = circuit
         .veriloga_transient_event_time(accepted_time)
-        .map_err(SimulationError::Circuit)?
-    else {
+        .map_err(SimulationError::Circuit)?;
+    // Shared code-model events have the same exact landing contract as HDL
+    // timers. The general breakpoint manager may coalesce nearby times; that
+    // tolerance must not consume or move a distinct shared-net activation.
+    if circuit.has_coupled_event_nets()
+        && let Some(event) = circuit.next_xspice_event_time()
+    {
+        target = Some(target.map_or(event, |target| target.min(event)));
+    }
+    let Some(target) = target else {
         return Ok(None);
     };
     validate_veriloga_event_interval(target, accepted_time, hard_min_dt)?;
@@ -3793,7 +3801,10 @@ impl Engine {
                 0.0,
                 0.0,
                 &solution,
-                &CompanionCoefficients::backward_euler(),
+                XspiceCompanionPolicy {
+                    coefficients: &CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
                 0.0,
                 true,
                 false,
@@ -3899,7 +3910,10 @@ impl Engine {
                 0.0,
                 0.0,
                 &solution,
-                &CompanionCoefficients::backward_euler(),
+                XspiceCompanionPolicy {
+                    coefficients: &CompanionCoefficients::backward_euler(),
+                    xyce_one_step_order2: false,
+                },
                 0.0,
                 true,
                 false,
@@ -4487,14 +4501,31 @@ impl Engine {
             let origin_state = circuit.nonlinear_state_snapshot();
             let origin_result = (|| -> Result<(), SimulationError> {
                 Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
-                circuit.accept_model_transient_timestep(
-                    0.0,
-                    0.0,
-                    &solution,
-                    &CompanionCoefficients::backward_euler(),
-                    true,
-                    origin_model_finish.is_some(),
-                )?;
+                if circuit.has_coupled_event_nets() {
+                    self.accept_transient_models(
+                        &mut circuit,
+                        &mut matrix,
+                        &mut solution,
+                        0.0,
+                        0.0,
+                        &CompanionCoefficients::backward_euler(),
+                        false,
+                        false,
+                        0.0,
+                        true,
+                        origin_model_finish.is_some(),
+                        None,
+                    )?;
+                } else {
+                    circuit.accept_model_transient_timestep(
+                        0.0,
+                        0.0,
+                        &solution,
+                        &CompanionCoefficients::backward_euler(),
+                        true,
+                        origin_model_finish.is_some(),
+                    )?;
+                }
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
                 pending_veriloga_event_time =
                     accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
@@ -5760,7 +5791,8 @@ impl Engine {
             let mut exact_veriloga_event_time = None;
             if let Some(target) = pending_veriloga_event_time
                 && target > t
-                && target <= canonical_transient_step_time(t, dt, tstop)
+                && target <= tstop
+                && target - t <= dt
             {
                 dt = target - t;
                 exact_veriloga_event_time = Some(target);
@@ -6069,7 +6101,8 @@ impl Engine {
                         Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
                         let model_candidate = Self::inspect_transient_model_candidate(
                             &mut circuit, $candidate_time, dt, $candidate_solution,
-                            &coeff, timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
+                            XspiceCompanionPolicy { coefficients: &coeff, xyce_one_step_order2 },
+                            timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
                         )?;
                         if let Some(target) = model_candidate.refinement_time {
                             let accepted_time = t;

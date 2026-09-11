@@ -458,6 +458,15 @@ impl DacBridge {
     fn undefined_level(&self) -> f64 {
         self.low + (self.high - self.low) / 2.0
     }
+
+    fn driven_level(&self, bit: FourStateBit) -> Option<f64> {
+        match bit {
+            FourStateBit::Zero => Some(self.low),
+            FourStateBit::One => Some(self.high),
+            FourStateBit::Unknown => Some(self.undefined_level()),
+            FourStateBit::HighImpedance => None,
+        }
+    }
 }
 
 /// One continuous-net probe of Verilog-AMS LRM 2.4 section 7.3.3, wired to the
@@ -1166,6 +1175,29 @@ impl MixedSignalHost {
         &self.analog
     }
 
+    /// Instantaneous D/A level or impedance changes cannot be compared with
+    /// smooth analog history. Report the final candidate's actual electrical
+    /// change, including Z release, to the integration restart contract. A
+    /// purely event-connected bit or an intermediate delta glitch adds none.
+    pub(crate) fn candidate_discontinuity(&self) -> bool {
+        if self.analog.discontinuity_rising() {
+            return true;
+        }
+        let Some(trial) = &self.trial else {
+            return false;
+        };
+        self.state.bridges.dac.iter().any(|bridge| {
+            let level = |digital: &MixedDigital| {
+                bridge.driven_level(
+                    digital
+                        .read(bridge.signal)
+                        .map_or(FourStateBit::HighImpedance, |value| value.bit(bridge.bit)),
+                )
+            };
+            level(&trial.rollback) != level(&self.state.digital)
+        })
+    }
+
     pub(crate) fn analysis_step(&self) -> (bool, bool) {
         (
             self.analog_inputs.initial_step,
@@ -1869,11 +1901,8 @@ impl MixedSignalHost {
                     detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
                 }
             })?;
-            let level = match value.bit(bridge.bit) {
-                FourStateBit::Zero => bridge.low,
-                FourStateBit::One => bridge.high,
-                FourStateBit::Unknown => bridge.undefined_level(),
-                FourStateBit::HighImpedance => continue,
+            let Some(level) = bridge.driven_level(value.bit(bridge.bit)) else {
+                continue;
             };
             let conductance = 1.0 / bridge.resistance;
             // Ground has no matrix row, so a bridge referred to it stamps only

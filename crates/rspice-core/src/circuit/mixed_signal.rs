@@ -180,7 +180,9 @@ impl<'a> MixedHostTrialGroup<'a> {
         ))
     }
 
-    fn promote(&mut self) -> Result<(), SimulationError> {
+    fn prepare(
+        &mut self,
+    ) -> Result<Vec<crate::xspice::verilog::PreparedMixedAcceptance<'_>>, SimulationError> {
         let mut prepared = Vec::with_capacity(self.hosts.len());
         for host in self.hosts.iter_mut() {
             prepared.push(
@@ -188,7 +190,11 @@ impl<'a> MixedHostTrialGroup<'a> {
                     .map_err(|(instance, error)| mixed_error(&instance, error))?,
             );
         }
-        for candidate in prepared {
+        Ok(prepared)
+    }
+
+    fn promote(&mut self) -> Result<(), SimulationError> {
+        for candidate in self.prepare()? {
             candidate.commit();
         }
         self.active = false;
@@ -216,23 +222,22 @@ fn shared_error(error: MixedSignalError) -> SimulationError {
 /// storage. All exits put the owners back. XSPICE probes retain state across
 /// Active waves and restore their COW model/queue images and external resources
 /// only after the entire mixed evaluation, including stamps, has finished.
-struct MixedCircuitProbe<'a> {
+/// Accepted candidates instead use the engine's outer XSPICE/resource journal.
+struct MixedCircuitOwner<'a> {
     circuit: &'a mut CircuitData,
     coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
     hosts: Vec<MixedSignalHost>,
     xspice: Option<XspiceAcceptanceRollback>,
 }
-impl<'a> MixedCircuitProbe<'a> {
-    fn begin(circuit: &'a mut CircuitData) -> Result<Self, SimulationError> {
+impl<'a> MixedCircuitOwner<'a> {
+    fn begin(circuit: &'a mut CircuitData, capture_xspice: bool) -> Result<Self, SimulationError> {
         let coordinator = circuit.mixed_digital_coordinator.take().ok_or_else(|| {
             SimulationError::Circuit(
                 "mixed circuit digital execution has not been elaborated".into(),
             )
         })?;
         let hosts = std::mem::take(&mut circuit.mixed_signal_hosts);
-        let xspice = circuit
-            .mixed_xspice_bindings
-            .is_some()
+        let xspice = (capture_xspice && circuit.has_coupled_event_nets())
             .then(|| circuit.capture_xspice_acceptance());
         Ok(Self {
             circuit,
@@ -250,7 +255,7 @@ impl<'a> MixedCircuitProbe<'a> {
         Ok(())
     }
 }
-impl Drop for MixedCircuitProbe<'_> {
+impl Drop for MixedCircuitOwner<'_> {
     fn drop(&mut self) {
         // An explicit finish reports restoration errors. Unwinding still
         // restores every context/queue; a resource failure latches the circuit.
@@ -272,7 +277,7 @@ impl CircuitData {
             Option<&crate::xspice::ResourceTransaction>,
         ) -> Result<T, SimulationError>,
     ) -> Result<T, SimulationError> {
-        let mut probe = MixedCircuitProbe::begin(self)?;
+        let mut probe = MixedCircuitOwner::begin(self, true)?;
         let result = evaluate(
             probe.circuit,
             probe.coordinator.as_mut().expect("owned coordinator"),
@@ -379,11 +384,16 @@ impl CircuitData {
     /// event topology, including instances created after a mixed module.
     /// Direct event bindings require the circuit scheduling coordinator; the
     /// current host must not accidentally reach them through an analog bridge.
-    pub(crate) fn validate_mixed_event_connections(&self) -> Result<(), SimulationError> {
+    pub(crate) fn validate_mixed_event_connections(
+        &self,
+        event_nodes: &std::collections::BTreeSet<usize>,
+    ) -> Result<(), SimulationError> {
         for host in &self.mixed_signal_hosts {
             for (signal, node) in host.boundary_connections() {
                 let kind = self.net_kinds.kind(node);
-                if !kind.is_discrete() {
+                if !kind.is_discrete()
+                    || (kind == super::NetKind::Digital && event_nodes.contains(&node))
+                {
                     continue;
                 }
                 let node_names = self.node_names_sorted();
@@ -393,9 +403,9 @@ impl CircuitData {
                     .unwrap_or("<unnamed>");
                 return Err(SimulationError::Circuit(format!(
                     "mixed Verilog-AMS instance '{}' connects its discrete port '{}' to node '{}', \
-                     which carries {} event-driven XSPICE values. Direct event connections \
-                     require a shared circuit event scheduler; this instance currently uses \
-                     an electrical boundary",
+                     which carries {} event-driven XSPICE values. This connection requires \
+                     an explicit shared conversion contract for continuous loading or unlike \
+                     event domains; direct shared resolution currently requires a digital-only net",
                     host.instance_name(),
                     signal,
                     node_name,
@@ -570,6 +580,93 @@ impl CircuitData {
         )
     }
 
+    /// Settle and validate shared HDL/XSPICE before native acceptance work.
+    /// The caller owns the XSPICE/resource and projected-solution rollback.
+    /// Its finish callback must complete all remaining fallible preparation
+    /// before promotion; after it succeeds, these HDL commits are infallible.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn accept_coupled_transient_with<T>(
+        &mut self,
+        time: Value,
+        dt: Value,
+        solution: &mut [Value],
+        companion: XspiceCompanionPolicy<'_>,
+        initial_step: bool,
+        final_step: bool,
+        resources: &crate::xspice::ResourceTransaction,
+        projected: &mut Vec<(usize, Value)>,
+        finish: impl FnOnce(
+            &mut CircuitData,
+            &mut [Value],
+            &[(usize, Value)],
+        ) -> Result<T, SimulationError>,
+    ) -> Result<(bool, T), SimulationError> {
+        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let bindings = self.mixed_xspice_bindings.clone().ok_or_else(|| {
+            SimulationError::Circuit("shared acceptance requires enrolled event connections".into())
+        })?;
+        let mut owner = MixedCircuitOwner::begin(self, false)?;
+        let mut digital = owner
+            .coordinator
+            .as_mut()
+            .expect("owned coordinator")
+            .begin_trial(time, false)
+            .map_err(shared_error)?;
+        let mut group = MixedHostTrialGroup::begin(
+            &mut owner.hosts,
+            time,
+            dt,
+            integration,
+            Some((initial_step, final_step)),
+            false,
+        )?;
+        let mut projected_quiet = false;
+        for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
+            let mut participant = XspiceDigitalParticipant::new(
+                owner.circuit,
+                &bindings,
+                solution,
+                time,
+                dt,
+                crate::xspice::AnalysisType::Transient,
+                crate::xspice::EvaluationPhase::AcceptedStep,
+                companion,
+                Some(resources),
+            );
+            group.settle_with(&mut digital, solution, Some(&mut participant))?;
+            drop(participant);
+            let updates = owner
+                .circuit
+                .project_xspice_voltage_outputs(solution, owner.circuit.num_nodes());
+            if updates.is_empty() {
+                projected_quiet = true;
+                break;
+            }
+            projected.extend(updates);
+        }
+        if !projected_quiet {
+            return Err(SimulationError::Circuit(format!(
+                "mixed candidate voltage projection did not settle at t={time:.16e}s"
+            )));
+        }
+        let mut discontinuity = false;
+        for host in group.hosts.iter_mut() {
+            let stamped = host.stamp(solution, |_, _, _| {}, |_, _| {});
+            named(host, stamped)?;
+            discontinuity |= host.candidate_discontinuity();
+        }
+        // Reserve every HDL candidate before native state can be promoted.
+        // Dropping these reservations on a callback error unwinds all hosts.
+        let prepared = group.prepare()?;
+        let result = finish(owner.circuit, solution, projected)?;
+        for candidate in prepared {
+            candidate.commit();
+        }
+        group.active = false;
+        digital.commit();
+        Ok((discontinuity, result))
+    }
+
     /// Validate every mixed and analog model, then promote all their states.
     /// A later participant cannot leave an earlier participant committed.
     ///
@@ -616,7 +713,7 @@ impl CircuitData {
             for host in group.hosts.iter_mut() {
                 let stamped = host.stamp(voltages, |_, _, _| {}, |_, _| {});
                 named(host, stamped)?;
-                discontinuity |= host.analog_device().discontinuity_rising();
+                discontinuity |= host.candidate_discontinuity();
             }
             group.promote()?;
             digital.commit();
@@ -640,7 +737,7 @@ impl CircuitData {
         time: Value,
         dt: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        companion: XspiceCompanionPolicy<'_>,
         minimum_timestep: Value,
         initial_step: bool,
         final_step: bool,
@@ -663,56 +760,66 @@ impl CircuitData {
         if boundary_root.is_some() {
             return Ok((boundary_root, false));
         }
-        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
-        let mut refinement: Option<Value> = None;
-        let mut discontinuity = false;
-        let mut digital = self
-            .mixed_digital_coordinator
-            .as_mut()
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "mixed circuit digital execution has not been elaborated".into(),
-                )
-            })?
-            .begin_trial(time, false)
-            .map_err(shared_error)?;
-        let mut group = MixedHostTrialGroup::begin(
-            &mut self.mixed_signal_hosts,
-            time,
-            dt,
-            integration,
-            Some((initial_step, final_step)),
-            false,
-        )?;
-        group.settle(&mut digital, voltages)?;
-        for host in group.hosts.iter_mut() {
-            let inspected = (|| {
-                host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
-                discontinuity |= host.analog_device().discontinuity_rising();
-                let target = host
-                    .analog_device()
-                    .try_transient_event_refinement_time()
-                    .map_err(|error| MixedSignalError::Analog {
-                        detail: error.to_string(),
-                    })?;
-                if let Some(target) = target {
-                    refinement = Some(refinement.map_or(target, |current| current.min(target)));
-                } else if validate_acceptance {
-                    let mut accepted = host.clone();
-                    accepted.accept_trial()?;
-                } else if let Some(event) = host
-                    .analog_device()
-                    .first_candidate_analog_task(kind)
-                    .map_err(|error| MixedSignalError::Analog {
-                    detail: error.to_string(),
-                })? {
-                    consume(event);
-                }
-                Ok(())
-            })();
-            named(host, inspected)?;
-        }
-        Ok((refinement, discontinuity))
+        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let bindings = self.mixed_xspice_bindings.clone();
+        self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
+            let mut refinement: Option<Value> = None;
+            let mut discontinuity = false;
+            let mut digital = coordinator.begin_trial(time, false).map_err(shared_error)?;
+            let mut group = MixedHostTrialGroup::begin(
+                hosts,
+                time,
+                dt,
+                integration,
+                Some((initial_step, final_step)),
+                false,
+            )?;
+            if let Some(bindings) = &bindings {
+                let mut participant = XspiceDigitalParticipant::new(
+                    circuit,
+                    bindings,
+                    voltages,
+                    time,
+                    dt,
+                    crate::xspice::AnalysisType::Transient,
+                    crate::xspice::EvaluationPhase::CircuitTrial,
+                    companion,
+                    resources,
+                );
+                group.settle_with(&mut digital, voltages, Some(&mut participant))?;
+            } else {
+                group.settle(&mut digital, voltages)?;
+            }
+            for host in group.hosts.iter_mut() {
+                let inspected = (|| {
+                    host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
+                    discontinuity |= host.candidate_discontinuity();
+                    let target = host
+                        .analog_device()
+                        .try_transient_event_refinement_time()
+                        .map_err(|error| MixedSignalError::Analog {
+                            detail: error.to_string(),
+                        })?;
+                    if let Some(target) = target {
+                        refinement = Some(refinement.map_or(target, |current| current.min(target)));
+                    } else if validate_acceptance {
+                        let mut accepted = host.clone();
+                        accepted.accept_trial()?;
+                    } else if let Some(event) = host
+                        .analog_device()
+                        .first_candidate_analog_task(kind)
+                        .map_err(|error| MixedSignalError::Analog {
+                            detail: error.to_string(),
+                        })?
+                    {
+                        consume(event);
+                    }
+                    Ok(())
+                })();
+                named(host, inspected)?;
+            }
+            Ok((refinement, discontinuity))
+        })
     }
 
     /// Earliest scheduled digital activation across every mixed module.
@@ -741,21 +848,7 @@ impl CircuitData {
         use rspice_veriloga::four_state::FourStateBit;
 
         if let Some(digital) = &self.mixed_digital_coordinator {
-            for (node, bit) in digital.event_values() {
-                let state = match bit {
-                    FourStateBit::Zero => crate::xspice::DigitalState::Zero,
-                    FourStateBit::One => crate::xspice::DigitalState::One,
-                    FourStateBit::Unknown => crate::xspice::DigitalState::Unknown,
-                    FourStateBit::HighImpedance => crate::xspice::DigitalState::HighZ,
-                };
-                snapshot.push((
-                    node,
-                    crate::xspice::DigitalValue {
-                        state,
-                        strength: crate::xspice::DigitalStrength::Strong,
-                    },
-                ));
-            }
+            snapshot.extend(digital.event_values());
         }
         for host in &self.mixed_signal_hosts {
             host.boundary_digital_values(|node, bit| {
