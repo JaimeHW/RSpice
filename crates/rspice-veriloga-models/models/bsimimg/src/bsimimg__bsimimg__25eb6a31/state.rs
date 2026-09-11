@@ -1747,6 +1747,7 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 684;
 	pub const DDT_STATE_COUNT: usize = 8;
 	pub const IDT_STATE_COUNT: usize = 0;
+	pub const IDTMOD_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([246, 1, 6, 228, 236, 33, 51, 253, 80, 177, 12, 21, 221, 85, 51, 177, 98, 225, 180, 176, 238, 254, 59, 1, 208, 78, 13, 13, 213, 87, 201, 6]);
 	pub const EVENT_STATE_COUNT: usize = 4;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
@@ -1818,13 +1819,14 @@ impl Instance {
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
 		flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);
 		flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);
-		GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone() }
+		GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone(), ..Default::default() }
 	}
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
 		debug_assert_eq!(state.values.len(), 48);
 		debug_assert_eq!(state.flags.len(), 16);
+		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
 		let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
 		self.stamp_state.ddt_current.copy_from_slice(field);
@@ -1935,6 +1937,7 @@ impl Instance {
 			idt_older: self.stamp_state.idt_older.to_vec(),
 			idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),
 			idt_initialized: self.stamp_state.idt_initialized.to_vec(),
+			idtmod: Vec::new(),
 			event_variables,
 			limiter_anchor: Vec::new(),
 			limiter_initialized: Vec::new(),
@@ -1943,6 +1946,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+		if state.idtmod.len() != Self::IDTMOD_STATE_COUNT { return Err(format!("generated idtmod checkpoint shape mismatch: expected {}, found {}", Self::IDTMOD_STATE_COUNT, state.idtmod.len())); }
 		if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {
 			return Err(format!("generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));
 		}

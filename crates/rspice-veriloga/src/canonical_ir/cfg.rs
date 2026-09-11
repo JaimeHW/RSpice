@@ -415,6 +415,27 @@ pub enum CfgValueKind {
         ic_derivative: ValueId,
         wrap: Option<(ValueId, ValueId, ValueId)>,
     },
+    /// Read-only operating-point value introduced by frequency/noise lowering
+    /// after differentiation. It validates the integrand and wraps the initial
+    /// condition without allocating or observing transient state.
+    IdtModInitial {
+        input: ValueId,
+        ic: ValueId,
+        modulus: ValueId,
+        offset: ValueId,
+    },
+    /// One real frequency coefficient on the operating-point wrap branch:
+    /// integral_derivative - floor((ic-offset)/modulus)*modulus_derivative.
+    /// The quotient remains exact even when it cannot fit in binary64.
+    /// The primal dependency preserves integrand validation after pruning.
+    IdtModBranchDerivative {
+        primal: ValueId,
+        ic: ValueId,
+        modulus: ValueId,
+        offset: ValueId,
+        integral_derivative: ValueId,
+        modulus_derivative: ValueId,
+    },
     /// `absdelay(x, delay, max_delay)` — transport delay.
     ///
     /// `max_delay` stays optional rather than defaulting to zero: absent, the
@@ -1193,6 +1214,8 @@ impl CfgValueKind {
             | Self::IdtScale
             | Self::IdtMod { .. }
             | Self::IntegralDerivative { .. }
+            | Self::IdtModInitial { .. }
+            | Self::IdtModBranchDerivative { .. }
             | Self::AbsDelay { .. }
             | Self::AbsDelayDerivative { .. }
             | Self::Slew { .. }
@@ -1365,7 +1388,28 @@ impl CfgValueKind {
                 modulus,
                 offset,
                 ..
+            }
+            | Self::IdtModInitial {
+                input,
+                ic,
+                modulus,
+                offset,
             } => vec![*input, *ic, *modulus, *offset],
+            Self::IdtModBranchDerivative {
+                primal,
+                ic,
+                modulus,
+                offset,
+                integral_derivative,
+                modulus_derivative,
+            } => vec![
+                *primal,
+                *ic,
+                *modulus,
+                *offset,
+                *integral_derivative,
+                *modulus_derivative,
+            ],
             Self::IntegralDerivative {
                 primal,
                 input_derivative,
@@ -1595,11 +1639,32 @@ impl CfgValueKind {
                 modulus,
                 offset,
                 ..
+            }
+            | Self::IdtModInitial {
+                input,
+                ic,
+                modulus,
+                offset,
             } => {
                 *input = map(*input);
                 *ic = map(*ic);
                 *modulus = map(*modulus);
                 *offset = map(*offset);
+            }
+            Self::IdtModBranchDerivative {
+                primal,
+                ic,
+                modulus,
+                offset,
+                integral_derivative,
+                modulus_derivative,
+            } => {
+                *primal = map(*primal);
+                *ic = map(*ic);
+                *modulus = map(*modulus);
+                *offset = map(*offset);
+                *integral_derivative = map(*integral_derivative);
+                *modulus_derivative = map(*modulus_derivative);
             }
             Self::IntegralDerivative {
                 primal,
@@ -2319,6 +2384,21 @@ impl CfgFunction {
                         derivatives.push(*derivative);
                     }
                     self.validate_stateful_derivative(value.id, lanes, &primals, &derivatives)?;
+                }
+                CfgValueKind::IdtModBranchDerivative {
+                    primal,
+                    ic,
+                    modulus,
+                    offset,
+                    integral_derivative,
+                    modulus_derivative,
+                } => {
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &[*primal, *ic, *modulus, *offset],
+                        &[*integral_derivative, *modulus_derivative],
+                    )?;
                 }
                 CfgValueKind::AbsDelayDerivative {
                     input,

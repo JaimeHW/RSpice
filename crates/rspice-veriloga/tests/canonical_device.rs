@@ -4653,6 +4653,267 @@ for (coefficients, input_gain) in [(runtime::GeneratedDdtCoefficients::inactive(
 }
 
 #[test]
+fn generated_idtmod_preserves_common_branch_history_and_transactions() {
+    let (state, stamp, noise) = generated_parts(
+        "module circular_integral(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+idtmod(V(p),0.5,V(n),0); endmodule",
+        "circular integral transactions",
+    );
+    run_generated_main(
+        "circular integral transactions",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let be=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:2.0, previous_value_scale:2.0,
+    older_value_scale:0.0, previous_derivative_scale:0.0,
+};
+let trap=runtime::GeneratedDdtCoefficients {
+    derivative_scale:4.0, previous_value_scale:4.0,
+    previous_derivative_scale:1.0, ..be
+};
+let gear=runtime::GeneratedDdtCoefficients {
+    derivative_scale:3.0, previous_value_scale:4.0,
+    older_value_scale:-1.0, ..be
+};
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (step,(coefficients,modulus,expected,older,gain,period_gain)) in [
+    (be,1.0,0.0,-0.5,0.5,-1.0),
+    (trap,1.0,0.5,0.0,0.25,-1.0),
+    (gear,1.0,0.0,-0.5,1.0/3.0,-2.0),
+    (be,3.0,2.5,2.0,0.5,0.0),
+    (be,3.0,0.0,-0.5,0.5,-1.0),
+].into_iter().enumerate() {
+    instance.set_timepoint((step+1) as f64*0.5,0.5,coefficients);
+    instance.begin_stateful_evaluation();
+    let before=instance.capture_persistent_state();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,modulus],temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert!(!ctx.evaluation_failed());
+    assert_eq!(sink[9],expected,"step {step}: {sink:?}");
+    assert!((sink[12]-gain).abs()<1e-14,"input tangent at {step}: {sink:?}");
+    assert_eq!(sink[13],period_gain,"period tangent at {step}: {sink:?}");
+    assert_eq!(instance.capture_persistent_state(),before);
+    let candidate=instance.capture_rollback_state();
+    instance.begin_stateful_evaluation();
+    instance.restore_rollback_state(&candidate);
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    let accepted=instance.capture_persistent_state();
+    assert!(accepted.idt_previous.is_empty(),"circular history must use independent slots");
+    assert_eq!(accepted.idtmod.len(),1);
+    assert_eq!(accepted.idtmod[0].previous,expected);
+    assert_eq!(accepted.idtmod[0].older,older);
+    let mut restored=device::state::Instance::new(&[0,1]);
+    restored.finalize_parameters().unwrap();
+    restored.restore_persistent_state(&accepted).unwrap();
+    assert_eq!(restored.capture_persistent_state(),accepted);
+    instance=restored;
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_idtmod_small_signal_and_noise_freeze_transient_state() {
+    let (state, stamp, noise) = generated_parts(
+        "module circular_frequency(p,n); inout p,n; electrical p,n; real a;
+         analog begin a=white_noise(1,\"a\");
+         I(p,n)<+idtmod(V(p)+a,2.5,V(n)+a,0); end endmodule",
+        "circular integral frequency",
+    );
+    run_generated_main("circular integral frequency", &state, &stamp, &noise, r#"
+struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _:usize, process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
+        assert_eq!(process.psd,1.0);
+        self.0.extend(process.injections.iter().map(|injection| injection.gain));
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let coefficients=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:2.0, previous_value_scale:2.0,
+    older_value_scale:0.0, previous_derivative_scale:0.0,
+};
+instance.set_timepoint(0.5,0.5,coefficients);
+instance.begin_stateful_evaluation();
+instance.stamp(&runtime::GeneratedEvalContext {voltages:&[1.0,1.0],temperature:300.15},
+    &mut runtime::GeneratedStamper::default());
+let trial=instance.capture_rollback_state();
+let accepted=instance.capture_persistent_state();
+for temperature in [123.0,124.0] {
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,1.0],temperature};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!(sink[9],0.5);
+    assert_eq!((sink[12],sink[13]),(0.0,-2.0),"AC real tangent: {sink:?}");
+    for omega in [0.5_f64,2.0] {
+        runtime::FREQUENCY_OMEGA.store(omega.to_bits(),std::sync::atomic::Ordering::SeqCst);
+        let mut reactive=[0.0;6];
+        instance.stamp_reactive(&ctx,&mut runtime::GeneratedReactiveStamper {sink:Some(&mut reactive)});
+        assert_eq!((reactive[0],reactive[3]),(-1.0/omega,0.0),"AC reactive tangent: {reactive:?}");
+        let mut capture=Capture(Vec::new());
+        instance.evaluate_noise_processes_at_frequency(&ctx,omega/std::f64::consts::TAU,&mut capture).unwrap();
+        assert_eq!(capture.0.len(),1);
+        assert_eq!((capture.0[0].re,capture.0[0].im),(2.0,1.0/omega));
+        assert!(!ctx.evaluation_failed());
+        assert_eq!(instance.capture_rollback_state(),trial);
+        assert_eq!(instance.capture_persistent_state(),accepted);
+    }
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_idtmod_modulus_only_noise_does_not_include_initial_condition_tangents() {
+    let (state, stamp, noise) = generated_parts(
+        "module circular_period_noise(p,n); inout p,n; electrical p,n; real a;
+         analog begin a=white_noise(1,\"a\");
+         I(p,n)<+idtmod(0,2.5+a,V(n)+a,0); end endmodule",
+        "circular period noise",
+    );
+    run_generated_main("circular period noise", &state, &stamp, &noise, r#"
+struct Capture(Vec<runtime::GeneratedNoiseComplex>);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self, _:usize, process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
+        self.0.extend(process.injections.iter().map(|injection| injection.gain));
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext {voltages:&[0.0,1.0],temperature:124.0};
+for frequency in [0.0,1.0,1.0e100] {
+    let mut capture=Capture(Vec::new());
+    instance.evaluate_noise_processes_at_frequency(&ctx,frequency,&mut capture).unwrap();
+    assert_eq!(capture.0.len(),1);
+    assert_eq!((capture.0[0].re,capture.0[0].im),(2.0,0.0));
+    assert!(!ctx.evaluation_failed());
+}
+"#).unwrap_or_else(|report|panic!("{report}"));
+}
+
+#[test]
+fn generated_idtmod_derivatives_match_finite_differences_before_and_after_acceptance() {
+    for (name, expression) in [
+        (
+            "circular derivatives",
+            "idtmod(V(p)*V(p),V(n)*V(n),3+V(p)*V(p),V(n)/10)",
+        ),
+        (
+            "circular higher derivatives",
+            "ddx(idtmod(V(p)*V(p),V(n)*V(n),3+V(p)*V(p),V(n)/10),V(p))",
+        ),
+    ] {
+        let (state, stamp, noise) = generated_parts(
+            &format!(
+                "module circular_derivatives(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+            ),
+            name,
+        );
+        run_generated_main(name, &state, &stamp, &noise, r#"
+fn evaluate(instance:&mut device::state::Instance, p:f64, n:f64)->[f64;3] {
+    instance.begin_stateful_evaluation();
+    let ctx=runtime::GeneratedEvalContext {voltages:&[p,n],temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert!(!ctx.evaluation_failed());
+    [sink[9],sink[12],sink[13]]
+}
+let active=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:8.0, previous_value_scale:8.0,
+    older_value_scale:0.0, previous_derivative_scale:1.0,
+};
+for initial in [runtime::GeneratedDdtCoefficients::inactive(),active] {
+    let mut instance=device::state::Instance::new(&[0,1]);
+    instance.finalize_parameters().unwrap();
+    instance.set_timepoint(0.25,0.25,initial);
+    for initialized in [false,true] {
+        let before=instance.capture_persistent_state();
+        let value=evaluate(&mut instance,1.0,5.0);
+        for (lane,(p,n)) in [(1,(1.0,5.0)),(2,(1.0,5.0))] {
+            let h=1e-5;
+            let plus=evaluate(&mut instance,if lane==1 {p+h} else {p},if lane==2 {n+h} else {n})[0];
+            let minus=evaluate(&mut instance,if lane==1 {p-h} else {p},if lane==2 {n-h} else {n})[0];
+            let numerical=(plus-minus)/(2.0*h);
+            assert!((value[lane]-numerical).abs()<1e-7,"initialized={initialized}, lane={lane}: {value:?} numerical={numerical}");
+            assert_eq!(instance.capture_persistent_state(),before);
+        }
+        evaluate(&mut instance,1.0,5.0);
+        instance.validate_advance_state().unwrap();
+        instance.apply_validated_advance_state();
+        instance.set_timepoint(0.5,0.25,active);
+    }
+}
+"#).unwrap_or_else(|report|panic!("{name}: {report}"));
+    }
+}
+
+#[test]
+fn generated_idtmod_resumes_wide_origins_and_rejects_checkpoints_atomically() {
+    let (state, stamp, noise) = generated_parts(
+        "module circular_checkpoint(p,n); inout p,n; electrical p,n;
+         parameter real ic=0; analog I(p,n)<+idtmod(V(p),ic,3,0); endmodule",
+        "circular wide checkpoint",
+    );
+    run_generated_main(
+        "circular wide checkpoint",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.set_parameter("ic",2.0_f64.powi(900)).unwrap();
+instance.finalize_parameters().unwrap();
+let coefficients=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:16.0, previous_value_scale:16.0,
+    older_value_scale:0.0, previous_derivative_scale:0.0,
+};
+let ctx=runtime::GeneratedEvalContext {voltages:&[1.0,0.0],temperature:300.15};
+for step in 1..=48 {
+    instance.set_timepoint(step as f64/16.0,1.0/16.0,coefficients);
+    instance.begin_stateful_evaluation();
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!(sink[9],((16+step)%48) as f64/16.0);
+    assert_eq!(sink[12],1.0/16.0);
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    let accepted=instance.capture_persistent_state();
+    let mut restored=instance.clone();
+    restored.restore_persistent_state(&accepted).unwrap();
+    assert_eq!(restored.capture_persistent_state(),accepted);
+    instance=restored;
+}
+let accepted=instance.capture_persistent_state();
+assert!(accepted.idtmod[0].origin.words.len()>1);
+for mutation in 0..4 {
+    let mut malformed=accepted.clone();
+    match mutation {
+        0=>malformed.idtmod.clear(),
+        1=>malformed.idtmod[0].previous=f64::INFINITY,
+        2=>malformed.idtmod[0].origin.words[0]=0,
+        _=>malformed.idtmod[0].initialized=false,
+    }
+    assert!(instance.restore_persistent_state(&malformed).is_err());
+    assert_eq!(instance.capture_persistent_state(),accepted);
+}
+instance.begin_analysis(&ctx);
+assert!(!instance.capture_persistent_state().idtmod[0].initialized);
+assert!(instance.capture_persistent_state().idtmod[0].origin.words.is_empty());
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_integral_recovers_intermediate_overflow() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -7411,6 +7672,13 @@ pub mod runtime {
     }
     pub use integration::*;
 
+    mod integration_state {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/integration_state.rs"),
+    r#"
+    }
+    pub use integration_state::*;
+
     #[derive(Debug, Clone, Copy)]
     pub enum GeneratedDdtCandidateError {
         NonFiniteInput { field: &'static str },
@@ -7629,6 +7897,7 @@ pub mod runtime {
         pub idt_older: Vec<Value>,
         pub idt_input_previous: Vec<Value>,
         pub idt_initialized: Vec<bool>,
+        pub idtmod: Vec<GeneratedIdtModPersistentState>,
         pub event_variables: Vec<Value>,
         pub limiter_anchor: Vec<Value>,
         pub limiter_initialized: Vec<bool>,
@@ -7645,6 +7914,7 @@ pub mod runtime {
     pub struct GeneratedVerilogARollbackState {
         pub values: Vec<Value>,
         pub flags: Vec<bool>,
+        pub idtmod: Vec<GeneratedIdtModState>,
         pub analog_effects: Option<Box<AnalogEffectJournal>>,
     }
 
@@ -7748,6 +8018,7 @@ pub mod runtime {
         }
         pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
+        pub fn report_idtmod_candidate_error(&self, _slot: Option<usize>, _source: GeneratedIdtModCandidateError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }

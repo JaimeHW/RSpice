@@ -52,6 +52,7 @@ pub(super) fn generate_mod_file() -> String {
 
 #[derive(Debug, Clone)]
 pub(super) struct StateFileExtensions {
+    pub idtmod_state_count: usize,
     /// Whether generated state uses accepted/candidate `cross`, `above`, or `last_crossing`
     /// detector records and therefore needs their runtime helpers imported.
     pub uses_cross_event_state: bool,
@@ -94,6 +95,7 @@ pub(super) struct StateFileExtensions {
 impl Default for StateFileExtensions {
     fn default() -> Self {
         Self {
+            idtmod_state_count: 0,
             uses_cross_event_state: false,
             uses_analog_tasks: false,
             uses_point_analog_tasks: false,
@@ -144,6 +146,7 @@ pub(super) fn generate_state_file_with_extensions(
     accepted_state_shape_identity: [u8; 32],
     extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
+    let idtmod_state_count = extensions.idtmod_state_count;
     validate_canonical_parameter_default_order(artifact)?;
     let parameter_fields = &ParameterBindings {
         fields: parameter_fields,
@@ -161,6 +164,9 @@ pub(super) fn generate_state_file_with_extensions(
         "use {}::{{{cross_event_imports}GeneratedEvalContext, GeneratedSimulationParameters, GeneratedDdtCoefficients, GeneratedParameterAssignment, GeneratedParameterOrigin, GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAParameterBound as B, GeneratedVerilogAParameterDescriptor as P, GeneratedVerilogAPersistentState, GeneratedVerilogARollbackState, GeneratedVerilogATerminalDescriptor, GeneratedVerilogATerminalDirection, boxed_zero_bool_array, boxed_zero_f64_array}};\n",
         options.runtime_path,
     ));
+    if idtmod_state_count > 0 {
+        writeln!(out, "use {}::GeneratedIdtModState;", options.runtime_path).unwrap();
+    }
     if !artifact.mir.parameters.is_empty() {
         out.push_str(&format!(
             "use {}::{{GeneratedParameterBound as ParameterBound, GENERATED_PARAMETER_MAX_EXCLUSIVE_FLAG as PARAMETER_MAX_EXCLUSIVE_FLAG, GENERATED_PARAMETER_MIN_EXCLUSIVE_FLAG as PARAMETER_MIN_EXCLUSIVE_FLAG, find_generated_parameter_index as find_parameter_index, resolve_generated_parameter_bound as resolve_parameter_bound, validate_generated_finite_parameter as validate_finite_parameter, validate_generated_parameter_bound_indices as validate_parameter_bound_indices, validate_generated_parameter_bounds as validate_parameter_bounds}};\n",
@@ -335,6 +341,13 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub(crate) stamp_state: Box<StampState<{ddt_state_count}, {idt_state_count}>>,\n"
     ));
+    if idtmod_state_count > 0 {
+        writeln!(
+            out,
+            "    pub(crate) idtmod_state: Box<[GeneratedIdtModState; {idtmod_state_count}]>,"
+        )
+        .unwrap();
+    }
     out.push_str("    pub(crate) time: f64,\n");
     out.push_str("    pub(crate) timestep: f64,\n");
     out.push_str("    pub(crate) ddt_coefficients: GeneratedDdtCoefficients,\n");
@@ -364,6 +377,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            model_param_given: self.model_param_given.clone(),\n");
     out.push_str("            multiplicity: self.multiplicity,\n");
     out.push_str("            stamp_state: self.stamp_state.clone(),\n");
+    if idtmod_state_count > 0 {
+        out.push_str("            idtmod_state: self.idtmod_state.clone(),\n");
+    }
     out.push_str("            time: self.time,\n");
     out.push_str("            timestep: self.timestep,\n");
     out.push_str("            ddt_coefficients: self.ddt_coefficients,\n");
@@ -426,6 +442,11 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub const IDT_STATE_COUNT: usize = {idt_state_count};\n"
     ));
+    writeln!(
+        out,
+        "    pub const IDTMOD_STATE_COUNT: usize = {idtmod_state_count};"
+    )
+    .unwrap();
     out.push_str(&format!(
         "    pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes({accepted_state_shape_identity:?});\n"
     ));
@@ -472,6 +493,9 @@ pub(super) fn generate_state_file_with_extensions(
     );
     out.push_str("            multiplicity: 1.0,\n");
     out.push_str("            stamp_state: StampState::new_box(),\n");
+    if idtmod_state_count > 0 {
+        writeln!(out, "            idtmod_state: vec![GeneratedIdtModState::default(); {idtmod_state_count}].into_boxed_slice().try_into().expect(\"generated idtmod state shape\"),").unwrap();
+    }
     out.push_str("            time: 0.0,\n");
     out.push_str("            timestep: 0.0,\n");
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
@@ -529,8 +553,15 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);\n");
     out.push_str("        flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);\n");
     out.push_str(&extensions.rollback_capture_flags);
-    if extensions.uses_analog_tasks {
-        out.push_str("        GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone() }\n");
+    if idtmod_state_count > 0 {
+        let effects = if extensions.uses_analog_tasks {
+            "self.analog_effects.clone()"
+        } else {
+            "None"
+        };
+        writeln!(out, "        GeneratedVerilogARollbackState {{ values, flags, idtmod: self.idtmod_state.to_vec(), analog_effects: {effects} }}").unwrap();
+    } else if extensions.uses_analog_tasks {
+        out.push_str("        GeneratedVerilogARollbackState { values, flags, analog_effects: self.analog_effects.clone(), ..Default::default() }\n");
     } else {
         out.push_str(
             "        GeneratedVerilogARollbackState { values, flags, ..Default::default() }\n",
@@ -547,6 +578,14 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "        debug_assert_eq!(state.flags.len(), {rollback_flag_count});\n"
     ));
+    writeln!(
+        out,
+        "        debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);"
+    )
+    .unwrap();
+    if idtmod_state_count > 0 {
+        out.push_str("        self.idtmod_state.clone_from_slice(&state.idtmod);\n");
+    }
     out.push_str("        let mut rollback_values = state.values.as_slice();\n");
     for field in [
         "ddt_current",
@@ -683,6 +722,9 @@ pub(super) fn generate_state_file_with_extensions(
     }
     out.push_str("        self.reset_analog_tasks();\n");
     out.push_str(&extensions.reset_analysis_state);
+    if idtmod_state_count > 0 {
+        out.push_str("        self.idtmod_state.fill_with(GeneratedIdtModState::default);\n");
+    }
     if extensions.uses_initialization {
         out.push_str("        self.initialize_analysis(ctx);\n        if ctx.evaluation_failed() { self.restore_rollback_state(&rollback); return; }\n");
     }
@@ -718,11 +760,20 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            idt_older: self.stamp_state.idt_older.to_vec(),\n");
     out.push_str("            idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),\n");
     out.push_str("            idt_initialized: self.stamp_state.idt_initialized.to_vec(),\n");
+    if idtmod_state_count > 0 {
+        out.push_str("            idtmod: self.idtmod_state.iter().map(GeneratedIdtModState::checkpoint).collect(),\n");
+    } else {
+        out.push_str("            idtmod: Vec::new(),\n");
+    }
     out.push_str("            event_variables,\n");
     out.push_str(&extensions.checkpoint_capture_fields);
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    #[doc(hidden)]\n    pub fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
+    out.push_str("        if state.idtmod.len() != Self::IDTMOD_STATE_COUNT { return Err(format!(\"generated idtmod checkpoint shape mismatch: expected {}, found {}\", Self::IDTMOD_STATE_COUNT, state.idtmod.len())); }\n");
+    if idtmod_state_count > 0 {
+        out.push_str("        for checkpoint in &state.idtmod { GeneratedIdtModState::default().restore(checkpoint).map_err(|error| error.to_string())?; }\n");
+    }
     out.push_str("        if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {\n");
     out.push_str("            return Err(format!(\"generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}\", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));\n");
     out.push_str("        }\n");
@@ -748,6 +799,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    }\n\n");
     out.push_str("    #[doc(hidden)]\n    pub fn restore_persistent_state(&mut self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {\n");
     out.push_str("        self.validate_persistent_state_shape(state)?;\n");
+    if idtmod_state_count > 0 {
+        out.push_str("        for (slot, checkpoint) in self.idtmod_state.iter_mut().zip(&state.idtmod) { slot.restore(checkpoint).expect(\"validated generated idtmod checkpoint\"); }\n");
+    }
     out.push_str("        self.stamp_state.ddt_previous.copy_from_slice(&state.ddt_previous);\n");
     out.push_str("        self.stamp_state.ddt_current.copy_from_slice(&state.ddt_previous);\n");
     out.push_str("        self.stamp_state.ddt_older.copy_from_slice(&state.ddt_older);\n");
@@ -1113,6 +1167,9 @@ pub(super) fn generate_state_file_with_extensions(
         );
     }
     out.push_str(&extensions.apply_advance_state);
+    if idtmod_state_count > 0 {
+        out.push_str("        for slot in self.idtmod_state.iter_mut() { slot.commit(); }\n");
+    }
     if extensions.uses_analog_tasks {
         out.push_str("        if let Some(journal) = self.analog_effects.as_mut() { journal.apply_validated_acceptance(); }\n");
     }
@@ -1157,6 +1214,11 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    fn normalize_integration_candidates(&mut self) {\n");
+    if idtmod_state_count > 0 {
+        out.push_str(
+            "        for slot in self.idtmod_state.iter_mut() { slot.begin_evaluation(); }\n",
+        );
+    }
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
     out.push_str(
@@ -1178,6 +1240,9 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("        }\n");
     out.push_str("    }\n\n");
     out.push_str("    fn promote_operating_point_candidates(&mut self) {\n");
+    if idtmod_state_count > 0 {
+        out.push_str("        for slot in self.idtmod_state.iter_mut() { slot.commit(); }\n");
+    }
     out.push_str("        let mut index = 0usize;\n");
     out.push_str("        while index < Self::DDT_STATE_COUNT {\n");
     out.push_str("            let finite = self.stamp_state.ddt_previous[index].is_finite() && self.stamp_state.ddt_older[index].is_finite() && self.stamp_state.ddt_derivative_previous[index].is_finite() && self.stamp_state.ddt_current[index].is_finite() && self.stamp_state.ddt_derivative_current[index].is_finite();\n");

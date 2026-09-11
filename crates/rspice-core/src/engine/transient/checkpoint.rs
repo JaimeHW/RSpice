@@ -87,6 +87,10 @@ use rspice_veriloga_runtime::generated_veriloga_checkpoint_compatibility_entry;
 use rspice_veriloga_runtime::{
     GENERATED_VERILOGA_COMPATIBILITY_CATALOG, GENERATED_VERILOGA_V27_COMBINED_IDENTITY_ALIASES,
 };
+use rspice_veriloga_runtime::{
+    GeneratedIdtModPersistentState, GeneratedIdtModState,
+    arithmetic::{IdtModOrigin, IdtModOriginCheckpoint},
+};
 use solver_state::{read_solver_state, write_solver_state};
 use std::io::Read;
 
@@ -179,7 +183,9 @@ fn checkpoint_operation_result<T>(
 /// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
 /// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
 /// Version 42 retains external BJT BC displacement current across integration resets.
-const FORMAT_VERSION: u32 = 42;
+const FORMAT_VERSION: u32 = 43;
+// Generated circular integrators retain an exact dyadic wrap origin.
+const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
 const BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION: u32 = 42;
 
 #[cfg(feature = "veriloga")]
@@ -3473,6 +3479,75 @@ fn read_generated_state_rows(
     Ok((values, initialized))
 }
 
+fn read_generated_idtmod_states(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<GeneratedIdtModPersistentState>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'idtmod_state' section".to_string())?;
+    let count = parse_count_header(header, "idtmod_state")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "idtmod_state", budget)?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'idtmod_state' truncated at row {row}"))?;
+        let context = format!("'idtmod_state' row {row}");
+        let mut fields = line.split_whitespace();
+        let mut next = || fields.next().ok_or_else(|| format!("{context} is short"));
+        let mut value = || {
+            let field = next()?;
+            field
+                .parse::<Value>()
+                .map_err(|_| format!("{context}: bad value '{field}'"))
+        };
+        let previous = value()?;
+        let older = value()?;
+        let input_previous = value()?;
+        let initialized = parse_checkpoint_bool(next()?, &context)?;
+        let negative = parse_checkpoint_bool(next()?, &context)?;
+        let exponent = next()?
+            .parse::<i32>()
+            .map_err(|_| format!("{context}: invalid origin exponent"))?;
+        let word_count = next()?
+            .parse::<usize>()
+            .map_err(|_| format!("{context}: invalid origin word count"))?;
+        if word_count > IdtModOrigin::MAX_CHECKPOINT_WORDS {
+            return Err(format!(
+                "{context}: origin word count exceeds {}",
+                IdtModOrigin::MAX_CHECKPOINT_WORDS
+            ));
+        }
+        let mut words = allocate_checkpoint_capacity(word_count, "idtmod origin", budget)?;
+        for _ in 0..word_count {
+            words.push(
+                next()?
+                    .parse::<u64>()
+                    .map_err(|_| format!("{context}: invalid origin word"))?,
+            );
+        }
+        if let Some(extra) = fields.next() {
+            return Err(format!("{context}: extra field '{extra}'"));
+        }
+        let state = GeneratedIdtModPersistentState {
+            initialized,
+            previous,
+            older,
+            input_previous,
+            origin: IdtModOriginCheckpoint {
+                negative,
+                exponent,
+                words,
+            },
+        };
+        GeneratedIdtModState::default()
+            .restore(&state)
+            .map_err(|error| format!("{context}: {error}"))?;
+        states.push(state);
+    }
+    Ok(states)
+}
+
 fn read_generated_veriloga_states(
     lines: &mut CheckpointLines<'_>,
     checkpoint_version: u32,
@@ -3600,8 +3675,11 @@ fn read_generated_veriloga_states(
             .ok_or_else(|| format!("generated state row {row} is missing state version"))?
             .parse::<u32>()
             .map_err(|_| format!("generated state row {row} has invalid state version"))?;
-        let expected_state_version = if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+        let expected_state_version = if checkpoint_version >= GENERATED_IDTMOD_STATE_FORMAT_VERSION
+        {
             GENERATED_PERSISTENT_STATE_VERSION
+        } else if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
+            4
         } else if checkpoint_version >= GENERATED_TERMINAL_CURRENT_FORMAT_VERSION {
             3
         } else if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
@@ -3627,6 +3705,11 @@ fn read_generated_veriloga_states(
             };
         let (mut idt, idt_initialized) =
             read_generated_state_rows(lines, "idt_state", idt_value_columns, budget)?;
+        let idtmod = if checkpoint_version >= GENERATED_IDTMOD_STATE_FORMAT_VERSION {
+            read_generated_idtmod_states(lines, budget)?
+        } else {
+            Vec::new()
+        };
         let (mut limiter, limiter_initialized) =
             read_generated_state_rows(lines, "limiter_state", 1, budget)?;
         let event_variables = if checkpoint_version >= GENERATED_EVENT_STATE_FORMAT_VERSION {
@@ -3662,7 +3745,13 @@ fn read_generated_veriloga_states(
             source_identity,
             model_identity,
             accepted_state_shape_identity,
-            state_version,
+            // Generated Rust did not support idtmod in v4. Its complete ordinary
+            // operator history migrates by adding an empty circular-state list.
+            state_version: if state_version == 4 {
+                GENERATED_PERSISTENT_STATE_VERSION
+            } else {
+                state_version
+            },
             state: GeneratedVerilogAPersistentState {
                 ddt_previous: ddt.remove(0),
                 ddt_older: ddt.remove(0),
@@ -3672,6 +3761,7 @@ fn read_generated_veriloga_states(
                 idt_older,
                 idt_input_previous,
                 idt_initialized,
+                idtmod,
                 event_variables,
                 limiter_anchor: limiter.remove(0),
                 limiter_initialized,
@@ -5832,6 +5922,11 @@ impl TransientCheckpoint {
                 ));
             }
             let state = &instance.state;
+            for (slot, circular) in state.idtmod.iter().enumerate() {
+                GeneratedIdtModState::default().restore(circular).map_err(|error| {
+                    format!("generated Verilog-A checkpoint instance {index} idtmod slot {slot}: {error}")
+                })?;
+            }
             if state.ddt_previous.len() != state.ddt_older.len()
                 || state.ddt_previous.len() != state.ddt_derivative_previous.len()
                 || state.ddt_previous.len() != state.ddt_initialized.len()
@@ -7291,6 +7386,11 @@ impl TransientCheckpoint {
                 .saturating_add(state.limiter_anchor.len())
                 .saturating_add(state.limiter_initialized.len())
                 .saturating_add(instance.terminal_currents.len());
+            for circular in &state.idtmod {
+                count = count
+                    .saturating_add(7)
+                    .saturating_add(circular.origin.words.len());
+            }
         }
         #[cfg(feature = "veriloga")]
         for instance in &self.runtime_veriloga_instance_states {
@@ -7890,6 +7990,24 @@ impl TransientCheckpoint {
                     state.idt_input_previous[index],
                     u8::from(state.idt_initialized[index])
                 ));
+            }
+            out.push_str(&format!("idtmod_state {}\n", state.idtmod.len()));
+            for (index, circular) in state.idtmod.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} {}",
+                    circular.previous,
+                    circular.older,
+                    circular.input_previous,
+                    u8::from(circular.initialized),
+                    u8::from(circular.origin.negative),
+                    circular.origin.exponent,
+                    circular.origin.words.len()
+                ));
+                for word in &circular.origin.words {
+                    out.push_str(&format!(" {word}"));
+                }
+                out.push('\n');
             }
             out.push_str(&format!("limiter_state {}\n", state.limiter_anchor.len()));
             for index in 0..state.limiter_anchor.len() {
@@ -10105,6 +10223,7 @@ mod tests {
                     idt_older: vec![4.25],
                     idt_input_previous: vec![-1.125],
                     idt_initialized: vec![true],
+                    idtmod: Vec::new(),
                     event_variables: vec![6.75, Value::INFINITY, Value::NEG_INFINITY],
                     limiter_anchor: vec![-0.75],
                     limiter_initialized: vec![true],
@@ -10771,6 +10890,21 @@ mod tests {
                     output.push('\n');
                 }
                 continue;
+            }
+            if version < GENERATED_IDTMOD_STATE_FORMAT_VERSION {
+                if line.starts_with("idtmod_state ") {
+                    assert_eq!(
+                        line, "idtmod_state 0",
+                        "legacy fixtures cannot contain circular state"
+                    );
+                    continue;
+                }
+                if line.starts_with("generated_veriloga_state ") {
+                    let (header, _) = line.rsplit_once(' ').expect("generated state version");
+                    output.push_str(header);
+                    output.push_str(" 4\n");
+                    continue;
+                }
             }
             if version < GENERATED_TERMINAL_CURRENT_FORMAT_VERSION
                 && line.starts_with("terminal_currents ")
@@ -13191,6 +13325,97 @@ mod tests {
     }
 
     #[test]
+    fn generated_idtmod_checkpoint_round_trips_exact_origin_and_rejects_malformed_state() {
+        let mut checkpoint = sample();
+        let mut circular = GeneratedIdtModState::default();
+        circular
+            .evaluate(
+                rspice_veriloga_runtime::GeneratedDdtCoefficients {
+                    active: true,
+                    derivative_scale: 2.0,
+                    previous_value_scale: 2.0,
+                    older_value_scale: 0.0,
+                    previous_derivative_scale: 0.0,
+                },
+                1.0,
+                2.0_f64.powi(900),
+                3.0,
+                -0.25,
+            )
+            .unwrap();
+        circular.commit();
+        let accepted = circular.checkpoint();
+        assert!(accepted.origin.words.len() > 1);
+        checkpoint.generated_veriloga_instance_states[0]
+            .state
+            .idtmod = vec![
+            accepted.clone(),
+            GeneratedIdtModState::default().checkpoint(),
+        ];
+        let text = checkpoint.to_text();
+        let restored = TransientCheckpoint::from_text(&text).unwrap();
+        assert_eq!(
+            restored.generated_veriloga_instance_states,
+            checkpoint.generated_veriloga_instance_states
+        );
+        assert_eq!(
+            restored.retained_value_count(),
+            checkpoint.retained_value_count()
+        );
+
+        let row = text
+            .lines()
+            .skip_while(|line| *line != "idtmod_state 2")
+            .nth(1)
+            .unwrap();
+        let fields = row.split_whitespace().collect::<Vec<_>>();
+        for (index, invalid, diagnostic) in [
+            (0, "NaN", "must be finite"),
+            (3, "2", "must be 0 or 1"),
+            (3, "0", "uninitialized"),
+            (4, "2", "must be 0 or 1"),
+            (5, "-2147483648", "origin"),
+            (6, "65", "word count exceeds"),
+            (7, "0", "origin"),
+        ] {
+            let mut bad = fields.clone();
+            bad[index] = invalid;
+            let error =
+                TransientCheckpoint::from_text(&text.replacen(row, &bad.join(" "), 1)).unwrap_err();
+            assert!(error.contains(diagnostic), "{index}={invalid}: {error}");
+        }
+        for bad_row in [fields[..7].join(" "), format!("{row} 1")] {
+            assert!(TransientCheckpoint::from_text(&text.replacen(row, &bad_row, 1)).is_err());
+        }
+        checkpoint.generated_veriloga_instance_states[0]
+            .state
+            .idtmod[0]
+            .previous = f64::INFINITY;
+        assert!(
+            checkpoint
+                .validate_numeric_state()
+                .unwrap_err()
+                .contains("idtmod")
+        );
+    }
+
+    #[test]
+    fn generated_v4_checkpoint_migrates_without_fabricating_circular_history() {
+        let checkpoint = sample();
+        for version in [28, 35, 42] {
+            let restored =
+                TransientCheckpoint::from_text(&legacy_text(&checkpoint, version)).unwrap();
+            let state = &restored.generated_veriloga_instance_states[0];
+            assert_eq!(state.state_version, GENERATED_PERSISTENT_STATE_VERSION);
+            assert!(state.state.idtmod.is_empty());
+            assert_eq!(
+                state.state,
+                checkpoint.generated_veriloga_instance_states[0].state
+            );
+        }
+    }
+
+    #[test]
     fn generated_state_parser_rejects_invalid_provenance_shape_and_values() {
         let text = sample().to_text();
         let err = TransientCheckpoint::from_text(&text.replace(
@@ -13216,7 +13441,7 @@ mod tests {
             .find(|line| line.starts_with("generated_veriloga_state xgen1 "))
             .expect("generated checkpoint header");
         let mut fields = header.split_whitespace().collect::<Vec<_>>();
-        fields[7] = "5";
+        fields[7] = "6";
         let err = TransientCheckpoint::from_text(&text.replacen(header, &fields.join(" "), 1))
             .expect_err("unknown generated persistent-state versions must fail closed");
         assert!(

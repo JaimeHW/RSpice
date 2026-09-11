@@ -54,8 +54,9 @@ pub use integration::{
     GeneratedIdtAcceptedHistory, GeneratedIdtCandidate, GeneratedIdtCandidateError,
     GeneratedIdtModBranch, GeneratedIdtModCandidate, GeneratedIdtModCandidateError,
     evaluate_generated_idt_candidate, evaluate_generated_idt_derivative,
-    evaluate_generated_idtmod_candidate, evaluate_generated_idtmod_derivative,
-    idtmod_wrapped_value, rspice_eval_idt,
+    evaluate_generated_idtmod_branch_derivative, evaluate_generated_idtmod_candidate,
+    evaluate_generated_idtmod_derivative, evaluate_generated_idtmod_initial, idtmod_wrapped_value,
+    rspice_eval_idt,
 };
 pub use integration_state::{GeneratedIdtModPersistentState, GeneratedIdtModState};
 
@@ -1263,6 +1264,9 @@ pub struct GeneratedVerilogAPersistentState {
     pub idt_older: Vec<Value>,
     pub idt_input_previous: Vec<Value>,
     pub idt_initialized: Vec<bool>,
+    /// Circular integrators in generated dense-site order. These retain their
+    /// exact origins separately from ordinary integral and event state.
+    pub idtmod: Vec<GeneratedIdtModPersistentState>,
     /// Accepted event-controlled procedural variables in generated dense-slot
     /// order. Speculative candidates are intentionally not persistent.
     pub event_variables: Vec<Value>,
@@ -1279,12 +1283,13 @@ pub struct GeneratedVerilogAPersistentState {
 pub struct GeneratedVerilogARollbackState {
     pub values: Vec<Value>,
     pub flags: Vec<bool>,
+    pub idtmod: Vec<GeneratedIdtModState>,
     /// Task models retain the exact delivery and candidate state during solver
     /// rollback. Numerical-only models leave this unallocated.
     pub analog_effects: Option<Box<AnalogEffectJournal>>,
 }
 
-pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 4;
+pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 5;
 
 /// Persistent state plus exact generated-model and instance provenance.
 #[derive(Debug, Clone, PartialEq)]
@@ -1350,6 +1355,10 @@ pub enum GeneratedEvaluationError {
         slot: usize,
         source: GeneratedIdtCandidateError,
     },
+    IdtModCandidate {
+        slot: Option<usize>,
+        source: GeneratedIdtModCandidateError,
+    },
     EventControl {
         operator: &'static str,
         slot: usize,
@@ -1403,6 +1412,13 @@ impl std::fmt::Display for GeneratedEvaluationError {
             }
             Self::IdtCandidate { slot, source } => {
                 write!(f, "generated Verilog-A idt slot {slot} failed: {source}")
+            }
+            Self::IdtModCandidate { slot, source } => {
+                if let Some(slot) = slot {
+                    write!(f, "generated Verilog-A idtmod slot {slot} failed: {source}")
+                } else {
+                    write!(f, "generated Verilog-A idtmod evaluation failed: {source}")
+                }
             }
             Self::EventControl {
                 operator,
@@ -2159,6 +2175,21 @@ impl<'a> GeneratedEvalContext<'a> {
         if self.evaluation_error.get().is_none() {
             self.evaluation_error
                 .set(Some(GeneratedEvaluationError::IdtCandidate {
+                    slot,
+                    source,
+                }));
+        }
+    }
+
+    #[inline]
+    pub fn report_idtmod_candidate_error(
+        &self,
+        slot: Option<usize>,
+        source: GeneratedIdtModCandidateError,
+    ) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::IdtModCandidate {
                     slot,
                     source,
                 }));

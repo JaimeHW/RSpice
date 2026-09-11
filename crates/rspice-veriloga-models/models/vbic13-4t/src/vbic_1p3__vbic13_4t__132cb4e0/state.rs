@@ -575,6 +575,7 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 360;
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 0;
+	pub const IDTMOD_STATE_COUNT: usize = 0;
 	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([80, 61, 139, 84, 33, 208, 145, 79, 22, 23, 125, 86, 250, 162, 20, 95, 34, 67, 168, 39, 156, 30, 229, 240, 226, 105, 198, 218, 125, 205, 178, 149]);
 	pub const EVENT_STATE_COUNT: usize = 20;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
@@ -646,6 +647,7 @@ impl Instance {
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
 		debug_assert_eq!(state.values.len(), 95);
 		debug_assert_eq!(state.flags.len(), 22);
+		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
 		let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
 		self.stamp_state.ddt_current.copy_from_slice(field);
@@ -751,6 +753,7 @@ impl Instance {
 			idt_older: self.stamp_state.idt_older.to_vec(),
 			idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),
 			idt_initialized: self.stamp_state.idt_initialized.to_vec(),
+			idtmod: Vec::new(),
 			event_variables,
 			limiter_anchor: Vec::new(),
 			limiter_initialized: Vec::new(),
@@ -759,6 +762,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn validate_persistent_state_shape(&self, state: &GeneratedVerilogAPersistentState) -> Result<(), String> {
+		if state.idtmod.len() != Self::IDTMOD_STATE_COUNT { return Err(format!("generated idtmod checkpoint shape mismatch: expected {}, found {}", Self::IDTMOD_STATE_COUNT, state.idtmod.len())); }
 		if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {
 			return Err(format!("generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));
 		}

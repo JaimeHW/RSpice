@@ -1,7 +1,7 @@
 //! Transactional circular-integrator history for generated models.
 
-use crate::arithmetic::{IdtModOrigin, IdtModOriginCheckpoint};
-use crate::{
+use super::arithmetic::{IdtModOrigin, IdtModOriginCheckpoint};
+use super::{
     GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory, GeneratedIdtCandidateError,
     GeneratedIdtModBranch, GeneratedIdtModCandidate, GeneratedIdtModCandidateError, Value,
     evaluate_generated_idtmod_candidate, evaluate_generated_idtmod_derivative,

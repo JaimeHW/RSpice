@@ -622,6 +622,8 @@ pub(super) fn grouped_noise_extension(
     // binding transient history during a noise sweep.
     bindings.ddt = "grouped_noise_ddt_is_unsupported".into();
     bindings.idt = "grouped_noise_idt_is_unsupported".into();
+    bindings.idtmod = "grouped_noise_idtmod_is_unsupported".into();
+    super::canonical::emit_frozen_idtmod_bindings(&plan.function, "        ", &mut out);
     emit_frozen_event_bindings(&mut out, &plan.function, options);
     let (body, values) = emit_body(&plan.function, &plan.outputs, &bindings)
         .map_err(|error| unsupported(artifact, format!("grouped noise body: {error}")))?;
@@ -942,7 +944,7 @@ fn plan_grouped_noise(
             ),
         },
     )?;
-    let conduction_rows = residuals
+    let mut conduction_rows = residuals
         .iter()
         .map(|residual| differentiated.derivative_row(*residual))
         .collect::<Vec<_>>();
@@ -978,7 +980,10 @@ fn plan_grouped_noise(
                 error,
             ),
         })?;
-        for ((equation, process, _), coefficients) in roots.into_iter().zip(coefficients) {
+        for ((equation, process, _), mut coefficients) in roots.into_iter().zip(coefficients) {
+            conduction_rows[equation][process] = coefficients
+                .remove(&frequency::DynamicPower::default())
+                .map(|coefficient| coefficient.value);
             frequency_rows[equation][process] = coefficients.into_iter().collect();
         }
     }
@@ -1123,6 +1128,7 @@ fn validate_noise_routing(
                 value.kind,
                 CfgValueKind::Ddt { .. }
                     | CfgValueKind::Idt { .. }
+                    | CfgValueKind::IdtMod { .. }
                     | CfgValueKind::Binary {
                         op: CfgBinaryOp::Mul
                             | CfgBinaryOp::Div

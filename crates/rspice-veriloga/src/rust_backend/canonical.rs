@@ -467,6 +467,8 @@ fn kernel_region_metrics(
             CfgValueKind::IdtMod { operator, .. } => {
                 write!(out, "idtmod:{}", operator_indices[operator])
             }
+            CfgValueKind::IdtModInitial { .. } => write!(out, "idtmod-initial"),
+            CfgValueKind::IdtModBranchDerivative { .. } => write!(out, "idtmod-branch-derivative"),
             CfgValueKind::AbsDelay { operator, .. } => {
                 write!(out, "absdelay:{}", operator_indices[operator])
             }
@@ -862,6 +864,18 @@ impl InitializationInput {
     }
 }
 
+pub(super) fn emit_frozen_idtmod_bindings(function: &CfgFunction, pad: &str, out: &mut String) {
+    let mut wants = Wants::default();
+    for value in &function.values {
+        match value.kind {
+            CfgValueKind::IdtModInitial { .. } => wants.idtmod_initial = true,
+            CfgValueKind::IdtModBranchDerivative { .. } => wants.idtmod_branch_derivative = true,
+            _ => {}
+        }
+    }
+    ModelPlan::emit_idtmod_bindings(&wants, pad, out);
+}
+
 struct ModelPlan {
     initialization: Vec<InitializationPlan>,
     initialization_inputs: Vec<InitializationInput>,
@@ -919,6 +933,8 @@ struct ModelPlan {
     ddt_slots: HashMap<ExprId, usize>,
     /// One history slot per `idt`, allocated from the CFG for the same reason.
     idt_slots: HashMap<ExprId, usize>,
+    /// Circular integrators own typed history, including their exact origins.
+    idtmod_slots: HashMap<ExprId, usize>,
     /// One accepted/candidate detector slot shared by `cross` and `above`.
     cross_slots: HashMap<ExprId, usize>,
     /// Dense source-order timer ids (timers share one per-instance next-event
@@ -986,6 +1002,7 @@ impl ModelPlan {
         // property of the model rather than of a hash map's iteration.
         let mut ddt_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut idt_slots: HashMap<ExprId, usize> = HashMap::new();
+        let mut idtmod_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut limit_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut cross_slots: HashMap<ExprId, usize> = HashMap::new();
         let mut timer_slots: HashMap<ExprId, usize> = HashMap::new();
@@ -998,6 +1015,10 @@ impl ModelPlan {
                 CfgValueKind::Idt { operator, .. } => {
                     let next = idt_slots.len();
                     idt_slots.entry(*operator).or_insert(next);
+                }
+                CfgValueKind::IdtMod { operator, .. } => {
+                    let next = idtmod_slots.len();
+                    idtmod_slots.entry(*operator).or_insert(next);
                 }
                 CfgValueKind::Cross { operator, .. }
                 | CfgValueKind::Above { operator, .. }
@@ -1068,7 +1089,8 @@ impl ModelPlan {
             )
         });
         let (charges, first_order_complete) = recover_stored_charges(&mut cfg.function, &residuals);
-        let general_frequency = !first_order_complete || !idt_slots.is_empty();
+        let general_frequency =
+            !first_order_complete || !idt_slots.is_empty() || !idtmod_slots.is_empty();
         let mut derivative_roots = residuals.clone();
         if !general_frequency {
             derivative_roots.extend(charges.iter().flatten().copied());
@@ -1092,6 +1114,7 @@ impl ModelPlan {
         let mut one_step_dae_split_safe =
             crate::canonical_ir::charge::one_step_dae_split_safe(artifact, false)
                 && idt_slots.is_empty()
+                && idtmod_slots.is_empty()
                 && !ddt_controls_flow
                 && first_order_complete
                 && residuals.iter().zip(&charges).all(|(residual, charge)| {
@@ -1183,6 +1206,7 @@ impl ModelPlan {
                 frequency.extend(
                     coefficients
                         .into_iter()
+                        .filter(|(power, _)| *power != DynamicPower::default())
                         .map(|(power, value)| FrequencyEntry {
                             equation,
                             unknown,
@@ -1593,6 +1617,7 @@ impl ModelPlan {
             noise,
             ddt_slots,
             idt_slots,
+            idtmod_slots,
             cross_slots,
             timer_slots,
             limit_slots,
@@ -1660,6 +1685,26 @@ impl ModelPlan {
                     "initialized:bool",
                 ],
             );
+        }
+
+        if !self.idtmod_slots.is_empty() {
+            let idtmod = ordered(&self.idtmod_slots, "idtmod")?;
+            shape.section("idtmod", idtmod.len());
+            for (slot, operator) in idtmod.into_iter().enumerate() {
+                shape.operator(
+                    "idtmod",
+                    slot,
+                    expression(operator)?.span,
+                    None,
+                    &[
+                        "previous:f64:finite",
+                        "older:f64:finite",
+                        "input_previous:f64:finite",
+                        "initialized:bool",
+                        "origin:canonical-dyadic:4096-bits",
+                    ],
+                );
+            }
         }
 
         let limit = ordered(&self.limit_slots, "limit")?;
@@ -2380,6 +2425,7 @@ impl ModelPlan {
         EmitBindings {
             ddt_slots: self.ddt_slots.clone(),
             idt_slots: self.idt_slots.clone(),
+            idtmod_slots: self.idtmod_slots.clone(),
             cross_slots: self.cross_slots.clone(),
             timer_slots: self.timer_slots.clone(),
             limit_slots: self.limit_slots.clone(),
@@ -2479,6 +2525,22 @@ impl ModelPlan {
                 "evaluate_generated_idt_candidate".to_string(),
                 "GeneratedDdtCoefficients".to_string(),
                 "GeneratedIdtAcceptedHistory".to_string(),
+            ]);
+        }
+        if !self.idtmod_slots.is_empty()
+            || self.function.values.iter().any(|value| {
+                matches!(
+                    value.kind,
+                    CfgValueKind::IdtModInitial { .. }
+                        | CfgValueKind::IdtModBranchDerivative { .. }
+                )
+            })
+        {
+            runtime_support.extend([
+                "GeneratedIdtModState".to_string(),
+                "GeneratedIdtModCandidateError".to_string(),
+                "evaluate_generated_idtmod_initial".to_string(),
+                "evaluate_generated_idtmod_branch_derivative".to_string(),
             ]);
         }
         if self
@@ -3873,6 +3935,7 @@ impl ModelPlan {
                  {pad}let idt_scale = move || idt_scale_value;"
             );
         }
+        Self::emit_idtmod_bindings(&wants, &pad, out);
         // One binding for both operators, and before either closure is built.
         // `idt` used to bind it itself unless `ddt` was going to, which put the
         // binding *after* the closure that read it whenever a model had both —
@@ -4142,6 +4205,88 @@ impl ModelPlan {
         Ok(())
     }
 
+    fn emit_idtmod_bindings(wants: &Wants, pad: &str, out: &mut String) {
+        let mut emit = |source: &str| {
+            for line in source.trim().lines() {
+                let _ = writeln!(out, "{pad}{line}");
+            }
+        };
+        if wants.idtmod
+            || wants.idtmod_derivative
+            || wants.idtmod_initial
+            || wants.idtmod_branch_derivative
+        {
+            emit(
+                r#"
+let idtmod_result = |slot: Option<usize>, result: Result<f64, GeneratedIdtModCandidateError>| -> f64 {
+    match result {
+        Ok(value) => value,
+        Err(source) => { ctx.report_idtmod_candidate_error(slot, source); 0.0 }
+    }
+};
+"#,
+            );
+        }
+        if wants.idtmod || wants.idtmod_derivative {
+            emit(
+                r#"
+let idtmod_coefficients = self.ddt_coefficients;
+let idtmod_state = &mut self.idtmod_state;
+"#,
+            );
+        }
+        if wants.idtmod {
+            emit(
+                r#"
+let idtmod = |state: &mut GeneratedIdtModState, slot: usize, input: f64, ic: f64, modulus: f64, offset: f64| -> f64 {
+    let result = if ctx.integration_operators_enabled() {
+        state.evaluate(idtmod_coefficients, input, ic, modulus, offset)
+    } else {
+        evaluate_generated_idtmod_initial(input, ic, modulus, offset).map(|initial| {
+            if ctx.analysis_smallsig() && !ctx.analysis_static() { initial } else { state.current().unwrap_or(initial) }
+        })
+    };
+    idtmod_result(Some(slot), result)
+};
+"#,
+            );
+        }
+        if wants.idtmod_derivative {
+            emit(
+                r#"
+let idtmod_derivative = |state: &GeneratedIdtModState, slot: usize, primal: f64, ic: f64, modulus: f64, offset: f64, derivatives: [f64; 3]| -> f64 {
+    let result = if ctx.integration_operators_enabled() {
+        state.derivative(idtmod_coefficients, primal, modulus, offset, derivatives)
+    } else if ctx.analysis_smallsig() && !ctx.analysis_static() {
+        evaluate_generated_idtmod_branch_derivative(primal, ic, modulus, offset, 0.0, derivatives[2])
+    } else {
+        Ok(0.0)
+    };
+    idtmod_result(Some(slot), result)
+};
+"#,
+            );
+        }
+        if wants.idtmod_initial {
+            emit(
+                r#"
+let idtmod_initial = |input: f64, ic: f64, modulus: f64, offset: f64| -> f64 {
+    idtmod_result(None, evaluate_generated_idtmod_initial(input, ic, modulus, offset))
+};
+"#,
+            );
+        }
+        if wants.idtmod_branch_derivative {
+            emit(
+                r#"
+let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64, integral: f64, period: f64| -> f64 {
+    idtmod_result(None, evaluate_generated_idtmod_branch_derivative(primal, ic, modulus, offset, integral, period))
+};
+"#,
+            );
+        }
+    }
+
     fn has_newton_tasks(&self) -> bool {
         self.function
             .values
@@ -4165,6 +4310,7 @@ impl ModelPlan {
         options: &RustTranspileOptions,
     ) -> state_file::StateFileExtensions {
         let mut extensions = state_file::StateFileExtensions {
+            idtmod_state_count: self.idtmod_slots.len(),
             uses_analog_tasks: self.has_analog_tasks(),
             uses_point_analog_tasks: self.has_newton_tasks(),
             uses_initialization: !self.initialization.is_empty(),
@@ -5183,6 +5329,10 @@ struct Wants {
     idt: bool,
     idt_scale: bool,
     idt_derivative: bool,
+    idtmod: bool,
+    idtmod_derivative: bool,
+    idtmod_initial: bool,
+    idtmod_branch_derivative: bool,
     cross: bool,
     above: bool,
     last_crossing: bool,
@@ -5212,7 +5362,11 @@ impl Wants {
             CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,
-            CfgValueKind::IntegralDerivative { .. } => self.idt_derivative = true,
+            CfgValueKind::IntegralDerivative { wrap: None, .. } => self.idt_derivative = true,
+            CfgValueKind::IntegralDerivative { wrap: Some(_), .. } => self.idtmod_derivative = true,
+            CfgValueKind::IdtMod { .. } => self.idtmod = true,
+            CfgValueKind::IdtModInitial { .. } => self.idtmod_initial = true,
+            CfgValueKind::IdtModBranchDerivative { .. } => self.idtmod_branch_derivative = true,
             CfgValueKind::Cross { .. } => self.cross = true,
             CfgValueKind::Above { .. } => self.above = true,
             CfgValueKind::LastCrossing { .. } => self.last_crossing = true,
@@ -5254,17 +5408,11 @@ fn reject_unsupported_kinds(
                 ));
             }
             // The canonical level represents these; this backend does not run
-            // them. Each owns accepted history — a wrapped running total, a
-            // transport queue, a rate-limiter state, a crossing detector — that
+            // them. Each owns accepted history — a transport queue or a
+            // rate-limiter state — that
             // the VM, the native JIT and the WebAssembly JIT keep and this one
             // has no place for. Refusing sends the model to a runtime that
             // does.
-            CfgValueKind::IdtMod { .. } => {
-                return Err(unsupported(
-                    artifact,
-                    "stateful idtmod in the direct generated-Rust backend; use the VM, native JIT, or WebAssembly JIT runtime so the wrapped running total is preserved",
-                ));
-            }
             CfgValueKind::AbsDelay { .. } | CfgValueKind::AbsDelayDerivative { .. } => {
                 return Err(unsupported(
                     artifact,

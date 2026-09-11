@@ -107,6 +107,12 @@ pub struct EmitBindings {
     pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
     pub idt_derivative: String,
+    pub idtmod: String,
+    pub idtmod_state: String,
+    pub idtmod_slots: HashMap<crate::canonical_ir::ExprId, usize>,
+    pub idtmod_derivative: String,
+    pub idtmod_initial: String,
+    pub idtmod_branch_derivative: String,
     /// Stateful generated event-control evaluators.
     pub cross: String,
     pub cross_slots: HashMap<crate::canonical_ir::ExprId, usize>,
@@ -159,6 +165,12 @@ impl Default for EmitBindings {
             idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
             idt_derivative: "idt_derivative".into(),
+            idtmod: "idtmod".into(),
+            idtmod_state: "idtmod_state".into(),
+            idtmod_slots: HashMap::new(),
+            idtmod_derivative: "idtmod_derivative".into(),
+            idtmod_initial: "idtmod_initial".into(),
+            idtmod_branch_derivative: "idtmod_branch_derivative".into(),
             cross: "cross".into(),
             cross_slots: HashMap::new(),
             above: "above".into(),
@@ -285,6 +297,8 @@ pub(super) fn math_runtime_imports(
         "rspice_limexp",
         "rspice_limited_exp",
         "rspice_limited_exp_derivative",
+        "evaluate_generated_idtmod_initial",
+        "evaluate_generated_idtmod_branch_derivative",
     ] {
         if bodies
             .iter()
@@ -292,6 +306,12 @@ pub(super) fn math_runtime_imports(
         {
             imports.push(helper.to_string());
         }
+    }
+    if bodies
+        .iter()
+        .any(|source| source.contains("GeneratedIdtModCandidateError"))
+    {
+        imports.push("GeneratedIdtModCandidateError".into());
     }
     imports
 }
@@ -1843,6 +1863,123 @@ impl Emitter<'_> {
                 self.numeric_operand(*ic)
             ),
             CfgValueKind::IdtScale => format!("{}()", bindings.idt_scale),
+            CfgValueKind::IdtMod {
+                operator,
+                input,
+                ic,
+                modulus,
+                offset,
+            } => {
+                let slot = bindings
+                    .idtmod_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator));
+                format!(
+                    "{}(&mut {}[{slot}],{slot},{},{},{},{})",
+                    bindings.idtmod,
+                    bindings.idtmod_state,
+                    self.numeric_operand(*input),
+                    self.numeric_operand(*ic),
+                    self.numeric_operand(*modulus),
+                    self.numeric_operand(*offset)
+                )
+            }
+            CfgValueKind::IdtModInitial {
+                input,
+                ic,
+                modulus,
+                offset,
+            } => {
+                format!(
+                    "{}({},{},{},{})",
+                    bindings.idtmod_initial,
+                    self.numeric_operand(*input),
+                    self.numeric_operand(*ic),
+                    self.numeric_operand(*modulus),
+                    self.numeric_operand(*offset)
+                )
+            }
+            CfgValueKind::IntegralDerivative {
+                operator,
+                primal,
+                input_derivative,
+                ic_derivative,
+                wrap: Some((modulus, offset, modulus_derivative)),
+            } => {
+                let slot = bindings
+                    .idtmod_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator));
+                let ic = match self.function.value(*primal).kind {
+                    CfgValueKind::IdtMod { ic, .. } | CfgValueKind::IdtModInitial { ic, .. } => ic,
+                    _ => {
+                        return Err(EmitError::UnsupportedStatefulOperator {
+                            value,
+                            operator: "idtmod derivative without a direct primal",
+                        });
+                    }
+                };
+                let prefix = format!(
+                    "{}(&{}[{slot}],{slot},{},{},{},{}",
+                    bindings.idtmod_derivative,
+                    bindings.idtmod_state,
+                    self.numeric_operand(*primal),
+                    self.numeric_operand(ic),
+                    self.numeric_operand(*modulus),
+                    self.numeric_operand(*offset)
+                );
+                let width = self.function.lanes_of(value).map_or(1, |lanes| lanes.len());
+                if width == 1 {
+                    format!(
+                        "{prefix},[{},{},{}])",
+                        self.lane_element(*input_derivative, 0),
+                        self.lane_element(*ic_derivative, 0),
+                        self.lane_element(*modulus_derivative, 0)
+                    )
+                } else {
+                    format!(
+                        "{}(std::array::from_fn(|i| {prefix},[({})[i],({})[i],({})[i]])))",
+                        lane_type_name(width),
+                        self.operand(*input_derivative),
+                        self.operand(*ic_derivative),
+                        self.operand(*modulus_derivative)
+                    )
+                }
+            }
+            CfgValueKind::IdtModBranchDerivative {
+                primal,
+                ic,
+                modulus,
+                offset,
+                integral_derivative,
+                modulus_derivative,
+            } => {
+                let prefix = format!(
+                    "{}({},{},{},{}",
+                    bindings.idtmod_branch_derivative,
+                    self.numeric_operand(*primal),
+                    self.numeric_operand(*ic),
+                    self.numeric_operand(*modulus),
+                    self.numeric_operand(*offset)
+                );
+                let width = self.function.lanes_of(value).map_or(1, |lanes| lanes.len());
+                if width == 1 {
+                    format!(
+                        "{prefix},{},{})",
+                        self.lane_element(*integral_derivative, 0),
+                        self.lane_element(*modulus_derivative, 0)
+                    )
+                } else {
+                    format!(
+                        "{}(std::array::from_fn(|i| {prefix},({})[i],({})[i])))",
+                        lane_type_name(width),
+                        self.operand(*integral_derivative),
+                        self.operand(*modulus_derivative)
+                    )
+                }
+            }
             CfgValueKind::IntegralDerivative {
                 operator,
                 primal,
@@ -1961,13 +2098,6 @@ impl Emitter<'_> {
                 self.numeric_operand(*proposed)
             ),
             CfgValueKind::Ddx { .. } => return Err(EmitError::UnresolvedDdx(value)),
-            CfgValueKind::IdtMod { .. }
-            | CfgValueKind::IntegralDerivative { wrap: Some(_), .. } => {
-                return Err(EmitError::UnsupportedStatefulOperator {
-                    value,
-                    operator: "idtmod",
-                });
-            }
             CfgValueKind::AbsDelay { .. } | CfgValueKind::AbsDelayDerivative { .. } => {
                 return Err(EmitError::UnsupportedStatefulOperator {
                     value,
@@ -2246,7 +2376,7 @@ impl Emitter<'_> {
         if self
             .function
             .lanes_of(value)
-            .is_some_and(|lanes| lanes.len() == 1)
+            .is_none_or(|lanes| lanes.len() == 1)
         {
             operand
         } else {

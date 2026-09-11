@@ -24,6 +24,7 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
             value.kind,
             CfgValueKind::Ddt { .. }
                 | CfgValueKind::Idt { .. }
+                | CfgValueKind::IdtMod { .. }
                 | CfgValueKind::IntegralDerivative { .. }
                 | CfgValueKind::DdtScale
                 | CfgValueKind::IdtScale
@@ -31,6 +32,17 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
     }) {
         return;
     }
+    let circular_initials = function
+        .values
+        .iter()
+        .filter_map(|value| {
+            if let CfgValueKind::IdtMod { ic, .. } = value.kind {
+                Some((value.id, ic))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
     let zero = ValueId::from(function.values.len());
     function.values.push(CfgValue {
         id: zero,
@@ -52,6 +64,18 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 left: input,
                 right: ic,
             },
+            CfgValueKind::IdtMod {
+                input,
+                ic,
+                modulus,
+                offset,
+                ..
+            } => CfgValueKind::IdtModInitial {
+                input,
+                ic,
+                modulus,
+                offset,
+            },
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
             CfgValueKind::IntegralDerivative {
                 primal,
@@ -63,6 +87,24 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 left: primal,
                 right: ic_derivative,
             },
+            CfgValueKind::IntegralDerivative {
+                primal,
+                ic_derivative,
+                wrap: Some((modulus, offset, modulus_derivative)),
+                ..
+            } => {
+                let Some(&ic) = circular_initials.get(&primal) else {
+                    continue;
+                };
+                CfgValueKind::IdtModBranchDerivative {
+                    primal,
+                    ic,
+                    modulus,
+                    offset,
+                    integral_derivative: ic_derivative,
+                    modulus_derivative,
+                }
+            }
             _ => continue,
         };
     }
@@ -100,7 +142,8 @@ pub(crate) struct FrequencyCoefficient {
     pub active: Option<ValueId>,
 }
 
-/// Append the dynamic coefficients of `roots`, retaining all existing ids.
+/// Append the frequency coefficients of `roots`, including the constant term,
+/// retaining all existing ids.
 /// `primal_count` is the size before AD's scalar `ddx` preparation: source
 /// readbacks are frozen coefficients, but the symbolic operations introduced
 /// to differentiate those readbacks still carry their integration multipliers.
@@ -160,7 +203,14 @@ pub(crate) fn expand(
             }));
         }
         let value = &source.values[index];
-        let next = if index < primal_count || value.value_type == CfgValueType::Boolean {
+        let next = if matches!(
+            value.kind,
+            CfgValueKind::RealConstant(0.0) | CfgValueKind::LaneSplat(0.0)
+        ) {
+            // A literal zero has no transfer. An operating-point expression
+            // that merely evaluates to zero still has its structural support.
+            Powers::new()
+        } else if index < primal_count || value.value_type == CfgValueType::Boolean {
             Powers::from([DynamicPower::default()])
         } else {
             value_powers(&value.kind, &inputs[index], &powers)?
@@ -182,9 +232,39 @@ pub(crate) fn expand(
         }
     }
 
+    let mut expanded = powers
+        .iter()
+        .enumerate()
+        .map(|(index, support)| {
+            dynamic(support)
+                || (index >= primal_count
+                    && !support.is_empty()
+                    && matches!(
+                        source.values[index].kind,
+                        CfgValueKind::IntegralDerivative { wrap: Some(_), .. }
+                    ))
+        })
+        .collect::<Vec<_>>();
+    // Even a constant-power circular derivative differs from its transient
+    // form: AC excludes the initial-condition tangent. Carry that replacement
+    // through arithmetic and block arguments that otherwise need no expansion.
+    let mut pending = expanded
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &copy)| copy.then_some(index))
+        .collect::<Vec<_>>();
+    while let Some(index) = pending.pop() {
+        for &user in &users[index] {
+            if !powers[user].is_empty() && !std::mem::replace(&mut expanded[user], true) {
+                pending.push(user);
+            }
+        }
+    }
+    let expand_value = |index: usize| expanded[index];
     let mut coefficients = vec![Polynomial::new(); count];
     for (index, support) in powers.iter().enumerate() {
-        if support.len() == 1 && support.contains(&DynamicPower::default()) {
+        if support.len() == 1 && support.contains(&DynamicPower::default()) && !expand_value(index)
+        {
             coefficients[index].insert(DynamicPower::default(), ValueId::from(index));
         } else {
             for &power in support {
@@ -220,7 +300,7 @@ pub(crate) fn expand(
         }
         let mut params = block.params.clone();
         for param in &block.params {
-            if dynamic(&powers[usize::from(*param)]) {
+            if expand_value(usize::from(*param)) {
                 params.extend(coefficients[usize::from(*param)].values());
             }
         }
@@ -228,7 +308,7 @@ pub(crate) fn expand(
         for instruction in &block.instructions {
             instructions.push(instruction.clone());
             let value = source.value(instruction.result);
-            if !dynamic(&powers[usize::from(value.id)]) {
+            if !expand_value(usize::from(value.id)) {
                 continue;
             }
             for (&power, &target) in &coefficients[usize::from(value.id)] {
@@ -239,7 +319,7 @@ pub(crate) fn expand(
         let mut extend_edge = |target, args: &mut Vec<ValueId>| {
             let original = args.clone();
             for (&param, arg) in source.block(target).params.iter().zip(original) {
-                if dynamic(&powers[usize::from(param)]) {
+                if expand_value(usize::from(param)) {
                     for &power in coefficients[usize::from(param)].keys() {
                         args.push(builder.coefficient(arg, power, source.value(param).value_type));
                     }
@@ -284,7 +364,6 @@ pub(crate) fn expand(
         .map(|root| {
             coefficients[usize::from(*root)]
                 .iter()
-                .filter(|(power, _)| **power != DynamicPower::default())
                 .map(|(&power, &value)| {
                     (
                         power,
@@ -336,6 +415,7 @@ fn append_activity(
             && matches!(
                 value.kind,
                 CfgValueKind::BlockParameter
+                    | CfgValueKind::IntegralDerivative { .. }
                     | CfgValueKind::Select { .. }
                     | CfgValueKind::SumProductsDiv { .. }
                     | CfgValueKind::LaneSumProductsDiv { .. }
@@ -431,6 +511,26 @@ fn append_activity(
                     sum
                 };
                 let result = match &value.kind {
+                    CfgValueKind::IntegralDerivative {
+                        input_derivative,
+                        wrap,
+                        ..
+                    } => {
+                        let input = power.idt.checked_sub(1).map_or(zero, |idt| {
+                            get(
+                                *input_derivative,
+                                DynamicPower {
+                                    ddt: power.ddt,
+                                    idt,
+                                },
+                                lane,
+                            )
+                        });
+                        let modulus = wrap
+                            .as_ref()
+                            .map_or(zero, |(_, _, derivative)| get(*derivative, power, lane));
+                        builder.binary(CfgBinaryOp::Max, input, modulus)
+                    }
                     CfgValueKind::Select {
                         condition,
                         then_value,
@@ -599,12 +699,18 @@ fn value_powers(
         CfgValueKind::IdtScale => Powers::from([DynamicPower { ddt: 0, idt: 1 }]),
         CfgValueKind::IntegralDerivative {
             input_derivative,
-            wrap: None,
+            wrap,
             ..
-        } => at(input_derivative)
-            .iter()
-            .map(|power| power.product(DynamicPower { ddt: 0, idt: 1 }))
-            .collect(),
+        } => {
+            let mut result: Powers = at(input_derivative)
+                .iter()
+                .map(|power| power.product(DynamicPower { ddt: 0, idt: 1 }))
+                .collect();
+            if let Some((_, _, modulus_derivative)) = wrap {
+                result.extend(at(modulus_derivative));
+            }
+            result
+        }
         CfgValueKind::BlockParameter => inputs
             .iter()
             .flat_map(|input| at(input).iter().copied())
@@ -701,6 +807,10 @@ impl Expansion<'_> {
         if let Some(value) = self.coefficients[usize::from(value)].get(&power) {
             return *value;
         }
+        self.zero(ty)
+    }
+
+    fn zero(&mut self, ty: CfgValueType) -> ValueId {
         if let Some(value) = self.constants.get(&ty.shape()) {
             return *value;
         }
@@ -746,6 +856,42 @@ impl Expansion<'_> {
         let ty = value.value_type;
         let kind = match &value.kind {
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
+            CfgValueKind::IntegralDerivative {
+                primal,
+                input_derivative,
+                wrap: Some((modulus, offset, modulus_derivative)),
+                ..
+            } => {
+                let ic = match self.function.values[usize::from(*primal)].kind {
+                    CfgValueKind::IdtMod { ic, .. } | CfgValueKind::IdtModInitial { ic, .. } => ic,
+                    _ => {
+                        return Err(FrequencyError::Unsupported(
+                            "circular-integrator derivative has no direct primal".into(),
+                        ));
+                    }
+                };
+                let integral_derivative = if let Some(idt) = power.idt.checked_sub(1) {
+                    self.coefficient(
+                        *input_derivative,
+                        DynamicPower {
+                            ddt: power.ddt,
+                            idt,
+                        },
+                        ty,
+                    )
+                } else {
+                    self.zero(ty)
+                };
+                let modulus_derivative = self.coefficient(*modulus_derivative, power, ty);
+                CfgValueKind::IdtModBranchDerivative {
+                    primal: *primal,
+                    ic,
+                    modulus: *modulus,
+                    offset: *offset,
+                    integral_derivative,
+                    modulus_derivative,
+                }
+            }
             CfgValueKind::IntegralDerivative {
                 input_derivative,
                 wrap: None,

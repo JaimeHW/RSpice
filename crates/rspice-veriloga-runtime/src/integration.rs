@@ -279,6 +279,59 @@ pub fn idtmod_wrapped_value(raw: f64, modulus: f64, offset: f64) -> Result<f64, 
     IdtModOrigin::ZERO.wrapped_value(raw, modulus, offset)
 }
 
+/// Validate and wrap the initial condition without reading transient history.
+#[inline]
+pub fn evaluate_generated_idtmod_initial(
+    input: Value,
+    initial_condition: Value,
+    modulus: Value,
+    offset: Value,
+) -> Result<Value, GeneratedIdtModCandidateError> {
+    let candidate = evaluate_generated_idt_candidate(
+        GeneratedDdtCoefficients::inactive(),
+        input,
+        initial_condition,
+        GeneratedIdtAcceptedHistory {
+            initialized: false,
+            integral_previous: 0.0,
+            integral_older: 0.0,
+            input_previous: 0.0,
+        },
+    )
+    .map_err(GeneratedIdtModCandidateError::Integral)?;
+    idtmod_wrapped_value(candidate.value, modulus, offset)
+        .map_err(GeneratedIdtModCandidateError::Wrapping)
+}
+
+/// Read-only local action on the initial wrap branch. Used after frequency
+/// expansion, with the supplied derivative already carrying its power of jω.
+#[inline]
+pub fn evaluate_generated_idtmod_branch_derivative(
+    primal: Value,
+    initial_condition: Value,
+    modulus: Value,
+    offset: Value,
+    integral_derivative: Value,
+    modulus_derivative: Value,
+) -> Result<Value, GeneratedIdtModCandidateError> {
+    if !primal.is_finite() {
+        return Err(GeneratedIdtModCandidateError::Wrapping(
+            "primal value must be finite",
+        ));
+    }
+    evaluate_generated_idtmod_derivative(
+        GeneratedDdtCoefficients::inactive(),
+        false,
+        [0.0, integral_derivative, modulus_derivative],
+        GeneratedIdtModBranch {
+            origin: &IdtModOrigin::ZERO,
+            value: initial_condition,
+            modulus,
+            offset,
+        },
+    )
+}
+
 /// Circular-integrator candidate and its previous value on the same wrap branch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedIdtModCandidate {
@@ -378,6 +431,51 @@ pub fn evaluate_generated_idtmod_candidate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn frozen_idtmod_helpers_validate_inputs_and_preserve_exact_branch_cancellation() {
+        use super::*;
+        let ic = 2.0_f64.powi(900);
+        let modulus = 2.0_f64.powi(-200);
+        let derivative = 2.0_f64.powi(-300);
+        let action = 2.0_f64.powi(800);
+        assert_eq!(
+            evaluate_generated_idtmod_initial(1.0, ic, modulus, 0.0).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            evaluate_generated_idtmod_branch_derivative(0.0, ic, modulus, 0.0, 0.0, derivative)
+                .unwrap(),
+            -action
+        );
+        assert_eq!(
+            evaluate_generated_idtmod_branch_derivative(0.0, ic, modulus, 0.0, action, derivative)
+                .unwrap(),
+            0.0
+        );
+        for (input, ic, modulus, offset) in [
+            (f64::INFINITY, 0.5, 1.0, 0.0),
+            (1.0, f64::NAN, 1.0, 0.0),
+            (1.0, 0.5, 0.0, 0.0),
+            (1.0, 0.5, -1.0, 0.0),
+            (1.0, 0.5, f64::INFINITY, 0.0),
+            (1.0, 0.5, 1.0, f64::NAN),
+        ] {
+            assert!(evaluate_generated_idtmod_initial(input, ic, modulus, offset).is_err());
+        }
+        for (primal, integral, period) in [
+            (f64::NAN, 1.0, 1.0),
+            (0.0, f64::INFINITY, 1.0),
+            (0.0, 1.0, f64::NAN),
+        ] {
+            assert!(
+                evaluate_generated_idtmod_branch_derivative(
+                    primal, ic, modulus, 0.0, integral, period
+                )
+                .is_err()
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -368,6 +368,7 @@ impl<S: Copy> CfgEvalSnapshot<S> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CfgEvalError {
+    CircularIntegration(rspice_veriloga_runtime::GeneratedIdtModCandidateError),
     SimulationParameter(rspice_veriloga_runtime::SimulationParameter),
     InvalidDerivative {
         reason: &'static str,
@@ -417,6 +418,7 @@ pub enum CfgEvalError {
 impl std::fmt::Display for CfgEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::CircularIntegration(source) => write!(f, "{source}"),
             Self::SimulationParameter(parameter) => write!(
                 f,
                 "simulation parameter '{}' is unavailable and has no fallback",
@@ -669,6 +671,39 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             .len();
         let kind = self.function.value(id).kind.clone();
         Ok(match kind {
+            CfgValueKind::IdtModBranchDerivative {
+                primal,
+                ic,
+                modulus,
+                offset,
+                integral_derivative,
+                modulus_derivative,
+            } => {
+                let [primal, ic, modulus, offset] = [
+                    self.read(primal)?.real(),
+                    self.read(ic)?.real(),
+                    self.read(modulus)?.real(),
+                    self.read(offset)?.real(),
+                ];
+                let integral = self.read_lanes(integral_derivative)?;
+                let period = self.read_lanes(modulus_derivative)?;
+                integral
+                    .into_iter()
+                    .zip(period)
+                    .map(|(integral, period)| {
+                        rspice_veriloga_runtime::evaluate_generated_idtmod_branch_derivative(
+                            primal,
+                            ic,
+                            modulus,
+                            offset,
+                            integral.real(),
+                            period.real(),
+                        )
+                        .map(S::from_f64)
+                        .map_err(CfgEvalError::CircularIntegration)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
             CfgValueKind::AnalogTask(_) => {
                 return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
             }
@@ -955,6 +990,40 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.idt
             }
             CfgValueKind::IdtScale => self.inputs.idt_scale,
+            // These are real coefficients introduced only after differentiation;
+            // the operating point is held fixed during frequency evaluation.
+            CfgValueKind::IdtModInitial {
+                input,
+                ic,
+                modulus,
+                offset,
+            } => S::from_f64(
+                rspice_veriloga_runtime::evaluate_generated_idtmod_initial(
+                    self.read(input)?.real(),
+                    self.read(ic)?.real(),
+                    self.read(modulus)?.real(),
+                    self.read(offset)?.real(),
+                )
+                .map_err(CfgEvalError::CircularIntegration)?,
+            ),
+            CfgValueKind::IdtModBranchDerivative {
+                primal,
+                ic,
+                modulus,
+                offset,
+                integral_derivative,
+                modulus_derivative,
+            } => S::from_f64(
+                rspice_veriloga_runtime::evaluate_generated_idtmod_branch_derivative(
+                    self.read(primal)?.real(),
+                    self.read(ic)?.real(),
+                    self.read(modulus)?.real(),
+                    self.read(offset)?.real(),
+                    self.read(integral_derivative)?.real(),
+                    self.read(modulus_derivative)?.real(),
+                )
+                .map_err(CfgEvalError::CircularIntegration)?,
+            ),
             CfgValueKind::IntegralDerivative {
                 operator,
                 primal,

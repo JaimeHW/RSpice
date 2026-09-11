@@ -1709,6 +1709,7 @@ mod tests {
     /// every refusal a test sees is about the construct it is testing.
     fn empty_state() -> CfgStateAllocation {
         let hir = HirModel {
+            digital_observations: Vec::new(),
             switch_branch_variables: Vec::new(),
             module_id: crate::canonical_ir::ModuleId::from(0usize),
             module_name: "cfg-program-test".into(),
