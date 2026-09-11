@@ -1706,6 +1706,14 @@ impl ProcessLowerer<'_> {
     /// signed one. So only the signed half is emitted here; stating the
     /// unsigned half as well would put a node where the rule already applies.
     fn assigned_value(&mut self, block: BlockId, value: &Expression, width: u32) -> ValueId {
+        if self.is_real_expression(value) {
+            let input = self.real_expression(block, value);
+            return self.builder.push(
+                block,
+                CfgValueType::FourState { width },
+                CfgValueKind::DigitalRealToInteger { input, width },
+            );
+        }
         let signed = self.self_signed(value);
         let lowered = self.sized(block, value, Context { width, signed });
         if signed && self.value_width(lowered) < width {
@@ -2223,16 +2231,9 @@ impl ProcessLowerer<'_> {
     //   * a branch condition converts a real with `!= 0.0`, section 9.4's
     //     "nonzero known value".
     //
-    // # And the two domains never mix inside one operator
-    //
-    // Verilog-AMS LRM 2.4 section 3.7 is explicit that a `wreal` "cannot be
-    // connected to any other wires, although connection to explicitly declared
-    // 64-bit wires can be done via system tasks `$realtobits` and
-    // `$bitstoreal`". The standard's answer to real-versus-bits is an explicit
-    // call, not a coercion — so a mixed operand pair is refused by name here
-    // rather than converted. There is no honest conversion to make: a
-    // four-state value holding `x` has no real, and inventing one would put a
-    // number where the design said it did not know.
+    // VAMS-2023 4.2.1 defines numeric conversion independently of the real-net
+    // connection rules in 3.7. Integral subexpressions keep their own sizing and
+    // arithmetic, then convert numerically when a real operand/target requires it.
 
     /// Whether an expression's value is a real rather than four-state bits.
     ///
@@ -2260,12 +2261,16 @@ impl ProcessLowerer<'_> {
                 },
             },
             // Section 5.1 permits real operands for `+ - * /`; the result is
-            // real when either operand is. A mixed pair is caught in
-            // `real_expression`, which is where a diagnostic can name it.
+            // real when either operand is; the other operand converts numerically.
             Expression::Binary(binary) => {
                 matches!(
                     binary.op,
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div
+                    BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Mul
+                        | BinaryOp::Div
+                        | BinaryOp::Mod
+                        | BinaryOp::Pow
                 ) && (self.is_real_expression(&binary.left)
                     || self.is_real_expression(&binary.right))
             }
@@ -2275,8 +2280,7 @@ impl ProcessLowerer<'_> {
             }
             // Table 4-2 makes `?:` legal in a real expression, and it is the
             // operator a real-number model is built out of. It is real when
-            // either arm is; a mixed pair is caught in `real_expression`,
-            // where a diagnostic can name it.
+            // either arm is; integral arms convert numerically.
             Expression::Conditional(conditional) => {
                 self.is_real_expression(&conditional.then_expr)
                     || self.is_real_expression(&conditional.else_expr)
@@ -2405,6 +2409,15 @@ impl ProcessLowerer<'_> {
 
     /// Lower an expression that must produce a real.
     fn real_expression(&mut self, block: BlockId, expression: &Expression) -> ValueId {
+        if !self.is_real_expression(expression) {
+            let signed = self.self_signed(expression);
+            let input = self.expression(block, expression);
+            return self.builder.push(
+                block,
+                CfgValueType::Real,
+                CfgValueKind::DigitalIntegerToReal { input, signed },
+            );
+        }
         if let Expression::SystemFunction(function) = expression
             && let Some(query) = super::digital::DigitalTimeQuery::from_name(&function.name)
             && query.bit_width().is_none()
@@ -2492,28 +2505,8 @@ impl ProcessLowerer<'_> {
                     BinaryOp::Sub => RealArithmeticOp::Sub,
                     BinaryOp::Mul => RealArithmeticOp::Mul,
                     BinaryOp::Div => RealArithmeticOp::Div,
-                    // The bitwise and shift operators are not in Verilog-AMS
-                    // LRM 2.4 table 4-2 at all, and are illegal on a real by
-                    // section 4.2.1's "all other operators are considered
-                    // illegal". `%`, `**`, `&&` and `||` *are* in the table and
-                    // are simply not implemented yet; the message says which
-                    // kind of missing each one is.
-                    BinaryOp::Mod | BinaryOp::Pow | BinaryOp::And | BinaryOp::Or => {
-                        let spelling = match binary.op {
-                            BinaryOp::Mod => "%",
-                            BinaryOp::Pow => "**",
-                            BinaryOp::And => "&&",
-                            _ => "||",
-                        };
-                        self.error(
-                            format!(
-                                "`{spelling}` on real operands is legal per Verilog-AMS LRM 2.4 \
-                                 table 4-2 but is not implemented yet"
-                            ),
-                            binary.span,
-                        );
-                        return self.real_constant(0.0);
-                    }
+                    BinaryOp::Mod => RealArithmeticOp::Mod,
+                    BinaryOp::Pow => RealArithmeticOp::Pow,
                     _ => {
                         self.error(
                             "this operator has no real-valued form: Verilog-AMS LRM 2.4 section \
@@ -2602,23 +2595,9 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Lower one operand of a real operator, refusing a four-state one by name.
+    /// Apply the same numeric conversion at assignments and real operators.
     fn real_operand(&mut self, block: BlockId, expression: &Expression) -> ValueId {
-        if self.is_real_expression(expression) {
-            return self.real_expression(block, expression);
-        }
-        // A whole-number literal beside a real is the one four-state operand
-        // that is not ambiguous — `x` cannot reach it — but admitting it would
-        // put the conversion rule in one place and refuse it in every other,
-        // which is worse than refusing it here too. `2.0` says the same thing
-        // and says it in one domain.
-        self.error(
-            "a four-state operand in a real expression has no conversion: Verilog-AMS LRM 2.4 \
-             section 3.7 converts between a real and bits with the explicit `$realtobits` and \
-             `$bitstoreal`, and an implicit one would have to invent a real for `x`",
-            expression.span(),
-        );
-        self.real_constant(0.0)
+        self.real_expression(block, expression)
     }
 
     /// Refuse a concatenation target with a real element, reporting whether it
@@ -2648,13 +2627,10 @@ impl ProcessLowerer<'_> {
         refused
     }
 
-    /// Refuse a four-state name used where a real was needed.
+    /// A real-classified identifier must resolve to real storage or a constant.
     fn not_a_real(&mut self, name: &str, what: &str, span: Span) -> ValueId {
         self.error(
-            format!(
-                "`{name}` is {what} and carries no real value; Verilog-AMS LRM 2.4 section 3.7 \
-                 converts bits to a real with `$realtobits`/`$bitstoreal` rather than implicitly"
-            ),
+            format!("`{name}` resolved to {what} after real type classification"),
             span,
         );
         self.real_constant(0.0)
@@ -3488,7 +3464,7 @@ impl ProcessLowerer<'_> {
                 self.unknown(width)
             }
             UnaryOp::Not => {
-                let input = self.expression(block, &unary.operand);
+                let input = self.condition(block, &unary.operand);
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },
@@ -3621,8 +3597,8 @@ impl ProcessLowerer<'_> {
                 } else {
                     LogicalOp::Or
                 };
-                let left = self.expression(block, &binary.left);
-                let right = self.expression(block, &binary.right);
+                let left = self.condition(block, &binary.left);
+                let right = self.condition(block, &binary.right);
                 return self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },

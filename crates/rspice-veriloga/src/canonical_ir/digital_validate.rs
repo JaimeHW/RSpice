@@ -284,6 +284,29 @@ impl CanonicalDigitalPlan {
                             ));
                         }
                     }
+                    CfgValueKind::DigitalIntegerToReal { input, .. } => {
+                        if value.value_type != CfgValueType::Real
+                            || !matches!(
+                                function.value(*input).value_type,
+                                CfgValueType::Integer | CfgValueType::FourState { .. }
+                            )
+                        {
+                            return Err(error(
+                                "integer-to-real conversion has inconsistent value domains",
+                            ));
+                        }
+                    }
+                    CfgValueKind::DigitalRealToInteger { input, width } => {
+                        if *width == 0
+                            || *width > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                            || value.value_type != (CfgValueType::FourState { width: *width })
+                            || function.value(*input).value_type != CfgValueType::Real
+                        {
+                            return Err(error(
+                                "real-to-integer conversion has inconsistent value domains or width",
+                            ));
+                        }
+                    }
                     CfgValueKind::DigitalTime { query } => {
                         if value.value_type != query.value_type() {
                             return Err(error(

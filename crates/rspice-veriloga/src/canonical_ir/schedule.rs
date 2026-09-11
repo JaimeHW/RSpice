@@ -1878,6 +1878,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalRealSelect { .. }
         | CfgValueKind::DigitalRealToBits { .. }
         | CfgValueKind::DigitalBitsToReal { .. }
+            | CfgValueKind::DigitalIntegerToReal { .. }
+            | CfgValueKind::DigitalRealToInteger { .. }
         | CfgValueKind::DigitalBitwise { .. }
         | CfgValueKind::DigitalBitwiseNot { .. }
         | CfgValueKind::DigitalLogical { .. }

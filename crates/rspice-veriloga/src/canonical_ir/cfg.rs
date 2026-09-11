@@ -926,9 +926,19 @@ pub enum CfgValueKind {
         then_value: ValueId,
         else_value: ValueId,
     },
+    /// Numeric conversion of an integral expression, VAMS-2023 4.2.1.2/3.
+    DigitalIntegerToReal {
+        input: ValueId,
+        signed: bool,
+    },
+    /// Numeric assignment conversion, rounding before truncation to `width`.
+    DigitalRealToInteger {
+        input: ValueId,
+        width: u32,
+    },
     /// `$realtobits(x)` — the IEEE 754 bit pattern of a real, 64 bits wide.
     ///
-    /// The one direction the two value domains are allowed to meet in.
+    /// A bit-pattern conversion, separate from numeric assignment conversion.
     /// Verilog-AMS LRM 2.4 section 3.7 says a `wreal` "cannot be connected to
     /// any other wires, although connection to explicitly declared 64-bit wires
     /// can be done via system tasks `$realtobits` and `$bitstoreal`", and IEEE
@@ -1210,6 +1220,8 @@ impl CfgValueKind {
             | Self::DigitalRealSelect { .. }
             | Self::DigitalRealToBits { .. }
             | Self::DigitalBitsToReal { .. }
+            | Self::DigitalIntegerToReal { .. }
+            | Self::DigitalRealToInteger { .. }
             | Self::DigitalBitwise { .. }
             | Self::DigitalBitwiseNot { .. }
             | Self::DigitalLogical { .. }
@@ -1444,6 +1456,8 @@ impl CfgValueKind {
             | Self::DigitalLogicalNot { input }
             | Self::DigitalRealToBits { input }
             | Self::DigitalBitsToReal { input }
+            | Self::DigitalIntegerToReal { input, .. }
+            | Self::DigitalRealToInteger { input, .. }
             | Self::DigitalPartSelect { input, .. } => vec![*input],
             Self::DigitalBitwise { left, right, .. }
             | Self::DigitalLogical { left, right, .. }
@@ -1690,6 +1704,8 @@ impl CfgValueKind {
             | Self::DigitalLogicalNot { input }
             | Self::DigitalRealToBits { input }
             | Self::DigitalBitsToReal { input }
+            | Self::DigitalIntegerToReal { input, .. }
+            | Self::DigitalRealToInteger { input, .. }
             | Self::DigitalPartSelect { input, .. } => *input = map(*input),
             Self::DigitalBitwise { left, right, .. }
             | Self::DigitalLogical { left, right, .. }

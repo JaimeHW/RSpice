@@ -557,16 +557,13 @@ pub enum DigitalEvalError {
         value: ValueId,
         detail: &'static str,
     },
-    /// A four-state value reached an operator that computes on reals, or the
-    /// reverse.
-    ///
-    /// Refused rather than converted, for the reason Verilog-AMS LRM 2.4
-    /// section 3.7 gives: the standard's own conversion between a real and bits
-    /// is the explicit `$realtobits`/`$bitstoreal`, and a value holding `x` has
-    /// no real to become. The lowering refuses every mix it can see, so
-    /// reaching this means the plan and this interpreter disagree about a
-    /// node's type.
+    /// A typed numeric operator received a value from the wrong domain.
+    /// Numeric conversions are explicit CFG nodes; this indicates malformed IR.
     MixedValueDomains(ValueId),
+    InvalidNumericConversion {
+        value: ValueId,
+        detail: &'static str,
+    },
     /// `$bitstoreal` was given a value with an `x` or a `z` in it.
     ///
     /// Neither standard rules on this case, so RSpice does, and it refuses.
@@ -684,9 +681,12 @@ impl std::fmt::Display for DigitalEvalError {
             ),
             Self::MixedValueDomains(value) => write!(
                 f,
-                "value {} mixes a real and a four-state operand in one operator, which \
-                 Verilog-AMS LRM 2.4 section 3.7 converts between only with an explicit \
-                 `$realtobits` or `$bitstoreal`",
+                "value {} has the wrong numeric domain for its CFG operator",
+                usize::from(*value)
+            ),
+            Self::InvalidNumericConversion { value, detail } => write!(
+                f,
+                "numeric conversion at value {} failed: {detail}",
                 usize::from(*value)
             ),
             Self::UnknownBitsToReal(value) => write!(
@@ -1830,9 +1830,27 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     op, left, right,
                 )))
             }
-            // The two crossings the standard defines, and the only two nodes
-            // in this interpreter whose operand and result are in different
-            // value domains.
+            CfgValueKind::DigitalIntegerToReal { input, signed } => {
+                let value = match self.scalar(*input)? {
+                    ScalarRef::FourState(value) => value.to_real(*signed),
+                    ScalarRef::Integer(value) => Ok(value as f64),
+                    ScalarRef::Real(_) => return Err(DigitalEvalError::MixedValueDomains(*input)),
+                    ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(*input)),
+                }
+                .map_err(|detail| DigitalEvalError::InvalidNumericConversion {
+                    value: id,
+                    detail,
+                })?;
+                Ok(DigitalScalar::Real(value))
+            }
+            CfgValueKind::DigitalRealToInteger { input, width } => {
+                let value =
+                    FourStateValue::from_real(*width, self.real(*input)?).map_err(|detail| {
+                        DigitalEvalError::InvalidNumericConversion { value: id, detail }
+                    })?;
+                Ok(DigitalScalar::FourState(value))
+            }
+            // IEEE 754 bit-pattern operations are separate from numeric conversion.
             CfgValueKind::DigitalRealToBits { input } => {
                 let value = self.real(*input)?;
                 Ok(DigitalScalar::FourState(FourStateValue::from_u64(

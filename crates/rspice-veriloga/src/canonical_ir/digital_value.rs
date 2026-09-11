@@ -42,6 +42,7 @@
 
 use crate::four_state::{FourStateBit, FourStateLiteral};
 use num_bigint::{BigInt, Sign};
+use num_traits::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
 /// Number of value bits carried by one plane word.
@@ -637,6 +638,35 @@ impl FourStateValue {
         Some(magnitude)
     }
 
+    /// VAMS-2023 4.2.1.2/3: numeric conversion at the operand's own width/sign.
+    /// X/Z is an error; it is never reinterpreted as a floating-point bit pattern.
+    pub fn to_real(&self, signed: bool) -> Result<f64, &'static str> {
+        if self.has_unknown() {
+            return Err("integer-to-real conversion contains X/Z bits");
+        }
+        if let Some(value) = self.to_integer(signed) {
+            return Ok(value as f64);
+        }
+        self.to_wide_integer(signed)
+            .and_then(|value| value.to_f64())
+            .filter(|value| value.is_finite())
+            .ok_or("integer-to-real conversion exceeds the finite real range")
+    }
+
+    /// VAMS-2023 4.2.1.1: round to nearest, ties away from zero, then assign
+    /// the integer at the target width. No saturating machine-integer cast.
+    pub fn from_real(width: u32, value: f64) -> Result<Self, &'static str> {
+        let rounded = value.round();
+        if !rounded.is_finite() {
+            return Err("real-to-integer conversion requires a finite value");
+        }
+        if width <= 64 && (-9223372036854775808.0..9223372036854775808.0).contains(&rounded) {
+            return Ok(Self::from_u64(width, rounded as i64 as u64));
+        }
+        let integer = BigInt::from_f64(rounded).ok_or("real-to-integer conversion failed")?;
+        Ok(Self::from_wide_integer(width, integer))
+    }
+
     /// A declared bit index. Unknown or numerically out-of-range indices select X.
     pub(crate) fn bit_index(&self, signed: bool) -> Option<i64> {
         if self.width <= 64 {
@@ -1228,27 +1258,18 @@ pub fn concat(parts: &[FourStateValue]) -> FourStateValue {
 // discrete-domain operator does to its operands — and a reader comparing the
 // two domains should not have to change files to do it.
 //
-// # What is deliberately absent
-//
-// Every conversion between the two. Section 3.7 says a `wreal` "cannot be
-// connected to any other wires, although connection to explicitly declared
-// 64-bit wires can be done via system tasks `$realtobits` and `$bitstoreal`" —
-// the standard's own answer to real-versus-bits is an explicit call, not a
-// coercion. So there is no `real_from_four_state` here, and none is wanted: a
-// four-state value holding `x` has no real to be, and the lowering refuses a
-// mixed operand pair by name rather than picking one.
+// Numeric conversion follows VAMS-2023 4.2.1 independently of the bit-pattern
+// functions and net-connection rules in section 3.7.
 
-/// An arithmetic operator over real values.
-///
-/// Four, not five: IEEE 1364-2005 section 5.1 excludes `%` from the operators
-/// real operands may be used with, and there is no modulus here to be tempted
-/// by.
+/// Arithmetic operators over real operands, VAMS-2023 table 4-2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RealArithmeticOp {
     Add,
     Sub,
     Mul,
     Div,
+    Mod,
+    Pow,
 }
 
 impl RealArithmeticOp {
@@ -1258,6 +1279,8 @@ impl RealArithmeticOp {
             Self::Sub => "-",
             Self::Mul => "*",
             Self::Div => "/",
+            Self::Mod => "%",
+            Self::Pow => "**",
         }
     }
 }
@@ -1276,6 +1299,8 @@ pub fn real_arithmetic(op: RealArithmeticOp, left: f64, right: f64) -> f64 {
         RealArithmeticOp::Sub => left - right,
         RealArithmeticOp::Mul => left * right,
         RealArithmeticOp::Div => left / right,
+        RealArithmeticOp::Mod => left % right,
+        RealArithmeticOp::Pow => left.powf(right),
     }
 }
 

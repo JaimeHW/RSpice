@@ -5582,6 +5582,7 @@ dependencies = [
  "log",
  "num-bigint 0.4.8",
  "num-complex",
+ "num-traits",
  "rspice-veriloga-runtime",
  "serde",
  "serde_json",

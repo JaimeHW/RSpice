@@ -2094,6 +2094,75 @@ shipping-platform qualification, or vendor parity. No licensed reference
 installation is currently available. Main through 0aa31414f adds separate native
 BJT HB/PAC work without overlapping this increment or its generator inputs.
 
+## MS06: numeric conversion in mixed discrete expressions
+
+The recorded $realtime > 0 refusal came from applying net-connection restrictions
+to arithmetic operands. VAMS-2023 4.2.1.1–3 requires numeric conversions between
+integral and real expressions; section 3.7's bit-pattern/connection rules describe
+a different operation. The compiler now emits explicit numeric-conversion CFG
+nodes. [Normative language reference](https://www.accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
+Integral operands evaluate with their own width and signedness, including nested
+integer division and overflow, before conversion to real. Assignments to real
+variables/drivers and mixed arithmetic, comparisons and conditional arms share
+that path. Real-to-integral assignment rounds to nearest with ties away from
+zero, then assigns at the destination width rather than saturating a machine
+integer. Wide values use the existing BigInt representation through num-traits;
+ordinary values retain a machine-word path. X/Z numeric inputs and nonfinite
+real-to-integral inputs report errors. Integral magnitudes beyond finite real
+range also report a representability error. $realtobits/$bitstoreal continue to
+operate on IEEE bit patterns, separately from numeric conversion.
+
+Real %, ** and numeric logical operands now use the appropriate real arithmetic
+or four-state truth rules. Bitwise operations still require integral operands.
+The existing hierarchy connection-width checks precede driver lowering; this
+change does not supply an implicit electrical/event-net connection policy.
+Analog-owned variable access and other unsupported ownership paths remain open.
+
+Both numeric nodes participate in operand traversal, relocation, classification,
+validation and interpreter execution. The artifact schema is now 52, preventing
+older caches/checkpoints from treating the changed digital vocabulary as the
+old contract. Native/Wasm analog emitters retain their existing digital-node
+refusal: these mixed processes execute through the common digital runtime.
+Actual native/Wasm digital code generation remains MS11 work.
+
+Five focused checks passed in 0.00 seconds after a 1m28s build: source execution,
+X/Z/nonfinite errors, malformed conversion IR and the two updated unsupported-
+construct inventories. Source execution includes mixed clock comparisons, real
+logical expressions, signed/unsigned values, a 96-bit value, integer versus
+real division, modulus/power, rounding/truncation and artifact serialization.
+An extension covering negative 96-bit conversion and a four-bit addition that
+must overflow before real conversion passed in 0.00 seconds after a 0.99-second
+build. Logs: target/unified-mixed-fixes/digital-numeric-conversion-tests.log and
+digital-numeric-conversion-widths.log. The native/wasm-jit compiler feature check
+passed in 39.56 seconds. No broad suite was run.
+
+The authoritative generator completed all 43 built-ins without numerical source
+changes. Generator digest:
+e7307b81862c79f4bbb749439589a06ba250cc64441c6472e63512bb1ef6b336.
+Bundle digest remains
+90bf692657091a33dc398f91f063094ae67d77fbe3e33b857a1f787a495e1aa6.
+Log: target/unified-mixed-fixes/digital-numeric-conversion-generator.log.
+
+The initial circuit build exhausted disk space. Package-scoped Cargo cleanup
+inside this task's verified target directory removed 14.2 GiB of build products.
+The concurrent formatter had truncated digital_process_execution.rs; that file
+was restored from HEAD plus the in-progress test edits, and its diff inspected.
+With incremental caches disabled, all five focused checks passed again in 0.00
+seconds after a 29.94-second build. The structural validation test now verifies
+the conversion diagnostic rather than accepting a stale content-identity error,
+and checks an inconsistent target width. Log: digital-numeric-conversion-restored.log.
+This was recovery from an infrastructure failure, not a full-suite rerun.
+
+The shared HDL/XSPICE circuit regression now uses its original integer-zero
+comparison and compound condition. Its circuit qualification follows separately.
+
+Remaining expression work includes lazy real-conditional evaluation: the current
+DigitalRealSelect lowering computes both arms before selection, so an error in
+an unselected arm is not suppressed. This is visible in the lowering and ordered
+interpreter and remains an open correctness item. This increment does not close
+MS06, the broader plan, production qualification, or licensed-reference parity.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2101,8 +2170,9 @@ controller/effect/result/cache transaction. Preserve physical loads
 and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
-dependencies and feedback convergence. Close the recorded mixed real/integer
-comparison refusal under MS06. Extend model/state/circuit qualification of the
+dependencies and feedback convergence. Complete lazy real-conditional evaluation
+and the remaining ownership/type/event requirements under MS06; mixed numeric
+conversion now handles the recorded comparison refusal. Extend qualification of the
 now-enabled conservative OneStep path and preserve correct readbacks while
 improving eligibility of compiler-created flow temporaries. Settled static
 history, distinct companion rules, compiler proof and mixed weighting are

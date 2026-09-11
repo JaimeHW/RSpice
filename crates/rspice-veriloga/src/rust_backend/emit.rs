@@ -2180,6 +2180,8 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalRealSelect { .. }
             | CfgValueKind::DigitalRealToBits { .. }
             | CfgValueKind::DigitalBitsToReal { .. }
+            | CfgValueKind::DigitalIntegerToReal { .. }
+            | CfgValueKind::DigitalRealToInteger { .. }
             | CfgValueKind::DigitalBitwise { .. }
             | CfgValueKind::DigitalBitwiseNot { .. }
             | CfgValueKind::DigitalLogical { .. }

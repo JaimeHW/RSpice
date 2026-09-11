@@ -2331,21 +2331,6 @@ fn the_real_net_refusals_name_themselves() {
          \x20   initial q = level[0];",
             "no bits to select",
         ),
-        // Verilog-AMS LRM 2.4 table 4-2 makes `%` legal on real operands and
-        // this wave does not implement it; the refusal says which of the two
-        // kinds of missing it is.
-        (
-            "    wreal a, b, out;\n\
-         \x20   assign out = a % b;",
-            "table 4-2 but is not implemented yet",
-        ),
-        // `?:` *is* implemented, and its arms are still one domain each.
-        (
-            "    wreal a, out;\n\
-         \x20   reg sel;\n\
-         \x20   assign out = sel ? a : 2;",
-            "a four-state operand in a real expression has no conversion",
-        ),
     ];
     for (section, expected) in cases {
         let error = VerilogACompiler::new(CompilerOptions::default())
@@ -2380,20 +2365,6 @@ fn the_remaining_process_refusals_name_themselves() {
             "    reg q;\n\
              \x20   initial begin : work string s; q = 1'b0; end",
             "process-local `string`",
-        ),
-        // What a real *cannot* do is meet a four-state value inside one
-        // operator. Section 3.7 converts between the two with an explicit
-        // `$realtobits`/`$bitstoreal`, and there is no implicit conversion to
-        // invent for an `x`.
-        (
-            "    reg [3:0] q;\n\
-             \x20   initial begin : work real r; r = 1.0; q = r; end",
-            "a real value has no four-state form here",
-        ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work real r; r = 1.0 + q; q = 1'b0; end",
-            "a four-state operand in a real expression has no conversion",
         ),
         (
             "    reg q;\n\
@@ -4576,4 +4547,152 @@ fn repeat_controls_capture_wide_counts_data_and_implicit_dependencies_once() {
         terms.iter().map(|term| term.signal).collect::<Vec<_>>(),
         [h.signal("data")]
     );
+}
+
+/// VAMS-2023 4.2.1.1–3: convert numbers, preserving integral subexpressions.
+#[test]
+fn mixed_numeric_conversions_preserve_sign_width_rounding_and_clock_values() {
+    use rspice_veriloga::canonical_ir::DigitalClock;
+    let mut harness = Harness::from_source(
+        r#"
+module numeric;
+    reg signed [7:0] s;
+    reg [7:0] u, up, down, wrapped;
+    reg [95:0] wide, wide_round;
+    reg signed [95:0] wide_signed;
+    reg [3:0] nibble;
+    reg [63:0] pattern;
+    reg ok;
+    real a,b,c,d,signed_mix,unsigned_mix,wide_real,negative_wide,own_width,local_real,selected,rem,power;
+    initial begin : work
+        integer i;
+        real local_value;
+        i=-3; s=-2; u=254; wide=96'h000100000000000000000001;
+        wide_signed=-3; negative_wide=wide_signed; nibble=15; own_width=(nibble+4'd1)+0.0;
+        a=3+5.0; b=1/2; c=8.0+(1/2); d=1/2.0;
+        signed_mix=s+0.5; unsigned_mix=u+0.5; wide_real=wide;
+        local_value=i; local_real=local_value;
+        selected=1 ? 2 : 1.25;
+        rem=-10.5%3; power=2.0**3;
+        up=35.5; down=-1.5; wrapped=255.5;
+        wide_round=1208925819614629174706176.0;
+        pattern=$realtobits(1);
+        ok=($realtime>0 && 0<$realtime && s<0.0 && u>0.0 && !0.0 && (1.0 || 1'bx) && !(0.0 && 1'bx));
+    end
+endmodule
+"#,
+    );
+    // Serialization carries both conversions and their width/sign contracts.
+    harness.plan = serde_json::from_str(&serde_json::to_string(&harness.plan).unwrap()).unwrap();
+    harness.plan.validate().unwrap();
+    harness.store.clock = Some(DigitalClock {
+        tick: 1,
+        absolute_seconds: 1e-9,
+    });
+    assert!(matches!(harness.start(0), DigitalProcessOutcome::Finished));
+    for (name, expected) in [
+        ("a", 8.0),
+        ("b", 0.0),
+        ("c", 8.0),
+        ("d", 0.5),
+        ("signed_mix", -1.5),
+        ("unsigned_mix", 254.5),
+        ("wide_real", 2.0_f64.powi(80)),
+        ("negative_wide", -3.0),
+        ("own_width", 0.0),
+        ("local_real", -3.0),
+        ("selected", 2.0),
+        ("rem", -1.5),
+        ("power", 8.0),
+    ] {
+        assert_eq!(harness.get_real(name), expected, "{name}");
+    }
+    assert_eq!(harness.get("up"), "00100100");
+    assert_eq!(harness.get("down"), "11111110");
+    assert_eq!(harness.get("wrapped"), "00000000");
+    assert_eq!(harness.get("wide_round"), format!("{:096b}", 1_u128 << 80));
+    assert_eq!(
+        harness.get("pattern"),
+        format!("{:064b}", 1.0_f64.to_bits())
+    );
+    assert_eq!(harness.get("ok"), "1");
+}
+
+#[test]
+fn numeric_conversion_reports_unknown_bits_and_nonfinite_integer_inputs() {
+    for digit in ["x", "z"] {
+        let mut harness = Harness::from_source(
+            "module unknown; reg [95:0] data; real r; initial r=data+1.0; endmodule",
+        );
+        harness.set("data", &format!("{digit}{}", "0".repeat(95)));
+        let error = start(
+            &harness.plan,
+            &harness.plan.processes[0],
+            &mut harness.store,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, DigitalEvalError::InvalidNumericConversion { .. }),
+            "{error}"
+        );
+        assert!(error.to_string().contains("X/Z"));
+    }
+    let mut harness = Harness::from_source(
+        "module invalid; reg [7:0] q; real r; initial begin r=1.0/0.0; q=r; end endmodule",
+    );
+    let error = start(
+        &harness.plan,
+        &harness.plan.processes[0],
+        &mut harness.store,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, DigitalEvalError::InvalidNumericConversion { .. }),
+        "{error}"
+    );
+    assert!(error.to_string().contains("finite"));
+}
+
+#[test]
+fn numeric_conversions_validate_their_value_domains_and_target_widths() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType};
+    let harness = Harness::from_source(
+        "module shape; real r; reg [7:0] q; initial begin r=3; q=r; end endmodule",
+    );
+    for real_to_int in [false, true] {
+        let mut plan = harness.plan.clone();
+        let value = plan.processes[0]
+            .function
+            .values
+            .iter_mut()
+            .find(|v| match v.kind {
+                CfgValueKind::DigitalRealToInteger { .. } => real_to_int,
+                CfgValueKind::DigitalIntegerToReal { .. } => !real_to_int,
+                _ => false,
+            })
+            .unwrap();
+        value.value_type = if real_to_int {
+            CfgValueType::Real
+        } else {
+            CfgValueType::FourState { width: 8 }
+        };
+        let error = format!("{:?}", plan.validate().unwrap_err());
+        let expected = if real_to_int {
+            "real-to-integer conversion"
+        } else {
+            "integer-to-real conversion"
+        };
+        assert!(
+            error.contains(expected),
+            "the structural check must precede identity validation: {error}"
+        );
+    }
+    let mut plan = harness.plan.clone();
+    for value in &mut plan.processes[0].function.values {
+        if let CfgValueKind::DigitalRealToInteger { width, .. } = &mut value.kind {
+            *width = 9;
+        }
+    }
+    let error = format!("{:?}", plan.validate().unwrap_err());
+    assert!(error.contains("real-to-integer conversion"), "{error}");
 }

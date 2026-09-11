@@ -575,6 +575,12 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalRealSelect { .. } => write!(out, "digital-real-select"),
             CfgValueKind::DigitalRealToBits { .. } => write!(out, "digital-real-to-bits"),
             CfgValueKind::DigitalBitsToReal { .. } => write!(out, "digital-bits-to-real"),
+            CfgValueKind::DigitalIntegerToReal { signed, .. } => {
+                write!(out, "digital-integer-to-real:{signed}")
+            }
+            CfgValueKind::DigitalRealToInteger { width, .. } => {
+                write!(out, "digital-real-to-integer:{width}")
+            }
             CfgValueKind::DigitalBitwise { op, .. } => write!(out, "digital-bitwise:{op:?}"),
             CfgValueKind::DigitalBitwiseNot { .. } => write!(out, "digital-bitwise-not"),
             CfgValueKind::DigitalLogical { op, .. } => write!(out, "digital-logical:{op:?}"),
