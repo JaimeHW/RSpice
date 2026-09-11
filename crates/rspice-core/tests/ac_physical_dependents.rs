@@ -11,8 +11,7 @@ use rspice_core::netlist::Netlist;
 
 const TEMPERATURE_K: f64 = 300.15;
 const HIGH_RESISTANCE_OHM: f64 = 1.0e18;
-// Primitive resistor-noise collection currently models finite resistors below
-// 1e12 ohm. This value remains high enough that a 1e-15 S blanket shunt would
+// This resistor value is high enough that a 1e-15 S blanket shunt would
 // introduce a readily detectable ~2e-4 relative error in the output PSD.
 const HIGH_NOISE_RESISTANCE_OHM: f64 = 1.0e11;
 
@@ -114,6 +113,48 @@ fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
         let error = result.expect_err("a distant slope cannot replace unresolved local evidence");
         assert!(error.to_string().contains("could not resolve"), "{error}");
     }
+}
+
+#[test]
+fn sensitivity_retains_the_zero_resistor_flicker_domain_boundary() {
+    use rspice_core::analysis::AcSensitivityOutput;
+    let netlist = Netlist::parse(
+        "Zero flicker parameter\n.param noise=0\nI1 0 out DC 1 AC 1\n\
+         R1 out 0 RM 1\n.model RM R(KF={noise})\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    let probe = AcSensitivityOutput::Voltage {
+        positive: output,
+        negative: None,
+    };
+    let filters = ["RM:KF".to_owned()];
+    // KF changes resistor noise, so both deterministic transfer derivatives
+    // are zero, including at the nonnegative coefficient's domain boundary.
+    let dc = engine
+        .run_sensitivity_dc_complete(&netlist, probe.clone(), &filters)
+        .unwrap();
+    let ac = engine
+        .run_sensitivity_ac_complete(&netlist, probe, &[1.0], &filters)
+        .unwrap();
+    assert_eq!(dc.get("RM:KF").unwrap().absolute, 0.0);
+    assert_eq!(
+        ac.get("RM:KF").unwrap().absolute,
+        [rspice_core::Complex64::new(0.0, 0.0)]
+    );
+    assert_eq!(
+        engine
+            .run_sensitivity(&netlist, output, "noise", 0.0, None)
+            .unwrap(),
+        0.0
+    );
+    assert_eq!(
+        engine
+            .run_sensitivity_ac(&netlist, output, "noise", 0.0, &[1.0], None)
+            .unwrap(),
+        [0.0]
+    );
 }
 
 #[test]
