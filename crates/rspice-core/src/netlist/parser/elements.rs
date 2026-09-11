@@ -194,6 +194,7 @@ pub(super) fn parse_resistor(
                             if name_upper == "R" || name_upper == "VALUE" {
                                 value = Some(param_value);
                                 value_expr = None;
+                                continue;
                             }
                             if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
@@ -206,7 +207,14 @@ pub(super) fn parse_resistor(
                                     DeferrableValue::Resolved(param_value),
                                 );
                             } else {
-                                instance_params.push((name_upper, param_value));
+                                upsert_passive_instance_param(
+                                    ElementParamSink {
+                                        instance_params: &mut instance_params,
+                                        deferred_params: &mut deferred_params,
+                                    },
+                                    &name_upper,
+                                    DeferrableValue::Resolved(param_value),
+                                );
                             }
                         }
                         DeferrableValue::Deferred(expr) => {
@@ -236,7 +244,14 @@ pub(super) fn parse_resistor(
                                     DeferrableValue::Deferred(expr),
                                 );
                             } else {
-                                deferred_params.push((name_upper, expr));
+                                upsert_passive_instance_param(
+                                    ElementParamSink {
+                                        instance_params: &mut instance_params,
+                                        deferred_params: &mut deferred_params,
+                                    },
+                                    &name_upper,
+                                    DeferrableValue::Deferred(expr),
+                                );
                             }
                         }
                     }
@@ -289,13 +304,6 @@ pub(super) fn parse_resistor(
                 });
             }
         }
-    }
-
-    if value.is_none() {
-        value = instance_params
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case("R") || k.eq_ignore_ascii_case("VALUE"))
-            .map(|(_, v)| *v);
     }
 
     let missing_value = value.is_none() && value_expr.is_none();
@@ -422,6 +430,11 @@ struct PassiveTail {
 /// single namespace so replacing an assignment cannot leave stale state in
 /// the other representation.
 fn upsert_passive_instance_param(sink: ElementParamSink<'_>, name: &str, value: DeferrableValue) {
+    let name = if name.eq_ignore_ascii_case("MULT") {
+        "M"
+    } else {
+        name
+    };
     let ElementParamSink {
         instance_params,
         deferred_params,
@@ -842,7 +855,14 @@ fn parse_passive_tail(
                                     DeferrableValue::Resolved(param_value),
                                 );
                             } else {
-                                tail.instance_params.push((name_upper, param_value));
+                                upsert_passive_instance_param(
+                                    ElementParamSink {
+                                        instance_params: &mut tail.instance_params,
+                                        deferred_params: &mut tail.deferred_params,
+                                    },
+                                    &name_upper,
+                                    DeferrableValue::Resolved(param_value),
+                                );
                             }
                         }
                         DeferrableValue::Deferred(expr) => {
@@ -872,7 +892,14 @@ fn parse_passive_tail(
                                     DeferrableValue::Deferred(expr),
                                 );
                             } else {
-                                tail.deferred_params.push((name_upper, expr));
+                                upsert_passive_instance_param(
+                                    ElementParamSink {
+                                        instance_params: &mut tail.instance_params,
+                                        deferred_params: &mut tail.deferred_params,
+                                    },
+                                    &name_upper,
+                                    DeferrableValue::Deferred(expr),
+                                );
                             }
                         }
                     }
@@ -901,6 +928,7 @@ fn parse_passive_tail(
             }
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
+                tail.value_expr = None;
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {

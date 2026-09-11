@@ -9083,6 +9083,55 @@ impl Engine {
 mod tests {
 
     #[test]
+    fn passive_reassignments_replace_numeric_and_deferred_fields() {
+        use crate::config::ExpressionDialect;
+        let engine = Engine::default();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for nested in [false, true] {
+                for (tail, expected_r, expected_c, expected_l) in [
+                    ("1 VALUE=2 VALUE={q}", 4.0, 4.0, 4.0),
+                    ("1 VALUE={q} VALUE=3", 3.0, 3.0, 3.0),
+                    ("1 VALUE=2 VALUE=3", 3.0, 3.0, 3.0),
+                    ("{q} 3", 3.0, 3.0, 3.0),
+                    ("12 M=2 M=3", 4.0, 36.0, 4.0),
+                    ("12 M={q} M=3", 4.0, 36.0, 4.0),
+                    ("12 M=3 M={q}", 3.0, 48.0, 3.0),
+                    ("12 M=3 MULT={q}", 3.0, 48.0, 3.0),
+                    ("12 MULT={q} M=3", 4.0, 36.0, 4.0),
+                    ("12 SCALE=2 SCALE=3", 36.0, 36.0, 36.0),
+                    ("12 SCALE={q} SCALE=3", 36.0, 36.0, 36.0),
+                    ("12 SCALE=3 SCALE={q}", 48.0, 48.0, 48.0),
+                ] {
+                    let body = format!("R1 r 0 {tail}\nC1 c 0 {tail}\nL1 l 0 {tail}");
+                    let source = if nested {
+                        format!(
+                            "Passive replacements\nX1 cell q=4\n.subckt cell q=9\n{body}\n.ends\n.end"
+                        )
+                    } else {
+                        format!("Passive replacements\n.param q=4\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        crate::netlist::NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    for (actual, expected) in [
+                        (circuit.resistors.conductances[0].recip(), expected_r),
+                        (circuit.capacitors.capacitances[0], expected_c),
+                        (circuit.inductors.inductances[0], expected_l),
+                    ] {
+                        assert_eq!(actual, expected, "{dialect:?} nested={nested}: {tail}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn signed_coupling_perfect_flux_rank_survives_square_root_roundoff() {
         for coefficient in [-1.0_f64, -0.999, 0.999, 1.0] {
             // These inductances normalize an authored |k|=1 to slightly below
