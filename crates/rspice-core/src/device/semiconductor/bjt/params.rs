@@ -324,15 +324,21 @@ impl Bjt {
     fn legacy_temp_scaled_current(
         nominal: Value,
         factlog: Value,
-        beta_scale: Value,
+        log_beta_scale: Value,
         emission_coeff: Value,
+        area: Value,
+        multiplicity: Value,
     ) -> Value {
         if nominal <= 0.0 {
             return 0.0;
         }
 
         let emission = emission_coeff.max(1e-12);
-        nominal * (factlog / emission).clamp(-80.0, 80.0).exp() / beta_scale.max(1e-18)
+        crate::numerics::scaled_exp_product(
+            &[nominal, area, multiplicity],
+            &[],
+            factlog / emission - log_beta_scale,
+        )
     }
 
     #[inline]
@@ -657,11 +663,17 @@ impl Bjt {
         let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
         // Classic SPICE/Xyce BJT scaling is parameterized by the model's EG
         // bandgap. EA is a distinct VBIC activation-energy parameter.
-        let legacy_factlog =
-            ((ratio - 1.0) * self.eg / vt.max(1e-18) + self.xis * ratio.ln()).clamp(-80.0, 80.0);
-        let legacy_is_factor = legacy_factlog.exp();
+        let legacy_factlog = (ratio - 1.0) * self.eg / vt.max(1e-18) + self.xis * ratio.ln();
+        let log_beta_scale = self.beta_exp * ratio.ln();
+        let scale = self.instance_scale();
         let is_temp = if legacy_model {
-            self.is_nominal * legacy_is_factor
+            // Preserve the constitutive exponential, combining geometry before
+            // rounding so small thermal factors do not erase finite currents.
+            crate::numerics::scaled_exp_product(
+                &[self.is_nominal, self.area, self.m],
+                &[],
+                legacy_factlog,
+            )
         } else {
             // Saturation-current mapping uses nominal emission coefficients;
             // TNF adjusts the junction slope separately. Reusing nf/nr here
@@ -673,11 +685,9 @@ impl Bjt {
                 self.xis,
                 self.ea,
                 self.nf_nominal,
-            )
+            ) * scale
         };
-        let scale = self.instance_scale();
         let (bc_area, substrate_area) = self.junction_area_factors();
-        let bc_scale = bc_area * self.m;
         let isrr_temp = Self::vbic_temp_scaled_current(
             self.isrr_nominal,
             ratio,
@@ -693,8 +703,10 @@ impl Bjt {
             Self::legacy_temp_scaled_current(
                 self.ibei_nominal,
                 legacy_factlog,
-                beta_scale,
+                log_beta_scale,
                 self.nei,
+                self.area,
+                self.m,
             )
         } else {
             Self::vbic_temp_scaled_current(
@@ -710,8 +722,10 @@ impl Bjt {
             Self::legacy_temp_scaled_current(
                 self.iben_nominal,
                 legacy_factlog,
-                beta_scale,
+                log_beta_scale,
                 self.nen,
+                self.area,
+                self.m,
             )
         } else {
             Self::vbic_temp_scaled_current(
@@ -727,8 +741,10 @@ impl Bjt {
             Self::legacy_temp_scaled_current(
                 self.ibci_nominal,
                 legacy_factlog,
-                beta_scale,
+                log_beta_scale,
                 self.nci,
+                bc_area,
+                self.m,
             )
         } else {
             Self::vbic_temp_scaled_current(
@@ -744,8 +760,10 @@ impl Bjt {
             Self::legacy_temp_scaled_current(
                 self.ibcn_nominal,
                 legacy_factlog,
-                beta_scale,
+                log_beta_scale,
                 self.ncn,
+                bc_area,
+                self.m,
             )
         } else {
             Self::vbic_temp_scaled_current(
@@ -901,7 +919,7 @@ impl Bjt {
         self.temperature = temp;
         self.bf = (self.bf_nominal * beta_scale).max(1e-18);
         self.br = (self.br_nominal * beta_scale).max(1e-18);
-        self.is = is_temp * scale;
+        self.is = is_temp;
         self.nf = nf_temp.max(1e-12);
         self.nr = nr_temp.max(1e-12);
         // Xyce's VBIC equations multiply every completed current branch by
@@ -983,10 +1001,11 @@ impl Bjt {
                 );
             }
         }
-        self.ibei = (ibei_temp * scale).max(0.0);
-        self.iben = (iben_temp * scale).max(0.0);
-        self.ibci = (ibci_temp * bc_scale).max(0.0);
-        self.ibcn = (ibcn_temp * bc_scale).max(0.0);
+        let current_scale = if legacy_model { 1.0 } else { scale };
+        self.ibei = (ibei_temp * current_scale).max(0.0);
+        self.iben = (iben_temp * current_scale).max(0.0);
+        self.ibci = (ibci_temp * current_scale).max(0.0);
+        self.ibcn = (ibcn_temp * current_scale).max(0.0);
         self.vbbe = if vbbe_temp.is_finite() {
             vbbe_temp
         } else {
@@ -1205,7 +1224,6 @@ impl Bjt {
         }
         if let Some(v) = model_parameter_alias(params, &["XTI", "PT"])
             && v.is_finite()
-            && v > 0.0
         {
             self.xti = v;
             self.xis = v;
@@ -1284,7 +1302,6 @@ impl Bjt {
         }
         if let Some(&v) = params.get("EG")
             && v.is_finite()
-            && v > 0.0
         {
             self.eg = v;
             self.ea = v;
@@ -2902,10 +2919,9 @@ mod tests {
         let tnom = bjt.tnom;
         let ratio = temp / tnom;
         let vt = bjt.thermal_voltage_at(temp);
-        let expected = bjt.is_nominal
-            * (((ratio - 1.0) * bjt.eg / vt + bjt.xis * ratio.ln()).clamp(-80.0, 80.0)).exp();
-        let wrong_vbic_activation_energy = bjt.is_nominal
-            * (((ratio - 1.0) * bjt.ea / vt + bjt.xis * ratio.ln()).clamp(-80.0, 80.0)).exp();
+        let expected = bjt.is_nominal * ((ratio - 1.0) * bjt.eg / vt + bjt.xis * ratio.ln()).exp();
+        let wrong_vbic_activation_energy =
+            bjt.is_nominal * ((ratio - 1.0) * bjt.ea / vt + bjt.xis * ratio.ln()).exp();
 
         bjt.set_temperature(temp);
 

@@ -2244,6 +2244,285 @@ fn zero_gummel_poon_saturation_current_stays_disabled() {
 }
 
 #[test]
+fn legacy_temperature_controls_and_cryogenic_currents_preserve_the_equations() {
+    use rspice_core::Complex64;
+    // Warning-free ngspice 46 and XyceNF 7.10 DC captures. Xyce clips its
+    // junction exponent at 100; the cryogenic Xyce-dialect case instead
+    // checks the physical equations with Xyce's k/q, as AC must retain the
+    // derivative of the actual junction current rather than a capped value.
+    for (dialect, exponent, energy, temperature, vb, vc, reference) in [
+        (
+            SpiceDialect::Ngspice,
+            0.0,
+            1.11,
+            70.0,
+            0.3,
+            0.2,
+            Some([-3.298800527212516e-07, -4.328755440063333e-09]),
+        ),
+        (
+            SpiceDialect::Xyce,
+            0.0,
+            1.11,
+            70.0,
+            0.3,
+            0.2,
+            Some([-3.305294819137328e-07, -4.1953901686865675e-09]),
+        ),
+        (
+            SpiceDialect::Ngspice,
+            -2.0,
+            1.11,
+            -40.0,
+            0.3,
+            0.2,
+            Some([-1.3377300385225144e-12, -1.6504605776079342e-14]),
+        ),
+        (
+            SpiceDialect::Xyce,
+            -2.0,
+            1.11,
+            -40.0,
+            0.3,
+            0.2,
+            Some([-1.3379090610888149e-12, -1.64880767456844e-14]),
+        ),
+        (
+            SpiceDialect::Ngspice,
+            3.0,
+            0.0,
+            70.0,
+            0.3,
+            0.2,
+            Some([-2.276604405974342e-09, -3.048365269752723e-11]),
+        ),
+        (
+            SpiceDialect::Xyce,
+            3.0,
+            0.0,
+            70.0,
+            0.3,
+            0.2,
+            Some([-2.280739832495972e-09, -2.955897989074215e-11]),
+        ),
+        (
+            SpiceDialect::Ngspice,
+            0.0,
+            0.0,
+            -40.0,
+            0.3,
+            0.2,
+            Some([-1.8319384057959526e-07, -1.7212242983473143e-09]),
+        ),
+        (
+            SpiceDialect::Xyce,
+            0.0,
+            0.0,
+            -40.0,
+            0.3,
+            0.2,
+            Some([-1.8328219526921212e-07, -1.7195327171945165e-09]),
+        ),
+        (
+            SpiceDialect::Ngspice,
+            -1.0,
+            -0.2,
+            70.0,
+            0.3,
+            0.2,
+            Some([-5.056987224693705e-10, -6.8808140483814914e-12]),
+        ),
+        (
+            SpiceDialect::Xyce,
+            -1.0,
+            -0.2,
+            70.0,
+            0.3,
+            0.2,
+            Some([-5.066034549811124e-10, -6.675257679790909e-12]),
+        ),
+        (
+            SpiceDialect::Ngspice,
+            3.0,
+            1.11,
+            -196.15,
+            1.0,
+            0.9,
+            Some([-0.0002778366276213612, -1.191758046411879e-06]),
+        ),
+        (SpiceDialect::Xyce, 3.0, 1.11, -196.15, 1.0, 0.9, None),
+    ] {
+        let temp = temperature + 273.15;
+        let vt = if dialect == SpiceDialect::Xyce {
+            rspice_core::constants::XYCE_K_BOLTZMANN * temp
+                / rspice_core::constants::XYCE_Q_ELECTRON
+        } else {
+            rspice_core::constants::thermal_voltage(temp)
+        };
+        let ratio = temp / 300.15;
+        let log_factor = (ratio - 1.0) * energy / vt + exponent * ratio.ln();
+        let beta = ratio.powf(-0.7);
+        let diode = |nominal: f64, bias: f64, emission: f64, log_scale: f64| {
+            let saturation = nominal * 6.0 * log_scale.exp();
+            (
+                saturation * (bias / (emission * vt)).exp_m1(),
+                saturation * (bias / (emission * vt)).exp() / (emission * vt),
+            )
+        };
+        let (forward, gf) = diode(1e-14, vb, 1.0, log_factor);
+        let reverse_area = if dialect == SpiceDialect::Ngspice {
+            2.0
+        } else {
+            1.0
+        };
+        let (reverse, gr) = diode(reverse_area * 1e-14, vb - vc, 1.0, log_factor);
+        let (leak_be, gle) = diode(1e-16, vb, 1.5, log_factor / 1.5 - beta.ln());
+        let (leak_bc, glc) = diode(2e-16, vb - vc, 2.0, log_factor / 2.0 - beta.ln());
+        let bf = 90.0 * beta;
+        let br = 3.0 * beta;
+        let expected_dc = [
+            -forward + (1.0 + 1.0 / br) * reverse + leak_bc,
+            -forward / bf - reverse / br - leak_be - leak_bc,
+        ];
+        let omega = std::f64::consts::TAU * 1e6;
+        let expected_ac = [
+            Complex64::new(-gf + (1.0 + 1.0 / br) * gr + glc, omega * 2e-9 * gr),
+            Complex64::new(
+                -gf / bf - gr / br - gle - glc,
+                -omega * (1e-9 * gf + 2e-9 * gr),
+            ),
+        ];
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            temperature: temp,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-10,
+                voltage_abstol: 1e-12,
+                current_abstol: 1e-22,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for (alias, nested) in [("XTI", false), ("PT", true)] {
+                let device = format!(
+                    "Q1 c b 0 qm AREA=2 M=3\n.model qm {kind}(IS=1e-14 BF=90 BR=3 ISE=1e-16 NE=1.5 ISC=2e-16 NC=2 NF=1 NR=1 XTB=-.7 {alias}={{x}} EG={{gap}} TF=1n TR=2n)"
+                );
+                let device = if nested {
+                    format!(
+                        "X1 c b cell x={exponent} gap={energy}\n.subckt cell c b x=19 gap=2\n{device}\n.ends"
+                    )
+                } else {
+                    device
+                };
+                let deck=Netlist::parse(&format!("Temperature mapping\n.param x={exponent} gap={energy}\nVC c 0 {}\nVB b 0 DC {} AC 1\n{device}\n.end",polarity*vc,polarity*vb)).unwrap();
+                let dc = engine.run_dc_op(&deck).unwrap();
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                for (i, name) in ["VC", "VB"].iter().enumerate() {
+                    let current = dc.branch_current_named(name).unwrap();
+                    let label = format!(
+                        "{dialect:?} {kind} {alias}={exponent} EG={energy} T={temperature} {name}"
+                    );
+                    if let Some(reference) = reference {
+                        // Account for the known older ngspice k/q constants.
+                        let tolerance = if dialect == SpiceDialect::Ngspice {
+                            2e-5
+                        } else {
+                            1e-8
+                        };
+                        assert_rel_close(&label, current, polarity * reference[i], tolerance);
+                    }
+                    assert!(
+                        (current - polarity * expected_dc[i]).abs()
+                            < expected_dc[i].abs() * 1e-9 + 1e-25,
+                        "{label}: {current:e} != {:e}",
+                        polarity * expected_dc[i]
+                    );
+                    let branch = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|key| key.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    let actual = ac[0].currents[branch];
+                    assert!(
+                        (actual - expected_ac[i]).norm() < expected_ac[i].norm() * 1e-9 + 1e-24,
+                        "{label}: {actual:?} != {:?}",
+                        expected_ac[i]
+                    );
+                }
+            }
+        }
+    }
+    for name in ["XTI", "PT", "EG"] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut deck =
+                Netlist::parse("Invalid temperature law\nQ1 0 0 0 qm\n.model qm NPN\n.end")
+                    .unwrap();
+            deck.models[0].params.push((name.into(), value));
+            assert!(
+                Engine::new(SimulationConfig::default())
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_junction_exponentials_preserve_tiny_and_large_finite_currents() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let vt = if dialect == SpiceDialect::Xyce {
+            rspice_core::constants::XYCE_K_BOLTZMANN * 300.15
+                / rspice_core::constants::XYCE_Q_ELECTRON
+        } else {
+            rspice_core::constants::thermal_voltage(300.15)
+        };
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-10,
+                voltage_abstol: 1e-30,
+                current_abstol: 1e-40,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        for (argument, isat) in [(-1e-16, 1e-14), (1e-16, 1e-14), (720.0, 1e-300)] {
+            let expected = if argument < 1.0 {
+                isat * f64::exp_m1(argument)
+            } else {
+                f64::exp(f64::ln(isat) + argument) - isat
+            };
+            let slope = if argument < 1.0 {
+                isat * f64::exp(argument) / vt
+            } else {
+                f64::exp(f64::ln(isat) + argument - f64::ln(vt))
+            };
+            let deck=Netlist::parse(&format!("Finite junction range\nVC c 0 0\nVB b 0 DC {} AC 1\nQ1 c b 0 qm\n.model qm NPN(IS={isat} BF=100 BR=1)\n.end",argument*vt)).unwrap();
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let actual = dc.branch_current_named("VC").unwrap();
+            assert!(
+                (actual - expected).abs() < expected.abs() * 1e-11,
+                "{dialect:?} arg={argument}: {actual:e} != {expected:e}"
+            );
+            let ac = engine.run_ac(&deck, &[1.0]).unwrap();
+            let branch = ac[0]
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("VC"))
+                .unwrap();
+            assert!((ac[0].currents[branch].re - slope).abs() < slope.abs() * 1e-11);
+        }
+    }
+}
+
+#[test]
 fn legacy_split_currents_reach_dc_ac_and_transient() {
     use rspice_core::Complex64;
     // Independent ngspice 46 DC measurements. AC is checked against the

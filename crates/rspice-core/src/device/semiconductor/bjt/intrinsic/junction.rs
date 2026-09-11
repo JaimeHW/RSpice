@@ -68,6 +68,25 @@ impl Bjt {
             return (0.0, 0.0);
         }
 
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon && v >= -3.0 * nvt {
+            let argument = v / nvt;
+            // Low-temperature GP junctions can exceed 80 thermal voltages
+            // at ordinary currents. A numerical cap changes their physics;
+            // combine the saturation current with exp before range checks.
+            let exponential = crate::numerics::scaled_exp_product(&[isat], &[], argument);
+            let current = if argument.abs() < 0.5 {
+                isat * argument.exp_m1()
+            } else {
+                exponential - isat
+            };
+            let conductance = if exponential.is_normal() {
+                exponential / nvt
+            } else {
+                crate::numerics::scaled_exp_product(&[isat], &[nvt], argument)
+            };
+            return (current, conductance);
+        }
+
         let v_forward = 80.0 * nvt;
         if v > v_forward {
             let exp_forward = (v_forward / nvt).exp();

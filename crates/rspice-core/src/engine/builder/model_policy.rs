@@ -735,6 +735,19 @@ pub(super) fn validate_bjt_model_level(
         }
     }
 
+    for name in ["XTI", "PT", "EG"] {
+        let authored = params.contains_key(name)
+            || expr_params
+                .iter()
+                .chain(string_params.iter())
+                .any(|(key, _)| key.eq_ignore_ascii_case(name));
+        if authored && !params.get(name).is_some_and(|value| value.is_finite()) {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} must be a finite scalar"
+            )));
+        }
+    }
+
     let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
     for name in ["IBE", "IBC", "ISS", "NS"] {
         let authored = params.contains_key(name)
