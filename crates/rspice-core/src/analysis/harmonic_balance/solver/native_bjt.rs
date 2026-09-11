@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 struct NativeStamp {
     residual: Vec<Value>,
+    residual_scale: Vec<Value>,
+    contributions: Vec<(usize, Value)>,
     jacobian: Vec<(usize, usize, Value)>,
     invalid: bool,
 }
@@ -14,12 +16,16 @@ impl NativeStamp {
     fn new(unknowns: usize) -> Self {
         Self {
             residual: vec![0.0; unknowns],
+            residual_scale: vec![0.0; unknowns],
+            contributions: Vec::new(),
             jacobian: Vec::new(),
             invalid: false,
         }
     }
     fn clear(&mut self) {
         self.residual.fill(0.0);
+        self.residual_scale.fill(0.0);
+        self.contributions.clear();
         self.jacobian.clear();
         self.invalid = false;
     }
@@ -42,11 +48,50 @@ impl MatrixStamper for NativeStamp {
         }
         if let Some(entry) = self.residual.get_mut(row - 1) {
             *entry += value;
-            self.invalid |= !entry.is_finite();
+            self.residual_scale[row - 1] += value.abs();
+            self.contributions.push((row - 1, value));
+            self.invalid |= !entry.is_finite() || !self.residual_scale[row - 1].is_finite();
         } else {
             self.invalid = true;
         }
     }
+}
+
+/// Retain the stable per-device term ordering without a dense row-by-device
+/// tensor or a hash lookup at every collocation sample.
+fn record_native_terms(
+    waveforms: &mut Vec<(usize, Vec<Value>)>,
+    terms: &[(usize, Value)],
+    time: usize,
+    count: usize,
+) -> Result<(), HbError> {
+    if time == 0 {
+        waveforms.try_reserve_exact(terms.len()).map_err(|error| {
+            HbError::InvalidCircuit(format!("native BJT term allocation failed: {error}"))
+        })?;
+        for &(row, _) in terms {
+            let mut values = Vec::new();
+            values.try_reserve_exact(count).map_err(|error| {
+                HbError::InvalidCircuit(format!("native BJT waveform allocation failed: {error}"))
+            })?;
+            values.resize(count, 0.0);
+            waveforms.push((row, values));
+        }
+    }
+    if waveforms.len() != terms.len() {
+        return Err(HbError::InvalidCircuit(
+            "native BJT physical term count changes over the orbit".into(),
+        ));
+    }
+    for ((row, waveform), &(actual_row, value)) in waveforms.iter_mut().zip(terms) {
+        if *row != actual_row {
+            return Err(HbError::InvalidCircuit(
+                "native BJT physical term changes its row over the orbit".into(),
+            ));
+        }
+        waveform[time] = value;
+    }
+    Ok(())
 }
 
 impl HbSolver {
@@ -101,15 +146,6 @@ impl HbSolver {
         q.clear();
         for bjt in &mut self.native_bjts {
             bjt.stamp_periodic_fq(solution, f, q);
-            // The canonical port owns these two linear KCL incidence entries.
-            // Retain the native RBI constitutive row and thermal power coupling.
-            if let Some(branch) = bjt.mna_rbi_branch_matrix_node(self.num_nodes) {
-                let current = solution[branch - 1];
-                for (node, sign) in [(bjt.node_bx, 1.0), (bjt.node_bi, -1.0)] {
-                    f.stamp(node, branch, -sign);
-                    f.stamp_rhs(node, sign * current);
-                }
-            }
             if f.invalid || q.invalid {
                 return Err(HbError::InvalidCircuit(format!(
                     "BJT '{}' produced invalid physical F/Q entries",
@@ -141,7 +177,7 @@ impl HbSolver {
             return Ok(());
         }
         let f = self.native_dc_sample(state)?;
-        for ((residual, scale), value) in state
+        for ((residual, scale), (value, magnitude)) in state
             .residual
             .iter_mut()
             .chain(&mut state.mna_branch_residual)
@@ -151,10 +187,10 @@ impl HbSolver {
                     .iter_mut()
                     .chain(&mut state.mna_branch_residual_scale),
             )
-            .zip(f.residual)
+            .zip(f.residual.into_iter().zip(f.residual_scale))
         {
             residual[0].re += value;
-            scale[0] += value.abs();
+            scale[0] += magnitude;
         }
         Ok(())
     }
@@ -234,24 +270,40 @@ impl HbSolver {
         let mut solution = vec![0.0; size];
         let mut f = NativeStamp::new(size);
         let mut q = NativeStamp::new(size);
-        let mut f_time = vec![vec![0.0; times]; size];
-        let mut q_time = vec![vec![0.0; times]; size];
+        let mut f_time = Vec::new();
+        let mut q_time = Vec::new();
         for time in 0..times {
             for (value, wave) in solution.iter_mut().zip(&waves) {
                 *value = wave[time];
             }
             self.sample_native_bjts(&solution, &mut f, &mut q)?;
-            for row in 0..size {
-                f_time[row][time] = f.residual[row];
-                q_time[row][time] = q.residual[row];
-            }
+            record_native_terms(&mut f_time, &f.contributions, time, times)?;
+            record_native_terms(&mut q_time, &q.contributions, time, times)?;
         }
+        self.add_native_waveform_terms(state, f_time, false)?;
+        self.add_native_waveform_terms(state, q_time, true)
+    }
+
+    fn add_native_waveform_terms(
+        &mut self,
+        state: &mut HbSolverState,
+        waveforms: Vec<(usize, Vec<Value>)>,
+        charge: bool,
+    ) -> Result<(), HbError> {
         let omega = std::f64::consts::TAU * self.config.fundamental_freq;
-        for (row, (f, q)) in f_time.iter().zip(&q_time).enumerate() {
-            let f =
-                self.checked_periodic_spectrum(f, (self.fft.size() - 1) / 2, "native BJT current")?;
-            let q =
-                self.checked_periodic_spectrum(q, (self.fft.size() - 1) / 2, "native BJT charge")?;
+        // Transform the physical contributions before taking magnitudes. A
+        // DC current must not inflate the tolerance of a small AC harmonic,
+        // and opposing currents at that harmonic must retain both magnitudes.
+        for (row, waveform) in waveforms {
+            let spectrum = self.checked_periodic_spectrum(
+                &waveform,
+                self.num_harmonics,
+                if charge {
+                    "native BJT charge term"
+                } else {
+                    "native BJT current term"
+                },
+            )?;
             let (residual, scale) = if row < self.num_nodes {
                 (&mut state.residual[row], &mut state.residual_scale[row])
             } else {
@@ -260,12 +312,12 @@ impl HbSolver {
                     &mut state.mna_branch_residual_scale[row - self.num_nodes],
                 )
             };
-            for k in 0..=self.num_harmonics {
-                let current = f.get(k).copied().unwrap_or_default();
-                let displacement =
-                    Complex64::new(0.0, omega * k as Value) * q.get(k).copied().unwrap_or_default();
-                residual[k] += current + displacement;
-                scale[k] += current.norm() + displacement.norm();
+            for (k, mut contribution) in spectrum.into_iter().enumerate() {
+                if charge {
+                    contribution *= Complex64::new(0.0, omega * k as Value);
+                }
+                residual[k] += contribution;
+                scale[k] += contribution.norm();
             }
         }
         Ok(())
@@ -312,5 +364,42 @@ impl HbSolver {
             }
         }
         Ok(spectra)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_terms_preserve_harmonic_scales_without_dc_masking() {
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(2), 1);
+        let count = solver.fft.size();
+        for (factor, accepted) in [(0.9999, true), (0.99, false)] {
+            let mut waves = Vec::new();
+            let mut dc = NativeStamp::new(1);
+            dc.stamp_rhs(1, 2.0);
+            dc.stamp_rhs(1, -2.0);
+            assert_eq!(dc.residual[0], 0.0);
+            assert_eq!(dc.residual_scale[0], 4.0);
+            for time in 0..count {
+                let ac = 1e-4 * (std::f64::consts::TAU * time as Value / count as Value).cos();
+                record_native_terms(
+                    &mut waves,
+                    &[(0, 2.0 + ac), (0, -2.0 - factor * ac)],
+                    time,
+                    count,
+                )
+                .unwrap();
+            }
+            let mut state = HbSolverState::new(1, 2);
+            solver
+                .add_native_waveform_terms(&mut state, waves, false)
+                .unwrap();
+            let expected = 0.5e-4 * (1.0 + factor);
+            assert!((state.residual_scale[0][1] - expected).abs() < 1e-15);
+            assert!(state.residual[0][1].norm() < expected);
+            assert_eq!(state.rows_converged(1e-3, 1e-15), accepted);
+        }
     }
 }

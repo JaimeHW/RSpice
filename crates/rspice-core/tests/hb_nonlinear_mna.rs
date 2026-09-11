@@ -481,3 +481,40 @@ fn nonlinear_hb_honors_resolved_voltage_tolerance_for_small_ideal_sources() {
         }
     }
 }
+
+#[test]
+fn vbic_hb_convergence_preserves_native_current_scales() {
+    // Independent ngspice46 .op reference, RELTOL1e-10 ABSTOL1e-18
+    // VNTOL1e-12, GMIN0, TEMP=TNOM27. The private lead currents nearly
+    // cancel at equilibrium; their magnitudes still define RELTOL.
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let deck = Netlist::parse(&format!(
+            "VBIC physical KCL scale\nVC c 0 {}\nVB b 0 {}\nQ1 c b 0 0 th qm AREA=2 M=3\n.model qm {kind}(LEVEL=4 IS=1e-15 IBEI=1e-17 IBCI=1e-17 IBEIP=0 IBENP=0 IBCIP=0 IBCNP=0 ISP=0 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 CJE=10p CJC=5p TF=10n TR=2n SELFT=1 RTH=1000 CTH=1n TD=100n)\n.options GMIN=0 RELTOL=1e-10 ABSTOL=1e-18 VNTOL=1e-12\n.temp 27\n.end\n",
+            polarity * 1.2, polarity * 0.65,
+        )).unwrap();
+        let mut simulation = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(simulation);
+        for krylov in [false, true] {
+            let mut config = HbConfig::new(F0).with_harmonics(8).with_tolerance(1e-10);
+            config.abstol = 1e-18;
+            config.use_krylov = krylov;
+            let hb = engine.run_hb(&deck, config).unwrap();
+            assert!((coefficient(&hb, "th", 0).re - 0.09920307212069912).abs() < 2e-9);
+            for (name, expected) in [("VC", -4.933430855483811e-4), ("VB", -4.933430867715138e-6)] {
+                let current = hb
+                    .result
+                    .mna_branch_currents
+                    .iter()
+                    .find(|branch| branch.device_name.eq_ignore_ascii_case(name))
+                    .unwrap()
+                    .coefficients[0];
+                assert!(
+                    (current.re / (polarity * expected) - 1.0).abs() < 2e-8,
+                    "{kind} Krylov={krylov} {name}: {current:e}"
+                );
+            }
+        }
+    }
+}

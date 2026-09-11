@@ -38,6 +38,23 @@ pub(crate) struct VbicNoiseOperatingModel {
     pub flicker: [(&'static str, NodeId, NodeId, Value, Value); 3],
 }
 
+/// HB owns the RBI port's linear KCL incidence. The native model retains its
+/// constitutive row and heat coupling; RHS terms are emitted separately below.
+struct PeriodicJacobian<'a, S> {
+    stamper: &'a mut S,
+    rbi: NodeId,
+    base: [NodeId; 2],
+}
+
+impl<S: MatrixStamper> MatrixStamper for PeriodicJacobian<'_, S> {
+    fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+        if self.rbi == 0 || col != self.rbi || !self.base.contains(&row) {
+            self.stamper.stamp(row, col, value);
+        }
+    }
+    fn stamp_rhs(&mut self, _row: NodeId, _value: Value) {}
+}
+
 impl Bjt {
     pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
         self.vbic_three_terminal
@@ -1222,7 +1239,8 @@ impl Bjt {
 
     /// Sample physical F/Q and their Jacobians at an unlimited state. Stamped
     /// RHS values are -F and -Q (not absolute Newton companion sources); both
-    /// matrices contain positive derivatives of the physical equations.
+    /// matrices contain positive derivatives of the physical equations. The
+    /// canonical RBI port separately owns its two linear electrical KCL terms.
     pub(crate) fn stamp_periodic_fq(
         &mut self,
         solution: &[Value],
@@ -1230,7 +1248,16 @@ impl Bjt {
         charge_part: &mut impl MatrixStamper,
     ) {
         self.update_mna_static_probe(solution);
-        self.stamp_mna_at(static_part, Some(solution), true);
+        self.stamp_mna_at(
+            &mut PeriodicJacobian {
+                stamper: static_part,
+                rbi: self.mna_rbi_matrix_node,
+                base: [self.node_bx, self.node_bi],
+            },
+            Some(solution),
+            true,
+        );
+        self.stamp_periodic_static_terms(static_part);
         let external_nodes = self.external_terminal_nodes();
         let (branches, _, _) = self.mna_charge_state();
         for (index, branch) in branches.iter().enumerate() {
@@ -1243,6 +1270,9 @@ impl Bjt {
             };
             let pos = node(branch.pos_internal, branch.pos_external);
             let neg = node(branch.neg_internal, branch.neg_external);
+            if pos == neg {
+                continue;
+            }
             for (row, sign) in [(pos, polarity), (neg, -polarity)] {
                 if row == 0 {
                     continue;
@@ -1270,6 +1300,70 @@ impl Bjt {
                 charge_part.stamp(row, pos, sign * charge.capacitance);
                 charge_part.stamp(row, neg, -sign * charge.capacitance);
             }
+        }
+    }
+
+    /// Emit each physical term separately, in a stable topology order, so HB
+    /// can Fourier-transform before summing its convergence magnitudes. The
+    /// canonical RBI port owns its two electrical current incidences.
+    fn stamp_periodic_static_terms(&self, stamper: &mut impl MatrixStamper) {
+        let Some(eval) = self.mna_eval else {
+            return;
+        };
+        let state = IntrinsicTerminalState {
+            vcx: self.vcx,
+            vci: self.vci,
+            vbx: self.vbx,
+            vbi: self.vbi,
+            vei: self.vei,
+            vbp: self.vbp,
+            vsi: self.vsi,
+            vrth: self.vrth,
+        };
+        let external_rbi_port = self.mna_rbi_matrix_node != 0;
+        self.visit_internal_kcl_terms(
+            state,
+            eval,
+            self.mna_external_state(),
+            external_rbi_port,
+            |row, terms| {
+                let sign = Self::vbic_residual_row_sign(row);
+                for term in terms {
+                    stamper.stamp_rhs(self.mna_internal_node(row), -sign * term.current);
+                }
+            },
+        );
+        let external_nodes = self.external_terminal_nodes();
+        self.visit_external_kcl_terms(eval, external_rbi_port, |row, terms| {
+            for term in terms {
+                stamper.stamp_rhs(external_nodes[row], -term.current);
+            }
+        });
+        if external_rbi_port {
+            let resistance = self.mna_rbi_stamp_resistance(eval.linearized, true).current;
+            stamper.stamp_rhs(self.mna_rbi_matrix_node, -(self.vbx - self.vbi));
+            stamper.stamp_rhs(self.mna_rbi_matrix_node, resistance * self.mna_rbi_current);
+        }
+        // Delay equations are affine in the transport-current coordinates.
+        // Their linear terms must not disappear into a near-zero DC balance.
+        for branch in self
+            .mna_delay_branches
+            .iter()
+            .chain([&self.mna_delay_thermal])
+        {
+            if !branch.is_active() {
+                continue;
+            }
+            let linear = [
+                branch.d_internal[IDX_VXF1] * self.vxf1,
+                branch.d_internal[IDX_VXF2] * self.vxf2,
+            ];
+            let remainder = branch.current - linear.iter().sum::<Value>();
+            self.visit_vbic_residual_rows(branch, |row, sign| {
+                for term in linear.into_iter().chain([remainder]) {
+                    stamper.stamp_rhs(row, -sign * term);
+                }
+            });
         }
     }
 
@@ -1413,6 +1507,21 @@ impl Bjt {
         }
     }
 
+    fn mna_rbi_stamp_resistance(
+        &self,
+        linearized: BjtLinearization,
+        exact: bool,
+    ) -> BranchLinearization {
+        if exact && self.uses_legacy_gummel_poon() {
+            self.legacy_gp_base_resistance_law::<true>(
+                linearized,
+                self.guarded_series_resistance(self.rbi),
+            )
+        } else {
+            self.mna_rbi_resistance(linearized, self.vrth)
+        }
+    }
+
     fn stamp_mna_rbi_current(
         &self,
         stamper: &mut impl MatrixStamper,
@@ -1439,14 +1548,7 @@ impl Bjt {
 
         // Vbx - Vbi - (RBI/qb)*I = 0. The temperature and charge-control
         // partials use the solved current, not an unresolvable voltage drop.
-        let resistance = if exact && self.uses_legacy_gummel_poon() {
-            self.legacy_gp_base_resistance_law::<true>(
-                linearized,
-                self.guarded_series_resistance(self.rbi),
-            )
-        } else {
-            self.mna_rbi_resistance(linearized, self.vrth)
-        };
+        let resistance = self.mna_rbi_stamp_resistance(linearized, exact);
         let mut equation = Self::scale_branch(resistance, -current);
         equation.current += self.vbx - self.vbi;
         equation.d_internal[IDX_VBX] += 1.0;
@@ -1489,7 +1591,7 @@ impl Bjt {
         let external_nodes = self.external_terminal_nodes();
         let source = branch.linearization_dot(internal, external) - branch.current;
 
-        let mut stamp_side = |row_node: NodeId, sign: Value| {
+        let stamp_side = |row_node: NodeId, sign: Value| {
             if row_node == 0 {
                 return;
             }
@@ -1510,26 +1612,32 @@ impl Bjt {
             stamper.stamp_rhs(row_node, sign * source);
         };
 
+        self.visit_vbic_residual_rows(branch, stamp_side);
+    }
+
+    fn visit_vbic_residual_rows(
+        &self,
+        branch: &BjtCurrentBranch,
+        mut visit: impl FnMut(NodeId, Value),
+    ) {
+        let external_nodes = self.external_terminal_nodes();
         if let Some(idx) = branch.pos_internal {
-            stamp_side(
+            visit(
                 self.mna_internal_node(idx),
                 Self::vbic_residual_row_sign(idx),
             );
         }
         if let Some(idx) = branch.neg_internal {
-            stamp_side(
+            visit(
                 self.mna_internal_node(idx),
                 -Self::vbic_residual_row_sign(idx),
             );
         }
-        // External rows already use the MNA leaving-current orientation.
-        // Delay branches carry no external incidence today; keep the mapping
-        // complete so future residual branches stamp correctly.
         if let Some(idx) = branch.pos_external {
-            stamp_side(external_nodes[idx], 1.0);
+            visit(external_nodes[idx], 1.0);
         }
         if let Some(idx) = branch.neg_external {
-            stamp_side(external_nodes[idx], -1.0);
+            visit(external_nodes[idx], -1.0);
         }
     }
 }
@@ -1682,6 +1790,11 @@ mod tests {
                     let mut f = DenseStamper::new(n);
                     let mut q = DenseStamper::new(n);
                     bjt.stamp_periodic_fq(point, &mut f, &mut q);
+                    let branch = bjt.mna_rbi_matrix_node;
+                    for (row, sign) in [(bjt.node_bx, 1.0), (bjt.node_bi, -1.0)] {
+                        f.stamp(row, branch, sign);
+                        f.stamp_rhs(row, -sign * point[branch - 1]);
+                    }
                     [f, q]
                 };
                 let base = sample(&mut bjt, &bias);
