@@ -339,11 +339,10 @@ impl<'a> HierarchyElaborator<'a> {
                     .into_iter()
                     .map(|(branch, sign)| {
                         super::flow_probes::signed(
-                            Expression::BranchAccess(BranchAccess::Nodes {
+                            Expression::BranchAccess(BranchAccess::Branch {
                                 access: "I".into(),
                                 kind: Some(AccessKind::Flow),
-                                pos: branch,
-                                neg: None,
+                                name: branch,
                                 span: port.span,
                             }),
                             f64::from(sign),

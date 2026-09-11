@@ -1310,6 +1310,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalDelayTicks { .. }
             | CfgValueKind::DigitalRepeatCount { .. }
             | CfgValueKind::DigitalAnalogPotential { .. }
+            | CfgValueKind::DigitalAnalogFlow { .. }
             | CfgValueKind::DigitalRealArithmetic { .. }
             | CfgValueKind::DigitalRealCompare { .. }
             | CfgValueKind::DigitalExpression { .. }

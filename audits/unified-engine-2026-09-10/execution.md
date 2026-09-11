@@ -2289,14 +2289,87 @@ subject to the focused evidence above. Remaining ownership, types, events,
 analyses, runtime/backend/platform and MS00-MS15 qualification work remain open.
 No licensed reference is available and vendor parity is not established.
 
+## MS03/MS06: sampled flow reads from digital processes
+
+Digital processes now resolve potential and flow access functions using the same
+nature/discipline rules as analog expressions. Named branches retain their
+identity, including parallel branches with identical endpoints. The compiler's
+simultaneous-flow pass now visits process expression roots (including locals,
+conditions, assignment captures and timing operands) and continuous-assignment
+expressions. Current-source reads acquire the existing mathematical current
+unknown and balance equation; the digital observer does not evaluate ddt/idt or
+other analog stateful operators again to obtain a value. Voltage/indirect-source
+currents retain their physical MNA unknowns.
+
+The canonical plan records each probe's quantity and node-pair/named-branch
+target. A distinct digital flow read asks the environment for the solver sample;
+validation rejects missing probes, wrong quantities and wrong result types. The
+linker relocates both quantities and preserves instance-qualified branch names.
+Schema 55 invalidates previous untyped probe records. Analog emitters continue
+to refuse digital instructions; this does not implement native/Wasm digital
+code generation.
+
+The mixed host binds branch flows using authored MIR node identities before
+circuit-node collapse, maps the correct solver current and preserves direction.
+Potential reads of named branches use the branch endpoints. Both quantities
+share the trial sample bank, accepted/rejected state and shared-host sampling
+barrier. The mapping also now recognizes the literal ground reference `0`,
+including compiler-created flow-state probes. A missing current binding is an
+explicit error. No current is guessed from a previous device evaluation.
+
+Five focused compiler checks pass: the existing voltage sampler, legal flow and
+illegal discrete-net operands, named-current resampling, custom access functions,
+and simultaneous current equations with unsupported event/local-shadow cases.
+Malformed plans with the wrong physical quantity or result type are refused.
+The first run exposed reserved words used as fixture variable names; these were
+corrected and only those two failing fixtures were rerun. Logs:
+target/unified-mixed-fixes/digital-flow-compiler-tests.log and
+target/unified-mixed-fixes/digital-flow-compiler-retest.log.
+
+The first circuit run passed the anonymous-source case and caught an identity
+error in the new named-source path: a terminal-flow sum generated a single-node
+access containing a branch name. Terminal sums now emit explicit named-branch
+accesses, including sums produced by hierarchy expansion. The named-source
+compiler regression now samples the terminal sum as well and passes. Log:
+target/unified-mixed-fixes/digital-flow-port-sum-test.log. The initial circuit
+log, target/unified-mixed-fixes/digital-flow-circuit-tests.log, retains the failed
+case as diagnostic history; it is superseded by the final result below.
+
+Main through 1cfeb21d5 was incorporated cleanly, including the BJT multiplicity
+and harmonic-balance changes. These do not touch this compiler or the exercised
+mixed transient path. The final generator refreshed all 43 built-ins without
+numerical source changes. Generator digest:
+e3c193ada72e26e935559ccfbe471ee979d08a0fbc16864ff5bb40b281ad08c3.
+Bundle digest:
+42d6535f34a94ae96bc3055bb5f2c80aad6cbae8b3a8f67342e87ed49823cc8c.
+Log: target/unified-mixed-fixes/digital-flow-final-generator.log. This supersedes
+the initial digital-flow-generator.log metadata.
+
+Both final linked-circuit cases passed in 0.05 seconds after a 53.63-second
+build. Each instantiates two samplers with different native resistor/capacitor
+loads. The checks cover named or anonymous voltage-source current, reverse
+direction, distinct parallel named current sources (one containing ddt), both
+terminal-flow sums, named-branch potential, exact scheduled sample time and
+correct loaded digital outputs. The comparison is against the analytical
+steady circuit currents; it does not qualify all dynamic/stateful or
+rejected-step behavior. Log:
+target/unified-mixed-fixes/digital-flow-final-circuit-tests.log.
+Broad suites remain deferred.
+
+This implements sampled flow access; analog-probe sensitivity subscriptions,
+analog-owned-variable reads/events, remaining hierarchy/ownership/value forms,
+all-owner startup and the rest of MS00-MS15 remain open. No licensed reference
+is available; vendor parity and production readiness are not established.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
 controller/effect/result/cache transaction. Preserve physical loads
 and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
-the root handshake to XSPICE boundaries and complete flow/analog-owned-variable
-dependencies and feedback convergence. Complete the remaining ownership/type/
+the root handshake to XSPICE boundaries and complete flow-event/analog-owned-variable
+dependencies and feedback convergence. Scheduled process flow reads now share
+the authoritative solution sample; event subscriptions remain open. Complete the remaining ownership/type/
 event requirements under MS06. Both conditional value domains now retain control
 flow, and numeric conversion handles the recorded mixed-clock comparison.
 Extend qualification of the

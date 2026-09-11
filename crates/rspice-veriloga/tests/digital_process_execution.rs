@@ -243,6 +243,10 @@ impl DigitalEnvironment for Store {
         self.driven_reals.insert(drive.driver, drive);
     }
 
+    fn read_analog_flow(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.read_analog_potential(probe)
+    }
+
     fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
         self.analog.get(usize::from(probe)).copied().flatten()
     }
@@ -4983,5 +4987,123 @@ fn four_state_conditionals_preserve_wide_signed_merges_and_nested_control_flow()
         h.set("c", condition);
         expect_finished(h.start(0));
         assert_eq!(h.get("q"), expected, "{condition}");
+    }
+}
+
+#[test]
+fn digital_flow_probes_sample_named_solver_currents_and_validate_quantity() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType};
+    let mut harness = Harness::from_source(
+        r#"
+module samples(p,n); inout p,n; electrical p,n; branch(p,n) supply;
+real amperes, volts, total;
+analog V(supply)<+2;
+initial begin amperes=I(supply); volts=V(supply); total=I(<p>); #1 amperes=I(<supply>); end
+endmodule
+"#,
+    );
+    let missing = start(
+        &harness.plan,
+        &harness.plan.processes[0],
+        &mut harness.store,
+    );
+    assert!(matches!(
+        missing,
+        Err(DigitalEvalError::AnalogProbeUnavailable(_))
+    ));
+    harness.set_analog("I(<supply>)", -0.002);
+    harness.set_analog("V(<supply>)", 2.0);
+    let wait = expect_suspended(harness.start(0));
+    assert_eq!(harness.get_real("amperes"), -0.002);
+    assert_eq!(harness.get_real("volts"), 2.0);
+    assert_eq!(harness.get_real("total"), -0.002);
+    harness.set_analog("I(<supply>)", -0.004);
+    assert!(matches!(
+        harness.resume(0, wait.resume_state()),
+        DigitalProcessOutcome::Finished
+    ));
+    assert_eq!(harness.get_real("amperes"), -0.004);
+    for wrong_type in [false, true] {
+        let mut malformed = harness.plan.clone();
+        let read = malformed.processes[0]
+            .function
+            .values
+            .iter_mut()
+            .find(|v| matches!(v.kind, CfgValueKind::DigitalAnalogFlow { .. }))
+            .unwrap();
+        if wrong_type {
+            read.value_type = CfgValueType::FourState { width: 1 };
+        } else if let CfgValueKind::DigitalAnalogFlow { probe } = read.kind {
+            read.kind = CfgValueKind::DigitalAnalogPotential { probe };
+        }
+        assert!(malformed.validate().is_err());
+    }
+}
+
+#[test]
+fn digital_flow_probes_resolve_custom_nature_roles() {
+    use rspice_veriloga::ast::AccessKind;
+    let mut harness = Harness::from_source(
+        r#"
+nature TestPotential units="V"; access=TestU; abstol=1e-6; endnature
+nature TestFlow units="A"; access=TestQ; abstol=1e-12; endnature
+discipline custom potential TestPotential; flow TestFlow; enddiscipline
+module samples(p,n); inout p,n; custom p,n; branch(p,n) source;
+real amperes, volts;
+analog TestU(source)<+2;
+initial begin amperes=TestQ(source); volts=TestU(p,n); end
+endmodule
+"#,
+    );
+    assert_eq!(harness.plan.analog_probes[0].quantity, AccessKind::Flow);
+    assert_eq!(
+        harness.plan.analog_probes[1].quantity,
+        AccessKind::Potential
+    );
+    harness.set_analog("TestQ(<source>)", -0.003);
+    harness.set_analog("TestU(p, n)", 2.0);
+    assert!(matches!(harness.start(0), DigitalProcessOutcome::Finished));
+    assert_eq!(harness.get_real("amperes"), -0.003);
+    assert_eq!(harness.get_real("volts"), 2.0);
+}
+
+#[test]
+fn digital_flow_probes_join_simultaneous_equations_and_refuse_unsupported_events() {
+    use rspice_veriloga::canonical_ir::CfgValueKind;
+    let source = r#"
+module samples(p,n); inout p,n; electrical p,n; branch(p,n) a,b;
+real x,y,total;
+analog begin I(a)<+V(p,n)*0.001+ddt(1e-12*V(p,n)); I(b)<+0.002; end
+initial begin #1; x=I(a); y=I(b); total=I(<p>); end
+endmodule
+"#;
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler.compile_canonical_ir_module(source, None).unwrap();
+    assert_eq!(
+        artifact
+            .hir
+            .internal_nodes
+            .iter()
+            .filter(|n| n.is_state)
+            .count(),
+        2
+    );
+    assert!(
+        artifact.digital.processes[0]
+            .function
+            .values
+            .iter()
+            .all(|v| !matches!(v.kind, CfgValueKind::DigitalAnalogFlow { .. })),
+        "current-source reads must use the simultaneous mathematical states"
+    );
+    for source in [
+        "module bad(p,n); inout p,n; electrical p,n; branch(p,n) b; analog V(b)<+1; initial begin real b; b=I(b); end endmodule",
+        "module bad(p,n); inout p,n; electrical p,n; reg q; analog V(p,n)<+1; initial @(I(p,n)) q=1; endmodule",
+        "module bad(p,n); inout p,n; electrical p,n; reg q; analog I(p,n)<+1; initial @(I(p,n)) q=1; endmodule",
+    ] {
+        assert!(
+            compiler.compile_canonical_ir_module(source, None).is_err(),
+            "{source}"
+        );
     }
 }

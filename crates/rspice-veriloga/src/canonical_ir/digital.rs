@@ -373,7 +373,7 @@ fn is_four_state(kind: &DigitalSignalKind) -> bool {
     matches!(kind, DigitalSignalKind::FourState)
 }
 
-/// One continuous-domain potential the discrete-domain half reads.
+/// The authored net pair or named branch of a continuous-domain read.
 ///
 /// Verilog-AMS LRM 2.4 section 7.3.3: "All continuous nets can be probed from
 /// a discrete context using access functions. All probes which are legal in a
@@ -402,26 +402,39 @@ fn is_four_state(kind: &DigitalSignalKind) -> bool {
 /// make the probe a *leaf*, so that two reads on either side of a suspension
 /// are two calls and may differ, exactly as two reads of a signal are.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalAnalogProbeTarget {
+    Nodes {
+        positive: SmolStr,
+        negative: Option<SmolStr>,
+    },
+    Branch {
+        name: SmolStr,
+    },
+}
+
+/// A typed solver sample requested by a discrete-domain expression.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalAnalogProbe {
     pub id: DigitalAnalogProbeId,
-    /// The access function as written — `V` for an electrical potential, and
-    /// whichever name the net's discipline gives its potential otherwise.
-    /// Carried so a host can report the probe the way the author wrote it.
+    /// Authored nature access function, resolved to its physical role.
     pub access: SmolStr,
-    /// The positive net's name, exactly as the author declared it.
-    pub positive: SmolStr,
-    /// The negative net's name. `None` is the single-ended form `V(a)`, whose
-    /// reference is the global ground rather than a second declared net.
-    pub negative: Option<SmolStr>,
+    pub quantity: crate::ast::AccessKind,
+    pub target: DigitalAnalogProbeTarget,
     pub span: SourceSpanRef,
 }
 
 impl DigitalAnalogProbe {
-    /// The probe as the author wrote it, for a diagnostic.
     pub fn spelling(&self) -> String {
-        match &self.negative {
-            Some(negative) => format!("{}({}, {})", self.access, self.positive, negative),
-            None => format!("{}({})", self.access, self.positive),
+        match &self.target {
+            DigitalAnalogProbeTarget::Nodes {
+                positive,
+                negative: Some(negative),
+            } => format!("{}({}, {})", self.access, positive, negative),
+            DigitalAnalogProbeTarget::Nodes {
+                positive,
+                negative: None,
+            } => format!("{}({})", self.access, positive),
+            DigitalAnalogProbeTarget::Branch { name } => format!("{}(<{}>)", self.access, name),
         }
     }
 }
@@ -608,7 +621,7 @@ pub struct CanonicalDigitalPlan {
     /// Every continuous driver in the module, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drivers: Vec<DigitalDriver>,
-    /// Every continuous-domain potential a process reads, in first-appearance
+    /// Every continuous-domain potential or flow a process reads, in first-appearance
     /// order (Verilog-AMS LRM 2.4 section 7.3.3).
     ///
     /// Empty for a design with no cross-domain read, which is every design

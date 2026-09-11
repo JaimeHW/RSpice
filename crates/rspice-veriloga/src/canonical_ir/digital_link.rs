@@ -351,10 +351,17 @@ pub fn link_digital_plans(
             let id = DigitalAnalogProbeId::new(index(plan.analog_probes.len(), "analog probe")?);
             let mut probe = probe.clone();
             probe.id = id;
-            probe.positive = qualify_probe_node(layout.instance.name, &probe.positive).into();
-            probe.negative = probe
-                .negative
-                .map(|node| qualify_probe_node(layout.instance.name, &node).into());
+            match &mut probe.target {
+                super::digital::DigitalAnalogProbeTarget::Nodes { positive, negative } => {
+                    *positive = qualify_probe_node(layout.instance.name, positive).into();
+                    *negative = negative
+                        .as_ref()
+                        .map(|node| qualify_probe_node(layout.instance.name, node).into());
+                }
+                super::digital::DigitalAnalogProbeTarget::Branch { name } => {
+                    *name = format!("{}.{name}", layout.instance.name).into();
+                }
+            }
             relocate_span(&mut probe.span, &layout.map);
             layout.map.analog_probes.push(id);
             plan.analog_probes.push(probe);
@@ -518,7 +525,8 @@ fn relocate_value(
         | CfgValueKind::DigitalRealSignalRead { signal } => {
             *signal = map.signals[usize::from(*signal)];
         }
-        CfgValueKind::DigitalAnalogPotential { probe } => {
+        CfgValueKind::DigitalAnalogPotential { probe }
+        | CfgValueKind::DigitalAnalogFlow { probe } => {
             *probe = map.analog_probes[usize::from(*probe)]
         }
         CfgValueKind::DigitalBlockingWrite { target, .. } => relocate_target(target, source, map),

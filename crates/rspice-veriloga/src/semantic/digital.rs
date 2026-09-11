@@ -624,6 +624,17 @@ impl SemanticAnalyzer {
         }
         self.reject_drivers_on_input_ports(module, &continuous_assigns);
 
+        for process in &mut processes {
+            super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
+                self.resolve_digital_accesses(expression)
+            });
+        }
+        for assign in &mut continuous_assigns {
+            self.resolve_digital_accesses(&mut assign.assignment.value);
+            if let Some(delay) = &mut assign.assignment.delay {
+                self.resolve_digital_accesses(delay);
+            }
+        }
         analyzed.digital = AnalyzedDigital {
             time_scale: module.time_scale,
             signals,
@@ -1999,6 +2010,10 @@ impl SemanticAnalyzer {
             // wave; their arguments are still resolved so an undeclared name
             // inside one is not hidden by the refusal.
             Expression::Call(call) => {
+                if let Some(access) = self.digital_access_call(call) {
+                    self.check_analog_probe(&access, index);
+                    return;
+                }
                 self.record_error_at(
                     SemanticErrorKind::UnsupportedFeature(format!(
                         "call to `{}` inside a discrete-domain expression is not supported yet",
@@ -2102,75 +2117,146 @@ impl SemanticAnalyzer {
     /// refusal names the reason rather than the clause, because the clause
     /// permits all of them.
     ///
-    /// # What is refused, and why each one is
-    ///
-    /// * **A flow probe** (`I(a, b)`, or any access function its discipline
-    ///   declares a flow). Section 7.3.3 makes it legal. A potential is an
-    ///   entry of the solution vector and can be read from wherever the analog
-    ///   solver last left one; a flow is not — it is the analog body's own
-    ///   accumulated contribution to a branch, produced by evaluating that
-    ///   body, and there is nothing to sample between evaluations. Reading a
-    ///   stale one would be a plausible number for a quantity nobody computed.
-    /// * **The named-branch form** (`V(<b>)`). It names an entry of the analog
-    ///   branch table, which the discrete plan does not carry — a probe names
-    ///   its nets, so the two halves need no shared numbering. The equivalent
-    ///   node form is what to write.
-    /// * **A net that is not continuous.** A discrete net has no potential to
-    ///   probe; it is read by naming it, which is what a process already does.
+    /// Resolve the same physical access role as the analog context. The
+    /// subsequent branch pass supplies solver-owned currents for flow reads.
     fn check_analog_probe(&mut self, access: &BranchAccess, index: &HashMap<SmolStr, usize>) {
-        let (function, positive, negative) = match access {
+        let names: Vec<&SmolStr> = match access {
+            BranchAccess::Nodes { pos, neg, .. } => {
+                std::iter::once(pos).chain(neg.iter()).collect()
+            }
+            BranchAccess::Branch { name, .. } => vec![name],
+        };
+        if let Some(name) = names.into_iter().find(|name| {
+            self.digital_scopes
+                .iter()
+                .any(|scope| scope.iter().any(|local| &local.name == *name))
+        }) {
+            self.record_error_at(SemanticErrorKind::InvalidExpression(
+                format!("analog access names process-local storage `{name}`, not a continuous net or branch")), access.span());
+            return;
+        }
+        match access {
             BranchAccess::Nodes {
                 access: function,
                 pos,
                 neg,
                 ..
-            } => (function, pos, neg.as_ref()),
+            } => {
+                if !(neg.is_none()
+                    && self
+                        .symbols
+                        .lookup(pos)
+                        .is_some_and(|s| s.kind == SymbolKind::Branch))
+                {
+                    for net in std::iter::once(pos).chain(neg.iter()) {
+                        self.check_probe_net(function, net, access.span(), index);
+                    }
+                }
+            }
             BranchAccess::Branch {
                 access: function,
                 name,
-                span,
                 ..
             } => {
-                self.record_error_at(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "`{function}(<{name}>)` probes a declared branch from a discrete-domain \
-                         expression; Verilog-AMS LRM 2.4 section 7.3.3 allows it, but a \
-                         discrete-domain probe names its nets rather than the analog branch \
-                         table — write the equivalent node form"
-                    )),
-                    *span,
-                );
-                return;
+                if !self
+                    .symbols
+                    .lookup(name)
+                    .is_some_and(|s| s.kind == SymbolKind::Branch)
+                {
+                    self.check_probe_net(function, name, access.span(), index);
+                }
             }
-        };
-        if self.disciplines.resolve_access(function).is_none() && function != "I" {
-            self.record_error_at(
-                SemanticErrorKind::InvalidExpression(format!(
-                    "`{function}` is not an access function of any declared discipline"
-                )),
-                access.span(),
-            );
-            return;
         }
-        let discipline = self
-            .symbols
-            .lookup(positive)
-            .and_then(|symbol| symbol.attrs.discipline.as_deref())
-            .unwrap_or("electrical");
-        if self.disciplines.access_kind(discipline, function) == Some(crate::ast::AccessKind::Flow)
+        match self.resolve_branch_access_kind(access, access.span()) {
+            Ok(kind) => {
+                if let BranchAccess::Branch {
+                    access: function,
+                    name,
+                    ..
+                } = access
+                    && !self
+                        .symbols
+                        .lookup(name)
+                        .is_some_and(|s| s.kind == SymbolKind::Branch)
+                    && (kind != AccessKind::Flow
+                        || !self
+                            .symbols
+                            .lookup(name)
+                            .is_some_and(|s| s.kind == SymbolKind::Port))
+                {
+                    self.record_error_at(SemanticErrorKind::InvalidExpression(
+                        format!("`{function}(<{name}>)` must name a declared branch or a flow-probed port")), access.span());
+                }
+            }
+            Err(error) => self.record_error_at(
+                SemanticErrorKind::InvalidExpression(error.to_string()),
+                access.span(),
+            ),
+        }
+    }
+
+    fn digital_access_call(&self, call: &CallExpr) -> Option<BranchAccess> {
+        if self.user_functions.contains_key(&call.name)
+            || self.disciplines.resolve_access(&call.name).is_none()
+            || !matches!(call.args.len(), 1 | 2)
+            || !call
+                .args
+                .iter()
+                .all(|arg| matches!(arg, Expression::Identifier(_)))
         {
-            self.record_error_at(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "`{function}` is a flow access, and a flow has no value between analog \
-                     evaluations to sample from a discrete-domain expression; Verilog-AMS LRM \
-                     2.4 section 7.3.3 allows it, but only a potential probe is served here"
-                )),
-                access.span(),
-            );
-            return;
+            return None;
         }
-        for net in std::iter::once(positive).chain(negative) {
-            self.check_probe_net(function, net, access.span(), index);
+        let mut names = call.args.iter().map(|arg| match arg {
+            Expression::Identifier(id) => id.name.clone(),
+            _ => unreachable!(),
+        });
+        Some(BranchAccess::Nodes {
+            access: call.name.clone(),
+            kind: None,
+            pos: names.next().unwrap(),
+            neg: names.next(),
+            span: call.span,
+        })
+    }
+
+    /// Keep the resolved nature and named-branch identity in the process AST,
+    /// before hierarchy and simultaneous-flow lowering inspect its reads.
+    fn resolve_digital_accesses(&self, root: &mut Expression) {
+        let mut pending = vec![root];
+        while let Some(expression) = pending.pop() {
+            if let Expression::Call(call) = expression
+                && let Some(access) = self.digital_access_call(call)
+            {
+                *expression = Expression::BranchAccess(access);
+            }
+            if let Expression::BranchAccess(access) = expression {
+                if let Ok(kind) = self.resolve_branch_access_kind(access, access.span()) {
+                    let normalized = match access {
+                        BranchAccess::Nodes {
+                            access,
+                            pos,
+                            neg: None,
+                            span,
+                            ..
+                        } if self
+                            .symbols
+                            .lookup(pos)
+                            .is_some_and(|s| s.kind == SymbolKind::Branch) =>
+                        {
+                            BranchAccess::Branch {
+                                access: access.clone(),
+                                kind: Some(kind),
+                                name: pos.clone(),
+                                span: *span,
+                            }
+                        }
+                        _ => access.clone().with_kind(kind),
+                    };
+                    *access = normalized;
+                }
+            } else {
+                super::flow_probes::for_child_mut(expression, &mut |child| pending.push(child));
+            }
         }
     }
 
@@ -2183,6 +2269,9 @@ impl SemanticAnalyzer {
         span: Span,
         index: &HashMap<SmolStr, usize>,
     ) {
+        if super::is_global_ground_name(net) {
+            return;
+        }
         // A name the module declared in its discrete half is refused first and
         // by that fact alone, without asking the discipline database. A `wire`
         // written in a process's own half of the module is a discrete net

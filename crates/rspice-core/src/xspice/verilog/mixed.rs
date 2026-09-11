@@ -472,9 +472,9 @@ impl DacBridge {
 /// One continuous-net probe of Verilog-AMS LRM 2.4 section 7.3.3, wired to the
 /// circuit.
 ///
-/// `positive` and `negative` are circuit-node ids and `0` is ground, exactly as
-/// they are on a bridge — and for the same reason: the module's two halves
-/// name the same node, so they had better name it the same way.
+/// `positive` and `negative` are one-based solution indices; `0` is the
+/// reference. A potential uses a node difference. A flow uses its current
+/// unknown against the reference, with `scale` preserving authored direction.
 ///
 /// The plan names the probe's nets by the author's own identifiers, because the
 /// analog levels and the discrete plan are lowered by two passes that share no
@@ -485,6 +485,13 @@ impl DacBridge {
 struct AnalogProbeWiring {
     positive: usize,
     negative: usize,
+    scale: f64,
+}
+
+impl AnalogProbeWiring {
+    fn sample(&self, solution: &[f64]) -> f64 {
+        self.scale * (node_voltage(solution, self.positive) - node_voltage(solution, self.negative))
+    }
 }
 
 /// The bridge declarations, fixed once the module is wired.
@@ -1031,7 +1038,7 @@ impl MixedSignalHost {
         // it *is* the solution state of an unsolved matrix, and the same thing
         // a node voltage read before the first solve would give.
         let initial_probe_values = vec![0.0; analog_probes.len()];
-        digital.sample_analog_potentials(&initial_probe_values);
+        digital.sample_analog_probes(&initial_probe_values);
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
             instance: instance.to_string(),
@@ -1152,7 +1159,7 @@ impl MixedSignalHost {
                 self.state.initial_digital = Some(self.state.digital.clone());
             }
             let digital = self.state.digital.make_mut();
-            digital.sample_analog_potentials(&self.state.accepted_probe_values);
+            digital.sample_analog_probes(&self.state.accepted_probe_values);
             if self.analog_probes.is_empty() {
                 digital.start()?;
             } else {
@@ -1786,7 +1793,7 @@ impl MixedSignalHost {
                 &mut self.scratch.probes,
             );
             let digital = self.state.digital.make_mut();
-            digital.sample_analog_potentials(&self.scratch.probes);
+            digital.sample_analog_probes(&self.scratch.probes);
             if start {
                 digital.start()?;
                 self.trial.as_mut().unwrap().start_digital = false;
@@ -1889,7 +1896,7 @@ impl MixedSignalHost {
             .map(|trial| trial.vectors.probe_values.clone())
             .unwrap_or_default();
         let digital = self.state.digital.make_mut();
-        digital.sample_analog_potentials(&probes);
+        digital.sample_analog_probes(&probes);
         digital.force_many(&parsed, tick)?;
         // A drive published into the slot can move a D/A input, so the
         // boundary is no longer known quiet.
@@ -2149,7 +2156,7 @@ impl MixedSignalHost {
                 .is_some_and(|next| next <= tick)
         {
             let digital = self.state.digital.make_mut();
-            digital.sample_analog_potentials(&scratch.probes);
+            digital.sample_analog_probes(&scratch.probes);
             if start {
                 digital.start()?;
                 self.trial.as_mut().unwrap().start_digital = false;
@@ -2234,7 +2241,7 @@ impl MixedSignalHost {
         fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
         if !scratch.drives.is_empty() {
             let digital = self.state.digital.make_mut();
-            digital.sample_analog_potentials(&scratch.probes);
+            digital.sample_analog_probes(&scratch.probes);
             digital.force_many_from_analog(&scratch.drives, publish_tick, time_seconds)?;
             if let Some(trial) = self.trial.as_mut() {
                 for &(index, crossing) in &scratch.crossings {
@@ -2979,10 +2986,7 @@ fn read_dac_bits(state: &MixedState, out: &mut Vec<FourStateBit>) -> Result<(), 
 /// that answers.
 fn fill_analog_probes(probes: &[AnalogProbeWiring], circuit_voltages: &[f64], out: &mut Vec<f64>) {
     out.clear();
-    out.extend(probes.iter().map(|probe| {
-        node_voltage(circuit_voltages, probe.positive)
-            - node_voltage(circuit_voltages, probe.negative)
-    }));
+    out.extend(probes.iter().map(|probe| probe.sample(circuit_voltages)));
 }
 
 fn analog_solver_nodes(analog: &VerilogADevice) -> impl Iterator<Item = usize> + '_ {
@@ -2997,8 +3001,8 @@ fn analog_solver_nodes(analog: &VerilogADevice) -> impl Iterator<Item = usize> +
         )
 }
 
-/// Resolve continuous-net probes to circuit nodes, using the internal-node
-/// mapping installed by the owning solver. Ground uses the reference index.
+/// Resolve potential and flow probes to the owning solver's solution indices.
+/// Branch identity is resolved before circuit nodes are collapsed.
 fn wire_analog_probes(
     canonical_ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
     analog: &VerilogADevice,
@@ -3013,11 +3017,12 @@ fn wire_analog_probes(
         .map(|name| name.as_str())
         .collect();
     let resolve = |net: &str| -> Result<usize, MixedSignalError> {
-        if canonical_ir
-            .hir
-            .ground_nodes
-            .iter()
-            .any(|ground| ground == net)
+        if net == "0"
+            || canonical_ir
+                .hir
+                .ground_nodes
+                .iter()
+                .any(|ground| ground == net)
         {
             return Ok(0);
         }
@@ -3040,14 +3045,95 @@ fn wire_analog_probes(
             ),
         })
     };
+    use rspice_veriloga::ast::AccessKind;
+    use rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget;
+    let resolve_mir_node = |name: &str| {
+        if name == "0"
+            || canonical_ir
+                .hir
+                .ground_nodes
+                .iter()
+                .any(|ground| ground == name)
+        {
+            Ok(None)
+        } else {
+            canonical_ir
+                .mir
+                .nodes
+                .iter()
+                .find(|node| node.name == name)
+                .map(|node| Some(node.id))
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: format!("analog flow probe names unknown node `{name}`"),
+                })
+        }
+    };
     probes
         .iter()
         .map(|probe| {
+            let (positive, negative, declared) = match &probe.target {
+                DigitalAnalogProbeTarget::Nodes { positive, negative } => {
+                    (positive.as_str(), negative.as_deref(), None)
+                }
+                DigitalAnalogProbeTarget::Branch { name } => {
+                    let branch = canonical_ir
+                        .hir
+                        .branches
+                        .iter()
+                        .find(|branch| branch.name == *name)
+                        .ok_or_else(|| MixedSignalError::InvalidBridge {
+                            detail: format!("analog probe names undeclared branch `{name}`"),
+                        })?;
+                    (
+                        branch.pos_node.as_str(),
+                        Some(branch.neg_node.as_str()),
+                        Some(name),
+                    )
+                }
+            };
+            if probe.quantity == AccessKind::Potential {
+                return Ok(AnalogProbeWiring {
+                    positive: resolve(positive)?,
+                    negative: negative.map_or(Ok(0), resolve)?,
+                    scale: 1.0,
+                });
+            }
+            // Match authored MIR identities before mapping into the circuit. Tied
+            // terminals must not merge distinct branches or their current unknowns.
+            let pos = resolve_mir_node(positive)?;
+            let neg = negative.map_or(Ok(None), resolve_mir_node)?;
+            let unknown = canonical_ir
+                .mir
+                .branch_unknowns
+                .iter()
+                .find(|unknown| {
+                    unknown.declared_name.as_ref() == declared
+                        && ((unknown.pos_node == pos && unknown.neg_node == neg)
+                            || (unknown.pos_node == neg && unknown.neg_node == pos))
+                })
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: format!(
+                        "flow probe `{}` has no simultaneous solver current in module `{}`",
+                        probe.spelling(),
+                        canonical_ir.mir.module_name
+                    ),
+                })?;
+            let current = analog
+                .branch_current_index(usize::from(unknown.id))
+                .filter(|index| *index != 0)
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: format!(
+                        "flow probe `{}` has no solver-current mapping",
+                        probe.spelling()
+                    ),
+                })?;
             Ok(AnalogProbeWiring {
-                positive: resolve(&probe.positive)?,
-                negative: match &probe.negative {
-                    Some(negative) => resolve(negative)?,
-                    None => 0,
+                positive: current,
+                negative: 0,
+                scale: if unknown.pos_node == pos && unknown.neg_node == neg {
+                    1.0
+                } else {
+                    -1.0
                 },
             })
         })

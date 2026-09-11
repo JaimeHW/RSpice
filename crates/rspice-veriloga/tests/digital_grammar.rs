@@ -913,23 +913,14 @@ fn a_process_may_probe_a_continuous_net() {
     assert_eq!(only_module(&analyzed).digital.processes.len(), 1);
 }
 
-/// What section 7.3.3 permits and this compiler cannot serve, each named for
-/// the reason rather than for the clause — the clause allows all three.
+/// Cross-domain reads include flow; a discrete signal is still not a
+/// continuous net and cannot be passed to an analog access function.
 #[test]
-fn the_probe_forms_this_boundary_cannot_serve_are_refused_by_name() {
-    // A flow. There is no value between analog evaluations to sample: a branch
-    // flow is the analog body's own accumulated contribution, not an entry of
-    // the solution vector.
-    let message = analyze_error(&digital_module(
-        "    wire clk;\n\
-         \x20   reg hi;\n\
-         \x20   always @(posedge clk) hi <= (I(p, n) > 0.5);",
+fn process_flow_probes_are_accepted_and_discrete_operands_are_refused() {
+    let analyzed = analyze(&digital_module(
+        "wire clk; reg hi; always @(posedge clk) hi <= (I(p,n)>0.5);",
     ));
-    assert!(
-        message.contains("`I` is a flow access")
-            && message.contains("no value between analog evaluations"),
-        "expected a flow-probe diagnostic, got {message:?}"
-    );
+    assert_eq!(only_module(&analyzed).digital.processes.len(), 1);
 
     // A discrete net has no potential to probe at all.
     let message = analyze_error(&digital_module(

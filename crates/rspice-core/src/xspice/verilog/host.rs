@@ -737,8 +737,8 @@ impl DigitalHost {
     /// solution — Verilog-AMS LRM 2.4 section 7.3.6.3 fixes a probe's value by
     /// the *time* the expression is evaluated, and a bank refreshed halfway
     /// through a settle would give two processes in one slot two answers.
-    pub(crate) fn sample_analog_potentials(&mut self, values: &[f64]) {
-        self.store.sample_analog_potentials(values);
+    pub(crate) fn sample_analog_probes(&mut self, values: &[f64]) {
+        self.store.sample_analog_probes(values);
     }
 
     /// Write a real net from outside the design and settle the consequences.

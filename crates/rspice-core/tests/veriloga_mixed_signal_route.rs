@@ -2262,3 +2262,81 @@ endmodule
         );
     }
 }
+
+#[test]
+fn digital_flow_probes_observe_named_sources_and_parallel_branch_identity() {
+    sampled_flow_circuit(true);
+}
+
+#[test]
+fn digital_flow_probes_observe_anonymous_sources_and_reversed_direction() {
+    sampled_flow_circuit(false);
+}
+
+fn sampled_flow_circuit(named_source: bool) {
+    let (source_branch, sense, reverse) = if named_source {
+        ("supply", "I(supply)", "-I(<supply>)")
+    } else {
+        ("p,n", "I(p,n)", "I(n,p)")
+    };
+    let model = ModelFile::new(
+        "flow_sampler",
+        &format!(
+            r#"
+`timescale 1ns/1ps
+module flow_sampler(p,n,q);
+ inout p,n; electrical p,n;
+ output q; reg q;
+ branch(p,n) supply,a; branch(n,p) b;
+ parameter real LOAD=1000.0;
+ real sample_i, reverse_i, a_i, b_i, p_i, n_i, sample_v;
+ analog begin
+   V({source_branch})<+2.0;
+   I(a)<+0.003+ddt(1e-12*V(p,n));
+   I(b)<+0.001;
+ end
+ initial begin
+   q=0;
+   #1;
+   sample_i={sense}; reverse_i={reverse};
+   a_i=I(a); b_i=I(<b>); p_i=I(<p>); n_i=I(<n>); sample_v=V(b);
+   q=(sample_i+2.0/LOAD+0.002<1e-9) && (sample_i+2.0/LOAD+0.002>-1e-9)
+     && (reverse_i+sample_i<1e-9) && (reverse_i+sample_i>-1e-9)
+     && (a_i>0.002999999) && (a_i<0.003000001)
+     && (b_i>0.000999999) && (b_i<0.001000001)
+     && (p_i+2.0/LOAD<1e-9) && (p_i+2.0/LOAD>-1e-9)
+     && (n_i-2.0/LOAD<1e-9) && (n_i-2.0/LOAD>-1e-9)
+     && (sample_v<-1.999999) && (sample_v>-2.000001);
+ end
+endmodule
+"#
+        ),
+    );
+    let deck = format!(
+        "* physical branch samples in linked mixed modules\n.param vcc=1\nXa pa 0 qa flow_sampler LOAD=1000\nXb pb 0 qb flow_sampler LOAD=2000\nRa pa 0 1k\nRb pb 0 2k\nCa pa 0 1p\nCb pb 0 2p\nRqa qa 0 1k\nRqb qb 0 1k\n.va \"{}\" flow_sampler\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One,
+            "{node}"
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+        assert!(
+            (waveform(&result, node).last().unwrap() - 1.0 / 1.02).abs() < 1e-8,
+            "{node}"
+        );
+    }
+    for node in ["pa", "pb"] {
+        assert!(
+            waveform(&result, node)
+                .iter()
+                .all(|v| (*v - 2.0).abs() < 1e-9),
+            "{node}"
+        );
+    }
+}

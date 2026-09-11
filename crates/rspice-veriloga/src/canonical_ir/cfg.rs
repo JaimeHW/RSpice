@@ -892,6 +892,10 @@ pub enum CfgValueKind {
     DigitalAnalogPotential {
         probe: DigitalAnalogProbeId,
     },
+    /// A solver-owned physical branch current sampled at this instruction.
+    DigitalAnalogFlow {
+        probe: DigitalAnalogProbeId,
+    },
     /// Arithmetic over two real values, inside a process function.
     ///
     /// Distinct from [`Self::Binary`], which is the analog body's arithmetic on
@@ -1223,6 +1227,7 @@ impl CfgValueKind {
             | Self::DigitalDelayTicks { .. }
             | Self::DigitalRepeatCount { .. }
             | Self::DigitalAnalogPotential { .. }
+            | Self::DigitalAnalogFlow { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
             | Self::DigitalExpression { .. }

@@ -372,6 +372,7 @@ pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 mod analyzed;
 mod digital;
 mod digital_elaborate;
+mod digital_walk;
 mod elaboration;
 mod flow_probes;
 mod function_effects;

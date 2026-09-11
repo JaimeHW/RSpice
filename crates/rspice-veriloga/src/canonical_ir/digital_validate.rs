@@ -114,8 +114,12 @@ impl CanonicalDigitalPlan {
         for (index, probe) in self.analog_probes.iter().enumerate() {
             if usize::from(probe.id) != index
                 || probe.access.is_empty()
-                || probe.positive.is_empty()
-                || probe.negative.as_ref().is_some_and(|name| name.is_empty())
+                || match &probe.target {
+                    super::digital::DigitalAnalogProbeTarget::Nodes { positive, negative } => {
+                        positive.is_empty() || negative.as_ref().is_some_and(|name| name.is_empty())
+                    }
+                    super::digital::DigitalAnalogProbeTarget::Branch { name } => name.is_empty(),
+                }
             {
                 return Err(error(
                     "digital analog probes must have dense IDs and nonempty access/net names",
@@ -372,9 +376,22 @@ impl CanonicalDigitalPlan {
                             }
                         }
                         CfgValueKind::DigitalAnalogPotential { probe }
-                            if self.analog_probe(*probe).is_none() =>
-                        {
-                            return Err(error("digital read names an undeclared analog probe"));
+                        | CfgValueKind::DigitalAnalogFlow { probe } => {
+                            let Some(probe) = self.analog_probe(*probe) else {
+                                return Err(error("digital read names an undeclared analog probe"));
+                            };
+                            let expected =
+                                if matches!(kind, CfgValueKind::DigitalAnalogPotential { .. }) {
+                                    crate::ast::AccessKind::Potential
+                                } else {
+                                    crate::ast::AccessKind::Flow
+                                };
+                            if probe.quantity != expected || value.value_type != CfgValueType::Real
+                            {
+                                return Err(error(
+                                    "digital analog read has the wrong physical quantity or value type",
+                                ));
+                            }
                         }
                         CfgValueKind::DigitalBlockingWrite { target, .. }
                         | CfgValueKind::DigitalNonblockingWrite { target, .. } => {
@@ -451,7 +468,9 @@ pub(crate) fn event_expression_schedule(
         if value.value_type == CfgValueType::Effect
             || matches!(
                 value.kind,
-                CfgValueKind::BlockParameter | CfgValueKind::DigitalAnalogPotential { .. }
+                CfgValueKind::BlockParameter
+                    | CfgValueKind::DigitalAnalogPotential { .. }
+                    | CfgValueKind::DigitalAnalogFlow { .. }
             )
             || !(value.kind.is_digital() || matches!(value.kind, CfgValueKind::RealConstant(_)))
         {
@@ -536,6 +555,7 @@ fn expression_dependencies(
                 | CfgValueKind::DigitalNonblockingWrite { .. }
                 | CfgValueKind::DigitalDriverWrite { .. }
                 | CfgValueKind::DigitalAnalogPotential { .. }
+                | CfgValueKind::DigitalAnalogFlow { .. }
         ) || !matches!(
             value.value_type,
             CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }

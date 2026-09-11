@@ -174,6 +174,12 @@ pub trait DigitalEnvironment {
     /// the plan's probe table exists to make impossible.
     fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64>;
 
+    /// Sample the current supplied by the analog solver for this flow probe.
+    /// Environments without current bindings explicitly report unavailable.
+    fn read_analog_flow(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
+        None
+    }
+
     /// Accept one driver's contribution to a real net.
     ///
     /// The real twin of [`drive_signal`](Self::drive_signal), and it carries no
@@ -1845,6 +1851,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             // Which value the environment hands back is section 7.3.6.3's
             // question, and it is deliberately not asked here — the
             // interpreter has no clock to compare the two domains' against.
+            CfgValueKind::DigitalAnalogFlow { probe } => {
+                let id = *probe;
+                if self.plan.analog_probe(id).is_none() {
+                    return Err(DigitalEvalError::UndeclaredAnalogProbe(id));
+                }
+                let value = self
+                    .environment
+                    .read_analog_flow(id)
+                    .ok_or(DigitalEvalError::AnalogProbeUnavailable(id))?;
+                Ok(DigitalScalar::Real(value))
+            }
             CfgValueKind::DigitalAnalogPotential { probe } => {
                 let id = *probe;
                 if self.plan.analog_probe(id).is_none() {

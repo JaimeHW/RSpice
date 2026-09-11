@@ -1874,6 +1874,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // Verilog-AMS LRM 2.4 section 7.3.6.3 rules out by fixing *which*
         // analog value a discrete read sees.
         | CfgValueKind::DigitalAnalogPotential { .. }
+            | CfgValueKind::DigitalAnalogFlow { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
         | CfgValueKind::DigitalExpression { .. }

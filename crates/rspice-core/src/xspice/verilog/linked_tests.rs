@@ -345,7 +345,7 @@ fn linked_digital_analog_probes_and_refusals_preserve_instance_identity() {
         TimeResolution::new(linked.plan.timing.precision_exponent).unwrap(),
         SchedulerLimits::default(),
     );
-    host.sample_analog_potentials(&probes);
+    host.sample_analog_probes(&probes);
     host.start().unwrap();
     assert_eq!(
         host.read(linked.signal_names["a.q"]).unwrap().spelling(),

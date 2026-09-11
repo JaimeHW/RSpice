@@ -147,9 +147,9 @@ impl MixedDigital {
             Self::View(_) => None,
         }
     }
-    pub(super) fn sample_analog_potentials(&mut self, values: &[f64]) {
+    pub(super) fn sample_analog_probes(&mut self, values: &[f64]) {
         if let Self::Owned(host) = self {
-            host.sample_analog_potentials(values);
+            host.sample_analog_probes(values);
         }
     }
     pub(super) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
@@ -613,8 +613,7 @@ impl SharedDigitalTrial<'_> {
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
             host.validate_solution(solution)?;
             for (probe, global) in host.analog_probes.iter().zip(&map.analog_probes) {
-                coordinator.probes[usize::from(*global)] =
-                    node_voltage(solution, probe.positive) - node_voltage(solution, probe.negative);
+                coordinator.probes[usize::from(*global)] = probe.sample(solution);
             }
         }
         if coordinator
@@ -623,7 +622,7 @@ impl SharedDigitalTrial<'_> {
             .is_some_and(|next| next <= self.tick)
         {
             let digital = coordinator.digital.make_mut();
-            digital.sample_analog_potentials(&coordinator.probes);
+            digital.sample_analog_probes(&coordinator.probes);
             let advanced = match &mut participant {
                 Some(participant) => digital.advance_to_with(self.tick, *participant),
                 None => digital.advance_to(self.tick),
@@ -639,7 +638,7 @@ impl SharedDigitalTrial<'_> {
                 .seconds_to_ticks(self.time)
                 .map_err(DigitalRunError::from)?;
             let digital = coordinator.digital.make_mut();
-            digital.sample_analog_potentials(&coordinator.probes);
+            digital.sample_analog_probes(&coordinator.probes);
             let advanced = digital.force_many_from_analog_with(&[], tick, self.time, participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
@@ -704,7 +703,7 @@ impl SharedDigitalTrial<'_> {
             return Ok(false);
         }
         let digital = coordinator.digital.make_mut();
-        digital.sample_analog_potentials(&coordinator.probes);
+        digital.sample_analog_probes(&coordinator.probes);
         let published = match participant {
             Some(participant) => digital.force_many_from_analog_with(
                 &coordinator.drives,

@@ -160,6 +160,15 @@ pub(super) fn hierarchy_branches(module: &AnalyzedModule) -> HierarchyBranches {
         inspect(&contribution.expression);
     }
     visit_statements(&module.statements, &mut inspect);
+    for process in &module.digital.processes {
+        super::digital_walk::visit_roots(&process.body, &mut inspect);
+    }
+    for assign in &module.digital.continuous_assigns {
+        inspect(&assign.assignment.value);
+        if let Some(delay) = &assign.assignment.delay {
+            inspect(delay);
+        }
+    }
     for contribution in &module.contributions {
         match resolver.contribution(contribution).0 {
             BranchKey::Named(name) => {
@@ -211,6 +220,17 @@ pub(super) fn expand_port_flows(
     let rewrite =
         |expression: &mut Expression| rewrite_expression(expression, &branches, &resolver, ports);
     rewrite_statements(&mut module.statements, &rewrite);
+    for process in &mut module.digital.processes {
+        super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
+            rewrite(expression)
+        });
+    }
+    for assign in &mut module.digital.continuous_assigns {
+        rewrite(&mut assign.assignment.value);
+        if let Some(delay) = &mut assign.assignment.delay {
+            rewrite(delay);
+        }
+    }
     rewrite_regions(&mut module.body, &rewrite, &branches, &HashMap::new());
     for contribution in &mut module.contributions {
         rewrite(&mut contribution.expression);
@@ -314,6 +334,15 @@ pub(crate) fn lower<'a>(
         inspect(&contribution.expression);
     }
     visit_statements(&module.statements, &mut inspect);
+    for process in &module.digital.processes {
+        super::digital_walk::visit_roots(&process.body, &mut inspect);
+    }
+    for assign in &module.digital.continuous_assigns {
+        inspect(&assign.assignment.value);
+        if let Some(delay) = &assign.assignment.delay {
+            inspect(delay);
+        }
+    }
     let mut existing_unknowns = HashSet::new();
     let mut source_kinds = HashMap::<_, u8>::new();
     let mut incident = branches.clone();
@@ -448,11 +477,10 @@ pub(crate) fn lower<'a>(
                     potential(&lowered.state, "0", branch.span)
                 } else {
                     Expression::BranchAccess(match key {
-                        BranchKey::Named(name) => BranchAccess::Nodes {
+                        BranchKey::Named(name) => BranchAccess::Branch {
                             access: "I".into(),
                             kind: Some(AccessKind::Flow),
-                            pos: name.clone(),
-                            neg: None,
+                            name: name.clone(),
                             span: branch.span,
                         },
                         BranchKey::Nodes(pos, neg) => BranchAccess::Nodes {
@@ -477,6 +505,17 @@ pub(crate) fn lower<'a>(
         rewrite_expression(expression, &branches, &resolver, &port_values);
     };
     rewrite_statements(&mut target.statements, &rewrite);
+    for process in &mut target.digital.processes {
+        super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
+            rewrite(expression)
+        });
+    }
+    for assign in &mut target.digital.continuous_assigns {
+        rewrite(&mut assign.assignment.value);
+        if let Some(delay) = &mut assign.assignment.delay {
+            rewrite(delay);
+        }
+    }
     rewrite_regions(&mut target.body, &rewrite, &branches, &rewrites);
     for contribution in &mut target.contributions {
         rewrite(&mut contribution.expression);
@@ -869,7 +908,10 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
     }
 }
 
-fn for_child_mut<'a>(expression: &'a mut Expression, visit: &mut impl FnMut(&'a mut Expression)) {
+pub(super) fn for_child_mut<'a>(
+    expression: &'a mut Expression,
+    visit: &mut impl FnMut(&'a mut Expression),
+) {
     match expression {
         Expression::Binary(expr) => {
             visit(&mut expr.left);

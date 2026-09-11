@@ -2447,67 +2447,54 @@ impl ProcessLowerer<'_> {
             .push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(value))
     }
 
-    /// Lower a probe of a continuous net into a plan-level probe id.
-    ///
-    /// Verilog-AMS LRM 2.4 section 7.3.3. Which spellings are legal is the
-    /// analyzer's decision — `SemanticAnalyzer::check_analog_probe` refuses a
-    /// flow probe, a named-branch probe and a discrete net by name before
-    /// anything reaches here — so this only has to turn an accepted probe into
-    /// an id, and to fail closed if one it did not expect arrives anyway.
-    ///
-    /// Probes are deduplicated on the triple the host resolves against.
-    /// `V(a)` written in two processes is one entry, because two entries would
-    /// be one net the host had to look up twice and could conceivably resolve
-    /// two ways. The *node* is not deduplicated — each read is its own
-    /// `DigitalAnalogPotential` pinned to its own block, because two samples
-    /// of a moving quantity are meant to differ.
+    /// A process read stays ordered, while its binding is shared plan-wide.
+    /// Flow-source reads have already acquired simultaneous equations; reads
+    /// of voltage-source currents retain their physical branch identity.
     fn analog_probe(&mut self, block: BlockId, access: &BranchAccess) -> ValueId {
-        let (function, positive, negative) = match access {
-            BranchAccess::Nodes {
-                access: function,
-                pos,
-                neg,
-                ..
-            } => (function.clone(), pos.clone(), neg.clone()),
-            BranchAccess::Branch {
-                access: function,
-                name,
-                span,
-                ..
-            } => {
-                self.error(
-                    format!(
-                        "`{function}(<{name}>)` probes a declared branch from a discrete-domain \
-                         expression, which names the analog branch table the discrete plan does \
-                         not carry"
-                    ),
-                    *span,
-                );
-                return self.real_constant(0.0);
-            }
+        use super::digital::DigitalAnalogProbeTarget;
+        let Some(quantity) = access.kind() else {
+            self.error(
+                "analog probe has no resolved physical quantity",
+                access.span(),
+            );
+            return self.real_constant(0.0);
         };
-        let existing = self.probes.iter().position(|probe| {
-            probe.access == function && probe.positive == positive && probe.negative == negative
-        });
-        let id = match existing {
+        let (function, target) = match access {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } => (
+                access.clone(),
+                DigitalAnalogProbeTarget::Nodes {
+                    positive: pos.clone(),
+                    negative: neg.clone(),
+                },
+            ),
+            BranchAccess::Branch { access, name, .. } => (
+                access.clone(),
+                DigitalAnalogProbeTarget::Branch { name: name.clone() },
+            ),
+        };
+        let id = match self.probes.iter().position(|probe| {
+            probe.access == function && probe.quantity == quantity && probe.target == target
+        }) {
             Some(index) => DigitalAnalogProbeId::from(index),
             None => {
                 let id = DigitalAnalogProbeId::from(self.probes.len());
                 self.probes.push(DigitalAnalogProbe {
                     id,
                     access: function,
-                    positive,
-                    negative,
+                    quantity,
+                    target,
                     span: SourceSpanRef::from(access.span()),
                 });
                 id
             }
         };
-        self.builder.push(
-            block,
-            CfgValueType::Real,
-            CfgValueKind::DigitalAnalogPotential { probe: id },
-        )
+        let kind = match quantity {
+            crate::ast::AccessKind::Potential => CfgValueKind::DigitalAnalogPotential { probe: id },
+            crate::ast::AccessKind::Flow => CfgValueKind::DigitalAnalogFlow { probe: id },
+        };
+        self.builder.push(block, CfgValueType::Real, kind)
     }
 
     /// Resolve constant module declarations independently of the process clock.
