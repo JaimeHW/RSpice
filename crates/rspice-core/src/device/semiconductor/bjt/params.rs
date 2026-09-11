@@ -27,15 +27,21 @@ impl Bjt {
         ["TISC1", "TISC2"],
         ["TISS1", "TISS2"],
     ];
+    pub(crate) const LEGACY_JUNCTION_TEMPERATURE_PARAMS: [[&str; 2]; 3] =
+        [["CTE", "TVJE"], ["CTC", "TVJC"], ["CTS", "TVJS"]];
+    pub(crate) const LEGACY_GRADING_TEMPERATURE_PARAMS: [[&str; 2]; 3] =
+        [["TMJE1", "TMJE2"], ["TMJC1", "TMJC2"], ["TMJS1", "TMJS2"]];
 
     pub(crate) fn legacy_temperature_parameter_names() -> impl Iterator<Item = &'static str> {
         Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
             .iter()
             .chain(Self::LEGACY_BETA_TEMPERATURE_PARAMS.iter())
             .chain(Self::LEGACY_CURRENT_TEMPERATURE_PARAMS.iter())
+            .chain(Self::LEGACY_JUNCTION_TEMPERATURE_PARAMS.iter())
+            .chain(Self::LEGACY_GRADING_TEMPERATURE_PARAMS.iter())
             .flatten()
             .copied()
-            .chain(core::iter::once("TLEV"))
+            .chain(["TLEV", "TLEVC"])
     }
 
     #[inline]
@@ -55,6 +61,35 @@ impl Bjt {
             return Ok(());
         }
         let delta_t = self.temperature - self.tnom.max(1.0);
+        for (index, (capacitance, potential, grading)) in [
+            (self.cje, self.vje, self.mje),
+            (self.cjc, self.vjc, self.mjc),
+            (self.cjcp, self.ps, self.ms),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let [cap, pot] = Self::LEGACY_JUNCTION_TEMPERATURE_PARAMS[index];
+            let [first, second] = Self::LEGACY_GRADING_TEMPERATURE_PARAMS[index];
+            if !grading.is_finite() {
+                return Err(format!(
+                    "BJT '{}': {first}/{second} at {} K must yield a finite junction grading coefficient",
+                    self.name, self.temperature
+                ));
+            }
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Err(format!(
+                    "BJT '{}': TLEVC/{cap}/{first}/{second} at {} K must yield a finite nonnegative junction capacitance",
+                    self.name, self.temperature
+                ));
+            }
+            if capacitance > 0.0 && (!potential.is_finite() || potential <= 0.0) {
+                return Err(format!(
+                    "BJT '{}': TLEVC/{pot} at {} K must yield a finite positive junction potential",
+                    self.name, self.temperature
+                ));
+            }
+        }
         let linear_beta = 1.0 + self.beta_exp * delta_t;
         if mapping.current_law == 1.0 && (!linear_beta.is_finite() || linear_beta <= 0.0) {
             return Err(format!(
@@ -959,6 +994,26 @@ impl Bjt {
             })
         });
         let explicit_temperature = temperature_parameters.is_some();
+        let grading = temperature_parameters.map_or([self.mje, self.mjc, self.ms], |t| {
+            core::array::from_fn(|index| {
+                let value = t.nominal_grading[index]
+                    * (1.0 + Self::legacy_polynomial_delta(t.grading_coefficients[index], delta_t));
+                // Match bjttemp.c's upper limit, retaining nonfinite values
+                // for the builder's named operating-domain diagnostic.
+                if value.is_finite() && value > 0.999 {
+                    if [self.mje, self.mjc, self.ms][index] != 0.999 {
+                        log::warn!(
+                            "BJT '{}': {} including temperature coefficients is limited to 0.999 at {temp} K",
+                            self.name,
+                            ["MJE", "MJC", "MJS"][index]
+                        );
+                    }
+                    0.999
+                } else {
+                    value
+                }
+            })
+        });
         let scale = self.instance_scale();
         let (bc_area, substrate_area) = self.junction_area_factors();
         let isrr_temp = Self::vbic_temp_scaled_current(
@@ -1044,7 +1099,19 @@ impl Bjt {
             (nominal, operating)
         });
         let junction =
-            |potential: Value, capacitance: Value, grading: Value, energy: Value, area: Value| {
+            |index: usize, potential: Value, capacitance: Value, energy: Value, area: Value| {
+                let grading = grading[index];
+                if let Some(mapping) = temperature_parameters.filter(|t| t.capacitance_law == 1.0) {
+                    let [cap_coefficient, pot_coefficient] = mapping.junction_coefficients[index];
+                    return (
+                        potential - pot_coefficient * delta_t,
+                        crate::numerics::scaled_exp_product(
+                            &[capacitance, 1.0 + cap_coefficient * delta_t, area, self.m],
+                            &[],
+                            0.0,
+                        ),
+                    );
+                }
                 if let Some((nominal_shift, operating_shift)) = legacy_shifts {
                     let reference = crate::constants::TEMP_REFERENCE;
                     let pbo = (potential - nominal_shift) / (tnom / reference);
@@ -1068,39 +1135,23 @@ impl Bjt {
                     )
                 }
             };
-        let (vje_temp, cje_temp) = junction(
-            self.vje_nominal,
-            self.cje_nominal,
-            self.mje,
-            self.eaie,
-            self.area,
-        );
-        let (vjc_temp, cjc_temp) = junction(
-            self.vjc_nominal,
-            self.cjc_nominal,
-            self.mjc,
-            self.eaic,
-            bc_area,
-        );
+        let (vje_temp, cje_temp) =
+            junction(0, self.vje_nominal, self.cje_nominal, self.eaie, self.area);
+        let (vjc_temp, cjc_temp) =
+            junction(1, self.vjc_nominal, self.cjc_nominal, self.eaic, bc_area);
         let (ps_temp, cjcp_temp) = if legacy_model && self.xyce_compatibility {
             // Xyce's legacy substrate charge uses nominal CJS and VJS.
             (self.ps_nominal, self.cjcp_nominal * scale)
         } else {
             junction(
+                2,
                 self.ps_nominal,
                 self.cjcp_nominal,
-                self.ms,
                 self.eais,
                 substrate_area,
             )
         };
-        let (_, cjep_temp) = junction(
-            self.vjc_nominal,
-            self.cjep_nominal,
-            self.mjc,
-            self.eaic,
-            self.area,
-        );
+        let (_, cjep_temp) = junction(1, self.vjc_nominal, self.cjep_nominal, self.eaic, self.area);
         let mut nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
         let mut nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
         if legacy_model && !self.xyce_compatibility {
@@ -1182,6 +1233,7 @@ impl Bjt {
         self.vje = vje_temp;
         self.vjc = vjc_temp;
         self.ps = ps_temp;
+        [self.mje, self.mjc, self.ms] = grading;
         self.cje = cje_temp;
         self.cjc = cjc_temp;
         self.cjcp = cjcp_temp;
@@ -2160,6 +2212,12 @@ impl Bjt {
                 emission_coefficients: coefficients,
                 operating_emission: [0.0; 5],
                 current_law: params.get("TLEV").copied().unwrap_or(0.0),
+                capacitance_law: params.get("TLEVC").copied().unwrap_or(0.0),
+                junction_coefficients: Self::LEGACY_JUNCTION_TEMPERATURE_PARAMS
+                    .map(|names| names.map(|name| params.get(name).copied().unwrap_or(0.0))),
+                grading_coefficients: Self::LEGACY_GRADING_TEMPERATURE_PARAMS
+                    .map(|names| names.map(|name| params.get(name).copied().unwrap_or(0.0))),
+                nominal_grading: [self.mje, self.mjc, self.ms],
                 beta_coefficients: Self::LEGACY_BETA_TEMPERATURE_PARAMS.map(|[first, second]| {
                     (params.contains_key(first) || params.contains_key(second)).then(|| {
                         [
@@ -2409,8 +2467,13 @@ mod tests {
 
     #[test]
     fn legacy_temperature_mapped_charges_have_continuous_consistent_derivatives() {
-        for xyce in [false, true] {
-            let mut model = model_with(&[
+        for (xyce, law) in [
+            (false, None),
+            (true, None),
+            (false, Some(0.0)),
+            (false, Some(1.0)),
+        ] {
+            let mut params = vec![
                 ("IS", 0.0),
                 ("CJE", 2e-12),
                 ("VJE", 0.83),
@@ -2424,11 +2487,44 @@ mod tests {
                 ("MJS", 0.23),
                 ("FC", 0.4),
                 ("TNOM", 50.0),
-            ]);
+            ];
+            if let Some(law) = law {
+                params.extend([
+                    ("TLEVC", law),
+                    ("CTE", 0.001),
+                    ("CTC", -0.0007),
+                    ("CTS", 0.002),
+                    ("TVJE", 0.001),
+                    ("TVJC", -0.0005),
+                    ("TVJS", 0.0008),
+                    ("TMJE1", 0.002),
+                    ("TMJE2", 0.00001),
+                    ("TMJC1", -0.001),
+                    ("TMJC2", 0.00002),
+                    ("TMJS1", 0.003),
+                    ("TMJS2", -0.00001),
+                ]);
+            }
+            let mut model = model_with(&params);
             model.set_xyce_compatibility(xyce);
             model.set_junction_gmin(0.0);
-            for temperature in [233.15, 300.15, 323.15, 398.15] {
+            for temperature in [233.15, 300.15, 323.15, 398.15, 233.15, 323.15] {
                 model.set_temperature(temperature);
+                model.validate_legacy_temperature_parameters().unwrap();
+                // A warm/cold round trip must always start from nominal M.
+                let dt = temperature - 323.15;
+                for (actual, nominal, first, second) in [
+                    (model.mje, 0.37, 0.002, 0.00001),
+                    (model.mjc, 0.41, -0.001, 0.00002),
+                    (model.ms, 0.23, 0.003, -0.00001),
+                ] {
+                    let expected = if law.is_some() {
+                        nominal * (1.0 + first * dt + second * dt * dt)
+                    } else {
+                        nominal
+                    };
+                    assert!((actual - expected).abs() < 1e-15);
+                }
                 let sample = |v| {
                     let state = model.legacy_transient_charge_state_with_vbx(v, v, v, -v);
                     [

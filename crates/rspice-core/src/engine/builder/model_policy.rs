@@ -767,12 +767,19 @@ pub(super) fn validate_bjt_model_level(
             )));
         }
         if !params.get(name).is_some_and(|value| {
-            value.is_finite() && (name != "TLEV" || [0.0, 1.0, 3.0].contains(value))
+            value.is_finite()
+                && match name {
+                    "TLEV" => [0.0, 1.0, 3.0].contains(value),
+                    "TLEVC" => [0.0, 1.0].contains(value),
+                    _ => true,
+                }
         }) {
             return Err(SimulationError::Circuit(format!(
                 "BJT '{element_name}': model '{model}' parameter {name} must be {}",
                 if name == "TLEV" {
                     "one of 0, 1, 3"
+                } else if name == "TLEVC" {
+                    "one of 0, 1"
                 } else {
                     "a finite scalar"
                 }
@@ -781,7 +788,8 @@ pub(super) fn validate_bjt_model_level(
     }
     if temperature_parameters_given {
         for name in [
-            "NF", "NR", "NE", "NLE", "NEN", "NC", "NCN", "NS", "BF", "BFM", "BR", "BRM",
+            "NF", "NR", "NE", "NLE", "NEN", "NC", "NCN", "NS", "BF", "BFM", "BR", "BRM", "VJE",
+            "PE", "VJC", "PC", "VJS", "PS", "PSUB",
         ] {
             let authored = params.contains_key(name)
                 || expr_params
@@ -799,14 +807,18 @@ pub(super) fn validate_bjt_model_level(
             }
         }
         for name in [
-            "IS", "ISE", "JLE", "IBEN", "ISC", "JLC", "IBCN", "XTB", "TB", "TCB", "TNF",
+            "IS", "ISE", "JLE", "IBEN", "ISC", "JLC", "IBCN", "XTB", "TB", "TCB", "TNF", "CJE",
+            "CJC", "CJS", "CJCP", "CCS", "CSUB", "MJE", "ME", "MJC", "MC", "MJS", "MS", "ESUB",
         ] {
             let authored = params.contains_key(name)
                 || expr_params
                     .iter()
                     .chain(string_params)
                     .any(|(key, _)| key.eq_ignore_ascii_case(name));
-            let signed = ["XTB", "TB", "TCB", "TNF"].contains(&name);
+            let signed = [
+                "XTB", "TB", "TCB", "TNF", "MJE", "ME", "MJC", "MC", "MJS", "MS", "ESUB",
+            ]
+            .contains(&name);
             if authored
                 && !params
                     .get(name)

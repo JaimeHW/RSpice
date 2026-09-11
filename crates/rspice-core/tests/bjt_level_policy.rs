@@ -3954,6 +3954,295 @@ fn legacy_junction_areas_match_ngspice_currents_and_stored_charge() {
 }
 
 #[test]
+fn legacy_capacitance_temperature_controls_match_ngspice_and_stored_charge() {
+    // Independent ngspice 46 AC measurements, with all twelve CT/TVJ/TMJ
+    // coefficients active. TLEVC=0 deliberately ignores the CT/TVJ values.
+    for (law, temperature, bias, expected) in [
+        (
+            0.0,
+            -40.0,
+            -0.4,
+            [
+                1.6765259396807914e-12,
+                2.140391394373884e-12,
+                4.657460127387347e-12,
+            ],
+        ),
+        (
+            0.0,
+            70.0,
+            0.6,
+            [
+                3.0290270824033776e-12,
+                5.138709323537502e-12,
+                5.8680016169128165e-12,
+            ],
+        ),
+        (
+            1.0,
+            -40.0,
+            -0.4,
+            [
+                1.6136286810736238e-12,
+                2.4816763819689538e-12,
+                3.896123393697486e-12,
+            ],
+        ),
+        (
+            1.0,
+            50.0,
+            0.1,
+            [
+                2.097294565936023e-12,
+                3.202170347382517e-12,
+                5.126373626373625e-12,
+            ],
+        ),
+        (
+            1.0,
+            70.0,
+            0.6,
+            [
+                3.030128265617304e-12,
+                4.791337291014488e-12,
+                6.0476348993288594e-12,
+            ],
+        ),
+        (
+            1.0,
+            125.0,
+            0.1,
+            [2.290754052646454e-12, 3.029901559798528e-12, 5.93184375e-12],
+        ),
+    ] {
+        let config = SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let engine = Engine::new(config.clone());
+        for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+            for subs in [1, -1] {
+                let common = format!(
+                    "IS=0 SUBS={subs} TNOM=50 FC=.4 TLEVC={law} CTE={{ct}} CTC=-.0007 CTS=.002 TVJE=.001 TVJC=-.0005 TVJS=.0008 TMJE1=.002 TMJE2=.00001 TMJC1=-.001 TMJC2=.00002 TMJS1=.003 TMJS2=-.00001"
+                );
+                let models = format!(
+                    ".model me {kind}({common} CJE=2p VJE=.83 MJE=.37)\n\
+                     .model mc {kind}({common} CJC=3p VJC=.68 MJC=.41)\n\
+                     .model ms {kind}({common} CJS=5p VJS=.91 MJS=.23)\n"
+                );
+                let devices = "QBE 0 be 0 0 me AREA=2 AREAB=3 AREAC=5 M=4\nQBC 0 bc 0 0 mc AREA=2 AREAB=3 AREAC=5 M=4\nQSC 0 0 0 sc ms AREA=2 AREAB=3 AREAC=5 M=4\n";
+                let body = if subs == -1 {
+                    // Scoped coefficients and nominal parameter aliases must
+                    // reach the same physical model after expansion.
+                    let models = models
+                        .replace(" VJE=", " PE=")
+                        .replace(" VJC=", " PC=")
+                        .replace(" VJS=", " PSUB=")
+                        .replace(" MJE=", " ME=")
+                        .replace(" MJC=", " MC=")
+                        .replace(" MJS=", " ESUB=")
+                        .replace(" CJS=", " CSUB=");
+                    format!(
+                        ".param ct=9\nX1 be bc sc cell ct=.001\n.subckt cell be bc sc ct=7\n{devices}{models}.ends\n"
+                    )
+                } else {
+                    format!(".param ct=.001\n{devices}{models}")
+                };
+                let voltage = polarity * bias;
+                let substrate_voltage = f64::from(subs) * voltage;
+                let text = format!(
+                    "GP capacitance controls\nVBE be 0 DC {voltage} AC 1\nVBC bc 0 DC {voltage} AC 1\nVSC sc 0 DC {substrate_voltage} AC 1\n{body}.temp {temperature}\n.end"
+                );
+                let ac = engine
+                    .run_ac(&Netlist::parse(&text).unwrap(), &[1e6])
+                    .unwrap();
+                let geometry = if subs == 1 {
+                    [8.0, 12.0, 20.0]
+                } else {
+                    [8.0, 20.0, 12.0]
+                };
+                for ((name, expected), scale) in ["VBE", "VBC", "VSC"]
+                    .into_iter()
+                    .zip(expected)
+                    .zip(geometry)
+                {
+                    let column = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|branch| branch.eq_ignore_ascii_case(name))
+                        .unwrap();
+                    let current = ac[0].currents[column];
+                    let actual = -current.im / (std::f64::consts::TAU * 1e6 * scale);
+                    // Only the physical law uses ngspice's older k/q constants.
+                    let tolerance = if law == 0.0 { 3e-8 } else { 2e-12 };
+                    assert!(
+                        (actual - expected).abs() < expected * tolerance,
+                        "{kind} SUBS={subs} TLEVC={law} TEMP={temperature} {name}: {actual:e} vs {expected:e}"
+                    );
+                    assert_eq!(current.re, 0.0);
+                }
+                if law == 1.0 && temperature == 70.0 && polarity == 1.0 {
+                    let mut transient_config = config.clone();
+                    transient_config.integration_method =
+                        rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
+                    transient_config.locked_time_grid = Some(std::sync::Arc::new(
+                        (0..=20).map(|i| f64::from(i) * 1e-8).collect(),
+                    ));
+                    let ramp = text
+                        .replace(
+                            &format!("VSC sc 0 DC {substrate_voltage} AC 1"),
+                            &format!(
+                                "VSC sc 0 PWL(0 {} 200n {})",
+                                -0.4 * f64::from(subs),
+                                0.6 * f64::from(subs)
+                            ),
+                        )
+                        .replace(&format!("DC {voltage} AC 1"), "PWL(0 -.4 200n .6)");
+                    let result = Engine::new(transient_config)
+                        .run_tran(&Netlist::parse(&ramp).unwrap(), 200e-9, 10e-9)
+                        .unwrap();
+                    // Integrate terminal current, then compare to the analytic
+                    // depletion-charge integral across both continuation joins.
+                    for (((name, scale), cap), (potential, grading, fc)) in ["VBE", "VBC", "VSC"]
+                        .into_iter()
+                        .zip(geometry)
+                        .zip([2.04e-12, 2.958e-12, 5.2e-12])
+                        .zip([
+                            (0.81_f64, 0.38628_f64, 0.4),
+                            (0.69, 0.40508, 0.4),
+                            (0.894, 0.24288, 0.0),
+                        ])
+                    {
+                        let charge = |v: f64| {
+                            let join = fc * potential;
+                            let x = v.min(join);
+                            let q =
+                                cap * potential * (1.0 - (1.0 - x / potential).powf(1.0 - grading))
+                                    / (1.0 - grading);
+                            let overdrive = (v - join).max(0.0);
+                            q + cap
+                                * (1.0 - fc).powf(-grading)
+                                * overdrive
+                                * (1.0 + 0.5 * grading * overdrive / (potential * (1.0 - fc)))
+                        };
+                        let currents = result.try_branch_current_waveform_named(name).unwrap();
+                        let integral: f64 = result
+                            .time
+                            .windows(2)
+                            .zip(currents.iter().skip(1))
+                            .map(|(t, i)| -i * (t[1] - t[0]) / scale)
+                            .sum();
+                        let integral = integral * if name == "VSC" { f64::from(subs) } else { 1.0 };
+                        let expected = charge(0.6) - charge(-0.4);
+                        assert!(
+                            (integral - expected).abs() < expected * 1e-8,
+                            "SUBS={subs} {name}: integrated charge {integral:e} vs {expected:e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_capacitance_temperature_controls_validate_operating_domains() {
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let engine = Engine::new(config.clone());
+    for value in [-1.0, 2.0, 0.5, f64::NAN, f64::INFINITY] {
+        let mut deck =
+            Netlist::parse("Invalid capacitance law\nQ1 0 0 0 qm\n.model qm NPN\n.end").unwrap();
+        deck.models[0].params.push(("TLEVC".into(), value));
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains("TLEVC")
+        );
+    }
+    for name in [
+        "TLEVC", "CTE", "CTC", "CTS", "TVJE", "TVJC", "TVJS", "TMJE1", "TMJE2", "TMJC1", "TMJC2",
+        "TMJS1", "TMJS2",
+    ] {
+        let mut deck =
+            Netlist::parse("Invalid charge coefficient\nQ1 0 0 0 qm\n.model qm NPN\n.end").unwrap();
+        deck.models[0].params.push((name.into(), f64::NAN));
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+        for (dialect, family) in [
+            (SpiceDialect::Xyce, "LEVEL=1"),
+            (SpiceDialect::Ngspice, "TNF=0"),
+        ] {
+            let deck = Netlist::parse(&format!(
+                "Wrong charge family\nQ1 0 0 0 qm\n.model qm NPN({family} {name}=0)\n.end"
+            ))
+            .unwrap();
+            assert!(
+                Engine::new(config.clone().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+    }
+    for (fields, expected) in [
+        ("CJE=1p CTE=-1", "CTE"),
+        ("CJC=1p CTC=-1", "CTC"),
+        ("CJS=1p CTS=-1", "CTS"),
+        ("CJE=1p TVJE=1", "TVJE"),
+        ("CJC=1p TVJC=1", "TVJC"),
+        ("CJS=1p TVJS=1", "TVJS"),
+        ("TMJE2=1e308", "TMJE"),
+        ("TMJC2=1e308", "TMJC"),
+        ("TMJS2=1e308", "TMJS"),
+        ("VJE=0", "VJE"),
+        ("PC=-1", "PC"),
+        ("PSUB=0", "PSUB"),
+        ("CJE=-1", "CJE"),
+        ("CSUB=-1", "CSUB"),
+    ] {
+        let deck = Netlist::parse(&format!(
+            "Invalid mapped charge\nQ1 0 0 0 qm TEMP=29\n.model qm NPN(TLEVC=1 {fields})\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(expected),
+            "{fields}"
+        );
+    }
+    // Zero coefficients select constant C/P; finite large grading follows
+    // ngspice's 0.999 limit, including the substrate (default MJS is zero).
+    let make = |fields: &str| {
+        Netlist::parse(&format!("Grading limit\nVB b 0 .1 AC 1\nVS s 0 -.2 AC 1\nQ1 0 b 0 s qm\n.model qm NPN(IS=0 CJE=2p CJC=3p CJS=5p {fields})\n.end")).unwrap()
+    };
+    let mapped = engine
+        .run_ac(&make("TLEVC=1 MJE=1 MJC=2 MJS=3"), &[1e6])
+        .unwrap();
+    let reference = engine
+        .run_ac(&make("MJE=.999 MJC=.999 MJS=.999"), &[1e6])
+        .unwrap();
+    for (actual, expected) in mapped[0].currents.iter().zip(&reference[0].currents) {
+        assert!((actual - expected).norm() <= expected.norm() * 1e-12);
+    }
+}
+
+#[test]
 fn legacy_junction_capacitance_temperature_matches_spice_references() {
     use SpiceDialect::{Ngspice, Xyce};
     // Independent ngspice 46 AC measurements (IS=TF=TR=0), in farads.

@@ -637,6 +637,11 @@ struct LegacyTemperatureParameters {
     current_law: Value,
     beta_coefficients: [Option<[Value; 2]>; 2],
     current_coefficients: [[Value; 2]; 4],
+    capacitance_law: Value,
+    // BE, BC, substrate: [capacitance coefficient, potential coefficient].
+    junction_coefficients: [[Value; 2]; 3],
+    grading_coefficients: [[Value; 2]; 3],
+    nominal_grading: [Value; 3],
 }
 
 #[derive(Debug, Clone, Default)]
