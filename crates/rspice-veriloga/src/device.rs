@@ -3045,6 +3045,7 @@ impl VerilogADevice {
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
                     | Instruction::IdtModState(idx)
+                    | Instruction::DdtDerivativeState(idx)
                     | Instruction::IdtDerivativeState(idx)
                     | Instruction::IdtModDerivativeState(idx)
                     | Instruction::LimitState(idx)
@@ -8975,7 +8976,7 @@ mod static_dae_device_tests {
             assert_eq!(
                 dynamic,
                 [
-                    4.0 + direct + 3.0 / dt + if time == 0.0 { 2.0 } else { 0.0 },
+                    4.0 + direct + if time == 0.0 { 2.0 } else { 3.0 / dt },
                     rate_direction * dt
                 ]
             );
@@ -9046,7 +9047,7 @@ mod static_dae_device_tests {
                     |_, _| {},
                 )
                 .unwrap();
-            assert_eq!(dynamic, if time == 0.0 { [7.0, 0.0] } else { [6.5, -4.0] });
+            assert_eq!(dynamic, if time == 0.0 { [4.0, 0.0] } else { [6.5, -4.0] });
             let before = format!("{:?}", device.context);
             for (probe, delay) in [(voltage, 0.25), (voltage + 1.0, 0.125), (voltage, 0.25)] {
                 let (mut jacobian, mut rhs) = ([0.0; 2], 0.0);
@@ -9122,7 +9123,11 @@ mod static_dae_device_tests {
                     |_, _| {},
                 )
                 .unwrap();
-            assert!((dynamic_jacobian - (2.0 + 3.0 / dt + feedthrough)).abs() < 1e-12);
+            assert!(
+                (dynamic_jacobian - (2.0 + if time == 0.0 { 0.0 } else { 3.0 / dt } + feedthrough))
+                    .abs()
+                    < 1e-12
+            );
             let before = format!("{:?}", device.context);
             for probe in [voltage, voltage + 1.0, voltage] {
                 let (mut jacobian, mut rhs) = (0.0, 0.0);
@@ -9269,7 +9274,10 @@ mod static_dae_device_tests {
                     |_, _| {},
                 )
                 .unwrap();
-            assert!((dynamic_jacobian - 29.0 / 3.0).abs() < 1e-12);
+            assert!(
+                (dynamic_jacobian - if time == 0.5 { 11.0 / 3.0 } else { 29.0 / 3.0 }).abs()
+                    < 1e-12
+            );
             let before = format!("{:?}", device.context);
             for probe in [voltage, voltage + 1.0, voltage] {
                 let (mut jacobian, mut rhs) = (0.0, 0.0);

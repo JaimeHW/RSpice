@@ -455,6 +455,9 @@ fn kernel_region_metrics(
                 write!(out, "ddt:{}", operator_indices[operator])
             }
             CfgValueKind::DdtScale => write!(out, "ddt-scale"),
+            CfgValueKind::DdtDerivative { operator, .. } => {
+                write!(out, "ddt-derivative:{}", operator_indices[operator])
+            }
             CfgValueKind::Idt { operator, .. } => {
                 write!(out, "idt:{}", operator_indices[operator])
             }
@@ -2519,6 +2522,7 @@ impl ModelPlan {
         ]);
         if !self.ddt_slots.is_empty() {
             runtime_support.push("GeneratedDdtCandidateError".to_string());
+            runtime_support.push("evaluate_generated_ddt_derivative".to_string());
         }
         if !self.idt_slots.is_empty() {
             runtime_support.extend([
@@ -3941,8 +3945,25 @@ impl ModelPlan {
         // binding *after* the closure that read it whenever a model had both —
         // and only PSP-NQS has both, so nothing caught it until the corpus was
         // compiled. The two closures reach disjoint fields through it.
-        if wants.ddt || wants.idt || wants.idt_derivative {
+        if wants.ddt || wants.ddt_derivative || wants.idt || wants.idt_derivative {
             let _ = writeln!(out, "{pad}let ddt_state = self.stamp_state.as_mut();");
+        }
+        if wants.ddt_derivative {
+            let _ = writeln!(
+                out,
+                "{pad}let ddt_derivative_coefficients = self.ddt_coefficients;\n\
+                 {pad}let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {{\n\
+                 {pad}    let result = if !primal.is_finite() || !input.is_finite() {{\n\
+                 {pad}        Err(GeneratedDdtCandidateError::NonFiniteInput {{ field: \"derivative operands\" }})\n\
+                 {pad}    }} else if !ctx.integration_operators_enabled() {{ Ok(0.0) }} else {{\n\
+                 {pad}        evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)\n\
+                 {pad}    }};\n\
+                 {pad}    match result {{\n\
+                 {pad}        Ok(value) => value,\n\
+                 {pad}        Err(source) => {{ ctx.report_ddt_candidate_error(slot, source); 0.0 }}\n\
+                 {pad}    }}\n\
+                 {pad}}};"
+            );
         }
         if wants.idt_derivative {
             let _ = writeln!(
@@ -5325,6 +5346,7 @@ struct Wants {
     multiplicity: bool,
     time: bool,
     ddt: bool,
+    ddt_derivative: bool,
     ddt_scale: bool,
     idt: bool,
     idt_scale: bool,
@@ -5359,6 +5381,7 @@ impl Wants {
             CfgValueKind::Multiplicity => self.multiplicity = true,
             CfgValueKind::Time => self.time = true,
             CfgValueKind::Ddt { .. } => self.ddt = true,
+            CfgValueKind::DdtDerivative { .. } => self.ddt_derivative = true,
             CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,

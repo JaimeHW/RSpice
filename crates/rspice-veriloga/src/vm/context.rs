@@ -38,6 +38,8 @@ pub(crate) const INTEGRATION_CANDIDATE_IDLE: u8 = 2;
 pub(crate) const LIMITER_HISTORY_UNINITIALIZED: u8 = 3;
 pub(crate) const LIMITER_HISTORY_VALID: u8 = 4;
 pub(crate) const LIMITER_HISTORY_IDLE: u8 = 5;
+/// A failed integration evaluation cannot be accepted until a fresh evaluation.
+pub(crate) const INTEGRATION_CANDIDATE_FAILED: u8 = 6;
 
 pub(crate) fn pin_limiter_history(
     status: &mut u8,
@@ -363,7 +365,8 @@ pub struct VmContext {
     /// Per-slot evaluation status. Integration uses zero for an unseen slot,
     /// one for a candidate, and two for an idle integration slot. Limiters use
     /// three/four for an uninitialized/initialized previous-Newton snapshot
-    /// and five for a limiter whose snapshot is idle.
+    /// and five for a limiter whose snapshot is idle. Six marks an integration
+    /// evaluation that failed; beginning a new evaluation clears that failure.
     /// These operator families own disjoint slots. Runtime-only.
     pub(crate) state_candidate_valid: Vec<u8>,
     /// Exact older-history lane proposed by the current integration-state
@@ -947,6 +950,14 @@ impl VmContext {
         }
         if self
             .state_candidate_valid
+            .contains(&INTEGRATION_CANDIDATE_FAILED)
+        {
+            return Err(invalid(
+                "cannot accept a failed integration candidate".into(),
+            ));
+        }
+        if self
+            .state_candidate_valid
             .iter()
             .any(|status| *status > LIMITER_HISTORY_IDLE)
         {
@@ -1128,6 +1139,14 @@ impl VmContext {
         {
             return Err(invalid(
                 "integration candidate-valid storage shape is inconsistent".into(),
+            ));
+        }
+        if self
+            .state_candidate_valid
+            .contains(&INTEGRATION_CANDIDATE_FAILED)
+        {
+            return Err(invalid(
+                "cannot accept a failed integration candidate".into(),
             ));
         }
         if self
@@ -1588,7 +1607,10 @@ impl VmContext {
             .iter_mut()
             .zip(&mut self.state_older_candidate)
         {
-            if *status == INTEGRATION_CANDIDATE_VALID {
+            if matches!(
+                *status,
+                INTEGRATION_CANDIDATE_VALID | INTEGRATION_CANDIDATE_FAILED
+            ) {
                 *status = INTEGRATION_CANDIDATE_IDLE;
             } else if matches!(
                 *status,
@@ -3126,7 +3148,7 @@ mod tests {
             .expect_err("candidate-status shape mismatch must block checkpoint capture");
         assert!(error.to_string().contains("shape is inconsistent"));
 
-        context.state_candidate_valid = vec![6];
+        context.state_candidate_valid = vec![u8::MAX];
         let error = context
             .accepted_checkpoint()
             .expect_err("invalid candidate status must block checkpoint capture");

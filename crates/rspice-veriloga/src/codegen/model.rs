@@ -815,6 +815,9 @@ pub enum Instruction {
     /// companion rule; records the current candidate into state.
     /// Stack: `[expr] -> [d(expr)/dt]`
     DdtState(usize),
+    /// Derivative of the current DDT candidate using this site's history.
+    /// Stack: `[candidate, input_derivative] -> [derivative]`
+    DdtDerivativeState(usize),
     /// State-based integration: `idt(expr, ic)` using the solver's active
     /// companion rule; returns `ic` at DC.
     /// Stack: `[expr, ic] -> [integral]`

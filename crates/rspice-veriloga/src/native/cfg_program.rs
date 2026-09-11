@@ -882,6 +882,16 @@ impl Lowerer<'_> {
                 let ic = operand(*ic)?;
                 push(NativeOp::IdtState(slot), &[input, ic])
             }
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::Ddt)?;
+                let primal = operand(*primal)?;
+                let input = operand(*input_derivative)?;
+                push(NativeOp::DdtDerivativeState(slot), &[primal, input])
+            }
             CfgValueKind::IdtMod {
                 operator,
                 input,

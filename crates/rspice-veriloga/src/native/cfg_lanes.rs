@@ -376,6 +376,15 @@ impl<'a> Scalarizer<'a> {
             // operands carry this value's lanes and take the lane; everything
             // else is a primal scalar the runtime reads its local coefficient
             // from, and takes none.
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => CfgValueKind::DdtDerivative {
+                operator: *operator,
+                primal: self.plain_of(*primal)?,
+                input_derivative: self.lane_of(*input_derivative, lane, 0)?,
+            },
             CfgValueKind::IntegralDerivative {
                 operator,
                 primal,

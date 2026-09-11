@@ -2290,6 +2290,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::FlickerNoise => descriptor.opcode = 431,
         NativeOp::DdtState(index) => set_index(&mut descriptor, 440, index)?,
         NativeOp::DdtJacobian => descriptor.opcode = 441,
+        NativeOp::DdtDerivativeState(index) => set_index(&mut descriptor, 482, index)?,
         NativeOp::IdtState(index) => set_index(&mut descriptor, 442, index)?,
         NativeOp::IdtJacobian => descriptor.opcode = 443,
         NativeOp::IdtModState(index) => set_index(&mut descriptor, 444, index)?,

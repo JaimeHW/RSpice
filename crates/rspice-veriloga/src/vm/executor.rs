@@ -9,7 +9,7 @@
 //! This is the reference runtime: whatever the JIT and the generated Rust
 //! backend produce is expected to agree with it numerically.
 
-use super::context::INTEGRATION_CANDIDATE_VALID;
+use super::context::{INTEGRATION_CANDIDATE_FAILED, INTEGRATION_CANDIDATE_VALID};
 use super::{VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
@@ -564,43 +564,23 @@ impl<'a> Vm<'a> {
                 if self.context.state_values.len() <= *idx {
                     self.context.allocate_states(*idx + 1);
                 }
-                let initialized = self.context.state_initialized[*idx];
-                let prev_value = self
-                    .context
-                    .state_values_prev
-                    .get(*idx)
-                    .copied()
-                    .filter(|_| initialized)
-                    .unwrap_or(current_value);
-                let older_value = self
-                    .context
-                    .state_values_older
-                    .get(*idx)
-                    .copied()
-                    .filter(|_| initialized)
-                    .unwrap_or(prev_value);
-                let previous_derivative = self
-                    .context
-                    .state_derivatives_prev
-                    .get(*idx)
-                    .copied()
-                    .filter(|_| initialized)
-                    .unwrap_or(0.0);
-
+                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_FAILED;
+                let candidate = rspice_veriloga_runtime::evaluate_generated_ddt_candidate(
+                    self.context.integration_coefficients().into(),
+                    current_value,
+                    rspice_veriloga_runtime::GeneratedDdtAcceptedHistory {
+                        initialized: self.context.state_initialized[*idx],
+                        value_previous: self.context.state_values_prev[*idx],
+                        value_older: self.context.state_values_older[*idx],
+                        derivative_previous: self.context.state_derivatives_prev[*idx],
+                    },
+                )
+                .map_err(|error| VmError::InvalidNumericResult(error.to_string()))?;
                 self.context.state_values[*idx] = current_value;
-                let coefficients = self.context.integration_coefficients();
-                let derivative = if coefficients.active {
-                    coefficients.derivative_scale * current_value
-                        - coefficients.previous_value_scale * prev_value
-                        - coefficients.older_value_scale * older_value
-                        - coefficients.previous_derivative_scale * previous_derivative
-                } else {
-                    0.0
-                };
-                self.context.state_derivatives[*idx] = derivative;
-                self.context.state_older_candidate[*idx] = prev_value;
+                self.context.state_derivatives[*idx] = candidate.value;
+                self.context.state_older_candidate[*idx] = candidate.previous;
                 self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
-                self.stack.push(derivative);
+                self.stack.push(candidate.value);
             }
 
             // The VM and JIT use the same checked companion arithmetic as
@@ -637,7 +617,7 @@ impl<'a> Vm<'a> {
                     if self.context.state_values.len() <= *idx {
                         self.context.allocate_states(*idx + 1);
                     }
-                    self.context.state_candidate_valid[*idx] = 0;
+                    self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_FAILED;
                     (
                         self.context.state_integration_coefficients().into(),
                         GeneratedIdtAcceptedHistory {
@@ -715,6 +695,42 @@ impl<'a> Vm<'a> {
                 self.stack.push(value);
             }
 
+            Instruction::DdtDerivativeState(idx) => {
+                let input = self.pop()?;
+                let primal = self.pop()?;
+                if !input.is_finite() || !primal.is_finite() {
+                    return Err(VmError::InvalidNumericResult(
+                        "ddt derivative operands must be finite".into(),
+                    ));
+                }
+                if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    || (matches!(self.context.analysis_type, 1 | 3)
+                        && !self.context.analysis_phase.is_equilibrium())
+                {
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
+                let initialized = self
+                    .context
+                    .state_initialized
+                    .get(*idx)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing ddt derivative state"))?;
+                if self.context.state_candidate_valid.get(*idx)
+                    != Some(&INTEGRATION_CANDIDATE_VALID)
+                {
+                    return Err(VmError::InvalidInstruction(
+                        "ddt derivative requires its current primal candidate",
+                    ));
+                }
+                let value = rspice_veriloga_runtime::evaluate_generated_ddt_derivative(
+                    self.context.integration_coefficients().into(),
+                    initialized,
+                    input,
+                )
+                .map_err(|error| VmError::InvalidNumericResult(error.to_string()))?;
+                self.stack.push(value);
+            }
             Instruction::IdtDerivativeState(idx) | Instruction::IdtModDerivativeState(idx) => {
                 use rspice_veriloga_runtime::{
                     GeneratedIdtModBranch, evaluate_generated_idt_derivative,
@@ -2954,8 +2970,7 @@ mod tests {
                 &mut context,
                 vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
             )
-            .unwrap()
-            .is_nan()
+            .is_err()
         );
         assert!(context.validate_advance_state().is_err());
 
@@ -2974,15 +2989,14 @@ mod tests {
     fn nonfinite_operating_point_candidate_is_not_promoted_to_transient_history() {
         let mut context = VmContext::with_states(0, 1);
 
-        assert_eq!(
+        assert!(
             execute_with_context(
                 &mut context,
                 vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
             )
-            .unwrap()
-            .to_bits(),
-            0.0_f64.to_bits()
+            .is_err()
         );
+        assert!(context.validate_advance_state().is_err());
         assert!(!context.state_initialized[0]);
 
         context.set_integration_coefficients(
@@ -2994,7 +3008,10 @@ mod tests {
         assert_eq!(context.state_values_prev[0].to_bits(), 0.0_f64.to_bits());
         assert_eq!(context.state_values_older[0].to_bits(), 0.0_f64.to_bits());
         assert_eq!(context.state_derivatives[0].to_bits(), 0.0_f64.to_bits());
-        assert_eq!(context.state_candidate_valid, vec![2]);
+        assert_eq!(
+            context.state_candidate_valid,
+            vec![super::INTEGRATION_CANDIDATE_FAILED]
+        );
     }
 
     #[test]

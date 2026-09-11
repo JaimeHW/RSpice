@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 391] = [707, 0, 708, 1, 122, 126, 139, 151, 5, 6, 7, 125, 138, 150, 128, 141, 153, 124, 137, 149, 131, 134, 146, 158, 132, 144, 156, 133, 145, 157, 709, 710, 711, 713, 714, 715, 712, 17, 18, 19, 29, 232, 31, 249, 33, 266, 35, 36, 37, 30, 231, 32, 248, 34, 265, 235, 252, 269, 26, 230, 27, 247, 28, 264, 239, 242, 256, 259, 273, 276, 238, 240, 255, 257, 272, 274, 241, 258, 275, 716, 717, 718, 719, 720, 721, 650, 963, 2, 3, 4, 8, 9, 10, 11, 12, 13, 15, 14, 16, 20, 21, 22, 23, 24, 25, 38, 39, 40, 42, 41, 44, 43, 46, 45, 47, 48, 49, 51, 50, 52, 728, 53, 54, 742, 743, 744, 745, 746, 747, 55, 56, 57, 759, 760, 761, 762, 58, 59, 60, 763, 764, 765, 766, 767, 63, 61, 62, 64, 65, 768, 769, 67, 66, 68, 69, 70, 71, 772, 72, 773, 73, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 829, 831, 832, 833, 828, 75, 74, 76, 77, 834, 836, 837, 838, 830, 79, 78, 80, 81, 835, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 88, 361, 354, 105, 370, 368, 374, 372, 376, 911, 410, 384, 919, 477, 441, 454, 453, 439, 438, 458, 104, 464, 749, 750, 495, 96, 484, 488, 487, 348, 349, 962, 408, 414, 92, 108, 94, 95, 436, 455, 440, 448, 971, 973, 446, 974, 447, 101, 102, 107, 977, 486, 985, 986, 988, 111, 989, 991, 1013, 120, 160, 177, 225, 278, 295, 227, 228, 234, 244, 245, 251, 261, 262, 268, 342, 480, 352, 359, 385, 386, 1491, 396, 1494, 407, 413, 418, 419, 437, 445, 452, 460, 473, 1502, 1499, 1500, 1503, 1501, 485, 493, 500, 498, 1508, 1509, 555, 1524, 556, 596, 600, 601, 603, 604, 643, 644, 646, 1590, 1591, 1592, 1593, 1594, 1595, 1596, 1597, 1598, 1582, 673, 674];
@@ -14053,38 +14053,27 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-			let A=staged[728]!=0.0;
-			let B=staged[871]!=0.0;
-			let C=staged[873]!=0.0;
-			if A{
-			if B{
-			loop{
-			if !C{
-			break;
-			}
-			}
-			}
-			}
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -14683,15 +14672,14 @@ impl Instance {
 		let JEC=L7([0f64;7]);
 		let JEF=staged[664];
 		let JEI=staged[665];
-		let JEM=ddt_scale();
-		let JEP=staged[666];
-		let JFF=staged[667];
-		let JHJ=0.08333333333333333f64;
-		let JHU=1e-20f64;
-		let JJG=staged[668];
-		let JKG=staged[669];
-		let JND=node_potentials[5];
-		let JNN=staged[671];
+		let JEO=staged[666];
+		let JFE=staged[667];
+		let JHI=0.08333333333333333f64;
+		let JHT=1e-20f64;
+		let JJF=staged[668];
+		let JKF=staged[669];
+		let JNC=node_potentials[5];
+		let JNM=staged[671];
 		let JOD=node_potentials[13];
 		let JOI=node_potentials[14];
 		let JOK=staged[1583];
@@ -24796,81 +24784,82 @@ impl Instance {
 		let JEJ=JEI* X;
 		let JEK=AA* JEI;
 		let JEL=ddt(0, JEJ);
-		let JEN=JEK* JEM;
-		let JEO=E+ JEL;
-		let JEQ=(AA* IXQ)/ JEP;
-		let JER=E+ ((IXQ* X)/ JEP);
-		let JES=-((FFD+ FFE)+ FFF);
-		let JET=((FFG+ FFH)+ FFI)* AS;
-		let JEU=FMB+ FFK;
-		let JEV=FMC+ FFL;
-		let JEW=FME+ FFN;
-		let JEX=FMF+ FFO;
-		let JEY=((GZG* FOA)+ (GZH* FOB))+ (GZJ* FOC);
-		let JEZ=((FOI* GZG)+ (FOJ* GZH))+ (FOK* GZJ);
-		let JFA=((ILH* FOD)+ (ILI* FOE))+ (ILK* FOF);
-		let JFB=((FOL* ILH)+ (FOM* ILI))+ (FON* ILK);
-		let JFC=NN< E;
+		let JEM=ddt_derivative(0,JEL,JEK);
+		let JEN=E+ JEL;
+		let JEP=(AA* IXQ)/ JEO;
+		let JEQ=E+ ((IXQ* X)/ JEO);
+		let JER=-((FFD+ FFE)+ FFF);
+		let JES=((FFG+ FFH)+ FFI)* AS;
+		let JET=FMB+ FFK;
+		let JEU=FMC+ FFL;
+		let JEV=FME+ FFN;
+		let JEW=FMF+ FFO;
+		let JEX=((GZG* FOA)+ (GZH* FOB))+ (GZJ* FOC);
+		let JEY=((FOI* GZG)+ (FOJ* GZH))+ (FOK* GZJ);
+		let JEZ=((ILH* FOD)+ (ILI* FOE))+ (ILK* FOF);
+		let JFA=((FOL* ILH)+ (FOM* ILI))+ (FON* ILK);
+		let JFB=NN< E;
+		let JFC;
 		let JFD;
-		let JFE;
-		if JFC{
+		if JFB{
+		JFC=JER;
 		JFD=JES;
-		JFE=JET;
 		}else{
-		JFD=FFF;
-		JFE=FFI;
+		JFC=FFF;
+		JFD=FFI;
 		}
-		let JFG=JFF* FFD;
-		let JFH=FFG* JFF;
-		let JFI=ddt(1, JFG);
-		let JFJ=JFH* JEM;
-		let JFK=E+ JFI;
-		let JFL=JFF* FFE;
-		let JFM=FFH* JFF;
-		let JFN=ddt(2, JFL);
-		let JFO=JFM* JEM;
-		let JFP=E+ JFN;
-		let JFQ=JFF* JFD;
-		let JFR=JFE* JFF;
-		let JFS=ddt(3, JFQ);
-		let JFT=JFR* JEM;
-		let JFU=E+ JFS;
-		let JFV=JFF* JEU;
-		let JFW=JEV* JFF;
-		let JFX=ddt(4, JFV);
-		let JFY=JFW* JEM;
-		let JFZ=E+ JFX;
-		let JGA=JFF* JEW;
-		let JGB=JEX* JFF;
-		let JGC=ddt(5, JGA);
-		let JGD=JGB* JEM;
-		let JGE=E+ JGC;
-		let JGF=JFF* FLY;
-		let JGG=FLZ* JFF;
-		let JGH=ddt(6, JGF);
-		let JGI=JGG* JEM;
-		let JGJ=E+ JGH;
-		let JGK=JFF* JEY;
-		let JGL=JEZ* JFF;
-		let JGM=ddt(7, JGK);
-		let JGN=JGL* JEM;
-		let JGO=E+ JGM;
-		let JGP=JFF* JFA;
-		let JGQ=JFB* JFF;
-		let JGR=ddt(8, JGP);
-		let JGS=JGQ* JEM;
-		let JGT=E+ JGR;
-		let JGU=FBG* CXU;
-		let JGV=(FBH* CXU)+ (CYL* FBG);
-		let JGW=AAT&& (GO> E);
+		let JFF=JFE* FFD;
+		let JFG=FFG* JFE;
+		let JFH=ddt(1, JFF);
+		let JFI=L5(std::array::from_fn(|i| ddt_derivative(1,JFH,(JFG)[i])));
+		let JFJ=E+ JFH;
+		let JFK=JFE* FFE;
+		let JFL=FFH* JFE;
+		let JFM=ddt(2, JFK);
+		let JFN=L5(std::array::from_fn(|i| ddt_derivative(2,JFM,(JFL)[i])));
+		let JFO=E+ JFM;
+		let JFP=JFE* JFC;
+		let JFQ=JFD* JFE;
+		let JFR=ddt(3, JFP);
+		let JFS=L5(std::array::from_fn(|i| ddt_derivative(3,JFR,(JFQ)[i])));
+		let JFT=E+ JFR;
+		let JFU=JFE* JET;
+		let JFV=JEU* JFE;
+		let JFW=ddt(4, JFU);
+		let JFX=L2(std::array::from_fn(|i| ddt_derivative(4,JFW,(JFV)[i])));
+		let JFY=E+ JFW;
+		let JFZ=JFE* JEV;
+		let JGA=JEW* JFE;
+		let JGB=ddt(5, JFZ);
+		let JGC=L3(std::array::from_fn(|i| ddt_derivative(5,JGB,(JGA)[i])));
+		let JGD=E+ JGB;
+		let JGE=JFE* FLY;
+		let JGF=FLZ* JFE;
+		let JGG=ddt(6, JGE);
+		let JGH=L4(std::array::from_fn(|i| ddt_derivative(6,JGG,(JGF)[i])));
+		let JGI=E+ JGG;
+		let JGJ=JFE* JEX;
+		let JGK=JEY* JFE;
+		let JGL=ddt(7, JGJ);
+		let JGM=L2(std::array::from_fn(|i| ddt_derivative(7,JGL,(JGK)[i])));
+		let JGN=E+ JGL;
+		let JGO=JFE* JEZ;
+		let JGP=JFA* JFE;
+		let JGQ=ddt(8, JGO);
+		let JGR=L4(std::array::from_fn(|i| ddt_derivative(8,JGQ,(JGP)[i])));
+		let JGS=E+ JGQ;
+		let JGT=FBG* CXU;
+		let JGU=(FBH* CXU)+ (CYL* FBG);
+		let JGV=AAT&& (GO> E);
+		let JGW;
 		let JGX;
 		let JGY;
 		let JGZ;
 		let JHA;
 		let JHB;
-		let JHC;
-		if JGW{
-		let JHD=IXR> E;
+		if JGV{
+		let JHC=IXR> E;
+		let JHV;
 		let JHW;
 		let JHX;
 		let JHY;
@@ -24886,125 +24875,125 @@ impl Instance {
 		let JII;
 		let JIJ;
 		let JIK;
-		let JIL;
-		if JHD{
-		let JHE=ATP/ ATN;
-		let JHF=(AUF).product_sum_div(AI,AUD,(-JHE),ATN);
-		let JHG=ATO/ ATP;
-		let JHH=(AUE).product_sum_div(AI,AUF,(-JHG),ATP);
-		let JHI=ATJ/ JHE;
-		let JHK=JHJ* JHI;
-		let JHL=((ATZ).product_sum_div(AI,JHF,(-JHI),JHE))* JHJ;
-		let JHM=JHK* JHK;
-		let JHN=JHL* JHK;
-		let JHO=JHN+ JHN;
-		let JHP=JHE/ BSU;
-		let JHQ=(JHF).product_sum_div(AI,BSX,(-JHP),BSU);
-		let JHR=JHP- AO;
-		let JHS=AO- (ADV* (JHR* JHM));
-		let JHT=(((JHQ* JHM)+ (JHO* JHR))* ADV)* AS;
-		let JHV=JHS> JHU;
+		if JHC{
+		let JHD=ATP/ ATN;
+		let JHE=(AUF).product_sum_div(AI,AUD,(-JHD),ATN);
+		let JHF=ATO/ ATP;
+		let JHG=(AUE).product_sum_div(AI,AUF,(-JHF),ATP);
+		let JHH=ATJ/ JHD;
+		let JHJ=JHI* JHH;
+		let JHK=((ATZ).product_sum_div(AI,JHE,(-JHH),JHD))* JHI;
+		let JHL=JHJ* JHJ;
+		let JHM=JHK* JHJ;
+		let JHN=JHM+ JHM;
+		let JHO=JHD/ BSU;
+		let JHP=(JHE).product_sum_div(AI,BSX,(-JHO),BSU);
+		let JHQ=JHO- AO;
+		let JHR=AO- (ADV* (JHQ* JHL));
+		let JHS=(((JHP* JHL)+ (JHN* JHQ))* ADV)* AS;
+		let JHU=JHR> JHT;
+		let JIM;
 		let JIN;
-		let JIO;
-		if JHV{
+		if JHU{
+		JIM=JHR;
 		JIN=JHS;
-		JIO=JHT;
 		}else{
-		JIN=JHU;
-		JIO=SH;
+		JIM=JHT;
+		JIN=SH;
 		}
-		let JIP=JIN* JIN;
-		let JIQ=JIO* JIN;
-		let JIR=AO/ JIP;
-		let JIS=((JIQ+ JIQ)).product_div((-JIR),JIP);
-		let JIT=GO* ATP;
-		let JIU=JIT* BSW;
-		let JIV=((L5([(GP* ATP),0.0,0.0,0.0,0.0])+ (AUF* GO))* BSW)+ (BSZ* JIT);
-		let JIW=AO+ JHG;
-		let JIX=JIW* JHM;
-		let JIY=(JHG+ (ADV* JHM))- (24f64* (JIX* JHR));
-		let JIZ=(JHH+ (JHO* ADV))- (((((JHH* JHM)+ (JHO* JIW))* JHR)+ (JHQ* JIX))* 24f64);
-		let JJA=JIY> AGS;
+		let JIO=JIM* JIM;
+		let JIP=JIN* JIM;
+		let JIQ=AO/ JIO;
+		let JIR=((JIP+ JIP)).product_div((-JIQ),JIO);
+		let JIS=GO* ATP;
+		let JIT=JIS* BSW;
+		let JIU=((L5([(GP* ATP),0.0,0.0,0.0,0.0])+ (AUF* GO))* BSW)+ (BSZ* JIS);
+		let JIV=AO+ JHF;
+		let JIW=JIV* JHL;
+		let JIX=(JHF+ (ADV* JHL))- (24f64* (JIW* JHQ));
+		let JIY=(JHG+ (JHN* ADV))- (((((JHG* JHL)+ (JHN* JIV))* JHQ)+ (JHP* JIW))* 24f64);
+		let JIZ=JIX> AGS;
+		let JJA;
 		let JJB;
-		let JJC;
-		if JJA{
+		if JIZ{
+		JJA=JIX;
 		JJB=JIY;
-		JJC=JIZ;
 		}else{
-		JJB=AGS;
-		JJC=SH;
+		JJA=AGS;
+		JJB=SH;
 		}
-		let JJD=JIU* JIR;
-		let JJE=JJD* JJB;
-		let JJF=(((JIV* JIR)+ (JIS* JIU))* JJB)+ (JJC* JJD);
-		let JJH=JJG> E;
+		let JJC=JIT* JIQ;
+		let JJD=JJC* JJA;
+		let JJE=(((JIU* JIQ)+ (JIR* JIT))* JJA)+ (JJB* JJC);
+		let JJG=JJF> E;
+		let JJO;
 		let JJP;
 		let JJQ;
 		let JJR;
-		let JJS;
-		if JJH{
-		let JJI=ATU/ ATS;
-		let JJJ=(AUK).product_sum_div(AI,AUI,(-JJI),ATS);
-		let JJK=JJI* JJI;
-		let JJL=JJJ* JJI;
-		let JJM=JJK* ATJ;
-		let JJN=JJM* ATJ;
-		let JJO=((((JJL+ JJL)* ATJ)+ (ATZ* JJK))* ATJ)+ (ATZ* JJM);
+		if JJG{
+		let JJH=ATU/ ATS;
+		let JJI=(AUK).product_sum_div(AI,AUI,(-JJH),ATS);
+		let JJJ=JJH* JJH;
+		let JJK=JJI* JJH;
+		let JJL=JJJ* ATJ;
+		let JJM=JJL* ATJ;
+		let JJN=((((JJK+ JJK)* ATJ)+ (ATZ* JJJ))* ATJ)+ (ATZ* JJL);
+		let JJX;
 		let JJY;
-		let JJZ;
 		if K{
-		let JJV=AO+ (JJI* ATJ);
-		let JJW=JJN/ JJV;
-		let JJX=(JJO).product_sum_div(AI,((JJJ* ATJ)+ (ATZ* JJI)),(-JJW),JJV);
+		let JJU=AO+ (JJH* ATJ);
+		let JJV=JJM/ JJU;
+		let JJW=(JJN).product_sum_div(AI,((JJI* ATJ)+ (ATZ* JJH)),(-JJV),JJU);
+		JJX=JJV;
 		JJY=JJW;
-		JJZ=JJX;
 		}else{
+		JJX=JJM;
 		JJY=JJN;
-		JJZ=JJO;
 		}
-		let JKA=(AO+ (BJ* JJY)).sqrt();
-		let JKB=AO+ JKA;
-		let JKC=DS* (ATS* JKB);
-		let JKD=JKC* JIN;
-		let JKE=ATS/ JKD;
-		let JKF=(AUI).product_sum_div(AI,(((((AUI* JKB)+ (((JJZ* BJ)* (AI/ (CB* JKA)))* ATS))* DS)* JIN)+ (JIO* JKC)),(-JKE),JKD);
-		let JKH=JKG* BSV;
-		let JKI=JKH* ATG;
-		let JKJ=JKI* JKE;
-		let JKK=JKJ* JKE;
-		let JKL=((((((BSY* JKG)* ATG)+ (ATW* JKH))* JKE)+ (JKF* JKI))* JKE)+ (JKF* JKJ);
-		let JKM=JKK/ BG;
-		let JKN=JJE+ JKM;
-		let JKO=JJF+ ((JKL).product_sum_div(AI,L5([BH,0.0,0.0,0.0,0.0]),(-JKM),BG));
-		JJP=JKN;
-		JJQ=JKK;
-		JJR=JKO;
-		JJS=JKL;
+		let JJZ=(AO+ (BJ* JJX)).sqrt();
+		let JKA=AO+ JJZ;
+		let JKB=DS* (ATS* JKA);
+		let JKC=JKB* JIM;
+		let JKD=ATS/ JKC;
+		let JKE=(AUI).product_sum_div(AI,(((((AUI* JKA)+ (((JJY* BJ)* (AI/ (CB* JJZ)))* ATS))* DS)* JIM)+ (JIN* JKB)),(-JKD),JKC);
+		let JKG=JKF* BSV;
+		let JKH=JKG* ATG;
+		let JKI=JKH* JKD;
+		let JKJ=JKI* JKD;
+		let JKK=((((((BSY* JKF)* ATG)+ (ATW* JKG))* JKD)+ (JKE* JKH))* JKD)+ (JKE* JKI);
+		let JKL=JKJ/ BG;
+		let JKM=JJD+ JKL;
+		let JKN=JJE+ ((JKK).product_sum_div(AI,L5([BH,0.0,0.0,0.0,0.0]),(-JKL),BG));
+		JJO=JKM;
+		JJP=JKJ;
+		JJQ=JKN;
+		JJR=JKK;
 		}else{
-		JJP=JJE;
-		JJQ=E;
-		JJR=JJF;
-		JJS=SH;
+		JJO=JJD;
+		JJP=E;
+		JJQ=JJE;
+		JJR=SH;
 		}
-		let JJT=(IL* JJP).sqrt();
-		let JJU=(L5([(IM* JJP),0.0,0.0,0.0,0.0])+ (JJR* IL))* (AI/ (CB* JJT));
-		JHW=JHG;
-		JHX=JHM;
-		JHY=JHR;
-		JHZ=JIR;
-		JIA=JIU;
-		JIB=JHK;
-		JIC=JJQ;
-		JID=JJT;
-		JIE=JHH;
-		JIF=JHO;
-		JIG=JHQ;
-		JIH=JIS;
-		JII=JIV;
-		JIJ=JHL;
-		JIK=JJS;
-		JIL=JJU;
+		let JJS=(IL* JJO).sqrt();
+		let JJT=(L5([(IM* JJO),0.0,0.0,0.0,0.0])+ (JJQ* IL))* (AI/ (CB* JJS));
+		JHV=JHF;
+		JHW=JHL;
+		JHX=JHQ;
+		JHY=JIQ;
+		JHZ=JIT;
+		JIA=JHJ;
+		JIB=JJP;
+		JIC=JJS;
+		JID=JHG;
+		JIE=JHN;
+		JIF=JHP;
+		JIG=JIR;
+		JIH=JIU;
+		JII=JHK;
+		JIJ=JJR;
+		JIK=JJT;
 		}else{
+		JHV=E;
 		JHW=E;
 		JHX=E;
 		JHY=E;
@@ -25012,7 +25001,7 @@ impl Instance {
 		JIA=E;
 		JIB=E;
 		JIC=E;
-		JID=E;
+		JID=SH;
 		JIE=SH;
 		JIF=SH;
 		JIG=SH;
@@ -25020,168 +25009,168 @@ impl Instance {
 		JII=SH;
 		JIJ=SH;
 		JIK=SH;
-		JIL=SH;
 		}
-		let JIM=(((parameters[50]== AO)&& (IL> E))&& JHD)&& (parameters[33]> E);
+		let JIL=(((parameters[50]== AO)&& (IL> E))&& JHC)&& (parameters[33]> E);
+		let JKX;
 		let JKY;
 		let JKZ;
 		let JLA;
 		let JLB;
 		let JLC;
+		if JIL{
+		let JKO=ADV* JHW;
+		let JKP=JIE* ADV;
+		let JKQ=(JHV+ APJ)- JKO;
+		let JKR=(JID- JKP)* JHW;
+		let JKS=(JHV+ AO)- JKO;
+		let JKT=JHW* JKS;
+		let JKU=((JHV/ ADV)- (JHW* JKQ))- (1.6f64* (JKT* JHX));
+		let JKV=((JID/ ADV)- ((JIE* JKQ)+ JKR))- (((((JIE* JKS)+ JKR)* JHX)+ (JIF* JKT))* 1.6f64);
+		let JKW=JKU> AGS;
 		let JLD;
-		if JIM{
-		let JKP=ADV* JHX;
-		let JKQ=JIF* ADV;
-		let JKR=(JHW+ APJ)- JKP;
-		let JKS=(JIE- JKQ)* JHX;
-		let JKT=(JHW+ AO)- JKP;
-		let JKU=JHX* JKT;
-		let JKV=((JHW/ ADV)- (JHX* JKR))- (1.6f64* (JKU* JHY));
-		let JKW=((JIE/ ADV)- ((JIF* JKR)+ JKS))- (((((JIF* JKT)+ JKS)* JHY)+ (JIG* JKU))* 1.6f64);
-		let JKX=JKV> AGS;
 		let JLE;
-		let JLF;
-		if JKX{
+		if JKW{
+		JLD=JKU;
 		JLE=JKV;
-		JLF=JKW;
 		}else{
-		JLE=AGS;
-		JLF=SH;
+		JLD=AGS;
+		JLE=SH;
 		}
-		let JLG=JHZ/ JIA;
-		let JLH=JLG* JLE;
-		let JLI=(((JIH).product_sum_div(AI,JII,(-JLG),JIA))* JLE)+ (JLF* JLG);
-		let JLJ=JHZ* JIB;
-		let JLK=(JHW+ (19.2f64* JHX))- (ADV* (JHW* JHX));
-		let JLL=(AO- JKP)- (JLK* JHY);
-		let JLM=JLJ* JLL;
-		let JLN=(((JIH* JIB)+ (JIJ* JHZ))* JLL)+ (((JKQ* AS)- ((((JIE+ (JIF* 19.2f64))- (((JIE* JHX)+ (JIF* JHW))* ADV))* JHY)+ (JIG* JLK)))* JLJ);
-		let JLO=FBS* FBS;
-		let JLP=FBX* FBS;
-		let JLQ=JLO* FBG;
-		let JLR=FBT* FBT;
-		let JLS=FBY* FBT;
-		let JLT=(JLQ* CXU)/ JLR;
-		let JLU=((((((JLP+ JLP)* FBG)+ (FBH* JLO))* CXU)+ (CYL* JLQ))).product_sum_div(AI,(JLS+ JLS),(-JLT),JLR);
-		let JLV=JJG> E;
+		let JLF=JHY/ JHZ;
+		let JLG=JLF* JLD;
+		let JLH=(((JIG).product_sum_div(AI,JIH,(-JLF),JHZ))* JLD)+ (JLE* JLF);
+		let JLI=JHY* JIA;
+		let JLJ=(JHV+ (19.2f64* JHW))- (ADV* (JHV* JHW));
+		let JLK=(AO- JKO)- (JLJ* JHX);
+		let JLL=JLI* JLK;
+		let JLM=(((JIG* JIA)+ (JII* JHY))* JLK)+ (((JKP* AS)- ((((JID+ (JIE* 19.2f64))- (((JID* JHW)+ (JIE* JHV))* ADV))* JHX)+ (JIF* JLJ)))* JLI);
+		let JLN=FBS* FBS;
+		let JLO=FBX* FBS;
+		let JLP=JLN* FBG;
+		let JLQ=FBT* FBT;
+		let JLR=FBY* FBT;
+		let JLS=(JLP* CXU)/ JLQ;
+		let JLT=((((((JLO+ JLO)* FBG)+ (FBH* JLN))* CXU)+ (CYL* JLP))).product_sum_div(AI,(JLR+ JLR),(-JLS),JLQ);
+		let JLU=JJF> E;
+		let JMI;
 		let JMJ;
 		let JMK;
 		let JML;
-		let JMM;
-		if JLV{
-		let JLW=AO+ JKP;
-		let JLX=ADV* JIA;
-		let JLY=JLX* JIA;
-		let JLZ=JLY* BG;
-		let JMA=(JIC* JLW)/ JLZ;
-		let JMB=JLH+ JMA;
-		let JMC=JLI+ ((((JIK* JLW)+ (JKQ* JIC))).product_sum_div(AI,(((((JII* ADV)* JIA)+ (JII* JLX))* BG)+ L5([(BH* JLY),0.0,0.0,0.0,0.0])),(-JMA),JLZ));
-		let JMD=JIC* JIB;
-		let JME=AO+ JHY;
-		let JMF=JIA* BG;
-		let JMG=(JMD* JME)/ JMF;
-		let JMH=JLM- JMG;
-		let JMI=JLN- ((((((JIK* JIB)+ (JIJ* JIC))* JME)+ (JIG* JMD))).product_sum_div(AI,((JII* BG)+ L5([(BH* JIA),0.0,0.0,0.0,0.0])),(-JMG),JMF));
-		JMJ=JMB;
-		JMK=JMH;
-		JML=JMC;
-		JMM=JMI;
+		if JLU{
+		let JLV=AO+ JKO;
+		let JLW=ADV* JHZ;
+		let JLX=JLW* JHZ;
+		let JLY=JLX* BG;
+		let JLZ=(JIB* JLV)/ JLY;
+		let JMA=JLG+ JLZ;
+		let JMB=JLH+ ((((JIJ* JLV)+ (JKP* JIB))).product_sum_div(AI,(((((JIH* ADV)* JHZ)+ (JIH* JLW))* BG)+ L5([(BH* JLX),0.0,0.0,0.0,0.0])),(-JLZ),JLY));
+		let JMC=JIB* JIA;
+		let JMD=AO+ JHX;
+		let JME=JHZ* BG;
+		let JMF=(JMC* JMD)/ JME;
+		let JMG=JLL- JMF;
+		let JMH=JLM- ((((((JIJ* JIA)+ (JII* JIB))* JMD)+ (JIF* JMC))).product_sum_div(AI,((JIH* BG)+ L5([(BH* JHZ),0.0,0.0,0.0,0.0])),(-JMF),JME));
+		JMI=JMA;
+		JMJ=JMG;
+		JMK=JMB;
+		JML=JMH;
 		}else{
-		JMJ=JLH;
-		JMK=JLM;
-		JML=JLI;
-		JMM=JLN;
+		JMI=JLG;
+		JMJ=JLL;
+		JMK=JLH;
+		JML=JLM;
 		}
-		let JMN=IL/ JMJ;
-		let JMO=JMN.sqrt();
-		let JMP=((L5([IM,0.0,0.0,0.0,0.0])).product_sum_div(AI,JML,(-JMN),JMJ))* (AI/ (CB* JMO));
-		let JMQ=JID<= E;
+		let JMM=IL/ JMI;
+		let JMN=JMM.sqrt();
+		let JMO=((L5([IM,0.0,0.0,0.0,0.0])).product_sum_div(AI,JMK,(-JMM),JMI))* (AI/ (CB* JMN));
+		let JMP=JIC<= E;
+		let JMS;
 		let JMT;
-		let JMU;
-		if JMQ{
-		JMT=E;
-		JMU=SH;
+		if JMP{
+		JMS=E;
+		JMT=SH;
 		}else{
-		let JMR=(JMK* JMO)/ JID;
-		let JMS=(((JMM* JMO)+ (JMP* JMK))).product_sum_div(AI,JIL,(-JMR),JID);
+		let JMQ=(JMJ* JMN)/ JIC;
+		let JMR=(((JML* JMN)+ (JMO* JMJ))).product_sum_div(AI,JIK,(-JMQ),JIC);
+		JMS=JMQ;
 		JMT=JMR;
-		JMU=JMS;
 		}
-		let JMV=JMT> E;
+		let JMU=JMS> E;
+		let JMW;
 		let JMX;
-		let JMY;
-		if JMV{
-		let JMW=JMT< AO;
+		if JMU{
+		let JMV=JMS< AO;
+		let JNA;
 		let JNB;
-		let JNC;
-		if JMW{
+		if JMV{
+		JNA=JMS;
 		JNB=JMT;
-		JNC=JMU;
 		}else{
-		JNB=AO;
-		JNC=SH;
+		JNA=AO;
+		JNB=SH;
 		}
+		JMW=JNA;
 		JMX=JNB;
-		JMY=JNC;
 		}else{
-		JMX=E;
-		JMY=SH;
+		JMW=E;
+		JMX=SH;
 		}
-		let JMZ=(JMX* JID)/ JMO;
-		let JNA=(((JMY* JID)+ (JIL* JMX))).product_sum_div(AI,JMP,(-JMZ),JMO);
-		JKY=JMJ;
-		JKZ=JLT;
-		JLA=JMZ;
-		JLB=JML;
-		JLC=JLU;
-		JLD=JNA;
+		let JMY=(JMW* JIC)/ JMN;
+		let JMZ=(((JMX* JIC)+ (JIK* JMW))).product_sum_div(AI,JMO,(-JMY),JMN);
+		JKX=JMI;
+		JKY=JLS;
+		JKZ=JMY;
+		JLA=JMK;
+		JLB=JLT;
+		JLC=JMZ;
 		}else{
-		JKY=AGS;
-		JKZ=JGU;
-		JLA=E;
-		JLB=SH;
-		JLC=JGV;
-		JLD=SH;
+		JKX=AGS;
+		JKY=JGT;
+		JKZ=E;
+		JLA=SH;
+		JLB=JGU;
+		JLC=SH;
 		}
+		JGW=JKX;
 		JGX=JKY;
 		JGY=JKZ;
 		JGZ=JLA;
 		JHA=JLB;
 		JHB=JLC;
-		JHC=JLD;
 		}else{
-		JGX=AGS;
-		JGY=JGU;
-		JGZ=E;
-		JHA=SH;
-		JHB=JGV;
-		JHC=SH;
+		JGW=AGS;
+		JGX=JGT;
+		JGY=E;
+		JGZ=SH;
+		JHA=JGU;
+		JHB=SH;
 		}
-		let JNE=JND/ JGX;
-		let JNF=(L6([0.0,1f64,0.0,0.0,0.0,0.0])).product_sum_div(AI,L6([JHA[0],0.0,JHA[1],JHA[2],JHA[3],JHA[4]]),(-JNE),JGX);
-		let JNG=E+ JNE;
-		let JNH=JGY* JND;
-		let JNI=JHB* JND;
-		let JNJ=L6([JNI[0],0.0,JNI[1],JNI[2],JNI[3],JNI[4]])+ L6([0.0,(1f64* JGY),0.0,0.0,0.0,0.0]);
-		let JNK=ddt(9, JNH);
-		let JNL=JNJ* JEM;
-		let JNM=E+ JNK;
-		let JNO=JNN* JGY;
-		let JNP=JNO* JND;
-		let JNQ=(JHB* JNN)* JND;
-		let JNR=L6([JNQ[0],0.0,JNQ[1],JNQ[2],JNQ[3],JNQ[4]])+ L6([0.0,(1f64* JNO),0.0,0.0,0.0,0.0]);
-		let JNS=ddt(10, JNP);
-		let JNT=JNR* JEM;
-		let JNU=JNT* AS;
-		let JNV=-JNP;
-		let JNW=JNR* AS;
-		let JNX=E+ (-JNS);
-		let JNY=ddt(11, JNP);
-		let JNZ=JNT* AS;
-		let JOA=E+ (-JNY);
+		let JND=JNC/ JGW;
+		let JNE=(L6([0.0,1f64,0.0,0.0,0.0,0.0])).product_sum_div(AI,L6([JGZ[0],0.0,JGZ[1],JGZ[2],JGZ[3],JGZ[4]]),(-JND),JGW);
+		let JNF=E+ JND;
+		let JNG=JGX* JNC;
+		let JNH=JHA* JNC;
+		let JNI=L6([JNH[0],0.0,JNH[1],JNH[2],JNH[3],JNH[4]])+ L6([0.0,(1f64* JGX),0.0,0.0,0.0,0.0]);
+		let JNJ=ddt(9, JNG);
+		let JNK=L6(std::array::from_fn(|i| ddt_derivative(9,JNJ,(JNI)[i])));
+		let JNL=E+ JNJ;
+		let JNN=JNM* JGX;
+		let JNO=JNN* JNC;
+		let JNP=(JHA* JNM)* JNC;
+		let JNQ=L6([JNP[0],0.0,JNP[1],JNP[2],JNP[3],JNP[4]])+ L6([0.0,(1f64* JNN),0.0,0.0,0.0,0.0]);
+		let JNR=ddt(10, JNO);
+		let JNS=L6(std::array::from_fn(|i| ddt_derivative(10,JNR,(JNQ)[i])));
+		let JNT=JNS* AS;
+		let JNU=-JNO;
+		let JNV=JNQ* AS;
+		let JNW=E+ (-JNR);
+		let JNX=ddt(11, JNO);
+		let JNY=L6(std::array::from_fn(|i| ddt_derivative(11,JNX,(JNQ)[i])));
+		let JNZ=JNY* AS;
+		let JOA=E+ (-JNX);
 		let JOB=NN* staged[672];
-		let JOC=JOB* JGZ;
-		let JOE=(JHC* JOB)* JOD;
+		let JOC=JOB* JGY;
+		let JOE=(JHB* JOB)* JOD;
 		let JOF=L6([JOE[0],JOE[1],JOE[2],JOE[3],JOE[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(1f64* JOC)]);
 		let JOG=E+ (JOC* JOD);
 		let JOH=E+ JOD;
@@ -25376,56 +25365,56 @@ impl Instance {
 		let JUF=JEG[4];
 		let JUG=JEG[5];
 		let JUH=JEG[6];
-		let JUI=JEN;
-		let JUJ=JEQ;
-		let JUK=JFJ[0];
-		let JUL=JFJ[1];
-		let JUM=JFJ[2];
-		let JUN=JFJ[3];
-		let JUO=JFJ[4];
-		let JUP=JFO[0];
-		let JUQ=JFO[1];
-		let JUR=JFO[2];
-		let JUS=JFO[3];
-		let JUT=JFO[4];
-		let JUU=JFT[0];
-		let JUV=JFT[1];
-		let JUW=JFT[2];
-		let JUX=JFT[3];
-		let JUY=JFT[4];
-		let JUZ=JFY[0];
-		let JVA=JFY[1];
-		let JVB=JGD[0];
-		let JVC=JGD[1];
-		let JVD=JGD[2];
-		let JVE=JGI[0];
-		let JVF=JGI[1];
-		let JVG=JGI[2];
-		let JVH=JGI[3];
-		let JVI=JGN[0];
-		let JVJ=JGN[1];
-		let JVK=JGS[0];
-		let JVL=JGS[1];
-		let JVM=JGS[2];
-		let JVN=JGS[3];
-		let JVO=JNF[0];
-		let JVP=JNF[1];
-		let JVQ=JNF[2];
-		let JVR=JNF[3];
-		let JVS=JNF[4];
-		let JVT=JNF[5];
-		let JVU=JNL[0];
-		let JVV=JNL[1];
-		let JVW=JNL[2];
-		let JVX=JNL[3];
-		let JVY=JNL[4];
-		let JVZ=JNL[5];
-		let JWA=JNU[0];
-		let JWB=JNU[1];
-		let JWC=JNU[2];
-		let JWD=JNU[3];
-		let JWE=JNU[4];
-		let JWF=JNU[5];
+		let JUI=JEM;
+		let JUJ=JEP;
+		let JUK=JFI[0];
+		let JUL=JFI[1];
+		let JUM=JFI[2];
+		let JUN=JFI[3];
+		let JUO=JFI[4];
+		let JUP=JFN[0];
+		let JUQ=JFN[1];
+		let JUR=JFN[2];
+		let JUS=JFN[3];
+		let JUT=JFN[4];
+		let JUU=JFS[0];
+		let JUV=JFS[1];
+		let JUW=JFS[2];
+		let JUX=JFS[3];
+		let JUY=JFS[4];
+		let JUZ=JFX[0];
+		let JVA=JFX[1];
+		let JVB=JGC[0];
+		let JVC=JGC[1];
+		let JVD=JGC[2];
+		let JVE=JGH[0];
+		let JVF=JGH[1];
+		let JVG=JGH[2];
+		let JVH=JGH[3];
+		let JVI=JGM[0];
+		let JVJ=JGM[1];
+		let JVK=JGR[0];
+		let JVL=JGR[1];
+		let JVM=JGR[2];
+		let JVN=JGR[3];
+		let JVO=JNE[0];
+		let JVP=JNE[1];
+		let JVQ=JNE[2];
+		let JVR=JNE[3];
+		let JVS=JNE[4];
+		let JVT=JNE[5];
+		let JVU=JNK[0];
+		let JVV=JNK[1];
+		let JVW=JNK[2];
+		let JVX=JNK[3];
+		let JVY=JNK[4];
+		let JVZ=JNK[5];
+		let JWA=JNT[0];
+		let JWB=JNT[1];
+		let JWC=JNT[2];
+		let JWD=JNT[3];
+		let JWE=JNT[4];
+		let JWF=JNT[5];
 		let JWG=JNZ[0];
 		let JWH=JNZ[1];
 		let JWI=JNZ[2];
@@ -25468,54 +25457,54 @@ impl Instance {
 		let JXT=JRF[1];
 		let JXU=JRF[2];
 		let JXV=JEK;
-		let JXW=JFH[0];
-		let JXX=JFH[1];
-		let JXY=JFH[2];
-		let JXZ=JFH[3];
-		let JYA=JFH[4];
-		let JYB=JFM[0];
-		let JYC=JFM[1];
-		let JYD=JFM[2];
-		let JYE=JFM[3];
-		let JYF=JFM[4];
-		let JYG=JFR[0];
-		let JYH=JFR[1];
-		let JYI=JFR[2];
-		let JYJ=JFR[3];
-		let JYK=JFR[4];
-		let JYL=JFW[0];
-		let JYM=JFW[1];
-		let JYN=JGB[0];
-		let JYO=JGB[1];
-		let JYP=JGB[2];
-		let JYQ=JGG[0];
-		let JYR=JGG[1];
-		let JYS=JGG[2];
-		let JYT=JGG[3];
-		let JYU=JGL[0];
-		let JYV=JGL[1];
-		let JYW=JGQ[0];
-		let JYX=JGQ[1];
-		let JYY=JGQ[2];
-		let JYZ=JGQ[3];
-		let JZA=JNJ[0];
-		let JZB=JNJ[1];
-		let JZC=JNJ[2];
-		let JZD=JNJ[3];
-		let JZE=JNJ[4];
-		let JZF=JNJ[5];
-		let JZG=JNW[0];
-		let JZH=JNW[1];
-		let JZI=JNW[2];
-		let JZJ=JNW[3];
-		let JZK=JNW[4];
-		let JZL=JNW[5];
-		let JZM=JNW[0];
-		let JZN=JNW[1];
-		let JZO=JNW[2];
-		let JZP=JNW[3];
-		let JZQ=JNW[4];
-		let JZR=JNW[5];
+		let JXW=JFG[0];
+		let JXX=JFG[1];
+		let JXY=JFG[2];
+		let JXZ=JFG[3];
+		let JYA=JFG[4];
+		let JYB=JFL[0];
+		let JYC=JFL[1];
+		let JYD=JFL[2];
+		let JYE=JFL[3];
+		let JYF=JFL[4];
+		let JYG=JFQ[0];
+		let JYH=JFQ[1];
+		let JYI=JFQ[2];
+		let JYJ=JFQ[3];
+		let JYK=JFQ[4];
+		let JYL=JFV[0];
+		let JYM=JFV[1];
+		let JYN=JGA[0];
+		let JYO=JGA[1];
+		let JYP=JGA[2];
+		let JYQ=JGF[0];
+		let JYR=JGF[1];
+		let JYS=JGF[2];
+		let JYT=JGF[3];
+		let JYU=JGK[0];
+		let JYV=JGK[1];
+		let JYW=JGP[0];
+		let JYX=JGP[1];
+		let JYY=JGP[2];
+		let JYZ=JGP[3];
+		let JZA=JNI[0];
+		let JZB=JNI[1];
+		let JZC=JNI[2];
+		let JZD=JNI[3];
+		let JZE=JNI[4];
+		let JZF=JNI[5];
+		let JZG=JNV[0];
+		let JZH=JNV[1];
+		let JZI=JNV[2];
+		let JZJ=JNV[3];
+		let JZK=JNV[4];
+		let JZL=JNV[5];
+		let JZM=JNV[0];
+		let JZN=JNV[1];
+		let JZO=JNV[2];
+		let JZP=JNV[3];
+		let JZQ=JNV[4];
+		let JZR=JNV[5];
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[1583]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[1584]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[1585]; }
@@ -25706,7 +25695,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (JEO),
+            multiplicity * (JEN),
             [4],
             [JUI],
             [],
@@ -25716,7 +25705,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (JER),
+            multiplicity * (JEQ),
             [4],
             [JUJ],
             [],
@@ -25726,7 +25715,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             Some(7),
-            multiplicity * (JFK),
+            multiplicity * (JFJ),
             [4, 6, 7, 8, 9],
             [JUK, JUL, JUM, JUN, JUO],
             [],
@@ -25736,7 +25725,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(9),
             Some(7),
-            multiplicity * (JFP),
+            multiplicity * (JFO),
             [4, 6, 7, 8, 9],
             [JUP, JUQ, JUR, JUS, JUT],
             [],
@@ -25746,7 +25735,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(8),
             Some(7),
-            multiplicity * (JFU),
+            multiplicity * (JFT),
             [4, 6, 7, 8, 9],
             [JUU, JUV, JUW, JUX, JUY],
             [],
@@ -25756,7 +25745,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(7),
-            multiplicity * (JFZ),
+            multiplicity * (JFY),
             [6, 7],
             [JUZ, JVA],
             [],
@@ -25766,7 +25755,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(8),
-            multiplicity * (JGE),
+            multiplicity * (JGD),
             [6, 7, 8],
             [JVB, JVC, JVD],
             [],
@@ -25776,7 +25765,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             Some(9),
-            multiplicity * (JGJ),
+            multiplicity * (JGI),
             [4, 6, 7, 9],
             [JVE, JVF, JVG, JVH],
             [],
@@ -25786,7 +25775,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(11),
             Some(7),
-            multiplicity * (JGO),
+            multiplicity * (JGN),
             [7, 11],
             [JVI, JVJ],
             [],
@@ -25796,7 +25785,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(12),
             Some(8),
-            multiplicity * (JGT),
+            multiplicity * (JGS),
             [7, 8, 11, 12],
             [JVK, JVL, JVM, JVN],
             [],
@@ -25816,7 +25805,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(5),
             None,
-            multiplicity * (JNG),
+            multiplicity * (JNF),
             [4, 5, 6, 7, 8, 9],
             [JVO, JVP, JVQ, JVR, JVS, JVT],
             [],
@@ -25826,7 +25815,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(5),
             None,
-            multiplicity * (JNM),
+            multiplicity * (JNL),
             [4, 5, 6, 7, 8, 9],
             [JVU, JVV, JVW, JVX, JVY, JVZ],
             [],
@@ -25836,7 +25825,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(6),
             Some(7),
-            multiplicity * (JNX),
+            multiplicity * (JNW),
             [4, 5, 6, 7, 8, 9],
             [JWA, JWB, JWC, JWD, JWE, JWF],
             [],
@@ -26123,62 +26112,62 @@ impl Instance {
         self.canonical_reactive[17] = JEH;
         self.canonical_reactive[18] = JEJ;
         self.canonical_reactive[19] = JXV;
-        self.canonical_reactive[20] = JER;
-        self.canonical_reactive[21] = JFG;
+        self.canonical_reactive[20] = JEQ;
+        self.canonical_reactive[21] = JFF;
         self.canonical_reactive[22] = JXW;
         self.canonical_reactive[23] = JXX;
         self.canonical_reactive[24] = JXY;
         self.canonical_reactive[25] = JXZ;
         self.canonical_reactive[26] = JYA;
-        self.canonical_reactive[27] = JFL;
+        self.canonical_reactive[27] = JFK;
         self.canonical_reactive[28] = JYB;
         self.canonical_reactive[29] = JYC;
         self.canonical_reactive[30] = JYD;
         self.canonical_reactive[31] = JYE;
         self.canonical_reactive[32] = JYF;
-        self.canonical_reactive[33] = JFQ;
+        self.canonical_reactive[33] = JFP;
         self.canonical_reactive[34] = JYG;
         self.canonical_reactive[35] = JYH;
         self.canonical_reactive[36] = JYI;
         self.canonical_reactive[37] = JYJ;
         self.canonical_reactive[38] = JYK;
-        self.canonical_reactive[39] = JFV;
+        self.canonical_reactive[39] = JFU;
         self.canonical_reactive[40] = JYL;
         self.canonical_reactive[41] = JYM;
-        self.canonical_reactive[42] = JGA;
+        self.canonical_reactive[42] = JFZ;
         self.canonical_reactive[43] = JYN;
         self.canonical_reactive[44] = JYO;
         self.canonical_reactive[45] = JYP;
-        self.canonical_reactive[46] = JGF;
+        self.canonical_reactive[46] = JGE;
         self.canonical_reactive[47] = JYQ;
         self.canonical_reactive[48] = JYR;
         self.canonical_reactive[49] = JYS;
         self.canonical_reactive[50] = JYT;
-        self.canonical_reactive[51] = JGK;
+        self.canonical_reactive[51] = JGJ;
         self.canonical_reactive[52] = JYU;
         self.canonical_reactive[53] = JYV;
-        self.canonical_reactive[54] = JGP;
+        self.canonical_reactive[54] = JGO;
         self.canonical_reactive[55] = JYW;
         self.canonical_reactive[56] = JYX;
         self.canonical_reactive[57] = JYY;
         self.canonical_reactive[58] = JYZ;
         self.canonical_reactive[59] = staged[1590];
-        self.canonical_reactive[60] = JNG;
-        self.canonical_reactive[61] = JNH;
+        self.canonical_reactive[60] = JNF;
+        self.canonical_reactive[61] = JNG;
         self.canonical_reactive[62] = JZA;
         self.canonical_reactive[63] = JZB;
         self.canonical_reactive[64] = JZC;
         self.canonical_reactive[65] = JZD;
         self.canonical_reactive[66] = JZE;
         self.canonical_reactive[67] = JZF;
-        self.canonical_reactive[68] = JNV;
+        self.canonical_reactive[68] = JNU;
         self.canonical_reactive[69] = JZG;
         self.canonical_reactive[70] = JZH;
         self.canonical_reactive[71] = JZI;
         self.canonical_reactive[72] = JZJ;
         self.canonical_reactive[73] = JZK;
         self.canonical_reactive[74] = JZL;
-        self.canonical_reactive[75] = JNV;
+        self.canonical_reactive[75] = JNU;
         self.canonical_reactive[76] = JZM;
         self.canonical_reactive[77] = JZN;
         self.canonical_reactive[78] = JZO;

@@ -558,6 +558,7 @@ fn simparam_required(name: &str) -> f64 {{ match name {{ "gmin" => 1e-12, "tnom"
 fn has_simparam(name: &str) -> bool {{ matches!(name,"gmin"|"tnom"|"simulatorVersion"|"simulatorSubversion") }}
 fn ddt(_operator: usize, _input: f64) -> f64 {{ 0.0 }}
 fn ddt_scale() -> f64 {{ 0.0 }}
+fn ddt_derivative(_operator: usize, primal: f64, input: f64) -> f64 {{ assert!(primal.is_finite() && input.is_finite()); 0.0 }}
 fn limit(_operator: usize, _proposed: f64, candidate: f64) -> f64 {{ candidate }}
 fn limit_previous(_operator: usize, proposed: f64) -> f64 {{ proposed }}
 

@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 171] = [289, 290, 291, 292, 44, 293, 18, 294, 20, 295, 22, 296, 14, 297, 15, 298, 16, 299, 300, 17, 301, 302, 19, 303, 304, 21, 305, 11, 306, 12, 307, 13, 308, 57, 309, 73, 310, 87, 311, 312, 313, 58, 314, 74, 315, 88, 316, 317, 318, 319, 64, 320, 80, 321, 94, 322, 29, 323, 30, 324, 31, 325, 71, 326, 85, 327, 99, 328, 36, 329, 38, 330, 37, 331, 39, 332, 35, 333, 334, 6, 335, 8, 336, 10, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 41, 349, 350, 351, 51, 352, 170, 0, 56, 1, 2, 3, 4, 5, 7, 9, 62, 78, 92, 23, 24, 25, 61, 77, 91, 65, 81, 95, 60, 76, 90, 26, 27, 28, 69, 72, 86, 100, 42, 32, 33, 34, 40, 53, 54, 263, 374, 377, 375, 48, 49, 50, 802, 803, 804, 251, 805, 252, 253, 254, 257, 806, 264, 807, 265, 267, 816, 817, 270, 809, 811, 273, 812, 813, 814];
@@ -8047,27 +8047,28 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
         if ctx.evaluation_failed() { return; }
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -8297,20 +8298,19 @@ impl Instance {
 		let BGU=staged[810];
 		let BGV=L2([0f64;2]);
 		let BHE=staged[811]!=0.0;
-		let BHG=ddt_scale();
 		let BHH=1e-12f64;
-		let BHR=0f64;
 		let BHS=0f64;
-		let BIA=staged[273];
-		let BIL=0f64;
-		let BIM=node_potentials[6];
-		let BIO=staged[812];
-		let BIY=node_potentials[7];
-		let BJA=staged[813];
-		let BJK=node_potentials[8];
-		let BJM=staged[814];
-		let BJW=node_potentials[9];
-		let BJY=staged[815];
+		let BHT=0f64;
+		let BIB=staged[273];
+		let BIN=0f64;
+		let BIO=node_potentials[6];
+		let BIQ=staged[812];
+		let BJA=node_potentials[7];
+		let BJC=staged[813];
+		let BJM=node_potentials[8];
+		let BJO=staged[814];
+		let BJY=node_potentials[9];
+		let BKA=staged[815];
 		let F=node_potentials[0]- E;
 		let G=L2([1f64,0.0])- L2([0.0,1f64]);
 		let P;
@@ -10692,26 +10692,28 @@ impl Instance {
 		let BHD;
 		if BGQ{
 		let BHF=ddt(0, AZB);
-		let BHI=((AZH+ L3([0.0,0.0,(AZI* BHG)]))* BHH)* AI;
+		let BHG=ddt_derivative(0,BHF,AZI);
+		let BHI=((AZH+ L3([0.0,0.0,BHG]))* BHH)* AI;
 		let BHJ=-(1e-12f64* AZB);
 		let BHK=(AZI* 1e-12f64)* AI;
 		let BHL=0f64+ (-(BHH* (AZA+ BHF)));
 		let BHM=ddt(1, AZD);
-		let BHN=((AZJ+ L3([0.0,0.0,(AZK* BHG)]))* BHH)* AI;
-		let BHO=-(1e-12f64* AZD);
-		let BHP=(AZK* 1e-12f64)* AI;
-		let BHQ=0f64+ (-(BHH* (AZC+ BHM)));
+		let BHN=ddt_derivative(1,BHM,AZK);
+		let BHO=((AZJ+ L3([0.0,0.0,BHN]))* BHH)* AI;
+		let BHP=-(1e-12f64* AZD);
+		let BHQ=(AZK* 1e-12f64)* AI;
+		let BHR=0f64+ (-(BHH* (AZC+ BHM)));
 		BGW=BHL;
-		BGX=BHQ;
+		BGX=BHR;
 		BGY=BHJ;
-		BGZ=BHO;
+		BGZ=BHP;
 		BHA=BHI;
-		BHB=BHN;
+		BHB=BHO;
 		BHC=BHK;
-		BHD=BHP;
+		BHD=BHQ;
 		}else{
-		BGW=BHR;
-		BGX=BHS;
+		BGW=BHS;
+		BGX=BHT;
 		BGY=DQ;
 		BGZ=DQ;
 		BHA=AYU;
@@ -10719,139 +10721,140 @@ impl Instance {
 		BHC=AYV;
 		BHD=AYX;
 		}
-		let BHT;
 		let BHU;
 		let BHV;
 		let BHW;
+		let BHX;
 		if BHE{
-		let BIG=ddt(2, AZF);
-		let BIH=((AZL+ L3([0.0,0.0,(AZM* BHG)]))* 1e-13f64)* AI;
-		let BII=-(1e-13f64* AZF);
-		let BIJ=(AZM* 1e-13f64)* AI;
-		let BIK=0f64+ (-(1e-13f64* (AZE+ BIG)));
-		BHT=BIK;
-		BHU=BII;
-		BHV=BIH;
+		let BIH=ddt(2, AZF);
+		let BII=ddt_derivative(2,BIH,AZM);
+		let BIJ=((AZL+ L3([0.0,0.0,BII]))* 1e-13f64)* AI;
+		let BIK=-(1e-13f64* AZF);
+		let BIL=(AZM* 1e-13f64)* AI;
+		let BIM=0f64+ (-(1e-13f64* (AZE+ BIH)));
+		BHU=BIM;
+		BHV=BIK;
 		BHW=BIJ;
+		BHX=BIL;
 		}else{
-		BHT=BIL;
-		BHU=DQ;
-		BHV=AYY;
-		BHW=AYZ;
+		BHU=BIN;
+		BHV=DQ;
+		BHW=AYY;
+		BHX=AYZ;
 		}
-		let BHX=ddt(3, AZG);
-		let BHY=AZN* BHG;
-		let BHZ=DQ+ BHX;
-		let BIB=BIA* AZO;
-		let BIC=AZP* BIA;
-		let BID=ddt(4, BIB);
-		let BIE=BIC* BHG;
-		let BIF=DQ+ BID;
-		let BIN=DQ+ BIM;
-		let BIS;
-		let BIT;
-		if BIO!=0.0{
-		let BIP=-BCM;
-		let BIQ=L2([(BCN* AI),0.0]);
-		BIS=BIP;
-		BIT=BIQ;
+		let BHY=ddt(3, AZG);
+		let BHZ=L5(std::array::from_fn(|i| ddt_derivative(3,BHY,(AZN)[i])));
+		let BIA=DQ+ BHY;
+		let BIC=BIB* AZO;
+		let BID=AZP* BIB;
+		let BIE=ddt(4, BIC);
+		let BIF=L2(std::array::from_fn(|i| ddt_derivative(4,BIE,(BID)[i])));
+		let BIG=DQ+ BIE;
+		let BIP=DQ+ BIO;
+		let BIU;
+		let BIV;
+		if BIQ!=0.0{
+		let BIR=-BCM;
+		let BIS=L2([(BCN* AI),0.0]);
+		BIU=BIR;
+		BIV=BIS;
 		}else{
-		let BIR=L2([0.0,1f64]);
-		BIS=BIM;
-		BIT=BIR;
+		let BIT=L2([0.0,1f64]);
+		BIU=BIO;
+		BIV=BIT;
 		}
-		let BIU=L4([0.0,0.0,BIT[0],BIT[1]])- L4([BHA[0],BHA[1],BHA[2],0.0]);
-		let BIV=-BGY;
-		let BIW=BHC* AI;
-		let BIX=DQ+ (BIS- BGW);
-		let BIZ=DQ+ BIY;
-		let BJE;
-		let BJF;
-		if BJA!=0.0{
-		let BJB=-BDU;
-		let BJC=L2([(BDV* AI),0.0]);
-		BJE=BJB;
-		BJF=BJC;
+		let BIW=L4([0.0,0.0,BIV[0],BIV[1]])- L4([BHA[0],BHA[1],BHA[2],0.0]);
+		let BIX=-BGY;
+		let BIY=BHC* AI;
+		let BIZ=DQ+ (BIU- BGW);
+		let BJB=DQ+ BJA;
+		let BJG;
+		let BJH;
+		if BJC!=0.0{
+		let BJD=-BDU;
+		let BJE=L2([(BDV* AI),0.0]);
+		BJG=BJD;
+		BJH=BJE;
 		}else{
-		let BJD=L2([0.0,1f64]);
-		BJE=BIY;
-		BJF=BJD;
+		let BJF=L2([0.0,1f64]);
+		BJG=BJA;
+		BJH=BJF;
 		}
-		let BJG=L4([0.0,0.0,BJF[0],BJF[1]])- L4([BHB[0],BHB[1],BHB[2],0.0]);
-		let BJH=-BGZ;
-		let BJI=BHD* AI;
-		let BJJ=DQ+ (BJE- BGX);
-		let BJL=DQ+ BJK;
-		let BJQ;
-		let BJR;
-		if BJM!=0.0{
-		let BJN=-BFD;
-		let BJO=L2([(BFE* AI),0.0]);
-		BJQ=BJN;
-		BJR=BJO;
+		let BJI=L4([0.0,0.0,BJH[0],BJH[1]])- L4([BHB[0],BHB[1],BHB[2],0.0]);
+		let BJJ=-BGZ;
+		let BJK=BHD* AI;
+		let BJL=DQ+ (BJG- BGX);
+		let BJN=DQ+ BJM;
+		let BJS;
+		let BJT;
+		if BJO!=0.0{
+		let BJP=-BFD;
+		let BJQ=L2([(BFE* AI),0.0]);
+		BJS=BJP;
+		BJT=BJQ;
 		}else{
-		let BJP=L2([0.0,1f64]);
-		BJQ=BJK;
-		BJR=BJP;
+		let BJR=L2([0.0,1f64]);
+		BJS=BJM;
+		BJT=BJR;
 		}
-		let BJS=L4([0.0,0.0,BJR[0],BJR[1]])- L4([BHV[0],BHV[1],BHV[2],0.0]);
-		let BJT=-BHU;
-		let BJU=BHW* AI;
-		let BJV=DQ+ (BJQ- BHT);
-		let BJX=DQ+ BJW;
-		let BKB;
-		let BKC;
-		if BJY!=0.0{
-		let BJZ=L3([AH[0],AH[1],0.0]);
-		BKB=AG;
-		BKC=BJZ;
+		let BJU=L4([0.0,0.0,BJT[0],BJT[1]])- L4([BHW[0],BHW[1],BHW[2],0.0]);
+		let BJV=-BHV;
+		let BJW=BHX* AI;
+		let BJX=DQ+ (BJS- BHU);
+		let BJZ=DQ+ BJY;
+		let BKD;
+		let BKE;
+		if BKA!=0.0{
+		let BKB=L3([AH[0],AH[1],0.0]);
+		BKD=AG;
+		BKE=BKB;
 		}else{
-		let BKA=L3([0.0,0.0,1f64]);
-		BKB=BJW;
-		BKC=BKA;
+		let BKC=L3([0.0,0.0,1f64]);
+		BKD=BJY;
+		BKE=BKC;
 		}
-		let BKD=BKC- L3([BGP[0],BGP[1],0.0]);
-		let BKE=DQ+ (BKB- BGO);
-		let BKF=Z[0];
-		let BKG=Z[1];
-		let BKH=BGL[0];
-		let BKI=BGL[1];
-		let BKJ=BHY[0];
-		let BKK=BHY[1];
-		let BKL=BHY[2];
-		let BKM=BHY[3];
-		let BKN=BHY[4];
-		let BKO=BIE[0];
-		let BKP=BIE[1];
-		let BKQ=1f64;
-		let BKR=BIU[0];
-		let BKS=BIU[1];
-		let BKT=BIU[2];
-		let BKU=BIU[3];
-		let BKV=1f64;
-		let BKW=BJG[0];
-		let BKX=BJG[1];
-		let BKY=BJG[2];
-		let BKZ=BJG[3];
-		let BLA=1f64;
-		let BLB=BJS[0];
-		let BLC=BJS[1];
-		let BLD=BJS[2];
-		let BLE=BJS[3];
-		let BLF=1f64;
-		let BLG=BKD[0];
-		let BLH=BKD[1];
-		let BLI=BKD[2];
-		let BLJ=AZN[0];
-		let BLK=AZN[1];
-		let BLL=AZN[2];
-		let BLM=AZN[3];
-		let BLN=AZN[4];
-		let BLO=BIC[0];
-		let BLP=BIC[1];
-		let BLQ=BIW;
-		let BLR=BJI;
-		let BLS=BJU;
+		let BKF=BKE- L3([BGP[0],BGP[1],0.0]);
+		let BKG=DQ+ (BKD- BGO);
+		let BKH=Z[0];
+		let BKI=Z[1];
+		let BKJ=BGL[0];
+		let BKK=BGL[1];
+		let BKL=BHZ[0];
+		let BKM=BHZ[1];
+		let BKN=BHZ[2];
+		let BKO=BHZ[3];
+		let BKP=BHZ[4];
+		let BKQ=BIF[0];
+		let BKR=BIF[1];
+		let BKS=1f64;
+		let BKT=BIW[0];
+		let BKU=BIW[1];
+		let BKV=BIW[2];
+		let BKW=BIW[3];
+		let BKX=1f64;
+		let BKY=BJI[0];
+		let BKZ=BJI[1];
+		let BLA=BJI[2];
+		let BLB=BJI[3];
+		let BLC=1f64;
+		let BLD=BJU[0];
+		let BLE=BJU[1];
+		let BLF=BJU[2];
+		let BLG=BJU[3];
+		let BLH=1f64;
+		let BLI=BKF[0];
+		let BLJ=BKF[1];
+		let BLK=BKF[2];
+		let BLL=AZN[0];
+		let BLM=AZN[1];
+		let BLN=AZN[2];
+		let BLO=AZN[3];
+		let BLP=AZN[4];
+		let BLQ=BID[0];
+		let BLR=BID[1];
+		let BLS=BIY;
+		let BLT=BJK;
+		let BLU=BJW;
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[812]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[813]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[814]; }
@@ -10881,7 +10884,7 @@ impl Instance {
             Some(2),
             multiplicity * (BGH),
             [0, 2],
-            [BKF, BKG],
+            [BKH, BKI],
             [],
             [],
             multiplicity,
@@ -10891,7 +10894,7 @@ impl Instance {
             Some(2),
             multiplicity * (BGM),
             [0, 2],
-            [BKH, BKI],
+            [BKJ, BKK],
             [],
             [],
             multiplicity,
@@ -10899,9 +10902,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(0),
             Some(2),
-            multiplicity * (BHZ),
+            multiplicity * (BIA),
             [0, 2, 3, 4, 5],
-            [BKJ, BKK, BKL, BKM, BKN],
+            [BKL, BKM, BKN, BKO, BKP],
             [],
             [],
             multiplicity,
@@ -10909,9 +10912,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(0),
             Some(2),
-            multiplicity * (BIF),
+            multiplicity * (BIG),
             [0, 2],
-            [BKO, BKP],
+            [BKQ, BKR],
             [],
             [],
             multiplicity,
@@ -10919,9 +10922,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             None,
             Some(3),
-            multiplicity * (BIN),
+            multiplicity * (BIP),
             [6],
-            [BKQ],
+            [BKS],
             [],
             [],
             multiplicity,
@@ -10929,9 +10932,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             None,
-            multiplicity * (BIX),
+            multiplicity * (BIZ),
             [0, 2, 3, 6],
-            [BKR, BKS, BKT, BKU],
+            [BKT, BKU, BKV, BKW],
             [],
             [],
             multiplicity,
@@ -10939,9 +10942,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             None,
             Some(4),
-            multiplicity * (BIZ),
+            multiplicity * (BJB),
             [7],
-            [BKV],
+            [BKX],
             [],
             [],
             multiplicity,
@@ -10949,9 +10952,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             None,
-            multiplicity * (BJJ),
+            multiplicity * (BJL),
             [0, 2, 4, 7],
-            [BKW, BKX, BKY, BKZ],
+            [BKY, BKZ, BLA, BLB],
             [],
             [],
             multiplicity,
@@ -10959,9 +10962,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             None,
             Some(5),
-            multiplicity * (BJL),
+            multiplicity * (BJN),
             [8],
-            [BLA],
+            [BLC],
             [],
             [],
             multiplicity,
@@ -10969,9 +10972,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             None,
-            multiplicity * (BJV),
+            multiplicity * (BJX),
             [0, 2, 5, 8],
-            [BLB, BLC, BLD, BLE],
+            [BLD, BLE, BLF, BLG],
             [],
             [],
             multiplicity,
@@ -10979,9 +10982,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             Some(1),
-            multiplicity * (BJX),
+            multiplicity * (BJZ),
             [9],
-            [BLF],
+            [BLH],
             [],
             [],
             multiplicity,
@@ -10989,9 +10992,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(9),
             None,
-            multiplicity * (BKE),
+            multiplicity * (BKG),
             [1, 2, 9],
-            [BLG, BLH, BLI],
+            [BLI, BLJ, BLK],
             [],
             [],
             multiplicity,
@@ -11001,25 +11004,25 @@ impl Instance {
         self.canonical_reactive[2] = BGH;
         self.canonical_reactive[3] = BGM;
         self.canonical_reactive[4] = AZG;
-        self.canonical_reactive[5] = BLJ;
-        self.canonical_reactive[6] = BLK;
-        self.canonical_reactive[7] = BLL;
-        self.canonical_reactive[8] = BLM;
-        self.canonical_reactive[9] = BLN;
-        self.canonical_reactive[10] = BIB;
-        self.canonical_reactive[11] = BLO;
-        self.canonical_reactive[12] = BLP;
-        self.canonical_reactive[13] = BIN;
-        self.canonical_reactive[14] = BIV;
-        self.canonical_reactive[15] = BLQ;
-        self.canonical_reactive[16] = BIZ;
-        self.canonical_reactive[17] = BJH;
-        self.canonical_reactive[18] = BLR;
-        self.canonical_reactive[19] = BJL;
-        self.canonical_reactive[20] = BJT;
-        self.canonical_reactive[21] = BLS;
-        self.canonical_reactive[22] = BJX;
-        self.canonical_reactive[23] = BKE;
+        self.canonical_reactive[5] = BLL;
+        self.canonical_reactive[6] = BLM;
+        self.canonical_reactive[7] = BLN;
+        self.canonical_reactive[8] = BLO;
+        self.canonical_reactive[9] = BLP;
+        self.canonical_reactive[10] = BIC;
+        self.canonical_reactive[11] = BLQ;
+        self.canonical_reactive[12] = BLR;
+        self.canonical_reactive[13] = BIP;
+        self.canonical_reactive[14] = BIX;
+        self.canonical_reactive[15] = BLS;
+        self.canonical_reactive[16] = BJB;
+        self.canonical_reactive[17] = BJJ;
+        self.canonical_reactive[18] = BLT;
+        self.canonical_reactive[19] = BJN;
+        self.canonical_reactive[20] = BJV;
+        self.canonical_reactive[21] = BLU;
+        self.canonical_reactive[22] = BJZ;
+        self.canonical_reactive[23] = BKG;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

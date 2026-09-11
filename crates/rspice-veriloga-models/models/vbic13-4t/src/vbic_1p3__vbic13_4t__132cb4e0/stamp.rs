@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L11, L12, L13, L2, L3, L4, L5, L6, L7, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L11, L12, L13, L2, L3, L4, L5, L6, L7, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -11,9 +11,19 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -254,7 +264,6 @@ impl Instance {
 		let BRM=L2([0f64;2]);
 		let BRS=L3([0f64;3]);
 		let BVO=L3([0f64;3]);
-		let BYC=ddt_scale();
 		let CM;
 		let CU;
 		let EE;
@@ -2777,37 +2786,37 @@ impl Instance {
 		let AWR=A+ AMV;
 		let AWS=A+ AMU;
 		let AWT=ddt(0, AVT);
-		let BYD=BXW* BYC;
+		let BYC=L4(std::array::from_fn(|i| ddt_derivative(0,AWT,(BXW)[i])));
 		let AWU=A+ AWT;
 		let AWV=ddt(1, AVU);
-		let BYE=BXX* BYC;
+		let BYD=L3(std::array::from_fn(|i| ddt_derivative(1,AWV,(BXX)[i])));
 		let AWW=A+ AWV;
 		let AWX=ddt(2, AVV);
-		let BYF=BXY* BYC;
+		let BYE=L3(std::array::from_fn(|i| ddt_derivative(2,AWX,(BXY)[i])));
 		let AWY=A+ AWX;
 		let AWZ=ddt(3, AVW);
-		let BYG=BXZ* BYC;
+		let BYF=L3(std::array::from_fn(|i| ddt_derivative(3,AWZ,(BXZ)[i])));
 		let AXA=A+ AWZ;
 		let AXB=ddt(4, AVX);
-		let BYH=BYA* BYC;
+		let BYG=L5(std::array::from_fn(|i| ddt_derivative(4,AXB,(BYA)[i])));
 		let AXC=A+ AXB;
 		let AXD=ddt(5, AVK);
-		let BYI=BXR* BYC;
+		let BYH=L2(std::array::from_fn(|i| ddt_derivative(5,AXD,(BXR)[i])));
 		let AXE=A+ AXD;
 		let AXF=ddt(6, AVM);
-		let BYJ=BXS* BYC;
+		let BYI=L2(std::array::from_fn(|i| ddt_derivative(6,AXF,(BXS)[i])));
 		let AXG=A+ AXF;
 		let AXH=ddt(7, AVY);
-		let BYK=BYB* BYC;
+		let BYJ=L3(std::array::from_fn(|i| ddt_derivative(7,AXH,(BYB)[i])));
 		let AXI=A+ AXH;
 		let AXJ=ddt(8, AVQ);
-		let BYL=BXU* BYC;
+		let BYK=ddt_derivative(8,AXJ,BXU);
 		let AXK=A+ AXJ;
 		let AXL=ddt(9, AVS);
-		let BYM=BXV* BYC;
+		let BYL=ddt_derivative(9,AXL,BXV);
 		let AXM=A+ AXL;
 		let AXN=ddt(10, AVO);
-		let BYN=BXT* BYC;
+		let BYM=ddt_derivative(10,AXN,BXT);
 		let AXO=A+ AXN;
 		let AYU;
 		let AYV;
@@ -2872,144 +2881,144 @@ impl Instance {
 		AZH=A;
 		AZI=A;
 		}
-		let BYO=BTV[0];
-		let BYP=BTV[1];
-		let BYQ=BTV[2];
-		let BYR=BTV[3];
-		let BYS=BTW[0];
-		let BYT=BTW[1];
-		let BYU=BTW[2];
-		let BYV=BTW[3];
-		let BYW=BTX;
-		let BYX=BTY[0];
-		let BYY=BTY[1];
-		let BYZ=BTY[2];
-		let BZA=BTY[3];
-		let BZB=BTZ[0];
-		let BZC=BTZ[1];
-		let BZD=BTZ[2];
-		let BZE=BTZ[3];
-		let BZF=BTZ[4];
-		let BZG=BUA[0];
-		let BZH=BUA[1];
-		let BZI=BUA[2];
-		let BZJ=BUA[3];
-		let BZK=BUB[0];
-		let BZL=BUB[1];
-		let BZM=BUB[2];
-		let BZN=BPV[0];
-		let BZO=BPV[1];
-		let BZP=BPV[2];
-		let BZQ=BUC[0];
-		let BZR=BUC[1];
-		let BZS=BUC[2];
-		let BZT=BUC[3];
-		let BZU=BQF[0];
-		let BZV=BQF[1];
-		let BZW=BQF[2];
-		let BZX=BQI[0];
-		let BZY=BQI[1];
-		let BZZ=BQI[2];
-		let CAA=BQI[3];
-		let CAB=BQI[4];
-		let CAC=BQK[0];
-		let CAD=BQK[1];
-		let CAE=BQK[2];
-		let CAF=BQN[0];
-		let CAG=BQN[1];
-		let CAH=BQN[2];
-		let CAI=BQN[3];
-		let CAJ=BQN[4];
-		let CAK=BQN[5];
-		let CAL=BUD[0];
-		let CAM=BUD[1];
-		let CAN=BUD[2];
-		let CAO=BUE[0];
-		let CAP=BUE[1];
-		let CAQ=BUE[2];
-		let CAR=BUE[3];
-		let CAS=BUE[4];
-		let CAT=BUE[5];
-		let CAU=BQP[0];
-		let CAV=BQP[1];
-		let CAW=BQP[2];
-		let CAX=BTN[0];
-		let CAY=BTN[1];
-		let CAZ=BTN[2];
-		let CBA=BTN[3];
-		let CBB=BTN[4];
-		let CBC=BTO[0];
-		let CBD=BTO[1];
-		let CBE=BTM;
-		let CBF=BTL[0];
-		let CBG=BTL[1];
-		let CBH=BTL[2];
-		let CBI=BTL[3];
-		let CBJ=BTL[4];
-		let CBK=BTL[5];
-		let CBL=BTL[6];
-		let CBM=BTL[7];
-		let CBN=BTL[8];
-		let CBO=BTL[9];
-		let CBP=BTL[10];
-		let CBQ=BTL[11];
-		let CBR=BTL[12];
-		let CBS=BYD[0];
-		let CBT=BYD[1];
-		let CBU=BYD[2];
-		let CBV=BYD[3];
-		let CBW=BYE[0];
-		let CBX=BYE[1];
-		let CBY=BYE[2];
-		let CBZ=BYF[0];
-		let CCA=BYF[1];
-		let CCB=BYF[2];
-		let CCC=BYG[0];
-		let CCD=BYG[1];
-		let CCE=BYG[2];
-		let CCF=BYH[0];
-		let CCG=BYH[1];
-		let CCH=BYH[2];
-		let CCI=BYH[3];
-		let CCJ=BYH[4];
-		let CCK=BYI[0];
-		let CCL=BYI[1];
-		let CCM=BYJ[0];
-		let CCN=BYJ[1];
-		let CCO=BYK[0];
-		let CCP=BYK[1];
-		let CCQ=BYK[2];
+		let BYN=BTV[0];
+		let BYO=BTV[1];
+		let BYP=BTV[2];
+		let BYQ=BTV[3];
+		let BYR=BTW[0];
+		let BYS=BTW[1];
+		let BYT=BTW[2];
+		let BYU=BTW[3];
+		let BYV=BTX;
+		let BYW=BTY[0];
+		let BYX=BTY[1];
+		let BYY=BTY[2];
+		let BYZ=BTY[3];
+		let BZA=BTZ[0];
+		let BZB=BTZ[1];
+		let BZC=BTZ[2];
+		let BZD=BTZ[3];
+		let BZE=BTZ[4];
+		let BZF=BUA[0];
+		let BZG=BUA[1];
+		let BZH=BUA[2];
+		let BZI=BUA[3];
+		let BZJ=BUB[0];
+		let BZK=BUB[1];
+		let BZL=BUB[2];
+		let BZM=BPV[0];
+		let BZN=BPV[1];
+		let BZO=BPV[2];
+		let BZP=BUC[0];
+		let BZQ=BUC[1];
+		let BZR=BUC[2];
+		let BZS=BUC[3];
+		let BZT=BQF[0];
+		let BZU=BQF[1];
+		let BZV=BQF[2];
+		let BZW=BQI[0];
+		let BZX=BQI[1];
+		let BZY=BQI[2];
+		let BZZ=BQI[3];
+		let CAA=BQI[4];
+		let CAB=BQK[0];
+		let CAC=BQK[1];
+		let CAD=BQK[2];
+		let CAE=BQN[0];
+		let CAF=BQN[1];
+		let CAG=BQN[2];
+		let CAH=BQN[3];
+		let CAI=BQN[4];
+		let CAJ=BQN[5];
+		let CAK=BUD[0];
+		let CAL=BUD[1];
+		let CAM=BUD[2];
+		let CAN=BUE[0];
+		let CAO=BUE[1];
+		let CAP=BUE[2];
+		let CAQ=BUE[3];
+		let CAR=BUE[4];
+		let CAS=BUE[5];
+		let CAT=BQP[0];
+		let CAU=BQP[1];
+		let CAV=BQP[2];
+		let CAW=BTN[0];
+		let CAX=BTN[1];
+		let CAY=BTN[2];
+		let CAZ=BTN[3];
+		let CBA=BTN[4];
+		let CBB=BTO[0];
+		let CBC=BTO[1];
+		let CBD=BTM;
+		let CBE=BTL[0];
+		let CBF=BTL[1];
+		let CBG=BTL[2];
+		let CBH=BTL[3];
+		let CBI=BTL[4];
+		let CBJ=BTL[5];
+		let CBK=BTL[6];
+		let CBL=BTL[7];
+		let CBM=BTL[8];
+		let CBN=BTL[9];
+		let CBO=BTL[10];
+		let CBP=BTL[11];
+		let CBQ=BTL[12];
+		let CBR=BYC[0];
+		let CBS=BYC[1];
+		let CBT=BYC[2];
+		let CBU=BYC[3];
+		let CBV=BYD[0];
+		let CBW=BYD[1];
+		let CBX=BYD[2];
+		let CBY=BYE[0];
+		let CBZ=BYE[1];
+		let CCA=BYE[2];
+		let CCB=BYF[0];
+		let CCC=BYF[1];
+		let CCD=BYF[2];
+		let CCE=BYG[0];
+		let CCF=BYG[1];
+		let CCG=BYG[2];
+		let CCH=BYG[3];
+		let CCI=BYG[4];
+		let CCJ=BYH[0];
+		let CCK=BYH[1];
+		let CCL=BYI[0];
+		let CCM=BYI[1];
+		let CCN=BYJ[0];
+		let CCO=BYJ[1];
+		let CCP=BYJ[2];
+		let CCQ=BYK;
 		let CCR=BYL;
 		let CCS=BYM;
-		let CCT=BYN;
-		let CCU=BXW[0];
-		let CCV=BXW[1];
-		let CCW=BXW[2];
-		let CCX=BXW[3];
-		let CCY=BXX[0];
-		let CCZ=BXX[1];
-		let CDA=BXX[2];
-		let CDB=BXY[0];
-		let CDC=BXY[1];
-		let CDD=BXY[2];
-		let CDE=BXZ[0];
-		let CDF=BXZ[1];
-		let CDG=BXZ[2];
-		let CDH=BYA[0];
-		let CDI=BYA[1];
-		let CDJ=BYA[2];
-		let CDK=BYA[3];
-		let CDL=BYA[4];
-		let CDM=BXR[0];
-		let CDN=BXR[1];
-		let CDO=BXS[0];
-		let CDP=BXS[1];
-		let CDQ=BYB[0];
-		let CDR=BYB[1];
-		let CDS=BYB[2];
-		let CDT=BXU;
-		let CDU=BXV;
-		let CDV=BXT;
+		let CCT=BXW[0];
+		let CCU=BXW[1];
+		let CCV=BXW[2];
+		let CCW=BXW[3];
+		let CCX=BXX[0];
+		let CCY=BXX[1];
+		let CCZ=BXX[2];
+		let CDA=BXY[0];
+		let CDB=BXY[1];
+		let CDC=BXY[2];
+		let CDD=BXZ[0];
+		let CDE=BXZ[1];
+		let CDF=BXZ[2];
+		let CDG=BYA[0];
+		let CDH=BYA[1];
+		let CDI=BYA[2];
+		let CDJ=BYA[3];
+		let CDK=BYA[4];
+		let CDL=BXR[0];
+		let CDM=BXR[1];
+		let CDN=BXS[0];
+		let CDO=BXS[1];
+		let CDP=BYB[0];
+		let CDQ=BYB[1];
+		let CDR=BYB[2];
+		let CDS=BXU;
+		let CDT=BXV;
+		let CDU=BXT;
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = CM; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = YM; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = EE; }
@@ -3035,7 +3044,7 @@ impl Instance {
             Some(9),
             multiplicity * (AVZ),
             [4, 6, 8, 9],
-            [BYO, BYP, BYQ, BYR],
+            [BYN, BYO, BYP, BYQ],
             [],
             [],
             multiplicity,
@@ -3045,7 +3054,7 @@ impl Instance {
             Some(9),
             multiplicity * (AWA),
             [4, 7, 8, 9],
-            [BYS, BYT, BYU, BYV],
+            [BYR, BYS, BYT, BYU],
             [],
             [],
             multiplicity,
@@ -3055,7 +3064,7 @@ impl Instance {
             Some(9),
             multiplicity * (AWB),
             [13],
-            [BYW],
+            [BYV],
             [],
             [],
             multiplicity,
@@ -3065,7 +3074,7 @@ impl Instance {
             Some(6),
             multiplicity * (AWC),
             [4, 6, 8, 9],
-            [BYX, BYY, BYZ, BZA],
+            [BYW, BYX, BYY, BYZ],
             [],
             [],
             multiplicity,
@@ -3075,7 +3084,7 @@ impl Instance {
             Some(6),
             multiplicity * (AWD),
             [4, 6, 8, 9, 13],
-            [BZB, BZC, BZD, BZE, BZF],
+            [BZA, BZB, BZC, BZD, BZE],
             [],
             [],
             multiplicity,
@@ -3085,7 +3094,7 @@ impl Instance {
             Some(5),
             multiplicity * (AWE),
             [0, 4, 5, 7],
-            [BZG, BZH, BZI, BZJ],
+            [BZF, BZG, BZH, BZI],
             [],
             [],
             multiplicity,
@@ -3095,7 +3104,7 @@ impl Instance {
             Some(10),
             multiplicity * (AWF),
             [4, 7, 10],
-            [BZK, BZL, BZM],
+            [BZJ, BZK, BZL],
             [],
             [],
             multiplicity,
@@ -3105,7 +3114,7 @@ impl Instance {
             Some(5),
             multiplicity * (AWG),
             [0, 4, 5],
-            [BZN, BZO, BZP],
+            [BZM, BZN, BZO],
             [],
             [],
             multiplicity,
@@ -3115,7 +3124,7 @@ impl Instance {
             Some(6),
             multiplicity * (AWH),
             [4, 5, 6, 8],
-            [BZQ, BZR, BZS, BZT],
+            [BZP, BZQ, BZR, BZS],
             [],
             [],
             multiplicity,
@@ -3125,7 +3134,7 @@ impl Instance {
             Some(7),
             multiplicity * (AWI),
             [1, 4, 7],
-            [BZU, BZV, BZW],
+            [BZT, BZU, BZV],
             [],
             [],
             multiplicity,
@@ -3135,7 +3144,7 @@ impl Instance {
             Some(8),
             multiplicity * (AWJ),
             [4, 6, 7, 8, 9],
-            [BZX, BZY, BZZ, CAA, CAB],
+            [BZW, BZX, BZY, BZZ, CAA],
             [],
             [],
             multiplicity,
@@ -3145,7 +3154,7 @@ impl Instance {
             Some(9),
             multiplicity * (AWK),
             [2, 4, 9],
-            [CAC, CAD, CAE],
+            [CAB, CAC, CAD],
             [],
             [],
             multiplicity,
@@ -3155,7 +3164,7 @@ impl Instance {
             Some(5),
             multiplicity * (AWL),
             [4, 5, 6, 7, 8, 10],
-            [CAF, CAG, CAH, CAI, CAJ, CAK],
+            [CAE, CAF, CAG, CAH, CAI, CAJ],
             [],
             [],
             multiplicity,
@@ -3165,7 +3174,7 @@ impl Instance {
             Some(10),
             multiplicity * (AWM),
             [4, 10, 11],
-            [CAL, CAM, CAN],
+            [CAK, CAL, CAM],
             [],
             [],
             multiplicity,
@@ -3175,7 +3184,7 @@ impl Instance {
             Some(11),
             multiplicity * (AWN),
             [4, 6, 7, 8, 10, 11],
-            [CAO, CAP, CAQ, CAR, CAS, CAT],
+            [CAN, CAO, CAP, CAQ, CAR, CAS],
             [],
             [],
             multiplicity,
@@ -3185,7 +3194,7 @@ impl Instance {
             Some(11),
             multiplicity * (AWO),
             [3, 4, 11],
-            [CAU, CAV, CAW],
+            [CAT, CAU, CAV],
             [],
             [],
             multiplicity,
@@ -3195,7 +3204,7 @@ impl Instance {
             None,
             multiplicity * (AWP),
             [4, 6, 8, 9, 13],
-            [CAX, CAY, CAZ, CBA, CBB],
+            [CAW, CAX, CAY, CAZ, CBA],
             [],
             [],
             multiplicity,
@@ -3205,7 +3214,7 @@ impl Instance {
             None,
             multiplicity * (AWQ),
             [12, 13],
-            [CBC, CBD],
+            [CBB, CBC],
             [],
             [],
             multiplicity,
@@ -3215,7 +3224,7 @@ impl Instance {
             None,
             multiplicity * (AWR),
             [4],
-            [CBE],
+            [CBD],
             [],
             [],
             multiplicity,
@@ -3225,7 +3234,7 @@ impl Instance {
             None,
             multiplicity * (AWS),
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13],
-            [CBF, CBG, CBH, CBI, CBJ, CBK, CBL, CBM, CBN, CBO, CBP, CBQ, CBR],
+            [CBE, CBF, CBG, CBH, CBI, CBJ, CBK, CBL, CBM, CBN, CBO, CBP, CBQ],
             [],
             [],
             multiplicity,
@@ -3235,7 +3244,7 @@ impl Instance {
             Some(9),
             multiplicity * (AWU),
             [4, 6, 8, 9],
-            [CBS, CBT, CBU, CBV],
+            [CBR, CBS, CBT, CBU],
             [],
             [],
             multiplicity,
@@ -3245,7 +3254,7 @@ impl Instance {
             Some(9),
             multiplicity * (AWW),
             [4, 7, 9],
-            [CBW, CBX, CBY],
+            [CBV, CBW, CBX],
             [],
             [],
             multiplicity,
@@ -3255,7 +3264,7 @@ impl Instance {
             Some(6),
             multiplicity * (AWY),
             [4, 6, 8],
-            [CBZ, CCA, CCB],
+            [CBY, CBZ, CCA],
             [],
             [],
             multiplicity,
@@ -3265,7 +3274,7 @@ impl Instance {
             Some(5),
             multiplicity * (AXA),
             [4, 5, 8],
-            [CCC, CCD, CCE],
+            [CCB, CCC, CCD],
             [],
             [],
             multiplicity,
@@ -3275,7 +3284,7 @@ impl Instance {
             Some(10),
             multiplicity * (AXC),
             [4, 6, 7, 8, 10],
-            [CCF, CCG, CCH, CCI, CCJ],
+            [CCE, CCF, CCG, CCH, CCI],
             [],
             [],
             multiplicity,
@@ -3285,7 +3294,7 @@ impl Instance {
             Some(2),
             multiplicity * (AXE),
             [1, 2],
-            [CCK, CCL],
+            [CCJ, CCK],
             [],
             [],
             multiplicity,
@@ -3295,7 +3304,7 @@ impl Instance {
             Some(0),
             multiplicity * (AXG),
             [0, 1],
-            [CCM, CCN],
+            [CCL, CCM],
             [],
             [],
             multiplicity,
@@ -3305,7 +3314,7 @@ impl Instance {
             Some(10),
             multiplicity * (AXI),
             [4, 10, 11],
-            [CCO, CCP, CCQ],
+            [CCN, CCO, CCP],
             [],
             [],
             multiplicity,
@@ -3315,7 +3324,7 @@ impl Instance {
             None,
             multiplicity * (AXK),
             [12],
-            [CCR],
+            [CCQ],
             [],
             [],
             multiplicity,
@@ -3325,7 +3334,7 @@ impl Instance {
             None,
             multiplicity * (AXM),
             [13],
-            [CCS],
+            [CCR],
             [],
             [],
             multiplicity,
@@ -3335,7 +3344,7 @@ impl Instance {
             None,
             multiplicity * (AXO),
             [4],
-            [CCT],
+            [CCS],
             [],
             [],
             multiplicity,
@@ -3511,44 +3520,44 @@ impl Instance {
         self.canonical_reactive[18] = AWR;
         self.canonical_reactive[19] = AWS;
         self.canonical_reactive[20] = AVT;
-        self.canonical_reactive[21] = CCU;
-        self.canonical_reactive[22] = CCV;
-        self.canonical_reactive[23] = CCW;
-        self.canonical_reactive[24] = CCX;
+        self.canonical_reactive[21] = CCT;
+        self.canonical_reactive[22] = CCU;
+        self.canonical_reactive[23] = CCV;
+        self.canonical_reactive[24] = CCW;
         self.canonical_reactive[25] = AVU;
-        self.canonical_reactive[26] = CCY;
-        self.canonical_reactive[27] = CCZ;
-        self.canonical_reactive[28] = CDA;
+        self.canonical_reactive[26] = CCX;
+        self.canonical_reactive[27] = CCY;
+        self.canonical_reactive[28] = CCZ;
         self.canonical_reactive[29] = AVV;
-        self.canonical_reactive[30] = CDB;
-        self.canonical_reactive[31] = CDC;
-        self.canonical_reactive[32] = CDD;
+        self.canonical_reactive[30] = CDA;
+        self.canonical_reactive[31] = CDB;
+        self.canonical_reactive[32] = CDC;
         self.canonical_reactive[33] = AVW;
-        self.canonical_reactive[34] = CDE;
-        self.canonical_reactive[35] = CDF;
-        self.canonical_reactive[36] = CDG;
+        self.canonical_reactive[34] = CDD;
+        self.canonical_reactive[35] = CDE;
+        self.canonical_reactive[36] = CDF;
         self.canonical_reactive[37] = AVX;
-        self.canonical_reactive[38] = CDH;
-        self.canonical_reactive[39] = CDI;
-        self.canonical_reactive[40] = CDJ;
-        self.canonical_reactive[41] = CDK;
-        self.canonical_reactive[42] = CDL;
+        self.canonical_reactive[38] = CDG;
+        self.canonical_reactive[39] = CDH;
+        self.canonical_reactive[40] = CDI;
+        self.canonical_reactive[41] = CDJ;
+        self.canonical_reactive[42] = CDK;
         self.canonical_reactive[43] = AVK;
-        self.canonical_reactive[44] = CDM;
-        self.canonical_reactive[45] = CDN;
+        self.canonical_reactive[44] = CDL;
+        self.canonical_reactive[45] = CDM;
         self.canonical_reactive[46] = AVM;
-        self.canonical_reactive[47] = CDO;
-        self.canonical_reactive[48] = CDP;
+        self.canonical_reactive[47] = CDN;
+        self.canonical_reactive[48] = CDO;
         self.canonical_reactive[49] = AVY;
-        self.canonical_reactive[50] = CDQ;
-        self.canonical_reactive[51] = CDR;
-        self.canonical_reactive[52] = CDS;
+        self.canonical_reactive[50] = CDP;
+        self.canonical_reactive[51] = CDQ;
+        self.canonical_reactive[52] = CDR;
         self.canonical_reactive[53] = AVQ;
-        self.canonical_reactive[54] = CDT;
+        self.canonical_reactive[54] = CDS;
         self.canonical_reactive[55] = AVS;
-        self.canonical_reactive[56] = CDU;
+        self.canonical_reactive[56] = CDT;
         self.canonical_reactive[57] = AVO;
-        self.canonical_reactive[58] = CDV;
+        self.canonical_reactive[58] = CDU;
         self.canonical_reactive[59] = AYU;
         self.canonical_reactive[60] = AYV;
         self.canonical_reactive[61] = AYW;

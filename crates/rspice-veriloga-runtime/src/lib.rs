@@ -51,12 +51,14 @@ pub use compatibility_catalog::{
 };
 
 pub use integration::{
+    GeneratedDdtAcceptedHistory, GeneratedDdtCandidate, GeneratedDdtCandidateError,
     GeneratedIdtAcceptedHistory, GeneratedIdtCandidate, GeneratedIdtCandidateError,
     GeneratedIdtModBranch, GeneratedIdtModCandidate, GeneratedIdtModCandidateError,
+    evaluate_generated_ddt_candidate, evaluate_generated_ddt_derivative,
     evaluate_generated_idt_candidate, evaluate_generated_idt_derivative,
     evaluate_generated_idtmod_branch_derivative, evaluate_generated_idtmod_candidate,
     evaluate_generated_idtmod_derivative, evaluate_generated_idtmod_initial, idtmod_wrapped_value,
-    rspice_eval_idt,
+    rspice_eval_ddt, rspice_eval_idt,
 };
 pub use integration_state::{GeneratedIdtModPersistentState, GeneratedIdtModState};
 
@@ -795,74 +797,6 @@ pub fn rspice_limited_exp_derivative(x: f64) -> f64 {
     }
 }
 
-/// Evaluate one generated `ddt` Newton candidate without publishing it as
-/// accepted history.
-#[doc(hidden)]
-#[inline]
-#[allow(clippy::too_many_arguments)]
-pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    previous: &[f64; STATE_COUNT],
-    older: &[f64; STATE_COUNT],
-    initialized: &[bool; STATE_COUNT],
-    derivative_current: &mut [f64; STATE_COUNT],
-    derivative_previous: &[f64; STATE_COUNT],
-    candidate_valid: &mut [bool; STATE_COUNT],
-    coefficients: GeneratedDdtCoefficients,
-    slot: usize,
-    value: f64,
-) -> Result<f64, GeneratedDdtCandidateError> {
-    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
-    candidate_valid[slot] = false;
-    for (field, operand) in [
-        ("input", value),
-        ("accepted previous value", previous[slot]),
-        ("accepted older value", older[slot]),
-        ("accepted previous derivative", derivative_previous[slot]),
-        ("derivative scale", coefficients.derivative_scale),
-        ("previous-value scale", coefficients.previous_value_scale),
-        ("older-value scale", coefficients.older_value_scale),
-        (
-            "previous-derivative scale",
-            coefficients.previous_derivative_scale,
-        ),
-    ] {
-        if !operand.is_finite() {
-            return Err(GeneratedDdtCandidateError::NonFiniteInput { field });
-        }
-    }
-    let previous_value = if initialized[slot] {
-        previous[slot]
-    } else {
-        value
-    };
-    let older_value = if initialized[slot] {
-        older[slot]
-    } else {
-        value
-    };
-    let previous_derivative = if initialized[slot] {
-        derivative_previous[slot]
-    } else {
-        0.0
-    };
-    let result = if coefficients.active {
-        value * coefficients.derivative_scale
-            - previous_value * coefficients.previous_value_scale
-            - older_value * coefficients.older_value_scale
-            - previous_derivative * coefficients.previous_derivative_scale
-    } else {
-        0.0
-    };
-    if !result.is_finite() {
-        return Err(GeneratedDdtCandidateError::NonFiniteResult);
-    }
-    current[slot] = value;
-    derivative_current[slot] = result;
-    candidate_valid[slot] = true;
-    Ok(result)
-}
-
 /// One literal or referenced bound in generated parameter metadata.
 #[doc(hidden)]
 #[derive(Copy, Clone)]
@@ -1228,26 +1162,6 @@ impl Default for GeneratedDdtCoefficients {
         Self::inactive()
     }
 }
-
-/// Malformed numeric input to one generated `ddt` candidate evaluation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneratedDdtCandidateError {
-    NonFiniteInput { field: &'static str },
-    NonFiniteResult,
-}
-
-impl std::fmt::Display for GeneratedDdtCandidateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteInput { field } => {
-                write!(f, "generated ddt {field} must be finite")
-            }
-            Self::NonFiniteResult => f.write_str("generated ddt produced a non-finite derivative"),
-        }
-    }
-}
-
-impl std::error::Error for GeneratedDdtCandidateError {}
 
 /// Accepted dynamic history needed to resume a generated Verilog-A instance.
 ///

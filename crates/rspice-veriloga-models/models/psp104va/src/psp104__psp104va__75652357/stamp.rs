@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 388] = [757, 0, 758, 1, 165, 169, 182, 194, 5, 6, 7, 168, 181, 193, 171, 184, 196, 167, 180, 192, 174, 177, 189, 201, 175, 187, 199, 176, 188, 200, 759, 760, 761, 763, 764, 765, 762, 17, 18, 19, 29, 275, 31, 292, 33, 309, 35, 36, 37, 30, 274, 32, 291, 34, 308, 278, 295, 312, 26, 273, 27, 290, 28, 307, 282, 285, 299, 302, 316, 319, 281, 283, 298, 300, 315, 317, 284, 301, 318, 766, 767, 768, 769, 770, 771, 702, 1008, 2, 3, 4, 8, 9, 10, 11, 12, 13, 15, 14, 16, 20, 21, 22, 23, 24, 25, 38, 39, 40, 42, 41, 44, 43, 46, 45, 47, 48, 49, 51, 50, 52, 779, 53, 54, 793, 794, 795, 796, 797, 798, 55, 56, 57, 810, 811, 812, 813, 58, 59, 60, 814, 815, 816, 817, 818, 63, 61, 62, 64, 65, 819, 820, 67, 66, 68, 69, 70, 71, 823, 72, 824, 73, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 879, 881, 882, 883, 878, 75, 74, 76, 77, 884, 886, 887, 888, 880, 79, 78, 80, 81, 885, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 88, 113, 106, 150, 121, 119, 125, 123, 127, 958, 429, 133, 966, 514, 463, 477, 476, 461, 460, 481, 149, 487, 800, 801, 547, 96, 536, 540, 539, 100, 101, 1007, 423, 435, 92, 153, 94, 95, 532, 104, 111, 134, 135, 458, 478, 462, 470, 1023, 1024, 468, 1025, 469, 146, 147, 152, 1028, 538, 1036, 1037, 1039, 154, 1040, 1042, 1065, 163, 203, 220, 268, 321, 338, 270, 271, 277, 287, 288, 294, 304, 305, 311, 385, 1049, 392, 1542, 422, 434, 440, 441, 459, 467, 474, 483, 509, 1550, 1547, 1548, 1551, 1549, 537, 545, 552, 550, 1557, 1558, 607, 1573, 608, 648, 652, 653, 655, 656, 695, 696, 698, 1638, 1639, 1640, 1641, 1642, 1643, 1644, 1645, 1646, 1630, 723, 724];
@@ -14235,38 +14235,27 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-			let A=staged[779]!=0.0;
-			let B=staged[918]!=0.0;
-			let C=staged[920]!=0.0;
-			if A{
-			if B{
-			loop{
-			if !C{
-			break;
-			}
-			}
-			}
-			}
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -14836,15 +14825,14 @@ impl Instance {
 		let IQF=0f64;
 		let IQH=0f64;
 		let IQK=staged[714];
-		let IQO=ddt_scale();
-		let ISP=0.08333333333333333f64;
-		let ITA=1e-20f64;
-		let ITS=staged[719];
-		let IUN=staged[716];
-		let IVN=staged[717];
-		let IVT=staged[718];
-		let IYJ=node_potentials[4];
-		let IYT=staged[721];
+		let ISO=0.08333333333333333f64;
+		let ISZ=1e-20f64;
+		let ITR=staged[719];
+		let IUM=staged[716];
+		let IVM=staged[717];
+		let IVS=staged[718];
+		let IYI=node_potentials[4];
+		let IYS=staged[721];
 		let IZJ=node_potentials[12];
 		let IZO=node_potentials[13];
 		let IZQ=staged[1631];
@@ -24477,54 +24465,55 @@ impl Instance {
 		let IQL=IQK* ERY;
 		let IQM=ESB* IQK;
 		let IQN=ddt(0, IQL);
-		let IQP=IQM* IQO;
-		let IQQ=E+ IQN;
-		let IQR=IQK* ERZ;
-		let IQS=ESC* IQK;
-		let IQT=ddt(1, IQR);
-		let IQU=IQS* IQO;
-		let IQV=E+ IQT;
-		let IQW=IQK* IQI;
-		let IQX=IQJ* IQK;
-		let IQY=ddt(2, IQW);
-		let IQZ=IQX* IQO;
-		let IRA=E+ IQY;
-		let IRB=IQK* IPO;
-		let IRC=IPP* IQK;
-		let IRD=ddt(3, IRB);
-		let IRE=IRC* IQO;
-		let IRF=E+ IRD;
-		let IRG=IQK* IPQ;
-		let IRH=IPR* IQK;
-		let IRI=ddt(4, IRG);
-		let IRJ=IRH* IQO;
-		let IRK=E+ IRI;
-		let IRL=IQK* EYR;
-		let IRM=EYS* IQK;
-		let IRN=ddt(5, IRL);
-		let IRO=IRM* IQO;
-		let IRP=E+ IRN;
-		let IRQ=IQK* IPS;
-		let IRR=IPT* IQK;
-		let IRS=ddt(6, IRQ);
-		let IRT=IRR* IQO;
-		let IRU=E+ IRS;
-		let IRV=IQK* IPU;
-		let IRW=IPV* IQK;
-		let IRX=ddt(7, IRV);
-		let IRY=IRW* IQO;
-		let IRZ=E+ IRX;
-		let ISA=EOB* CMB;
-		let ISB=(EOC* CMB)+ (CMS* EOB);
-		let ISC=PH&& (staged[715]!=0.0);
+		let IQO=L4(std::array::from_fn(|i| ddt_derivative(0,IQN,(IQM)[i])));
+		let IQP=E+ IQN;
+		let IQQ=IQK* ERZ;
+		let IQR=ESC* IQK;
+		let IQS=ddt(1, IQQ);
+		let IQT=L4(std::array::from_fn(|i| ddt_derivative(1,IQS,(IQR)[i])));
+		let IQU=E+ IQS;
+		let IQV=IQK* IQI;
+		let IQW=IQJ* IQK;
+		let IQX=ddt(2, IQV);
+		let IQY=L4(std::array::from_fn(|i| ddt_derivative(2,IQX,(IQW)[i])));
+		let IQZ=E+ IQX;
+		let IRA=IQK* IPO;
+		let IRB=IPP* IQK;
+		let IRC=ddt(3, IRA);
+		let IRD=L2(std::array::from_fn(|i| ddt_derivative(3,IRC,(IRB)[i])));
+		let IRE=E+ IRC;
+		let IRF=IQK* IPQ;
+		let IRG=IPR* IQK;
+		let IRH=ddt(4, IRF);
+		let IRI=L3(std::array::from_fn(|i| ddt_derivative(4,IRH,(IRG)[i])));
+		let IRJ=E+ IRH;
+		let IRK=IQK* EYR;
+		let IRL=EYS* IQK;
+		let IRM=ddt(5, IRK);
+		let IRN=L3(std::array::from_fn(|i| ddt_derivative(5,IRM,(IRL)[i])));
+		let IRO=E+ IRM;
+		let IRP=IQK* IPS;
+		let IRQ=IPT* IQK;
+		let IRR=ddt(6, IRP);
+		let IRS=L2(std::array::from_fn(|i| ddt_derivative(6,IRR,(IRQ)[i])));
+		let IRT=E+ IRR;
+		let IRU=IQK* IPU;
+		let IRV=IPV* IQK;
+		let IRW=ddt(7, IRU);
+		let IRX=L4(std::array::from_fn(|i| ddt_derivative(7,IRW,(IRV)[i])));
+		let IRY=E+ IRW;
+		let IRZ=EOB* CMB;
+		let ISA=(EOC* CMB)+ (CMS* EOB);
+		let ISB=PH&& (staged[715]!=0.0);
+		let ISC;
 		let ISD;
 		let ISE;
 		let ISF;
 		let ISG;
 		let ISH;
-		let ISI;
-		if ISC{
-		let ISJ=IKK> E;
+		if ISB{
+		let ISI=IKK> E;
+		let ITB;
 		let ITC;
 		let ITD;
 		let ITE;
@@ -24540,124 +24529,124 @@ impl Instance {
 		let ITO;
 		let ITP;
 		let ITQ;
-		let ITR;
-		if ISJ{
-		let ISK=AIH/ AIF;
-		let ISL=(AIX).product_sum_div(CW,AIV,(-ISK),AIF);
-		let ISM=AIG/ AIH;
-		let ISN=(AIW).product_sum_div(CW,AIX,(-ISM),AIH);
-		let ISO=AIB/ ISK;
-		let ISQ=ISP* ISO;
-		let ISR=((AIR).product_sum_div(CW,ISL,(-ISO),ISK))* ISP;
-		let ISS=ISQ* ISQ;
-		let IST=ISR* ISQ;
-		let ISU=IST+ IST;
-		let ISV=ISK/ BHD;
-		let ISW=(ISL).product_sum_div(CW,BHG,(-ISV),BHD);
-		let ISX=ISV- CH;
-		let ISY=CH- (SJ* (ISX* ISS));
-		let ISZ=(((ISW* ISS)+ (ISU* ISX))* SJ)* AN;
-		let ITB=ISY> ITA;
+		if ISI{
+		let ISJ=AIH/ AIF;
+		let ISK=(AIX).product_sum_div(CW,AIV,(-ISJ),AIF);
+		let ISL=AIG/ AIH;
+		let ISM=(AIW).product_sum_div(CW,AIX,(-ISL),AIH);
+		let ISN=AIB/ ISJ;
+		let ISP=ISO* ISN;
+		let ISQ=((AIR).product_sum_div(CW,ISK,(-ISN),ISJ))* ISO;
+		let ISR=ISP* ISP;
+		let ISS=ISQ* ISP;
+		let IST=ISS+ ISS;
+		let ISU=ISJ/ BHD;
+		let ISV=(ISK).product_sum_div(CW,BHG,(-ISU),BHD);
+		let ISW=ISU- CH;
+		let ISX=CH- (SJ* (ISW* ISR));
+		let ISY=(((ISV* ISR)+ (IST* ISW))* SJ)* AN;
+		let ITA=ISX> ISZ;
+		let ITT;
 		let ITU;
-		let ITV;
-		if ITB{
+		if ITA{
+		ITT=ISX;
 		ITU=ISY;
-		ITV=ISZ;
 		}else{
-		ITU=ITA;
-		ITV=GU;
+		ITT=ISZ;
+		ITU=GU;
 		}
-		let ITW=ITU* ITU;
-		let ITX=ITV* ITU;
-		let ITY=CH/ ITW;
-		let ITZ=((ITX+ ITX)).product_div((-ITY),ITW);
-		let IUA=BIB* AIH;
-		let IUB=IUA* BHF;
-		let IUC=((AIX* BIB)* BHF)+ (BHI* IUA);
-		let IUD=CH+ ISM;
-		let IUE=IUD* ISS;
-		let IUF=(ISM+ (SJ* ISS))- (24f64* (IUE* ISX));
-		let IUG=(ISN+ (ISU* SJ))- (((((ISN* ISS)+ (ISU* IUD))* ISX)+ (ISW* IUE))* 24f64);
-		let IUH=IUF> VG;
+		let ITV=ITT* ITT;
+		let ITW=ITU* ITT;
+		let ITX=CH/ ITV;
+		let ITY=((ITW+ ITW)).product_div((-ITX),ITV);
+		let ITZ=BIB* AIH;
+		let IUA=ITZ* BHF;
+		let IUB=((AIX* BIB)* BHF)+ (BHI* ITZ);
+		let IUC=CH+ ISL;
+		let IUD=IUC* ISR;
+		let IUE=(ISL+ (SJ* ISR))- (24f64* (IUD* ISW));
+		let IUF=(ISM+ (IST* SJ))- (((((ISM* ISR)+ (IST* IUC))* ISW)+ (ISV* IUD))* 24f64);
+		let IUG=IUE> VG;
+		let IUH;
 		let IUI;
-		let IUJ;
-		if IUH{
+		if IUG{
+		IUH=IUE;
 		IUI=IUF;
-		IUJ=IUG;
 		}else{
-		IUI=VG;
-		IUJ=GU;
+		IUH=VG;
+		IUI=GU;
 		}
-		let IUK=IUB* ITY;
-		let IUL=IUK* IUI;
-		let IUM=(((IUC* ITY)+ (ITZ* IUB))* IUI)+ (IUJ* IUK);
-		let IUO=IUN> E;
+		let IUJ=IUA* ITX;
+		let IUK=IUJ* IUH;
+		let IUL=(((IUB* ITX)+ (ITY* IUA))* IUH)+ (IUI* IUJ);
+		let IUN=IUM> E;
+		let IUV;
 		let IUW;
 		let IUX;
 		let IUY;
-		let IUZ;
-		if IUO{
-		let IUP=AIM/ AIK;
-		let IUQ=(AJC).product_sum_div(CW,AJA,(-IUP),AIK);
-		let IUR=IUP* IUP;
-		let IUS=IUQ* IUP;
-		let IUT=IUR* AIB;
-		let IUU=IUT* AIB;
-		let IUV=((((IUS+ IUS)* AIB)+ (AIR* IUR))* AIB)+ (AIR* IUT);
+		if IUN{
+		let IUO=AIM/ AIK;
+		let IUP=(AJC).product_sum_div(CW,AJA,(-IUO),AIK);
+		let IUQ=IUO* IUO;
+		let IUR=IUP* IUO;
+		let IUS=IUQ* AIB;
+		let IUT=IUS* AIB;
+		let IUU=((((IUR+ IUR)* AIB)+ (AIR* IUQ))* AIB)+ (AIR* IUS);
+		let IVE;
 		let IVF;
-		let IVG;
 		if J{
-		let IVC=CH+ (IUP* AIB);
-		let IVD=IUU/ IVC;
-		let IVE=(IUV).product_sum_div(CW,((IUQ* AIB)+ (AIR* IUP)),(-IVD),IVC);
+		let IVB=CH+ (IUO* AIB);
+		let IVC=IUT/ IVB;
+		let IVD=(IUU).product_sum_div(CW,((IUP* AIB)+ (AIR* IUO)),(-IVC),IVB);
+		IVE=IVC;
 		IVF=IVD;
-		IVG=IVE;
 		}else{
+		IVE=IUT;
 		IVF=IUU;
-		IVG=IUV;
 		}
-		let IVH=(CH+ (DZ* IVF)).sqrt();
-		let IVI=CH+ IVH;
-		let IVJ=DI* (AIK* IVI);
-		let IVK=IVJ* ITU;
-		let IVL=AIK/ IVK;
-		let IVM=(AJA).product_sum_div(CW,(((((AJA* IVI)+ (((IVG* DZ)* (CW/ (CV* IVH)))* AIK))* DI)* ITU)+ (ITV* IVJ)),(-IVL),IVK);
-		let IVO=IVN* BHE;
-		let IVP=IVO* AHY;
-		let IVQ=IVP* IVL;
-		let IVR=IVQ* IVL;
-		let IVS=((((((BHH* IVN)* AHY)+ (AIO* IVO))* IVL)+ (IVM* IVP))* IVL)+ (IVM* IVQ);
-		let IVU=IUL+ (IVR/ IVT);
-		let IVV=IUM+ (IVS/ IVT);
-		IUW=IVU;
-		IUX=IVR;
-		IUY=IVV;
-		IUZ=IVS;
+		let IVG=(CH+ (DZ* IVE)).sqrt();
+		let IVH=CH+ IVG;
+		let IVI=DI* (AIK* IVH);
+		let IVJ=IVI* ITT;
+		let IVK=AIK/ IVJ;
+		let IVL=(AJA).product_sum_div(CW,(((((AJA* IVH)+ (((IVF* DZ)* (CW/ (CV* IVG)))* AIK))* DI)* ITT)+ (ITU* IVI)),(-IVK),IVJ);
+		let IVN=IVM* BHE;
+		let IVO=IVN* AHY;
+		let IVP=IVO* IVK;
+		let IVQ=IVP* IVK;
+		let IVR=((((((BHH* IVM)* AHY)+ (AIO* IVN))* IVK)+ (IVL* IVO))* IVK)+ (IVL* IVP);
+		let IVT=IUK+ (IVQ/ IVS);
+		let IVU=IUL+ (IVR/ IVS);
+		IUV=IVT;
+		IUW=IVQ;
+		IUX=IVU;
+		IUY=IVR;
 		}else{
-		IUW=IUL;
-		IUX=E;
-		IUY=IUM;
-		IUZ=GU;
+		IUV=IUK;
+		IUW=E;
+		IUX=IUL;
+		IUY=GU;
 		}
-		let IVA=(ITS* IUW).sqrt();
-		let IVB=(IUY* ITS)* (CW/ (CV* IVA));
-		ITC=ISM;
-		ITD=ISS;
-		ITE=ISX;
-		ITF=ITY;
-		ITG=IUB;
-		ITH=ISQ;
-		ITI=IUX;
-		ITJ=IVA;
-		ITK=ISN;
-		ITL=ISU;
-		ITM=ISW;
-		ITN=ITZ;
-		ITO=IUC;
-		ITP=ISR;
-		ITQ=IUZ;
-		ITR=IVB;
+		let IUZ=(ITR* IUV).sqrt();
+		let IVA=(IUX* ITR)* (CW/ (CV* IUZ));
+		ITB=ISL;
+		ITC=ISR;
+		ITD=ISW;
+		ITE=ITX;
+		ITF=IUA;
+		ITG=ISP;
+		ITH=IUW;
+		ITI=IUZ;
+		ITJ=ISM;
+		ITK=IST;
+		ITL=ISV;
+		ITM=ITY;
+		ITN=IUB;
+		ITO=ISQ;
+		ITP=IUY;
+		ITQ=IVA;
 		}else{
+		ITB=E;
 		ITC=E;
 		ITD=E;
 		ITE=E;
@@ -24665,7 +24654,7 @@ impl Instance {
 		ITG=E;
 		ITH=E;
 		ITI=E;
-		ITJ=E;
+		ITJ=GU;
 		ITK=GU;
 		ITL=GU;
 		ITM=GU;
@@ -24673,167 +24662,167 @@ impl Instance {
 		ITO=GU;
 		ITP=GU;
 		ITQ=GU;
-		ITR=GU;
 		}
-		let ITT=(((parameters[50]== CH)&& (ITS> E))&& ISJ)&& (parameters[33]> E);
+		let ITS=(((parameters[50]== CH)&& (ITR> E))&& ISI)&& (parameters[33]> E);
+		let IWE;
 		let IWF;
 		let IWG;
 		let IWH;
 		let IWI;
 		let IWJ;
+		if ITS{
+		let IVV=SJ* ITC;
+		let IVW=ITK* SJ;
+		let IVX=(ITB+ ADX)- IVV;
+		let IVY=(ITJ- IVW)* ITC;
+		let IVZ=(ITB+ CH)- IVV;
+		let IWA=ITC* IVZ;
+		let IWB=((ITB/ SJ)- (ITC* IVX))- (1.6f64* (IWA* ITD));
+		let IWC=((ITJ/ SJ)- ((ITK* IVX)+ IVY))- (((((ITK* IVZ)+ IVY)* ITD)+ (ITL* IWA))* 1.6f64);
+		let IWD=IWB> VG;
 		let IWK;
-		if ITT{
-		let IVW=SJ* ITD;
-		let IVX=ITL* SJ;
-		let IVY=(ITC+ ADX)- IVW;
-		let IVZ=(ITK- IVX)* ITD;
-		let IWA=(ITC+ CH)- IVW;
-		let IWB=ITD* IWA;
-		let IWC=((ITC/ SJ)- (ITD* IVY))- (1.6f64* (IWB* ITE));
-		let IWD=((ITK/ SJ)- ((ITL* IVY)+ IVZ))- (((((ITL* IWA)+ IVZ)* ITE)+ (ITM* IWB))* 1.6f64);
-		let IWE=IWC> VG;
 		let IWL;
-		let IWM;
-		if IWE{
+		if IWD{
+		IWK=IWB;
 		IWL=IWC;
-		IWM=IWD;
 		}else{
-		IWL=VG;
-		IWM=GU;
+		IWK=VG;
+		IWL=GU;
 		}
-		let IWN=ITF/ ITG;
-		let IWO=IWN* IWL;
-		let IWP=(((ITN).product_sum_div(CW,ITO,(-IWN),ITG))* IWL)+ (IWM* IWN);
-		let IWQ=ITF* ITH;
-		let IWR=(ITC+ (19.2f64* ITD))- (SJ* (ITC* ITD));
-		let IWS=(CH- IVW)- (IWR* ITE);
-		let IWT=IWQ* IWS;
-		let IWU=(((ITN* ITH)+ (ITP* ITF))* IWS)+ (((IVX* AN)- ((((ITK+ (ITL* 19.2f64))- (((ITK* ITD)+ (ITL* ITC))* SJ))* ITE)+ (ITM* IWR)))* IWQ);
-		let IWV=EON* EON;
-		let IWW=EOS* EON;
-		let IWX=IWV* EOB;
-		let IWY=EOO* EOO;
-		let IWZ=EOT* EOO;
-		let IXA=(IWX* CMB)/ IWY;
-		let IXB=((((((IWW+ IWW)* EOB)+ (EOC* IWV))* CMB)+ (CMS* IWX))).product_sum_div(CW,(IWZ+ IWZ),(-IXA),IWY);
-		let IXC=IUN> E;
+		let IWM=ITE/ ITF;
+		let IWN=IWM* IWK;
+		let IWO=(((ITM).product_sum_div(CW,ITN,(-IWM),ITF))* IWK)+ (IWL* IWM);
+		let IWP=ITE* ITG;
+		let IWQ=(ITB+ (19.2f64* ITC))- (SJ* (ITB* ITC));
+		let IWR=(CH- IVV)- (IWQ* ITD);
+		let IWS=IWP* IWR;
+		let IWT=(((ITM* ITG)+ (ITO* ITE))* IWR)+ (((IVW* AN)- ((((ITJ+ (ITK* 19.2f64))- (((ITJ* ITC)+ (ITK* ITB))* SJ))* ITD)+ (ITL* IWQ)))* IWP);
+		let IWU=EON* EON;
+		let IWV=EOS* EON;
+		let IWW=IWU* EOB;
+		let IWX=EOO* EOO;
+		let IWY=EOT* EOO;
+		let IWZ=(IWW* CMB)/ IWX;
+		let IXA=((((((IWV+ IWV)* EOB)+ (EOC* IWU))* CMB)+ (CMS* IWW))).product_sum_div(CW,(IWY+ IWY),(-IWZ),IWX);
+		let IXB=IUM> E;
+		let IXO;
 		let IXP;
 		let IXQ;
 		let IXR;
-		let IXS;
-		if IXC{
-		let IXD=CH+ IVW;
-		let IXE=SJ* ITG;
-		let IXF=(IXE* ITG)* IVT;
-		let IXG=(ITI* IXD)/ IXF;
-		let IXH=IWO+ IXG;
-		let IXI=IWP+ ((((ITQ* IXD)+ (IVX* ITI))).product_sum_div(CW,((((ITO* SJ)* ITG)+ (ITO* IXE))* IVT),(-IXG),IXF));
-		let IXJ=ITI* ITH;
-		let IXK=CH+ ITE;
-		let IXL=ITG* IVT;
-		let IXM=(IXJ* IXK)/ IXL;
-		let IXN=IWT- IXM;
-		let IXO=IWU- ((((((ITQ* ITH)+ (ITP* ITI))* IXK)+ (ITM* IXJ))).product_sum_div(CW,(ITO* IVT),(-IXM),IXL));
-		IXP=IXH;
-		IXQ=IXN;
-		IXR=IXI;
-		IXS=IXO;
+		if IXB{
+		let IXC=CH+ IVV;
+		let IXD=SJ* ITF;
+		let IXE=(IXD* ITF)* IVS;
+		let IXF=(ITH* IXC)/ IXE;
+		let IXG=IWN+ IXF;
+		let IXH=IWO+ ((((ITP* IXC)+ (IVW* ITH))).product_sum_div(CW,((((ITN* SJ)* ITF)+ (ITN* IXD))* IVS),(-IXF),IXE));
+		let IXI=ITH* ITG;
+		let IXJ=CH+ ITD;
+		let IXK=ITF* IVS;
+		let IXL=(IXI* IXJ)/ IXK;
+		let IXM=IWS- IXL;
+		let IXN=IWT- ((((((ITP* ITG)+ (ITO* ITH))* IXJ)+ (ITL* IXI))).product_sum_div(CW,(ITN* IVS),(-IXL),IXK));
+		IXO=IXG;
+		IXP=IXM;
+		IXQ=IXH;
+		IXR=IXN;
 		}else{
-		IXP=IWO;
-		IXQ=IWT;
-		IXR=IWP;
-		IXS=IWU;
+		IXO=IWN;
+		IXP=IWS;
+		IXQ=IWO;
+		IXR=IWT;
 		}
-		let IXT=ITS/ IXP;
-		let IXU=IXT.sqrt();
-		let IXV=((IXR).product_div((-IXT),IXP))* (CW/ (CV* IXU));
-		let IXW=ITJ<= E;
+		let IXS=ITR/ IXO;
+		let IXT=IXS.sqrt();
+		let IXU=((IXQ).product_div((-IXS),IXO))* (CW/ (CV* IXT));
+		let IXV=ITI<= E;
+		let IXY;
 		let IXZ;
-		let IYA;
-		if IXW{
-		IXZ=E;
-		IYA=GU;
+		if IXV{
+		IXY=E;
+		IXZ=GU;
 		}else{
-		let IXX=(IXQ* IXU)/ ITJ;
-		let IXY=(((IXS* IXU)+ (IXV* IXQ))).product_sum_div(CW,ITR,(-IXX),ITJ);
+		let IXW=(IXP* IXT)/ ITI;
+		let IXX=(((IXR* IXT)+ (IXU* IXP))).product_sum_div(CW,ITQ,(-IXW),ITI);
+		IXY=IXW;
 		IXZ=IXX;
-		IYA=IXY;
 		}
-		let IYB=IXZ> E;
+		let IYA=IXY> E;
+		let IYC;
 		let IYD;
-		let IYE;
-		if IYB{
-		let IYC=IXZ< CH;
+		if IYA{
+		let IYB=IXY< CH;
+		let IYG;
 		let IYH;
-		let IYI;
-		if IYC{
+		if IYB{
+		IYG=IXY;
 		IYH=IXZ;
-		IYI=IYA;
 		}else{
-		IYH=CH;
-		IYI=GU;
+		IYG=CH;
+		IYH=GU;
 		}
+		IYC=IYG;
 		IYD=IYH;
-		IYE=IYI;
 		}else{
-		IYD=E;
-		IYE=GU;
+		IYC=E;
+		IYD=GU;
 		}
-		let IYF=(IYD* ITJ)/ IXU;
-		let IYG=(((IYE* ITJ)+ (ITR* IYD))).product_sum_div(CW,IXV,(-IYF),IXU);
-		IWF=IXP;
-		IWG=IXA;
-		IWH=IYF;
-		IWI=IXR;
-		IWJ=IXB;
-		IWK=IYG;
+		let IYE=(IYC* ITI)/ IXT;
+		let IYF=(((IYD* ITI)+ (ITQ* IYC))).product_sum_div(CW,IXU,(-IYE),IXT);
+		IWE=IXO;
+		IWF=IWZ;
+		IWG=IYE;
+		IWH=IXQ;
+		IWI=IXA;
+		IWJ=IYF;
 		}else{
-		IWF=VG;
-		IWG=ISA;
-		IWH=E;
-		IWI=GU;
-		IWJ=ISB;
-		IWK=GU;
+		IWE=VG;
+		IWF=IRZ;
+		IWG=E;
+		IWH=GU;
+		IWI=ISA;
+		IWJ=GU;
 		}
+		ISC=IWE;
 		ISD=IWF;
 		ISE=IWG;
 		ISF=IWH;
 		ISG=IWI;
 		ISH=IWJ;
-		ISI=IWK;
 		}else{
-		ISD=VG;
-		ISE=ISA;
-		ISF=E;
-		ISG=GU;
-		ISH=ISB;
-		ISI=GU;
+		ISC=VG;
+		ISD=IRZ;
+		ISE=E;
+		ISF=GU;
+		ISG=ISA;
+		ISH=GU;
 		}
-		let IYK=IYJ/ ISD;
-		let IYL=(L5([1f64,0.0,0.0,0.0,0.0])).product_sum_div(CW,L5([0.0,ISG[0],ISG[1],ISG[2],ISG[3]]),(-IYK),ISD);
-		let IYM=E+ IYK;
-		let IYN=ISE* IYJ;
-		let IYO=ISH* IYJ;
-		let IYP=L5([0.0,IYO[0],IYO[1],IYO[2],IYO[3]])+ L5([(1f64* ISE),0.0,0.0,0.0,0.0]);
-		let IYQ=ddt(8, IYN);
-		let IYR=IYP* IQO;
-		let IYS=E+ IYQ;
-		let IYU=IYT* ISE;
-		let IYV=IYU* IYJ;
-		let IYW=(ISH* IYT)* IYJ;
-		let IYX=L5([0.0,IYW[0],IYW[1],IYW[2],IYW[3]])+ L5([(1f64* IYU),0.0,0.0,0.0,0.0]);
-		let IYY=ddt(9, IYV);
-		let IYZ=IYX* IQO;
-		let IZA=IYZ* AN;
-		let IZB=-IYV;
-		let IZC=IYX* AN;
-		let IZD=E+ (-IYY);
-		let IZE=ddt(10, IYV);
-		let IZF=IYZ* AN;
-		let IZG=E+ (-IZE);
+		let IYJ=IYI/ ISC;
+		let IYK=(L5([1f64,0.0,0.0,0.0,0.0])).product_sum_div(CW,L5([0.0,ISF[0],ISF[1],ISF[2],ISF[3]]),(-IYJ),ISC);
+		let IYL=E+ IYJ;
+		let IYM=ISD* IYI;
+		let IYN=ISG* IYI;
+		let IYO=L5([0.0,IYN[0],IYN[1],IYN[2],IYN[3]])+ L5([(1f64* ISD),0.0,0.0,0.0,0.0]);
+		let IYP=ddt(8, IYM);
+		let IYQ=L5(std::array::from_fn(|i| ddt_derivative(8,IYP,(IYO)[i])));
+		let IYR=E+ IYP;
+		let IYT=IYS* ISD;
+		let IYU=IYT* IYI;
+		let IYV=(ISG* IYS)* IYI;
+		let IYW=L5([0.0,IYV[0],IYV[1],IYV[2],IYV[3]])+ L5([(1f64* IYT),0.0,0.0,0.0,0.0]);
+		let IYX=ddt(9, IYU);
+		let IYY=L5(std::array::from_fn(|i| ddt_derivative(9,IYX,(IYW)[i])));
+		let IYZ=IYY* AN;
+		let IZA=-IYU;
+		let IZB=IYW* AN;
+		let IZC=E+ (-IYX);
+		let IZD=ddt(10, IYU);
+		let IZE=L5(std::array::from_fn(|i| ddt_derivative(10,IZD,(IYW)[i])));
+		let IZF=IZE* AN;
+		let IZG=E+ (-IZD);
 		let IZH=CL* staged[722];
-		let IZI=IZH* ISF;
-		let IZK=(ISI* IZH)* IZJ;
+		let IZI=IZH* ISE;
+		let IZK=(ISH* IZH)* IZJ;
 		let IZL=L5([IZK[0],IZK[1],IZK[2],IZK[3],0.0])+ L5([0.0,0.0,0.0,0.0,(1f64* IZI)]);
 		let IZM=E+ (IZI* IZJ);
 		let IZN=E+ IZJ;
@@ -25012,47 +25001,47 @@ impl Instance {
 		let JEV=IPI[1];
 		let JEW=IPK[0];
 		let JEX=IPK[1];
-		let JEY=IQP[0];
-		let JEZ=IQP[1];
-		let JFA=IQP[2];
-		let JFB=IQP[3];
-		let JFC=IQU[0];
-		let JFD=IQU[1];
-		let JFE=IQU[2];
-		let JFF=IQU[3];
-		let JFG=IQZ[0];
-		let JFH=IQZ[1];
-		let JFI=IQZ[2];
-		let JFJ=IQZ[3];
-		let JFK=IRE[0];
-		let JFL=IRE[1];
-		let JFM=IRJ[0];
-		let JFN=IRJ[1];
-		let JFO=IRJ[2];
-		let JFP=IRO[0];
-		let JFQ=IRO[1];
-		let JFR=IRO[2];
-		let JFS=IRT[0];
-		let JFT=IRT[1];
-		let JFU=IRY[0];
-		let JFV=IRY[1];
-		let JFW=IRY[2];
-		let JFX=IRY[3];
-		let JFY=IYL[0];
-		let JFZ=IYL[1];
-		let JGA=IYL[2];
-		let JGB=IYL[3];
-		let JGC=IYL[4];
-		let JGD=IYR[0];
-		let JGE=IYR[1];
-		let JGF=IYR[2];
-		let JGG=IYR[3];
-		let JGH=IYR[4];
-		let JGI=IZA[0];
-		let JGJ=IZA[1];
-		let JGK=IZA[2];
-		let JGL=IZA[3];
-		let JGM=IZA[4];
+		let JEY=IQO[0];
+		let JEZ=IQO[1];
+		let JFA=IQO[2];
+		let JFB=IQO[3];
+		let JFC=IQT[0];
+		let JFD=IQT[1];
+		let JFE=IQT[2];
+		let JFF=IQT[3];
+		let JFG=IQY[0];
+		let JFH=IQY[1];
+		let JFI=IQY[2];
+		let JFJ=IQY[3];
+		let JFK=IRD[0];
+		let JFL=IRD[1];
+		let JFM=IRI[0];
+		let JFN=IRI[1];
+		let JFO=IRI[2];
+		let JFP=IRN[0];
+		let JFQ=IRN[1];
+		let JFR=IRN[2];
+		let JFS=IRS[0];
+		let JFT=IRS[1];
+		let JFU=IRX[0];
+		let JFV=IRX[1];
+		let JFW=IRX[2];
+		let JFX=IRX[3];
+		let JFY=IYK[0];
+		let JFZ=IYK[1];
+		let JGA=IYK[2];
+		let JGB=IYK[3];
+		let JGC=IYK[4];
+		let JGD=IYQ[0];
+		let JGE=IYQ[1];
+		let JGF=IYQ[2];
+		let JGG=IYQ[3];
+		let JGH=IYQ[4];
+		let JGI=IYZ[0];
+		let JGJ=IYZ[1];
+		let JGK=IYZ[2];
+		let JGL=IYZ[3];
+		let JGM=IYZ[4];
 		let JGN=IZF[0];
 		let JGO=IZF[1];
 		let JGP=IZF[2];
@@ -25096,43 +25085,43 @@ impl Instance {
 		let JIB=IQM[1];
 		let JIC=IQM[2];
 		let JID=IQM[3];
-		let JIE=IQS[0];
-		let JIF=IQS[1];
-		let JIG=IQS[2];
-		let JIH=IQS[3];
-		let JII=IQX[0];
-		let JIJ=IQX[1];
-		let JIK=IQX[2];
-		let JIL=IQX[3];
-		let JIM=IRC[0];
-		let JIN=IRC[1];
-		let JIO=IRH[0];
-		let JIP=IRH[1];
-		let JIQ=IRH[2];
-		let JIR=IRM[0];
-		let JIS=IRM[1];
-		let JIT=IRM[2];
-		let JIU=IRR[0];
-		let JIV=IRR[1];
-		let JIW=IRW[0];
-		let JIX=IRW[1];
-		let JIY=IRW[2];
-		let JIZ=IRW[3];
-		let JJA=IYP[0];
-		let JJB=IYP[1];
-		let JJC=IYP[2];
-		let JJD=IYP[3];
-		let JJE=IYP[4];
-		let JJF=IZC[0];
-		let JJG=IZC[1];
-		let JJH=IZC[2];
-		let JJI=IZC[3];
-		let JJJ=IZC[4];
-		let JJK=IZC[0];
-		let JJL=IZC[1];
-		let JJM=IZC[2];
-		let JJN=IZC[3];
-		let JJO=IZC[4];
+		let JIE=IQR[0];
+		let JIF=IQR[1];
+		let JIG=IQR[2];
+		let JIH=IQR[3];
+		let JII=IQW[0];
+		let JIJ=IQW[1];
+		let JIK=IQW[2];
+		let JIL=IQW[3];
+		let JIM=IRB[0];
+		let JIN=IRB[1];
+		let JIO=IRG[0];
+		let JIP=IRG[1];
+		let JIQ=IRG[2];
+		let JIR=IRL[0];
+		let JIS=IRL[1];
+		let JIT=IRL[2];
+		let JIU=IRQ[0];
+		let JIV=IRQ[1];
+		let JIW=IRV[0];
+		let JIX=IRV[1];
+		let JIY=IRV[2];
+		let JIZ=IRV[3];
+		let JJA=IYO[0];
+		let JJB=IYO[1];
+		let JJC=IYO[2];
+		let JJD=IYO[3];
+		let JJE=IYO[4];
+		let JJF=IZB[0];
+		let JJG=IZB[1];
+		let JJH=IZB[2];
+		let JJI=IZB[3];
+		let JJJ=IZB[4];
+		let JJK=IZB[0];
+		let JJL=IZB[1];
+		let JJM=IZB[2];
+		let JJN=IZB[3];
+		let JJO=IZB[4];
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[1631]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[1632]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[1633]; }
@@ -25313,7 +25302,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IQQ),
+            multiplicity * (IQP),
             [5, 6, 7, 8],
             [JEY, JEZ, JFA, JFB],
             [],
@@ -25323,7 +25312,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(6),
-            multiplicity * (IQV),
+            multiplicity * (IQU),
             [5, 6, 7, 8],
             [JFC, JFD, JFE, JFF],
             [],
@@ -25333,7 +25322,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(6),
-            multiplicity * (IRA),
+            multiplicity * (IQZ),
             [5, 6, 7, 8],
             [JFG, JFH, JFI, JFJ],
             [],
@@ -25343,7 +25332,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IRF),
+            multiplicity * (IRE),
             [5, 6],
             [JFK, JFL],
             [],
@@ -25353,7 +25342,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(7),
-            multiplicity * (IRK),
+            multiplicity * (IRJ),
             [5, 6, 7],
             [JFM, JFN, JFO],
             [],
@@ -25363,7 +25352,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(8),
-            multiplicity * (IRP),
+            multiplicity * (IRO),
             [5, 6, 8],
             [JFP, JFQ, JFR],
             [],
@@ -25373,7 +25362,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(10),
             Some(6),
-            multiplicity * (IRU),
+            multiplicity * (IRT),
             [6, 10],
             [JFS, JFT],
             [],
@@ -25383,7 +25372,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(11),
             Some(7),
-            multiplicity * (IRZ),
+            multiplicity * (IRY),
             [6, 7, 10, 11],
             [JFU, JFV, JFW, JFX],
             [],
@@ -25403,7 +25392,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (IYM),
+            multiplicity * (IYL),
             [4, 5, 6, 7, 8],
             [JFY, JFZ, JGA, JGB, JGC],
             [],
@@ -25413,7 +25402,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (IYS),
+            multiplicity * (IYR),
             [4, 5, 6, 7, 8],
             [JGD, JGE, JGF, JGG, JGH],
             [],
@@ -25423,7 +25412,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(6),
-            multiplicity * (IZD),
+            multiplicity * (IZC),
             [4, 5, 6, 7, 8],
             [JGI, JGJ, JGK, JGL, JGM],
             [],
@@ -25712,50 +25701,50 @@ impl Instance {
         self.canonical_reactive[19] = JIB;
         self.canonical_reactive[20] = JIC;
         self.canonical_reactive[21] = JID;
-        self.canonical_reactive[22] = IQR;
+        self.canonical_reactive[22] = IQQ;
         self.canonical_reactive[23] = JIE;
         self.canonical_reactive[24] = JIF;
         self.canonical_reactive[25] = JIG;
         self.canonical_reactive[26] = JIH;
-        self.canonical_reactive[27] = IQW;
+        self.canonical_reactive[27] = IQV;
         self.canonical_reactive[28] = JII;
         self.canonical_reactive[29] = JIJ;
         self.canonical_reactive[30] = JIK;
         self.canonical_reactive[31] = JIL;
-        self.canonical_reactive[32] = IRB;
+        self.canonical_reactive[32] = IRA;
         self.canonical_reactive[33] = JIM;
         self.canonical_reactive[34] = JIN;
-        self.canonical_reactive[35] = IRG;
+        self.canonical_reactive[35] = IRF;
         self.canonical_reactive[36] = JIO;
         self.canonical_reactive[37] = JIP;
         self.canonical_reactive[38] = JIQ;
-        self.canonical_reactive[39] = IRL;
+        self.canonical_reactive[39] = IRK;
         self.canonical_reactive[40] = JIR;
         self.canonical_reactive[41] = JIS;
         self.canonical_reactive[42] = JIT;
-        self.canonical_reactive[43] = IRQ;
+        self.canonical_reactive[43] = IRP;
         self.canonical_reactive[44] = JIU;
         self.canonical_reactive[45] = JIV;
-        self.canonical_reactive[46] = IRV;
+        self.canonical_reactive[46] = IRU;
         self.canonical_reactive[47] = JIW;
         self.canonical_reactive[48] = JIX;
         self.canonical_reactive[49] = JIY;
         self.canonical_reactive[50] = JIZ;
         self.canonical_reactive[51] = staged[1638];
-        self.canonical_reactive[52] = IYM;
-        self.canonical_reactive[53] = IYN;
+        self.canonical_reactive[52] = IYL;
+        self.canonical_reactive[53] = IYM;
         self.canonical_reactive[54] = JJA;
         self.canonical_reactive[55] = JJB;
         self.canonical_reactive[56] = JJC;
         self.canonical_reactive[57] = JJD;
         self.canonical_reactive[58] = JJE;
-        self.canonical_reactive[59] = IZB;
+        self.canonical_reactive[59] = IZA;
         self.canonical_reactive[60] = JJF;
         self.canonical_reactive[61] = JJG;
         self.canonical_reactive[62] = JJH;
         self.canonical_reactive[63] = JJI;
         self.canonical_reactive[64] = JJJ;
-        self.canonical_reactive[65] = IZB;
+        self.canonical_reactive[65] = IZA;
         self.canonical_reactive[66] = JJK;
         self.canonical_reactive[67] = JJL;
         self.canonical_reactive[68] = JJM;

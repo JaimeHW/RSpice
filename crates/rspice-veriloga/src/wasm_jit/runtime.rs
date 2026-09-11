@@ -395,6 +395,10 @@ fn evaluate_stateful_helper(
             (Instruction::DdtState(index), 1)
         }
         441 => (Instruction::DdtJacobian, 1),
+        482 => {
+            require_integration_state(session, index)?;
+            (Instruction::DdtDerivativeState(index), 2)
+        }
         442 => {
             require_integration_state(session, index)?;
             (Instruction::IdtState(index), 2)
@@ -1835,7 +1839,11 @@ mod tests {
                 Err(HelperError::StatefulRuntimeFailed)
             );
             assert!(session.take_error().unwrap().contains("must be finite"));
-            assert_eq!(session.context().state_candidate_valid[0], 0);
+            assert_eq!(
+                session.context().state_candidate_valid[0],
+                crate::vm::INTEGRATION_CANDIDATE_FAILED
+            );
+            assert!(session.context().validate_advance_state().is_err());
             assert!(!session.context().state_initialized[0]);
         }
     }

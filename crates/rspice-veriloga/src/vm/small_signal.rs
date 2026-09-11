@@ -1099,6 +1099,12 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 let result = self.multiply_values(V::new(0.0, self.omega), input);
                 self.stack.push(result);
             }
+            Instruction::DdtDerivativeState(_) => {
+                let input = self.pop("ddt input derivative")?;
+                let _primal = self.pop_real("ddt primal")?;
+                let result = self.multiply_values(V::new(0.0, self.omega), input);
+                self.stack.push(result);
+            }
             Instruction::IdtJacobian => {
                 let input = self.pop("IdtJacobian")?;
                 if self.omega == 0.0 {

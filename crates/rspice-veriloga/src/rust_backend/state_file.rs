@@ -1682,7 +1682,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 26 retains indirect-equation absolute tolerances.
 // Version 27 preserves generated last_crossing interpolation and accepted history.
 // Version 28 preserves finite integral candidates through intermediate range loss.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 28;
+// Version 29 shares DDT candidate history with its derivatives and recovers range loss.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 29;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

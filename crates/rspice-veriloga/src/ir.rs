@@ -1511,7 +1511,7 @@ impl DeviceIR {
         fn contains_ddt(arena: &ExprArena, id: NodeId) -> bool {
             match *arena.node(id) {
                 Node::FreezeDerivative(inner) => contains_ddt(arena, inner),
-                Node::Ddt(_) => true,
+                Node::Ddt(_) | Node::DdtDerivative { .. } => true,
                 Node::Binary(_, left, right) => {
                     contains_ddt(arena, left) || contains_ddt(arena, right)
                 }
@@ -2397,7 +2397,12 @@ pub mod autodiff {
             Node::Conditional(_, then_expr, else_expr) => recurse(then_expr) | recurse(else_expr),
             Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => recurse(input),
             Node::Ddx { expr: inner, .. } => recurse(inner),
-            Node::DdtCompanion(inner) | Node::IdtCompanion(inner) => recurse(inner),
+            Node::DdtCompanion(inner)
+            | Node::IdtCompanion(inner)
+            | Node::DdtDerivative {
+                input_derivative: inner,
+                ..
+            } => recurse(inner),
             // Event detectors are piecewise constant (or zero) in the DC
             // Jacobian
             Node::LastCrossing { .. } => 0,
@@ -3473,6 +3478,9 @@ pub mod autodiff {
                     collect!(ic);
                 }
             }
+            Node::DdtDerivative {
+                input_derivative, ..
+            } => collect!(input_derivative),
             Node::TableLookup { input, .. } => collect!(input),
             Node::Ddx { .. } => {
                 // ddx is resolved along its solver axis before the outer noise
@@ -4701,12 +4709,24 @@ pub mod autodiff {
                 binary!(BinaryOp::Mul, expr, di)
             }
 
-            // ddt companion: d(ddt(q))/dV = (dq/dV) / dt under backward
-            // Euler (zero at DC). The DdtCompanion wrapper multiplies its
-            // operand by the integration coefficient at runtime.
+            // The first candidate's synthetic history follows its input.
+            // Preserve the primal site so the tangent uses the same history.
             Node::Ddt(inner) => {
-                let di = differentiate!(inner);
-                arena.push(Node::DdtCompanion(di))
+                let input_derivative = differentiate!(inner);
+                arena.push(Node::DdtDerivative {
+                    primal: expr,
+                    input_derivative,
+                })
+            }
+            Node::DdtDerivative {
+                primal,
+                input_derivative,
+            } => {
+                let input_derivative = differentiate!(input_derivative);
+                arena.push(Node::DdtDerivative {
+                    primal,
+                    input_derivative,
+                })
             }
 
             // Retain the primal site: initialization and the local wrap count

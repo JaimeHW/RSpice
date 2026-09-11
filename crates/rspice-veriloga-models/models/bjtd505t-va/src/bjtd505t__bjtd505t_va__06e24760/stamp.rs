@@ -2,16 +2,26 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L11, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L11, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -237,9 +247,8 @@ impl Instance {
 		let CFQ=L5([0f64;5]);
 		let CLW=L6([0f64;6]);
 		let CMR=L4([0f64;4]);
-		let CNA=ddt_scale();
-		let COK=L3([0f64;3]);
-		let CON=L3([0f64;3]);
+		let COS=L3([0f64;3]);
+		let COV=L3([0f64;3]);
 		let D=B== C;
 		let PO;
 		let AQM;
@@ -3132,8 +3141,9 @@ impl Instance {
 		let BBV=BBU* BD;
 		let CMZ=BJN* BBU;
 		let BBW=ddt(0, BBV);
+		let CNA=ddt_derivative(0,BBW,CMZ);
 		let BBX=BBW* T;
-		let CNB=(CMZ* CNA)* T;
+		let CNB=CNA* T;
 		let BJA=T;
 		let BJB=BBV* BJA;
 		let CNC=CMZ* BJA;
@@ -3187,112 +3197,120 @@ impl Instance {
 		let BCS=B* ((AVC+ BCQ)+ BCR);
 		let CNI=((L5([CJS[0],CJS[1],CJS[2],0.0,0.0])+ BOF)+ L5([BOG[0],BOG[1],BOG[2],0.0,0.0]))* B;
 		let BCT=ddt(1, BCS);
-		let CNJ=(CNI* CNA)* T;
+		let CNJ=L5(std::array::from_fn(|i| ddt_derivative(1,BCT,(CNI)[i])));
+		let CNK=CNJ* T;
 		let BJC=BCS* BJA;
-		let CNK=CNI* BJA;
+		let CNL=CNI* BJA;
 		let BCU=A+ (BCT* T);
 		let BCV=B* AVS;
-		let CNL=CKA* B;
+		let CNM=CKA* B;
 		let BCW=ddt(2, BCV);
-		let CNM=(CNL* CNA)* T;
+		let CNN=L3(std::array::from_fn(|i| ddt_derivative(2,BCW,(CNM)[i])));
+		let CNO=CNN* T;
 		let BJD=BCV* BJA;
-		let CNN=CNL* BJA;
+		let CNP=CNM* BJA;
 		let BCX=A+ (BCW* T);
 		let BCZ=B* ((AVV+ BCY)+ AYI);
-		let CNO=((L5([CKB[0],0.0,CKB[1],CKB[2],CKB[3]])+ BOH)+ L5([CLG[0],0.0,CLG[1],CLG[2],CLG[3]]))* B;
+		let CNQ=((L5([CKB[0],0.0,CKB[1],CKB[2],CKB[3]])+ BOH)+ L5([CLG[0],0.0,CLG[1],CLG[2],CLG[3]]))* B;
 		let BDA=ddt(3, BCZ);
-		let CNP=(CNO* CNA)* T;
+		let CNR=L5(std::array::from_fn(|i| ddt_derivative(3,BDA,(CNQ)[i])));
+		let CNS=CNR* T;
 		let BJE=BCZ* BJA;
-		let CNQ=CNO* BJA;
+		let CNT=CNQ* BJA;
 		let BDB=A+ (BDA* T);
 		let BDD=B* BDC;
-		let CNR=BOI* B;
+		let CNU=BOI* B;
 		let BDE=ddt(4, BDD);
-		let CNS=(CNR* CNA)* T;
+		let CNV=L6(std::array::from_fn(|i| ddt_derivative(4,BDE,(CNU)[i])));
+		let CNW=CNV* T;
 		let BJF=BDD* BJA;
-		let CNT=CNR* BJA;
+		let CNX=CNU* BJA;
 		let BDF=A+ (BDE* T);
 		let BDG=B* parameters[68];
 		let BDH=BDG* QV;
-		let CNU=BUF* BDG;
+		let CNY=BUF* BDG;
 		let BDI=ddt(5, BDH);
-		let CNV=((CNU* CNA)* T)* BPF;
+		let CNZ=L2(std::array::from_fn(|i| ddt_derivative(5,BDI,(CNY)[i])));
+		let COA=(CNZ* T)* BPF;
 		let BJG=-(BDH* BJA);
-		let CNW=(CNU* BJA)* BPF;
+		let COB=(CNY* BJA)* BPF;
 		let BDJ=A+ (-(BDI* T));
 		let BDK=B* parameters[77];
 		let BDL=BDK* QW;
-		let CNX=BUG* BDK;
+		let COC=BUG* BDK;
 		let BDM=ddt(6, BDL);
-		let CNY=((CNX* CNA)* T)* BPF;
+		let COD=L2(std::array::from_fn(|i| ddt_derivative(6,BDM,(COC)[i])));
+		let COE=(COD* T)* BPF;
 		let BJH=-(BDL* BJA);
-		let CNZ=(CNX* BJA)* BPF;
+		let COF=(COC* BJA)* BPF;
 		let BDN=A+ (-(BDM* T));
-		let COA=((CFH* B)* T)* BPF;
+		let COG=((CFH* B)* T)* BPF;
 		let BDO=A+ (-((B* AND)* T));
 		let BDP=B* RC;
-		let COB=(BUS* B)* AUF;
-		let COC=((L9([COB[0],COB[1],0.0,COB[2],COB[3],COB[4],COB[5],COB[6],COB[7]])+ L9([0.0,0.0,(BKJ* BDP),0.0,0.0,0.0,0.0,0.0,0.0]))* T)* BPF;
+		let COH=(BUS* B)* AUF;
+		let COI=((L9([COH[0],COH[1],0.0,COH[2],COH[3],COH[4],COH[5],COH[6],COH[7]])+ L9([0.0,0.0,(BKJ* BDP),0.0,0.0,0.0,0.0,0.0,0.0]))* T)* BPF;
 		let BDQ=A+ (-((BDP* AUF)* T));
 		let BDS=B* (AXN+ BDR);
-		let COD=(CKY+ BOB)* B;
+		let COJ=(CKY+ BOB)* B;
 		let BDT=ddt(7, BDS);
-		let COE=((COD* CNA)* T)* BPF;
+		let COK=L9(std::array::from_fn(|i| ddt_derivative(7,BDT,(COJ)[i])));
+		let COL=(COK* T)* BPF;
 		let BJI=-(BDS* BJA);
-		let COF=(COD* BJA)* BPF;
+		let COM=(COJ* BJA)* BPF;
 		let BDU=A+ (-(BDT* T));
-		let COG=(((CFF+ CJL)+ CFD)* B)* T;
+		let CON=(((CFF+ CJL)+ CFD)* B)* T;
 		let BDV=A+ ((B* ((ANB+ AUW)+ ANA))* T);
 		let BDX=B* (AWV+ BDW);
-		let COH=(CKQ+ BOC)* B;
+		let COO=(CKQ+ BOC)* B;
 		let BDY=ddt(8, BDX);
-		let COI=(COH* CNA)* T;
+		let COP=L6(std::array::from_fn(|i| ddt_derivative(8,BDY,(COO)[i])));
+		let COQ=COP* T;
 		let BJJ=BDX* BJA;
-		let COJ=COH* BJA;
+		let COR=COO* BJA;
 		let BDZ=A+ (BDY* T);
 		let BGN;
 		let BGO;
 		let BOP;
 		if QA{
 		let BEA=B* RA;
-		let COL=(BUL* B)* AUI;
-		let COM=(L3([0.0,COL[0],COL[1]])+ L3([(BKL* BEA),0.0,0.0]))* T;
+		let COT=(BUL* B)* AUI;
+		let COU=(L3([0.0,COT[0],COT[1]])+ L3([(BKL* BEA),0.0,0.0]))* T;
 		let BEB=0f64+ ((BEA* AUI)* T);
 		BGN=BEB;
 		BGO=A;
-		BOP=COM;
+		BOP=COU;
 		}else{
 		BGN=BEC;
 		BGO=C;
-		BOP=COK;
+		BOP=COS;
 		}
 		let BGT;
 		let BGU;
 		let BOQ;
 		if QD{
 		let BED=B* QY;
-		let COO=(BUJ* B)* AUL;
-		let COP=((L3([0.0,COO[0],COO[1]])+ L3([(BKN* BED),0.0,0.0]))* T)* BPF;
+		let COW=(BUJ* B)* AUL;
+		let COX=((L3([0.0,COW[0],COW[1]])+ L3([(BKN* BED),0.0,0.0]))* T)* BPF;
 		let BEE=0f64+ (-((BED* AUL)* T));
 		BGT=BEE;
 		BGU=A;
-		BOQ=COP;
+		BOQ=COX;
 		}else{
 		BGT=BEF;
 		BGU=C;
-		BOQ=CON;
+		BOQ=COV;
 		}
 		let BEG=(ABI+ ABH)/ ABE;
-		let COQ=((CAJ+ CAK)).product_sum_div(BJM,CAG,(-BEG),ABE);
+		let COY=((CAJ+ CAK)).product_sum_div(BJM,CAG,(-BEG),ABE);
 		let BEH=parameters[129]> A;
 		let BEK;
 		let BOR;
 		if BEH{
 		let BEI=ATZ/ BEG;
 		let BEJ=BEI.abs();
-		let COR=((BNA).product_sum_div(BJM,COQ,(-BEI),BEG))* ((BSH* ((BEI>= BRD) as u8 as f64))- BJM);
+		let COZ=((BNA).product_sum_div(BJM,COY,(-BEI),BEG))* ((BSH* ((BEI>= BRD) as u8 as f64))- BJM);
 		BEK=BEJ;
-		BOR=COR;
+		BOR=COZ;
 		}else{
 		BEK=A;
 		BOR=CFQ;
@@ -3302,33 +3320,33 @@ impl Instance {
 		let BOS;
 		if BEL{
 		let BEM=(BCQ+ BCY)/ BEG;
-		let COT=((BOF+ BOH)).product_sum_div(BJM,COQ,(-BEM),BEG);
+		let CPB=((BOF+ BOH)).product_sum_div(BJM,COY,(-BEM),BEG);
 		BER=BEM;
-		BOS=COT;
+		BOS=CPB;
 		}else{
 		let BEN=OZ* ANP;
 		let BEO=BEN* ABE;
-		let COS=((L5([(BTN* ANP),0.0,0.0,0.0,0.0])+ (BMY* OZ))* ABE)+ (CAG* BEN);
+		let CPA=((L5([(BTN* ANP),0.0,0.0,0.0,0.0])+ (BMY* OZ))* ABE)+ (CAG* BEN);
 		BER=BEO;
-		BOS=COS;
+		BOS=CPA;
 		}
 		let BEQ=BEP== C;
 		let BFA;
 		let BOT;
 		if BEQ{
 		let BES=BBE* BER;
-		let COV=BOS* BBE;
+		let CPD=BOS* BBE;
 		BFA=BES;
-		BOT=COV;
+		BOT=CPD;
 		}else{
 		let BET=BEP== X;
 		let BFB;
 		let BOU;
 		if BET{
 		let BEV=BEU* BER;
-		let COU=BOS* BEU;
+		let CPC=BOS* BEU;
 		BFB=BEV;
-		BOU=COU;
+		BOU=CPC;
 		}else{
 		BFB=A;
 		BOU=CFQ;
@@ -3339,14 +3357,15 @@ impl Instance {
 		let BEX=A+ BEW;
 		let BEZ=A+ BEY;
 		let BFC=ddt(9, BEY);
-		let COW=BOT* BFC;
-		let COX=L6([COW[0],COW[1],COW[2],COW[3],COW[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,((1f64* CNA)* BFA)]);
+		let CPE=ddt_derivative(9,BFC,1f64);
+		let CPF=BOT* BFC;
+		let CPG=L6([CPF[0],CPF[1],CPF[2],CPF[3],CPF[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(CPE* BFA)]);
 		let BJK=BFA;
 		let BJL=BJK* BEY;
-		let COY=1f64* BJK;
+		let CPH=1f64* BJK;
 		let BFD=A+ (BFA* BFC);
-		let COZ=BOR* BEY;
-		let CPA=L6([COZ[0],COZ[1],COZ[2],COZ[3],COZ[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(1f64* BEK)]);
+		let CPI=BOR* BEY;
+		let CPJ=L6([CPI[0],CPI[1],CPI[2],CPI[3],CPI[4],0.0])+ L6([0.0,0.0,0.0,0.0,0.0,(1f64* BEK)]);
 		let BFE=A+ (BEK* BEY);
 		let BFG=A+ BFF;
 		let BFI=A+ BFH;
@@ -3404,7 +3423,7 @@ impl Instance {
 		BOZ=BOP;
 		}else{
 		BGQ=A;
-		BOZ=COK;
+		BOZ=COS;
 		}
 		let BGS=(ctx.checked_derivative_value(BGN, BGQ))+ BGR;
 		let BGV=BGU== A;
@@ -3415,7 +3434,7 @@ impl Instance {
 		BPA=BOQ;
 		}else{
 		BGW=A;
-		BPA=CON;
+		BPA=COV;
 		}
 		let BGY=(ctx.checked_derivative_value(BGT, BGW))+ (-BGX);
 		BHV=A;
@@ -3467,7 +3486,7 @@ impl Instance {
 		BPC=BOQ;
 		}else{
 		BHG=A;
-		BPC=CON;
+		BPC=COV;
 		}
 		let BHI=(ctx.checked_derivative_value(BGT, BHG))+ (-BHH);
 		BHW=A;
@@ -3507,220 +3526,220 @@ impl Instance {
 		let BPD;
 		if BHU!=0.0{
 		let BHX=QH- QX;
-		let CPC=BUI- BUH;
-		let CPD=L3([CPC[0],CPC[1],0.0]);
+		let CPL=BUI- BUH;
+		let CPM=L3([CPL[0],CPL[1],0.0]);
 		BHY=BHX;
-		BPD=CPD;
+		BPD=CPM;
 		}else{
-		let CPB=L3([0.0,0.0,1f64]);
+		let CPK=L3([0.0,0.0,1f64]);
 		BHY=BHS;
-		BPD=CPB;
+		BPD=CPK;
 		}
-		let CPE=L4([0.0,BPD[0],BPD[1],BPD[2]])- L4([BOV[0],BOV[1],BOV[2],0.0]);
+		let CPN=L4([0.0,BPD[0],BPD[1],BPD[2]])- L4([BOV[0],BOV[1],BOV[2],0.0]);
 		let BIC=A+ (BHY- BHZ);
 		let BIE=A+ BID;
 		let BIH;
 		let BPE;
 		if BIF!=0.0{
-		let CPG=L3([BUK[0],BUK[1],0.0]);
+		let CPP=L3([BUK[0],BUK[1],0.0]);
 		BIH=QZ;
-		BPE=CPG;
+		BPE=CPP;
 		}else{
-		let CPF=L3([0.0,0.0,1f64]);
+		let CPO=L3([0.0,0.0,1f64]);
 		BIH=BID;
-		BPE=CPF;
+		BPE=CPO;
 		}
-		let CPH=L4([0.0,BPE[0],BPE[1],BPE[2]])- L4([BOW[0],BOW[1],BOW[2],0.0]);
+		let CPQ=L4([0.0,BPE[0],BPE[1],BPE[2]])- L4([BOW[0],BOW[1],BOW[2],0.0]);
 		let BIK=A+ (BIH- BII);
 		let BIL=A+ node_potentials[21];
-		let CPI=CMM[0];
-		let CPJ=CMM[1];
-		let CPK=CMM[2];
-		let CPL=CMM[3];
-		let CPM=CMN[0];
-		let CPN=CMN[1];
-		let CPO=CMN[2];
-		let CPP=CMN[3];
-		let CPQ=CMN[4];
-		let CPR=CMO[0];
-		let CPS=CMO[1];
-		let CPT=CMO[2];
-		let CPU=CMP[0];
-		let CPV=CMP[1];
-		let CPW=CMP[2];
-		let CPX=CMP[3];
-		let CPY=CMP[4];
-		let CPZ=BOK[0];
-		let CQA=BOK[1];
-		let CQB=BOK[2];
-		let CQC=BOK[3];
-		let CQD=BOL[0];
-		let CQE=BOL[1];
-		let CQF=BOL[2];
-		let CQG=BOL[3];
-		let CQH=CMT[0];
-		let CQI=CMT[1];
-		let CQJ=CMT[2];
-		let CQK=CMT[3];
-		let CQL=CMT[4];
-		let CQM=CMT[5];
-		let CQN=CMU[0];
-		let CQO=CMU[1];
-		let CQP=CMU[2];
-		let CQQ=CMU[3];
-		let CQR=CMU[4];
-		let CQS=CMW[0];
-		let CQT=CMW[1];
-		let CQU=CMW[2];
-		let CQV=CMY[0];
-		let CQW=CMY[1];
-		let CQX=CMY[2];
-		let CQY=BOM;
-		let CQZ=CNB;
-		let CRA=CNH[0];
-		let CRB=CNH[1];
-		let CRC=CNH[2];
-		let CRD=CNH[3];
-		let CRE=CNH[4];
-		let CRF=CNH[5];
-		let CRG=CNH[6];
-		let CRH=CNH[7];
-		let CRI=CNH[8];
-		let CRJ=CNH[9];
-		let CRK=CNH[10];
-		let CRL=CNJ[0];
-		let CRM=CNJ[1];
-		let CRN=CNJ[2];
-		let CRO=CNJ[3];
-		let CRP=CNJ[4];
-		let CRQ=CNM[0];
-		let CRR=CNM[1];
-		let CRS=CNM[2];
-		let CRT=CNP[0];
-		let CRU=CNP[1];
-		let CRV=CNP[2];
-		let CRW=CNP[3];
-		let CRX=CNP[4];
-		let CRY=CNS[0];
-		let CRZ=CNS[1];
-		let CSA=CNS[2];
-		let CSB=CNS[3];
-		let CSC=CNS[4];
-		let CSD=CNS[5];
-		let CSE=CNV[0];
-		let CSF=CNV[1];
-		let CSG=CNY[0];
-		let CSH=CNY[1];
-		let CSI=COA[0];
-		let CSJ=COA[1];
-		let CSK=COA[2];
-		let CSL=COA[3];
-		let CSM=COA[4];
-		let CSN=COA[5];
-		let CSO=COA[6];
-		let CSP=COA[7];
-		let CSQ=COA[8];
-		let CSR=COC[0];
-		let CSS=COC[1];
-		let CST=COC[2];
-		let CSU=COC[3];
-		let CSV=COC[4];
-		let CSW=COC[5];
-		let CSX=COC[6];
-		let CSY=COC[7];
-		let CSZ=COC[8];
-		let CTA=COE[0];
-		let CTB=COE[1];
-		let CTC=COE[2];
-		let CTD=COE[3];
-		let CTE=COE[4];
-		let CTF=COE[5];
-		let CTG=COE[6];
-		let CTH=COE[7];
-		let CTI=COE[8];
-		let CTJ=COG[0];
-		let CTK=COG[1];
-		let CTL=COG[2];
-		let CTM=COG[3];
-		let CTN=COG[4];
-		let CTO=COG[5];
-		let CTP=COI[0];
-		let CTQ=COI[1];
-		let CTR=COI[2];
-		let CTS=COI[3];
-		let CTT=COI[4];
-		let CTU=COI[5];
-		let CTV=1f64;
-		let CTW=COX[0];
-		let CTX=COX[1];
-		let CTY=COX[2];
-		let CTZ=COX[3];
-		let CUA=COX[4];
-		let CUB=COX[5];
-		let CUC=CPA[0];
-		let CUD=CPA[1];
-		let CUE=CPA[2];
-		let CUF=CPA[3];
-		let CUG=CPA[4];
-		let CUH=CPA[5];
-		let CUI=1f64;
-		let CUJ=1f64;
-		let CUK=1f64;
-		let CUL=1f64;
-		let CUM=1f64;
-		let CUN=1f64;
-		let CUO=1f64;
-		let CUP=1f64;
-		let CUQ=CPE[0];
-		let CUR=CPE[1];
-		let CUS=CPE[2];
-		let CUT=CPE[3];
+		let CPR=CMM[0];
+		let CPS=CMM[1];
+		let CPT=CMM[2];
+		let CPU=CMM[3];
+		let CPV=CMN[0];
+		let CPW=CMN[1];
+		let CPX=CMN[2];
+		let CPY=CMN[3];
+		let CPZ=CMN[4];
+		let CQA=CMO[0];
+		let CQB=CMO[1];
+		let CQC=CMO[2];
+		let CQD=CMP[0];
+		let CQE=CMP[1];
+		let CQF=CMP[2];
+		let CQG=CMP[3];
+		let CQH=CMP[4];
+		let CQI=BOK[0];
+		let CQJ=BOK[1];
+		let CQK=BOK[2];
+		let CQL=BOK[3];
+		let CQM=BOL[0];
+		let CQN=BOL[1];
+		let CQO=BOL[2];
+		let CQP=BOL[3];
+		let CQQ=CMT[0];
+		let CQR=CMT[1];
+		let CQS=CMT[2];
+		let CQT=CMT[3];
+		let CQU=CMT[4];
+		let CQV=CMT[5];
+		let CQW=CMU[0];
+		let CQX=CMU[1];
+		let CQY=CMU[2];
+		let CQZ=CMU[3];
+		let CRA=CMU[4];
+		let CRB=CMW[0];
+		let CRC=CMW[1];
+		let CRD=CMW[2];
+		let CRE=CMY[0];
+		let CRF=CMY[1];
+		let CRG=CMY[2];
+		let CRH=BOM;
+		let CRI=CNB;
+		let CRJ=CNH[0];
+		let CRK=CNH[1];
+		let CRL=CNH[2];
+		let CRM=CNH[3];
+		let CRN=CNH[4];
+		let CRO=CNH[5];
+		let CRP=CNH[6];
+		let CRQ=CNH[7];
+		let CRR=CNH[8];
+		let CRS=CNH[9];
+		let CRT=CNH[10];
+		let CRU=CNK[0];
+		let CRV=CNK[1];
+		let CRW=CNK[2];
+		let CRX=CNK[3];
+		let CRY=CNK[4];
+		let CRZ=CNO[0];
+		let CSA=CNO[1];
+		let CSB=CNO[2];
+		let CSC=CNS[0];
+		let CSD=CNS[1];
+		let CSE=CNS[2];
+		let CSF=CNS[3];
+		let CSG=CNS[4];
+		let CSH=CNW[0];
+		let CSI=CNW[1];
+		let CSJ=CNW[2];
+		let CSK=CNW[3];
+		let CSL=CNW[4];
+		let CSM=CNW[5];
+		let CSN=COA[0];
+		let CSO=COA[1];
+		let CSP=COE[0];
+		let CSQ=COE[1];
+		let CSR=COG[0];
+		let CSS=COG[1];
+		let CST=COG[2];
+		let CSU=COG[3];
+		let CSV=COG[4];
+		let CSW=COG[5];
+		let CSX=COG[6];
+		let CSY=COG[7];
+		let CSZ=COG[8];
+		let CTA=COI[0];
+		let CTB=COI[1];
+		let CTC=COI[2];
+		let CTD=COI[3];
+		let CTE=COI[4];
+		let CTF=COI[5];
+		let CTG=COI[6];
+		let CTH=COI[7];
+		let CTI=COI[8];
+		let CTJ=COL[0];
+		let CTK=COL[1];
+		let CTL=COL[2];
+		let CTM=COL[3];
+		let CTN=COL[4];
+		let CTO=COL[5];
+		let CTP=COL[6];
+		let CTQ=COL[7];
+		let CTR=COL[8];
+		let CTS=CON[0];
+		let CTT=CON[1];
+		let CTU=CON[2];
+		let CTV=CON[3];
+		let CTW=CON[4];
+		let CTX=CON[5];
+		let CTY=COQ[0];
+		let CTZ=COQ[1];
+		let CUA=COQ[2];
+		let CUB=COQ[3];
+		let CUC=COQ[4];
+		let CUD=COQ[5];
+		let CUE=1f64;
+		let CUF=CPG[0];
+		let CUG=CPG[1];
+		let CUH=CPG[2];
+		let CUI=CPG[3];
+		let CUJ=CPG[4];
+		let CUK=CPG[5];
+		let CUL=CPJ[0];
+		let CUM=CPJ[1];
+		let CUN=CPJ[2];
+		let CUO=CPJ[3];
+		let CUP=CPJ[4];
+		let CUQ=CPJ[5];
+		let CUR=1f64;
+		let CUS=1f64;
+		let CUT=1f64;
 		let CUU=1f64;
-		let CUV=CPH[0];
-		let CUW=CPH[1];
-		let CUX=CPH[2];
-		let CUY=CPH[3];
-		let CUZ=1f64;
-		let CVA=CNC;
-		let CVB=CNK[0];
-		let CVC=CNK[1];
-		let CVD=CNK[2];
-		let CVE=CNK[3];
-		let CVF=CNK[4];
-		let CVG=CNN[0];
-		let CVH=CNN[1];
-		let CVI=CNN[2];
-		let CVJ=CNQ[0];
-		let CVK=CNQ[1];
-		let CVL=CNQ[2];
-		let CVM=CNQ[3];
-		let CVN=CNQ[4];
-		let CVO=CNT[0];
-		let CVP=CNT[1];
-		let CVQ=CNT[2];
-		let CVR=CNT[3];
-		let CVS=CNT[4];
-		let CVT=CNT[5];
-		let CVU=CNW[0];
-		let CVV=CNW[1];
-		let CVW=CNZ[0];
-		let CVX=CNZ[1];
-		let CVY=COF[0];
-		let CVZ=COF[1];
-		let CWA=COF[2];
-		let CWB=COF[3];
-		let CWC=COF[4];
-		let CWD=COF[5];
-		let CWE=COF[6];
-		let CWF=COF[7];
-		let CWG=COF[8];
-		let CWH=COJ[0];
-		let CWI=COJ[1];
-		let CWJ=COJ[2];
-		let CWK=COJ[3];
-		let CWL=COJ[4];
-		let CWM=COJ[5];
-		let CWN=COY;
+		let CUV=1f64;
+		let CUW=1f64;
+		let CUX=1f64;
+		let CUY=1f64;
+		let CUZ=CPN[0];
+		let CVA=CPN[1];
+		let CVB=CPN[2];
+		let CVC=CPN[3];
+		let CVD=1f64;
+		let CVE=CPQ[0];
+		let CVF=CPQ[1];
+		let CVG=CPQ[2];
+		let CVH=CPQ[3];
+		let CVI=1f64;
+		let CVJ=CNC;
+		let CVK=CNL[0];
+		let CVL=CNL[1];
+		let CVM=CNL[2];
+		let CVN=CNL[3];
+		let CVO=CNL[4];
+		let CVP=CNP[0];
+		let CVQ=CNP[1];
+		let CVR=CNP[2];
+		let CVS=CNT[0];
+		let CVT=CNT[1];
+		let CVU=CNT[2];
+		let CVV=CNT[3];
+		let CVW=CNT[4];
+		let CVX=CNX[0];
+		let CVY=CNX[1];
+		let CVZ=CNX[2];
+		let CWA=CNX[3];
+		let CWB=CNX[4];
+		let CWC=CNX[5];
+		let CWD=COB[0];
+		let CWE=COB[1];
+		let CWF=COF[0];
+		let CWG=COF[1];
+		let CWH=COM[0];
+		let CWI=COM[1];
+		let CWJ=COM[2];
+		let CWK=COM[3];
+		let CWL=COM[4];
+		let CWM=COM[5];
+		let CWN=COM[6];
+		let CWO=COM[7];
+		let CWP=COM[8];
+		let CWQ=COR[0];
+		let CWR=COR[1];
+		let CWS=COR[2];
+		let CWT=COR[3];
+		let CWU=COR[4];
+		let CWV=COR[5];
+		let CWW=CPH;
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = BHU; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = BIF; }
         stamper.stamp_current_sparse_local::<4, 0>(
@@ -3728,7 +3747,7 @@ impl Instance {
             Some(8),
             multiplicity * (BBI),
             [3, 6, 7, 8],
-            [CPI, CPJ, CPK, CPL],
+            [CPR, CPS, CPT, CPU],
             [],
             [],
             multiplicity,
@@ -3738,7 +3757,7 @@ impl Instance {
             Some(4),
             multiplicity * (BBJ),
             [3, 4, 6, 7, 8],
-            [CPM, CPN, CPO, CPP, CPQ],
+            [CPV, CPW, CPX, CPY, CPZ],
             [],
             [],
             multiplicity,
@@ -3748,7 +3767,7 @@ impl Instance {
             Some(4),
             multiplicity * (BBK),
             [3, 4, 5],
-            [CPR, CPS, CPT],
+            [CQA, CQB, CQC],
             [],
             [],
             multiplicity,
@@ -3758,7 +3777,7 @@ impl Instance {
             Some(4),
             multiplicity * (BBL),
             [3, 4, 6, 7, 8],
-            [CPU, CPV, CPW, CPX, CPY],
+            [CQD, CQE, CQF, CQG, CQH],
             [],
             [],
             multiplicity,
@@ -3768,7 +3787,7 @@ impl Instance {
             Some(7),
             multiplicity * (BIM),
             [3, 5, 6, 7],
-            [CPZ, CQA, CQB, CQC],
+            [CQI, CQJ, CQK, CQL],
             [],
             [],
             multiplicity,
@@ -3778,7 +3797,7 @@ impl Instance {
             Some(8),
             multiplicity * (BIN),
             [3, 5, 6, 7],
-            [CQD, CQE, CQF, CQG],
+            [CQM, CQN, CQO, CQP],
             [],
             [],
             multiplicity,
@@ -3788,7 +3807,7 @@ impl Instance {
             Some(6),
             multiplicity * (BBO),
             [3, 4, 5, 6, 7, 8],
-            [CQH, CQI, CQJ, CQK, CQL, CQM],
+            [CQQ, CQR, CQS, CQT, CQU, CQV],
             [],
             [],
             multiplicity,
@@ -3798,7 +3817,7 @@ impl Instance {
             Some(8),
             multiplicity * (BBP),
             [3, 4, 6, 7, 8],
-            [CQN, CQO, CQP, CQQ, CQR],
+            [CQW, CQX, CQY, CQZ, CRA],
             [],
             [],
             multiplicity,
@@ -3808,7 +3827,7 @@ impl Instance {
             None,
             multiplicity * (BBR),
             [2, 3, 4],
-            [CQS, CQT, CQU],
+            [CRB, CRC, CRD],
             [],
             [],
             multiplicity,
@@ -3818,7 +3837,7 @@ impl Instance {
             None,
             multiplicity * (BBT),
             [1, 3, 5],
-            [CQV, CQW, CQX],
+            [CRE, CRF, CRG],
             [],
             [],
             multiplicity,
@@ -3828,7 +3847,7 @@ impl Instance {
             None,
             multiplicity * (BCN),
             [3],
-            [CQY],
+            [CRH],
             [],
             [],
             multiplicity,
@@ -3838,7 +3857,7 @@ impl Instance {
             None,
             multiplicity * (BCO),
             [3],
-            [CQZ],
+            [CRI],
             [],
             [],
             multiplicity,
@@ -3848,7 +3867,7 @@ impl Instance {
             None,
             multiplicity * (BCP),
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            [CRA, CRB, CRC, CRD, CRE, CRF, CRG, CRH, CRI, CRJ, CRK],
+            [CRJ, CRK, CRL, CRM, CRN, CRO, CRP, CRQ, CRR, CRS, CRT],
             [],
             [],
             multiplicity,
@@ -3858,7 +3877,7 @@ impl Instance {
             Some(4),
             multiplicity * (BCU),
             [3, 4, 6, 7, 8],
-            [CRL, CRM, CRN, CRO, CRP],
+            [CRU, CRV, CRW, CRX, CRY],
             [],
             [],
             multiplicity,
@@ -3868,7 +3887,7 @@ impl Instance {
             Some(4),
             multiplicity * (BCX),
             [3, 4, 5],
-            [CRQ, CRR, CRS],
+            [CRZ, CSA, CSB],
             [],
             [],
             multiplicity,
@@ -3878,7 +3897,7 @@ impl Instance {
             Some(8),
             multiplicity * (BDB),
             [3, 4, 6, 7, 8],
-            [CRT, CRU, CRV, CRW, CRX],
+            [CSC, CSD, CSE, CSF, CSG],
             [],
             [],
             multiplicity,
@@ -3888,7 +3907,7 @@ impl Instance {
             Some(6),
             multiplicity * (BDF),
             [3, 4, 5, 6, 7, 8],
-            [CRY, CRZ, CSA, CSB, CSC, CSD],
+            [CSH, CSI, CSJ, CSK, CSL, CSM],
             [],
             [],
             multiplicity,
@@ -3898,7 +3917,7 @@ impl Instance {
             None,
             multiplicity * (BDJ),
             [1, 2],
-            [CSE, CSF],
+            [CSN, CSO],
             [],
             [],
             multiplicity,
@@ -3908,7 +3927,7 @@ impl Instance {
             None,
             multiplicity * (BDN),
             [0, 1],
-            [CSG, CSH],
+            [CSP, CSQ],
             [],
             [],
             multiplicity,
@@ -3918,7 +3937,7 @@ impl Instance {
             None,
             multiplicity * (BDO),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [CSI, CSJ, CSK, CSL, CSM, CSN, CSO, CSP, CSQ],
+            [CSR, CSS, CST, CSU, CSV, CSW, CSX, CSY, CSZ],
             [],
             [],
             multiplicity,
@@ -3928,7 +3947,7 @@ impl Instance {
             None,
             multiplicity * (BDQ),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [CSR, CSS, CST, CSU, CSV, CSW, CSX, CSY, CSZ],
+            [CTA, CTB, CTC, CTD, CTE, CTF, CTG, CTH, CTI],
             [],
             [],
             multiplicity,
@@ -3938,7 +3957,7 @@ impl Instance {
             None,
             multiplicity * (BDU),
             [0, 1, 3, 5, 6, 7, 8, 9, 10],
-            [CTA, CTB, CTC, CTD, CTE, CTF, CTG, CTH, CTI],
+            [CTJ, CTK, CTL, CTM, CTN, CTO, CTP, CTQ, CTR],
             [],
             [],
             multiplicity,
@@ -3948,7 +3967,7 @@ impl Instance {
             Some(10),
             multiplicity * (BDV),
             [3, 5, 6, 7, 8, 10],
-            [CTJ, CTK, CTL, CTM, CTN, CTO],
+            [CTS, CTT, CTU, CTV, CTW, CTX],
             [],
             [],
             multiplicity,
@@ -3958,7 +3977,7 @@ impl Instance {
             Some(10),
             multiplicity * (BDZ),
             [3, 5, 6, 7, 8, 10],
-            [CTP, CTQ, CTR, CTS, CTT, CTU],
+            [CTY, CTZ, CUA, CUB, CUC, CUD],
             [],
             [],
             multiplicity,
@@ -3978,7 +3997,7 @@ impl Instance {
             None,
             multiplicity * (BEZ),
             [11],
-            [CTV],
+            [CUE],
             [],
             [],
             multiplicity,
@@ -3988,7 +4007,7 @@ impl Instance {
             Some(4),
             multiplicity * (BFD),
             [3, 4, 6, 7, 8, 11],
-            [CTW, CTX, CTY, CTZ, CUA, CUB],
+            [CUF, CUG, CUH, CUI, CUJ, CUK],
             [],
             [],
             multiplicity,
@@ -3998,7 +4017,7 @@ impl Instance {
             Some(6),
             multiplicity * (BFE),
             [3, 4, 6, 7, 8, 11],
-            [CUC, CUD, CUE, CUF, CUG, CUH],
+            [CUL, CUM, CUN, CUO, CUP, CUQ],
             [],
             [],
             multiplicity,
@@ -4008,7 +4027,7 @@ impl Instance {
             Some(4),
             multiplicity * (BEZ),
             [11],
-            [CTV],
+            [CUE],
             [],
             [],
             multiplicity,
@@ -4228,7 +4247,7 @@ impl Instance {
             Some(5),
             multiplicity * (BHL),
             [12],
-            [CUI],
+            [CUR],
             [],
             [],
             multiplicity,
@@ -4238,7 +4257,7 @@ impl Instance {
             None,
             multiplicity * (BHL),
             [12],
-            [CUI],
+            [CUR],
             [],
             [],
             multiplicity,
@@ -4248,7 +4267,7 @@ impl Instance {
             Some(0),
             multiplicity * (BHM),
             [13],
-            [CUJ],
+            [CUS],
             [],
             [],
             multiplicity,
@@ -4258,7 +4277,7 @@ impl Instance {
             None,
             multiplicity * (BHM),
             [13],
-            [CUJ],
+            [CUS],
             [],
             [],
             multiplicity,
@@ -4268,7 +4287,7 @@ impl Instance {
             Some(9),
             multiplicity * (BHN),
             [14],
-            [CUK],
+            [CUT],
             [],
             [],
             multiplicity,
@@ -4278,7 +4297,7 @@ impl Instance {
             None,
             multiplicity * (BHN),
             [14],
-            [CUK],
+            [CUT],
             [],
             [],
             multiplicity,
@@ -4288,7 +4307,7 @@ impl Instance {
             Some(2),
             multiplicity * (BHO),
             [15],
-            [CUL],
+            [CUU],
             [],
             [],
             multiplicity,
@@ -4298,7 +4317,7 @@ impl Instance {
             None,
             multiplicity * (BHO),
             [15],
-            [CUL],
+            [CUU],
             [],
             [],
             multiplicity,
@@ -4308,7 +4327,7 @@ impl Instance {
             Some(7),
             multiplicity * (BHP),
             [16],
-            [CUM],
+            [CUV],
             [],
             [],
             multiplicity,
@@ -4318,7 +4337,7 @@ impl Instance {
             None,
             multiplicity * (BHP),
             [16],
-            [CUM],
+            [CUV],
             [],
             [],
             multiplicity,
@@ -4328,7 +4347,7 @@ impl Instance {
             Some(9),
             multiplicity * (BHQ),
             [17],
-            [CUN],
+            [CUW],
             [],
             [],
             multiplicity,
@@ -4338,7 +4357,7 @@ impl Instance {
             None,
             multiplicity * (BHQ),
             [17],
-            [CUN],
+            [CUW],
             [],
             [],
             multiplicity,
@@ -4348,7 +4367,7 @@ impl Instance {
             Some(10),
             multiplicity * (BHR),
             [18],
-            [CUO],
+            [CUX],
             [],
             [],
             multiplicity,
@@ -4358,7 +4377,7 @@ impl Instance {
             None,
             multiplicity * (BHR),
             [18],
-            [CUO],
+            [CUX],
             [],
             [],
             multiplicity,
@@ -4368,7 +4387,7 @@ impl Instance {
             Some(10),
             multiplicity * (BHT),
             [19],
-            [CUP],
+            [CUY],
             [],
             [],
             multiplicity,
@@ -4378,7 +4397,7 @@ impl Instance {
             None,
             multiplicity * (BIC),
             [3, 7, 10, 19],
-            [CUQ, CUR, CUS, CUT],
+            [CUZ, CVA, CVB, CVC],
             [],
             [],
             multiplicity,
@@ -4388,7 +4407,7 @@ impl Instance {
             Some(10),
             multiplicity * (BIE),
             [20],
-            [CUU],
+            [CVD],
             [],
             [],
             multiplicity,
@@ -4398,7 +4417,7 @@ impl Instance {
             None,
             multiplicity * (BIK),
             [3, 9, 10, 20],
-            [CUV, CUW, CUX, CUY],
+            [CVE, CVF, CVG, CVH],
             [],
             [],
             multiplicity,
@@ -4408,7 +4427,7 @@ impl Instance {
             Some(4),
             multiplicity * (BIL),
             [21],
-            [CUZ],
+            [CVI],
             [],
             [],
             multiplicity,
@@ -4418,7 +4437,7 @@ impl Instance {
             None,
             multiplicity * (BIL),
             [21],
-            [CUZ],
+            [CVI],
             [],
             [],
             multiplicity,
@@ -4435,61 +4454,61 @@ impl Instance {
         self.canonical_reactive[9] = BBT;
         self.canonical_reactive[10] = BCN;
         self.canonical_reactive[11] = BJB;
-        self.canonical_reactive[12] = CVA;
+        self.canonical_reactive[12] = CVJ;
         self.canonical_reactive[13] = BCP;
         self.canonical_reactive[14] = BJC;
-        self.canonical_reactive[15] = CVB;
-        self.canonical_reactive[16] = CVC;
-        self.canonical_reactive[17] = CVD;
-        self.canonical_reactive[18] = CVE;
-        self.canonical_reactive[19] = CVF;
+        self.canonical_reactive[15] = CVK;
+        self.canonical_reactive[16] = CVL;
+        self.canonical_reactive[17] = CVM;
+        self.canonical_reactive[18] = CVN;
+        self.canonical_reactive[19] = CVO;
         self.canonical_reactive[20] = BJD;
-        self.canonical_reactive[21] = CVG;
-        self.canonical_reactive[22] = CVH;
-        self.canonical_reactive[23] = CVI;
+        self.canonical_reactive[21] = CVP;
+        self.canonical_reactive[22] = CVQ;
+        self.canonical_reactive[23] = CVR;
         self.canonical_reactive[24] = BJE;
-        self.canonical_reactive[25] = CVJ;
-        self.canonical_reactive[26] = CVK;
-        self.canonical_reactive[27] = CVL;
-        self.canonical_reactive[28] = CVM;
-        self.canonical_reactive[29] = CVN;
+        self.canonical_reactive[25] = CVS;
+        self.canonical_reactive[26] = CVT;
+        self.canonical_reactive[27] = CVU;
+        self.canonical_reactive[28] = CVV;
+        self.canonical_reactive[29] = CVW;
         self.canonical_reactive[30] = BJF;
-        self.canonical_reactive[31] = CVO;
-        self.canonical_reactive[32] = CVP;
-        self.canonical_reactive[33] = CVQ;
-        self.canonical_reactive[34] = CVR;
-        self.canonical_reactive[35] = CVS;
-        self.canonical_reactive[36] = CVT;
+        self.canonical_reactive[31] = CVX;
+        self.canonical_reactive[32] = CVY;
+        self.canonical_reactive[33] = CVZ;
+        self.canonical_reactive[34] = CWA;
+        self.canonical_reactive[35] = CWB;
+        self.canonical_reactive[36] = CWC;
         self.canonical_reactive[37] = BJG;
-        self.canonical_reactive[38] = CVU;
-        self.canonical_reactive[39] = CVV;
+        self.canonical_reactive[38] = CWD;
+        self.canonical_reactive[39] = CWE;
         self.canonical_reactive[40] = BJH;
-        self.canonical_reactive[41] = CVW;
-        self.canonical_reactive[42] = CVX;
+        self.canonical_reactive[41] = CWF;
+        self.canonical_reactive[42] = CWG;
         self.canonical_reactive[43] = BDO;
         self.canonical_reactive[44] = BDQ;
         self.canonical_reactive[45] = BJI;
-        self.canonical_reactive[46] = CVY;
-        self.canonical_reactive[47] = CVZ;
-        self.canonical_reactive[48] = CWA;
-        self.canonical_reactive[49] = CWB;
-        self.canonical_reactive[50] = CWC;
-        self.canonical_reactive[51] = CWD;
-        self.canonical_reactive[52] = CWE;
-        self.canonical_reactive[53] = CWF;
-        self.canonical_reactive[54] = CWG;
+        self.canonical_reactive[46] = CWH;
+        self.canonical_reactive[47] = CWI;
+        self.canonical_reactive[48] = CWJ;
+        self.canonical_reactive[49] = CWK;
+        self.canonical_reactive[50] = CWL;
+        self.canonical_reactive[51] = CWM;
+        self.canonical_reactive[52] = CWN;
+        self.canonical_reactive[53] = CWO;
+        self.canonical_reactive[54] = CWP;
         self.canonical_reactive[55] = BDV;
         self.canonical_reactive[56] = BJJ;
-        self.canonical_reactive[57] = CWH;
-        self.canonical_reactive[58] = CWI;
-        self.canonical_reactive[59] = CWJ;
-        self.canonical_reactive[60] = CWK;
-        self.canonical_reactive[61] = CWL;
-        self.canonical_reactive[62] = CWM;
+        self.canonical_reactive[57] = CWQ;
+        self.canonical_reactive[58] = CWR;
+        self.canonical_reactive[59] = CWS;
+        self.canonical_reactive[60] = CWT;
+        self.canonical_reactive[61] = CWU;
+        self.canonical_reactive[62] = CWV;
         self.canonical_reactive[63] = BEX;
         self.canonical_reactive[64] = BEZ;
         self.canonical_reactive[65] = BJL;
-        self.canonical_reactive[66] = CWN;
+        self.canonical_reactive[66] = CWW;
         self.canonical_reactive[67] = BFE;
         self.canonical_reactive[68] = BEZ;
         self.canonical_reactive[69] = BFG;

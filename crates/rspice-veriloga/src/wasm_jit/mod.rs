@@ -125,7 +125,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 37 preserves ordered source retention on switch branches.
 /// Version 38 lowers circular integrators through the canonical CFG plan.
 /// Version 39 preserves initial-condition and modulus derivatives of integrals.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 39;
+/// Version 40 retains the initialization rule of each DDT derivative site.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 40;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2093,7 +2094,7 @@ endmodule
                 assert_eq!(harness.call(&jacobian), 0);
                 assert_eq!(
                     harness.read_f64(FRAME_RESULT_OFFSET as usize),
-                    4.0 + direct + 3.0 / dt + if time == 0.0 { 2.0 } else { 0.0 }
+                    4.0 + direct + if time == 0.0 { 2.0 } else { 3.0 / dt }
                 );
                 assert_eq!(harness.call(&control), 0);
                 assert_eq!(
@@ -2177,7 +2178,7 @@ endmodule
                 assert_eq!(harness.call(&jacobian), 0);
                 assert_eq!(
                     harness.read_f64(FRAME_RESULT_OFFSET as usize),
-                    if time == 0.0 { 7.0 } else { 6.5 }
+                    if time == 0.0 { 4.0 } else { 6.5 }
                 );
                 assert_eq!(harness.call(&control_jacobian), 0);
                 assert_eq!(
@@ -2253,7 +2254,7 @@ endmodule
                 assert_eq!(harness.call(&jacobian), 0);
                 assert!(
                     (harness.read_f64(FRAME_RESULT_OFFSET as usize)
-                        - (2.0 + 3.0 / dt + feedthrough))
+                        - (2.0 + if time == 0.0 { 0.0 } else { 3.0 / dt } + feedthrough))
                         .abs()
                         < 1e-12
                 );
@@ -2398,7 +2399,10 @@ endmodule
                 assert_eq!(harness.call(&value), 0);
                 assert_eq!(harness.call(&jacobian), 0);
                 assert!(
-                    (harness.read_f64(FRAME_RESULT_OFFSET as usize) - 29.0 / 3.0).abs() < 1e-12
+                    (harness.read_f64(FRAME_RESULT_OFFSET as usize)
+                        - if time == 0.5 { 11.0 / 3.0 } else { 29.0 / 3.0 })
+                    .abs()
+                        < 1e-12
                 );
                 let context = harness.store.data_mut().context_mut();
                 let before = format!("{:?}", context.laplace_filters);
@@ -2504,6 +2508,48 @@ endmodule
                         variables[index]
                     );
                 }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_ddt_derivatives_share_candidate_initialization_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = "module first_ddt(p,n); inout p,n; electrical p,n;
+            analog I(p,n)<+ddt(V(p,n)*V(p,n)); endmodule";
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "first_ddt", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let context = harness.store.data_mut().context_mut();
+            context.analysis_type = 2;
+            context.set_timestep(0.25);
+            for initialized in [false, true] {
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.5);
+                harness.call_assignments();
+                harness.call_prelude();
+                // Calling the tangent first must still evaluate its primal.
+                assert_eq!(harness.call(&jacobian), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    if initialized { 12.0 } else { 0.0 },
+                    "postfix={postfix}"
+                );
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
                 harness
                     .store
                     .data_mut()

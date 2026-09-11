@@ -29,7 +29,7 @@ use crate::codegen::{BytecodeProgram, Instruction};
 impl CanonicalStateOperator {
     pub(crate) fn bytecode_slot(self, instruction: &Instruction) -> Option<usize> {
         match (self, instruction) {
-            (Self::Ddt, Instruction::DdtState(slot))
+            (Self::Ddt, Instruction::DdtState(slot) | Instruction::DdtDerivativeState(slot))
             | (Self::Idt, Instruction::IdtState(slot) | Instruction::IdtDerivativeState(slot)) => {
                 Some(*slot)
             }
@@ -80,7 +80,7 @@ impl CanonicalStateOperator {
     /// Returns whether the instruction was one of this operator's.
     pub(crate) fn rewrite_bytecode_slot(self, instruction: &mut Instruction, slot: usize) -> bool {
         match (self, instruction) {
-            (Self::Ddt, Instruction::DdtState(held))
+            (Self::Ddt, Instruction::DdtState(held) | Instruction::DdtDerivativeState(held))
             | (Self::Idt, Instruction::IdtState(held) | Instruction::IdtDerivativeState(held))
             | (
                 Self::IdtMod,

@@ -200,6 +200,7 @@ impl NativeRequiredStorage {
                     Instruction::DdtState(index)
                     | Instruction::IdtState(index)
                     | Instruction::IdtModState(index)
+                    | Instruction::DdtDerivativeState(index)
                     | Instruction::IdtDerivativeState(index)
                     | Instruction::IdtModDerivativeState(index) => {
                         update_max(&mut max_state, *index)

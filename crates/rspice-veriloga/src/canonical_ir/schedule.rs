@@ -1792,6 +1792,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // different branch would be off by a whole period rather than by a
         // step.
         | CfgValueKind::IdtMod { .. }
+        | CfgValueKind::DdtDerivative { .. }
         | CfgValueKind::IntegralDerivative { .. }
         // Every remaining stateful operator is here because its value is a
         // function of accepted history and of the current time, not only of the

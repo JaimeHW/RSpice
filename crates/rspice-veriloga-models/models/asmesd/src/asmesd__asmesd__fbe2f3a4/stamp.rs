@@ -2,16 +2,26 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -174,18 +184,17 @@ impl Instance {
 		let AFA=2f64;
 		let AFE=L2([0f64;2]);
 		let AFV=L3([0f64;3]);
-		let AGZ=ddt_scale();
 		let AIM=L6([0f64;6]);
 		let AIN=0f64;
 		let AIO=L3([0f64;3]);
-		let AJM=L3([0f64;3]);
-		let AJW=L4([0f64;4]);
-		let AJY=L7([0f64;7]);
-		let AKG=0f64;
-		let AKH=L2([0f64;2]);
-		let ALK=L4([0f64;4]);
-		let ALN=L3([0f64;3]);
+		let AJN=L3([0f64;3]);
+		let AJX=L4([0f64;4]);
+		let AJZ=L7([0f64;7]);
+		let AKH=0f64;
+		let AKI=L2([0f64;2]);
+		let ALN=L4([0f64;4]);
 		let ALQ=L3([0f64;3]);
+		let ALT=L3([0f64;3]);
 		let C=(temperature+ B)+ parameters[45];
 		let D=C> 173.14999999999998f64;
 		let F=if D{
@@ -810,7 +819,8 @@ impl Instance {
 		let AGY=1f64* 1e-6f64;
 		let KV=A+ (KT* 1e-6f64);
 		let KX=ddt(0, KT);
-		let AHA=(1f64* AGZ)* KW;
+		let AGZ=ddt_derivative(0,KX,1f64);
+		let AHA=AGZ* KW;
 		let YV=KW;
 		let YW=YV* KT;
 		let AHB=1f64* YV;
@@ -917,16 +927,17 @@ impl Instance {
 		let NR=A+ NQ;
 		let NT=A+ NS;
 		let NU=ddt(1, NS);
-		let AIT=AIG* NU;
-		let AIU=L3([AIT[0],AIT[1],0.0])+ L3([0.0,0.0,((ZN* AGZ)* NL)]);
+		let AIT=ddt_derivative(1,NU,ZN);
+		let AIU=AIG* NU;
+		let AIV=L3([AIU[0],AIU[1],0.0])+ L3([0.0,0.0,(AIT* NL)]);
 		let YX=NL;
 		let YY=YX* NS;
-		let AIV=ZN* YX;
+		let AIW=ZN* YX;
 		let NV=A+ (NL* NU);
 		let NX=(NS.abs())/ NW;
 		let NZ=M+ (NX.powf(NY));
 		let OA=MQ/ NZ;
-		let AIW=(L4([AHZ[0],AHZ[1],AHZ[2],0.0])).product_sum_div(ZJ,L4([0.0,0.0,0.0,(((ZN* ((AFA* ((NS>= ACY) as u8 as f64))- ZJ))/ NW)* (NY* ((NX+ (((NX== ACY) as u8 as f64)* ACZ)).powf((NY- ZJ)))))]),(-OA),NZ);
+		let AIX=(L4([AHZ[0],AHZ[1],AHZ[2],0.0])).product_sum_div(ZJ,L4([0.0,0.0,0.0,(((ZN* ((AFA* ((NS>= ACY) as u8 as f64))- ZJ))/ NW)* (NY* ((NX+ (((NX== ACY) as u8 as f64)* ACZ)).powf((NY- ZJ)))))]),(-OA),NZ);
 		OE=OA;
 		YG=NR;
 		YH=NT;
@@ -934,11 +945,11 @@ impl Instance {
 		YJ=A;
 		YU=A;
 		YZ=YY;
-		AAW=AIW;
+		AAW=AIX;
 		AAX=AIS;
 		AAY=ZN;
-		AAZ=AIU;
-		ABA=AIV;
+		AAZ=AIV;
+		ABA=AIW;
 		}else{
 		let AIL=L4([AHZ[0],AHZ[1],AHZ[2],0.0]);
 		OE=MQ;
@@ -989,26 +1000,26 @@ impl Instance {
 		let OP=M- OO;
 		let OQ=(ON* (OP.ln())).exp();
 		let OR=M- OQ;
-		let AJA=L3([0.0,(((AEG* EB)+ (AEF* EE))* OR),0.0])+ ((((((((L3([AEH[0],0.0,AEH[1]])).product_sum_div(ZJ,L3([0.0,AEF,0.0]),(-OO),EB))* ACX)* (ZJ/ OP))* ON)* OQ)* ACX)* OM);
+		let AJB=L3([0.0,(((AEG* EB)+ (AEF* EE))* OR),0.0])+ ((((((((L3([AEH[0],0.0,AEH[1]])).product_sum_div(ZJ,L3([0.0,AEF,0.0]),(-OO),EB))* ACX)* (ZJ/ OP))* ON)* OQ)* ACX)* OM);
 		let OS=(OM* OR)/ ON;
-		let AJB=AJA/ ON;
+		let AJC=AJB/ ON;
 		WB=OS;
-		ABE=AJB;
+		ABE=AJC;
 		}else{
 		let OT=EE* EG;
-		let AIX=AEH* EE;
+		let AIY=AEH* EE;
 		let OV=OU* DY;
-		let AIY=AEH* OV;
+		let AIZ=AEH* OV;
 		let OW=(OV* EG)/ EB;
 		let OX=M+ OW;
 		let OY=OT* OX;
-		let AIZ=((L3([0.0,(AEG* EG),0.0])+ L3([AIX[0],0.0,AIX[1]]))* OX)+ (((L3([AIY[0],0.0,AIY[1]])).product_sum_div(ZJ,L3([0.0,AEF,0.0]),(-OW),EB))* OT);
+		let AJA=((L3([0.0,(AEG* EG),0.0])+ L3([AIY[0],0.0,AIY[1]]))* OX)+ (((L3([AIZ[0],0.0,AIZ[1]])).product_sum_div(ZJ,L3([0.0,AEF,0.0]),(-OW),EB))* OT);
 		WB=OY;
-		ABE=AIZ;
+		ABE=AJA;
 		}
 		let PA=EJ+ ((-DC)* OZ);
-		let AJC=L3([0.0,AEJ[0],AEJ[1]]);
-		let AJD=AJC+ L3([((ADW* ACX)* OZ),0.0,0.0]);
+		let AJD=L3([0.0,AEJ[0],AEJ[1]]);
+		let AJE=AJD+ L3([((ADW* ACX)* OZ),0.0,0.0]);
 		let PB=PA> A;
 		let PR;
 		let PS;
@@ -1024,12 +1035,12 @@ impl Instance {
 		let PI=(PH* PA)/ DC;
 		let PJ=PC+ PI;
 		let PK=(PA* PJ)* PD;
-		let AJF=((AJD* PJ)+ ((((AJD* PH)).product_sum_div(ZJ,L3([ADW,0.0,0.0]),(-PI),DC))* PA))* PD;
-		let AJG=L3([((ADW* PE)/ PF),0.0,0.0]);
+		let AJG=((AJE* PJ)+ ((((AJE* PH)).product_sum_div(ZJ,L3([ADW,0.0,0.0]),(-PI),DC))* PA))* PD;
+		let AJH=L3([((ADW* PE)/ PF),0.0,0.0]);
 		PR=PG;
 		PS=PK;
-		ABF=AJG;
-		ABG=AJF;
+		ABF=AJH;
+		ABG=AJG;
 		}else{
 		let PL=M- CX;
 		let PM=EJ/ DC;
@@ -1037,20 +1048,20 @@ impl Instance {
 		let PO=(PL* (PN.ln())).exp();
 		let PP=M- PO;
 		let PQ=(DC* PP)/ PL;
-		let AJE=(L3([(ADW* PP),0.0,0.0])+ ((((((((AJC).product_sum_div(ZJ,L3([ADW,0.0,0.0]),(-PM),DC))* ACX)* (ZJ/ PN))* PL)* PO)* ACX)* DC))/ PL;
+		let AJF=(L3([(ADW* PP),0.0,0.0])+ ((((((((AJD).product_sum_div(ZJ,L3([ADW,0.0,0.0]),(-PM),DC))* ACX)* (ZJ/ PN))* PL)* PO)* ACX)* DC))/ PL;
 		PR=PQ;
 		PS=A;
-		ABF=AJE;
+		ABF=AJF;
 		ABG=AEP;
 		}
 		let PT=PR+ PS;
 		let PU=DG* PT;
-		let AJH=L3([(ADY* PT),0.0,0.0])+ ((ABF+ ABG)* DG);
+		let AJI=L3([(ADY* PT),0.0,0.0])+ ((ABF+ ABG)* DG);
 		let PV=(-DP)* OZ;
-		let AJI=(AEB* ACX)* OZ;
+		let AJJ=(AEB* ACX)* OZ;
 		let PW=EL+ PV;
-		let AJJ=L3([AEK[0],0.0,AEK[1]]);
-		let AJK=AJJ+ L3([0.0,AJI,0.0]);
+		let AJK=L3([AEK[0],0.0,AEK[1]]);
+		let AJL=AJK+ L3([0.0,AJJ,0.0]);
 		let PX=PW> A;
 		let QN;
 		let QO;
@@ -1066,12 +1077,12 @@ impl Instance {
 		let QE=(QD* PW)/ DP;
 		let QF=PY+ QE;
 		let QG=(PW* QF)* PZ;
-		let AJN=((AJK* QF)+ ((((AJK* QD)).product_sum_div(ZJ,L3([0.0,AEB,0.0]),(-QE),DP))* PW))* PZ;
-		let AJO=L3([0.0,((AEB* QA)/ QB),0.0]);
+		let AJO=((AJL* QF)+ ((((AJL* QD)).product_sum_div(ZJ,L3([0.0,AEB,0.0]),(-QE),DP))* PW))* PZ;
+		let AJP=L3([0.0,((AEB* QA)/ QB),0.0]);
 		QN=QC;
 		QO=QG;
-		ABH=AJO;
-		ABI=AJN;
+		ABH=AJP;
+		ABI=AJO;
 		}else{
 		let QH=M- DM;
 		let QI=EL/ DP;
@@ -1079,19 +1090,19 @@ impl Instance {
 		let QK=(QH* (QJ.ln())).exp();
 		let QL=M- QK;
 		let QM=(DP* QL)/ QH;
-		let AJL=(L3([0.0,(AEB* QL),0.0])+ ((((((((AJJ).product_sum_div(ZJ,L3([0.0,AEB,0.0]),(-QI),DP))* ACX)* (ZJ/ QJ))* QH)* QK)* ACX)* DP))/ QH;
+		let AJM=(L3([0.0,(AEB* QL),0.0])+ ((((((((AJK).product_sum_div(ZJ,L3([0.0,AEB,0.0]),(-QI),DP))* ACX)* (ZJ/ QJ))* QH)* QK)* ACX)* DP))/ QH;
 		QN=QM;
 		QO=A;
-		ABH=AJL;
-		ABI=AJM;
+		ABH=AJM;
+		ABI=AJN;
 		}
 		let QP=QN+ QO;
 		let QR=M- QQ;
 		let QS=QR* (DS* QP);
-		let AJP=(L3([0.0,(AEC* QP),0.0])+ ((ABH+ ABI)* DS))* QR;
+		let AJQ=(L3([0.0,(AEC* QP),0.0])+ ((ABH+ ABI)* DS))* QR;
 		let QT=S+ PV;
-		let AJQ=L3([0.0,ACW[0],ACW[1]]);
-		let AJR=AJQ+ L3([AJI,0.0,0.0]);
+		let AJR=L3([0.0,ACW[0],ACW[1]]);
+		let AJS=AJR+ L3([AJJ,0.0,0.0]);
 		let QU=QT> A;
 		let RK;
 		let RL;
@@ -1107,12 +1118,12 @@ impl Instance {
 		let RB=(RA* QT)/ DP;
 		let RC=QV+ RB;
 		let RD=(QT* RC)* QW;
-		let AJT=((AJR* RC)+ ((((AJR* RA)).product_sum_div(ZJ,L3([AEB,0.0,0.0]),(-RB),DP))* QT))* QW;
-		let AJU=L3([((AEB* QX)/ QY),0.0,0.0]);
+		let AJU=((AJS* RC)+ ((((AJS* RA)).product_sum_div(ZJ,L3([AEB,0.0,0.0]),(-RB),DP))* QT))* QW;
+		let AJV=L3([((AEB* QX)/ QY),0.0,0.0]);
 		RK=QZ;
 		RL=RD;
-		ABJ=AJU;
-		ABK=AJT;
+		ABJ=AJV;
+		ABK=AJU;
 		}else{
 		let RE=M- DM;
 		let RF=S/ DP;
@@ -1120,27 +1131,27 @@ impl Instance {
 		let RH=(RE* (RG.ln())).exp();
 		let RI=M- RH;
 		let RJ=(DP* RI)/ RE;
-		let AJS=(L3([(AEB* RI),0.0,0.0])+ ((((((((AJQ).product_sum_div(ZJ,L3([AEB,0.0,0.0]),(-RF),DP))* ACX)* (ZJ/ RG))* RE)* RH)* ACX)* DP))/ RE;
+		let AJT=(L3([(AEB* RI),0.0,0.0])+ ((((((((AJR).product_sum_div(ZJ,L3([AEB,0.0,0.0]),(-RF),DP))* ACX)* (ZJ/ RG))* RE)* RH)* ACX)* DP))/ RE;
 		RK=RJ;
 		RL=A;
-		ABJ=AJS;
+		ABJ=AJT;
 		ABK=AFV;
 		}
 		let RM=RK+ RL;
 		let RN=QQ* (DS* RM);
-		let AJV=(L3([(AEC* RM),0.0,0.0])+ ((ABJ+ ABK)* DS))* QQ;
+		let AJW=(L3([(AEC* RM),0.0,0.0])+ ((ABJ+ ABK)* DS))* QQ;
 		let RP=(RO!= A)&& (NJ!= A);
 		let WF;
 		let ABL;
 		if RP{
 		let RQ=(((O* RO)* 3.141592653589793f64)/ 180f64)* NJ;
 		let RR=RQ* LV;
-		let AJX=AHR* RQ;
+		let AJY=AHR* RQ;
 		WF=RR;
-		ABL=AJX;
+		ABL=AJY;
 		}else{
 		WF=A;
-		ABL=AJW;
+		ABL=AJX;
 		}
 		let RU=RT> A;
 		let RV=(RS== M)&& RU;
@@ -1170,22 +1181,22 @@ impl Instance {
 		let ABW;
 		if RV{
 		let RW=LI* NC;
-		let AKX=AHF* NC;
-		let AKY=AIE* LI;
-		let AKZ=((L6([0.0,0.0,AKX[0],AKX[1],AKX[2],AKX[3]])+ L6([AKY[0],AKY[1],0.0,0.0,0.0,0.0]))* ((AFA* ((RW>= ACY) as u8 as f64))- ZJ))* -1f64;
+		let ALA=AHF* NC;
+		let ALB=AIE* LI;
+		let ALC=((L6([0.0,0.0,ALA[0],ALA[1],ALA[2],ALA[3]])+ L6([ALB[0],ALB[1],0.0,0.0,0.0,0.0]))* ((AFA* ((RW>= ACY) as u8 as f64))- ZJ))* -1f64;
 		let RY=EK- RX;
 		let RZ=LM* RY;
-		let ALA=AHG* RY;
-		let ALB=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
-		let ALC=(L5([0.0,0.0,ALA[0],ALA[1],ALA[2]])+ L5([ALB[0],ALB[1],0.0,0.0,0.0]))* ((AFA* ((RZ>= ACY) as u8 as f64))- ZJ);
-		let ALD=L7([0.0,AKZ[0],AKZ[1],AKZ[2],AKZ[3],AKZ[4],AKZ[5]])- L7([ALC[0],ALC[1],0.0,ALC[2],ALC[3],ALC[4],0.0]);
+		let ALD=AHG* RY;
+		let ALE=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
+		let ALF=(L5([0.0,0.0,ALD[0],ALD[1],ALD[2]])+ L5([ALE[0],ALE[1],0.0,0.0,0.0]))* ((AFA* ((RZ>= ACY) as u8 as f64))- ZJ);
+		let ALG=L7([0.0,ALC[0],ALC[1],ALC[2],ALC[3],ALC[4],ALC[5]])- L7([ALF[0],ALF[1],0.0,ALF[2],ALF[3],ALF[4],0.0]);
 		let SA=A+ ((-1f64* (RW.abs()))- (RZ.abs()));
-		let ALE=ZK/ RT;
+		let ALH=ZK/ RT;
 		let SB=A+ (B/ RT);
 		let SD=B* SC;
-		let ALF=ZK* SC;
+		let ALI=ZK* SC;
 		let SE=ddt(2, SD);
-		let ALG=ALF* AGZ;
+		let ALJ=ddt_derivative(2,SE,ALI);
 		let SF=A+ SE;
 		XN=A;
 		XS=A;
@@ -1201,16 +1212,16 @@ impl Instance {
 		ZD=A;
 		ZH=A;
 		ABM=ACU;
-		ABN=AKG;
-		ABO=ALD;
-		ABP=ALE;
-		ABQ=ALG;
-		ABR=AJY;
-		ABS=AKH;
-		ABT=AJY;
-		ABU=ALF;
+		ABN=AKH;
+		ABO=ALG;
+		ABP=ALH;
+		ABQ=ALJ;
+		ABR=AJZ;
+		ABS=AKI;
+		ABT=AJZ;
+		ABU=ALI;
 		ABV=ACU;
-		ABW=AKG;
+		ABW=AKH;
 		}else{
 		let SI=((RS== 2f64)&& RU)&& (SH> A);
 		let XO;
@@ -1231,43 +1242,45 @@ impl Instance {
 		let ACD;
 		if SI{
 		let SJ=LI* NC;
-		let AKI=AHF* NC;
-		let AKJ=AIE* LI;
-		let AKK=((L6([0.0,0.0,AKI[0],AKI[1],AKI[2],AKI[3]])+ L6([AKJ[0],AKJ[1],0.0,0.0,0.0,0.0]))* ((AFA* ((SJ>= ACY) as u8 as f64))- ZJ))* -1f64;
+		let AKJ=AHF* NC;
+		let AKK=AIE* LI;
+		let AKL=((L6([0.0,0.0,AKJ[0],AKJ[1],AKJ[2],AKJ[3]])+ L6([AKK[0],AKK[1],0.0,0.0,0.0,0.0]))* ((AFA* ((SJ>= ACY) as u8 as f64))- ZJ))* -1f64;
 		let SK=EK- RX;
 		let SL=LM* SK;
-		let AKL=AHG* SK;
-		let AKM=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
-		let AKN=(L5([0.0,0.0,AKL[0],AKL[1],AKL[2]])+ L5([AKM[0],AKM[1],0.0,0.0,0.0]))* ((AFA* ((SL>= ACY) as u8 as f64))- ZJ);
-		let AKO=L7([0.0,AKK[0],AKK[1],AKK[2],AKK[3],AKK[4],AKK[5]])- L7([AKN[0],AKN[1],0.0,AKN[2],AKN[3],AKN[4],0.0]);
+		let AKM=AHG* SK;
+		let AKN=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
+		let AKO=(L5([0.0,0.0,AKM[0],AKM[1],AKM[2]])+ L5([AKN[0],AKN[1],0.0,0.0,0.0]))* ((AFA* ((SL>= ACY) as u8 as f64))- ZJ);
+		let AKP=L7([0.0,AKL[0],AKL[1],AKL[2],AKL[3],AKL[4],AKL[5]])- L7([AKO[0],AKO[1],0.0,AKO[2],AKO[3],AKO[4],0.0]);
 		let SM=A+ ((-1f64* (SJ.abs()))- (SL.abs()));
-		let AKP=(L2([ZK,0.0])- L2([0.0,1f64]))/ RT;
+		let AKQ=(L2([ZK,0.0])- L2([0.0,1f64]))/ RT;
 		let SO=A+ ((B- SN)/ RT);
 		let SP=SC* B;
-		let AKQ=ZK* SC;
+		let AKR=ZK* SC;
 		let SQ=ddt(3, SP);
-		let AKR=(AKQ* AGZ)* ACX;
+		let AKS=ddt_derivative(3,SQ,AKR);
+		let AKT=AKS* ACX;
 		let ZB=-SP;
-		let AKS=AKQ* ACX;
+		let AKU=AKR* ACX;
 		let SR=0f64+ (-SQ);
-		let AKT=(1f64/ SH)* ACX;
+		let AKV=(1f64/ SH)* ACX;
 		let SS=0f64+ (-(SN/ SH));
 		let SU;
 		let ACE;
 		if ST{
 		SU=SS;
-		ACE=AKT;
+		ACE=AKV;
 		}else{
 		SU=A;
-		ACE=AKG;
+		ACE=AKH;
 		}
 		let SW=SV* SN;
-		let AKU=1f64* SV;
+		let AKW=1f64* SV;
 		let SX=ddt(4, SW);
+		let AKX=ddt_derivative(4,SX,AKW);
 		let ZF=-SW;
-		let AKV=AKU* ACX;
+		let AKY=AKW* ACX;
 		let SY=(ctx.checked_derivative_value(SS, SU))+ (-SX);
-		let AKW=ACE+ ((AKU* AGZ)* ACX);
+		let AKZ=ACE+ (AKX* ACX);
 		XO=A;
 		XT=SR;
 		XZ=A;
@@ -1277,13 +1290,13 @@ impl Instance {
 		YS=A;
 		ZC=ZB;
 		ZG=ZF;
-		ABX=AKR;
-		ABY=AKW;
-		ABZ=AKO;
-		ACA=AKP;
-		ACB=AJY;
-		ACC=AKS;
-		ACD=AKV;
+		ABX=AKT;
+		ABY=AKZ;
+		ABZ=AKP;
+		ACA=AKQ;
+		ACB=AJZ;
+		ACC=AKU;
+		ACD=AKY;
 		}else{
 		let SZ=RS== -1f64;
 		let XP;
@@ -1293,27 +1306,27 @@ impl Instance {
 		let ACF;
 		if SZ{
 		let TA=LI* NC;
-		let AJZ=AHF* NC;
-		let AKA=AIE* LI;
-		let AKB=((L6([0.0,0.0,AJZ[0],AJZ[1],AJZ[2],AJZ[3]])+ L6([AKA[0],AKA[1],0.0,0.0,0.0,0.0]))* ((AFA* ((TA>= ACY) as u8 as f64))- ZJ))* -1f64;
+		let AKA=AHF* NC;
+		let AKB=AIE* LI;
+		let AKC=((L6([0.0,0.0,AKA[0],AKA[1],AKA[2],AKA[3]])+ L6([AKB[0],AKB[1],0.0,0.0,0.0,0.0]))* ((AFA* ((TA>= ACY) as u8 as f64))- ZJ))* -1f64;
 		let TB=EK- RX;
 		let TC=LM* TB;
-		let AKC=AHG* TB;
-		let AKD=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
-		let AKE=(L5([0.0,0.0,AKC[0],AKC[1],AKC[2]])+ L5([AKD[0],AKD[1],0.0,0.0,0.0]))* ((AFA* ((TC>= ACY) as u8 as f64))- ZJ);
-		let AKF=L7([0.0,AKB[0],AKB[1],AKB[2],AKB[3],AKB[4],AKB[5]])- L7([AKE[0],AKE[1],0.0,AKE[2],AKE[3],AKE[4],0.0]);
+		let AKD=AHG* TB;
+		let AKE=(L2([0.0,ZM])- L2([ZO,0.0]))* LM;
+		let AKF=(L5([0.0,0.0,AKD[0],AKD[1],AKD[2]])+ L5([AKE[0],AKE[1],0.0,0.0,0.0]))* ((AFA* ((TC>= ACY) as u8 as f64))- ZJ);
+		let AKG=L7([0.0,AKC[0],AKC[1],AKC[2],AKC[3],AKC[4],AKC[5]])- L7([AKF[0],AKF[1],0.0,AKF[2],AKF[3],AKF[4],0.0]);
 		let TD=A+ ((-1f64* (TA.abs()))- (TC.abs()));
 		XP=A;
 		XU=A;
 		YE=TE;
 		YT=TD;
-		ACF=AKF;
+		ACF=AKG;
 		}else{
 		XP=M;
 		XU=TF;
 		YE=TG;
 		YT=A;
-		ACF=AJY;
+		ACF=AJZ;
 		}
 		XO=XP;
 		XT=XU;
@@ -1325,12 +1338,12 @@ impl Instance {
 		ZC=A;
 		ZG=A;
 		ABX=ACU;
-		ABY=AKG;
-		ABZ=AJY;
-		ACA=AKH;
+		ABY=AKH;
+		ABZ=AJZ;
+		ACA=AKI;
 		ACB=ACF;
 		ACC=ACU;
-		ACD=AKG;
+		ACD=AKH;
 		}
 		XN=XO;
 		XS=XT;
@@ -1347,7 +1360,7 @@ impl Instance {
 		ZH=ZG;
 		ABM=ABX;
 		ABN=ABY;
-		ABO=AJY;
+		ABO=AJZ;
 		ABP=ACU;
 		ABQ=ACU;
 		ABR=ABZ;
@@ -1364,7 +1377,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let ALH=AEI* TJ;
+		let ALK=AEI* TJ;
 		let TK=A+ (TJ* EI);
 		let TL=ctx.has_simparam("gmin");
 		let TN=if TL{
@@ -1373,7 +1386,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let ALI=ACV* TN;
+		let ALL=ACV* TN;
 		let TO=A+ (TN* R);
 		let TP=ctx.has_simparam("gmin");
 		let TR=if TP{
@@ -1382,7 +1395,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let ALJ=(L2([ZL,0.0])- L2([0.0,1f64]))* TR;
+		let ALM=(L2([ZL,0.0])- L2([0.0,1f64]))* TR;
 		let TS=A+ (TR* (Q- EH));
 		let TT=(MK+ (OC* OF))/ N;
 		let TU=(MV+ (OC* OJ))/ N;
@@ -1393,28 +1406,28 @@ impl Instance {
 		let ACG;
 		if TX{
 		let TZ=TY/ N;
-		let ALL=ABB/ N;
+		let ALO=ABB/ N;
 		let UA=TZ> TW;
 		let UB;
 		let ACH;
 		if UA{
 		UB=TZ;
-		ACH=ALL;
+		ACH=ALO;
 		}else{
 		UB=TW;
-		ACH=ALK;
+		ACH=ALN;
 		}
 		let UC=EM/ UB;
-		let ALM=(L4([AEL[0],0.0,AEL[1],0.0])).product_sum_div(ZJ,ACH,(-UC),UB);
+		let ALP=(L4([AEL[0],0.0,AEL[1],0.0])).product_sum_div(ZJ,ACH,(-UC),UB);
 		let UD=0f64+ UC;
 		let UF;
 		let ACI;
 		if UE{
 		UF=UD;
-		ACI=ALM;
+		ACI=ALP;
 		}else{
 		UF=A;
-		ACI=ALK;
+		ACI=ALN;
 		}
 		let UH=(ctx.checked_derivative_value(UD, UF))+ UG;
 		WU=A;
@@ -1423,7 +1436,7 @@ impl Instance {
 		}else{
 		WU=M;
 		WW=UI;
-		ACG=ALK;
+		ACG=ALN;
 		}
 		let UJ=(TU> A)&& (TU>= TW);
 		let XH;
@@ -1431,28 +1444,28 @@ impl Instance {
 		let ACJ;
 		if UJ{
 		let UL=UK/ N;
-		let ALO=ABC/ N;
+		let ALR=ABC/ N;
 		let UM=UL> TW;
 		let UN;
 		let ACK;
 		if UM{
 		UN=UL;
-		ACK=ALO;
+		ACK=ALR;
 		}else{
 		UN=TW;
-		ACK=ALN;
+		ACK=ALQ;
 		}
 		let UO=EO/ UN;
-		let ALP=(L3([AEN[0],0.0,AEN[1]])).product_sum_div(ZJ,ACK,(-UO),UN);
+		let ALS=(L3([AEN[0],0.0,AEN[1]])).product_sum_div(ZJ,ACK,(-UO),UN);
 		let UP=0f64+ UO;
 		let UR;
 		let ACL;
 		if UQ{
 		UR=UP;
-		ACL=ALP;
+		ACL=ALS;
 		}else{
 		UR=A;
-		ACL=ALN;
+		ACL=ALQ;
 		}
 		let UT=(ctx.checked_derivative_value(UP, UR))+ US;
 		XH=A;
@@ -1461,7 +1474,7 @@ impl Instance {
 		}else{
 		XH=M;
 		XJ=UU;
-		ACJ=ALN;
+		ACJ=ALQ;
 		}
 		let UV=(TV> A)&& (TV>= TW);
 		let XA;
@@ -1469,30 +1482,30 @@ impl Instance {
 		let ACM;
 		if UV{
 		let UW=RX- Q;
-		let ALR=L2([ZO,0.0])- L2([0.0,ZL]);
+		let ALU=L2([ZO,0.0])- L2([0.0,ZL]);
 		let UY=UX/ N;
-		let ALS=ABD/ N;
+		let ALV=ABD/ N;
 		let UZ=UY> TW;
 		let VA;
 		let ACN;
 		if UZ{
 		VA=UY;
-		ACN=ALS;
+		ACN=ALV;
 		}else{
 		VA=TW;
 		ACN=ACU;
 		}
 		let VB=UW/ VA;
-		let ALT=(L3([ALR[0],0.0,ALR[1]])).product_sum_div(ZJ,L3([0.0,ACN,0.0]),(-VB),VA);
+		let ALW=(L3([ALU[0],0.0,ALU[1]])).product_sum_div(ZJ,L3([0.0,ACN,0.0]),(-VB),VA);
 		let VC=0f64+ VB;
 		let VE;
 		let ACO;
 		if VD{
 		VE=VC;
-		ACO=ALT;
+		ACO=ALW;
 		}else{
 		VE=A;
-		ACO=ALQ;
+		ACO=ALT;
 		}
 		let VG=(ctx.checked_derivative_value(VC, VE))+ VF;
 		XA=A;
@@ -1501,55 +1514,55 @@ impl Instance {
 		}else{
 		XA=M;
 		XD=VH;
-		ACM=ALQ;
+		ACM=ALT;
 		}
-		let ALU=(AHF* O)* N;
+		let ALX=(AHF* O)* N;
 		let VI=A+ ((O* LI)* N);
-		let ALV=(AHG* O)* N;
+		let ALY=(AHG* O)* N;
 		let VJ=A+ ((O* LM)* N);
-		let ALW=((AHP* ACX)* N)* O;
+		let ALZ=((AHP* ACX)* N)* O;
 		let VK=A+ (O* ((-LU)* N));
-		let ALX=(AHW* O)* N;
+		let AMA=(AHW* O)* N;
 		let VL=A+ ((O* LZ)* N);
 		let VM=(O* PU)* N;
-		let ALY=(AJH* O)* N;
+		let AMB=(AJI* O)* N;
 		let VN=ddt(5, VM);
-		let ALZ=ALY* AGZ;
+		let AMC=L3(std::array::from_fn(|i| ddt_derivative(5,VN,(AMB)[i])));
 		let VO=A+ VN;
 		let VP=(O* NM)* N;
-		let AMA=(AIJ* O)* N;
+		let AMD=(AIJ* O)* N;
 		let VQ=ddt(6, VP);
-		let AMB=AMA* AGZ;
+		let AME=L5(std::array::from_fn(|i| ddt_derivative(6,VQ,(AMD)[i])));
 		let VR=A+ VQ;
 		let VS=(O* QS)* N;
-		let AMC=(AJP* O)* N;
+		let AMF=(AJQ* O)* N;
 		let VT=ddt(7, VS);
-		let AMD=AMC* AGZ;
+		let AMG=L3(std::array::from_fn(|i| ddt_derivative(7,VT,(AMF)[i])));
 		let VU=A+ VT;
 		let VV=(O* RN)* N;
-		let AME=(AJV* O)* N;
+		let AMH=(AJW* O)* N;
 		let VW=ddt(8, VV);
-		let AMF=AME* AGZ;
+		let AMI=L3(std::array::from_fn(|i| ddt_derivative(8,VW,(AMH)[i])));
 		let VX=A+ VW;
 		let VY=(O* NO)* N;
-		let AMG=(AIK* O)* N;
+		let AMJ=(AIK* O)* N;
 		let VZ=ddt(9, VY);
-		let AMH=AMG* AGZ;
+		let AMK=L4(std::array::from_fn(|i| ddt_derivative(9,VZ,(AMJ)[i])));
 		let WA=A+ VZ;
 		let WC=(O* WB)* N;
-		let AMI=(ABE* O)* N;
+		let AML=(ABE* O)* N;
 		let WD=ddt(10, WC);
-		let AMJ=AMI* AGZ;
+		let AMM=L3(std::array::from_fn(|i| ddt_derivative(10,WD,(AML)[i])));
 		let WE=A+ WD;
 		let WG=(-WF)* N;
-		let AMK=(ABL* ACX)* N;
+		let AMN=(ABL* ACX)* N;
 		let WH=ddt(11, WG);
-		let AML=AMK* AGZ;
+		let AMO=L4(std::array::from_fn(|i| ddt_derivative(11,WH,(AMN)[i])));
 		let WI=A+ WH;
 		let WJ=WF* N;
-		let AMM=ABL* N;
+		let AMP=ABL* N;
 		let WK=ddt(12, WJ);
-		let AMN=AMM* AGZ;
+		let AMQ=L4(std::array::from_fn(|i| ddt_derivative(12,WK,(AMP)[i])));
 		let WL=A+ WK;
 		let WN=A+ WM;
 		let WP=A+ WO;
@@ -1558,226 +1571,226 @@ impl Instance {
 		let WV;
 		let ACP;
 		if WU!=0.0{
-		let AMP=L3([AEL[0],AEL[1],0.0]);
+		let AMS=L3([AEL[0],AEL[1],0.0]);
 		WV=EM;
-		ACP=AMP;
+		ACP=AMS;
 		}else{
-		let AMO=L3([0.0,0.0,1f64]);
+		let AMR=L3([0.0,0.0,1f64]);
 		WV=WS;
-		ACP=AMO;
+		ACP=AMR;
 		}
-		let AMQ=L5([ACP[0],0.0,ACP[1],0.0,ACP[2]])- L5([ACG[0],ACG[1],ACG[2],ACG[3],0.0]);
+		let AMT=L5([ACP[0],0.0,ACP[1],0.0,ACP[2]])- L5([ACG[0],ACG[1],ACG[2],ACG[3],0.0]);
 		let WX=A+ (WV- WW);
 		let WZ=A+ WY;
 		let XC;
 		let ACQ;
 		if XA!=0.0{
 		let XB=RX- Q;
-		let AMS=L2([ZO,0.0])- L2([0.0,ZL]);
-		let AMT=L3([AMS[0],AMS[1],0.0]);
+		let AMV=L2([ZO,0.0])- L2([0.0,ZL]);
+		let AMW=L3([AMV[0],AMV[1],0.0]);
 		XC=XB;
-		ACQ=AMT;
+		ACQ=AMW;
 		}else{
-		let AMR=L3([0.0,0.0,1f64]);
+		let AMU=L3([0.0,0.0,1f64]);
 		XC=WY;
-		ACQ=AMR;
+		ACQ=AMU;
 		}
-		let AMU=L4([ACQ[0],0.0,ACQ[1],ACQ[2]])- L4([ACM[0],ACM[1],ACM[2],0.0]);
+		let AMX=L4([ACQ[0],0.0,ACQ[1],ACQ[2]])- L4([ACM[0],ACM[1],ACM[2],0.0]);
 		let XE=A+ (XC- XD);
 		let XG=A+ XF;
 		let XI;
 		let ACR;
 		if XH!=0.0{
-		let AMW=L3([AEN[0],AEN[1],0.0]);
+		let AMZ=L3([AEN[0],AEN[1],0.0]);
 		XI=EO;
-		ACR=AMW;
+		ACR=AMZ;
 		}else{
-		let AMV=L3([0.0,0.0,1f64]);
+		let AMY=L3([0.0,0.0,1f64]);
 		XI=XF;
-		ACR=AMV;
+		ACR=AMY;
 		}
-		let AMX=L4([ACR[0],0.0,ACR[1],ACR[2]])- L4([ACJ[0],ACJ[1],ACJ[2],0.0]);
+		let ANA=L4([ACR[0],0.0,ACR[1],ACR[2]])- L4([ACJ[0],ACJ[1],ACJ[2],0.0]);
 		let XK=A+ (XI- XJ);
 		let XM=A+ XL;
 		let XR;
 		let ACS;
 		if XN!=0.0{
 		let XQ=-B;
-		let AMZ=L2([(ZK* ACX),0.0]);
+		let ANC=L2([(ZK* ACX),0.0]);
 		XR=XQ;
-		ACS=AMZ;
+		ACS=ANC;
 		}else{
-		let AMY=L2([0.0,1f64]);
+		let ANB=L2([0.0,1f64]);
 		XR=XL;
-		ACS=AMY;
+		ACS=ANB;
 		}
-		let ANA=ACS- L2([ABM,0.0]);
+		let AND=ACS- L2([ABM,0.0]);
 		let ZE=-ZD;
-		let ANB=ABV* ACX;
+		let ANE=ABV* ACX;
 		let XV=A+ (XR- XS);
 		let XX=A+ XW;
 		let YB;
 		let ACT;
 		if XY!=0.0{
 		let YA=-SN;
-		let AND=L2([(1f64* ACX),0.0]);
+		let ANG=L2([(1f64* ACX),0.0]);
 		YB=YA;
-		ACT=AND;
+		ACT=ANG;
 		}else{
-		let ANC=L2([0.0,1f64]);
+		let ANF=L2([0.0,1f64]);
 		YB=XW;
-		ACT=ANC;
+		ACT=ANF;
 		}
-		let ANE=ACT- L2([ABN,0.0]);
+		let ANH=ACT- L2([ABN,0.0]);
 		let ZI=-ZH;
 		let YF=A+ (YB- YC);
-		let ANF=AGX[0];
-		let ANG=AGX[1];
-		let ANH=AGX[2];
-		let ANI=AGY;
-		let ANJ=AHA;
-		let ANK=AAX[0];
-		let ANL=AAX[1];
-		let ANM=AAX[2];
-		let ANN=AAX[3];
-		let ANO=AAX[4];
-		let ANP=AAX[5];
-		let ANQ=AAY;
-		let ANR=AAZ[0];
-		let ANS=AAZ[1];
-		let ANT=AAZ[2];
-		let ANU=ABO[0];
-		let ANV=ABO[1];
-		let ANW=ABO[2];
-		let ANX=ABO[3];
-		let ANY=ABO[4];
-		let ANZ=ABO[5];
-		let AOA=ABO[6];
-		let AOB=ABP;
-		let AOC=ABQ;
-		let AOD=ABR[0];
-		let AOE=ABR[1];
-		let AOF=ABR[2];
-		let AOG=ABR[3];
-		let AOH=ABR[4];
-		let AOI=ABR[5];
-		let AOJ=ABR[6];
-		let AOK=ABS[0];
-		let AOL=ABS[1];
-		let AOM=ABT[0];
-		let AON=ABT[1];
-		let AOO=ABT[2];
-		let AOP=ABT[3];
-		let AOQ=ABT[4];
-		let AOR=ABT[5];
-		let AOS=ABT[6];
-		let AOT=ALH[0];
-		let AOU=ALH[1];
-		let AOV=ALI[0];
-		let AOW=ALI[1];
-		let AOX=ALJ[0];
-		let AOY=ALJ[1];
-		let AOZ=ALU[0];
-		let APA=ALU[1];
-		let APB=ALU[2];
-		let APC=ALU[3];
-		let APD=ALV[0];
-		let APE=ALV[1];
-		let APF=ALV[2];
-		let APG=ALW[0];
-		let APH=ALW[1];
-		let API=ALW[2];
-		let APJ=ALW[3];
-		let APK=ALX[0];
-		let APL=ALX[1];
-		let APM=ALX[2];
-		let APN=ALX[3];
-		let APO=ALX[4];
-		let APP=ALZ[0];
-		let APQ=ALZ[1];
-		let APR=ALZ[2];
-		let APS=AMB[0];
-		let APT=AMB[1];
-		let APU=AMB[2];
-		let APV=AMB[3];
-		let APW=AMB[4];
-		let APX=AMD[0];
-		let APY=AMD[1];
-		let APZ=AMD[2];
-		let AQA=AMF[0];
-		let AQB=AMF[1];
-		let AQC=AMF[2];
-		let AQD=AMH[0];
-		let AQE=AMH[1];
-		let AQF=AMH[2];
-		let AQG=AMH[3];
-		let AQH=AMJ[0];
-		let AQI=AMJ[1];
-		let AQJ=AMJ[2];
-		let AQK=AML[0];
-		let AQL=AML[1];
-		let AQM=AML[2];
-		let AQN=AML[3];
-		let AQO=AMN[0];
-		let AQP=AMN[1];
-		let AQQ=AMN[2];
-		let AQR=AMN[3];
-		let AQS=1f64;
-		let AQT=AMQ[0];
-		let AQU=AMQ[1];
-		let AQV=AMQ[2];
-		let AQW=AMQ[3];
-		let AQX=AMQ[4];
-		let AQY=1f64;
-		let AQZ=AMU[0];
-		let ARA=AMU[1];
-		let ARB=AMU[2];
-		let ARC=AMU[3];
-		let ARD=1f64;
-		let ARE=AMX[0];
-		let ARF=AMX[1];
-		let ARG=AMX[2];
-		let ARH=AMX[3];
-		let ARI=1f64;
-		let ARJ=ANA[0];
-		let ARK=ANA[1];
+		let ANI=AGX[0];
+		let ANJ=AGX[1];
+		let ANK=AGX[2];
+		let ANL=AGY;
+		let ANM=AHA;
+		let ANN=AAX[0];
+		let ANO=AAX[1];
+		let ANP=AAX[2];
+		let ANQ=AAX[3];
+		let ANR=AAX[4];
+		let ANS=AAX[5];
+		let ANT=AAY;
+		let ANU=AAZ[0];
+		let ANV=AAZ[1];
+		let ANW=AAZ[2];
+		let ANX=ABO[0];
+		let ANY=ABO[1];
+		let ANZ=ABO[2];
+		let AOA=ABO[3];
+		let AOB=ABO[4];
+		let AOC=ABO[5];
+		let AOD=ABO[6];
+		let AOE=ABP;
+		let AOF=ABQ;
+		let AOG=ABR[0];
+		let AOH=ABR[1];
+		let AOI=ABR[2];
+		let AOJ=ABR[3];
+		let AOK=ABR[4];
+		let AOL=ABR[5];
+		let AOM=ABR[6];
+		let AON=ABS[0];
+		let AOO=ABS[1];
+		let AOP=ABT[0];
+		let AOQ=ABT[1];
+		let AOR=ABT[2];
+		let AOS=ABT[3];
+		let AOT=ABT[4];
+		let AOU=ABT[5];
+		let AOV=ABT[6];
+		let AOW=ALK[0];
+		let AOX=ALK[1];
+		let AOY=ALL[0];
+		let AOZ=ALL[1];
+		let APA=ALM[0];
+		let APB=ALM[1];
+		let APC=ALX[0];
+		let APD=ALX[1];
+		let APE=ALX[2];
+		let APF=ALX[3];
+		let APG=ALY[0];
+		let APH=ALY[1];
+		let API=ALY[2];
+		let APJ=ALZ[0];
+		let APK=ALZ[1];
+		let APL=ALZ[2];
+		let APM=ALZ[3];
+		let APN=AMA[0];
+		let APO=AMA[1];
+		let APP=AMA[2];
+		let APQ=AMA[3];
+		let APR=AMA[4];
+		let APS=AMC[0];
+		let APT=AMC[1];
+		let APU=AMC[2];
+		let APV=AME[0];
+		let APW=AME[1];
+		let APX=AME[2];
+		let APY=AME[3];
+		let APZ=AME[4];
+		let AQA=AMG[0];
+		let AQB=AMG[1];
+		let AQC=AMG[2];
+		let AQD=AMI[0];
+		let AQE=AMI[1];
+		let AQF=AMI[2];
+		let AQG=AMK[0];
+		let AQH=AMK[1];
+		let AQI=AMK[2];
+		let AQJ=AMK[3];
+		let AQK=AMM[0];
+		let AQL=AMM[1];
+		let AQM=AMM[2];
+		let AQN=AMO[0];
+		let AQO=AMO[1];
+		let AQP=AMO[2];
+		let AQQ=AMO[3];
+		let AQR=AMQ[0];
+		let AQS=AMQ[1];
+		let AQT=AMQ[2];
+		let AQU=AMQ[3];
+		let AQV=1f64;
+		let AQW=AMT[0];
+		let AQX=AMT[1];
+		let AQY=AMT[2];
+		let AQZ=AMT[3];
+		let ARA=AMT[4];
+		let ARB=1f64;
+		let ARC=AMX[0];
+		let ARD=AMX[1];
+		let ARE=AMX[2];
+		let ARF=AMX[3];
+		let ARG=1f64;
+		let ARH=ANA[0];
+		let ARI=ANA[1];
+		let ARJ=ANA[2];
+		let ARK=ANA[3];
 		let ARL=1f64;
-		let ARM=ANE[0];
-		let ARN=ANE[1];
-		let ARO=AHB;
-		let ARP=ABA;
-		let ARQ=ABU;
-		let ARR=ALY[0];
-		let ARS=ALY[1];
-		let ART=ALY[2];
-		let ARU=AMA[0];
-		let ARV=AMA[1];
-		let ARW=AMA[2];
-		let ARX=AMA[3];
-		let ARY=AMA[4];
-		let ARZ=AMC[0];
-		let ASA=AMC[1];
-		let ASB=AMC[2];
-		let ASC=AME[0];
-		let ASD=AME[1];
-		let ASE=AME[2];
-		let ASF=AMG[0];
-		let ASG=AMG[1];
-		let ASH=AMG[2];
-		let ASI=AMG[3];
-		let ASJ=AMI[0];
-		let ASK=AMI[1];
-		let ASL=AMI[2];
-		let ASM=AMK[0];
-		let ASN=AMK[1];
-		let ASO=AMK[2];
-		let ASP=AMK[3];
-		let ASQ=AMM[0];
-		let ASR=AMM[1];
-		let ASS=AMM[2];
-		let AST=AMM[3];
-		let ASU=ANB;
-		let ASV=(ABW* ACX);
+		let ARM=AND[0];
+		let ARN=AND[1];
+		let ARO=1f64;
+		let ARP=ANH[0];
+		let ARQ=ANH[1];
+		let ARR=AHB;
+		let ARS=ABA;
+		let ART=ABU;
+		let ARU=AMB[0];
+		let ARV=AMB[1];
+		let ARW=AMB[2];
+		let ARX=AMD[0];
+		let ARY=AMD[1];
+		let ARZ=AMD[2];
+		let ASA=AMD[3];
+		let ASB=AMD[4];
+		let ASC=AMF[0];
+		let ASD=AMF[1];
+		let ASE=AMF[2];
+		let ASF=AMH[0];
+		let ASG=AMH[1];
+		let ASH=AMH[2];
+		let ASI=AMJ[0];
+		let ASJ=AMJ[1];
+		let ASK=AMJ[2];
+		let ASL=AMJ[3];
+		let ASM=AML[0];
+		let ASN=AML[1];
+		let ASO=AML[2];
+		let ASP=AMN[0];
+		let ASQ=AMN[1];
+		let ASR=AMN[2];
+		let ASS=AMN[3];
+		let AST=AMP[0];
+		let ASU=AMP[1];
+		let ASV=AMP[2];
+		let ASW=AMP[3];
+		let ASX=ANE;
+		let ASY=(ABW* ACX);
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = WU; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = XA; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = XH; }
@@ -1793,7 +1806,7 @@ impl Instance {
             None,
             multiplicity * (KU),
             [5, 6, 9],
-            [ANF, ANG, ANH],
+            [ANI, ANJ, ANK],
             [],
             [],
             multiplicity,
@@ -1803,7 +1816,7 @@ impl Instance {
             None,
             multiplicity * (KV),
             [9],
-            [ANI],
+            [ANL],
             [],
             [],
             multiplicity,
@@ -1813,7 +1826,7 @@ impl Instance {
             None,
             multiplicity * (KY),
             [9],
-            [ANJ],
+            [ANM],
             [],
             [],
             multiplicity,
@@ -1823,7 +1836,7 @@ impl Instance {
             None,
             multiplicity * (YG),
             [1, 2, 3, 4, 5, 6],
-            [ANK, ANL, ANM, ANN, ANO, ANP],
+            [ANN, ANO, ANP, ANQ, ANR, ANS],
             [],
             [],
             multiplicity,
@@ -1833,7 +1846,7 @@ impl Instance {
             None,
             multiplicity * (YH),
             [8],
-            [ANQ],
+            [ANT],
             [],
             [],
             multiplicity,
@@ -1843,7 +1856,7 @@ impl Instance {
             None,
             multiplicity * (YI),
             [1, 2, 8],
-            [ANR, ANS, ANT],
+            [ANU, ANV, ANW],
             [],
             [],
             multiplicity,
@@ -1863,7 +1876,7 @@ impl Instance {
             None,
             multiplicity * (YK),
             [0, 1, 2, 3, 4, 5, 6],
-            [ANU, ANV, ANW, ANX, ANY, ANZ, AOA],
+            [ANX, ANY, ANZ, AOA, AOB, AOC, AOD],
             [],
             [],
             multiplicity,
@@ -1873,7 +1886,7 @@ impl Instance {
             None,
             multiplicity * (YL),
             [3],
-            [AOB],
+            [AOE],
             [],
             [],
             multiplicity,
@@ -1883,7 +1896,7 @@ impl Instance {
             None,
             multiplicity * (YM),
             [3],
-            [AOC],
+            [AOF],
             [],
             [],
             multiplicity,
@@ -1893,7 +1906,7 @@ impl Instance {
             None,
             multiplicity * (YN),
             [0, 1, 2, 3, 4, 5, 6],
-            [AOD, AOE, AOF, AOG, AOH, AOI, AOJ],
+            [AOG, AOH, AOI, AOJ, AOK, AOL, AOM],
             [],
             [],
             multiplicity,
@@ -1903,7 +1916,7 @@ impl Instance {
             Some(7),
             multiplicity * (YP),
             [3, 7],
-            [AOK, AOL],
+            [AON, AOO],
             [],
             [],
             multiplicity,
@@ -1913,7 +1926,7 @@ impl Instance {
             None,
             multiplicity * (YR),
             [0, 1, 2, 3, 4, 5, 6],
-            [AOM, AON, AOO, AOP, AOQ, AOR, AOS],
+            [AOP, AOQ, AOR, AOS, AOT, AOU, AOV],
             [],
             [],
             multiplicity,
@@ -1923,7 +1936,7 @@ impl Instance {
             Some(6),
             multiplicity * (TK),
             [5, 6],
-            [AOT, AOU],
+            [AOW, AOX],
             [],
             [],
             multiplicity,
@@ -1933,7 +1946,7 @@ impl Instance {
             Some(4),
             multiplicity * (TO),
             [4, 5],
-            [AOV, AOW],
+            [AOY, AOZ],
             [],
             [],
             multiplicity,
@@ -1943,7 +1956,7 @@ impl Instance {
             Some(6),
             multiplicity * (TS),
             [4, 6],
-            [AOX, AOY],
+            [APA, APB],
             [],
             [],
             multiplicity,
@@ -1953,7 +1966,7 @@ impl Instance {
             Some(6),
             multiplicity * (VI),
             [3, 4, 5, 6],
-            [AOZ, APA, APB, APC],
+            [APC, APD, APE, APF],
             [],
             [],
             multiplicity,
@@ -1963,7 +1976,7 @@ impl Instance {
             Some(4),
             multiplicity * (VJ),
             [3, 4, 5],
-            [APD, APE, APF],
+            [APG, APH, API],
             [],
             [],
             multiplicity,
@@ -1973,7 +1986,7 @@ impl Instance {
             Some(6),
             multiplicity * (VK),
             [3, 4, 5, 6],
-            [APG, APH, API, APJ],
+            [APJ, APK, APL, APM],
             [],
             [],
             multiplicity,
@@ -1983,7 +1996,7 @@ impl Instance {
             Some(6),
             multiplicity * (VL),
             [3, 4, 5, 6, 9],
-            [APK, APL, APM, APN, APO],
+            [APN, APO, APP, APQ, APR],
             [],
             [],
             multiplicity,
@@ -1993,7 +2006,7 @@ impl Instance {
             Some(6),
             multiplicity * (VO),
             [3, 5, 6],
-            [APP, APQ, APR],
+            [APS, APT, APU],
             [],
             [],
             multiplicity,
@@ -2003,7 +2016,7 @@ impl Instance {
             Some(6),
             multiplicity * (VR),
             [1, 2, 3, 5, 6],
-            [APS, APT, APU, APV, APW],
+            [APV, APW, APX, APY, APZ],
             [],
             [],
             multiplicity,
@@ -2013,7 +2026,7 @@ impl Instance {
             Some(4),
             multiplicity * (VU),
             [1, 3, 4],
-            [APX, APY, APZ],
+            [AQA, AQB, AQC],
             [],
             [],
             multiplicity,
@@ -2023,7 +2036,7 @@ impl Instance {
             Some(4),
             multiplicity * (VX),
             [3, 4, 5],
-            [AQA, AQB, AQC],
+            [AQD, AQE, AQF],
             [],
             [],
             multiplicity,
@@ -2033,7 +2046,7 @@ impl Instance {
             Some(4),
             multiplicity * (WA),
             [3, 4, 5, 6],
-            [AQD, AQE, AQF, AQG],
+            [AQG, AQH, AQI, AQJ],
             [],
             [],
             multiplicity,
@@ -2043,7 +2056,7 @@ impl Instance {
             Some(4),
             multiplicity * (WE),
             [2, 3, 4],
-            [AQH, AQI, AQJ],
+            [AQK, AQL, AQM],
             [],
             [],
             multiplicity,
@@ -2053,7 +2066,7 @@ impl Instance {
             Some(6),
             multiplicity * (WI),
             [3, 4, 5, 6],
-            [AQK, AQL, AQM, AQN],
+            [AQN, AQO, AQP, AQQ],
             [],
             [],
             multiplicity,
@@ -2063,7 +2076,7 @@ impl Instance {
             Some(4),
             multiplicity * (WL),
             [3, 4, 5, 6],
-            [AQO, AQP, AQQ, AQR],
+            [AQR, AQS, AQT, AQU],
             [],
             [],
             multiplicity,
@@ -2103,7 +2116,7 @@ impl Instance {
             Some(5),
             multiplicity * (WT),
             [10],
-            [AQS],
+            [AQV],
             [],
             [],
             multiplicity,
@@ -2113,7 +2126,7 @@ impl Instance {
             None,
             multiplicity * (WX),
             [1, 3, 5, 8, 10],
-            [AQT, AQU, AQV, AQW, AQX],
+            [AQW, AQX, AQY, AQZ, ARA],
             [],
             [],
             multiplicity,
@@ -2123,7 +2136,7 @@ impl Instance {
             Some(4),
             multiplicity * (WZ),
             [11],
-            [AQY],
+            [ARB],
             [],
             [],
             multiplicity,
@@ -2133,7 +2146,7 @@ impl Instance {
             None,
             multiplicity * (XE),
             [0, 3, 4, 11],
-            [AQZ, ARA, ARB, ARC],
+            [ARC, ARD, ARE, ARF],
             [],
             [],
             multiplicity,
@@ -2143,7 +2156,7 @@ impl Instance {
             Some(6),
             multiplicity * (XG),
             [12],
-            [ARD],
+            [ARG],
             [],
             [],
             multiplicity,
@@ -2153,7 +2166,7 @@ impl Instance {
             None,
             multiplicity * (XK),
             [2, 3, 6, 12],
-            [ARE, ARF, ARG, ARH],
+            [ARH, ARI, ARJ, ARK],
             [],
             [],
             multiplicity,
@@ -2163,7 +2176,7 @@ impl Instance {
             Some(3),
             multiplicity * (XM),
             [13],
-            [ARI],
+            [ARL],
             [],
             [],
             multiplicity,
@@ -2173,7 +2186,7 @@ impl Instance {
             None,
             multiplicity * (XV),
             [3, 13],
-            [ARJ, ARK],
+            [ARM, ARN],
             [],
             [],
             multiplicity,
@@ -2183,7 +2196,7 @@ impl Instance {
             Some(7),
             multiplicity * (XX),
             [14],
-            [ARL],
+            [ARO],
             [],
             [],
             multiplicity,
@@ -2193,7 +2206,7 @@ impl Instance {
             None,
             multiplicity * (YF),
             [7, 14],
-            [ARM, ARN],
+            [ARP, ARQ],
             [],
             [],
             multiplicity,
@@ -2201,16 +2214,16 @@ impl Instance {
         self.canonical_reactive[0] = KU;
         self.canonical_reactive[1] = KV;
         self.canonical_reactive[2] = YW;
-        self.canonical_reactive[3] = ARO;
+        self.canonical_reactive[3] = ARR;
         self.canonical_reactive[4] = YG;
         self.canonical_reactive[5] = YH;
         self.canonical_reactive[6] = YZ;
-        self.canonical_reactive[7] = ARP;
+        self.canonical_reactive[7] = ARS;
         self.canonical_reactive[8] = YJ;
         self.canonical_reactive[9] = YK;
         self.canonical_reactive[10] = YL;
         self.canonical_reactive[11] = ZA;
-        self.canonical_reactive[12] = ARQ;
+        self.canonical_reactive[12] = ART;
         self.canonical_reactive[13] = YN;
         self.canonical_reactive[14] = YP;
         self.canonical_reactive[15] = YR;
@@ -2222,42 +2235,42 @@ impl Instance {
         self.canonical_reactive[21] = VK;
         self.canonical_reactive[22] = VL;
         self.canonical_reactive[23] = VM;
-        self.canonical_reactive[24] = ARR;
-        self.canonical_reactive[25] = ARS;
-        self.canonical_reactive[26] = ART;
+        self.canonical_reactive[24] = ARU;
+        self.canonical_reactive[25] = ARV;
+        self.canonical_reactive[26] = ARW;
         self.canonical_reactive[27] = VP;
-        self.canonical_reactive[28] = ARU;
-        self.canonical_reactive[29] = ARV;
-        self.canonical_reactive[30] = ARW;
-        self.canonical_reactive[31] = ARX;
-        self.canonical_reactive[32] = ARY;
+        self.canonical_reactive[28] = ARX;
+        self.canonical_reactive[29] = ARY;
+        self.canonical_reactive[30] = ARZ;
+        self.canonical_reactive[31] = ASA;
+        self.canonical_reactive[32] = ASB;
         self.canonical_reactive[33] = VS;
-        self.canonical_reactive[34] = ARZ;
-        self.canonical_reactive[35] = ASA;
-        self.canonical_reactive[36] = ASB;
+        self.canonical_reactive[34] = ASC;
+        self.canonical_reactive[35] = ASD;
+        self.canonical_reactive[36] = ASE;
         self.canonical_reactive[37] = VV;
-        self.canonical_reactive[38] = ASC;
-        self.canonical_reactive[39] = ASD;
-        self.canonical_reactive[40] = ASE;
+        self.canonical_reactive[38] = ASF;
+        self.canonical_reactive[39] = ASG;
+        self.canonical_reactive[40] = ASH;
         self.canonical_reactive[41] = VY;
-        self.canonical_reactive[42] = ASF;
-        self.canonical_reactive[43] = ASG;
-        self.canonical_reactive[44] = ASH;
-        self.canonical_reactive[45] = ASI;
+        self.canonical_reactive[42] = ASI;
+        self.canonical_reactive[43] = ASJ;
+        self.canonical_reactive[44] = ASK;
+        self.canonical_reactive[45] = ASL;
         self.canonical_reactive[46] = WC;
-        self.canonical_reactive[47] = ASJ;
-        self.canonical_reactive[48] = ASK;
-        self.canonical_reactive[49] = ASL;
+        self.canonical_reactive[47] = ASM;
+        self.canonical_reactive[48] = ASN;
+        self.canonical_reactive[49] = ASO;
         self.canonical_reactive[50] = WG;
-        self.canonical_reactive[51] = ASM;
-        self.canonical_reactive[52] = ASN;
-        self.canonical_reactive[53] = ASO;
-        self.canonical_reactive[54] = ASP;
+        self.canonical_reactive[51] = ASP;
+        self.canonical_reactive[52] = ASQ;
+        self.canonical_reactive[53] = ASR;
+        self.canonical_reactive[54] = ASS;
         self.canonical_reactive[55] = WJ;
-        self.canonical_reactive[56] = ASQ;
-        self.canonical_reactive[57] = ASR;
-        self.canonical_reactive[58] = ASS;
-        self.canonical_reactive[59] = AST;
+        self.canonical_reactive[56] = AST;
+        self.canonical_reactive[57] = ASU;
+        self.canonical_reactive[58] = ASV;
+        self.canonical_reactive[59] = ASW;
         self.canonical_reactive[60] = WN;
         self.canonical_reactive[61] = WP;
         self.canonical_reactive[62] = WR;
@@ -2269,10 +2282,10 @@ impl Instance {
         self.canonical_reactive[68] = XK;
         self.canonical_reactive[69] = XM;
         self.canonical_reactive[70] = ZE;
-        self.canonical_reactive[71] = ASU;
+        self.canonical_reactive[71] = ASX;
         self.canonical_reactive[72] = XX;
         self.canonical_reactive[73] = ZI;
-        self.canonical_reactive[74] = ASV;
+        self.canonical_reactive[74] = ASY;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

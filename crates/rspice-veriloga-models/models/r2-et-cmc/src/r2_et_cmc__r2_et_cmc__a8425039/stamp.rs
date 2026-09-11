@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 7] = [5, 6, 4, 1, 3, 17, 18];
@@ -226,20 +226,11 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let parameter_given = &*self.param_given;
         let multiplicity = self.multiplicity;
@@ -254,9 +245,19 @@ impl Instance {
         };
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -328,7 +329,6 @@ impl Instance {
 		let HC=L2([0f64;2]);
 		let HU=0f64;
 		let HX=L3([0f64;3]);
-		let IF=ddt_scale();
 		if A{
 		analog_finish(2, time, B);
 		}
@@ -760,40 +760,40 @@ impl Instance {
 		IC=HX;
 		ID=HV;
 		}
+		let IH;
 		let II;
 		let IJ;
 		let IK;
-		let IL;
 		if FE!=0.0{
 		let IE=ddt(0, HP);
-		let IG=HQ* IF;
-		let IH=O+ IE;
-		II=IH;
-		IJ=HP;
-		IK=IG;
-		IL=HQ;
+		let IF=ddt_derivative(0,IE,HQ);
+		let IG=O+ IE;
+		IH=IG;
+		II=HP;
+		IJ=IF;
+		IK=HQ;
 		}else{
+		IH=O;
 		II=O;
-		IJ=O;
+		IJ=HU;
 		IK=HU;
-		IL=HU;
 		}
-		let IM=HI[0];
-		let IN=HI[1];
-		let IO=HI[2];
-		let IP=IB;
-		let IQ=IC[0];
-		let IR=IC[1];
-		let IS=IC[2];
-		let IT=ID;
+		let IL=HI[0];
+		let IM=HI[1];
+		let IN=HI[2];
+		let IO=IB;
+		let IP=IC[0];
+		let IQ=IC[1];
+		let IR=IC[2];
+		let IS=ID;
+		let IT=IJ;
 		let IU=IK;
-		let IV=IL;
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(0),
             Some(1),
             multiplicity * (HR),
             [0, 1, 2],
-            [IM, IN, IO],
+            [IL, IM, IN],
             [],
             [],
             multiplicity,
@@ -803,7 +803,7 @@ impl Instance {
             None,
             multiplicity * (HY),
             [2],
-            [IP],
+            [IO],
             [],
             [],
             multiplicity,
@@ -813,7 +813,7 @@ impl Instance {
             None,
             multiplicity * (HZ),
             [0, 1, 2],
-            [IQ, IR, IS],
+            [IP, IQ, IR],
             [],
             [],
             multiplicity,
@@ -823,7 +823,7 @@ impl Instance {
             None,
             multiplicity * (IA),
             [2],
-            [IT],
+            [IS],
             [],
             [],
             multiplicity,
@@ -831,9 +831,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             None,
-            multiplicity * (II),
+            multiplicity * (IH),
             [2],
-            [IU],
+            [IT],
             [],
             [],
             multiplicity,
@@ -862,8 +862,8 @@ impl Instance {
         self.canonical_reactive[1] = HY;
         self.canonical_reactive[2] = HZ;
         self.canonical_reactive[3] = IA;
-        self.canonical_reactive[4] = IJ;
-        self.canonical_reactive[5] = IV;
+        self.canonical_reactive[4] = II;
+        self.canonical_reactive[5] = IU;
         self.canonical_reactive[6] = staged[17];
         self.canonical_reactive[7] = staged[18];
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }

@@ -33,9 +33,10 @@ use crate::native::abi::{
     rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
-    rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
-    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_cosh, rspice_cross_state_native, rspice_ddt_derivative_native,
+    rspice_ddt_jacobian_native, rspice_ddt_state_native, rspice_default_limit_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
     rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
@@ -1341,6 +1342,9 @@ impl FunctionCompiler {
                         NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                         NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
                         NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
+                        NativeOp::DdtDerivativeState(index) => {
+                            self.emit_state_operand_helper(index, 2, rspice_ddt_derivative_native)?
+                        }
                         NativeOp::IdtState(index) => self.emit_idt_state(index)?,
                         NativeOp::IdtJacobian => self.emit_idt_jacobian()?,
                         NativeOp::IdtModState(index) => self.emit_idtmod_state(index)?,
@@ -9601,7 +9605,10 @@ mod tests {
         assert!(error.contains("modulus must be finite and greater than zero"));
         assert_eq!(state_values[1].to_bits(), 7.0_f64.to_bits());
         assert_eq!(state_older_candidate[1].to_bits(), 8.0_f64.to_bits());
-        assert_eq!(state_candidate_valid[1], 0);
+        assert_eq!(
+            state_candidate_valid[1],
+            crate::vm::INTEGRATION_CANDIDATE_FAILED
+        );
         assert!(idtmod_origins[&1].candidate.is_none());
         assert_eq!(idtmod_origins[&1].accepted, Default::default());
 
@@ -9612,7 +9619,10 @@ mod tests {
                 .unwrap()
                 .contains("missing circular-integrator origin storage")
         );
-        assert_eq!(state_candidate_valid[1], 0);
+        assert_eq!(
+            state_candidate_valid[1],
+            crate::vm::INTEGRATION_CANDIDATE_FAILED
+        );
         ctx.idtmod_origins = &mut idtmod_origins;
         assert!((f(&ctx, vars.as_ptr()) - 0.4).abs() < 1.0e-12);
         assert!(idtmod_origins[&1].candidate.is_some());

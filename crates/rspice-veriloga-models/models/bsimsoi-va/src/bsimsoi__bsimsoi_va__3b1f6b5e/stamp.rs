@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, GeneratedDerivative, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, GeneratedDerivative, install_generated_stage_values, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 147] = [0, 434, 80, 435, 436, 437, 23, 130, 66, 438, 1, 2, 446, 701, 447, 3, 311, 449, 451, 455, 456, 20, 21, 22, 457, 458, 56, 24, 483, 55, 489, 57, 58, 492, 60, 63, 65, 67, 69, 71, 73, 74, 497, 502, 75, 76, 77, 299, 503, 504, 507, 505, 78, 511, 512, 513, 81, 514, 515, 517, 86, 520, 91, 527, 528, 103, 533, 104, 105, 537, 106, 107, 108, 112, 110, 122, 136, 556, 567, 568, 569, 570, 573, 574, 576, 577, 591, 230, 139, 599, 600, 601, 142, 158, 677, 251, 250, 679, 252, 680, 681, 308, 686, 352, 345, 702, 703, 712, 714, 365, 383, 384, 726, 728, 389, 397, 400, 734, 743, 735, 736, 738, 739, 737, 740, 741, 742, 759, 760, 761, 762, 763, 764, 746, 744, 745, 426, 748, 749, 750, 752, 753, 754, 755, 756, 757, 758];
@@ -3599,32 +3599,6 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-			let A=staged[438]!=0.0;
-			let B=staged[521]!=0.0;
-			let C=staged[525]!=0.0;
-			let D=staged[549]!=0.0;
-			if B{
-			loop{
-			if !C{
-			break;
-			}
-			}
-			}
-			if !A{
-			loop{
-			if !D{
-			break;
-			}
-			}
-			}
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         if ctx.analog_tasks_enabled() { self.analog_effects.get_or_insert_with(Default::default).begin_evaluation(); }
         self.canonical_model_stage(ctx);
@@ -3632,7 +3606,6 @@ impl Instance {
         self.canonical_instance_stage(ctx);
         if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let parameter_given = &*self.param_given;
         let multiplicity = self.multiplicity;
@@ -3647,9 +3620,19 @@ impl Instance {
         };
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -4241,66 +4224,65 @@ impl Instance {
 		let FBJ=0f64;
 		let FDC=true;
 		let FEH=true;
-		let FEL=ddt_scale();
 		let FEO=true;
 		let FEP=0f64;
 		let FES=true;
 		let FEV=0f64;
-		let FFE=L8([0f64;8]);
-		let FGE=staged[425];
-		let FGJ=L4([0f64;4]);
-		let FGK=L3([0f64;3]);
-		let FGL=L2([0f64;2]);
-		let FGM=L4([0f64;4]);
-		let FGN=L3([0f64;3]);
-		let FGO=L2([0f64;2]);
-		let FHB=L2([0f64;2]);
-		let FHC=L2([0f64;2]);
-		let FIB=staged[744]!=0.0;
-		let FIE=staged[745]!=0.0;
-		let FIF=0f64;
-		let FIG=L2([0f64;2]);
-		let FIH=node_potentials[1];
-		let FIK=true;
-		let FIN=0f64;
-		let FIR=0f64;
-		let FIS=L7([0f64;7]);
-		let FIY=staged[746]!=0.0;
-		let FIZ=true;
-		let FJJ=staged[427];
-		let FJM=staged[428];
-		let FJP=true;
-		let FJQ=L2([0f64;2]);
-		let FJT=0f64;
-		let FJV=true;
-		let FJW=L2([0f64;2]);
-		let FJZ=0f64;
-		let FKB=0f64;
-		let FKC=0f64;
-		let FKD=false;
-		let FKQ=staged[429];
-		let FKT=true;
-		let FKW=staged[430];
-		let FLB=L6([0f64;6]);
-		let FLD=0f64;
-		let FLJ=node_potentials[13];
-		let FLL=staged[747];
-		let FLU=node_potentials[14];
-		let FLW=staged[748];
-		let FMF=node_potentials[15];
-		let FMH=staged[749];
-		let FMO=node_potentials[16];
-		let FMQ=staged[750];
-		let FMZ=node_potentials[17];
-		let FNB=staged[751];
-		let FNJ=node_potentials[18];
-		let FNL=staged[752];
-		let FNU=node_potentials[19];
-		let FNW=staged[753];
-		let FOF=node_potentials[20];
-		let FOH=staged[754];
-		let FOQ=node_potentials[21];
-		let FOS=staged[755];
+		let FFF=L8([0f64;8]);
+		let FGL=staged[425];
+		let FGR=L4([0f64;4]);
+		let FGS=L3([0f64;3]);
+		let FGT=L2([0f64;2]);
+		let FGU=L4([0f64;4]);
+		let FGV=L3([0f64;3]);
+		let FGW=L2([0f64;2]);
+		let FHM=L2([0f64;2]);
+		let FHN=L2([0f64;2]);
+		let FIO=staged[744]!=0.0;
+		let FIR=staged[745]!=0.0;
+		let FIS=0f64;
+		let FIT=L2([0f64;2]);
+		let FIU=node_potentials[1];
+		let FIX=true;
+		let FJA=0f64;
+		let FJE=0f64;
+		let FJF=L7([0f64;7]);
+		let FJL=staged[746]!=0.0;
+		let FJM=true;
+		let FJW=staged[427];
+		let FJZ=staged[428];
+		let FKC=true;
+		let FKD=L2([0f64;2]);
+		let FKG=0f64;
+		let FKI=true;
+		let FKJ=L2([0f64;2]);
+		let FKM=0f64;
+		let FKO=0f64;
+		let FKP=0f64;
+		let FKQ=false;
+		let FLD=staged[429];
+		let FLG=true;
+		let FLJ=staged[430];
+		let FLP=L6([0f64;6]);
+		let FLR=0f64;
+		let FLS=node_potentials[13];
+		let FLU=staged[747];
+		let FMD=node_potentials[14];
+		let FMF=staged[748];
+		let FMO=node_potentials[15];
+		let FMQ=staged[749];
+		let FMX=node_potentials[16];
+		let FMZ=staged[750];
+		let FNI=node_potentials[17];
+		let FNK=staged[751];
+		let FNS=node_potentials[18];
+		let FNU=staged[752];
+		let FOD=node_potentials[19];
+		let FOF=staged[753];
+		let FOO=node_potentials[20];
+		let FOQ=staged[754];
+		let FOZ=node_potentials[21];
+		let FPB=staged[755];
 		if C{
 		analog_finish(978, time, D);
 		}
@@ -10874,7 +10856,8 @@ impl Instance {
 		FEJ=FEU;
 		}
 		let FEK=ddt(0, FCI);
-		let FEM=FCS* FEL;
+		let FEL=L6(std::array::from_fn(|i| ddt_derivative(0,FEK,(FCS)[i])));
+		let FEM=FCS* (ctx.checked_derivative_value(FEK, 1f64));
 		let FEN=D+ FEK;
 		let FEX;
 		let FEY;
@@ -10886,38 +10869,32 @@ impl Instance {
 		FEY=DAQ;
 		}
 		let FEZ=ddt(1, FCJ);
-		let FFA=(FCT* FEL)* EJ;
-		let FFB=FCT* EJ;
-		let FFC=(ctx.checked_derivative_value(FDV, FEX))+ (-FEZ);
-		let FFD=FEY+ L8([FFA[0],FFA[1],FFA[2],FFA[3],FFA[4],FFA[5],0.0,0.0]);
-		let FFF=FFE+ L8([FFB[0],FFB[1],FFB[2],FFB[3],FFB[4],FFB[5],0.0,0.0]);
-		let FFG=ddt(2, DRC);
-		let FFH=(DRG* FEL)* TJ;
-		let FFI=DRG* TJ;
-		let FFJ=D+ (TJ* FFG);
-		let FFK=ddt(3, DRD);
-		let FFL=(DRH* FEL)* TJ;
-		let FFM=DRH* TJ;
-		let FFN=D+ (TJ* FFK);
-		let FFO=ddt(4, EPO);
-		let FFP=(EPQ* FEL)* TJ;
-		let FFQ=EPQ* TJ;
-		let FFR=D+ (TJ* FFO);
-		let FFS=ddt(5, EPP);
-		let FFT=(EPR* FEL)* TJ;
-		let FFU=EPR* TJ;
-		let FFV=D+ (TJ* FFS);
-		let FHD;
-		let FHE;
-		let FHF;
-		let FHG;
-		let FHH;
-		let FHI;
-		let FHJ;
-		let FHK;
-		let FHL;
-		let FHM;
-		let FHN;
+		let FFA=L6(std::array::from_fn(|i| ddt_derivative(1,FEZ,(FCT)[i])));
+		let FFB=FFA* EJ;
+		let FFC=(FCT* (ctx.checked_derivative_value(FEZ, 1f64)))* EJ;
+		let FFD=(ctx.checked_derivative_value(FDV, FEX))+ (-FEZ);
+		let FFE=FEY+ L8([FFB[0],FFB[1],FFB[2],FFB[3],FFB[4],FFB[5],0.0,0.0]);
+		let FFG=FFF+ L8([FFC[0],FFC[1],FFC[2],FFC[3],FFC[4],FFC[5],0.0,0.0]);
+		let FFH=ddt(2, DRC);
+		let FFI=L6(std::array::from_fn(|i| ddt_derivative(2,FFH,(DRG)[i])));
+		let FFJ=FFI* TJ;
+		let FFK=(DRG* (ctx.checked_derivative_value(FFH, 1f64)))* TJ;
+		let FFL=D+ (TJ* FFH);
+		let FFM=ddt(3, DRD);
+		let FFN=L6(std::array::from_fn(|i| ddt_derivative(3,FFM,(DRH)[i])));
+		let FFO=FFN* TJ;
+		let FFP=(DRH* (ctx.checked_derivative_value(FFM, 1f64)))* TJ;
+		let FFQ=D+ (TJ* FFM);
+		let FFR=ddt(4, EPO);
+		let FFS=L3(std::array::from_fn(|i| ddt_derivative(4,FFR,(EPQ)[i])));
+		let FFT=FFS* TJ;
+		let FFU=(EPQ* (ctx.checked_derivative_value(FFR, 1f64)))* TJ;
+		let FFV=D+ (TJ* FFR);
+		let FFW=ddt(5, EPP);
+		let FFX=L3(std::array::from_fn(|i| ddt_derivative(5,FFW,(EPR)[i])));
+		let FFY=FFX* TJ;
+		let FFZ=(EPR* (ctx.checked_derivative_value(FFW, 1f64)))* TJ;
+		let FGA=D+ (TJ* FFW);
 		let FHO;
 		let FHP;
 		let FHQ;
@@ -10925,589 +10902,609 @@ impl Instance {
 		let FHS;
 		let FHT;
 		let FHU;
-		if ETK{
-		let FFW=ddt(6, FAD);
-		let FFX=(FAF* FEL)* TJ;
-		let FFY=FAF* TJ;
-		let FFZ=D+ (TJ* FFW);
-		let FGA=ddt(7, FAE);
-		let FGB=(FAG* FEL)* TJ;
-		let FGC=FAG* TJ;
-		let FGD=D+ (TJ* FGA);
-		let FGF=(L2([0.0,VK])- L2([1f64,0.0]))* FGE;
-		let FGG=ddt(8, ((VJ- UT)* FGE));
-		let FGH=FGF* FEL;
-		let FGI=D+ FGG;
-		FHD=FFZ;
-		FHE=FGD;
-		FHF=FGI;
-		FHG=D;
-		FHH=D;
-		FHI=D;
-		FHJ=FFX;
-		FHK=FGB;
-		FHL=FGH;
-		FHM=FGJ;
-		FHN=FGK;
-		FHO=FGL;
-		FHP=FFY;
-		FHQ=FGC;
-		FHR=FGF;
-		FHS=FGM;
-		FHT=FGN;
-		FHU=FGO;
-		}else{
-		let FGP=ddt(9, FAD);
-		let FGQ=(FAF* FEL)* TJ;
-		let FGR=FAF* TJ;
-		let FGS=D+ (TJ* FGP);
-		let FGT=ddt(10, FAE);
-		let FGU=(FAG* FEL)* TJ;
-		let FGV=FAG* TJ;
-		let FGW=D+ (TJ* FGT);
-		let FGX=(L2([0.0,UQ])- L2([1f64,0.0]))* FGE;
-		let FGY=ddt(11, ((UP- UT)* FGE));
-		let FGZ=FGX* FEL;
-		let FHA=D+ FGY;
-		FHD=D;
-		FHE=D;
-		FHF=D;
-		FHG=FGS;
-		FHH=FGW;
-		FHI=FHA;
-		FHJ=FGJ;
-		FHK=FGK;
-		FHL=FHB;
-		FHM=FGQ;
-		FHN=FGU;
-		FHO=FGZ;
-		FHP=FGM;
-		FHQ=FGN;
-		FHR=FHC;
-		FHS=FGR;
-		FHT=FGV;
-		FHU=FGX;
-		}
-		let FHV=ddt(12, ETI);
-		let FHW=ETJ* FEL;
-		let FHX=D+ FHV;
-		let FHY=ddt(13, ETF);
-		let FHZ=ETG* FEL;
-		let FIA=D+ FHY;
+		let FHV;
+		let FHW;
+		let FHX;
+		let FHY;
+		let FHZ;
+		let FIA;
+		let FIB;
 		let FIC;
 		let FID;
-		if FIB{
-		FIC=FIF;
-		FID=FIG;
+		let FIE;
+		let FIF;
+		if ETK{
+		let FGB=ddt(6, FAD);
+		let FGC=L4(std::array::from_fn(|i| ddt_derivative(6,FGB,(FAF)[i])));
+		let FGD=FGC* TJ;
+		let FGE=(FAF* (ctx.checked_derivative_value(FGB, 1f64)))* TJ;
+		let FGF=D+ (TJ* FGB);
+		let FGG=ddt(7, FAE);
+		let FGH=L3(std::array::from_fn(|i| ddt_derivative(7,FGG,(FAG)[i])));
+		let FGI=FGH* TJ;
+		let FGJ=(FAG* (ctx.checked_derivative_value(FGG, 1f64)))* TJ;
+		let FGK=D+ (TJ* FGG);
+		let FGM=(L2([0.0,VK])- L2([1f64,0.0]))* FGL;
+		let FGN=ddt(8, ((VJ- UT)* FGL));
+		let FGO=L2(std::array::from_fn(|i| ddt_derivative(8,FGN,(FGM)[i])));
+		let FGP=FGM* (ctx.checked_derivative_value(FGN, 1f64));
+		let FGQ=D+ FGN;
+		FHO=FGF;
+		FHP=FGK;
+		FHQ=FGQ;
+		FHR=D;
+		FHS=D;
+		FHT=D;
+		FHU=FGD;
+		FHV=FGI;
+		FHW=FGO;
+		FHX=FGR;
+		FHY=FGS;
+		FHZ=FGT;
+		FIA=FGE;
+		FIB=FGJ;
+		FIC=FGP;
+		FID=FGU;
+		FIE=FGV;
+		FIF=FGW;
 		}else{
-		let FII=(L2([1f64,0.0])- L2([0.0,VK]))* DGO;
-		let FIJ=0f64+ ((FIH- VJ)* DGO);
-		let FIL;
-		let FIM;
-		if FIK{
-		FIL=FIJ;
-		FIM=FII;
-		}else{
-		FIL=D;
-		FIM=FIG;
+		let FGX=ddt(9, FAD);
+		let FGY=L4(std::array::from_fn(|i| ddt_derivative(9,FGX,(FAF)[i])));
+		let FGZ=FGY* TJ;
+		let FHA=(FAF* (ctx.checked_derivative_value(FGX, 1f64)))* TJ;
+		let FHB=D+ (TJ* FGX);
+		let FHC=ddt(10, FAE);
+		let FHD=L3(std::array::from_fn(|i| ddt_derivative(10,FHC,(FAG)[i])));
+		let FHE=FHD* TJ;
+		let FHF=(FAG* (ctx.checked_derivative_value(FHC, 1f64)))* TJ;
+		let FHG=D+ (TJ* FHC);
+		let FHH=(L2([0.0,UQ])- L2([1f64,0.0]))* FGL;
+		let FHI=ddt(11, ((UP- UT)* FGL));
+		let FHJ=L2(std::array::from_fn(|i| ddt_derivative(11,FHI,(FHH)[i])));
+		let FHK=FHH* (ctx.checked_derivative_value(FHI, 1f64));
+		let FHL=D+ FHI;
+		FHO=D;
+		FHP=D;
+		FHQ=D;
+		FHR=FHB;
+		FHS=FHG;
+		FHT=FHL;
+		FHU=FGR;
+		FHV=FGS;
+		FHW=FHM;
+		FHX=FGZ;
+		FHY=FHE;
+		FHZ=FHJ;
+		FIA=FGU;
+		FIB=FGV;
+		FIC=FHN;
+		FID=FHA;
+		FIE=FHF;
+		FIF=FHK;
 		}
-		let FIO=(ctx.checked_derivative_value(FIJ, FIL))+ FIN;
-		FIC=FIO;
-		FID=FIM;
-		}
+		let FIG=ddt(12, ETI);
+		let FIH=L3(std::array::from_fn(|i| ddt_derivative(12,FIG,(ETJ)[i])));
+		let FII=ETJ* (ctx.checked_derivative_value(FIG, 1f64));
+		let FIJ=D+ FIG;
+		let FIK=ddt(13, ETF);
+		let FIL=L2(std::array::from_fn(|i| ddt_derivative(13,FIK,(ETG)[i])));
+		let FIM=ETG* (ctx.checked_derivative_value(FIK, 1f64));
+		let FIN=D+ FIK;
 		let FIP;
 		let FIQ;
-		if FIE{
-		FIP=FIR;
-		FIQ=FIS;
+		if FIO{
+		FIP=FIS;
+		FIQ=FIT;
 		}else{
-		let FIT=VJ- UP;
-		let FIU=(L2([0.0,VK])- L2([UQ,0.0]))* DGG;
-		let FIV=DGH* FIT;
-		let FIW=(L7([0.0,0.0,0.0,0.0,0.0,FIU[0],FIU[1]])+ L7([FIV[0],FIV[1],FIV[2],FIV[3],FIV[4],FIV[5],0.0]))* EJ;
-		let FIX=0f64+ (-(FIT* DGG));
-		let FJA;
-		let FJB;
-		if FIY{
+		let FIV=(L2([1f64,0.0])- L2([0.0,VK]))* DGO;
+		let FIW=0f64+ ((FIU- VJ)* DGO);
+		let FIY;
+		let FIZ;
+		if FIX{
+		FIY=FIW;
+		FIZ=FIV;
+		}else{
+		FIY=D;
+		FIZ=FIT;
+		}
+		let FJB=(ctx.checked_derivative_value(FIW, FIY))+ FJA;
+		FIP=FJB;
+		FIQ=FIZ;
+		}
 		let FJC;
 		let FJD;
-		if FIZ{
-		FJC=FIX;
-		FJD=FIW;
+		if FIR{
+		FJC=FJE;
+		FJD=FJF;
 		}else{
-		FJC=D;
-		FJD=FIS;
-		}
-		let FJE=(ctx.checked_derivative_value(FIX, FJC))+ staged[426];
-		FJA=FJE;
-		FJB=FJD;
+		let FJG=VJ- UP;
+		let FJH=(L2([0.0,VK])- L2([UQ,0.0]))* DGG;
+		let FJI=DGH* FJG;
+		let FJJ=(L7([0.0,0.0,0.0,0.0,0.0,FJH[0],FJH[1]])+ L7([FJI[0],FJI[1],FJI[2],FJI[3],FJI[4],FJI[5],0.0]))* EJ;
+		let FJK=0f64+ (-(FJG* DGG));
+		let FJN;
+		let FJO;
+		if FJL{
+		let FJP;
+		let FJQ;
+		if FJM{
+		FJP=FJK;
+		FJQ=FJJ;
 		}else{
-		FJA=FIX;
-		FJB=FIW;
+		FJP=D;
+		FJQ=FJF;
 		}
-		FIP=FJA;
-		FIQ=FJB;
+		let FJR=(ctx.checked_derivative_value(FJK, FJP))+ staged[426];
+		FJN=FJR;
+		FJO=FJQ;
+		}else{
+		FJN=FJK;
+		FJO=FJJ;
 		}
-		let FJF;
-		let FJG;
-		let FJH;
-		let FJI;
-		if Y!=0.0{
-		let FJK=(L2([UL,0.0])- L2([0.0,1f64]))* FJJ;
-		let FJL=0f64+ ((UJ- VG)* FJJ);
-		let FJN=(L2([UL,0.0])- L2([0.0,1f64]))* FJM;
-		let FJO=0f64+ ((UJ- VD)* FJM);
-		let FJR;
+		FJC=FJN;
+		FJD=FJO;
+		}
 		let FJS;
-		if FJP{
-		FJR=FJL;
-		FJS=FJK;
-		}else{
-		FJR=D;
-		FJS=FJQ;
-		}
-		let FJU=(ctx.checked_derivative_value(FJL, FJR))+ FJT;
-		let FJX;
-		let FJY;
-		if FJV{
-		FJX=FJO;
-		FJY=FJN;
-		}else{
-		FJX=D;
-		FJY=FJW;
-		}
-		let FKA=(ctx.checked_derivative_value(FJO, FJX))+ FJZ;
-		FJF=FJU;
-		FJG=FKA;
-		FJH=FJS;
-		FJI=FJY;
-		}else{
-		FJF=FKB;
-		FJG=FKC;
-		FJH=FJQ;
-		FJI=FJW;
-		}
+		let FJT;
+		let FJU;
+		let FJV;
+		if Y!=0.0{
+		let FJX=(L2([UL,0.0])- L2([0.0,1f64]))* FJW;
+		let FJY=0f64+ ((UJ- VG)* FJW);
+		let FKA=(L2([UL,0.0])- L2([0.0,1f64]))* FJZ;
+		let FKB=0f64+ ((UJ- VD)* FJZ);
 		let FKE;
 		let FKF;
-		let FKG;
-		if DRI{
-		let FKH;
-		let FKI;
-		let FKJ;
-		if FKD{
-		FKH=FFC;
-		FKI=FFD;
-		FKJ=FFF;
+		if FKC{
+		FKE=FJY;
+		FKF=FJX;
 		}else{
-		FKH=D;
-		FKI=DAQ;
-		FKJ=FFE;
+		FKE=D;
+		FKF=FKD;
 		}
-		let FKK=(ctx.checked_derivative_value(FFC, FKH))+ D;
-		FKE=FKK;
-		FKF=FKI;
-		FKG=FKJ;
-		}else{
-		FKE=FFC;
-		FKF=FFD;
-		FKG=FFF;
-		}
+		let FKH=(ctx.checked_derivative_value(FJY, FKE))+ FKG;
+		let FKK;
 		let FKL;
-		let FKM;
-		let FKN;
-		if AD{
-		let FKO=-DJJ;
-		let FKP=XY* FKO;
-		let FKR=((((DJV* EJ)* XB)+ L6([0.0,0.0,0.0,FKP[0],FKP[1],0.0]))+ L6([0.0,0.0,(AI/ FKQ),0.0,0.0,0.0]))* EJ;
-		let FKS=0f64+ (-((FKO* XB)+ (AH/ FKQ)));
+		if FKI{
+		FKK=FKB;
+		FKL=FKA;
+		}else{
+		FKK=D;
+		FKL=FKJ;
+		}
+		let FKN=(ctx.checked_derivative_value(FKB, FKK))+ FKM;
+		FJS=FKH;
+		FJT=FKN;
+		FJU=FKF;
+		FJV=FKL;
+		}else{
+		FJS=FKO;
+		FJT=FKP;
+		FJU=FKD;
+		FJV=FKJ;
+		}
+		let FKR;
+		let FKS;
+		let FKT;
+		if DRI{
 		let FKU;
 		let FKV;
-		if FKT{
-		FKU=FKS;
-		FKV=FKR;
+		let FKW;
+		if FKQ{
+		FKU=FFD;
+		FKV=FFE;
+		FKW=FFG;
 		}else{
 		FKU=D;
-		FKV=ATW;
+		FKV=DAQ;
+		FKW=FFF;
 		}
-		let FKX=AI* FKW;
-		let FKY=ddt(14, (AH* FKW));
-		let FKZ=(ctx.checked_derivative_value(FKS, FKU))+ (-FKY);
-		let FLA=FKV+ L6([0.0,0.0,((FKX* FEL)* EJ),0.0,0.0,0.0]);
-		let FLC=FLB+ L6([0.0,0.0,(FKX* EJ),0.0,0.0,0.0]);
-		FKL=FKZ;
-		FKM=FLA;
-		FKN=FLC;
+		let FKX=(ctx.checked_derivative_value(FFD, FKU))+ D;
+		FKR=FKX;
+		FKS=FKV;
+		FKT=FKW;
 		}else{
-		FKL=FLD;
-		FKM=ATW;
-		FKN=FLB;
+		FKR=FFD;
+		FKS=FFE;
+		FKT=FFG;
 		}
-		let FLE=FCS[5];
-		let FLF=FCS[3];
-		let FLG=FCS[4];
-		let FLH=FFQ[2];
-		let FLI=FFU[2];
-		let FLK=D+ FLJ;
-		let FLP;
-		let FLQ;
-		if FLL!=0.0{
-		let FLM=-AE;
-		let FLN=L2([(AF* EJ),0.0]);
-		FLP=FLM;
-		FLQ=FLN;
+		let FKY;
+		let FKZ;
+		let FLA;
+		if AD{
+		let FLB=-DJJ;
+		let FLC=XY* FLB;
+		let FLE=((((DJV* EJ)* XB)+ L6([0.0,0.0,0.0,FLC[0],FLC[1],0.0]))+ L6([0.0,0.0,(AI/ FLD),0.0,0.0,0.0]))* EJ;
+		let FLF=0f64+ (-((FLB* XB)+ (AH/ FLD)));
+		let FLH;
+		let FLI;
+		if FLG{
+		FLH=FLF;
+		FLI=FLE;
 		}else{
-		let FLO=L2([0.0,1f64]);
-		FLP=FLJ;
-		FLQ=FLO;
+		FLH=D;
+		FLI=ATW;
 		}
-		let FLR=L7([0.0,0.0,FLQ[0],0.0,0.0,0.0,FLQ[1]])- L7([FKM[0],FKM[1],FKM[2],FKM[3],FKM[4],FKM[5],0.0]);
-		let FLS=L7([0f64;7])- L7([FKN[0],FKN[1],FKN[2],FKN[3],FKN[4],FKN[5],0.0]);
-		let FLT=D+ (FLP- FKL);
-		let FLV=D+ FLU;
-		let FMB;
-		let FMC;
-		if FLW!=0.0{
-		let FLX=UJ- VG;
-		let FLY=L2([UL,0.0])- L2([0.0,1f64]);
-		let FLZ=L3([FLY[0],FLY[1],0.0]);
-		FMB=FLX;
-		FMC=FLZ;
+		let FLK=AI* FLJ;
+		let FLL=ddt(14, (AH* FLJ));
+		let FLM=ddt_derivative(14,FLL,FLK);
+		let FLN=(ctx.checked_derivative_value(FLF, FLH))+ (-FLL);
+		let FLO=FLI+ L6([0.0,0.0,(FLM* EJ),0.0,0.0,0.0]);
+		let FLQ=FLP+ L6([0.0,0.0,((FLK* (ctx.checked_derivative_value(FLL, 1f64)))* EJ),0.0,0.0,0.0]);
+		FKY=FLN;
+		FKZ=FLO;
+		FLA=FLQ;
 		}else{
-		let FMA=L3([0.0,0.0,1f64]);
-		FMB=FLU;
-		FMC=FMA;
+		FKY=FLR;
+		FKZ=ATW;
+		FLA=FLP;
 		}
-		let FMD=FMC- L3([FJH[0],FJH[1],0.0]);
-		let FME=D+ (FMB- FJF);
-		let FMG=D+ FMF;
+		let FLT=D+ FLS;
+		let FLY;
+		let FLZ;
+		if FLU!=0.0{
+		let FLV=-AE;
+		let FLW=L2([(AF* EJ),0.0]);
+		FLY=FLV;
+		FLZ=FLW;
+		}else{
+		let FLX=L2([0.0,1f64]);
+		FLY=FLS;
+		FLZ=FLX;
+		}
+		let FMA=L7([0.0,0.0,FLZ[0],0.0,0.0,0.0,FLZ[1]])- L7([FKZ[0],FKZ[1],FKZ[2],FKZ[3],FKZ[4],FKZ[5],0.0]);
+		let FMB=L7([0f64;7])- L7([FLA[0],FLA[1],FLA[2],FLA[3],FLA[4],FLA[5],0.0]);
+		let FMC=D+ (FLY- FKY);
+		let FME=D+ FMD;
 		let FMK;
 		let FML;
-		if FMH!=0.0{
-		let FMI=L3([UY[0],UY[1],0.0]);
-		FMK=UX;
+		if FMF!=0.0{
+		let FMG=UJ- VG;
+		let FMH=L2([UL,0.0])- L2([0.0,1f64]);
+		let FMI=L3([FMH[0],FMH[1],0.0]);
+		FMK=FMG;
 		FML=FMI;
 		}else{
 		let FMJ=L3([0.0,0.0,1f64]);
-		FMK=FMF;
+		FMK=FMD;
 		FML=FMJ;
 		}
-		let FMM=FML- L3([FEJ[0],FEJ[1],0.0]);
-		let FMN=D+ (FMK- FEI);
+		let FMM=FML- L3([FJU[0],FJU[1],0.0]);
+		let FMN=D+ (FMK- FJS);
 		let FMP=D+ FMO;
-		let FMV;
-		let FMW;
+		let FMT;
+		let FMU;
 		if FMQ!=0.0{
-		let FMR=UJ- VD;
-		let FMS=L2([UL,0.0])- L2([0.0,1f64]);
-		let FMT=L3([FMS[0],FMS[1],0.0]);
-		FMV=FMR;
-		FMW=FMT;
+		let FMR=L3([UY[0],UY[1],0.0]);
+		FMT=UX;
+		FMU=FMR;
 		}else{
-		let FMU=L3([0.0,0.0,1f64]);
-		FMV=FMO;
-		FMW=FMU;
+		let FMS=L3([0.0,0.0,1f64]);
+		FMT=FMO;
+		FMU=FMS;
 		}
-		let FMX=FMW- L3([FJI[0],FJI[1],0.0]);
-		let FMY=D+ (FMV- FJG);
-		let FNA=D+ FMZ;
+		let FMV=FMU- L3([FEJ[0],FEJ[1],0.0]);
+		let FMW=D+ (FMT- FEI);
+		let FMY=D+ FMX;
 		let FNE;
 		let FNF;
-		if FNB!=0.0{
-		let FNC=L3([UM[0],UM[1],0.0]);
-		FNE=UK;
+		if FMZ!=0.0{
+		let FNA=UJ- VD;
+		let FNB=L2([UL,0.0])- L2([0.0,1f64]);
+		let FNC=L3([FNB[0],FNB[1],0.0]);
+		FNE=FNA;
 		FNF=FNC;
 		}else{
 		let FND=L3([0.0,0.0,1f64]);
-		FNE=FMZ;
+		FNE=FMX;
 		FNF=FND;
 		}
-		let FNG=L9([0.0,FNF[0],0.0,0.0,FNF[1],0.0,0.0,0.0,FNF[2]])- L9([FKF[0],FKF[1],FKF[2],FKF[3],FKF[4],FKF[5],FKF[6],FKF[7],0.0]);
-		let FNH=L9([0f64;9])- L9([FKG[0],FKG[1],FKG[2],FKG[3],FKG[4],FKG[5],FKG[6],FKG[7],0.0]);
-		let FNI=D+ (FNE- FKE);
-		let FNK=D+ FNJ;
-		let FNQ;
-		let FNR;
-		if FNL!=0.0{
-		let FNM=FAM- UE;
-		let FNN=L2([1f64,0.0])- L2([0.0,1f64]);
-		let FNO=L3([FNN[0],FNN[1],0.0]);
-		FNQ=FNM;
-		FNR=FNO;
+		let FNG=FNF- L3([FJV[0],FJV[1],0.0]);
+		let FNH=D+ (FNE- FJT);
+		let FNJ=D+ FNI;
+		let FNN;
+		let FNO;
+		if FNK!=0.0{
+		let FNL=L3([UM[0],UM[1],0.0]);
+		FNN=UK;
+		FNO=FNL;
 		}else{
-		let FNP=L3([0.0,0.0,1f64]);
-		FNQ=FNJ;
-		FNR=FNP;
+		let FNM=L3([0.0,0.0,1f64]);
+		FNN=FNI;
+		FNO=FNM;
 		}
-		let FNS=L7([FNR[0],0.0,0.0,FNR[1],0.0,0.0,FNR[2]])- L7([FAK[0],FAK[1],FAK[2],FAK[3],FAK[4],FAK[5],0.0]);
-		let FNT=D+ (FNQ- FAI);
-		let FNV=D+ FNU;
-		let FOB;
-		let FOC;
-		if FNW!=0.0{
-		let FNX=FIH- VJ;
-		let FNY=L2([1f64,0.0])- L2([0.0,VK]);
-		let FNZ=L3([FNY[0],FNY[1],0.0]);
-		FOB=FNX;
-		FOC=FNZ;
+		let FNP=L9([0.0,FNO[0],0.0,0.0,FNO[1],0.0,0.0,0.0,FNO[2]])- L9([FKS[0],FKS[1],FKS[2],FKS[3],FKS[4],FKS[5],FKS[6],FKS[7],0.0]);
+		let FNQ=L9([0f64;9])- L9([FKT[0],FKT[1],FKT[2],FKT[3],FKT[4],FKT[5],FKT[6],FKT[7],0.0]);
+		let FNR=D+ (FNN- FKR);
+		let FNT=D+ FNS;
+		let FNZ;
+		let FOA;
+		if FNU!=0.0{
+		let FNV=FAM- UE;
+		let FNW=L2([1f64,0.0])- L2([0.0,1f64]);
+		let FNX=L3([FNW[0],FNW[1],0.0]);
+		FNZ=FNV;
+		FOA=FNX;
 		}else{
-		let FOA=L3([0.0,0.0,1f64]);
-		FOB=FNU;
-		FOC=FOA;
+		let FNY=L3([0.0,0.0,1f64]);
+		FNZ=FNS;
+		FOA=FNY;
 		}
-		let FOD=FOC- L3([FID[0],FID[1],0.0]);
-		let FOE=D+ (FOB- FIC);
-		let FOG=D+ FOF;
-		let FOM;
-		let FON;
-		if FOH!=0.0{
-		let FOI=UP- VJ;
-		let FOJ=L2([UQ,0.0])- L2([0.0,VK]);
-		let FOK=L3([FOJ[0],FOJ[1],0.0]);
-		FOM=FOI;
-		FON=FOK;
+		let FOB=L7([FOA[0],0.0,0.0,FOA[1],0.0,0.0,FOA[2]])- L7([FAK[0],FAK[1],FAK[2],FAK[3],FAK[4],FAK[5],0.0]);
+		let FOC=D+ (FNZ- FAI);
+		let FOE=D+ FOD;
+		let FOK;
+		let FOL;
+		if FOF!=0.0{
+		let FOG=FIU- VJ;
+		let FOH=L2([1f64,0.0])- L2([0.0,VK]);
+		let FOI=L3([FOH[0],FOH[1],0.0]);
+		FOK=FOG;
+		FOL=FOI;
 		}else{
-		let FOL=L3([0.0,0.0,1f64]);
-		FOM=FOF;
-		FON=FOL;
+		let FOJ=L3([0.0,0.0,1f64]);
+		FOK=FOD;
+		FOL=FOJ;
 		}
-		let FOO=L8([0.0,0.0,0.0,0.0,0.0,FON[0],FON[1],FON[2]])- L8([FIQ[0],FIQ[1],FIQ[2],FIQ[3],FIQ[4],FIQ[5],FIQ[6],0.0]);
-		let FOP=D+ (FOM- FIP);
-		let FOR=D+ FOQ;
-		let FOX;
-		let FOY;
-		if FOS!=0.0{
-		let FOT=FAX- UF;
-		let FOU=L2([1f64,0.0])- L2([0.0,UG]);
-		let FOV=L3([FOU[0],FOU[1],0.0]);
-		FOX=FOT;
-		FOY=FOV;
+		let FOM=FOL- L3([FIQ[0],FIQ[1],0.0]);
+		let FON=D+ (FOK- FIP);
+		let FOP=D+ FOO;
+		let FOV;
+		let FOW;
+		if FOQ!=0.0{
+		let FOR=UP- VJ;
+		let FOS=L2([UQ,0.0])- L2([0.0,VK]);
+		let FOT=L3([FOS[0],FOS[1],0.0]);
+		FOV=FOR;
+		FOW=FOT;
 		}else{
-		let FOW=L3([0.0,0.0,1f64]);
-		FOX=FOQ;
-		FOY=FOW;
+		let FOU=L3([0.0,0.0,1f64]);
+		FOV=FOO;
+		FOW=FOU;
 		}
-		let FOZ=L6([FOY[0],0.0,0.0,FOY[1],0.0,FOY[2]])- L6([FAL[0],FAL[1],FAL[2],FAL[3],FAL[4],0.0]);
-		let FPA=D+ (FOX- FAJ);
-		let FPB=FCU[0];
-		let FPC=FCU[1];
-		let FPD=FCU[2];
-		let FPE=FCU[3];
-		let FPF=FCU[4];
-		let FPG=FCU[5];
-		let FPH=FCU[6];
-		let FPI=FCU[7];
-		let FPJ=FCV[0];
-		let FPK=FCV[1];
-		let FPL=FCV[2];
-		let FPM=FCV[3];
-		let FPN=FCV[4];
-		let FPO=FCV[5];
-		let FPP=FCV[6];
-		let FPQ=FCV[7];
-		let FPR=FCW[0];
-		let FPS=FCW[1];
-		let FPT=FCW[2];
-		let FPU=FCW[3];
-		let FPV=FCW[4];
-		let FPW=FCW[5];
-		let FPX=FCW[6];
-		let FPY=FCW[7];
-		let FPZ=FCN[0];
-		let FQA=FCN[1];
-		let FQB=FCN[2];
-		let FQC=FCN[3];
-		let FQD=FCN[4];
-		let FQE=FCN[5];
-		let FQF=FDX[0];
-		let FQG=FDX[1];
-		let FQH=FDX[2];
-		let FQI=FDZ[0];
-		let FQJ=FDZ[1];
-		let FQK=FDZ[2];
-		let FQL=FEB[0];
-		let FQM=FEB[1];
-		let FQN=FEB[2];
-		let FQO=FEB[3];
-		let FQP=FEB[4];
-		let FQQ=FEB[5];
-		let FQR=FED[0];
-		let FQS=FED[1];
-		let FQT=FED[2];
-		let FQU=FED[3];
-		let FQV=FED[4];
-		let FQW=FED[5];
-		let FQX=DKG[0];
-		let FQY=DKG[1];
-		let FQZ=DKG[2];
-		let FRA=DKG[3];
-		let FRB=DKG[4];
-		let FRC=DKG[5];
-		let FRD=CZK[0];
-		let FRE=CZK[1];
-		let FRF=CZK[2];
-		let FRG=FEM[0];
-		let FRH=FCS[0];
-		let FRI=FEM[1];
-		let FRJ=FCS[1];
-		let FRK=FEM[2];
-		let FRL=FCS[2];
-		let FRM=FEM[3];
-		let FRN=FEM[4];
-		let FRO=FEM[5];
-		let FRP=FFH[0];
-		let FRQ=FFI[0];
-		let FRR=FFH[1];
-		let FRS=FFI[1];
-		let FRT=FFH[2];
-		let FRU=FFI[2];
-		let FRV=FFH[3];
-		let FRW=FFI[3];
-		let FRX=FFH[4];
-		let FRY=FFI[4];
-		let FRZ=FFH[5];
-		let FSA=FFI[5];
-		let FSB=FFL[0];
-		let FSC=FFM[0];
-		let FSD=FFL[1];
-		let FSE=FFM[1];
-		let FSF=FFL[2];
-		let FSG=FFM[2];
-		let FSH=FFL[3];
-		let FSI=FFM[3];
-		let FSJ=FFL[4];
-		let FSK=FFM[4];
-		let FSL=FFL[5];
-		let FSM=FFM[5];
-		let FSN=FFP[0];
-		let FSO=FFQ[0];
-		let FSP=FFP[1];
-		let FSQ=FFQ[1];
-		let FSR=FFP[2];
-		let FSS=FFT[0];
-		let FST=FFU[0];
-		let FSU=FFT[1];
-		let FSV=FFU[1];
-		let FSW=FFT[2];
-		let FSX=FHJ[0];
-		let FSY=FHP[0];
-		let FSZ=FHJ[1];
-		let FTA=FHP[1];
-		let FTB=FHJ[2];
-		let FTC=FHP[2];
-		let FTD=FHJ[3];
-		let FTE=FHP[3];
-		let FTF=FHK[0];
-		let FTG=FHQ[0];
-		let FTH=FHK[1];
-		let FTI=FHQ[1];
-		let FTJ=FHK[2];
-		let FTK=FHQ[2];
-		let FTL=FHL[0];
-		let FTM=FHR[0];
-		let FTN=FHL[1];
-		let FTO=FHR[1];
-		let FTP=FHM[0];
-		let FTQ=FHS[0];
-		let FTR=FHM[1];
-		let FTS=FHS[1];
-		let FTT=FHM[2];
-		let FTU=FHS[2];
-		let FTV=FHM[3];
-		let FTW=FHS[3];
-		let FTX=FHN[0];
-		let FTY=FHT[0];
-		let FTZ=FHN[1];
-		let FUA=FHT[1];
-		let FUB=FHN[2];
-		let FUC=FHT[2];
-		let FUD=FHO[0];
-		let FUE=FHU[0];
-		let FUF=FHO[1];
-		let FUG=FHU[1];
-		let FUH=FHW[0];
-		let FUI=ETJ[0];
-		let FUJ=FHW[1];
-		let FUK=ETJ[1];
-		let FUL=FHW[2];
-		let FUM=ETJ[2];
-		let FUN=FHZ[0];
-		let FUO=ETG[0];
-		let FUP=FHZ[1];
-		let FUQ=ETG[1];
-		let FUR=1f64;
-		let FUS=FLR[0];
-		let FUT=FLS[0];
-		let FUU=FLR[1];
-		let FUV=FLS[1];
-		let FUW=FLR[2];
-		let FUX=FLS[2];
-		let FUY=FLR[3];
-		let FUZ=FLS[3];
-		let FVA=FLR[4];
-		let FVB=FLS[4];
-		let FVC=FLR[5];
-		let FVD=FLS[5];
-		let FVE=FLR[6];
-		let FVF=FLS[6];
-		let FVG=1f64;
-		let FVH=FMD[0];
-		let FVI=FMD[1];
-		let FVJ=FMD[2];
-		let FVK=1f64;
-		let FVL=FMM[0];
-		let FVM=FMM[1];
-		let FVN=FMM[2];
-		let FVO=1f64;
-		let FVP=FMX[0];
-		let FVQ=FMX[1];
-		let FVR=FMX[2];
-		let FVS=1f64;
-		let FVT=FNG[0];
-		let FVU=FNH[0];
-		let FVV=FNG[1];
-		let FVW=FNH[1];
-		let FVX=FNG[2];
-		let FVY=FNH[2];
-		let FVZ=FNG[3];
-		let FWA=FNH[3];
-		let FWB=FNG[4];
-		let FWC=FNH[4];
-		let FWD=FNG[5];
-		let FWE=FNH[5];
-		let FWF=FNG[6];
-		let FWG=FNH[6];
-		let FWH=FNG[7];
-		let FWI=FNH[7];
-		let FWJ=FNG[8];
-		let FWK=FNH[8];
-		let FWL=1f64;
-		let FWM=FNS[0];
-		let FWN=FNS[1];
-		let FWO=FNS[2];
-		let FWP=FNS[3];
-		let FWQ=FNS[4];
-		let FWR=FNS[5];
-		let FWS=FNS[6];
-		let FWT=1f64;
-		let FWU=FOD[0];
-		let FWV=FOD[1];
-		let FWW=FOD[2];
-		let FWX=1f64;
-		let FWY=FOO[0];
-		let FWZ=FOO[1];
-		let FXA=FOO[2];
-		let FXB=FOO[3];
-		let FXC=FOO[4];
-		let FXD=FOO[5];
-		let FXE=FOO[6];
-		let FXF=FOO[7];
-		let FXG=1f64;
-		let FXH=FOZ[0];
-		let FXI=FOZ[1];
-		let FXJ=FOZ[2];
-		let FXK=FOZ[3];
-		let FXL=FOZ[4];
-		let FXM=FOZ[5];
+		let FOX=L8([0.0,0.0,0.0,0.0,0.0,FOW[0],FOW[1],FOW[2]])- L8([FJD[0],FJD[1],FJD[2],FJD[3],FJD[4],FJD[5],FJD[6],0.0]);
+		let FOY=D+ (FOV- FJC);
+		let FPA=D+ FOZ;
+		let FPG;
+		let FPH;
+		if FPB!=0.0{
+		let FPC=FAX- UF;
+		let FPD=L2([1f64,0.0])- L2([0.0,UG]);
+		let FPE=L3([FPD[0],FPD[1],0.0]);
+		FPG=FPC;
+		FPH=FPE;
+		}else{
+		let FPF=L3([0.0,0.0,1f64]);
+		FPG=FOZ;
+		FPH=FPF;
+		}
+		let FPI=L6([FPH[0],0.0,0.0,FPH[1],0.0,FPH[2]])- L6([FAL[0],FAL[1],FAL[2],FAL[3],FAL[4],0.0]);
+		let FPJ=D+ (FPG- FAJ);
+		let FPK=FCU[0];
+		let FPL=FCU[1];
+		let FPM=FCU[2];
+		let FPN=FCU[3];
+		let FPO=FCU[4];
+		let FPP=FCU[5];
+		let FPQ=FCU[6];
+		let FPR=FCU[7];
+		let FPS=FCV[0];
+		let FPT=FCV[1];
+		let FPU=FCV[2];
+		let FPV=FCV[3];
+		let FPW=FCV[4];
+		let FPX=FCV[5];
+		let FPY=FCV[6];
+		let FPZ=FCV[7];
+		let FQA=FCW[0];
+		let FQB=FCW[1];
+		let FQC=FCW[2];
+		let FQD=FCW[3];
+		let FQE=FCW[4];
+		let FQF=FCW[5];
+		let FQG=FCW[6];
+		let FQH=FCW[7];
+		let FQI=FCN[0];
+		let FQJ=FCN[1];
+		let FQK=FCN[2];
+		let FQL=FCN[3];
+		let FQM=FCN[4];
+		let FQN=FCN[5];
+		let FQO=FDX[0];
+		let FQP=FDX[1];
+		let FQQ=FDX[2];
+		let FQR=FDZ[0];
+		let FQS=FDZ[1];
+		let FQT=FDZ[2];
+		let FQU=FEB[0];
+		let FQV=FEB[1];
+		let FQW=FEB[2];
+		let FQX=FEB[3];
+		let FQY=FEB[4];
+		let FQZ=FEB[5];
+		let FRA=FED[0];
+		let FRB=FED[1];
+		let FRC=FED[2];
+		let FRD=FED[3];
+		let FRE=FED[4];
+		let FRF=FED[5];
+		let FRG=DKG[0];
+		let FRH=DKG[1];
+		let FRI=DKG[2];
+		let FRJ=DKG[3];
+		let FRK=DKG[4];
+		let FRL=DKG[5];
+		let FRM=CZK[0];
+		let FRN=CZK[1];
+		let FRO=CZK[2];
+		let FRP=FEL[0];
+		let FRQ=FEM[0];
+		let FRR=FEL[1];
+		let FRS=FEM[1];
+		let FRT=FEL[2];
+		let FRU=FEM[2];
+		let FRV=FEL[3];
+		let FRW=FEM[3];
+		let FRX=FEL[4];
+		let FRY=FEM[4];
+		let FRZ=FEL[5];
+		let FSA=FEM[5];
+		let FSB=FFJ[0];
+		let FSC=FFK[0];
+		let FSD=FFJ[1];
+		let FSE=FFK[1];
+		let FSF=FFJ[2];
+		let FSG=FFK[2];
+		let FSH=FFJ[3];
+		let FSI=FFK[3];
+		let FSJ=FFJ[4];
+		let FSK=FFK[4];
+		let FSL=FFJ[5];
+		let FSM=FFK[5];
+		let FSN=FFO[0];
+		let FSO=FFP[0];
+		let FSP=FFO[1];
+		let FSQ=FFP[1];
+		let FSR=FFO[2];
+		let FSS=FFP[2];
+		let FST=FFO[3];
+		let FSU=FFP[3];
+		let FSV=FFO[4];
+		let FSW=FFP[4];
+		let FSX=FFO[5];
+		let FSY=FFP[5];
+		let FSZ=FFT[0];
+		let FTA=FFU[0];
+		let FTB=FFT[1];
+		let FTC=FFU[1];
+		let FTD=FFT[2];
+		let FTE=FFU[2];
+		let FTF=FFY[0];
+		let FTG=FFZ[0];
+		let FTH=FFY[1];
+		let FTI=FFZ[1];
+		let FTJ=FFY[2];
+		let FTK=FFZ[2];
+		let FTL=FHU[0];
+		let FTM=FIA[0];
+		let FTN=FHU[1];
+		let FTO=FIA[1];
+		let FTP=FHU[2];
+		let FTQ=FIA[2];
+		let FTR=FHU[3];
+		let FTS=FIA[3];
+		let FTT=FHV[0];
+		let FTU=FIB[0];
+		let FTV=FHV[1];
+		let FTW=FIB[1];
+		let FTX=FHV[2];
+		let FTY=FIB[2];
+		let FTZ=FHW[0];
+		let FUA=FIC[0];
+		let FUB=FHW[1];
+		let FUC=FIC[1];
+		let FUD=FHX[0];
+		let FUE=FID[0];
+		let FUF=FHX[1];
+		let FUG=FID[1];
+		let FUH=FHX[2];
+		let FUI=FID[2];
+		let FUJ=FHX[3];
+		let FUK=FID[3];
+		let FUL=FHY[0];
+		let FUM=FIE[0];
+		let FUN=FHY[1];
+		let FUO=FIE[1];
+		let FUP=FHY[2];
+		let FUQ=FIE[2];
+		let FUR=FHZ[0];
+		let FUS=FIF[0];
+		let FUT=FHZ[1];
+		let FUU=FIF[1];
+		let FUV=FIH[0];
+		let FUW=FII[0];
+		let FUX=FIH[1];
+		let FUY=FII[1];
+		let FUZ=FIH[2];
+		let FVA=FII[2];
+		let FVB=FIL[0];
+		let FVC=FIM[0];
+		let FVD=FIL[1];
+		let FVE=FIM[1];
+		let FVF=1f64;
+		let FVG=FMA[0];
+		let FVH=FMB[0];
+		let FVI=FMA[1];
+		let FVJ=FMB[1];
+		let FVK=FMA[2];
+		let FVL=FMB[2];
+		let FVM=FMA[3];
+		let FVN=FMB[3];
+		let FVO=FMA[4];
+		let FVP=FMB[4];
+		let FVQ=FMA[5];
+		let FVR=FMB[5];
+		let FVS=FMA[6];
+		let FVT=FMB[6];
+		let FVU=1f64;
+		let FVV=FMM[0];
+		let FVW=FMM[1];
+		let FVX=FMM[2];
+		let FVY=1f64;
+		let FVZ=FMV[0];
+		let FWA=FMV[1];
+		let FWB=FMV[2];
+		let FWC=1f64;
+		let FWD=FNG[0];
+		let FWE=FNG[1];
+		let FWF=FNG[2];
+		let FWG=1f64;
+		let FWH=FNP[0];
+		let FWI=FNQ[0];
+		let FWJ=FNP[1];
+		let FWK=FNQ[1];
+		let FWL=FNP[2];
+		let FWM=FNQ[2];
+		let FWN=FNP[3];
+		let FWO=FNQ[3];
+		let FWP=FNP[4];
+		let FWQ=FNQ[4];
+		let FWR=FNP[5];
+		let FWS=FNQ[5];
+		let FWT=FNP[6];
+		let FWU=FNQ[6];
+		let FWV=FNP[7];
+		let FWW=FNQ[7];
+		let FWX=FNP[8];
+		let FWY=FNQ[8];
+		let FWZ=1f64;
+		let FXA=FOB[0];
+		let FXB=FOB[1];
+		let FXC=FOB[2];
+		let FXD=FOB[3];
+		let FXE=FOB[4];
+		let FXF=FOB[5];
+		let FXG=FOB[6];
+		let FXH=1f64;
+		let FXI=FOM[0];
+		let FXJ=FOM[1];
+		let FXK=FOM[2];
+		let FXL=1f64;
+		let FXM=FOX[0];
+		let FXN=FOX[1];
+		let FXO=FOX[2];
+		let FXP=FOX[3];
+		let FXQ=FOX[4];
+		let FXR=FOX[5];
+		let FXS=FOX[6];
+		let FXT=FOX[7];
+		let FXU=1f64;
+		let FXV=FPI[0];
+		let FXW=FPI[1];
+		let FXX=FPI[2];
+		let FXY=FPI[3];
+		let FXZ=FPI[4];
+		let FYA=FPI[5];
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[747]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[748]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[749]; }
@@ -11562,7 +11559,7 @@ impl Instance {
             Some(8),
             multiplicity * (FCK),
             [3, 5, 6, 7, 8, 9, 11, 12],
-            [FPB, FPC, FPD, FPE, FPF, FPG, FPH, FPI],
+            [FPK, FPL, FPM, FPN, FPO, FPP, FPQ, FPR],
             [],
             [],
             multiplicity,
@@ -11572,7 +11569,7 @@ impl Instance {
             Some(5),
             multiplicity * (FCL),
             [3, 5, 6, 7, 8, 9, 11, 12],
-            [FPJ, FPK, FPL, FPM, FPN, FPO, FPP, FPQ],
+            [FPS, FPT, FPU, FPV, FPW, FPX, FPY, FPZ],
             [],
             [],
             multiplicity,
@@ -11582,7 +11579,7 @@ impl Instance {
             Some(7),
             multiplicity * (FCM),
             [3, 5, 6, 7, 8, 9, 11, 12],
-            [FPR, FPS, FPT, FPU, FPV, FPW, FPX, FPY],
+            [FQA, FQB, FQC, FQD, FQE, FQF, FQG, FQH],
             [],
             [],
             multiplicity,
@@ -11592,7 +11589,7 @@ impl Instance {
             Some(5),
             multiplicity * (FDB),
             [3, 5, 6, 7, 8, 9],
-            [FPZ, FQA, FQB, FQC, FQD, FQE],
+            [FQI, FQJ, FQK, FQL, FQM, FQN],
             [],
             [],
             multiplicity,
@@ -11602,7 +11599,7 @@ impl Instance {
             Some(7),
             multiplicity * (FDY),
             [6, 7, 12],
-            [FQF, FQG, FQH],
+            [FQO, FQP, FQQ],
             [],
             [],
             multiplicity,
@@ -11612,7 +11609,7 @@ impl Instance {
             Some(8),
             multiplicity * (FEA),
             [6, 8, 11],
-            [FQI, FQJ, FQK],
+            [FQR, FQS, FQT],
             [],
             [],
             multiplicity,
@@ -11622,7 +11619,7 @@ impl Instance {
             Some(7),
             multiplicity * (FEC),
             [3, 5, 6, 7, 8, 9],
-            [FQL, FQM, FQN, FQO, FQP, FQQ],
+            [FQU, FQV, FQW, FQX, FQY, FQZ],
             [],
             [],
             multiplicity,
@@ -11632,7 +11629,7 @@ impl Instance {
             Some(8),
             multiplicity * (FEE),
             [3, 5, 6, 7, 8, 9],
-            [FQR, FQS, FQT, FQU, FQV, FQW],
+            [FRA, FRB, FRC, FRD, FRE, FRF],
             [],
             [],
             multiplicity,
@@ -11642,7 +11639,7 @@ impl Instance {
             Some(5),
             multiplicity * (FEF),
             [3, 5, 6, 7, 8, 9],
-            [FQX, FQY, FQZ, FRA, FRB, FRC],
+            [FRG, FRH, FRI, FRJ, FRK, FRL],
             [],
             [],
             multiplicity,
@@ -11652,7 +11649,7 @@ impl Instance {
             Some(4),
             multiplicity * (FEG),
             [4, 6, 9],
-            [FRD, FRE, FRF],
+            [FRM, FRN, FRO],
             [],
             [],
             multiplicity,
@@ -11712,7 +11709,7 @@ impl Instance {
             Some(5),
             multiplicity * (FEN),
             [3, 5, 6, 7, 8, 9],
-            [FRG, FRI, FRK, FRM, FRN, FRO],
+            [FRP, FRR, FRT, FRV, FRX, FRZ],
             [],
             [],
             multiplicity,
@@ -11720,9 +11717,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(9),
             Some(5),
-            multiplicity * (FFJ),
+            multiplicity * (FFL),
             [3, 5, 6, 7, 8, 9],
-            [FRP, FRR, FRT, FRV, FRX, FRZ],
+            [FSB, FSD, FSF, FSH, FSJ, FSL],
             [],
             [],
             multiplicity,
@@ -11730,9 +11727,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(3),
             Some(5),
-            multiplicity * (FFN),
+            multiplicity * (FFQ),
             [3, 5, 6, 7, 8, 9],
-            [FSB, FSD, FSF, FSH, FSJ, FSL],
+            [FSN, FSP, FSR, FST, FSV, FSX],
             [],
             [],
             multiplicity,
@@ -11740,9 +11737,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(12),
             Some(7),
-            multiplicity * (FFR),
+            multiplicity * (FFV),
             [6, 7, 12],
-            [FSN, FSP, FSR],
+            [FSZ, FTB, FTD],
             [],
             [],
             multiplicity,
@@ -11750,39 +11747,39 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(11),
             Some(8),
-            multiplicity * (FFV),
+            multiplicity * (FGA),
             [6, 8, 11],
-            [FSS, FSU, FSW],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<4, 0>(
-            Some(10),
-            Some(7),
-            multiplicity * (FHD),
-            [7, 8, 9, 10],
-            [FSX, FSZ, FTB, FTD],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<3, 0>(
-            Some(10),
-            Some(8),
-            multiplicity * (FHE),
-            [8, 9, 10],
             [FTF, FTH, FTJ],
             [],
             [],
             multiplicity,
         );
+        stamper.stamp_current_sparse_local::<4, 0>(
+            Some(10),
+            Some(7),
+            multiplicity * (FHO),
+            [7, 8, 9, 10],
+            [FTL, FTN, FTP, FTR],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<3, 0>(
+            Some(10),
+            Some(8),
+            multiplicity * (FHP),
+            [8, 9, 10],
+            [FTT, FTV, FTX],
+            [],
+            [],
+            multiplicity,
+        );
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(10),
             Some(3),
-            multiplicity * (FHF),
+            multiplicity * (FHQ),
             [3, 10],
-            [FTL, FTN],
+            [FTZ, FUB],
             [],
             [],
             multiplicity,
@@ -11790,9 +11787,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(9),
             Some(7),
-            multiplicity * (FHG),
+            multiplicity * (FHR),
             [7, 8, 9, 10],
-            [FTP, FTR, FTT, FTV],
+            [FUD, FUF, FUH, FUJ],
             [],
             [],
             multiplicity,
@@ -11800,9 +11797,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(9),
             Some(8),
-            multiplicity * (FHH),
+            multiplicity * (FHS),
             [8, 9, 10],
-            [FTX, FTZ, FUB],
+            [FUL, FUN, FUP],
             [],
             [],
             multiplicity,
@@ -11810,9 +11807,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(9),
             Some(3),
-            multiplicity * (FHI),
+            multiplicity * (FHT),
             [3, 9],
-            [FUD, FUF],
+            [FUR, FUT],
             [],
             [],
             multiplicity,
@@ -11820,9 +11817,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(7),
             Some(3),
-            multiplicity * (FHX),
+            multiplicity * (FIJ),
             [3, 7, 8],
-            [FUH, FUJ, FUL],
+            [FUV, FUX, FUZ],
             [],
             [],
             multiplicity,
@@ -11830,9 +11827,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(8),
             Some(3),
-            multiplicity * (FIA),
+            multiplicity * (FIN),
             [3, 8],
-            [FUN, FUP],
+            [FVB, FVD],
             [],
             [],
             multiplicity,
@@ -11840,9 +11837,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             None,
             Some(6),
-            multiplicity * (FLK),
+            multiplicity * (FLT),
             [13],
-            [FUR],
+            [FVF],
             [],
             [],
             multiplicity,
@@ -11850,9 +11847,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(13),
             None,
-            multiplicity * (FLT),
+            multiplicity * (FMC),
             [3, 5, 6, 7, 8, 9, 13],
-            [FUS, FUU, FUW, FUY, FVA, FVC, FVE],
+            [FVG, FVI, FVK, FVM, FVO, FVQ, FVS],
             [],
             [],
             multiplicity,
@@ -11860,9 +11857,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(12),
-            multiplicity * (FLV),
+            multiplicity * (FME),
             [14],
-            [FVG],
+            [FVU],
             [],
             [],
             multiplicity,
@@ -11870,9 +11867,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(14),
             None,
-            multiplicity * (FME),
+            multiplicity * (FMN),
             [5, 12, 14],
-            [FVH, FVI, FVJ],
+            [FVV, FVW, FVX],
             [],
             [],
             multiplicity,
@@ -11880,9 +11877,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(4),
-            multiplicity * (FMG),
+            multiplicity * (FMP),
             [15],
-            [FVK],
+            [FVY],
             [],
             [],
             multiplicity,
@@ -11890,9 +11887,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(15),
             None,
-            multiplicity * (FMN),
+            multiplicity * (FMW),
             [4, 5, 15],
-            [FVL, FVM, FVN],
+            [FVZ, FWA, FWB],
             [],
             [],
             multiplicity,
@@ -11900,9 +11897,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(11),
-            multiplicity * (FMP),
+            multiplicity * (FMY),
             [16],
-            [FVO],
+            [FWC],
             [],
             [],
             multiplicity,
@@ -11910,9 +11907,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(16),
             None,
-            multiplicity * (FMY),
+            multiplicity * (FNH),
             [5, 11, 16],
-            [FVP, FVQ, FVR],
+            [FWD, FWE, FWF],
             [],
             [],
             multiplicity,
@@ -11920,9 +11917,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(8),
-            multiplicity * (FNA),
+            multiplicity * (FNJ),
             [17],
-            [FVS],
+            [FWG],
             [],
             [],
             multiplicity,
@@ -11930,9 +11927,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<9, 0>(
             Some(17),
             None,
-            multiplicity * (FNI),
+            multiplicity * (FNR),
             [3, 5, 6, 7, 8, 9, 11, 12, 17],
-            [FVT, FVV, FVX, FVZ, FWB, FWD, FWF, FWH, FWJ],
+            [FWH, FWJ, FWL, FWN, FWP, FWR, FWT, FWV, FWX],
             [],
             [],
             multiplicity,
@@ -11940,9 +11937,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(0),
             Some(7),
-            multiplicity * (FNK),
+            multiplicity * (FNT),
             [18],
-            [FWL],
+            [FWZ],
             [],
             [],
             multiplicity,
@@ -11950,9 +11947,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(18),
             None,
-            multiplicity * (FNT),
+            multiplicity * (FOC),
             [0, 5, 6, 7, 8, 9, 18],
-            [FWM, FWN, FWO, FWP, FWQ, FWR, FWS],
+            [FXA, FXB, FXC, FXD, FXE, FXF, FXG],
             [],
             [],
             multiplicity,
@@ -11960,9 +11957,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(10),
-            multiplicity * (FNV),
+            multiplicity * (FOE),
             [19],
-            [FWT],
+            [FXH],
             [],
             [],
             multiplicity,
@@ -11970,9 +11967,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(19),
             None,
-            multiplicity * (FOE),
+            multiplicity * (FON),
             [1, 10, 19],
-            [FWU, FWV, FWW],
+            [FXI, FXJ, FXK],
             [],
             [],
             multiplicity,
@@ -11980,9 +11977,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             Some(10),
-            multiplicity * (FOG),
+            multiplicity * (FOP),
             [20],
-            [FWX],
+            [FXL],
             [],
             [],
             multiplicity,
@@ -11990,9 +11987,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<8, 0>(
             Some(20),
             None,
-            multiplicity * (FOP),
+            multiplicity * (FOY),
             [3, 5, 6, 7, 8, 9, 10, 20],
-            [FWY, FWZ, FXA, FXB, FXC, FXD, FXE, FXF],
+            [FXM, FXN, FXO, FXP, FXQ, FXR, FXS, FXT],
             [],
             [],
             multiplicity,
@@ -12000,9 +11997,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             Some(8),
-            multiplicity * (FOR),
+            multiplicity * (FPA),
             [21],
-            [FXG],
+            [FXU],
             [],
             [],
             multiplicity,
@@ -12010,76 +12007,76 @@ impl Instance {
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(21),
             None,
-            multiplicity * (FPA),
+            multiplicity * (FPJ),
             [2, 5, 6, 8, 9, 21],
-            [FXH, FXI, FXJ, FXK, FXL, FXM],
+            [FXV, FXW, FXX, FXY, FXZ, FYA],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = FRH;
-        self.canonical_reactive[1] = FRJ;
-        self.canonical_reactive[2] = FRL;
-        self.canonical_reactive[3] = FLF;
-        self.canonical_reactive[4] = FLG;
-        self.canonical_reactive[5] = FLE;
-        self.canonical_reactive[6] = FRQ;
-        self.canonical_reactive[7] = FRS;
-        self.canonical_reactive[8] = FRU;
-        self.canonical_reactive[9] = FRW;
-        self.canonical_reactive[10] = FRY;
-        self.canonical_reactive[11] = FSA;
-        self.canonical_reactive[12] = FSC;
-        self.canonical_reactive[13] = FSE;
-        self.canonical_reactive[14] = FSG;
-        self.canonical_reactive[15] = FSI;
-        self.canonical_reactive[16] = FSK;
-        self.canonical_reactive[17] = FSM;
-        self.canonical_reactive[18] = FSO;
-        self.canonical_reactive[19] = FSQ;
-        self.canonical_reactive[20] = FLH;
-        self.canonical_reactive[21] = FST;
-        self.canonical_reactive[22] = FSV;
-        self.canonical_reactive[23] = FLI;
-        self.canonical_reactive[24] = FSY;
-        self.canonical_reactive[25] = FTA;
-        self.canonical_reactive[26] = FTC;
-        self.canonical_reactive[27] = FTE;
-        self.canonical_reactive[28] = FTG;
-        self.canonical_reactive[29] = FTI;
-        self.canonical_reactive[30] = FTK;
-        self.canonical_reactive[31] = FTM;
-        self.canonical_reactive[32] = FTO;
-        self.canonical_reactive[33] = FTQ;
-        self.canonical_reactive[34] = FTS;
-        self.canonical_reactive[35] = FTU;
-        self.canonical_reactive[36] = FTW;
-        self.canonical_reactive[37] = FTY;
-        self.canonical_reactive[38] = FUA;
-        self.canonical_reactive[39] = FUC;
-        self.canonical_reactive[40] = FUE;
-        self.canonical_reactive[41] = FUG;
-        self.canonical_reactive[42] = FUI;
-        self.canonical_reactive[43] = FUK;
-        self.canonical_reactive[44] = FUM;
-        self.canonical_reactive[45] = FUO;
-        self.canonical_reactive[46] = FUQ;
-        self.canonical_reactive[47] = FUT;
-        self.canonical_reactive[48] = FUV;
-        self.canonical_reactive[49] = FUX;
-        self.canonical_reactive[50] = FUZ;
-        self.canonical_reactive[51] = FVB;
-        self.canonical_reactive[52] = FVD;
-        self.canonical_reactive[53] = FVF;
-        self.canonical_reactive[54] = FVU;
-        self.canonical_reactive[55] = FVW;
-        self.canonical_reactive[56] = FVY;
-        self.canonical_reactive[57] = FWA;
-        self.canonical_reactive[58] = FWC;
-        self.canonical_reactive[59] = FWE;
-        self.canonical_reactive[60] = FWG;
-        self.canonical_reactive[61] = FWI;
-        self.canonical_reactive[62] = FWK;
+        self.canonical_reactive[0] = FRQ;
+        self.canonical_reactive[1] = FRS;
+        self.canonical_reactive[2] = FRU;
+        self.canonical_reactive[3] = FRW;
+        self.canonical_reactive[4] = FRY;
+        self.canonical_reactive[5] = FSA;
+        self.canonical_reactive[6] = FSC;
+        self.canonical_reactive[7] = FSE;
+        self.canonical_reactive[8] = FSG;
+        self.canonical_reactive[9] = FSI;
+        self.canonical_reactive[10] = FSK;
+        self.canonical_reactive[11] = FSM;
+        self.canonical_reactive[12] = FSO;
+        self.canonical_reactive[13] = FSQ;
+        self.canonical_reactive[14] = FSS;
+        self.canonical_reactive[15] = FSU;
+        self.canonical_reactive[16] = FSW;
+        self.canonical_reactive[17] = FSY;
+        self.canonical_reactive[18] = FTA;
+        self.canonical_reactive[19] = FTC;
+        self.canonical_reactive[20] = FTE;
+        self.canonical_reactive[21] = FTG;
+        self.canonical_reactive[22] = FTI;
+        self.canonical_reactive[23] = FTK;
+        self.canonical_reactive[24] = FTM;
+        self.canonical_reactive[25] = FTO;
+        self.canonical_reactive[26] = FTQ;
+        self.canonical_reactive[27] = FTS;
+        self.canonical_reactive[28] = FTU;
+        self.canonical_reactive[29] = FTW;
+        self.canonical_reactive[30] = FTY;
+        self.canonical_reactive[31] = FUA;
+        self.canonical_reactive[32] = FUC;
+        self.canonical_reactive[33] = FUE;
+        self.canonical_reactive[34] = FUG;
+        self.canonical_reactive[35] = FUI;
+        self.canonical_reactive[36] = FUK;
+        self.canonical_reactive[37] = FUM;
+        self.canonical_reactive[38] = FUO;
+        self.canonical_reactive[39] = FUQ;
+        self.canonical_reactive[40] = FUS;
+        self.canonical_reactive[41] = FUU;
+        self.canonical_reactive[42] = FUW;
+        self.canonical_reactive[43] = FUY;
+        self.canonical_reactive[44] = FVA;
+        self.canonical_reactive[45] = FVC;
+        self.canonical_reactive[46] = FVE;
+        self.canonical_reactive[47] = FVH;
+        self.canonical_reactive[48] = FVJ;
+        self.canonical_reactive[49] = FVL;
+        self.canonical_reactive[50] = FVN;
+        self.canonical_reactive[51] = FVP;
+        self.canonical_reactive[52] = FVR;
+        self.canonical_reactive[53] = FVT;
+        self.canonical_reactive[54] = FWI;
+        self.canonical_reactive[55] = FWK;
+        self.canonical_reactive[56] = FWM;
+        self.canonical_reactive[57] = FWO;
+        self.canonical_reactive[58] = FWQ;
+        self.canonical_reactive[59] = FWS;
+        self.canonical_reactive[60] = FWU;
+        self.canonical_reactive[61] = FWW;
+        self.canonical_reactive[62] = FWY;
         if ctx.analog_tasks_enabled() && !ctx.evaluation_failed() { self.analog_effects.as_mut().expect("task evaluation began").complete_evaluation(); }
     }
 

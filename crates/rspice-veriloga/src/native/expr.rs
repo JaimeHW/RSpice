@@ -198,6 +198,7 @@ pub(crate) enum NativeOp {
     FlickerNoise,
     DdtState(usize),
     DdtJacobian,
+    DdtDerivativeState(usize),
     IdtState(usize),
     IdtJacobian,
     IdtModState(usize),
@@ -2096,6 +2097,17 @@ impl NativeProgram {
                     )?;
                     depth -= 3;
                     ops.push(NativeOp::IdtModState(*index));
+                }
+                Instruction::DdtDerivativeState(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::DdtDerivativeState(*index));
                 }
                 Instruction::IdtDerivativeState(index)
                 | Instruction::IdtModDerivativeState(index) => {
@@ -4838,7 +4850,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 };
                 self.lower_ddx_projection_derivative(*expr, *probe, wrt)
             }
-            "ddt" => self.lower_ddt_derivative(name, args, wrt),
+            "ddt" => self.lower_ddt_derivative(expr_id, name, args, wrt, None),
             "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, wrt, None),
             "slew" => {
                 let (expr, max_rise, max_fall) = match args {
@@ -5055,9 +5067,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
             }
             "idt" | "idtmod" => self.lower_idt_derivative(expr_id, name, args, first, Some(second)),
-            "ddt" => Err(self.unsupported(format!(
-                "second derivative of stateful intrinsic at expression {expr_id}"
-            ))),
+            "ddt" => self.lower_ddt_derivative(expr_id, name, args, first, Some(second)),
             "slew" => {
                 let (expr, max_rise, max_fall) = match args {
                     [expr] => (*expr, None, None),
@@ -5893,13 +5903,25 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_ddt_derivative(
         &mut self,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
+        second: Option<CanonicalDerivativeAxis>,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
-        self.lower_derivative(args[0], wrt)?;
-        self.append_unary(NativeOp::DdtJacobian)
+        let slot = self.limits.canonical_ddt_slot(expr_id).ok_or_else(|| {
+            self.unsupported(format!("{name} derivative at {expr_id} has no state slot"))
+        })?;
+        self.lower(expr_id)?;
+        if let Some(second) = second {
+            self.lower_second_derivative(args[0], wrt, second)?;
+        } else {
+            self.lower_derivative(args[0], wrt)?;
+        }
+        self.depth -= 1;
+        self.ops.push(NativeOp::DdtDerivativeState(slot));
+        Ok(())
     }
 
     fn lower_idt_derivative(
@@ -8623,6 +8645,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::FlickerNoise => "FlickerNoise",
         NativeOp::DdtState(_) => "DdtState",
         NativeOp::DdtJacobian => "DdtJacobian",
+        NativeOp::DdtDerivativeState(_) => "DdtDerivativeState",
         NativeOp::IdtState(_) => "IdtState",
         NativeOp::IdtJacobian => "IdtJacobian",
         NativeOp::IdtModState(_) => "IdtModState",
@@ -9591,7 +9614,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::AbsDelayState(_)
         | NativeOp::LastCrossingState(_)
         | NativeOp::FlickerNoise
-        | NativeOp::IdtState(_) => (2, 1),
+        | NativeOp::IdtState(_)
+        | NativeOp::DdtDerivativeState(_) => (2, 1),
 
         NativeOp::SlewState(_)
         | NativeOp::IdtDerivativeState(_)
@@ -9801,6 +9825,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::IdtDerivativeState(_) => "IdtDerivativeState",
         Instruction::IdtModDerivativeState(_) => "IdtModDerivativeState",
         Instruction::DdtJacobian => "DdtJacobian",
+        Instruction::DdtDerivativeState(_) => "DdtDerivativeState",
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",
         Instruction::LimitState(_) => "LimitState",

@@ -2,16 +2,26 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -130,11 +140,10 @@ impl Instance {
 		let QN=L5([0f64;5]);
 		let QO=0f64;
 		let QP=L3([0f64;3]);
-		let QT=ddt_scale();
 		let RH=0f64;
 		let RI=L2([0f64;2]);
-		let SB=L4([0f64;4]);
-		let SE=L3([0f64;3]);
+		let SD=L4([0f64;4]);
+		let SG=L3([0f64;3]);
 		let C=(temperature+ B)+ parameters[45];
 		let D=C> 173.14999999999998f64;
 		let F=if D{
@@ -437,8 +446,9 @@ impl Instance {
 		let FS=A+ (FR* FO);
 		let FU=A+ FT;
 		let FV=ddt(0, FT);
+		let QT=ddt_derivative(0,FV,MI);
 		let QU=QI* FV;
-		let QV=L3([QU[0],QU[1],0.0])+ L3([0.0,0.0,((MI* QT)* FO)]);
+		let QV=L3([QU[0],QU[1],0.0])+ L3([0.0,0.0,(QT* FO)]);
 		let LU=FO;
 		let LV=LU* FT;
 		let QW=MI* LU;
@@ -542,16 +552,16 @@ impl Instance {
 		let NO;
 		if HD{
 		let HE=EA* FF;
-		let RU=PZ* FF;
-		let RV=QG* EA;
-		let RW=((L5([0.0,0.0,RU[0],RU[1],RU[2]])+ L5([RV[0],RV[1],0.0,0.0,0.0]))* ((PQ* ((HE>= PP) as u8 as f64))- MG))* -1f64;
+		let RW=PZ* FF;
+		let RX=QG* EA;
+		let RY=((L5([0.0,0.0,RW[0],RW[1],RW[2]])+ L5([RX[0],RX[1],0.0,0.0,0.0]))* ((PQ* ((HE>= PP) as u8 as f64))- MG))* -1f64;
 		let HF=A+ (-1f64* (HE.abs()));
-		let RX=MH/ HB;
+		let RZ=MH/ HB;
 		let HG=A+ (B/ HB);
 		let HI=B* HH;
-		let RY=MH* HH;
+		let SA=MH* HH;
 		let HJ=ddt(1, HI);
-		let RZ=RY* QT;
+		let SB=ddt_derivative(1,HJ,SA);
 		let HK=A+ HJ;
 		KM=A;
 		KR=A;
@@ -568,13 +578,13 @@ impl Instance {
 		ME=A;
 		NE=OI;
 		NF=RH;
-		NG=RW;
-		NH=RX;
-		NI=RZ;
+		NG=RY;
+		NH=RZ;
+		NI=SB;
 		NJ=QN;
 		NK=RI;
 		NL=QN;
-		NM=RY;
+		NM=SA;
 		NN=OI;
 		NO=RH;
 		}else{
@@ -606,28 +616,30 @@ impl Instance {
 		let HS=HH* B;
 		let RN=MH* HH;
 		let HT=ddt(2, HS);
-		let RO=(RN* QT)* OS;
+		let RO=ddt_derivative(2,HT,RN);
+		let RP=RO* OS;
 		let LY=-HS;
-		let RP=RN* OS;
+		let RQ=RN* OS;
 		let HU=0f64+ (-HT);
-		let RQ=(1f64/ HM)* OS;
+		let RR=(1f64/ HM)* OS;
 		let HV=0f64+ (-(HQ/ HM));
 		let HX;
 		let NW;
 		if HW{
 		HX=HV;
-		NW=RQ;
+		NW=RR;
 		}else{
 		HX=A;
 		NW=RH;
 		}
 		let HZ=HY* HQ;
-		let RR=1f64* HY;
+		let RS=1f64* HY;
 		let IA=ddt(3, HZ);
+		let RT=ddt_derivative(3,IA,RS);
 		let MC=-HZ;
-		let RS=RR* OS;
+		let RU=RS* OS;
 		let IB=(ctx.checked_derivative_value(HV, HX))+ (-IA);
-		let RT=NW+ ((RR* QT)* OS);
+		let RV=NW+ (RT* OS);
 		KN=A;
 		KS=HU;
 		KY=A;
@@ -637,13 +649,13 @@ impl Instance {
 		LR=A;
 		LZ=LY;
 		MD=MC;
-		NP=RO;
-		NQ=RT;
+		NP=RP;
+		NQ=RV;
 		NR=RL;
 		NS=RM;
 		NT=QN;
-		NU=RP;
-		NV=RS;
+		NU=RQ;
+		NV=RU;
 		}else{
 		let IC=HA== -1f64;
 		let KO;
@@ -718,7 +730,7 @@ impl Instance {
 		}else{
 		A
 		};
-		let SA=OY* IK;
+		let SC=OY* IK;
 		let IL=A+ (IK* BO);
 		let IM=(EL+ (EZ* FB))/ N;
 		let IN=(ES+ (EZ* FD))/ N;
@@ -728,28 +740,28 @@ impl Instance {
 		let NY;
 		if IP{
 		let IR=IQ/ N;
-		let SC=MX/ N;
+		let SE=MX/ N;
 		let IS=IR> IO;
 		let IT;
 		let NZ;
 		if IS{
 		IT=IR;
-		NZ=SC;
+		NZ=SE;
 		}else{
 		IT=IO;
-		NZ=SB;
+		NZ=SD;
 		}
 		let IU=BR/ IT;
-		let SD=(L4([PA[0],0.0,PA[1],0.0])).product_sum_div(MG,NZ,(-IU),IT);
+		let SF=(L4([PA[0],0.0,PA[1],0.0])).product_sum_div(MG,NZ,(-IU),IT);
 		let IV=0f64+ IU;
 		let IX;
 		let OA;
 		if IW{
 		IX=IV;
-		OA=SD;
+		OA=SF;
 		}else{
 		IX=A;
-		OA=SB;
+		OA=SD;
 		}
 		let IZ=(ctx.checked_derivative_value(IV, IX))+ IY;
 		KA=A;
@@ -758,7 +770,7 @@ impl Instance {
 		}else{
 		KA=M;
 		KC=JA;
-		NY=SB;
+		NY=SD;
 		}
 		let JB=(IN> A)&& (IN>= IO);
 		let KG;
@@ -766,28 +778,28 @@ impl Instance {
 		let OB;
 		if JB{
 		let JD=JC/ N;
-		let SF=MW/ N;
+		let SH=MW/ N;
 		let JE=JD> IO;
 		let JF;
 		let OC;
 		if JE{
 		JF=JD;
-		OC=SF;
+		OC=SH;
 		}else{
 		JF=IO;
-		OC=SE;
+		OC=SG;
 		}
 		let JG=BU/ JF;
-		let SG=(L3([PC[0],0.0,PC[1]])).product_sum_div(MG,OC,(-JG),JF);
+		let SI=(L3([PC[0],0.0,PC[1]])).product_sum_div(MG,OC,(-JG),JF);
 		let JH=0f64+ JG;
 		let JJ;
 		let OD;
 		if JI{
 		JJ=JH;
-		OD=SG;
+		OD=SI;
 		}else{
 		JJ=A;
-		OD=SE;
+		OD=SG;
 		}
 		let JL=(ctx.checked_derivative_value(JH, JJ))+ JK;
 		KG=A;
@@ -796,19 +808,19 @@ impl Instance {
 		}else{
 		KG=M;
 		KI=JM;
-		OB=SE;
+		OB=SG;
 		}
-		let SH=(PZ* BL)* N;
+		let SJ=(PZ* BL)* N;
 		let JN=A+ ((BL* EA)* N);
 		let JO=(BL* GZ)* N;
-		let SI=(RD* BL)* N;
+		let SK=(RD* BL)* N;
 		let JP=ddt(4, JO);
-		let SJ=SI* QT;
+		let SL=L3(std::array::from_fn(|i| ddt_derivative(4,JP,(SK)[i])));
 		let JQ=A+ JP;
 		let JR=(BL* FP)* N;
-		let SK=(QL* BL)* N;
+		let SM=(QL* BL)* N;
 		let JS=ddt(5, JR);
-		let SL=SK* QT;
+		let SN=L5(std::array::from_fn(|i| ddt_derivative(5,JS,(SM)[i])));
 		let JT=A+ JS;
 		let JV=A+ JU;
 		let JX=A+ JW;
@@ -816,133 +828,133 @@ impl Instance {
 		let KB;
 		let OE;
 		if KA!=0.0{
-		let SN=L3([PA[0],PA[1],0.0]);
+		let SP=L3([PA[0],PA[1],0.0]);
 		KB=BR;
-		OE=SN;
+		OE=SP;
 		}else{
-		let SM=L3([0.0,0.0,1f64]);
+		let SO=L3([0.0,0.0,1f64]);
 		KB=JY;
-		OE=SM;
+		OE=SO;
 		}
-		let SO=L5([OE[0],0.0,OE[1],0.0,OE[2]])- L5([NY[0],NY[1],NY[2],NY[3],0.0]);
+		let SQ=L5([OE[0],0.0,OE[1],0.0,OE[2]])- L5([NY[0],NY[1],NY[2],NY[3],0.0]);
 		let KD=A+ (KB- KC);
 		let KF=A+ KE;
 		let KH;
 		let OF;
 		if KG!=0.0{
-		let SQ=L3([PC[0],PC[1],0.0]);
+		let SS=L3([PC[0],PC[1],0.0]);
 		KH=BU;
-		OF=SQ;
+		OF=SS;
 		}else{
-		let SP=L3([0.0,0.0,1f64]);
+		let SR=L3([0.0,0.0,1f64]);
 		KH=KE;
-		OF=SP;
+		OF=SR;
 		}
-		let SR=L4([OF[0],0.0,OF[1],OF[2]])- L4([OB[0],OB[1],OB[2],0.0]);
+		let ST=L4([OF[0],0.0,OF[1],OF[2]])- L4([OB[0],OB[1],OB[2],0.0]);
 		let KJ=A+ (KH- KI);
 		let KL=A+ KK;
 		let KQ;
 		let OG;
 		if KM!=0.0{
 		let KP=-B;
-		let ST=L2([(MH* OS),0.0]);
+		let SV=L2([(MH* OS),0.0]);
 		KQ=KP;
-		OG=ST;
+		OG=SV;
 		}else{
-		let SS=L2([0.0,1f64]);
+		let SU=L2([0.0,1f64]);
 		KQ=KK;
-		OG=SS;
+		OG=SU;
 		}
-		let SU=OG- L2([NE,0.0]);
+		let SW=OG- L2([NE,0.0]);
 		let MB=-MA;
-		let SV=NN* OS;
+		let SX=NN* OS;
 		let KU=A+ (KQ- KR);
 		let KW=A+ KV;
 		let LA;
 		let OH;
 		if KX!=0.0{
 		let KZ=-HQ;
-		let SX=L2([(1f64* OS),0.0]);
+		let SZ=L2([(1f64* OS),0.0]);
 		LA=KZ;
-		OH=SX;
+		OH=SZ;
 		}else{
-		let SW=L2([0.0,1f64]);
+		let SY=L2([0.0,1f64]);
 		LA=KV;
-		OH=SW;
+		OH=SY;
 		}
-		let SY=OH- L2([NF,0.0]);
+		let TA=OH- L2([NF,0.0]);
 		let MF=-ME;
 		let LE=A+ (LA- LB);
-		let SZ=MY[0];
-		let TA=MY[1];
-		let TB=MY[2];
-		let TC=MY[3];
-		let TD=MY[4];
-		let TE=MZ;
-		let TF=NA[0];
-		let TG=NA[1];
-		let TH=NA[2];
-		let TI=NG[0];
-		let TJ=NG[1];
-		let TK=NG[2];
-		let TL=NG[3];
-		let TM=NG[4];
-		let TN=NH;
-		let TO=NI;
-		let TP=NJ[0];
-		let TQ=NJ[1];
-		let TR=NJ[2];
-		let TS=NJ[3];
-		let TT=NJ[4];
-		let TU=NK[0];
-		let TV=NK[1];
-		let TW=NL[0];
-		let TX=NL[1];
-		let TY=NL[2];
-		let TZ=NL[3];
-		let UA=NL[4];
-		let UB=SA[0];
-		let UC=SA[1];
-		let UD=SH[0];
-		let UE=SH[1];
-		let UF=SH[2];
-		let UG=SJ[0];
-		let UH=SJ[1];
-		let UI=SJ[2];
-		let UJ=SL[0];
-		let UK=SL[1];
-		let UL=SL[2];
-		let UM=SL[3];
-		let UN=SL[4];
-		let UO=1f64;
-		let UP=SO[0];
-		let UQ=SO[1];
-		let UR=SO[2];
-		let US=SO[3];
-		let UT=SO[4];
-		let UU=1f64;
-		let UV=SR[0];
-		let UW=SR[1];
-		let UX=SR[2];
-		let UY=SR[3];
-		let UZ=1f64;
-		let VA=SU[0];
-		let VB=SU[1];
-		let VC=1f64;
-		let VD=SY[0];
-		let VE=SY[1];
-		let VF=NB;
-		let VG=NM;
-		let VH=SI[0];
-		let VI=SI[1];
-		let VJ=SI[2];
-		let VK=SK[0];
-		let VL=SK[1];
-		let VM=SK[2];
-		let VN=SK[3];
-		let VO=SK[4];
-		let VP=SV;
-		let VQ=(NO* OS);
+		let TB=MY[0];
+		let TC=MY[1];
+		let TD=MY[2];
+		let TE=MY[3];
+		let TF=MY[4];
+		let TG=MZ;
+		let TH=NA[0];
+		let TI=NA[1];
+		let TJ=NA[2];
+		let TK=NG[0];
+		let TL=NG[1];
+		let TM=NG[2];
+		let TN=NG[3];
+		let TO=NG[4];
+		let TP=NH;
+		let TQ=NI;
+		let TR=NJ[0];
+		let TS=NJ[1];
+		let TT=NJ[2];
+		let TU=NJ[3];
+		let TV=NJ[4];
+		let TW=NK[0];
+		let TX=NK[1];
+		let TY=NL[0];
+		let TZ=NL[1];
+		let UA=NL[2];
+		let UB=NL[3];
+		let UC=NL[4];
+		let UD=SC[0];
+		let UE=SC[1];
+		let UF=SJ[0];
+		let UG=SJ[1];
+		let UH=SJ[2];
+		let UI=SL[0];
+		let UJ=SL[1];
+		let UK=SL[2];
+		let UL=SN[0];
+		let UM=SN[1];
+		let UN=SN[2];
+		let UO=SN[3];
+		let UP=SN[4];
+		let UQ=1f64;
+		let UR=SQ[0];
+		let US=SQ[1];
+		let UT=SQ[2];
+		let UU=SQ[3];
+		let UV=SQ[4];
+		let UW=1f64;
+		let UX=ST[0];
+		let UY=ST[1];
+		let UZ=ST[2];
+		let VA=ST[3];
+		let VB=1f64;
+		let VC=SW[0];
+		let VD=SW[1];
+		let VE=1f64;
+		let VF=TA[0];
+		let VG=TA[1];
+		let VH=NB;
+		let VI=NM;
+		let VJ=SK[0];
+		let VK=SK[1];
+		let VL=SK[2];
+		let VM=SM[0];
+		let VN=SM[1];
+		let VO=SM[2];
+		let VP=SM[3];
+		let VQ=SM[4];
+		let VR=SX;
+		let VS=(NO* OS);
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = KA; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = KG; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = KM; }
@@ -957,7 +969,7 @@ impl Instance {
             None,
             multiplicity * (LF),
             [0, 1, 2, 3, 4],
-            [SZ, TA, TB, TC, TD],
+            [TB, TC, TD, TE, TF],
             [],
             [],
             multiplicity,
@@ -967,7 +979,7 @@ impl Instance {
             None,
             multiplicity * (LG),
             [6],
-            [TE],
+            [TG],
             [],
             [],
             multiplicity,
@@ -977,7 +989,7 @@ impl Instance {
             None,
             multiplicity * (LH),
             [0, 1, 6],
-            [TF, TG, TH],
+            [TH, TI, TJ],
             [],
             [],
             multiplicity,
@@ -997,7 +1009,7 @@ impl Instance {
             None,
             multiplicity * (LJ),
             [0, 1, 2, 3, 4],
-            [TI, TJ, TK, TL, TM],
+            [TK, TL, TM, TN, TO],
             [],
             [],
             multiplicity,
@@ -1007,7 +1019,7 @@ impl Instance {
             None,
             multiplicity * (LK),
             [2],
-            [TN],
+            [TP],
             [],
             [],
             multiplicity,
@@ -1017,7 +1029,7 @@ impl Instance {
             None,
             multiplicity * (LL),
             [2],
-            [TO],
+            [TQ],
             [],
             [],
             multiplicity,
@@ -1027,7 +1039,7 @@ impl Instance {
             None,
             multiplicity * (LM),
             [0, 1, 2, 3, 4],
-            [TP, TQ, TR, TS, TT],
+            [TR, TS, TT, TU, TV],
             [],
             [],
             multiplicity,
@@ -1037,7 +1049,7 @@ impl Instance {
             Some(5),
             multiplicity * (LO),
             [2, 5],
-            [TU, TV],
+            [TW, TX],
             [],
             [],
             multiplicity,
@@ -1047,7 +1059,7 @@ impl Instance {
             None,
             multiplicity * (LQ),
             [0, 1, 2, 3, 4],
-            [TW, TX, TY, TZ, UA],
+            [TY, TZ, UA, UB, UC],
             [],
             [],
             multiplicity,
@@ -1057,7 +1069,7 @@ impl Instance {
             Some(4),
             multiplicity * (IL),
             [3, 4],
-            [UB, UC],
+            [UD, UE],
             [],
             [],
             multiplicity,
@@ -1067,7 +1079,7 @@ impl Instance {
             Some(4),
             multiplicity * (JN),
             [2, 3, 4],
-            [UD, UE, UF],
+            [UF, UG, UH],
             [],
             [],
             multiplicity,
@@ -1077,7 +1089,7 @@ impl Instance {
             Some(4),
             multiplicity * (JQ),
             [2, 3, 4],
-            [UG, UH, UI],
+            [UI, UJ, UK],
             [],
             [],
             multiplicity,
@@ -1087,7 +1099,7 @@ impl Instance {
             Some(4),
             multiplicity * (JT),
             [0, 1, 2, 3, 4],
-            [UJ, UK, UL, UM, UN],
+            [UL, UM, UN, UO, UP],
             [],
             [],
             multiplicity,
@@ -1117,7 +1129,7 @@ impl Instance {
             Some(3),
             multiplicity * (JZ),
             [7],
-            [UO],
+            [UQ],
             [],
             [],
             multiplicity,
@@ -1127,7 +1139,7 @@ impl Instance {
             None,
             multiplicity * (KD),
             [0, 2, 3, 6, 7],
-            [UP, UQ, UR, US, UT],
+            [UR, US, UT, UU, UV],
             [],
             [],
             multiplicity,
@@ -1137,7 +1149,7 @@ impl Instance {
             Some(4),
             multiplicity * (KF),
             [8],
-            [UU],
+            [UW],
             [],
             [],
             multiplicity,
@@ -1147,7 +1159,7 @@ impl Instance {
             None,
             multiplicity * (KJ),
             [1, 2, 4, 8],
-            [UV, UW, UX, UY],
+            [UX, UY, UZ, VA],
             [],
             [],
             multiplicity,
@@ -1157,7 +1169,7 @@ impl Instance {
             Some(2),
             multiplicity * (KL),
             [9],
-            [UZ],
+            [VB],
             [],
             [],
             multiplicity,
@@ -1167,7 +1179,7 @@ impl Instance {
             None,
             multiplicity * (KU),
             [2, 9],
-            [VA, VB],
+            [VC, VD],
             [],
             [],
             multiplicity,
@@ -1177,7 +1189,7 @@ impl Instance {
             Some(5),
             multiplicity * (KW),
             [10],
-            [VC],
+            [VE],
             [],
             [],
             multiplicity,
@@ -1187,7 +1199,7 @@ impl Instance {
             None,
             multiplicity * (LE),
             [5, 10],
-            [VD, VE],
+            [VF, VG],
             [],
             [],
             multiplicity,
@@ -1195,27 +1207,27 @@ impl Instance {
         self.canonical_reactive[0] = LF;
         self.canonical_reactive[1] = LG;
         self.canonical_reactive[2] = LW;
-        self.canonical_reactive[3] = VF;
+        self.canonical_reactive[3] = VH;
         self.canonical_reactive[4] = LI;
         self.canonical_reactive[5] = LJ;
         self.canonical_reactive[6] = LK;
         self.canonical_reactive[7] = LX;
-        self.canonical_reactive[8] = VG;
+        self.canonical_reactive[8] = VI;
         self.canonical_reactive[9] = LM;
         self.canonical_reactive[10] = LO;
         self.canonical_reactive[11] = LQ;
         self.canonical_reactive[12] = IL;
         self.canonical_reactive[13] = JN;
         self.canonical_reactive[14] = JO;
-        self.canonical_reactive[15] = VH;
-        self.canonical_reactive[16] = VI;
-        self.canonical_reactive[17] = VJ;
+        self.canonical_reactive[15] = VJ;
+        self.canonical_reactive[16] = VK;
+        self.canonical_reactive[17] = VL;
         self.canonical_reactive[18] = JR;
-        self.canonical_reactive[19] = VK;
-        self.canonical_reactive[20] = VL;
-        self.canonical_reactive[21] = VM;
-        self.canonical_reactive[22] = VN;
-        self.canonical_reactive[23] = VO;
+        self.canonical_reactive[19] = VM;
+        self.canonical_reactive[20] = VN;
+        self.canonical_reactive[21] = VO;
+        self.canonical_reactive[22] = VP;
+        self.canonical_reactive[23] = VQ;
         self.canonical_reactive[24] = JV;
         self.canonical_reactive[25] = JX;
         self.canonical_reactive[26] = JZ;
@@ -1224,10 +1236,10 @@ impl Instance {
         self.canonical_reactive[29] = KJ;
         self.canonical_reactive[30] = KL;
         self.canonical_reactive[31] = MB;
-        self.canonical_reactive[32] = VP;
+        self.canonical_reactive[32] = VR;
         self.canonical_reactive[33] = KW;
         self.canonical_reactive[34] = MF;
-        self.canonical_reactive[35] = VQ;
+        self.canonical_reactive[35] = VS;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

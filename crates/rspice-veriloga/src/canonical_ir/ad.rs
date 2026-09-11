@@ -391,7 +391,12 @@ fn lane_liveness_with_control(
                     changed |= live.union_from(value.id, *proposed);
                 }
                 kind if differentiable(kind) => match kind {
-                    CfgValueKind::Unary { input, .. } | CfgValueKind::Ddt { input, .. } => {
+                    CfgValueKind::Unary { input, .. }
+                    | CfgValueKind::Ddt { input, .. }
+                    | CfgValueKind::DdtDerivative {
+                        input_derivative: input,
+                        ..
+                    } => {
                         changed |= live.union_from(value.id, *input);
                     }
                     CfgValueKind::SumProductsDiv { terms, divisor } => {
@@ -520,6 +525,7 @@ fn differentiable(kind: &CfgValueKind) -> bool {
         // correction lane, not every operand's.
         CfgValueKind::Select { .. }
         | CfgValueKind::Ddt { .. }
+        | CfgValueKind::DdtDerivative { .. }
         | CfgValueKind::Idt { .. }
         | CfgValueKind::IdtMod { .. }
         | CfgValueKind::IntegralDerivative { .. }
@@ -825,7 +831,11 @@ fn ddx_direction_liveness(
                 CfgValueKind::Unary { input, .. } if differentiable(&value.kind) => {
                     changed |= needed.union_from(*input, value.id);
                 }
-                CfgValueKind::Ddt { input, .. } => {
+                CfgValueKind::Ddt { input, .. }
+                | CfgValueKind::DdtDerivative {
+                    input_derivative: input,
+                    ..
+                } => {
                     changed |= needed.union_from(*input, value.id);
                 }
                 CfgValueKind::Idt { input, ic, .. } => {
@@ -1075,7 +1085,6 @@ struct ScalarDdxBuilder<'a> {
     derivatives: Vec<Option<ValueId>>,
     constants: HashMap<u64, ValueId>,
     one: ValueId,
-    ddt_scale: Option<ValueId>,
     added_params: HashMap<BlockId, Vec<(usize, usize)>>,
     emitted: Vec<CfgInstruction>,
 }
@@ -1126,7 +1135,6 @@ impl<'a> ScalarDdxBuilder<'a> {
             derivatives: vec![None; source_value_count * lane_count],
             constants,
             one,
-            ddt_scale: None,
             added_params: HashMap::new(),
             emitted: Vec::new(),
         };
@@ -1352,11 +1360,12 @@ impl<'a> ScalarDdxBuilder<'a> {
                 self.derivative(*then_value, lane),
                 self.derivative(*else_value, lane),
             ),
-            CfgValueKind::Ddt { input, .. } => {
-                let derivative = self.derivative(*input, lane)?;
-                let scale = self.ddt_scale();
-                Some(self.push_binary(CfgBinaryOp::Mul, derivative, scale))
-            }
+            CfgValueKind::Ddt { operator, input } => self.ddt_rule(*operator, result, *input, lane),
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => self.ddt_rule(*operator, *primal, *input_derivative, lane),
             CfgValueKind::Idt {
                 operator,
                 input,
@@ -1869,13 +1878,22 @@ impl<'a> ScalarDdxBuilder<'a> {
         }
     }
 
-    fn ddt_scale(&mut self) -> ValueId {
-        if let Some(value) = self.ddt_scale {
-            return value;
-        }
-        let value = self.new_value(CfgValueType::Real, CfgValueKind::DdtScale);
-        self.ddt_scale = Some(value);
-        value
+    fn ddt_rule(
+        &mut self,
+        operator: super::ExprId,
+        primal: ValueId,
+        input: ValueId,
+        lane: usize,
+    ) -> Option<ValueId> {
+        let input_derivative = self.derivative(input, lane)?;
+        Some(self.push(
+            CfgValueType::Real,
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            },
+        ))
     }
 
     fn constant(&mut self, value: f64) -> ValueId {
@@ -2163,7 +2181,6 @@ struct AdBuilder<'a> {
     one: ValueId,
     /// The shared `d/dt` coefficient, created on first use so a purely
     /// resistive model carries no reference to it.
-    ddt_scale: Option<ValueId>,
     /// The lane reserved for [`AdSeed::LimiterCorrection`], if the caller asked
     /// for one. Without it a `$limit` differentiates to its proposed value's
     /// row and the displacement is dropped, which is what a consumer that does
@@ -2203,7 +2220,6 @@ impl<'a> AdBuilder<'a> {
             splats: HashMap::new(),
             constants: HashMap::from([(1.0f64.to_bits(), one)]),
             one,
-            ddt_scale: None,
             correction_lane: correction_lane(lanes)
                 .map(|lane| u32::try_from(lane).expect("lane count fits a u32")),
             added_params: HashMap::new(),
@@ -2270,15 +2286,23 @@ impl<'a> AdBuilder<'a> {
         value
     }
 
-    fn ddt_scale(&mut self) -> ValueId {
-        match self.ddt_scale {
-            Some(value) => value,
-            None => {
-                let value = self.new_value(CfgValueType::Real, CfgValueKind::DdtScale);
-                self.ddt_scale = Some(value);
-                value
-            }
-        }
+    fn ddt_lane_rule(
+        &mut self,
+        operator: super::ExprId,
+        primal: ValueId,
+        input: ValueId,
+        target: ShapeId,
+    ) -> Option<ValueId> {
+        let derivative = self.derivatives[usize::from(input)]?;
+        let input_derivative = self.widen(derivative, target);
+        Some(self.push(
+            CfgValueType::Lanes(target),
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            },
+        ))
     }
 
     fn widen(&mut self, value: ValueId, target: ShapeId) -> ValueId {
@@ -2610,14 +2634,16 @@ impl<'a> AdBuilder<'a> {
                 self.derivatives[usize::from(*else_value)],
                 target,
             ),
-            // Not another `ddt`: a second one would claim a second state slot
-            // for a quantity with no history of its own. The companion form's
-            // coefficient multiplies the input's derivative instead.
-            CfgValueKind::Ddt { input, .. } => {
-                let derivative = self.derivatives[usize::from(*input)]?;
-                let scale = self.ddt_scale();
-                Some(self.scale(derivative, scale))
+            // Share the primal site so synthetic and accepted history produce
+            // the same local derivative as the current candidate.
+            CfgValueKind::Ddt { operator, input } => {
+                self.ddt_lane_rule(*operator, result, *input, target)
             }
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => self.ddt_lane_rule(*operator, *primal, *input_derivative, target),
             CfgValueKind::Idt {
                 operator,
                 input,

@@ -134,7 +134,9 @@ impl BlockProgram {
 /// counted. They are left unclassified on purpose.
 fn state_slot(op: NativeOp) -> Option<(CanonicalStateFamily, usize)> {
     let (operator, slot) = match op {
-        NativeOp::DdtState(slot) => (CanonicalStateOperator::Ddt, slot),
+        NativeOp::DdtState(slot) | NativeOp::DdtDerivativeState(slot) => {
+            (CanonicalStateOperator::Ddt, slot)
+        }
         NativeOp::IdtState(slot) | NativeOp::IdtDerivativeState(slot) => {
             (CanonicalStateOperator::Idt, slot)
         }

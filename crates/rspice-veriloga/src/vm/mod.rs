@@ -10,6 +10,8 @@ mod executor;
 mod filters;
 mod small_signal;
 
+#[cfg(any(feature = "native", all(feature = "wasm-jit", test)))]
+pub(crate) use context::INTEGRATION_CANDIDATE_FAILED;
 #[doc(hidden)]
 pub use context::IdtModState;
 pub(crate) use context::idtmod_wrapped_value;

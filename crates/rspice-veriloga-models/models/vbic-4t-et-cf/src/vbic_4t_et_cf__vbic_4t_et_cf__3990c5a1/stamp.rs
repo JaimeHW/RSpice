@@ -2,16 +2,26 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L12, L2, L3, L4, L5, L6, L8, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L12, L2, L3, L4, L5, L6, L8, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -178,7 +188,6 @@ impl Instance {
 		let ATM=L3([0f64;3]);
 		let ATP=L6([0f64;6]);
 		let ATW=L3([0f64;3]);
-		let AVZ=ddt_scale();
 		let B=273.15f64+ parameters[0];
 		let D=(temperature+ parameters[105])+ C;
 		let G=(E* D)/ F;
@@ -1615,35 +1624,36 @@ impl Instance {
 		let AEZ=A+ AEF;
 		let AFA=A+ AEH;
 		let AFB=ddt(0, ACL);
-		let AWA=AUF* AVZ;
+		let AVZ=L4(std::array::from_fn(|i| ddt_derivative(0,AFB,(AUF)[i])));
 		let AFC=A+ AFB;
 		let AFD=ddt(1, ACO);
-		let AWB=AUG* AVZ;
+		let AWA=L3(std::array::from_fn(|i| ddt_derivative(1,AFD,(AUG)[i])));
 		let AFE=A+ AFD;
 		let AFF=ddt(2, ACR);
-		let AWC=AUH* AVZ;
+		let AWB=L3(std::array::from_fn(|i| ddt_derivative(2,AFF,(AUH)[i])));
 		let AFG=A+ AFF;
 		let AFH=ddt(3, ACS);
-		let AWD=AUI* AVZ;
+		let AWC=L3(std::array::from_fn(|i| ddt_derivative(3,AFH,(AUI)[i])));
 		let AFI=A+ AFH;
 		let AFJ=ddt(4, ACW);
-		let AWE=AUK* AVZ;
+		let AWD=L5(std::array::from_fn(|i| ddt_derivative(4,AFJ,(AUK)[i])));
 		let AFK=A+ AFJ;
 		let AFL=ddt(5, ADD);
-		let AWF=AUO* AVZ;
+		let AWE=L2(std::array::from_fn(|i| ddt_derivative(5,AFL,(AUO)[i])));
 		let AFM=A+ AFL;
 		let AFN=ddt(6, ADF);
-		let AWG=AUP* AVZ;
+		let AWF=L2(std::array::from_fn(|i| ddt_derivative(6,AFN,(AUP)[i])));
 		let AFO=A+ AFN;
 		let AFP=A+ ADT;
 		let AFQ=A+ ADU;
 		let AFR=A+ ADR;
 		let AFS=ddt(7, ADB);
-		let AWH=AUN* AVZ;
+		let AWG=L3(std::array::from_fn(|i| ddt_derivative(7,AFS,(AUN)[i])));
 		let AFT=A+ AFS;
 		let AFV=A+ AFU;
 		let AFW=A+ AEJ;
 		let AFX=ddt(8, AEO);
+		let AWH=ddt_derivative(8,AFX,AVY);
 		let AFY=A+ AFX;
 		let AWI=AHH[0];
 		let AWJ=AHH[1];
@@ -1690,28 +1700,28 @@ impl Instance {
 		let AXY=AHW[3];
 		let AXZ=AHW[4];
 		let AYA=AHW[5];
-		let AYB=AWA[0];
-		let AYC=AWA[1];
-		let AYD=AWA[2];
-		let AYE=AWA[3];
-		let AYF=AWB[0];
-		let AYG=AWB[1];
-		let AYH=AWB[2];
-		let AYI=AWC[0];
-		let AYJ=AWC[1];
-		let AYK=AWC[2];
-		let AYL=AWD[0];
-		let AYM=AWD[1];
-		let AYN=AWD[2];
-		let AYO=AWE[0];
-		let AYP=AWE[1];
-		let AYQ=AWE[2];
-		let AYR=AWE[3];
-		let AYS=AWE[4];
-		let AYT=AWF[0];
-		let AYU=AWF[1];
-		let AYV=AWG[0];
-		let AYW=AWG[1];
+		let AYB=AVZ[0];
+		let AYC=AVZ[1];
+		let AYD=AVZ[2];
+		let AYE=AVZ[3];
+		let AYF=AWA[0];
+		let AYG=AWA[1];
+		let AYH=AWA[2];
+		let AYI=AWB[0];
+		let AYJ=AWB[1];
+		let AYK=AWB[2];
+		let AYL=AWC[0];
+		let AYM=AWC[1];
+		let AYN=AWC[2];
+		let AYO=AWD[0];
+		let AYP=AWD[1];
+		let AYQ=AWD[2];
+		let AYR=AWD[3];
+		let AYS=AWD[4];
+		let AYT=AWE[0];
+		let AYU=AWE[1];
+		let AYV=AWF[0];
+		let AYW=AWF[1];
 		let AYX=AHX[0];
 		let AYY=AHX[1];
 		let AYZ=AHX[2];
@@ -1724,9 +1734,9 @@ impl Instance {
 		let AZG=AHY[0];
 		let AZH=AHY[1];
 		let AZI=AHY[2];
-		let AZJ=AWH[0];
-		let AZK=AWH[1];
-		let AZL=AWH[2];
+		let AZJ=AWG[0];
+		let AZK=AWG[1];
+		let AZL=AWG[2];
 		let AZM=AHZ;
 		let AZN=AVW[0];
 		let AZO=AVW[1];
@@ -1740,7 +1750,7 @@ impl Instance {
 		let AZW=AVW[9];
 		let AZX=AVW[10];
 		let AZY=AVW[11];
-		let AZZ=(AVY* AVZ);
+		let AZZ=AWH;
 		let BAA=AUF[0];
 		let BAB=AUF[1];
 		let BAC=AUF[2];

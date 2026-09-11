@@ -332,8 +332,9 @@ pub struct CfgEvalInputs<S> {
     pub idt: S,
     pub idt_scale: S,
     /// Optional per-site local weights for integrand, initial-condition and
-    /// modulus derivatives. With no history owner, omitted sites retain the
-    /// supplied `idt_scale` and zero initial-condition/modulus weights.
+    /// modulus derivatives. DDT sites use the first weight for their input.
+    /// With no history owner, omitted sites retain the supplied `ddt_scale`
+    /// or `idt_scale` and zero initial-condition/modulus weights.
     pub integral_derivatives: HashMap<ExprId, [S; 3]>,
     /// Results supplied for stateful event controls, keyed by their canonical
     /// call expression. The reference interpreter has no accepted-history
@@ -707,6 +708,22 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             CfgValueKind::AnalogTask(_) => {
                 return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
             }
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => {
+                self.read(primal)?;
+                let scale = self
+                    .inputs
+                    .integral_derivatives
+                    .get(&operator)
+                    .map_or(self.inputs.ddt_scale, |weights| weights[0]);
+                self.read_lanes(input_derivative)?
+                    .into_iter()
+                    .map(|input| input.mul(scale))
+                    .collect()
+            }
             CfgValueKind::IntegralDerivative {
                 operator,
                 primal,
@@ -981,6 +998,19 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.inputs.ddt
             }
             CfgValueKind::DdtScale => self.inputs.ddt_scale,
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => {
+                self.read(primal)?;
+                let scale = self
+                    .inputs
+                    .integral_derivatives
+                    .get(&operator)
+                    .map_or(self.inputs.ddt_scale, |weights| weights[0]);
+                self.read(input_derivative)?.mul(scale)
+            }
             // Same static treatment: the running total is supplied, and both
             // operands are still evaluated because either may carry a side
             // condition the path depends on.

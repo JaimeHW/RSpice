@@ -635,6 +635,7 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             // to wrap that condition, which needs the modulus rules the
             // runtime keeps, so it is refused rather than approximated.
             NativeOp::DdtState(_) => Self::unary(stack, name, |_| S::from_f64(0.0))?,
+            NativeOp::DdtDerivativeState(_) => Self::binary(stack, name, |_, _| S::from_f64(0.0))?,
             NativeOp::DdtJacobian | NativeOp::IdtJacobian => {
                 Self::unary(stack, name, |_| S::from_f64(0.0))?;
             }

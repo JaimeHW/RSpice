@@ -4653,6 +4653,52 @@ for (coefficients, input_gain) in [(runtime::GeneratedDdtCoefficients::inactive(
 }
 
 #[test]
+fn generated_ddt_jacobian_matches_uninitialized_transient_value() {
+    for (expression, value, slopes) in [
+        ("ddt(V(p)*V(p)+V(n)*V(n))", 0.0, [3.0, 1.0]),
+        ("ddx(ddt(V(p)*V(p)*V(p)),V(p))", 6.75, [9.0, 0.0]),
+    ] {
+        let (state, stamp, noise) = generated_parts(
+            &format!(
+                "module first_derivative(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+{expression}; endmodule"
+            ),
+            "first derivative Jacobian",
+        );
+        let main = r#"
+for (scale, previous, older, derivative) in [
+    (4.0,4.0,0.0,0.0),(8.0,8.0,0.0,1.0),(6.0,8.0,-2.0,0.0),
+] {
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let coefficients=runtime::GeneratedDdtCoefficients {
+    active:true, derivative_scale:scale, previous_value_scale:previous,
+    older_value_scale:older, previous_derivative_scale:derivative,
+};
+instance.set_timepoint(0.25,0.25,coefficients);
+for initialized in [false,true] {
+    let ctx=runtime::GeneratedEvalContext {voltages:&[1.5,0.5],temperature:300.15};
+    instance.begin_stateful_evaluation();
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+    assert_eq!(sink[9],if initialized {EXPECTED_VALUE*scale} else {0.0});
+    assert_eq!(sink[12],if initialized {EXPECTED_P*scale} else {0.0});
+    assert_eq!(sink[13],if initialized {EXPECTED_N*scale} else {0.0});
+    assert!(!ctx.evaluation_failed());
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+}
+}
+"#
+        .replace("EXPECTED_VALUE", &format!("{value:?}"))
+        .replace("EXPECTED_P", &format!("{:?}", slopes[0]))
+        .replace("EXPECTED_N", &format!("{:?}", slopes[1]));
+        run_generated_main("first derivative Jacobian", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
 fn generated_idtmod_preserves_common_branch_history_and_transactions() {
     let (state, stamp, noise) = generated_parts(
         "module circular_integral(p,n); inout p,n; electrical p,n;
@@ -7679,45 +7725,6 @@ pub mod runtime {
     }
     pub use integration_state::*;
 
-    #[derive(Debug, Clone, Copy)]
-    pub enum GeneratedDdtCandidateError {
-        NonFiniteInput { field: &'static str },
-        NonFiniteResult,
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
-        current: &mut [f64; STATE_COUNT],
-        previous: &[f64; STATE_COUNT],
-        older: &[f64; STATE_COUNT],
-        initialized: &[bool; STATE_COUNT],
-        derivative_current: &mut [f64; STATE_COUNT],
-        derivative_previous: &[f64; STATE_COUNT],
-        candidate_valid: &mut [bool; STATE_COUNT],
-        coefficients: GeneratedDdtCoefficients,
-        slot: usize,
-        value: f64,
-    ) -> Result<f64, GeneratedDdtCandidateError> {
-        candidate_valid[slot] = false;
-        let previous_value = if initialized[slot] { previous[slot] } else { value };
-        let older_value = if initialized[slot] { older[slot] } else { value };
-        let previous_derivative = if initialized[slot] { derivative_previous[slot] } else { 0.0 };
-        let result = if coefficients.active {
-            value * coefficients.derivative_scale
-                - previous_value * coefficients.previous_value_scale
-                - older_value * coefficients.older_value_scale
-                - previous_derivative * coefficients.previous_derivative_scale
-        } else {
-            0.0
-        };
-        if !result.is_finite() {
-            return Err(GeneratedDdtCandidateError::NonFiniteResult);
-        }
-        current[slot] = value;
-        derivative_current[slot] = result;
-        candidate_valid[slot] = true;
-        Ok(result)
-    }
 
     #[derive(Copy, Clone)]
     pub struct GeneratedParameterBound {

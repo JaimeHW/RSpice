@@ -353,11 +353,18 @@ pub enum CfgValueKind {
         operator: ExprId,
         input: ValueId,
     },
+    /// Local Jacobian action of one time-derivative candidate. The primal
+    /// dependency preserves evaluation order and access to this site's history.
+    DdtDerivative {
+        operator: ExprId,
+        primal: ValueId,
+        input_derivative: ValueId,
+    },
     /// The integration rule's `d/dt` coefficient for the current step.
     ///
-    /// `ddt` differentiates to this times the derivative of its input, rather
-    /// than to another `ddt`: a second `ddt` would claim a second state slot for
-    /// a quantity that has no history of its own.
+    /// An explicit global coefficient for frequency lowering and internal
+    /// expressions. Source derivatives use `DdtDerivative` to retain their
+    /// site's initialization rule.
     DdtScale,
     /// `idt(x, ic)` — the time integral of `x`, in companion form.
     ///
@@ -373,9 +380,8 @@ pub enum CfgValueKind {
     /// The integration rule's `dt` for the current step, and zero where there is
     /// no step to integrate over.
     ///
-    /// `idt` differentiates to this times the derivative of its input, for the
-    /// reason [`Self::DdtScale`] exists: a second `idt` would claim a second
-    /// slot for a quantity with no history of its own.
+    /// An explicit global coefficient. Source derivatives use
+    /// `IntegralDerivative` to retain initial-condition and history effects.
     IdtScale,
     /// `idtmod(x, ic, modulus, offset)` — the time integral of `x` folded into
     /// the half-open interval `[offset, offset + modulus)`.
@@ -1209,6 +1215,7 @@ impl CfgValueKind {
             | Self::ContributedCurrent { .. }
             | Self::NoiseProcess(_)
             | Self::Ddt { .. }
+            | Self::DdtDerivative { .. }
             | Self::DdtScale
             | Self::Idt { .. }
             | Self::IdtScale
@@ -1299,7 +1306,9 @@ impl CfgValueKind {
     /// runtime allocates in.
     pub fn state_site(&self) -> Option<CfgStateSite> {
         let site = match self {
-            Self::Ddt { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Ddt),
+            Self::Ddt { operator, .. } | Self::DdtDerivative { operator, .. } => {
+                CfgStateSite(*operator, CanonicalStateOperator::Ddt)
+            }
             Self::Idt { operator, .. } => CfgStateSite(*operator, CanonicalStateOperator::Idt),
             Self::IdtMod { operator, .. } => {
                 CfgStateSite(*operator, CanonicalStateOperator::IdtMod)
@@ -1410,6 +1419,11 @@ impl CfgValueKind {
                 *integral_derivative,
                 *modulus_derivative,
             ],
+            Self::DdtDerivative {
+                primal,
+                input_derivative,
+                ..
+            } => vec![*primal, *input_derivative],
             Self::IntegralDerivative {
                 primal,
                 input_derivative,
@@ -1665,6 +1679,14 @@ impl CfgValueKind {
                 *offset = map(*offset);
                 *integral_derivative = map(*integral_derivative);
                 *modulus_derivative = map(*modulus_derivative);
+            }
+            Self::DdtDerivative {
+                primal,
+                input_derivative,
+                ..
+            } => {
+                *primal = map(*primal);
+                *input_derivative = map(*input_derivative);
             }
             Self::IntegralDerivative {
                 primal,
@@ -2370,6 +2392,18 @@ impl CfgFunction {
                 // They cannot go through the catch-all below, which reads any
                 // packed operand as a mistake — correctly, for arithmetic, and
                 // wrongly for these.
+                CfgValueKind::DdtDerivative {
+                    primal,
+                    input_derivative,
+                    ..
+                } => {
+                    self.validate_stateful_derivative(
+                        value.id,
+                        lanes,
+                        &[*primal],
+                        &[*input_derivative],
+                    )?;
+                }
                 CfgValueKind::IntegralDerivative {
                     primal,
                     input_derivative,

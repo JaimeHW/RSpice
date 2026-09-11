@@ -11,6 +11,160 @@ fn assert_close(actual: f64, expected: f64, label: &str) {
 }
 
 #[test]
+fn derivative_jacobians_match_first_transient_candidates_and_accepted_history() {
+    let model = DeviceFixture::compile(
+        "module first_derivative(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+ddt(V(p,n)*V(p,n)); endmodule",
+    );
+    for (name, coefficients) in [
+        (
+            "BE",
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 4.0,
+                previous_value_scale: 4.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+        ),
+        (
+            "TR",
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 8.0,
+                previous_value_scale: 8.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 1.0,
+            },
+        ),
+        (
+            "Gear2",
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 6.0,
+                previous_value_scale: 8.0,
+                older_value_scale: -2.0,
+                previous_derivative_scale: 0.0,
+            },
+        ),
+    ] {
+        let mut device = model.device(name, &[1, 0]);
+        device.set_analysis_type(2);
+        device.set_integration_coefficients(coefficients);
+        for initialized in [false, true] {
+            let voltage = 1.5;
+            let mut jacobian = 0.0;
+            device
+                .try_stamp(
+                    &[voltage],
+                    |row, col, value| {
+                        assert_eq!((row, col), (0, 0));
+                        jacobian += value;
+                    },
+                    |_, _| {},
+                )
+                .unwrap();
+            let mut values = [0.0; 2];
+            for (value, delta) in values.iter_mut().zip([-1e-6, 1e-6]) {
+                device.update_voltages(&[voltage + delta]);
+                *value = device.try_evaluate().unwrap()[0];
+            }
+            let numerical = (values[1] - values[0]) / 2e-6;
+            let expected = if initialized {
+                2.0 * voltage * coefficients.derivative_scale
+            } else {
+                0.0
+            };
+            assert!(
+                (numerical - expected).abs() < 1e-7,
+                "{name} initialized={initialized}: finite difference {numerical}, expected {expected}"
+            );
+            assert!(
+                (jacobian - numerical).abs() < 1e-7,
+                "{name} initialized={initialized}: Jacobian {jacobian}, finite difference {numerical}"
+            );
+            device.update_voltages(&[voltage]);
+            device.try_evaluate().unwrap();
+            device.advance_state();
+        }
+    }
+}
+
+#[test]
+fn derivative_curvature_preserves_initialization_and_complex_ac_transfer() {
+    let model = DeviceFixture::compile(
+        "module curvature(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+ddx(ddt(V(p,n)*V(p,n)*V(p,n)),V(p,n)); endmodule",
+    );
+    let mut device = model.device("A", &[1, 0]);
+    device.set_analysis_type(2);
+    device.set_timestep(0.25);
+    for initialized in [false, true] {
+        let mut jacobian = 0.0;
+        device
+            .try_stamp(&[1.5], |_, _, value| jacobian += value, |_, _| {})
+            .unwrap();
+        assert_close(
+            jacobian,
+            if initialized { 36.0 } else { 0.0 },
+            "DDT curvature",
+        );
+        assert_close(
+            device.try_evaluate().unwrap()[0],
+            if initialized { 27.0 } else { 0.0 },
+            "DDT first partial",
+        );
+        device.advance_state();
+    }
+    // AC is independent of whether transient history has been initialized.
+    for mut device in [model.device("FRESH", &[1, 0]), device] {
+        device.set_analysis_type(1);
+        let mut jacobian = (0.0, 0.0);
+        device
+            .try_stamp_small_signal_complex(&[1.5], 2.0, |_, _, re, im| {
+                jacobian.0 += re;
+                jacobian.1 += im;
+            })
+            .unwrap();
+        assert_eq!(jacobian.0, 0.0);
+        assert_close(jacobian.1, 18.0 * std::f64::consts::TAU, "AC curvature");
+    }
+}
+
+#[test]
+fn derivative_companions_preserve_finite_large_value_differences() {
+    let model = DeviceFixture::compile(
+        "module large_derivative(p,n); inout p,n; electrical p,n;
+         analog I(p,n)<+ddt(V(p,n)); endmodule",
+    );
+    for (scale, previous_scale, older_scale, derivative_scale) in [
+        (4.0, 4.0, 0.0, 0.0),
+        (8.0, 8.0, 0.0, 1.0),
+        (6.0, 8.0, -2.0, 0.0),
+    ] {
+        let mut device = model.device("A", &[1, 0]);
+        device.set_analysis_type(2);
+        device.set_integration_coefficients(IntegrationCoefficients {
+            active: true,
+            derivative_scale: scale,
+            previous_value_scale: previous_scale,
+            older_value_scale: older_scale,
+            previous_derivative_scale: derivative_scale,
+        });
+        let previous = 1e308_f64;
+        device.update_voltages(&[previous]);
+        assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+        device.advance_state();
+        let current = f64::from_bits(previous.to_bits() + 1);
+        device.update_voltages(&[current]);
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            scale * (current - previous)
+        );
+    }
+}
+
+#[test]
 fn circular_integrator_jacobians_follow_the_initialization_and_wrap_branch() {
     let model = DeviceFixture::compile(
         r#"

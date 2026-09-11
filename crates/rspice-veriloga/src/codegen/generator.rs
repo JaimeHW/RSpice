@@ -1450,6 +1450,17 @@ impl CodeGenerator {
                 Node::FreezeDerivative(inner) => {
                     self.emit_expr(arena, inner, emit_ctx, program)?;
                 }
+                Node::DdtDerivative {
+                    primal,
+                    input_derivative,
+                } => {
+                    self.emit_expr(arena, primal, emit_ctx, program)?;
+                    let state_id = emit_ctx.integration_slot(primal, &self.limit_state_count);
+                    self.emit_expr(arena, input_derivative, emit_ctx, program)?;
+                    program
+                        .instructions
+                        .push(Instruction::DdtDerivativeState(state_id));
+                }
                 Node::DdtCompanion(inner) => {
                     // Jacobian companion factor: operand / dt (0 at DC)
                     self.emit_expr(arena, inner, emit_ctx, program)?;

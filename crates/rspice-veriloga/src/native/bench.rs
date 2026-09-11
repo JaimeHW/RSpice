@@ -1167,6 +1167,7 @@ fn preallocate_context(context: &mut VmContext, model: &CompiledModel) {
                 Instruction::DdtState(idx)
                 | Instruction::IdtState(idx)
                 | Instruction::IdtModState(idx)
+                | Instruction::DdtDerivativeState(idx)
                 | Instruction::IdtDerivativeState(idx)
                 | Instruction::IdtModDerivativeState(idx)
                 | Instruction::LimitState(idx)

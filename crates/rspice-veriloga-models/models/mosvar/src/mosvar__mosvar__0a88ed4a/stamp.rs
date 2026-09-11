@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 48] = [16, 1, 2, 76, 77, 78, 79, 0, 7, 8, 91, 92, 40, 17, 93, 22, 31, 32, 33, 34, 35, 38, 94, 95, 43, 50, 51, 54, 57, 58, 61, 65, 67, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121];
@@ -680,27 +680,28 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return; }
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -859,7 +860,6 @@ impl Instance {
 		let CHT=L2([0f64;2]);
 		let CHU=L4([0f64;4]);
 		let CHV=L2([0f64;2]);
-		let CIJ=ddt_scale();
 		let F=D- E;
 		let H=G* (F- parameters[27]);
 		let I=(L2([1f64,0.0])- L2([0.0,1f64]))* G;
@@ -3966,46 +3966,46 @@ impl Instance {
 		let CIG=BPI* G;
 		let CIH=S+ (G* BPG);
 		let CII=ddt(0, BPM);
-		let CIK=BPN* CIJ;
-		let CIL=S+ CII;
-		let CIM=AGD* V;
-		let CIN=S+ (-AGC);
-		let CIO=ddt(1, BPP);
-		let CIP=BPQ* CIJ;
-		let CIQ=S+ CIO;
-		let CIR=ddt(2, BPT);
-		let CIS=BPU* CIJ;
-		let CIT=S+ CIR;
-		let CIU=BPN[0];
-		let CIV=AGH;
-		let CIW=CIA[0];
-		let CIX=CIA[1];
-		let CIY=CIB[0];
-		let CIZ=CIB[1];
-		let CJA=CIC[0];
-		let CJB=CIC[1];
-		let CJC=CIC[2];
-		let CJD=CIC[3];
-		let CJE=CID[0];
-		let CJF=CID[1];
-		let CJG=CIE[0];
-		let CJH=CIE[1];
-		let CJI=CIE[2];
-		let CJJ=CIG[0];
-		let CJK=CIG[1];
-		let CJL=CIK[0];
-		let CJM=CIK[1];
-		let CJN=CIK[2];
-		let CJO=CIM[0];
-		let CJP=CIM[1];
-		let CJQ=CIP;
-		let CJR=CIS[0];
-		let CJS=CIS[1];
-		let CJT=BPN[1];
-		let CJU=BPN[2];
-		let CJV=BPQ;
-		let CJW=BPU[0];
-		let CJX=BPU[1];
+		let CIJ=L3(std::array::from_fn(|i| ddt_derivative(0,CII,(BPN)[i])));
+		let CIK=S+ CII;
+		let CIL=AGD* V;
+		let CIM=S+ (-AGC);
+		let CIN=ddt(1, BPP);
+		let CIO=ddt_derivative(1,CIN,BPQ);
+		let CIP=S+ CIN;
+		let CIQ=ddt(2, BPT);
+		let CIR=L2(std::array::from_fn(|i| ddt_derivative(2,CIQ,(BPU)[i])));
+		let CIS=S+ CIQ;
+		let CIT=BPN[0];
+		let CIU=AGH;
+		let CIV=CIA[0];
+		let CIW=CIA[1];
+		let CIX=CIB[0];
+		let CIY=CIB[1];
+		let CIZ=CIC[0];
+		let CJA=CIC[1];
+		let CJB=CIC[2];
+		let CJC=CIC[3];
+		let CJD=CID[0];
+		let CJE=CID[1];
+		let CJF=CIE[0];
+		let CJG=CIE[1];
+		let CJH=CIE[2];
+		let CJI=CIG[0];
+		let CJJ=CIG[1];
+		let CJK=CIJ[0];
+		let CJL=CIJ[1];
+		let CJM=CIJ[2];
+		let CJN=CIL[0];
+		let CJO=CIL[1];
+		let CJP=CIO;
+		let CJQ=CIR[0];
+		let CJR=CIR[1];
+		let CJS=BPN[1];
+		let CJT=BPN[2];
+		let CJU=BPQ;
+		let CJV=BPU[0];
+		let CJW=BPU[1];
         if (staged[118] != 0.0) {
             stamper.stamp_potential_branch_local(Some(0), Some(3), 0, multiplicity);
         } else {
@@ -4031,7 +4031,7 @@ impl Instance {
             None,
             multiplicity * (BPV),
             [6],
-            [CIV],
+            [CIU],
             [],
             [],
             multiplicity,
@@ -4041,7 +4041,7 @@ impl Instance {
             Some(3),
             multiplicity * (CHW),
             [0, 3],
-            [CIW, CIX],
+            [CIV, CIW],
             [],
             [],
             multiplicity,
@@ -4051,7 +4051,7 @@ impl Instance {
             Some(4),
             multiplicity * (CHX),
             [3, 4],
-            [CIY, CIZ],
+            [CIX, CIY],
             [],
             [],
             multiplicity,
@@ -4061,7 +4061,7 @@ impl Instance {
             Some(1),
             multiplicity * (CHY),
             [1, 4, 5, 6],
-            [CJA, CJB, CJC, CJD],
+            [CIZ, CJA, CJB, CJC],
             [],
             [],
             multiplicity,
@@ -4071,7 +4071,7 @@ impl Instance {
             Some(2),
             multiplicity * (CHZ),
             [1, 2],
-            [CJE, CJF],
+            [CJD, CJE],
             [],
             [],
             multiplicity,
@@ -4121,7 +4121,7 @@ impl Instance {
             Some(5),
             multiplicity * (CIF),
             [4, 5, 6],
-            [CJG, CJH, CJI],
+            [CJF, CJG, CJH],
             [],
             [],
             multiplicity,
@@ -4131,7 +4131,7 @@ impl Instance {
             Some(1),
             multiplicity * (CIH),
             [1, 4],
-            [CJJ, CJK],
+            [CJI, CJJ],
             [],
             [],
             multiplicity,
@@ -4139,9 +4139,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(4),
             Some(5),
-            multiplicity * (CIL),
+            multiplicity * (CIK),
             [4, 5, 6],
-            [CJL, CJM, CJN],
+            [CJK, CJL, CJM],
             [],
             [],
             multiplicity,
@@ -4149,9 +4149,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             None,
-            multiplicity * (CIN),
+            multiplicity * (CIM),
             [4, 5],
-            [CJO, CJP],
+            [CJN, CJO],
             [],
             [],
             multiplicity,
@@ -4159,9 +4159,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(6),
             None,
-            multiplicity * (CIQ),
+            multiplicity * (CIP),
             [6],
-            [CJQ],
+            [CJP],
             [],
             [],
             multiplicity,
@@ -4169,9 +4169,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(3),
             Some(1),
-            multiplicity * (CIT),
+            multiplicity * (CIS),
             [1, 3],
-            [CJR, CJS],
+            [CJQ, CJR],
             [],
             [],
             multiplicity,
@@ -4258,15 +4258,15 @@ impl Instance {
         self.canonical_reactive[9] = CIF;
         self.canonical_reactive[10] = CIH;
         self.canonical_reactive[11] = BPM;
-        self.canonical_reactive[12] = CIU;
-        self.canonical_reactive[13] = CJT;
-        self.canonical_reactive[14] = CJU;
-        self.canonical_reactive[15] = CIN;
+        self.canonical_reactive[12] = CIT;
+        self.canonical_reactive[13] = CJS;
+        self.canonical_reactive[14] = CJT;
+        self.canonical_reactive[15] = CIM;
         self.canonical_reactive[16] = BPP;
-        self.canonical_reactive[17] = CJV;
+        self.canonical_reactive[17] = CJU;
         self.canonical_reactive[18] = BPT;
-        self.canonical_reactive[19] = CJW;
-        self.canonical_reactive[20] = CJX;
+        self.canonical_reactive[19] = CJV;
+        self.canonical_reactive[20] = CJW;
         self.canonical_reactive[21] = staged[111];
         self.canonical_reactive[22] = staged[112];
         self.canonical_reactive[23] = staged[113];

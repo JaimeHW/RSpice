@@ -1745,37 +1745,31 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
         }
         return 0.0;
     }
-    let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
-    let previous = if initialized {
-        unsafe { *ctx.state_prev.add(state_id) }
-    } else {
-        value
-    };
-    let older = if initialized {
-        unsafe { *ctx.state_older.add(state_id) }
-    } else {
-        previous
-    };
-    let previous_derivative = if initialized {
-        unsafe { *ctx.state_derivatives_prev.add(state_id) }
-    } else {
-        0.0
-    };
-    let derivative = if ctx.integration_active != 0 {
-        value * ctx.integration_derivative_scale
-            - previous * ctx.integration_previous_value_scale
-            - older * ctx.integration_older_value_scale
-            - previous_derivative * ctx.integration_previous_derivative_scale
-    } else {
-        0.0
+    unsafe {
+        *ctx.state_candidate_valid.add(state_id) = crate::vm::INTEGRATION_CANDIDATE_FAILED;
+    }
+    let candidate = match rspice_veriloga_runtime::evaluate_generated_ddt_candidate(
+        integration_coefficients(ctx).into(),
+        value,
+        rspice_veriloga_runtime::GeneratedDdtAcceptedHistory {
+            initialized: unsafe { *ctx.state_initialized.add(state_id) != 0 },
+            value_previous: unsafe { *ctx.state_prev.add(state_id) },
+            value_older: unsafe { *ctx.state_older.add(state_id) },
+            derivative_previous: unsafe { *ctx.state_derivatives_prev.add(state_id) },
+        },
+    ) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            return invalid_native_integration_context(ctx, "ddt", state_id, &error.to_string());
+        }
     };
     unsafe {
         *ctx.state_values.add(state_id) = value;
-        *ctx.state_derivatives.add(state_id) = derivative;
-        *ctx.state_older_candidate.add(state_id) = previous;
+        *ctx.state_derivatives.add(state_id) = candidate.value;
+        *ctx.state_older_candidate.add(state_id) = candidate.previous;
         *ctx.state_candidate_valid.add(state_id) = 1;
     }
-    derivative
+    candidate.value
 }
 
 /// Native companion Jacobian evaluation for `ddt`.
@@ -1804,6 +1798,68 @@ pub unsafe extern "C" fn rspice_ddt_jacobian_native(
         (unsafe { *operands }) * ctx.integration_derivative_scale
     } else {
         0.0
+    }
+}
+
+/// Derivative of a validated DDT candidate at the same state site.
+///
+/// # Safety
+/// `operands` points to two f64 values and `ctx` points to a live context.
+#[unsafe(export_name = "rspice_ddt_derivative_native")]
+pub unsafe extern "C" fn rspice_ddt_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    let operator = "ddt derivative";
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "missing operands or context",
+        );
+    }
+    let ctx = unsafe { &*ctx };
+    if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "has invalid state storage",
+        );
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    if operands.iter().any(|value| !value.is_finite()) {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "operands must be finite",
+        );
+    }
+    if ctx.static_dae_probe != 0
+        || (matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium())
+    {
+        return 0.0;
+    }
+    if unsafe { *ctx.state_candidate_valid.add(state_id) } != 1 {
+        return invalid_native_integration_context(
+            ctx,
+            operator,
+            state_id,
+            "requires its current primal candidate",
+        );
+    }
+    match rspice_veriloga_runtime::evaluate_generated_ddt_derivative(
+        integration_coefficients(ctx).into(),
+        unsafe { *ctx.state_initialized.add(state_id) != 0 },
+        operands[1],
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            invalid_native_integration_context(ctx, operator, state_id, &error.to_string())
+        }
     }
 }
 
@@ -1852,7 +1908,7 @@ unsafe fn rspice_integral_state_native(
         )
     } else {
         unsafe {
-            *ctx.state_candidate_valid.add(state_id) = 0;
+            *ctx.state_candidate_valid.add(state_id) = crate::vm::INTEGRATION_CANDIDATE_FAILED;
         }
         (
             state_integration_coefficients(ctx).into(),
@@ -3325,7 +3381,8 @@ mod tests {
             unsafe { rspice_idt_state_native(invalid.as_ptr(), &ctx, 0) };
             assert!(ctx.take_runtime_error().unwrap().contains("must be finite"));
             assert_eq!(
-                candidate_valid[0], 0,
+                candidate_valid[0],
+                crate::vm::INTEGRATION_CANDIDATE_FAILED,
                 "failed retry must invalidate the candidate"
             );
             assert_eq!((values, derivatives, older_candidate), before);

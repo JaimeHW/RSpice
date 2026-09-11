@@ -100,6 +100,7 @@ pub struct EmitBindings {
     pub multiplicity: String,
     pub time: String,
     pub ddt: String,
+    pub ddt_derivative: String,
     /// Dense generated state slots keyed by source operator id.
     pub ddt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub ddt_scale: String,
@@ -159,6 +160,7 @@ impl Default for EmitBindings {
             integer_result: "integer_result".into(),
             checked_value: "checked_derivative_value".into(),
             ddt: "ddt".into(),
+            ddt_derivative: "ddt_derivative".into(),
             ddt_slots: HashMap::new(),
             ddt_scale: "ddt_scale".into(),
             idt: "idt".into(),
@@ -1696,6 +1698,7 @@ impl Emitter<'_> {
                 | CfgValueKind::BranchUnknownFlow(_)
                 | CfgValueKind::Staged { .. }
                 | CfgValueKind::Ddt { .. }
+                | CfgValueKind::DdtDerivative { .. }
                 | CfgValueKind::DdtScale
                 | CfgValueKind::Idt { .. }
                 | CfgValueKind::IdtScale
@@ -1846,6 +1849,34 @@ impl Emitter<'_> {
                     .unwrap_or_else(|| usize::from(*operator)),
                 self.numeric_operand(*input)
             ),
+            CfgValueKind::DdtDerivative {
+                operator,
+                primal,
+                input_derivative,
+            } => {
+                let slot = bindings
+                    .ddt_slots
+                    .get(operator)
+                    .copied()
+                    .unwrap_or_else(|| usize::from(*operator));
+                let width = self.function.lanes_of(value).map_or(1, |lanes| lanes.len());
+                if width == 1 {
+                    format!(
+                        "{}({slot},{},{})",
+                        bindings.ddt_derivative,
+                        self.numeric_operand(*primal),
+                        self.lane_element(*input_derivative, 0)
+                    )
+                } else {
+                    format!(
+                        "{}(std::array::from_fn(|i| {}({slot},{},({})[i])))",
+                        lane_type_name(width),
+                        bindings.ddt_derivative,
+                        self.numeric_operand(*primal),
+                        self.operand(*input_derivative)
+                    )
+                }
+            }
             CfgValueKind::DdtScale => format!("{}()", bindings.ddt_scale),
             CfgValueKind::Idt {
                 operator,

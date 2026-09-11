@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, GeneratedDerivative, install_generated_stage_values, L10, L11, L12, L13, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_idt_candidate, GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory, evaluate_generated_idt_derivative, GeneratedIdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, GeneratedDerivative, install_generated_stage_values, L10, L11, L12, L13, L2, L3, L4, L5, L6, L7, L8, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative, evaluate_generated_idt_candidate, GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory, evaluate_generated_idt_derivative, GeneratedIdtCandidateError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 386] = [752, 753, 754, 756, 757, 758, 0, 755, 1, 165, 169, 182, 194, 5, 6, 7, 168, 181, 193, 171, 184, 196, 167, 180, 192, 174, 177, 189, 201, 175, 187, 199, 176, 188, 200, 759, 760, 761, 763, 764, 765, 762, 17, 18, 19, 29, 275, 31, 292, 33, 309, 35, 36, 37, 30, 274, 32, 291, 34, 308, 278, 295, 312, 26, 273, 27, 290, 28, 307, 282, 285, 299, 302, 316, 319, 281, 283, 298, 300, 315, 317, 284, 301, 318, 766, 767, 768, 769, 770, 771, 703, 1010, 2, 3, 4, 8, 9, 10, 11, 12, 13, 15, 14, 16, 20, 21, 22, 23, 24, 25, 38, 39, 40, 42, 41, 44, 43, 46, 45, 47, 48, 49, 51, 50, 52, 779, 53, 54, 793, 794, 795, 796, 797, 798, 55, 56, 57, 810, 811, 812, 813, 58, 59, 60, 814, 815, 816, 817, 818, 63, 61, 62, 64, 65, 819, 820, 67, 66, 68, 69, 70, 71, 823, 72, 824, 73, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 879, 881, 882, 883, 878, 75, 74, 76, 77, 884, 886, 887, 888, 880, 79, 78, 80, 81, 885, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 88, 113, 106, 150, 121, 119, 125, 123, 127, 959, 429, 133, 967, 514, 463, 477, 476, 461, 460, 481, 149, 487, 800, 801, 547, 96, 536, 540, 539, 100, 101, 1009, 423, 435, 92, 153, 94, 95, 532, 104, 111, 134, 135, 458, 478, 462, 470, 1025, 1026, 468, 1027, 469, 146, 147, 152, 1030, 538, 1038, 1039, 1041, 154, 1042, 1044, 1067, 163, 203, 220, 268, 321, 338, 270, 271, 277, 287, 288, 294, 304, 305, 311, 385, 1051, 392, 1544, 422, 434, 440, 441, 459, 467, 474, 483, 509, 1552, 1549, 1550, 1553, 1551, 537, 545, 552, 550, 702, 1559, 1560, 1561, 607, 1576, 608, 648, 652, 653, 655, 656, 695, 696, 698, 718, 719];
@@ -14206,39 +14206,28 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-			let A=staged[779]!=0.0;
-			let B=staged[919]!=0.0;
-			let C=staged[921]!=0.0;
-			if A{
-			if B{
-			loop{
-			if !C{
-			break;
-			}
-			}
-			}
-			}
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         self.canonical_instance_stage(ctx);
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23]), ctx.node_voltage(self.nodes[24]), ctx.node_voltage(self.nodes[25]), ctx.node_voltage(self.nodes[26]), ctx.node_voltage(self.nodes[27]), ctx.node_voltage(self.nodes[28])];
         let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5]), ctx.branch_current(self.branches[6]), ctx.branch_current(self.branches[7]), ctx.branch_current(self.branches[8]), ctx.branch_current(self.branches[9]), ctx.branch_current(self.branches[10]), ctx.branch_current(self.branches[11]), ctx.branch_current(self.branches[12]), ctx.branch_current(self.branches[13]), ctx.branch_current(self.branches[14]), ctx.branch_current(self.branches[15]), ctx.branch_current(self.branches[16]), ctx.branch_current(self.branches[17])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let idt_derivative_coefficients = self.ddt_coefficients;
         let idt_derivative = |slot: usize, primal: f64, input: f64, ic: f64| -> f64 {
             if !ctx.integration_operators_enabled() { return 0.0; }
@@ -15017,31 +15006,30 @@ impl Instance {
 		let SSC=3504517f64;
 		let SSD=90789600f64;
 		let VDR=parameters[33];
-		let VDV=ddt_scale();
-		let VFP=0.08333333333333333f64;
-		let VGA=1e-20f64;
-		let VGS=staged[716];
-		let VHN=staged[713];
-		let VIN=staged[714];
-		let VIT=staged[715];
-		let VLJ=0f64;
-		let VLL=node_potentials[4];
-		let VMK=node_potentials[21];
-		let VMO=0f64;
-		let VMQ=0f64;
-		let VMS=0f64;
-		let VMU=0f64;
-		let VMW=0f64;
+		let VFW=0.08333333333333333f64;
+		let VGH=1e-20f64;
+		let VGZ=staged[716];
+		let VHU=staged[713];
+		let VIU=staged[714];
+		let VJA=staged[715];
+		let VLQ=0f64;
+		let VLS=node_potentials[4];
+		let VMU=node_potentials[21];
 		let VMY=0f64;
 		let VNA=0f64;
 		let VNC=0f64;
-		let VNF=node_potentials[22];
-		let VNP=node_potentials[23];
-		let VNZ=node_potentials[24];
-		let VOJ=node_potentials[25];
-		let VOT=node_potentials[26];
-		let VPD=node_potentials[27];
-		let VPN=node_potentials[28];
+		let VNE=0f64;
+		let VNG=0f64;
+		let VNI=0f64;
+		let VNK=0f64;
+		let VNM=0f64;
+		let VNP=node_potentials[22];
+		let VNZ=node_potentials[23];
+		let VOJ=node_potentials[24];
+		let VOT=node_potentials[25];
+		let VPD=node_potentials[26];
+		let VPN=node_potentials[27];
+		let VPX=node_potentials[28];
 		let C=ctx.has_simparam("gmin");
 		let F=if C{
 		let D=ctx.simparam_required("gmin");
@@ -36413,54 +36401,55 @@ impl Instance {
 		let VDS=KNZ* VDR;
 		let VDT=PLY* VDS;
 		let VDU=ddt(0, (VDS* PLV));
-		let VDW=VDT* VDV;
+		let VDV=L13(std::array::from_fn(|i| ddt_derivative(0,VDU,(VDT)[i])));
+		let VDW=VDT* (ctx.checked_derivative_value(VDU, 1f64));
 		let VDX=E+ VDU;
 		let VDY=PLZ* VDS;
 		let VDZ=ddt(1, (VDS* PLW));
-		let VEA=VDY* VDV;
-		let VEB=E+ VDZ;
-		let VEC=VDQ* VDS;
-		let VED=ddt(2, (VDS* VDP));
-		let VEE=VEC* VDV;
-		let VEF=E+ VED;
-		let VEG=PPK* VDS;
-		let VEH=ddt(3, (VDS* PPJ));
-		let VEI=VEG* VDV;
-		let VEJ=E+ VEH;
-		let VEK=PPM* VDS;
-		let VEL=ddt(4, (VDS* PPL));
-		let VEM=VEK* VDV;
-		let VEN=E+ VEL;
-		let VEO=EZT* VDS;
-		let VEP=ddt(5, (VDS* EZS));
-		let VEQ=VEO* VDV;
-		let VER=E+ VEP;
-		let VES=PPO* VDS;
-		let VET=ddt(6, (VDS* PPN));
-		let VEU=VES* VDV;
-		let VEV=E+ VET;
-		let VEW=PPQ* VDS;
-		let VEX=ddt(7, (VDS* PPP));
-		let VEY=VEW* VDV;
-		let VEZ=E+ VEX;
-		let VFA=EOY* CMG;
-		let VFB=(EOZ* CMG)+ (CNC* EOY);
-		let VFC=PH&& (BIF> E);
-		let VFD;
-		let VFE;
-		let VFF;
-		let VFG;
-		let VFH;
-		let VFI;
-		if VFC{
-		let VFJ=KMQ> E;
-		let VGC;
-		let VGD;
-		let VGE;
-		let VGF;
-		let VGG;
-		let VGH;
-		let VGI;
+		let VEA=L13(std::array::from_fn(|i| ddt_derivative(1,VDZ,(VDY)[i])));
+		let VEB=VDY* (ctx.checked_derivative_value(VDZ, 1f64));
+		let VEC=E+ VDZ;
+		let VED=VDQ* VDS;
+		let VEE=ddt(2, (VDS* VDP));
+		let VEF=L13(std::array::from_fn(|i| ddt_derivative(2,VEE,(VED)[i])));
+		let VEG=VED* (ctx.checked_derivative_value(VEE, 1f64));
+		let VEH=E+ VEE;
+		let VEI=PPK* VDS;
+		let VEJ=ddt(3, (VDS* PPJ));
+		let VEK=L2(std::array::from_fn(|i| ddt_derivative(3,VEJ,(VEI)[i])));
+		let VEL=VEI* (ctx.checked_derivative_value(VEJ, 1f64));
+		let VEM=E+ VEJ;
+		let VEN=PPM* VDS;
+		let VEO=ddt(4, (VDS* PPL));
+		let VEP=L3(std::array::from_fn(|i| ddt_derivative(4,VEO,(VEN)[i])));
+		let VEQ=VEN* (ctx.checked_derivative_value(VEO, 1f64));
+		let VER=E+ VEO;
+		let VES=EZT* VDS;
+		let VET=ddt(5, (VDS* EZS));
+		let VEU=L3(std::array::from_fn(|i| ddt_derivative(5,VET,(VES)[i])));
+		let VEV=VES* (ctx.checked_derivative_value(VET, 1f64));
+		let VEW=E+ VET;
+		let VEX=PPO* VDS;
+		let VEY=ddt(6, (VDS* PPN));
+		let VEZ=L2(std::array::from_fn(|i| ddt_derivative(6,VEY,(VEX)[i])));
+		let VFA=VEX* (ctx.checked_derivative_value(VEY, 1f64));
+		let VFB=E+ VEY;
+		let VFC=PPQ* VDS;
+		let VFD=ddt(7, (VDS* PPP));
+		let VFE=L4(std::array::from_fn(|i| ddt_derivative(7,VFD,(VFC)[i])));
+		let VFF=VFC* (ctx.checked_derivative_value(VFD, 1f64));
+		let VFG=E+ VFD;
+		let VFH=EOY* CMG;
+		let VFI=(EOZ* CMG)+ (CNC* EOY);
+		let VFJ=PH&& (BIF> E);
+		let VFK;
+		let VFL;
+		let VFM;
+		let VFN;
+		let VFO;
+		let VFP;
+		if VFJ{
+		let VFQ=KMQ> E;
 		let VGJ;
 		let VGK;
 		let VGL;
@@ -36470,333 +36459,327 @@ impl Instance {
 		let VGP;
 		let VGQ;
 		let VGR;
-		if VFJ{
-		let VFK=AIJ/ AIH;
-		let VFL=(AJA).product_sum_div(CW,AIY,(-VFK),AIH);
-		let VFM=AII/ AIJ;
-		let VFN=(AIZ).product_sum_div(CW,AJA,(-VFM),AIJ);
-		let VFO=AID/ VFK;
-		let VFQ=VFP* VFO;
-		let VFR=((AIU).product_sum_div(CW,VFL,(-VFO),VFK))* VFP;
-		let VFS=VFQ* VFQ;
-		let VFT=VFR* VFQ;
-		let VFU=VFT+ VFT;
-		let VFV=VFK/ BHH;
-		let VFW=(VFL).product_sum_div(CW,BHK,(-VFV),BHH);
-		let VFX=VFV- CH;
-		let VFY=CH- (SL* (VFX* VFS));
-		let VFZ=(((VFW* VFS)+ (VFU* VFX))* SL)* AN;
-		let VGB=VFY> VGA;
+		let VGS;
+		let VGT;
 		let VGU;
 		let VGV;
-		if VGB{
-		VGU=VFY;
-		VGV=VFZ;
+		let VGW;
+		let VGX;
+		let VGY;
+		if VFQ{
+		let VFR=AIJ/ AIH;
+		let VFS=(AJA).product_sum_div(CW,AIY,(-VFR),AIH);
+		let VFT=AII/ AIJ;
+		let VFU=(AIZ).product_sum_div(CW,AJA,(-VFT),AIJ);
+		let VFV=AID/ VFR;
+		let VFX=VFW* VFV;
+		let VFY=((AIU).product_sum_div(CW,VFS,(-VFV),VFR))* VFW;
+		let VFZ=VFX* VFX;
+		let VGA=VFY* VFX;
+		let VGB=VGA+ VGA;
+		let VGC=VFR/ BHH;
+		let VGD=(VFS).product_sum_div(CW,BHK,(-VGC),BHH);
+		let VGE=VGC- CH;
+		let VGF=CH- (SL* (VGE* VFZ));
+		let VGG=(((VGD* VFZ)+ (VGB* VGE))* SL)* AN;
+		let VGI=VGF> VGH;
+		let VHB;
+		let VHC;
+		if VGI{
+		VHB=VGF;
+		VHC=VGG;
 		}else{
-		VGU=VGA;
-		VGV=GU;
+		VHB=VGH;
+		VHC=GU;
 		}
-		let VGW=VGU* VGU;
-		let VGX=VGV* VGU;
-		let VGY=CH/ VGW;
-		let VGZ=((VGX+ VGX)).product_div((-VGY),VGW);
-		let VHA=BIF* AIJ;
-		let VHB=VHA* BHJ;
-		let VHC=((AJA* BIF)* BHJ)+ (BHM* VHA);
-		let VHD=CH+ VFM;
-		let VHE=VHD* VFS;
-		let VHF=(VFM+ (SL* VFS))- (KVG* (VHE* VFX));
-		let VHG=(VFN+ (VFU* SL))- (((((VFN* VFS)+ (VFU* VHD))* VFX)+ (VFW* VHE))* KVG);
-		let VHH=VHF> VI;
-		let VHI;
-		let VHJ;
-		if VHH{
-		VHI=VHF;
-		VHJ=VHG;
-		}else{
-		VHI=VI;
-		VHJ=GU;
-		}
-		let VHK=VHB* VGY;
-		let VHL=VHK* VHI;
-		let VHM=(((VHC* VGY)+ (VGZ* VHB))* VHI)+ (VHJ* VHK);
-		let VHO=VHN> E;
-		let VHW;
-		let VHX;
-		let VHY;
-		let VHZ;
+		let VHD=VHB* VHB;
+		let VHE=VHC* VHB;
+		let VHF=CH/ VHD;
+		let VHG=((VHE+ VHE)).product_div((-VHF),VHD);
+		let VHH=BIF* AIJ;
+		let VHI=VHH* BHJ;
+		let VHJ=((AJA* BIF)* BHJ)+ (BHM* VHH);
+		let VHK=CH+ VFT;
+		let VHL=VHK* VFZ;
+		let VHM=(VFT+ (SL* VFZ))- (KVG* (VHL* VGE));
+		let VHN=(VFU+ (VGB* SL))- (((((VFU* VFZ)+ (VGB* VHK))* VGE)+ (VGD* VHL))* KVG);
+		let VHO=VHM> VI;
+		let VHP;
+		let VHQ;
 		if VHO{
-		let VHP=AIO/ AIM;
-		let VHQ=(AJF).product_sum_div(CW,AJD,(-VHP),AIM);
-		let VHR=VHP* VHP;
-		let VHS=VHQ* VHP;
-		let VHT=VHR* AID;
-		let VHU=VHT* AID;
-		let VHV=((((VHS+ VHS)* AID)+ (AIU* VHR))* AID)+ (AIU* VHT);
+		VHP=VHM;
+		VHQ=VHN;
+		}else{
+		VHP=VI;
+		VHQ=GU;
+		}
+		let VHR=VHI* VHF;
+		let VHS=VHR* VHP;
+		let VHT=(((VHJ* VHF)+ (VHG* VHI))* VHP)+ (VHQ* VHR);
+		let VHV=VHU> E;
+		let VID;
+		let VIE;
 		let VIF;
 		let VIG;
+		if VHV{
+		let VHW=AIO/ AIM;
+		let VHX=(AJF).product_sum_div(CW,AJD,(-VHW),AIM);
+		let VHY=VHW* VHW;
+		let VHZ=VHX* VHW;
+		let VIA=VHY* AID;
+		let VIB=VIA* AID;
+		let VIC=((((VHZ+ VHZ)* AID)+ (AIU* VHY))* AID)+ (AIU* VIA);
+		let VIM;
+		let VIN;
 		if J{
-		let VIC=CH+ (VHP* AID);
-		let VID=VHU/ VIC;
-		let VIE=(VHV).product_sum_div(CW,((VHQ* AID)+ (AIU* VHP)),(-VID),VIC);
-		VIF=VID;
-		VIG=VIE;
+		let VIJ=CH+ (VHW* AID);
+		let VIK=VIB/ VIJ;
+		let VIL=(VIC).product_sum_div(CW,((VHX* AID)+ (AIU* VHW)),(-VIK),VIJ);
+		VIM=VIK;
+		VIN=VIL;
 		}else{
-		VIF=VHU;
-		VIG=VHV;
+		VIM=VIB;
+		VIN=VIC;
 		}
-		let VIH=(CH+ (DZ* VIF)).sqrt();
-		let VII=CH+ VIH;
-		let VIJ=DI* (AIM* VII);
-		let VIK=VIJ* VGU;
-		let VIL=AIM/ VIK;
-		let VIM=(AJD).product_sum_div(CW,(((((AJD* VII)+ (((VIG* DZ)* (CW/ (CV* VIH)))* AIM))* DI)* VGU)+ (VGV* VIJ)),(-VIL),VIK);
-		let VIO=VIN* BHI;
-		let VIP=VIO* AIA;
-		let VIQ=VIP* VIL;
-		let VIR=VIQ* VIL;
-		let VIS=((((((BHL* VIN)* AIA)+ (AIR* VIO))* VIL)+ (VIM* VIP))* VIL)+ (VIM* VIQ);
-		let VIU=VHL+ (VIR/ VIT);
-		let VIV=VHM+ (VIS/ VIT);
-		VHW=VIU;
-		VHX=VIR;
-		VHY=VIV;
-		VHZ=VIS;
+		let VIO=(CH+ (DZ* VIM)).sqrt();
+		let VIP=CH+ VIO;
+		let VIQ=DI* (AIM* VIP);
+		let VIR=VIQ* VHB;
+		let VIS=AIM/ VIR;
+		let VIT=(AJD).product_sum_div(CW,(((((AJD* VIP)+ (((VIN* DZ)* (CW/ (CV* VIO)))* AIM))* DI)* VHB)+ (VHC* VIQ)),(-VIS),VIR);
+		let VIV=VIU* BHI;
+		let VIW=VIV* AIA;
+		let VIX=VIW* VIS;
+		let VIY=VIX* VIS;
+		let VIZ=((((((BHL* VIU)* AIA)+ (AIR* VIV))* VIS)+ (VIT* VIW))* VIS)+ (VIT* VIX);
+		let VJB=VHS+ (VIY/ VJA);
+		let VJC=VHT+ (VIZ/ VJA);
+		VID=VJB;
+		VIE=VIY;
+		VIF=VJC;
+		VIG=VIZ;
 		}else{
-		VHW=VHL;
-		VHX=E;
-		VHY=VHM;
-		VHZ=GU;
+		VID=VHS;
+		VIE=E;
+		VIF=VHT;
+		VIG=GU;
 		}
-		let VIA=(VGS* VHW).sqrt();
-		let VIB=(VHY* VGS)* (CW/ (CV* VIA));
-		VGC=VFM;
-		VGD=VFS;
-		VGE=VFX;
-		VGF=VGY;
-		VGG=VHB;
-		VGH=VFQ;
-		VGI=VHX;
-		VGJ=VIA;
-		VGK=VFN;
-		VGL=VFU;
-		VGM=VFW;
-		VGN=VGZ;
-		VGO=VHC;
-		VGP=VFR;
-		VGQ=VHZ;
-		VGR=VIB;
+		let VIH=(VGZ* VID).sqrt();
+		let VII=(VIF* VGZ)* (CW/ (CV* VIH));
+		VGJ=VFT;
+		VGK=VFZ;
+		VGL=VGE;
+		VGM=VHF;
+		VGN=VHI;
+		VGO=VFX;
+		VGP=VIE;
+		VGQ=VIH;
+		VGR=VFU;
+		VGS=VGB;
+		VGT=VGD;
+		VGU=VHG;
+		VGV=VHJ;
+		VGW=VFY;
+		VGX=VIG;
+		VGY=VII;
 		}else{
-		VGC=E;
-		VGD=E;
-		VGE=E;
-		VGF=E;
-		VGG=E;
-		VGH=E;
-		VGI=E;
 		VGJ=E;
-		VGK=GU;
-		VGL=GU;
-		VGM=GU;
-		VGN=GU;
-		VGO=GU;
-		VGP=GU;
-		VGQ=GU;
+		VGK=E;
+		VGL=E;
+		VGM=E;
+		VGN=E;
+		VGO=E;
+		VGP=E;
+		VGQ=E;
 		VGR=GU;
+		VGS=GU;
+		VGT=GU;
+		VGU=GU;
+		VGV=GU;
+		VGW=GU;
+		VGX=GU;
+		VGY=GU;
 		}
-		let VGT=(((parameters[50]== CH)&& (VGS> E))&& VFJ)&& (VDR> E);
-		let VJF;
-		let VJG;
-		let VJH;
-		let VJI;
-		let VJJ;
-		let VJK;
-		if VGT{
-		let VIW=SL* VGD;
-		let VIX=VGL* SL;
-		let VIY=(VGC+ ADZ)- VIW;
-		let VIZ=(VGK- VIX)* VGD;
-		let VJA=(VGC+ CH)- VIW;
-		let VJB=VGD* VJA;
-		let VJC=((VGC/ SL)- (VGD* VIY))- (1.6f64* (VJB* VGE));
-		let VJD=((VGK/ SL)- ((VGL* VIY)+ VIZ))- (((((VGL* VJA)+ VIZ)* VGE)+ (VGM* VJB))* 1.6f64);
-		let VJE=VJC> VI;
-		let VJL;
+		let VHA=(((parameters[50]== CH)&& (VGZ> E))&& VFQ)&& (VDR> E);
 		let VJM;
-		if VJE{
-		VJL=VJC;
-		VJM=VJD;
+		let VJN;
+		let VJO;
+		let VJP;
+		let VJQ;
+		let VJR;
+		if VHA{
+		let VJD=SL* VGK;
+		let VJE=VGS* SL;
+		let VJF=(VGJ+ ADZ)- VJD;
+		let VJG=(VGR- VJE)* VGK;
+		let VJH=(VGJ+ CH)- VJD;
+		let VJI=VGK* VJH;
+		let VJJ=((VGJ/ SL)- (VGK* VJF))- (1.6f64* (VJI* VGL));
+		let VJK=((VGR/ SL)- ((VGS* VJF)+ VJG))- (((((VGS* VJH)+ VJG)* VGL)+ (VGT* VJI))* 1.6f64);
+		let VJL=VJJ> VI;
+		let VJS;
+		let VJT;
+		if VJL{
+		VJS=VJJ;
+		VJT=VJK;
 		}else{
-		VJL=VI;
-		VJM=GU;
+		VJS=VI;
+		VJT=GU;
 		}
-		let VJN=VGF/ VGG;
-		let VJO=VJN* VJL;
-		let VJP=(((VGN).product_sum_div(CW,VGO,(-VJN),VGG))* VJL)+ (VJM* VJN);
-		let VJQ=VGF* VGH;
-		let VJR=(VGC+ (19.2f64* VGD))- (SL* (VGC* VGD));
-		let VJS=(CH- VIW)- (VJR* VGE);
-		let VJT=VJQ* VJS;
-		let VJU=(((VGN* VGH)+ (VGP* VGF))* VJS)+ (((VIX* AN)- ((((VGK+ (VGL* 19.2f64))- (((VGK* VGD)+ (VGL* VGC))* SL))* VGE)+ (VGM* VJR)))* VJQ);
-		let VJV=EPN* EPN;
-		let VJW=EPU* EPN;
-		let VJX=VJV* EOY;
-		let VJY=EPL* EPL;
-		let VJZ=EPS* EPL;
-		let VKA=(VJX* CMG)/ VJY;
-		let VKB=((((((VJW+ VJW)* EOY)+ (EOZ* VJV))* CMG)+ (CNC* VJX))).product_sum_div(CW,(VJZ+ VJZ),(-VKA),VJY);
-		let VKC=VHN> E;
-		let VKP;
-		let VKQ;
-		let VKR;
-		let VKS;
-		if VKC{
-		let VKD=CH+ VIW;
-		let VKE=SL* VGG;
-		let VKF=(VKE* VGG)* VIT;
-		let VKG=(VGI* VKD)/ VKF;
-		let VKH=VJO+ VKG;
-		let VKI=VJP+ ((((VGQ* VKD)+ (VIX* VGI))).product_sum_div(CW,((((VGO* SL)* VGG)+ (VGO* VKE))* VIT),(-VKG),VKF));
-		let VKJ=VGI* VGH;
-		let VKK=CH+ VGE;
-		let VKL=VGG* VIT;
-		let VKM=(VKJ* VKK)/ VKL;
-		let VKN=VJT- VKM;
-		let VKO=VJU- ((((((VGQ* VGH)+ (VGP* VGI))* VKK)+ (VGM* VKJ))).product_sum_div(CW,(VGO* VIT),(-VKM),VKL));
-		VKP=VKH;
-		VKQ=VKN;
-		VKR=VKI;
-		VKS=VKO;
-		}else{
-		VKP=VJO;
-		VKQ=VJT;
-		VKR=VJP;
-		VKS=VJU;
-		}
-		let VKT=VGS/ VKP;
-		let VKU=VKT.sqrt();
-		let VKV=((VKR).product_div((-VKT),VKP))* (CW/ (CV* VKU));
-		let VKW=VGJ<= E;
+		let VJU=VGM/ VGN;
+		let VJV=VJU* VJS;
+		let VJW=(((VGU).product_sum_div(CW,VGV,(-VJU),VGN))* VJS)+ (VJT* VJU);
+		let VJX=VGM* VGO;
+		let VJY=(VGJ+ (19.2f64* VGK))- (SL* (VGJ* VGK));
+		let VJZ=(CH- VJD)- (VJY* VGL);
+		let VKA=VJX* VJZ;
+		let VKB=(((VGU* VGO)+ (VGW* VGM))* VJZ)+ (((VJE* AN)- ((((VGR+ (VGS* 19.2f64))- (((VGR* VGK)+ (VGS* VGJ))* SL))* VGL)+ (VGT* VJY)))* VJX);
+		let VKC=EPN* EPN;
+		let VKD=EPU* EPN;
+		let VKE=VKC* EOY;
+		let VKF=EPL* EPL;
+		let VKG=EPS* EPL;
+		let VKH=(VKE* CMG)/ VKF;
+		let VKI=((((((VKD+ VKD)* EOY)+ (EOZ* VKC))* CMG)+ (CNC* VKE))).product_sum_div(CW,(VKG+ VKG),(-VKH),VKF);
+		let VKJ=VHU> E;
+		let VKW;
+		let VKX;
+		let VKY;
 		let VKZ;
-		let VLA;
-		if VKW{
-		VKZ=E;
-		VLA=GU;
+		if VKJ{
+		let VKK=CH+ VJD;
+		let VKL=SL* VGN;
+		let VKM=(VKL* VGN)* VJA;
+		let VKN=(VGP* VKK)/ VKM;
+		let VKO=VJV+ VKN;
+		let VKP=VJW+ ((((VGX* VKK)+ (VJE* VGP))).product_sum_div(CW,((((VGV* SL)* VGN)+ (VGV* VKL))* VJA),(-VKN),VKM));
+		let VKQ=VGP* VGO;
+		let VKR=CH+ VGL;
+		let VKS=VGN* VJA;
+		let VKT=(VKQ* VKR)/ VKS;
+		let VKU=VKA- VKT;
+		let VKV=VKB- ((((((VGX* VGO)+ (VGW* VGP))* VKR)+ (VGT* VKQ))).product_sum_div(CW,(VGV* VJA),(-VKT),VKS));
+		VKW=VKO;
+		VKX=VKU;
+		VKY=VKP;
+		VKZ=VKV;
 		}else{
-		let VKX=(VKQ* VKU)/ VGJ;
-		let VKY=(((VKS* VKU)+ (VKV* VKQ))).product_sum_div(CW,VGR,(-VKX),VGJ);
-		VKZ=VKX;
-		VLA=VKY;
+		VKW=VJV;
+		VKX=VKA;
+		VKY=VJW;
+		VKZ=VKB;
 		}
-		let VLB=VKZ> E;
-		let VLD;
-		let VLE;
-		if VLB{
-		let VLC=VKZ< CH;
+		let VLA=VGZ/ VKW;
+		let VLB=VLA.sqrt();
+		let VLC=((VKY).product_div((-VLA),VKW))* (CW/ (CV* VLB));
+		let VLD=VGQ<= E;
+		let VLG;
 		let VLH;
-		let VLI;
-		if VLC{
-		VLH=VKZ;
-		VLI=VLA;
+		if VLD{
+		VLG=E;
+		VLH=GU;
 		}else{
-		VLH=CH;
-		VLI=GU;
+		let VLE=(VKX* VLB)/ VGQ;
+		let VLF=(((VKZ* VLB)+ (VLC* VKX))).product_sum_div(CW,VGY,(-VLE),VGQ);
+		VLG=VLE;
+		VLH=VLF;
 		}
-		VLD=VLH;
-		VLE=VLI;
+		let VLI=VLG> E;
+		let VLK;
+		let VLL;
+		if VLI{
+		let VLJ=VLG< CH;
+		let VLO;
+		let VLP;
+		if VLJ{
+		VLO=VLG;
+		VLP=VLH;
 		}else{
-		VLD=E;
-		VLE=GU;
+		VLO=CH;
+		VLP=GU;
 		}
-		let VLF=(VLD* VGJ)/ VKU;
-		let VLG=(((VLE* VGJ)+ (VGR* VLD))).product_sum_div(CW,VKV,(-VLF),VKU);
-		VJF=VKP;
-		VJG=VKA;
-		VJH=VLF;
-		VJI=VKR;
-		VJJ=VKB;
-		VJK=VLG;
+		VLK=VLO;
+		VLL=VLP;
 		}else{
-		VJF=VI;
-		VJG=VFA;
-		VJH=E;
-		VJI=GU;
-		VJJ=VFB;
-		VJK=GU;
+		VLK=E;
+		VLL=GU;
 		}
-		VFD=VJF;
-		VFE=VJG;
-		VFF=VJH;
-		VFG=VJI;
-		VFH=VJJ;
-		VFI=VJK;
+		let VLM=(VLK* VGQ)/ VLB;
+		let VLN=(((VLL* VGQ)+ (VGY* VLK))).product_sum_div(CW,VLC,(-VLM),VLB);
+		VJM=VKW;
+		VJN=VKH;
+		VJO=VLM;
+		VJP=VKY;
+		VJQ=VKI;
+		VJR=VLN;
 		}else{
-		VFD=VI;
-		VFE=VFA;
-		VFF=E;
-		VFG=GU;
-		VFH=VFB;
-		VFI=GU;
+		VJM=VI;
+		VJN=VFH;
+		VJO=E;
+		VJP=GU;
+		VJQ=VFI;
+		VJR=GU;
 		}
-		let VLK=E+ (-VLJ);
-		let VLM=VLL/ VFD;
-		let VLN=(L5([1f64,0.0,0.0,0.0,0.0])).product_sum_div(CW,L5([0.0,VFG[0],VFG[1],VFG[2],VFG[3]]),(-VLM),VFD);
-		let VLO=E+ VLM;
-		let VLP=VFH* VLL;
-		let VLQ=L5([0.0,VLP[0],VLP[1],VLP[2],VLP[3]])+ L5([(1f64* VFE),0.0,0.0,0.0,0.0]);
-		let VLR=ddt(8, (VFE* VLL));
-		let VLS=VLQ* VDV;
-		let VLT=E+ VLR;
-		let VLU=(KMP* KMQ).sqrt();
-		let VLV=VLU* DI;
-		let VLW=VLV* VFE;
-		let VLX=VLW* VLL;
-		let VLY=(VFH* VLV)* VLL;
-		let VLZ=L5([0.0,VLY[0],VLY[1],VLY[2],VLY[3]])+ L5([(1f64* VLW),0.0,0.0,0.0,0.0]);
-		let VMA=ddt(9, VLX);
-		let VMB=VLZ* VDV;
-		let VMC=VMB* AN;
-		let VMD=VLZ* AN;
-		let VME=E+ (-VMA);
-		let VMF=ddt(10, VLX);
-		let VMG=VMB* AN;
-		let VMH=E+ (-VMF);
-		let VMI=CL* VLU;
-		let VMJ=VMI* VFF;
-		let VML=(VFI* VMI)* VMK;
-		let VMM=L5([VML[0],VML[1],VML[2],VML[3],0.0])+ L5([0.0,0.0,0.0,0.0,(1f64* VMJ)]);
-		let VMN=E+ (VMJ* VMK);
-		let VMP=E+ VMO;
-		let VMR=E+ VMQ;
-		let VMT=E+ VMS;
-		let VMV=E+ VMU;
-		let VMX=E+ VMW;
+		VFK=VJM;
+		VFL=VJN;
+		VFM=VJO;
+		VFN=VJP;
+		VFO=VJQ;
+		VFP=VJR;
+		}else{
+		VFK=VI;
+		VFL=VFH;
+		VFM=E;
+		VFN=GU;
+		VFO=VFI;
+		VFP=GU;
+		}
+		let VLR=E+ (-VLQ);
+		let VLT=VLS/ VFK;
+		let VLU=(L5([1f64,0.0,0.0,0.0,0.0])).product_sum_div(CW,L5([0.0,VFN[0],VFN[1],VFN[2],VFN[3]]),(-VLT),VFK);
+		let VLV=E+ VLT;
+		let VLW=VFO* VLS;
+		let VLX=L5([0.0,VLW[0],VLW[1],VLW[2],VLW[3]])+ L5([(1f64* VFL),0.0,0.0,0.0,0.0]);
+		let VLY=ddt(8, (VFL* VLS));
+		let VLZ=L5(std::array::from_fn(|i| ddt_derivative(8,VLY,(VLX)[i])));
+		let VMA=VLX* (ctx.checked_derivative_value(VLY, 1f64));
+		let VMB=E+ VLY;
+		let VMC=(KMP* KMQ).sqrt();
+		let VMD=VMC* DI;
+		let VME=VMD* VFL;
+		let VMF=VME* VLS;
+		let VMG=(VFO* VMD)* VLS;
+		let VMH=L5([0.0,VMG[0],VMG[1],VMG[2],VMG[3]])+ L5([(1f64* VME),0.0,0.0,0.0,0.0]);
+		let VMI=ddt(9, VMF);
+		let VMJ=L5(std::array::from_fn(|i| ddt_derivative(9,VMI,(VMH)[i])));
+		let VMK=VMJ* AN;
+		let VML=(VMH* (ctx.checked_derivative_value(VMI, 1f64)))* AN;
+		let VMM=E+ (-VMI);
+		let VMN=ddt(10, VMF);
+		let VMO=L5(std::array::from_fn(|i| ddt_derivative(10,VMN,(VMH)[i])));
+		let VMP=VMO* AN;
+		let VMQ=(VMH* (ctx.checked_derivative_value(VMN, 1f64)))* AN;
+		let VMR=E+ (-VMN);
+		let VMS=CL* VMC;
+		let VMT=VMS* VFM;
+		let VMV=(VFP* VMS)* VMU;
+		let VMW=L5([VMV[0],VMV[1],VMV[2],VMV[3],0.0])+ L5([0.0,0.0,0.0,0.0,(1f64* VMT)]);
+		let VMX=E+ (VMT* VMU);
 		let VMZ=E+ VMY;
 		let VNB=E+ VNA;
 		let VND=E+ VNC;
-		let VNE=E+ VMK;
-		let VNG=E+ VNF;
-		let VNL;
-		let VNM;
-		if KRU!=0.0{
-		let VNH=KSV- KQJ;
-		let VNI=L2([1f64,0.0])- L2([0.0,KQK]);
-		let VNJ=L3([VNI[0],VNI[1],0.0]);
-		VNL=VNH;
-		VNM=VNJ;
-		}else{
-		let VNK=L3([0.0,0.0,1f64]);
-		VNL=VNF;
-		VNM=VNK;
-		}
-		let VNN=VNM- L3([KRW[0],KRW[1],0.0]);
-		let VNO=E+ (VNL- KRV);
+		let VNF=E+ VNE;
+		let VNH=E+ VNG;
+		let VNJ=E+ VNI;
+		let VNL=E+ VNK;
+		let VNN=E+ VNM;
+		let VNO=E+ VMU;
 		let VNQ=E+ VNP;
 		let VNV;
 		let VNW;
-		if KRH!=0.0{
-		let VNR=AP- KQJ;
-		let VNS=L2([0.0,1f64])- L2([KQK,0.0]);
+		if KRU!=0.0{
+		let VNR=KSV- KQJ;
+		let VNS=L2([1f64,0.0])- L2([0.0,KQK]);
 		let VNT=L3([VNS[0],VNS[1],0.0]);
 		VNV=VNR;
 		VNW=VNT;
@@ -36805,14 +36788,14 @@ impl Instance {
 		VNV=VNP;
 		VNW=VNU;
 		}
-		let VNX=VNW- L3([KRJ[0],KRJ[1],0.0]);
-		let VNY=E+ (VNV- KRI);
+		let VNX=VNW- L3([KRW[0],KRW[1],0.0]);
+		let VNY=E+ (VNV- KRV);
 		let VOA=E+ VNZ;
 		let VOF;
 		let VOG;
-		if KQF!=0.0{
-		let VOB=KQJ- AH;
-		let VOC=L2([0.0,KQK])- L2([AJ,0.0]);
+		if KRH!=0.0{
+		let VOB=AP- KQJ;
+		let VOC=L2([0.0,1f64])- L2([KQK,0.0]);
 		let VOD=L3([VOC[0],VOC[1],0.0]);
 		VOF=VOB;
 		VOG=VOD;
@@ -36821,14 +36804,14 @@ impl Instance {
 		VOF=VNZ;
 		VOG=VOE;
 		}
-		let VOH=VOG- L3([KQH[0],KQH[1],0.0]);
-		let VOI=E+ (VOF- KQG);
+		let VOH=VOG- L3([KRJ[0],KRJ[1],0.0]);
+		let VOI=E+ (VOF- KRI);
 		let VOK=E+ VOJ;
 		let VOP;
 		let VOQ;
-		if KQU!=0.0{
-		let VOL=KQJ- AL;
-		let VOM=L2([KQK,0.0])- L2([0.0,1f64]);
+		if KQF!=0.0{
+		let VOL=KQJ- AH;
+		let VOM=L2([0.0,KQK])- L2([AJ,0.0]);
 		let VON=L3([VOM[0],VOM[1],0.0]);
 		VOP=VOL;
 		VOQ=VON;
@@ -36837,14 +36820,14 @@ impl Instance {
 		VOP=VOJ;
 		VOQ=VOO;
 		}
-		let VOR=VOQ- L3([KQW[0],KQW[1],0.0]);
-		let VOS=E+ (VOP- KQV);
+		let VOR=VOQ- L3([KQH[0],KQH[1],0.0]);
+		let VOS=E+ (VOP- KQG);
 		let VOU=E+ VOT;
 		let VOZ;
 		let VPA;
-		if KPR!=0.0{
-		let VOV=KPV- AD;
-		let VOW=L2([1f64,0.0])- L2([0.0,AF]);
+		if KQU!=0.0{
+		let VOV=KQJ- AL;
+		let VOW=L2([KQK,0.0])- L2([0.0,1f64]);
 		let VOX=L3([VOW[0],VOW[1],0.0]);
 		VOZ=VOV;
 		VPA=VOX;
@@ -36853,14 +36836,14 @@ impl Instance {
 		VOZ=VOT;
 		VPA=VOY;
 		}
-		let VPB=VPA- L3([KPT[0],KPT[1],0.0]);
-		let VPC=E+ (VOZ- KPS);
+		let VPB=VPA- L3([KQW[0],KQW[1],0.0]);
+		let VPC=E+ (VOZ- KQV);
 		let VPE=E+ VPD;
 		let VPJ;
 		let VPK;
-		if KOP!=0.0{
-		let VPF=KOT- Y;
-		let VPG=L2([1f64,0.0])- L2([0.0,1f64]);
+		if KPR!=0.0{
+		let VPF=KPV- AD;
+		let VPG=L2([1f64,0.0])- L2([0.0,AF]);
 		let VPH=L3([VPG[0],VPG[1],0.0]);
 		VPJ=VPF;
 		VPK=VPH;
@@ -36869,14 +36852,14 @@ impl Instance {
 		VPJ=VPD;
 		VPK=VPI;
 		}
-		let VPL=VPK- L3([KOR[0],KOR[1],0.0]);
-		let VPM=E+ (VPJ- KOQ);
+		let VPL=VPK- L3([KPT[0],KPT[1],0.0]);
+		let VPM=E+ (VPJ- KPS);
 		let VPO=E+ VPN;
 		let VPT;
 		let VPU;
-		if KPD!=0.0{
-		let VPP=KPH- Z;
-		let VPQ=L2([1f64,0.0])- L2([0.0,AB]);
+		if KOP!=0.0{
+		let VPP=KOT- Y;
+		let VPQ=L2([1f64,0.0])- L2([0.0,1f64]);
 		let VPR=L3([VPQ[0],VPQ[1],0.0]);
 		VPT=VPP;
 		VPU=VPR;
@@ -36885,489 +36868,505 @@ impl Instance {
 		VPT=VPN;
 		VPU=VPS;
 		}
-		let VPV=VPU- L3([KPF[0],KPF[1],0.0]);
-		let VPW=E+ (VPT- KPE);
-		let VPX=KNR[0];
-		let VPY=KNR[1];
-		let VPZ=KNR[2];
-		let VQA=KNR[3];
-		let VQB=KNS[0];
-		let VQC=KNS[1];
-		let VQD=KNS[2];
-		let VQE=KNS[3];
-		let VQF=KNT[0];
-		let VQG=KNT[1];
-		let VQH=KNT[2];
-		let VQI=KNT[3];
-		let VQJ=KNU[0];
-		let VQK=KNU[1];
-		let VQL=KNU[2];
-		let VQM=KNU[3];
-		let VQN=KNV[0];
-		let VQO=KNV[1];
-		let VQP=KNV[2];
-		let VQQ=KNV[3];
-		let VQR=KNW[0];
-		let VQS=KNW[1];
-		let VQT=KNW[2];
-		let VQU=KNW[3];
-		let VQV=KNX[0];
-		let VQW=KNX[1];
-		let VQX=KNX[2];
-		let VQY=KNX[3];
-		let VQZ=KNY[0];
-		let VRA=KNY[1];
-		let VRB=KNY[2];
-		let VRC=KNY[3];
-		let VRD=KOB[0];
-		let VRE=KOB[1];
-		let VRF=KOB[2];
-		let VRG=KOB[3];
-		let VRH=KOD[0];
-		let VRI=KOD[1];
-		let VRJ=KOF[0];
-		let VRK=KOF[1];
-		let VRL=KOF[2];
-		let VRM=KOH[0];
-		let VRN=KOH[1];
-		let VRO=KOH[2];
-		let VRP=KOJ[0];
-		let VRQ=KOJ[1];
-		let VRR=KOJ[2];
-		let VRS=KOJ[3];
-		let VRT=KOL[0];
-		let VRU=KOL[1];
-		let VRV=KOL[2];
-		let VRW=KOL[3];
-		let VRX=KOL[4];
-		let VRY=KON[0];
-		let VRZ=KON[1];
-		let VSA=KON[2];
-		let VSB=KON[3];
-		let VSC=KON[4];
-		let VSD=KON[5];
-		let VSE=KRY[0];
-		let VSF=KRY[1];
-		let VSG=KSA[0];
-		let VSH=KSA[1];
-		let VSI=PMC;
-		let VSJ=PMK[0];
-		let VSK=PML[0];
-		let VSL=PMK[1];
-		let VSM=PML[1];
-		let VSN=PMK[2];
-		let VSO=PML[2];
-		let VSP=PMK[3];
-		let VSQ=PML[3];
-		let VSR=PMK[4];
-		let VSS=PML[4];
-		let VST=PMK[5];
-		let VSU=PML[5];
-		let VSV=PMK[6];
-		let VSW=PML[6];
-		let VSX=PMK[7];
-		let VSY=PML[7];
-		let VSZ=PMK[8];
-		let VTA=PML[8];
-		let VTB=PMK[9];
-		let VTC=PML[9];
-		let VTD=PMK[10];
-		let VTE=PML[10];
-		let VTF=PMK[11];
-		let VTG=PML[11];
-		let VTH=PMK[12];
-		let VTI=PML[12];
-		let VTJ=PMN;
-		let VTK=PMT[0];
-		let VTL=PMU[0];
-		let VTM=PMT[1];
-		let VTN=PMU[1];
-		let VTO=PMT[2];
-		let VTP=PMU[2];
-		let VTQ=PMT[3];
-		let VTR=PMU[3];
-		let VTS=PMT[4];
-		let VTT=PMU[4];
-		let VTU=PMT[5];
-		let VTV=PMU[5];
-		let VTW=PMT[6];
-		let VTX=PMU[6];
-		let VTY=PMT[7];
-		let VTZ=PMU[7];
-		let VUA=PMT[8];
-		let VUB=PMU[8];
-		let VUC=PMT[9];
-		let VUD=PMU[9];
-		let VUE=PMT[10];
-		let VUF=PMU[10];
-		let VUG=PMT[11];
-		let VUH=PMU[11];
-		let VUI=PMT[12];
-		let VUJ=PMU[12];
-		let VUK=PMW;
-		let VUL=PNC[0];
-		let VUM=PND[0];
-		let VUN=PNC[1];
-		let VUO=PND[1];
-		let VUP=PNC[2];
-		let VUQ=PND[2];
-		let VUR=PNC[3];
-		let VUS=PND[3];
-		let VUT=PNC[4];
-		let VUU=PND[4];
-		let VUV=PNC[5];
-		let VUW=PND[5];
-		let VUX=PNC[6];
-		let VUY=PND[6];
-		let VUZ=PNC[7];
-		let VVA=PND[7];
-		let VVB=PNC[8];
-		let VVC=PND[8];
-		let VVD=PNC[9];
-		let VVE=PND[9];
-		let VVF=PNC[10];
-		let VVG=PND[10];
-		let VVH=PNC[11];
-		let VVI=PND[11];
-		let VVJ=PNC[12];
-		let VVK=PND[12];
-		let VVL=PNF;
-		let VVM=PNL[0];
-		let VVN=PNM[0];
-		let VVO=PNL[1];
-		let VVP=PNM[1];
-		let VVQ=PNL[2];
-		let VVR=PNM[2];
-		let VVS=PNL[3];
-		let VVT=PNM[3];
-		let VVU=PNL[4];
-		let VVV=PNM[4];
-		let VVW=PNL[5];
-		let VVX=PNM[5];
-		let VVY=PNL[6];
-		let VVZ=PNM[6];
-		let VWA=PNL[7];
-		let VWB=PNM[7];
-		let VWC=PNL[8];
-		let VWD=PNM[8];
-		let VWE=PNL[9];
-		let VWF=PNM[9];
-		let VWG=PNL[10];
-		let VWH=PNM[10];
-		let VWI=PNL[11];
-		let VWJ=PNM[11];
-		let VWK=PNL[12];
-		let VWL=PNM[12];
-		let VWM=PNO;
-		let VWN=PNU[0];
-		let VWO=PNV[0];
-		let VWP=PNU[1];
-		let VWQ=PNV[1];
-		let VWR=PNU[2];
-		let VWS=PNV[2];
-		let VWT=PNU[3];
-		let VWU=PNV[3];
-		let VWV=PNU[4];
-		let VWW=PNV[4];
-		let VWX=PNU[5];
-		let VWY=PNV[5];
-		let VWZ=PNU[6];
-		let VXA=PNV[6];
-		let VXB=PNU[7];
-		let VXC=PNV[7];
-		let VXD=PNU[8];
-		let VXE=PNV[8];
-		let VXF=PNU[9];
-		let VXG=PNV[9];
-		let VXH=PNU[10];
-		let VXI=PNV[10];
-		let VXJ=PNU[11];
-		let VXK=PNV[11];
-		let VXL=PNU[12];
-		let VXM=PNV[12];
-		let VXN=PNX;
-		let VXO=POD[0];
-		let VXP=POE[0];
-		let VXQ=POD[1];
-		let VXR=POE[1];
-		let VXS=POD[2];
-		let VXT=POE[2];
-		let VXU=POD[3];
-		let VXV=POE[3];
-		let VXW=POD[4];
-		let VXX=POE[4];
-		let VXY=POD[5];
-		let VXZ=POE[5];
-		let VYA=POD[6];
-		let VYB=POE[6];
-		let VYC=POD[7];
-		let VYD=POE[7];
-		let VYE=POD[8];
-		let VYF=POE[8];
-		let VYG=POD[9];
-		let VYH=POE[9];
-		let VYI=POD[10];
-		let VYJ=POE[10];
-		let VYK=POD[11];
-		let VYL=POE[11];
-		let VYM=POD[12];
-		let VYN=POE[12];
-		let VYO=POG;
-		let VYP=POM[0];
-		let VYQ=PON[0];
-		let VYR=POM[1];
-		let VYS=PON[1];
-		let VYT=POM[2];
-		let VYU=PON[2];
-		let VYV=POM[3];
-		let VYW=PON[3];
-		let VYX=POM[4];
-		let VYY=PON[4];
-		let VYZ=POM[5];
-		let VZA=PON[5];
-		let VZB=POM[6];
-		let VZC=PON[6];
-		let VZD=POM[7];
-		let VZE=PON[7];
-		let VZF=POM[8];
-		let VZG=PON[8];
-		let VZH=POM[9];
-		let VZI=PON[9];
-		let VZJ=POM[10];
-		let VZK=PON[10];
-		let VZL=POM[11];
-		let VZM=PON[11];
-		let VZN=POM[12];
-		let VZO=PON[12];
-		let VZP=POP;
-		let VZQ=POV[0];
-		let VZR=POW[0];
-		let VZS=POV[1];
-		let VZT=POW[1];
-		let VZU=POV[2];
-		let VZV=POW[2];
-		let VZW=POV[3];
-		let VZX=POW[3];
-		let VZY=POV[4];
-		let VZZ=POW[4];
-		let WAA=POV[5];
-		let WAB=POW[5];
-		let WAC=POV[6];
-		let WAD=POW[6];
-		let WAE=POV[7];
-		let WAF=POW[7];
-		let WAG=POV[8];
-		let WAH=POW[8];
-		let WAI=POV[9];
-		let WAJ=POW[9];
-		let WAK=POV[10];
-		let WAL=POW[10];
-		let WAM=POV[11];
-		let WAN=POW[11];
-		let WAO=POV[12];
-		let WAP=POW[12];
-		let WAQ=POY;
-		let WAR=PPE[0];
-		let WAS=PPF[0];
-		let WAT=PPE[1];
-		let WAU=PPF[1];
-		let WAV=PPE[2];
-		let WAW=PPF[2];
-		let WAX=PPE[3];
-		let WAY=PPF[3];
-		let WAZ=PPE[4];
-		let WBA=PPF[4];
-		let WBB=PPE[5];
-		let WBC=PPF[5];
-		let WBD=PPE[6];
-		let WBE=PPF[6];
-		let WBF=PPE[7];
-		let WBG=PPF[7];
-		let WBH=PPE[8];
-		let WBI=PPF[8];
-		let WBJ=PPE[9];
-		let WBK=PPF[9];
-		let WBL=PPE[10];
-		let WBM=PPF[10];
-		let WBN=PPE[11];
-		let WBO=PPF[11];
-		let WBP=PPE[12];
-		let WBQ=PPF[12];
-		let WBR=VDW[0];
-		let WBS=VDT[0];
-		let WBT=VDW[1];
-		let WBU=VDT[1];
-		let WBV=VDW[2];
-		let WBW=VDT[2];
-		let WBX=VDW[3];
-		let WBY=VDT[3];
-		let WBZ=VDW[4];
-		let WCA=VDT[4];
-		let WCB=VDW[5];
-		let WCC=VDT[5];
-		let WCD=VDW[6];
-		let WCE=VDT[6];
-		let WCF=VDW[7];
-		let WCG=VDT[7];
-		let WCH=VDW[8];
-		let WCI=VDT[8];
-		let WCJ=VDW[9];
-		let WCK=VDT[9];
-		let WCL=VDW[10];
-		let WCM=VDT[10];
-		let WCN=VDW[11];
-		let WCO=VDT[11];
-		let WCP=VDW[12];
-		let WCQ=VDT[12];
-		let WCR=VEA[0];
-		let WCS=VDY[0];
-		let WCT=VEA[1];
-		let WCU=VDY[1];
-		let WCV=VEA[2];
-		let WCW=VDY[2];
-		let WCX=VEA[3];
-		let WCY=VDY[3];
-		let WCZ=VEA[4];
-		let WDA=VDY[4];
-		let WDB=VEA[5];
-		let WDC=VDY[5];
-		let WDD=VEA[6];
-		let WDE=VDY[6];
-		let WDF=VEA[7];
-		let WDG=VDY[7];
-		let WDH=VEA[8];
-		let WDI=VDY[8];
-		let WDJ=VEA[9];
-		let WDK=VDY[9];
-		let WDL=VEA[10];
-		let WDM=VDY[10];
-		let WDN=VEA[11];
-		let WDO=VDY[11];
-		let WDP=VEA[12];
-		let WDQ=VDY[12];
-		let WDR=VEE[0];
-		let WDS=VEC[0];
-		let WDT=VEE[1];
-		let WDU=VEC[1];
-		let WDV=VEE[2];
-		let WDW=VEC[2];
-		let WDX=VEE[3];
-		let WDY=VEC[3];
-		let WDZ=VEE[4];
-		let WEA=VEC[4];
-		let WEB=VEE[5];
-		let WEC=VEC[5];
-		let WED=VEE[6];
-		let WEE=VEC[6];
-		let WEF=VEE[7];
-		let WEG=VEC[7];
-		let WEH=VEE[8];
-		let WEI=VEC[8];
-		let WEJ=VEE[9];
-		let WEK=VEC[9];
-		let WEL=VEE[10];
-		let WEM=VEC[10];
-		let WEN=VEE[11];
-		let WEO=VEC[11];
-		let WEP=VEE[12];
-		let WEQ=VEC[12];
-		let WER=VEI[0];
-		let WES=VEG[0];
-		let WET=VEI[1];
-		let WEU=VEG[1];
-		let WEV=VEM[0];
-		let WEW=VEK[0];
-		let WEX=VEM[1];
-		let WEY=VEK[1];
-		let WEZ=VEM[2];
-		let WFA=VEK[2];
-		let WFB=VEQ[0];
-		let WFC=VEO[0];
-		let WFD=VEQ[1];
-		let WFE=VEO[1];
-		let WFF=VEQ[2];
-		let WFG=VEO[2];
-		let WFH=VEU[0];
-		let WFI=VES[0];
-		let WFJ=VEU[1];
-		let WFK=VES[1];
-		let WFL=VEY[0];
-		let WFM=VEW[0];
-		let WFN=VEY[1];
-		let WFO=VEW[1];
-		let WFP=VEY[2];
-		let WFQ=VEW[2];
-		let WFR=VEY[3];
-		let WFS=VEW[3];
-		let WFT=VLN[0];
-		let WFU=VLN[1];
-		let WFV=VLN[2];
-		let WFW=VLN[3];
-		let WFX=VLN[4];
-		let WFY=VLS[0];
-		let WFZ=VLQ[0];
-		let WGA=VLS[1];
-		let WGB=VLQ[1];
-		let WGC=VLS[2];
-		let WGD=VLQ[2];
-		let WGE=VLS[3];
-		let WGF=VLQ[3];
-		let WGG=VLS[4];
-		let WGH=VLQ[4];
-		let WGI=VMC[0];
-		let WGJ=VMD[0];
-		let WGK=VMC[1];
-		let WGL=VMD[1];
-		let WGM=VMC[2];
-		let WGN=VMD[2];
-		let WGO=VMC[3];
-		let WGP=VMD[3];
-		let WGQ=VMC[4];
-		let WGR=VMD[4];
-		let WGS=VMG[0];
-		let WGT=VMD[0];
-		let WGU=VMG[1];
-		let WGV=VMD[1];
-		let WGW=VMG[2];
-		let WGX=VMD[2];
-		let WGY=VMG[3];
-		let WGZ=VMD[3];
-		let WHA=VMG[4];
-		let WHB=VMD[4];
-		let WHC=VMM[0];
-		let WHD=VMM[1];
-		let WHE=VMM[2];
-		let WHF=VMM[3];
-		let WHG=VMM[4];
-		let WHH=1f64;
-		let WHI=1f64;
-		let WHJ=VNN[0];
-		let WHK=VNN[1];
-		let WHL=VNN[2];
-		let WHM=1f64;
-		let WHN=VNX[0];
-		let WHO=VNX[1];
-		let WHP=VNX[2];
-		let WHQ=1f64;
-		let WHR=VOH[0];
-		let WHS=VOH[1];
-		let WHT=VOH[2];
-		let WHU=1f64;
-		let WHV=VOR[0];
-		let WHW=VOR[1];
-		let WHX=VOR[2];
-		let WHY=1f64;
-		let WHZ=VPB[0];
-		let WIA=VPB[1];
-		let WIB=VPB[2];
-		let WIC=1f64;
-		let WID=VPL[0];
-		let WIE=VPL[1];
-		let WIF=VPL[2];
-		let WIG=1f64;
-		let WIH=VPV[0];
-		let WII=VPV[1];
-		let WIJ=VPV[2];
+		let VPV=VPU- L3([KOR[0],KOR[1],0.0]);
+		let VPW=E+ (VPT- KOQ);
+		let VPY=E+ VPX;
+		let VQD;
+		let VQE;
+		if KPD!=0.0{
+		let VPZ=KPH- Z;
+		let VQA=L2([1f64,0.0])- L2([0.0,AB]);
+		let VQB=L3([VQA[0],VQA[1],0.0]);
+		VQD=VPZ;
+		VQE=VQB;
+		}else{
+		let VQC=L3([0.0,0.0,1f64]);
+		VQD=VPX;
+		VQE=VQC;
+		}
+		let VQF=VQE- L3([KPF[0],KPF[1],0.0]);
+		let VQG=E+ (VQD- KPE);
+		let VQH=KNR[0];
+		let VQI=KNR[1];
+		let VQJ=KNR[2];
+		let VQK=KNR[3];
+		let VQL=KNS[0];
+		let VQM=KNS[1];
+		let VQN=KNS[2];
+		let VQO=KNS[3];
+		let VQP=KNT[0];
+		let VQQ=KNT[1];
+		let VQR=KNT[2];
+		let VQS=KNT[3];
+		let VQT=KNU[0];
+		let VQU=KNU[1];
+		let VQV=KNU[2];
+		let VQW=KNU[3];
+		let VQX=KNV[0];
+		let VQY=KNV[1];
+		let VQZ=KNV[2];
+		let VRA=KNV[3];
+		let VRB=KNW[0];
+		let VRC=KNW[1];
+		let VRD=KNW[2];
+		let VRE=KNW[3];
+		let VRF=KNX[0];
+		let VRG=KNX[1];
+		let VRH=KNX[2];
+		let VRI=KNX[3];
+		let VRJ=KNY[0];
+		let VRK=KNY[1];
+		let VRL=KNY[2];
+		let VRM=KNY[3];
+		let VRN=KOB[0];
+		let VRO=KOB[1];
+		let VRP=KOB[2];
+		let VRQ=KOB[3];
+		let VRR=KOD[0];
+		let VRS=KOD[1];
+		let VRT=KOF[0];
+		let VRU=KOF[1];
+		let VRV=KOF[2];
+		let VRW=KOH[0];
+		let VRX=KOH[1];
+		let VRY=KOH[2];
+		let VRZ=KOJ[0];
+		let VSA=KOJ[1];
+		let VSB=KOJ[2];
+		let VSC=KOJ[3];
+		let VSD=KOL[0];
+		let VSE=KOL[1];
+		let VSF=KOL[2];
+		let VSG=KOL[3];
+		let VSH=KOL[4];
+		let VSI=KON[0];
+		let VSJ=KON[1];
+		let VSK=KON[2];
+		let VSL=KON[3];
+		let VSM=KON[4];
+		let VSN=KON[5];
+		let VSO=KRY[0];
+		let VSP=KRY[1];
+		let VSQ=KSA[0];
+		let VSR=KSA[1];
+		let VSS=PMC;
+		let VST=PMK[0];
+		let VSU=PML[0];
+		let VSV=PMK[1];
+		let VSW=PML[1];
+		let VSX=PMK[2];
+		let VSY=PML[2];
+		let VSZ=PMK[3];
+		let VTA=PML[3];
+		let VTB=PMK[4];
+		let VTC=PML[4];
+		let VTD=PMK[5];
+		let VTE=PML[5];
+		let VTF=PMK[6];
+		let VTG=PML[6];
+		let VTH=PMK[7];
+		let VTI=PML[7];
+		let VTJ=PMK[8];
+		let VTK=PML[8];
+		let VTL=PMK[9];
+		let VTM=PML[9];
+		let VTN=PMK[10];
+		let VTO=PML[10];
+		let VTP=PMK[11];
+		let VTQ=PML[11];
+		let VTR=PMK[12];
+		let VTS=PML[12];
+		let VTT=PMN;
+		let VTU=PMT[0];
+		let VTV=PMU[0];
+		let VTW=PMT[1];
+		let VTX=PMU[1];
+		let VTY=PMT[2];
+		let VTZ=PMU[2];
+		let VUA=PMT[3];
+		let VUB=PMU[3];
+		let VUC=PMT[4];
+		let VUD=PMU[4];
+		let VUE=PMT[5];
+		let VUF=PMU[5];
+		let VUG=PMT[6];
+		let VUH=PMU[6];
+		let VUI=PMT[7];
+		let VUJ=PMU[7];
+		let VUK=PMT[8];
+		let VUL=PMU[8];
+		let VUM=PMT[9];
+		let VUN=PMU[9];
+		let VUO=PMT[10];
+		let VUP=PMU[10];
+		let VUQ=PMT[11];
+		let VUR=PMU[11];
+		let VUS=PMT[12];
+		let VUT=PMU[12];
+		let VUU=PMW;
+		let VUV=PNC[0];
+		let VUW=PND[0];
+		let VUX=PNC[1];
+		let VUY=PND[1];
+		let VUZ=PNC[2];
+		let VVA=PND[2];
+		let VVB=PNC[3];
+		let VVC=PND[3];
+		let VVD=PNC[4];
+		let VVE=PND[4];
+		let VVF=PNC[5];
+		let VVG=PND[5];
+		let VVH=PNC[6];
+		let VVI=PND[6];
+		let VVJ=PNC[7];
+		let VVK=PND[7];
+		let VVL=PNC[8];
+		let VVM=PND[8];
+		let VVN=PNC[9];
+		let VVO=PND[9];
+		let VVP=PNC[10];
+		let VVQ=PND[10];
+		let VVR=PNC[11];
+		let VVS=PND[11];
+		let VVT=PNC[12];
+		let VVU=PND[12];
+		let VVV=PNF;
+		let VVW=PNL[0];
+		let VVX=PNM[0];
+		let VVY=PNL[1];
+		let VVZ=PNM[1];
+		let VWA=PNL[2];
+		let VWB=PNM[2];
+		let VWC=PNL[3];
+		let VWD=PNM[3];
+		let VWE=PNL[4];
+		let VWF=PNM[4];
+		let VWG=PNL[5];
+		let VWH=PNM[5];
+		let VWI=PNL[6];
+		let VWJ=PNM[6];
+		let VWK=PNL[7];
+		let VWL=PNM[7];
+		let VWM=PNL[8];
+		let VWN=PNM[8];
+		let VWO=PNL[9];
+		let VWP=PNM[9];
+		let VWQ=PNL[10];
+		let VWR=PNM[10];
+		let VWS=PNL[11];
+		let VWT=PNM[11];
+		let VWU=PNL[12];
+		let VWV=PNM[12];
+		let VWW=PNO;
+		let VWX=PNU[0];
+		let VWY=PNV[0];
+		let VWZ=PNU[1];
+		let VXA=PNV[1];
+		let VXB=PNU[2];
+		let VXC=PNV[2];
+		let VXD=PNU[3];
+		let VXE=PNV[3];
+		let VXF=PNU[4];
+		let VXG=PNV[4];
+		let VXH=PNU[5];
+		let VXI=PNV[5];
+		let VXJ=PNU[6];
+		let VXK=PNV[6];
+		let VXL=PNU[7];
+		let VXM=PNV[7];
+		let VXN=PNU[8];
+		let VXO=PNV[8];
+		let VXP=PNU[9];
+		let VXQ=PNV[9];
+		let VXR=PNU[10];
+		let VXS=PNV[10];
+		let VXT=PNU[11];
+		let VXU=PNV[11];
+		let VXV=PNU[12];
+		let VXW=PNV[12];
+		let VXX=PNX;
+		let VXY=POD[0];
+		let VXZ=POE[0];
+		let VYA=POD[1];
+		let VYB=POE[1];
+		let VYC=POD[2];
+		let VYD=POE[2];
+		let VYE=POD[3];
+		let VYF=POE[3];
+		let VYG=POD[4];
+		let VYH=POE[4];
+		let VYI=POD[5];
+		let VYJ=POE[5];
+		let VYK=POD[6];
+		let VYL=POE[6];
+		let VYM=POD[7];
+		let VYN=POE[7];
+		let VYO=POD[8];
+		let VYP=POE[8];
+		let VYQ=POD[9];
+		let VYR=POE[9];
+		let VYS=POD[10];
+		let VYT=POE[10];
+		let VYU=POD[11];
+		let VYV=POE[11];
+		let VYW=POD[12];
+		let VYX=POE[12];
+		let VYY=POG;
+		let VYZ=POM[0];
+		let VZA=PON[0];
+		let VZB=POM[1];
+		let VZC=PON[1];
+		let VZD=POM[2];
+		let VZE=PON[2];
+		let VZF=POM[3];
+		let VZG=PON[3];
+		let VZH=POM[4];
+		let VZI=PON[4];
+		let VZJ=POM[5];
+		let VZK=PON[5];
+		let VZL=POM[6];
+		let VZM=PON[6];
+		let VZN=POM[7];
+		let VZO=PON[7];
+		let VZP=POM[8];
+		let VZQ=PON[8];
+		let VZR=POM[9];
+		let VZS=PON[9];
+		let VZT=POM[10];
+		let VZU=PON[10];
+		let VZV=POM[11];
+		let VZW=PON[11];
+		let VZX=POM[12];
+		let VZY=PON[12];
+		let VZZ=POP;
+		let WAA=POV[0];
+		let WAB=POW[0];
+		let WAC=POV[1];
+		let WAD=POW[1];
+		let WAE=POV[2];
+		let WAF=POW[2];
+		let WAG=POV[3];
+		let WAH=POW[3];
+		let WAI=POV[4];
+		let WAJ=POW[4];
+		let WAK=POV[5];
+		let WAL=POW[5];
+		let WAM=POV[6];
+		let WAN=POW[6];
+		let WAO=POV[7];
+		let WAP=POW[7];
+		let WAQ=POV[8];
+		let WAR=POW[8];
+		let WAS=POV[9];
+		let WAT=POW[9];
+		let WAU=POV[10];
+		let WAV=POW[10];
+		let WAW=POV[11];
+		let WAX=POW[11];
+		let WAY=POV[12];
+		let WAZ=POW[12];
+		let WBA=POY;
+		let WBB=PPE[0];
+		let WBC=PPF[0];
+		let WBD=PPE[1];
+		let WBE=PPF[1];
+		let WBF=PPE[2];
+		let WBG=PPF[2];
+		let WBH=PPE[3];
+		let WBI=PPF[3];
+		let WBJ=PPE[4];
+		let WBK=PPF[4];
+		let WBL=PPE[5];
+		let WBM=PPF[5];
+		let WBN=PPE[6];
+		let WBO=PPF[6];
+		let WBP=PPE[7];
+		let WBQ=PPF[7];
+		let WBR=PPE[8];
+		let WBS=PPF[8];
+		let WBT=PPE[9];
+		let WBU=PPF[9];
+		let WBV=PPE[10];
+		let WBW=PPF[10];
+		let WBX=PPE[11];
+		let WBY=PPF[11];
+		let WBZ=PPE[12];
+		let WCA=PPF[12];
+		let WCB=VDV[0];
+		let WCC=VDW[0];
+		let WCD=VDV[1];
+		let WCE=VDW[1];
+		let WCF=VDV[2];
+		let WCG=VDW[2];
+		let WCH=VDV[3];
+		let WCI=VDW[3];
+		let WCJ=VDV[4];
+		let WCK=VDW[4];
+		let WCL=VDV[5];
+		let WCM=VDW[5];
+		let WCN=VDV[6];
+		let WCO=VDW[6];
+		let WCP=VDV[7];
+		let WCQ=VDW[7];
+		let WCR=VDV[8];
+		let WCS=VDW[8];
+		let WCT=VDV[9];
+		let WCU=VDW[9];
+		let WCV=VDV[10];
+		let WCW=VDW[10];
+		let WCX=VDV[11];
+		let WCY=VDW[11];
+		let WCZ=VDV[12];
+		let WDA=VDW[12];
+		let WDB=VEA[0];
+		let WDC=VEB[0];
+		let WDD=VEA[1];
+		let WDE=VEB[1];
+		let WDF=VEA[2];
+		let WDG=VEB[2];
+		let WDH=VEA[3];
+		let WDI=VEB[3];
+		let WDJ=VEA[4];
+		let WDK=VEB[4];
+		let WDL=VEA[5];
+		let WDM=VEB[5];
+		let WDN=VEA[6];
+		let WDO=VEB[6];
+		let WDP=VEA[7];
+		let WDQ=VEB[7];
+		let WDR=VEA[8];
+		let WDS=VEB[8];
+		let WDT=VEA[9];
+		let WDU=VEB[9];
+		let WDV=VEA[10];
+		let WDW=VEB[10];
+		let WDX=VEA[11];
+		let WDY=VEB[11];
+		let WDZ=VEA[12];
+		let WEA=VEB[12];
+		let WEB=VEF[0];
+		let WEC=VEG[0];
+		let WED=VEF[1];
+		let WEE=VEG[1];
+		let WEF=VEF[2];
+		let WEG=VEG[2];
+		let WEH=VEF[3];
+		let WEI=VEG[3];
+		let WEJ=VEF[4];
+		let WEK=VEG[4];
+		let WEL=VEF[5];
+		let WEM=VEG[5];
+		let WEN=VEF[6];
+		let WEO=VEG[6];
+		let WEP=VEF[7];
+		let WEQ=VEG[7];
+		let WER=VEF[8];
+		let WES=VEG[8];
+		let WET=VEF[9];
+		let WEU=VEG[9];
+		let WEV=VEF[10];
+		let WEW=VEG[10];
+		let WEX=VEF[11];
+		let WEY=VEG[11];
+		let WEZ=VEF[12];
+		let WFA=VEG[12];
+		let WFB=VEK[0];
+		let WFC=VEL[0];
+		let WFD=VEK[1];
+		let WFE=VEL[1];
+		let WFF=VEP[0];
+		let WFG=VEQ[0];
+		let WFH=VEP[1];
+		let WFI=VEQ[1];
+		let WFJ=VEP[2];
+		let WFK=VEQ[2];
+		let WFL=VEU[0];
+		let WFM=VEV[0];
+		let WFN=VEU[1];
+		let WFO=VEV[1];
+		let WFP=VEU[2];
+		let WFQ=VEV[2];
+		let WFR=VEZ[0];
+		let WFS=VFA[0];
+		let WFT=VEZ[1];
+		let WFU=VFA[1];
+		let WFV=VFE[0];
+		let WFW=VFF[0];
+		let WFX=VFE[1];
+		let WFY=VFF[1];
+		let WFZ=VFE[2];
+		let WGA=VFF[2];
+		let WGB=VFE[3];
+		let WGC=VFF[3];
+		let WGD=VLU[0];
+		let WGE=VLU[1];
+		let WGF=VLU[2];
+		let WGG=VLU[3];
+		let WGH=VLU[4];
+		let WGI=VLZ[0];
+		let WGJ=VMA[0];
+		let WGK=VLZ[1];
+		let WGL=VMA[1];
+		let WGM=VLZ[2];
+		let WGN=VMA[2];
+		let WGO=VLZ[3];
+		let WGP=VMA[3];
+		let WGQ=VLZ[4];
+		let WGR=VMA[4];
+		let WGS=VMK[0];
+		let WGT=VML[0];
+		let WGU=VMK[1];
+		let WGV=VML[1];
+		let WGW=VMK[2];
+		let WGX=VML[2];
+		let WGY=VMK[3];
+		let WGZ=VML[3];
+		let WHA=VMK[4];
+		let WHB=VML[4];
+		let WHC=VMP[0];
+		let WHD=VMQ[0];
+		let WHE=VMP[1];
+		let WHF=VMQ[1];
+		let WHG=VMP[2];
+		let WHH=VMQ[2];
+		let WHI=VMP[3];
+		let WHJ=VMQ[3];
+		let WHK=VMP[4];
+		let WHL=VMQ[4];
+		let WHM=VMW[0];
+		let WHN=VMW[1];
+		let WHO=VMW[2];
+		let WHP=VMW[3];
+		let WHQ=VMW[4];
+		let WHR=1f64;
+		let WHS=1f64;
+		let WHT=VNX[0];
+		let WHU=VNX[1];
+		let WHV=VNX[2];
+		let WHW=1f64;
+		let WHX=VOH[0];
+		let WHY=VOH[1];
+		let WHZ=VOH[2];
+		let WIA=1f64;
+		let WIB=VOR[0];
+		let WIC=VOR[1];
+		let WID=VOR[2];
+		let WIE=1f64;
+		let WIF=VPB[0];
+		let WIG=VPB[1];
+		let WIH=VPB[2];
+		let WII=1f64;
+		let WIJ=VPL[0];
+		let WIK=VPL[1];
+		let WIL=VPL[2];
+		let WIM=1f64;
+		let WIN=VPV[0];
+		let WIO=VPV[1];
+		let WIP=VPV[2];
+		let WIQ=1f64;
+		let WIR=VQF[0];
+		let WIS=VQF[1];
+		let WIT=VQF[2];
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = KRU; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = KRH; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = KQF; }
@@ -37470,7 +37469,7 @@ impl Instance {
             Some(8),
             multiplicity * (KNJ),
             [5, 6, 7, 8],
-            [VPX, VPY, VPZ, VQA],
+            [VQH, VQI, VQJ, VQK],
             [],
             [],
             multiplicity,
@@ -37480,7 +37479,7 @@ impl Instance {
             Some(6),
             multiplicity * (KNK),
             [5, 6, 7, 8],
-            [VQB, VQC, VQD, VQE],
+            [VQL, VQM, VQN, VQO],
             [],
             [],
             multiplicity,
@@ -37490,7 +37489,7 @@ impl Instance {
             Some(6),
             multiplicity * (KNL),
             [5, 6, 7, 8],
-            [VQF, VQG, VQH, VQI],
+            [VQP, VQQ, VQR, VQS],
             [],
             [],
             multiplicity,
@@ -37500,7 +37499,7 @@ impl Instance {
             Some(7),
             multiplicity * (KNM),
             [5, 6, 7, 8],
-            [VQJ, VQK, VQL, VQM],
+            [VQT, VQU, VQV, VQW],
             [],
             [],
             multiplicity,
@@ -37510,7 +37509,7 @@ impl Instance {
             Some(8),
             multiplicity * (KNN),
             [5, 6, 7, 8],
-            [VQN, VQO, VQP, VQQ],
+            [VQX, VQY, VQZ, VRA],
             [],
             [],
             multiplicity,
@@ -37520,7 +37519,7 @@ impl Instance {
             Some(7),
             multiplicity * (KNO),
             [5, 6, 7, 8],
-            [VQR, VQS, VQT, VQU],
+            [VRB, VRC, VRD, VRE],
             [],
             [],
             multiplicity,
@@ -37530,7 +37529,7 @@ impl Instance {
             Some(7),
             multiplicity * (KNP),
             [5, 6, 7, 8],
-            [VQV, VQW, VQX, VQY],
+            [VRF, VRG, VRH, VRI],
             [],
             [],
             multiplicity,
@@ -37540,7 +37539,7 @@ impl Instance {
             Some(6),
             multiplicity * (KNQ),
             [5, 6, 7, 8],
-            [VQZ, VRA, VRB, VRC],
+            [VRJ, VRK, VRL, VRM],
             [],
             [],
             multiplicity,
@@ -37550,7 +37549,7 @@ impl Instance {
             Some(8),
             multiplicity * (KOC),
             [5, 6, 7, 8],
-            [VRD, VRE, VRF, VRG],
+            [VRN, VRO, VRP, VRQ],
             [],
             [],
             multiplicity,
@@ -37560,7 +37559,7 @@ impl Instance {
             Some(6),
             multiplicity * (KOE),
             [5, 6],
-            [VRH, VRI],
+            [VRR, VRS],
             [],
             [],
             multiplicity,
@@ -37570,7 +37569,7 @@ impl Instance {
             Some(7),
             multiplicity * (KOG),
             [5, 6, 7],
-            [VRJ, VRK, VRL],
+            [VRT, VRU, VRV],
             [],
             [],
             multiplicity,
@@ -37580,7 +37579,7 @@ impl Instance {
             Some(8),
             multiplicity * (KOI),
             [5, 6, 8],
-            [VRM, VRN, VRO],
+            [VRW, VRX, VRY],
             [],
             [],
             multiplicity,
@@ -37590,7 +37589,7 @@ impl Instance {
             Some(8),
             multiplicity * (KOK),
             [5, 6, 7, 8],
-            [VRP, VRQ, VRR, VRS],
+            [VRZ, VSA, VSB, VSC],
             [],
             [],
             multiplicity,
@@ -37600,7 +37599,7 @@ impl Instance {
             Some(6),
             multiplicity * (KOM),
             [5, 6, 7, 8, 10],
-            [VRT, VRU, VRV, VRW, VRX],
+            [VSD, VSE, VSF, VSG, VSH],
             [],
             [],
             multiplicity,
@@ -37610,7 +37609,7 @@ impl Instance {
             Some(7),
             multiplicity * (KOO),
             [5, 6, 7, 8, 10, 11],
-            [VRY, VRZ, VSA, VSB, VSC, VSD],
+            [VSI, VSJ, VSK, VSL, VSM, VSN],
             [],
             [],
             multiplicity,
@@ -37620,7 +37619,7 @@ impl Instance {
             Some(8),
             multiplicity * (KRZ),
             [7, 8],
-            [VSE, VSF],
+            [VSO, VSP],
             [],
             [],
             multiplicity,
@@ -37630,7 +37629,7 @@ impl Instance {
             Some(8),
             multiplicity * (KSB),
             [6, 8],
-            [VSG, VSH],
+            [VSQ, VSR],
             [],
             [],
             multiplicity,
@@ -37642,7 +37641,7 @@ impl Instance {
             [],
             [],
             [0],
-            [VSI],
+            [VSS],
         );
         }
         if CH != 0.0 {
@@ -37650,7 +37649,7 @@ impl Instance {
             1,
             PMM,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VSJ, VSL, VSN, VSP, VSR, VST, VSV, VSX, VSZ, VTB, VTD, VTF, VTH],
+            [VST, VSV, VSX, VSZ, VTB, VTD, VTF, VTH, VTJ, VTL, VTN, VTP, VTR],
             [],
             [],
         );
@@ -37662,7 +37661,7 @@ impl Instance {
             [],
             [],
             [2],
-            [VTJ],
+            [VTT],
         );
         }
         if CH != 0.0 {
@@ -37670,7 +37669,7 @@ impl Instance {
             3,
             PMV,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VTK, VTM, VTO, VTQ, VTS, VTU, VTW, VTY, VUA, VUC, VUE, VUG, VUI],
+            [VTU, VTW, VTY, VUA, VUC, VUE, VUG, VUI, VUK, VUM, VUO, VUQ, VUS],
             [],
             [],
         );
@@ -37682,7 +37681,7 @@ impl Instance {
             [],
             [],
             [4],
-            [VUK],
+            [VUU],
         );
         }
         if CH != 0.0 {
@@ -37690,7 +37689,7 @@ impl Instance {
             5,
             PNE,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VUL, VUN, VUP, VUR, VUT, VUV, VUX, VUZ, VVB, VVD, VVF, VVH, VVJ],
+            [VUV, VUX, VUZ, VVB, VVD, VVF, VVH, VVJ, VVL, VVN, VVP, VVR, VVT],
             [],
             [],
         );
@@ -37702,7 +37701,7 @@ impl Instance {
             [],
             [],
             [6],
-            [VVL],
+            [VVV],
         );
         }
         if CH != 0.0 {
@@ -37710,7 +37709,7 @@ impl Instance {
             7,
             PNN,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VVM, VVO, VVQ, VVS, VVU, VVW, VVY, VWA, VWC, VWE, VWG, VWI, VWK],
+            [VVW, VVY, VWA, VWC, VWE, VWG, VWI, VWK, VWM, VWO, VWQ, VWS, VWU],
             [],
             [],
         );
@@ -37722,7 +37721,7 @@ impl Instance {
             [],
             [],
             [8],
-            [VWM],
+            [VWW],
         );
         }
         if CH != 0.0 {
@@ -37730,7 +37729,7 @@ impl Instance {
             9,
             PNW,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VWN, VWP, VWR, VWT, VWV, VWX, VWZ, VXB, VXD, VXF, VXH, VXJ, VXL],
+            [VWX, VWZ, VXB, VXD, VXF, VXH, VXJ, VXL, VXN, VXP, VXR, VXT, VXV],
             [],
             [],
         );
@@ -37742,7 +37741,7 @@ impl Instance {
             [],
             [],
             [10],
-            [VXN],
+            [VXX],
         );
         }
         if CH != 0.0 {
@@ -37750,7 +37749,7 @@ impl Instance {
             11,
             POF,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VXO, VXQ, VXS, VXU, VXW, VXY, VYA, VYC, VYE, VYG, VYI, VYK, VYM],
+            [VXY, VYA, VYC, VYE, VYG, VYI, VYK, VYM, VYO, VYQ, VYS, VYU, VYW],
             [],
             [],
         );
@@ -37762,7 +37761,7 @@ impl Instance {
             [],
             [],
             [12],
-            [VYO],
+            [VYY],
         );
         }
         if CH != 0.0 {
@@ -37770,7 +37769,7 @@ impl Instance {
             13,
             POO,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VYP, VYR, VYT, VYV, VYX, VYZ, VZB, VZD, VZF, VZH, VZJ, VZL, VZN],
+            [VYZ, VZB, VZD, VZF, VZH, VZJ, VZL, VZN, VZP, VZR, VZT, VZV, VZX],
             [],
             [],
         );
@@ -37782,7 +37781,7 @@ impl Instance {
             [],
             [],
             [14],
-            [VZP],
+            [VZZ],
         );
         }
         if CH != 0.0 {
@@ -37790,7 +37789,7 @@ impl Instance {
             15,
             POX,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [VZQ, VZS, VZU, VZW, VZY, WAA, WAC, WAE, WAG, WAI, WAK, WAM, WAO],
+            [WAA, WAC, WAE, WAG, WAI, WAK, WAM, WAO, WAQ, WAS, WAU, WAW, WAY],
             [],
             [],
         );
@@ -37802,7 +37801,7 @@ impl Instance {
             [],
             [],
             [16],
-            [WAQ],
+            [WBA],
         );
         }
         if CH != 0.0 {
@@ -37810,7 +37809,7 @@ impl Instance {
             17,
             PPG,
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [WAR, WAT, WAV, WAX, WAZ, WBB, WBD, WBF, WBH, WBJ, WBL, WBN, WBP],
+            [WBB, WBD, WBF, WBH, WBJ, WBL, WBN, WBP, WBR, WBT, WBV, WBX, WBZ],
             [],
             [],
         );
@@ -37820,7 +37819,7 @@ impl Instance {
             Some(6),
             multiplicity * (VDX),
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [WBR, WBT, WBV, WBX, WBZ, WCB, WCD, WCF, WCH, WCJ, WCL, WCN, WCP],
+            [WCB, WCD, WCF, WCH, WCJ, WCL, WCN, WCP, WCR, WCT, WCV, WCX, WCZ],
             [],
             [],
             multiplicity,
@@ -37828,9 +37827,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<13, 0>(
             Some(8),
             Some(6),
-            multiplicity * (VEB),
+            multiplicity * (VEC),
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [WCR, WCT, WCV, WCX, WCZ, WDB, WDD, WDF, WDH, WDJ, WDL, WDN, WDP],
+            [WDB, WDD, WDF, WDH, WDJ, WDL, WDN, WDP, WDR, WDT, WDV, WDX, WDZ],
             [],
             [],
             multiplicity,
@@ -37838,9 +37837,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<13, 0>(
             Some(7),
             Some(6),
-            multiplicity * (VEF),
+            multiplicity * (VEH),
             [5, 6, 7, 8, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-            [WDR, WDT, WDV, WDX, WDZ, WEB, WED, WEF, WEH, WEJ, WEL, WEN, WEP],
+            [WEB, WED, WEF, WEH, WEJ, WEL, WEN, WEP, WER, WET, WEV, WEX, WEZ],
             [],
             [],
             multiplicity,
@@ -37848,9 +37847,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(5),
             Some(6),
-            multiplicity * (VEJ),
+            multiplicity * (VEM),
             [5, 6],
-            [WER, WET],
+            [WFB, WFD],
             [],
             [],
             multiplicity,
@@ -37858,9 +37857,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(7),
-            multiplicity * (VEN),
+            multiplicity * (VER),
             [5, 6, 7],
-            [WEV, WEX, WEZ],
+            [WFF, WFH, WFJ],
             [],
             [],
             multiplicity,
@@ -37868,9 +37867,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(5),
             Some(8),
-            multiplicity * (VER),
+            multiplicity * (VEW),
             [5, 6, 8],
-            [WFB, WFD, WFF],
+            [WFL, WFN, WFP],
             [],
             [],
             multiplicity,
@@ -37878,9 +37877,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(10),
             Some(6),
-            multiplicity * (VEV),
+            multiplicity * (VFB),
             [6, 10],
-            [WFH, WFJ],
+            [WFR, WFT],
             [],
             [],
             multiplicity,
@@ -37888,9 +37887,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(11),
             Some(7),
-            multiplicity * (VEZ),
+            multiplicity * (VFG),
             [6, 7, 10, 11],
-            [WFL, WFN, WFP, WFR],
+            [WFV, WFX, WFZ, WGB],
             [],
             [],
             multiplicity,
@@ -37898,7 +37897,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(21),
             None,
-            multiplicity * (VLK),
+            multiplicity * (VLR),
             [],
             [],
             [],
@@ -37908,9 +37907,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (VLO),
+            multiplicity * (VLV),
             [4, 5, 6, 7, 8],
-            [WFT, WFU, WFV, WFW, WFX],
+            [WGD, WGE, WGF, WGG, WGH],
             [],
             [],
             multiplicity,
@@ -37918,17 +37917,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(4),
             None,
-            multiplicity * (VLT),
-            [4, 5, 6, 7, 8],
-            [WFY, WGA, WGC, WGE, WGG],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<5, 0>(
-            Some(5),
-            Some(6),
-            multiplicity * (VME),
+            multiplicity * (VMB),
             [4, 5, 6, 7, 8],
             [WGI, WGK, WGM, WGO, WGQ],
             [],
@@ -37937,8 +37926,8 @@ impl Instance {
         );
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
-            Some(7),
-            multiplicity * (VMH),
+            Some(6),
+            multiplicity * (VMM),
             [4, 5, 6, 7, 8],
             [WGS, WGU, WGW, WGY, WHA],
             [],
@@ -37946,68 +37935,28 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<5, 0>(
+            Some(5),
             Some(7),
-            Some(6),
-            multiplicity * (VMN),
-            [5, 6, 7, 8, 21],
-            [WHC, WHD, WHE, WHF, WHG],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(7),
-            Some(6),
-            multiplicity * (VMP),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(7),
-            Some(6),
             multiplicity * (VMR),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
-            Some(6),
-            multiplicity * (VMT),
-            [],
-            [],
+            [4, 5, 6, 7, 8],
+            [WHC, WHE, WHG, WHI, WHK],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
+        stamper.stamp_current_sparse_local::<5, 0>(
             Some(7),
-            multiplicity * (VMV),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(10),
             Some(6),
             multiplicity * (VMX),
-            [],
-            [],
+            [5, 6, 7, 8, 21],
+            [WHM, WHN, WHO, WHP, WHQ],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(11),
             Some(7),
+            Some(6),
             multiplicity * (VMZ),
             [],
             [],
@@ -38026,9 +37975,59 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
-            Some(7),
+            Some(5),
             Some(6),
             multiplicity * (VND),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(5),
+            Some(7),
+            multiplicity * (VNF),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(10),
+            Some(6),
+            multiplicity * (VNH),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(11),
+            Some(7),
+            multiplicity * (VNJ),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(7),
+            Some(6),
+            multiplicity * (VNL),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(7),
+            Some(6),
+            multiplicity * (VNN),
             [],
             [],
             [],
@@ -38038,9 +38037,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(4),
             None,
-            multiplicity * (VNE),
+            multiplicity * (VNO),
             [21],
-            [WHH],
+            [WHR],
             [],
             [],
             multiplicity,
@@ -38048,9 +38047,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(21),
             None,
-            multiplicity * (VNE),
+            multiplicity * (VNO),
             [21],
-            [WHH],
+            [WHR],
             [],
             [],
             multiplicity,
@@ -38058,9 +38057,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(3),
             Some(9),
-            multiplicity * (VNG),
+            multiplicity * (VNQ),
             [22],
-            [WHI],
+            [WHS],
             [],
             [],
             multiplicity,
@@ -38068,9 +38067,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(22),
             None,
-            multiplicity * (VNO),
+            multiplicity * (VNY),
             [3, 9, 22],
-            [WHJ, WHK, WHL],
+            [WHT, WHU, WHV],
             [],
             [],
             multiplicity,
@@ -38078,9 +38077,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(11),
             Some(9),
-            multiplicity * (VNQ),
+            multiplicity * (VOA),
             [23],
-            [WHM],
+            [WHW],
             [],
             [],
             multiplicity,
@@ -38088,9 +38087,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(23),
             None,
-            multiplicity * (VNY),
+            multiplicity * (VOI),
             [9, 11, 23],
-            [WHN, WHO, WHP],
+            [WHX, WHY, WHZ],
             [],
             [],
             multiplicity,
@@ -38098,9 +38097,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             Some(8),
-            multiplicity * (VOA),
+            multiplicity * (VOK),
             [24],
-            [WHQ],
+            [WIA],
             [],
             [],
             multiplicity,
@@ -38108,9 +38107,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(24),
             None,
-            multiplicity * (VOI),
+            multiplicity * (VOS),
             [8, 9, 24],
-            [WHR, WHS, WHT],
+            [WIB, WIC, WID],
             [],
             [],
             multiplicity,
@@ -38118,9 +38117,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             Some(10),
-            multiplicity * (VOK),
+            multiplicity * (VOU),
             [25],
-            [WHU],
+            [WIE],
             [],
             [],
             multiplicity,
@@ -38128,9 +38127,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(25),
             None,
-            multiplicity * (VOS),
+            multiplicity * (VPC),
             [9, 10, 25],
-            [WHV, WHW, WHX],
+            [WIF, WIG, WIH],
             [],
             [],
             multiplicity,
@@ -38138,9 +38137,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(0),
             Some(7),
-            multiplicity * (VOU),
+            multiplicity * (VPE),
             [26],
-            [WHY],
+            [WII],
             [],
             [],
             multiplicity,
@@ -38148,9 +38147,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(26),
             None,
-            multiplicity * (VPC),
+            multiplicity * (VPM),
             [0, 7, 26],
-            [WHZ, WIA, WIB],
+            [WIJ, WIK, WIL],
             [],
             [],
             multiplicity,
@@ -38158,9 +38157,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(5),
-            multiplicity * (VPE),
+            multiplicity * (VPO),
             [27],
-            [WIC],
+            [WIM],
             [],
             [],
             multiplicity,
@@ -38168,9 +38167,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(27),
             None,
-            multiplicity * (VPM),
+            multiplicity * (VPW),
             [1, 5, 27],
-            [WID, WIE, WIF],
+            [WIN, WIO, WIP],
             [],
             [],
             multiplicity,
@@ -38178,9 +38177,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             Some(6),
-            multiplicity * (VPO),
+            multiplicity * (VPY),
             [28],
-            [WIG],
+            [WIQ],
             [],
             [],
             multiplicity,
@@ -38188,198 +38187,198 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(28),
             None,
-            multiplicity * (VPW),
+            multiplicity * (VQG),
             [2, 6, 28],
-            [WIH, WII, WIJ],
+            [WIR, WIS, WIT],
             [],
             [],
             multiplicity,
         );
-        self.canonical_reactive[0] = VSK;
-        self.canonical_reactive[1] = VSM;
-        self.canonical_reactive[2] = VSO;
-        self.canonical_reactive[3] = VSQ;
-        self.canonical_reactive[4] = VSS;
-        self.canonical_reactive[5] = VSU;
-        self.canonical_reactive[6] = VSW;
-        self.canonical_reactive[7] = VSY;
-        self.canonical_reactive[8] = VTA;
-        self.canonical_reactive[9] = VTC;
-        self.canonical_reactive[10] = VTE;
-        self.canonical_reactive[11] = VTG;
-        self.canonical_reactive[12] = VTI;
-        self.canonical_reactive[13] = VTL;
-        self.canonical_reactive[14] = VTN;
-        self.canonical_reactive[15] = VTP;
-        self.canonical_reactive[16] = VTR;
-        self.canonical_reactive[17] = VTT;
-        self.canonical_reactive[18] = VTV;
-        self.canonical_reactive[19] = VTX;
-        self.canonical_reactive[20] = VTZ;
-        self.canonical_reactive[21] = VUB;
-        self.canonical_reactive[22] = VUD;
-        self.canonical_reactive[23] = VUF;
-        self.canonical_reactive[24] = VUH;
-        self.canonical_reactive[25] = VUJ;
-        self.canonical_reactive[26] = VUM;
-        self.canonical_reactive[27] = VUO;
-        self.canonical_reactive[28] = VUQ;
-        self.canonical_reactive[29] = VUS;
-        self.canonical_reactive[30] = VUU;
-        self.canonical_reactive[31] = VUW;
-        self.canonical_reactive[32] = VUY;
-        self.canonical_reactive[33] = VVA;
-        self.canonical_reactive[34] = VVC;
-        self.canonical_reactive[35] = VVE;
-        self.canonical_reactive[36] = VVG;
-        self.canonical_reactive[37] = VVI;
-        self.canonical_reactive[38] = VVK;
-        self.canonical_reactive[39] = VVN;
-        self.canonical_reactive[40] = VVP;
-        self.canonical_reactive[41] = VVR;
-        self.canonical_reactive[42] = VVT;
-        self.canonical_reactive[43] = VVV;
-        self.canonical_reactive[44] = VVX;
-        self.canonical_reactive[45] = VVZ;
-        self.canonical_reactive[46] = VWB;
-        self.canonical_reactive[47] = VWD;
-        self.canonical_reactive[48] = VWF;
-        self.canonical_reactive[49] = VWH;
-        self.canonical_reactive[50] = VWJ;
-        self.canonical_reactive[51] = VWL;
-        self.canonical_reactive[52] = VWO;
-        self.canonical_reactive[53] = VWQ;
-        self.canonical_reactive[54] = VWS;
-        self.canonical_reactive[55] = VWU;
-        self.canonical_reactive[56] = VWW;
-        self.canonical_reactive[57] = VWY;
-        self.canonical_reactive[58] = VXA;
-        self.canonical_reactive[59] = VXC;
-        self.canonical_reactive[60] = VXE;
-        self.canonical_reactive[61] = VXG;
-        self.canonical_reactive[62] = VXI;
-        self.canonical_reactive[63] = VXK;
-        self.canonical_reactive[64] = VXM;
-        self.canonical_reactive[65] = VXP;
-        self.canonical_reactive[66] = VXR;
-        self.canonical_reactive[67] = VXT;
-        self.canonical_reactive[68] = VXV;
-        self.canonical_reactive[69] = VXX;
-        self.canonical_reactive[70] = VXZ;
-        self.canonical_reactive[71] = VYB;
-        self.canonical_reactive[72] = VYD;
-        self.canonical_reactive[73] = VYF;
-        self.canonical_reactive[74] = VYH;
-        self.canonical_reactive[75] = VYJ;
-        self.canonical_reactive[76] = VYL;
-        self.canonical_reactive[77] = VYN;
-        self.canonical_reactive[78] = VYQ;
-        self.canonical_reactive[79] = VYS;
-        self.canonical_reactive[80] = VYU;
-        self.canonical_reactive[81] = VYW;
-        self.canonical_reactive[82] = VYY;
-        self.canonical_reactive[83] = VZA;
-        self.canonical_reactive[84] = VZC;
-        self.canonical_reactive[85] = VZE;
-        self.canonical_reactive[86] = VZG;
-        self.canonical_reactive[87] = VZI;
-        self.canonical_reactive[88] = VZK;
-        self.canonical_reactive[89] = VZM;
-        self.canonical_reactive[90] = VZO;
-        self.canonical_reactive[91] = VZR;
-        self.canonical_reactive[92] = VZT;
-        self.canonical_reactive[93] = VZV;
-        self.canonical_reactive[94] = VZX;
-        self.canonical_reactive[95] = VZZ;
-        self.canonical_reactive[96] = WAB;
-        self.canonical_reactive[97] = WAD;
-        self.canonical_reactive[98] = WAF;
-        self.canonical_reactive[99] = WAH;
-        self.canonical_reactive[100] = WAJ;
-        self.canonical_reactive[101] = WAL;
-        self.canonical_reactive[102] = WAN;
-        self.canonical_reactive[103] = WAP;
-        self.canonical_reactive[104] = WAS;
-        self.canonical_reactive[105] = WAU;
-        self.canonical_reactive[106] = WAW;
-        self.canonical_reactive[107] = WAY;
-        self.canonical_reactive[108] = WBA;
-        self.canonical_reactive[109] = WBC;
-        self.canonical_reactive[110] = WBE;
-        self.canonical_reactive[111] = WBG;
-        self.canonical_reactive[112] = WBI;
-        self.canonical_reactive[113] = WBK;
-        self.canonical_reactive[114] = WBM;
-        self.canonical_reactive[115] = WBO;
-        self.canonical_reactive[116] = WBQ;
-        self.canonical_reactive[117] = WBS;
-        self.canonical_reactive[118] = WBU;
-        self.canonical_reactive[119] = WBW;
-        self.canonical_reactive[120] = WBY;
-        self.canonical_reactive[121] = WCA;
-        self.canonical_reactive[122] = WCC;
-        self.canonical_reactive[123] = WCE;
-        self.canonical_reactive[124] = WCG;
-        self.canonical_reactive[125] = WCI;
-        self.canonical_reactive[126] = WCK;
-        self.canonical_reactive[127] = WCM;
-        self.canonical_reactive[128] = WCO;
-        self.canonical_reactive[129] = WCQ;
-        self.canonical_reactive[130] = WCS;
-        self.canonical_reactive[131] = WCU;
-        self.canonical_reactive[132] = WCW;
-        self.canonical_reactive[133] = WCY;
-        self.canonical_reactive[134] = WDA;
-        self.canonical_reactive[135] = WDC;
-        self.canonical_reactive[136] = WDE;
-        self.canonical_reactive[137] = WDG;
-        self.canonical_reactive[138] = WDI;
-        self.canonical_reactive[139] = WDK;
-        self.canonical_reactive[140] = WDM;
-        self.canonical_reactive[141] = WDO;
-        self.canonical_reactive[142] = WDQ;
-        self.canonical_reactive[143] = WDS;
-        self.canonical_reactive[144] = WDU;
-        self.canonical_reactive[145] = WDW;
-        self.canonical_reactive[146] = WDY;
-        self.canonical_reactive[147] = WEA;
-        self.canonical_reactive[148] = WEC;
-        self.canonical_reactive[149] = WEE;
-        self.canonical_reactive[150] = WEG;
-        self.canonical_reactive[151] = WEI;
-        self.canonical_reactive[152] = WEK;
-        self.canonical_reactive[153] = WEM;
-        self.canonical_reactive[154] = WEO;
-        self.canonical_reactive[155] = WEQ;
-        self.canonical_reactive[156] = WES;
-        self.canonical_reactive[157] = WEU;
-        self.canonical_reactive[158] = WEW;
-        self.canonical_reactive[159] = WEY;
-        self.canonical_reactive[160] = WFA;
-        self.canonical_reactive[161] = WFC;
-        self.canonical_reactive[162] = WFE;
-        self.canonical_reactive[163] = WFG;
-        self.canonical_reactive[164] = WFI;
-        self.canonical_reactive[165] = WFK;
-        self.canonical_reactive[166] = WFM;
-        self.canonical_reactive[167] = WFO;
-        self.canonical_reactive[168] = WFQ;
-        self.canonical_reactive[169] = WFS;
-        self.canonical_reactive[170] = WFZ;
-        self.canonical_reactive[171] = WGB;
-        self.canonical_reactive[172] = WGD;
-        self.canonical_reactive[173] = WGF;
-        self.canonical_reactive[174] = WGH;
-        self.canonical_reactive[175] = WGJ;
-        self.canonical_reactive[176] = WGL;
-        self.canonical_reactive[177] = WGN;
-        self.canonical_reactive[178] = WGP;
-        self.canonical_reactive[179] = WGR;
-        self.canonical_reactive[180] = WGT;
-        self.canonical_reactive[181] = WGV;
-        self.canonical_reactive[182] = WGX;
-        self.canonical_reactive[183] = WGZ;
-        self.canonical_reactive[184] = WHB;
+        self.canonical_reactive[0] = VSU;
+        self.canonical_reactive[1] = VSW;
+        self.canonical_reactive[2] = VSY;
+        self.canonical_reactive[3] = VTA;
+        self.canonical_reactive[4] = VTC;
+        self.canonical_reactive[5] = VTE;
+        self.canonical_reactive[6] = VTG;
+        self.canonical_reactive[7] = VTI;
+        self.canonical_reactive[8] = VTK;
+        self.canonical_reactive[9] = VTM;
+        self.canonical_reactive[10] = VTO;
+        self.canonical_reactive[11] = VTQ;
+        self.canonical_reactive[12] = VTS;
+        self.canonical_reactive[13] = VTV;
+        self.canonical_reactive[14] = VTX;
+        self.canonical_reactive[15] = VTZ;
+        self.canonical_reactive[16] = VUB;
+        self.canonical_reactive[17] = VUD;
+        self.canonical_reactive[18] = VUF;
+        self.canonical_reactive[19] = VUH;
+        self.canonical_reactive[20] = VUJ;
+        self.canonical_reactive[21] = VUL;
+        self.canonical_reactive[22] = VUN;
+        self.canonical_reactive[23] = VUP;
+        self.canonical_reactive[24] = VUR;
+        self.canonical_reactive[25] = VUT;
+        self.canonical_reactive[26] = VUW;
+        self.canonical_reactive[27] = VUY;
+        self.canonical_reactive[28] = VVA;
+        self.canonical_reactive[29] = VVC;
+        self.canonical_reactive[30] = VVE;
+        self.canonical_reactive[31] = VVG;
+        self.canonical_reactive[32] = VVI;
+        self.canonical_reactive[33] = VVK;
+        self.canonical_reactive[34] = VVM;
+        self.canonical_reactive[35] = VVO;
+        self.canonical_reactive[36] = VVQ;
+        self.canonical_reactive[37] = VVS;
+        self.canonical_reactive[38] = VVU;
+        self.canonical_reactive[39] = VVX;
+        self.canonical_reactive[40] = VVZ;
+        self.canonical_reactive[41] = VWB;
+        self.canonical_reactive[42] = VWD;
+        self.canonical_reactive[43] = VWF;
+        self.canonical_reactive[44] = VWH;
+        self.canonical_reactive[45] = VWJ;
+        self.canonical_reactive[46] = VWL;
+        self.canonical_reactive[47] = VWN;
+        self.canonical_reactive[48] = VWP;
+        self.canonical_reactive[49] = VWR;
+        self.canonical_reactive[50] = VWT;
+        self.canonical_reactive[51] = VWV;
+        self.canonical_reactive[52] = VWY;
+        self.canonical_reactive[53] = VXA;
+        self.canonical_reactive[54] = VXC;
+        self.canonical_reactive[55] = VXE;
+        self.canonical_reactive[56] = VXG;
+        self.canonical_reactive[57] = VXI;
+        self.canonical_reactive[58] = VXK;
+        self.canonical_reactive[59] = VXM;
+        self.canonical_reactive[60] = VXO;
+        self.canonical_reactive[61] = VXQ;
+        self.canonical_reactive[62] = VXS;
+        self.canonical_reactive[63] = VXU;
+        self.canonical_reactive[64] = VXW;
+        self.canonical_reactive[65] = VXZ;
+        self.canonical_reactive[66] = VYB;
+        self.canonical_reactive[67] = VYD;
+        self.canonical_reactive[68] = VYF;
+        self.canonical_reactive[69] = VYH;
+        self.canonical_reactive[70] = VYJ;
+        self.canonical_reactive[71] = VYL;
+        self.canonical_reactive[72] = VYN;
+        self.canonical_reactive[73] = VYP;
+        self.canonical_reactive[74] = VYR;
+        self.canonical_reactive[75] = VYT;
+        self.canonical_reactive[76] = VYV;
+        self.canonical_reactive[77] = VYX;
+        self.canonical_reactive[78] = VZA;
+        self.canonical_reactive[79] = VZC;
+        self.canonical_reactive[80] = VZE;
+        self.canonical_reactive[81] = VZG;
+        self.canonical_reactive[82] = VZI;
+        self.canonical_reactive[83] = VZK;
+        self.canonical_reactive[84] = VZM;
+        self.canonical_reactive[85] = VZO;
+        self.canonical_reactive[86] = VZQ;
+        self.canonical_reactive[87] = VZS;
+        self.canonical_reactive[88] = VZU;
+        self.canonical_reactive[89] = VZW;
+        self.canonical_reactive[90] = VZY;
+        self.canonical_reactive[91] = WAB;
+        self.canonical_reactive[92] = WAD;
+        self.canonical_reactive[93] = WAF;
+        self.canonical_reactive[94] = WAH;
+        self.canonical_reactive[95] = WAJ;
+        self.canonical_reactive[96] = WAL;
+        self.canonical_reactive[97] = WAN;
+        self.canonical_reactive[98] = WAP;
+        self.canonical_reactive[99] = WAR;
+        self.canonical_reactive[100] = WAT;
+        self.canonical_reactive[101] = WAV;
+        self.canonical_reactive[102] = WAX;
+        self.canonical_reactive[103] = WAZ;
+        self.canonical_reactive[104] = WBC;
+        self.canonical_reactive[105] = WBE;
+        self.canonical_reactive[106] = WBG;
+        self.canonical_reactive[107] = WBI;
+        self.canonical_reactive[108] = WBK;
+        self.canonical_reactive[109] = WBM;
+        self.canonical_reactive[110] = WBO;
+        self.canonical_reactive[111] = WBQ;
+        self.canonical_reactive[112] = WBS;
+        self.canonical_reactive[113] = WBU;
+        self.canonical_reactive[114] = WBW;
+        self.canonical_reactive[115] = WBY;
+        self.canonical_reactive[116] = WCA;
+        self.canonical_reactive[117] = WCC;
+        self.canonical_reactive[118] = WCE;
+        self.canonical_reactive[119] = WCG;
+        self.canonical_reactive[120] = WCI;
+        self.canonical_reactive[121] = WCK;
+        self.canonical_reactive[122] = WCM;
+        self.canonical_reactive[123] = WCO;
+        self.canonical_reactive[124] = WCQ;
+        self.canonical_reactive[125] = WCS;
+        self.canonical_reactive[126] = WCU;
+        self.canonical_reactive[127] = WCW;
+        self.canonical_reactive[128] = WCY;
+        self.canonical_reactive[129] = WDA;
+        self.canonical_reactive[130] = WDC;
+        self.canonical_reactive[131] = WDE;
+        self.canonical_reactive[132] = WDG;
+        self.canonical_reactive[133] = WDI;
+        self.canonical_reactive[134] = WDK;
+        self.canonical_reactive[135] = WDM;
+        self.canonical_reactive[136] = WDO;
+        self.canonical_reactive[137] = WDQ;
+        self.canonical_reactive[138] = WDS;
+        self.canonical_reactive[139] = WDU;
+        self.canonical_reactive[140] = WDW;
+        self.canonical_reactive[141] = WDY;
+        self.canonical_reactive[142] = WEA;
+        self.canonical_reactive[143] = WEC;
+        self.canonical_reactive[144] = WEE;
+        self.canonical_reactive[145] = WEG;
+        self.canonical_reactive[146] = WEI;
+        self.canonical_reactive[147] = WEK;
+        self.canonical_reactive[148] = WEM;
+        self.canonical_reactive[149] = WEO;
+        self.canonical_reactive[150] = WEQ;
+        self.canonical_reactive[151] = WES;
+        self.canonical_reactive[152] = WEU;
+        self.canonical_reactive[153] = WEW;
+        self.canonical_reactive[154] = WEY;
+        self.canonical_reactive[155] = WFA;
+        self.canonical_reactive[156] = WFC;
+        self.canonical_reactive[157] = WFE;
+        self.canonical_reactive[158] = WFG;
+        self.canonical_reactive[159] = WFI;
+        self.canonical_reactive[160] = WFK;
+        self.canonical_reactive[161] = WFM;
+        self.canonical_reactive[162] = WFO;
+        self.canonical_reactive[163] = WFQ;
+        self.canonical_reactive[164] = WFS;
+        self.canonical_reactive[165] = WFU;
+        self.canonical_reactive[166] = WFW;
+        self.canonical_reactive[167] = WFY;
+        self.canonical_reactive[168] = WGA;
+        self.canonical_reactive[169] = WGC;
+        self.canonical_reactive[170] = WGJ;
+        self.canonical_reactive[171] = WGL;
+        self.canonical_reactive[172] = WGN;
+        self.canonical_reactive[173] = WGP;
+        self.canonical_reactive[174] = WGR;
+        self.canonical_reactive[175] = WGT;
+        self.canonical_reactive[176] = WGV;
+        self.canonical_reactive[177] = WGX;
+        self.canonical_reactive[178] = WGZ;
+        self.canonical_reactive[179] = WHB;
+        self.canonical_reactive[180] = WHD;
+        self.canonical_reactive[181] = WHF;
+        self.canonical_reactive[182] = WHH;
+        self.canonical_reactive[183] = WHJ;
+        self.canonical_reactive[184] = WHL;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

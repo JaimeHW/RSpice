@@ -23,6 +23,7 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
         matches!(
             value.kind,
             CfgValueKind::Ddt { .. }
+                | CfgValueKind::DdtDerivative { .. }
                 | CfgValueKind::Idt { .. }
                 | CfgValueKind::IdtMod { .. }
                 | CfgValueKind::IntegralDerivative { .. }
@@ -52,6 +53,55 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
     function.blocks[usize::from(function.entry)]
         .instructions
         .insert(0, CfgInstruction { result: zero });
+    let derivative_shapes = function
+        .values
+        .iter()
+        .filter_map(|value| {
+            matches!(value.kind, CfgValueKind::DdtDerivative { .. })
+                .then(|| value.value_type.shape())
+                .flatten()
+        })
+        .collect::<BTreeSet<_>>();
+    let mut zeros = BTreeMap::new();
+    for shape in derivative_shapes {
+        let id = ValueId::from(function.values.len());
+        function.values.push(CfgValue {
+            id,
+            value_type: CfgValueType::Lanes(shape),
+            kind: CfgValueKind::LaneSplat(0.0),
+        });
+        function.blocks[usize::from(function.entry)]
+            .instructions
+            .insert(0, CfgInstruction { result: id });
+        zeros.insert(shape, id);
+    }
+    let mut validation = BTreeMap::new();
+    for index in 0..function.values.len() {
+        let value = &function.values[index];
+        if let CfgValueKind::DdtDerivative { primal, .. } = value.kind
+            && let Some(shape) = value.value_type.shape()
+        {
+            let mut instructions = Vec::new();
+            let factor = validation_factor(function, primal, &mut instructions);
+            function.values[index].kind = CfgValueKind::LaneScalar {
+                op: CfgBinaryOp::Mul,
+                input: zeros[&shape],
+                scalar: factor,
+            };
+            validation.insert(ValueId::from(index), instructions);
+        }
+    }
+    for block in &mut function.blocks {
+        block.instructions = block
+            .instructions
+            .iter()
+            .flat_map(|instruction| {
+                let mut before = validation.remove(&instruction.result).unwrap_or_default();
+                before.push(instruction.clone());
+                before
+            })
+            .collect();
+    }
     for value in &mut function.values {
         value.kind = match value.kind {
             CfgValueKind::Ddt { input, .. } => CfgValueKind::Binary {
@@ -77,6 +127,11 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 offset,
             },
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
+            CfgValueKind::DdtDerivative { primal, .. } => CfgValueKind::Binary {
+                op: CfgBinaryOp::CheckedValue,
+                left: primal,
+                right: value.value_type.shape().map_or(zero, |shape| zeros[&shape]),
+            },
             CfgValueKind::IntegralDerivative {
                 primal,
                 ic_derivative,
@@ -108,6 +163,34 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
             _ => continue,
         };
     }
+}
+
+/// Return one after evaluating a scalar dependency, suitable for multiplying
+/// a packed coefficient without changing its lane shape or hiding a fault.
+fn validation_factor(
+    function: &mut CfgFunction,
+    primal: ValueId,
+    instructions: &mut Vec<CfgInstruction>,
+) -> ValueId {
+    let one = ValueId::from(function.values.len());
+    function.values.push(CfgValue {
+        id: one,
+        value_type: CfgValueType::Real,
+        kind: CfgValueKind::RealConstant(1.0),
+    });
+    instructions.push(CfgInstruction { result: one });
+    let checked = ValueId::from(function.values.len());
+    function.values.push(CfgValue {
+        id: checked,
+        value_type: CfgValueType::Real,
+        kind: CfgValueKind::Binary {
+            op: CfgBinaryOp::CheckedValue,
+            left: primal,
+            right: one,
+        },
+    });
+    instructions.push(CfgInstruction { result: checked });
+    checked
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -415,6 +498,7 @@ fn append_activity(
             && matches!(
                 value.kind,
                 CfgValueKind::BlockParameter
+                    | CfgValueKind::DdtDerivative { .. }
                     | CfgValueKind::IntegralDerivative { .. }
                     | CfgValueKind::Select { .. }
                     | CfgValueKind::SumProductsDiv { .. }
@@ -511,6 +595,18 @@ fn append_activity(
                     sum
                 };
                 let result = match &value.kind {
+                    CfgValueKind::DdtDerivative {
+                        input_derivative, ..
+                    } => power.ddt.checked_sub(1).map_or(zero, |ddt| {
+                        get(
+                            *input_derivative,
+                            DynamicPower {
+                                ddt,
+                                idt: power.idt,
+                            },
+                            lane,
+                        )
+                    }),
                     CfgValueKind::IntegralDerivative {
                         input_derivative,
                         wrap,
@@ -697,6 +793,12 @@ fn value_powers(
     Ok(match kind {
         CfgValueKind::DdtScale => Powers::from([DynamicPower { ddt: 1, idt: 0 }]),
         CfgValueKind::IdtScale => Powers::from([DynamicPower { ddt: 0, idt: 1 }]),
+        CfgValueKind::DdtDerivative {
+            input_derivative, ..
+        } => at(input_derivative)
+            .iter()
+            .map(|power| power.product(DynamicPower { ddt: 1, idt: 0 }))
+            .collect(),
         CfgValueKind::IntegralDerivative {
             input_derivative,
             wrap,
@@ -856,6 +958,34 @@ impl Expansion<'_> {
         let ty = value.value_type;
         let kind = match &value.kind {
             CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
+            CfgValueKind::DdtDerivative {
+                primal,
+                input_derivative,
+                ..
+            } => {
+                let input = self.coefficient(
+                    *input_derivative,
+                    DynamicPower {
+                        ddt: power.ddt - 1,
+                        idt: power.idt,
+                    },
+                    ty,
+                );
+                if ty.shape().is_some() {
+                    let scalar = validation_factor(self.function, *primal, instructions);
+                    CfgValueKind::LaneScalar {
+                        op: CfgBinaryOp::Mul,
+                        input,
+                        scalar,
+                    }
+                } else {
+                    CfgValueKind::Binary {
+                        op: CfgBinaryOp::CheckedValue,
+                        left: *primal,
+                        right: input,
+                    }
+                }
+            }
             CfgValueKind::IntegralDerivative {
                 primal,
                 input_derivative,

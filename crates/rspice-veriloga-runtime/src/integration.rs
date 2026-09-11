@@ -3,6 +3,156 @@
 use super::arithmetic::{IdtModOrigin, sum_products, sum_products_div};
 use super::{GeneratedDdtCoefficients, Value};
 
+/// Malformed numeric input to one generated `ddt` candidate evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedDdtCandidateError {
+    NonFiniteInput { field: &'static str },
+    NonFiniteResult,
+}
+
+impl std::fmt::Display for GeneratedDdtCandidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteInput { field } => {
+                write!(f, "generated ddt {field} must be finite")
+            }
+            Self::NonFiniteResult => f.write_str("generated ddt produced a non-finite derivative"),
+        }
+    }
+}
+
+impl std::error::Error for GeneratedDdtCandidateError {}
+
+/// Accepted history consumed by one time-derivative candidate.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GeneratedDdtAcceptedHistory {
+    pub initialized: bool,
+    pub value_previous: Value,
+    pub value_older: Value,
+    pub derivative_previous: Value,
+}
+
+/// Pure companion result and the previous input used to compute it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedDdtCandidate {
+    pub value: Value,
+    pub previous: Value,
+}
+
+/// Evaluate a time derivative without publishing speculative state.
+/// Synthetic history at an uninitialized site follows the current input.
+/// Recover intermediate range loss before deciding whether the result is finite.
+#[inline]
+pub fn evaluate_generated_ddt_candidate(
+    coefficients: GeneratedDdtCoefficients,
+    input: Value,
+    history: GeneratedDdtAcceptedHistory,
+) -> Result<GeneratedDdtCandidate, GeneratedDdtCandidateError> {
+    for (field, operand) in [
+        ("input", input),
+        ("accepted previous value", history.value_previous),
+        ("accepted older value", history.value_older),
+        ("accepted previous derivative", history.derivative_previous),
+        ("derivative scale", coefficients.derivative_scale),
+        ("previous-value scale", coefficients.previous_value_scale),
+        ("older-value scale", coefficients.older_value_scale),
+        (
+            "previous-derivative scale",
+            coefficients.previous_derivative_scale,
+        ),
+    ] {
+        if !operand.is_finite() {
+            return Err(GeneratedDdtCandidateError::NonFiniteInput { field });
+        }
+    }
+    let previous = if history.initialized {
+        history.value_previous
+    } else {
+        input
+    };
+    let older = if history.initialized {
+        history.value_older
+    } else {
+        input
+    };
+    let derivative_previous = if history.initialized {
+        history.derivative_previous
+    } else {
+        0.0
+    };
+    let value = if coefficients.active {
+        sum_products_div(
+            &[
+                [input, coefficients.derivative_scale],
+                [-previous, coefficients.previous_value_scale],
+                [-older, coefficients.older_value_scale],
+                [-derivative_previous, coefficients.previous_derivative_scale],
+            ],
+            1.0,
+        )
+    } else {
+        0.0
+    };
+    if !value.is_finite() {
+        return Err(GeneratedDdtCandidateError::NonFiniteResult);
+    }
+    Ok(GeneratedDdtCandidate { value, previous })
+}
+
+/// Apply a derivative direction to the site's current companion rule.
+/// Accepted history is constant; synthetic initial history follows the input.
+/// Evaluate the full action together so cancelling products cannot overflow.
+#[inline]
+pub fn evaluate_generated_ddt_derivative(
+    coefficients: GeneratedDdtCoefficients,
+    initialized: bool,
+    input_derivative: Value,
+) -> Result<Value, GeneratedDdtCandidateError> {
+    evaluate_generated_ddt_candidate(
+        coefficients,
+        input_derivative,
+        GeneratedDdtAcceptedHistory {
+            initialized,
+            ..Default::default()
+        },
+    )
+    .map(|candidate| candidate.value)
+}
+
+/// Evaluate one generated time-derivative trial without accepting it.
+#[doc(hidden)]
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
+    current: &mut [f64; STATE_COUNT],
+    previous: &[f64; STATE_COUNT],
+    older: &[f64; STATE_COUNT],
+    initialized: &[bool; STATE_COUNT],
+    derivative_current: &mut [f64; STATE_COUNT],
+    derivative_previous: &[f64; STATE_COUNT],
+    candidate_valid: &mut [bool; STATE_COUNT],
+    coefficients: GeneratedDdtCoefficients,
+    slot: usize,
+    value: f64,
+) -> Result<f64, GeneratedDdtCandidateError> {
+    debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
+    candidate_valid[slot] = false;
+    let candidate = evaluate_generated_ddt_candidate(
+        coefficients,
+        value,
+        GeneratedDdtAcceptedHistory {
+            initialized: initialized[slot],
+            value_previous: previous[slot],
+            value_older: older[slot],
+            derivative_previous: derivative_previous[slot],
+        },
+    )?;
+    current[slot] = value;
+    derivative_current[slot] = candidate.value;
+    candidate_valid[slot] = true;
+    Ok(candidate.value)
+}
+
 /// Accepted history consumed by one generated `idt` candidate evaluation.
 ///
 /// The history is immutable: evaluating a Newton candidate must not publish it
@@ -431,6 +581,140 @@ pub fn evaluate_generated_idtmod_candidate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ddt_candidates_and_derivatives_use_the_same_initialization_rule() {
+        use super::*;
+        for coefficients in [
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 2.0,
+                previous_value_scale: 2.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 4.0,
+                previous_value_scale: 4.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 1.0,
+            },
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 3.0,
+                previous_value_scale: 4.0,
+                older_value_scale: -1.0,
+                previous_derivative_scale: 0.0,
+            },
+            GeneratedDdtCoefficients::inactive(),
+        ] {
+            for initialized in [false, true] {
+                let history = GeneratedDdtAcceptedHistory {
+                    initialized,
+                    value_previous: 1.5,
+                    value_older: 1.0,
+                    derivative_previous: 1.0,
+                };
+                let candidate =
+                    evaluate_generated_ddt_candidate(coefficients, 2.0, history).unwrap();
+                assert_eq!(candidate.previous, if initialized { 1.5 } else { 2.0 });
+                assert_eq!(
+                    candidate.value,
+                    if initialized && coefficients.active {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                );
+                let step = 1.0 / 1024.0;
+                let plus = evaluate_generated_ddt_candidate(coefficients, 2.0 + step, history)
+                    .unwrap()
+                    .value;
+                let minus = evaluate_generated_ddt_candidate(coefficients, 2.0 - step, history)
+                    .unwrap()
+                    .value;
+                assert_eq!(
+                    evaluate_generated_ddt_derivative(coefficients, initialized, 1.0).unwrap(),
+                    (plus - minus) / (2.0 * step),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ddt_companions_recover_intermediate_overflow_and_underflow() {
+        use super::*;
+        let be = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 4.0,
+            previous_value_scale: 4.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        };
+        let previous = 1e308_f64;
+        let current = f64::from_bits(previous.to_bits() + 1);
+        let history = GeneratedDdtAcceptedHistory {
+            initialized: true,
+            value_previous: previous,
+            value_older: previous,
+            derivative_previous: 0.0,
+        };
+        for (scale, previous_scale, older_scale) in
+            [(4.0, 4.0, 0.0), (8.0, 8.0, 0.0), (6.0, 8.0, -2.0)]
+        {
+            let coefficients = GeneratedDdtCoefficients {
+                derivative_scale: scale,
+                previous_value_scale: previous_scale,
+                older_value_scale: older_scale,
+                ..be
+            };
+            assert_eq!(
+                evaluate_generated_ddt_candidate(coefficients, current, history)
+                    .unwrap()
+                    .value,
+                scale * (current - previous)
+            );
+            assert_eq!(
+                evaluate_generated_ddt_derivative(coefficients, false, previous).unwrap(),
+                0.0
+            );
+            assert!(evaluate_generated_ddt_derivative(coefficients, true, previous).is_err());
+        }
+        let tiny = f64::from_bits(1);
+        let coefficients = GeneratedDdtCoefficients {
+            derivative_scale: 0.5,
+            previous_value_scale: 0.5,
+            ..be
+        };
+        assert_eq!(
+            evaluate_generated_ddt_candidate(
+                coefficients,
+                3.0 * tiny,
+                GeneratedDdtAcceptedHistory {
+                    value_previous: tiny,
+                    value_older: 0.0,
+                    ..history
+                },
+            )
+            .unwrap()
+            .value,
+            tiny
+        );
+        assert!(evaluate_generated_ddt_candidate(be, f64::NAN, history).is_err());
+        assert!(
+            evaluate_generated_ddt_candidate(
+                be,
+                1.0,
+                GeneratedDdtAcceptedHistory {
+                    initialized: false,
+                    value_previous: f64::NAN,
+                    ..history
+                },
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn frozen_idtmod_helpers_validate_inputs_and_preserve_exact_branch_cancellation() {
         use super::*;

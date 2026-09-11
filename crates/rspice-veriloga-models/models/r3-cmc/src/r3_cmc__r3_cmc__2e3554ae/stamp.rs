@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L6, L8, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L6, L8, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 36] = [2, 3, 1, 0, 43, 6, 75, 7, 76, 77, 9, 11, 13, 14, 15, 81, 21, 82, 22, 83, 27, 28, 84, 29, 30, 85, 31, 32, 53, 54, 55, 58, 59, 63, 64, 65];
@@ -649,28 +649,29 @@ impl Instance {
         self.canonical_temperature_valid = true;
     }
 
-    fn canonical_timestep_stage(&mut self, ctx: &GeneratedEvalContext<'_>) {
-        let produced: [f64; 1] = {
-            let multiplicity = self.multiplicity;
-            let staged = &*self.canonical_staged;
-            [0.0]
-        };
-    }
-
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         self.canonical_model_stage(ctx);
         if ctx.evaluation_failed() { return; }
         self.canonical_instance_stage(ctx);
         if ctx.evaluation_failed() { return; }
         self.canonical_temperature_stage(ctx);
-        self.canonical_timestep_stage(ctx);
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -822,13 +823,12 @@ impl Instance {
 		let ALX=staged[95]!=0.0;
 		let ARP=staged[96]!=0.0;
 		let ARQ=staged[61];
-		let ASD=ddt_scale();
-		let ASM=parameters[13];
-		let ASN=staged[62];
-		let ASZ=0f64;
-		let ATC=0f64;
-		let ATI=staged[98];
-		let ATQ=staged[99];
+		let ASL=parameters[13];
+		let ASM=staged[62];
+		let ASY=0f64;
+		let ATB=0f64;
+		let ATH=staged[98];
+		let ATP=staged[99];
 		let A=ctx.has_simparam("gmin");
 		let D=if A{
 		let B=ctx.simparam_required("gmin");
@@ -2444,122 +2444,122 @@ impl Instance {
 		let ASA;
 		let ASB;
 		if ARP{
-		let ASO=AAZ* ASN;
-		let ASP=L2([0.0,((1f64* ASN)* BY)])+ L2([(BZ* ASO),0.0]);
-		let ASQ=0f64+ (ASO* BY);
-		let ASR=L4([0.0,ASP[0],0.0,ASP[1]]);
-		ASA=ASQ;
-		ASB=ASR;
+		let ASN=AAZ* ASM;
+		let ASO=L2([0.0,((1f64* ASM)* BY)])+ L2([(BZ* ASN),0.0]);
+		let ASP=0f64+ (ASN* BY);
+		let ASQ=L4([0.0,ASO[0],0.0,ASO[1]]);
+		ASA=ASP;
+		ASB=ASQ;
 		}else{
-		let ASS=ASN* BY;
-		let AST=AAX/ ASS;
-		let ASU=(L3([AAY[0],0.0,AAY[1]])).product_sum_div(CI,L3([0.0,(BZ* ASN),0.0]),(-AST),ASS);
-		let ASV=0f64+ AST;
-		let ASW=L4([ASU[0],ASU[1],ASU[2],0.0]);
-		ASA=ASV;
-		ASB=ASW;
+		let ASR=ASM* BY;
+		let ASS=AAX/ ASR;
+		let AST=(L3([AAY[0],0.0,AAY[1]])).product_sum_div(CI,L3([0.0,(BZ* ASM),0.0]),(-ASS),ASR);
+		let ASU=0f64+ ASS;
+		let ASV=L4([AST[0],AST[1],AST[2],0.0]);
+		ASA=ASU;
+		ASB=ASV;
 		}
 		let ASC=ddt(0, ALK);
-		let ASE=ALL* ASD;
-		let ASF=C+ ASC;
-		let ASG=ddt(1, ALN);
-		let ASH=ALO* ASD;
-		let ASI=C+ ASG;
-		let ASJ=ddt(2, ALQ);
-		let ASK=ALR* ASD;
-		let ASL=C+ ASJ;
+		let ASD=L3(std::array::from_fn(|i| ddt_derivative(0,ASC,(ALL)[i])));
+		let ASE=C+ ASC;
+		let ASF=ddt(1, ALN);
+		let ASG=L3(std::array::from_fn(|i| ddt_derivative(1,ASF,(ALO)[i])));
+		let ASH=C+ ASF;
+		let ASI=ddt(2, ALQ);
+		let ASJ=ddt_derivative(2,ASI,ALR);
+		let ASK=C+ ASI;
+		let ASW;
 		let ASX;
-		let ASY;
-		if ASM!=0.0{
-		let ATB=if XK{
-		let ATA=C+ ASZ;
-		ATA
+		if ASL!=0.0{
+		let ATA=if XK{
+		let ASZ=C+ ASY;
+		ASZ
 		}else{
 		C
 		};
-		let ATE=if XP{
-		let ATD=C+ ATC;
-		ATD
+		let ATD=if XP{
+		let ATC=C+ ATB;
+		ATC
 		}else{
 		C
 		};
-		ASX=ATB;
-		ASY=ATE;
+		ASW=ATA;
+		ASX=ATD;
 		}else{
+		ASW=C;
 		ASX=C;
-		ASY=C;
 		}
-		let ATF=AEH[3];
-		let ATG=AEH[1];
-		let ATH=C+ AAT;
+		let ATE=AEH[3];
+		let ATF=AEH[1];
+		let ATG=C+ AAT;
+		let ATK;
 		let ATL;
-		let ATM;
-		if ATI!=0.0{
-		let ATJ=L3([AAS[0],AAS[1],0.0]);
-		ATL=AAR;
-		ATM=ATJ;
+		if ATH!=0.0{
+		let ATI=L3([AAS[0],AAS[1],0.0]);
+		ATK=AAR;
+		ATL=ATI;
 		}else{
-		let ATK=L3([0.0,0.0,1f64]);
-		ATL=AAT;
-		ATM=ATK;
+		let ATJ=L3([0.0,0.0,1f64]);
+		ATK=AAT;
+		ATL=ATJ;
 		}
-		let ATN=L4([ATM[0],0.0,ATM[1],ATM[2]])- ARO;
-		let ATO=C+ (ATL- ARN);
-		let ATP=C+ AAZ;
+		let ATM=L4([ATL[0],0.0,ATL[1],ATL[2]])- ARO;
+		let ATN=C+ (ATK- ARN);
+		let ATO=C+ AAZ;
+		let ATS;
 		let ATT;
-		let ATU;
-		if ATQ!=0.0{
-		let ATR=L3([AAY[0],AAY[1],0.0]);
-		ATT=AAX;
-		ATU=ATR;
+		if ATP!=0.0{
+		let ATQ=L3([AAY[0],AAY[1],0.0]);
+		ATS=AAX;
+		ATT=ATQ;
 		}else{
-		let ATS=L3([0.0,0.0,1f64]);
-		ATT=AAZ;
-		ATU=ATS;
+		let ATR=L3([0.0,0.0,1f64]);
+		ATS=AAZ;
+		ATT=ATR;
 		}
-		let ATV=L4([ATU[0],0.0,ATU[1],ATU[2]])- ASB;
-		let ATW=C+ (ATT- ASA);
-		let ATX=AEH[0];
-		let ATY=AEH[2];
-		let ATZ=AEK[0];
-		let AUA=AEK[1];
-		let AUB=AEK[2];
-		let AUC=AEN[0];
-		let AUD=AEN[1];
-		let AUE=AEN[2];
-		let AUF=AED;
-		let AUG=AEE[0];
-		let AUH=AEE[1];
-		let AUI=AEE[2];
-		let AUJ=AEE[3];
-		let AUK=AEE[4];
-		let AUL=AEE[5];
-		let AUM=AEE[6];
-		let AUN=AEE[7];
-		let AUO=ASE[0];
-		let AUP=ASE[1];
-		let AUQ=ASE[2];
-		let AUR=ASH[0];
-		let AUS=ASH[1];
-		let AUT=ASH[2];
-		let AUU=ASK;
-		let AUV=1f64;
-		let AUW=ATN[0];
-		let AUX=ATN[1];
-		let AUY=ATN[2];
-		let AUZ=ATN[3];
-		let AVA=1f64;
-		let AVB=ATV[0];
-		let AVC=ATV[1];
-		let AVD=ATV[2];
-		let AVE=ATV[3];
-		let AVF=ALL[0];
-		let AVG=ALL[1];
-		let AVH=ALL[2];
-		let AVI=ALO[0];
-		let AVJ=ALO[1];
-		let AVK=ALO[2];
-		let AVL=ALR;
+		let ATU=L4([ATT[0],0.0,ATT[1],ATT[2]])- ASB;
+		let ATV=C+ (ATS- ASA);
+		let ATW=AEH[0];
+		let ATX=AEH[2];
+		let ATY=AEK[0];
+		let ATZ=AEK[1];
+		let AUA=AEK[2];
+		let AUB=AEN[0];
+		let AUC=AEN[1];
+		let AUD=AEN[2];
+		let AUE=AED;
+		let AUF=AEE[0];
+		let AUG=AEE[1];
+		let AUH=AEE[2];
+		let AUI=AEE[3];
+		let AUJ=AEE[4];
+		let AUK=AEE[5];
+		let AUL=AEE[6];
+		let AUM=AEE[7];
+		let AUN=ASD[0];
+		let AUO=ASD[1];
+		let AUP=ASD[2];
+		let AUQ=ASG[0];
+		let AUR=ASG[1];
+		let AUS=ASG[2];
+		let AUT=ASJ;
+		let AUU=1f64;
+		let AUV=ATM[0];
+		let AUW=ATM[1];
+		let AUX=ATM[2];
+		let AUY=ATM[3];
+		let AUZ=1f64;
+		let AVA=ATU[0];
+		let AVB=ATU[1];
+		let AVC=ATU[2];
+		let AVD=ATU[3];
+		let AVE=ALL[0];
+		let AVF=ALL[1];
+		let AVG=ALL[2];
+		let AVH=ALO[0];
+		let AVI=ALO[1];
+		let AVJ=ALO[2];
+		let AVK=ALR;
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[98]; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[99]; }
         stamper.stamp_current_sparse_local::<4, 0>(
@@ -2567,7 +2567,7 @@ impl Instance {
             Some(4),
             multiplicity * (ALS),
             [1, 3, 4, 5],
-            [ATX, ATG, ATY, ATF],
+            [ATW, ATF, ATX, ATE],
             [],
             [],
             multiplicity,
@@ -2577,7 +2577,7 @@ impl Instance {
             Some(4),
             multiplicity * (ALT),
             [1, 3, 4],
-            [ATZ, AUA, AUB],
+            [ATY, ATZ, AUA],
             [],
             [],
             multiplicity,
@@ -2587,7 +2587,7 @@ impl Instance {
             Some(5),
             multiplicity * (ALU),
             [1, 3, 5],
-            [AUC, AUD, AUE],
+            [AUB, AUC, AUD],
             [],
             [],
             multiplicity,
@@ -2597,7 +2597,7 @@ impl Instance {
             None,
             multiplicity * (ALV),
             [3],
-            [AUF],
+            [AUE],
             [],
             [],
             multiplicity,
@@ -2607,7 +2607,7 @@ impl Instance {
             None,
             multiplicity * (ALW),
             [0, 1, 2, 3, 4, 5, 6, 7],
-            [AUG, AUH, AUI, AUJ, AUK, AUL, AUM, AUN],
+            [AUF, AUG, AUH, AUI, AUJ, AUK, AUL, AUM],
             [],
             [],
             multiplicity,
@@ -2615,9 +2615,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(4),
-            multiplicity * (ASF),
+            multiplicity * (ASE),
             [1, 3, 4],
-            [AUO, AUP, AUQ],
+            [AUN, AUO, AUP],
             [],
             [],
             multiplicity,
@@ -2625,9 +2625,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(5),
-            multiplicity * (ASI),
+            multiplicity * (ASH),
             [1, 3, 5],
-            [AUR, AUS, AUT],
+            [AUQ, AUR, AUS],
             [],
             [],
             multiplicity,
@@ -2635,9 +2635,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(3),
             None,
-            multiplicity * (ASL),
+            multiplicity * (ASK),
             [3],
-            [AUU],
+            [AUT],
             [],
             [],
             multiplicity,
@@ -2685,7 +2685,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(4),
-            multiplicity * (ASX),
+            multiplicity * (ASW),
             [],
             [],
             [],
@@ -2695,7 +2695,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(5),
-            multiplicity * (ASY),
+            multiplicity * (ASX),
             [],
             [],
             [],
@@ -2705,9 +2705,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(0),
             Some(4),
-            multiplicity * (ATH),
+            multiplicity * (ATG),
             [6],
-            [AUV],
+            [AUU],
             [],
             [],
             multiplicity,
@@ -2715,9 +2715,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(6),
             None,
-            multiplicity * (ATO),
+            multiplicity * (ATN),
             [0, 3, 4, 6],
-            [AUW, AUX, AUY, AUZ],
+            [AUV, AUW, AUX, AUY],
             [],
             [],
             multiplicity,
@@ -2725,9 +2725,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(2),
             Some(5),
-            multiplicity * (ATP),
+            multiplicity * (ATO),
             [7],
-            [AVA],
+            [AUZ],
             [],
             [],
             multiplicity,
@@ -2735,9 +2735,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             None,
-            multiplicity * (ATW),
+            multiplicity * (ATV),
             [2, 3, 5, 7],
-            [AVB, AVC, AVD, AVE],
+            [AVA, AVB, AVC, AVD],
             [],
             [],
             multiplicity,
@@ -2748,25 +2748,25 @@ impl Instance {
         self.canonical_reactive[3] = ALV;
         self.canonical_reactive[4] = ALW;
         self.canonical_reactive[5] = ALK;
-        self.canonical_reactive[6] = AVF;
-        self.canonical_reactive[7] = AVG;
-        self.canonical_reactive[8] = AVH;
+        self.canonical_reactive[6] = AVE;
+        self.canonical_reactive[7] = AVF;
+        self.canonical_reactive[8] = AVG;
         self.canonical_reactive[9] = ALN;
-        self.canonical_reactive[10] = AVI;
-        self.canonical_reactive[11] = AVJ;
-        self.canonical_reactive[12] = AVK;
+        self.canonical_reactive[10] = AVH;
+        self.canonical_reactive[11] = AVI;
+        self.canonical_reactive[12] = AVJ;
         self.canonical_reactive[13] = ALQ;
-        self.canonical_reactive[14] = AVL;
+        self.canonical_reactive[14] = AVK;
         self.canonical_reactive[15] = staged[100];
         self.canonical_reactive[16] = staged[101];
         self.canonical_reactive[17] = staged[102];
         self.canonical_reactive[18] = staged[103];
-        self.canonical_reactive[19] = ASX;
-        self.canonical_reactive[20] = ASY;
-        self.canonical_reactive[21] = ATH;
-        self.canonical_reactive[22] = ATO;
-        self.canonical_reactive[23] = ATP;
-        self.canonical_reactive[24] = ATW;
+        self.canonical_reactive[19] = ASW;
+        self.canonical_reactive[20] = ASX;
+        self.canonical_reactive[21] = ATG;
+        self.canonical_reactive[22] = ATN;
+        self.canonical_reactive[23] = ATO;
+        self.canonical_reactive[24] = ATV;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {

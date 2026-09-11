@@ -2,7 +2,7 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L2, L3, L4, L5, L6, L7, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L10, L11, L2, L3, L4, L5, L6, L7, L9, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
@@ -11,9 +11,19 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -237,7 +247,6 @@ impl Instance {
 		let BJU=L4([0f64;4]);
 		let BKG=L2([0f64;2]);
 		let BMS=L3([0f64;3]);
-		let BPE=ddt_scale();
 		let CM;
 		let CU;
 		let EE;
@@ -2479,34 +2488,34 @@ impl Instance {
 		let AQZ=A+ AJH;
 		let ARA=A+ AJG;
 		let ARB=ddt(0, AQF);
-		let BPF=BOZ* BPE;
+		let BPE=L4(std::array::from_fn(|i| ddt_derivative(0,ARB,(BOZ)[i])));
 		let ARC=A+ ARB;
 		let ARD=ddt(1, AQG);
-		let BPG=BPA* BPE;
+		let BPF=L3(std::array::from_fn(|i| ddt_derivative(1,ARD,(BPA)[i])));
 		let ARE=A+ ARD;
 		let ARF=ddt(2, AQH);
-		let BPH=BPB* BPE;
+		let BPG=L3(std::array::from_fn(|i| ddt_derivative(2,ARF,(BPB)[i])));
 		let ARG=A+ ARF;
 		let ARH=ddt(3, AQI);
-		let BPI=BPC* BPE;
+		let BPH=L3(std::array::from_fn(|i| ddt_derivative(3,ARH,(BPC)[i])));
 		let ARI=A+ ARH;
 		let ARJ=ddt(4, AQJ);
-		let BPJ=BPD* BPE;
+		let BPI=L5(std::array::from_fn(|i| ddt_derivative(4,ARJ,(BPD)[i])));
 		let ARK=A+ ARJ;
 		let ARL=ddt(5, APW);
-		let BPK=BOU* BPE;
+		let BPJ=L2(std::array::from_fn(|i| ddt_derivative(5,ARL,(BOU)[i])));
 		let ARM=A+ ARL;
 		let ARN=ddt(6, APY);
-		let BPL=BOV* BPE;
+		let BPK=L2(std::array::from_fn(|i| ddt_derivative(6,ARN,(BOV)[i])));
 		let ARO=A+ ARN;
 		let ARP=ddt(7, AQC);
-		let BPM=BOX* BPE;
+		let BPL=ddt_derivative(7,ARP,BOX);
 		let ARQ=A+ ARP;
 		let ARR=ddt(8, AQE);
-		let BPN=BOY* BPE;
+		let BPM=ddt_derivative(8,ARR,BOY);
 		let ARS=A+ ARR;
 		let ART=ddt(9, AQA);
-		let BPO=BOW* BPE;
+		let BPN=ddt_derivative(9,ART,BOW);
 		let ARU=A+ ART;
 		let ASW;
 		let ASX;
@@ -2563,124 +2572,124 @@ impl Instance {
 		ATH=A;
 		ATI=A;
 		}
-		let BPP=BLV[0];
-		let BPQ=BLV[1];
-		let BPR=BLV[2];
-		let BPS=BLV[3];
-		let BPT=BLW[0];
-		let BPU=BLW[1];
-		let BPV=BLW[2];
-		let BPW=BLW[3];
-		let BPX=BLX;
-		let BPY=BLY[0];
-		let BPZ=BLY[1];
-		let BQA=BLY[2];
-		let BQB=BLY[3];
-		let BQC=BLZ[0];
-		let BQD=BLZ[1];
-		let BQE=BLZ[2];
-		let BQF=BLZ[3];
-		let BQG=BLZ[4];
-		let BQH=BMA[0];
-		let BQI=BMA[1];
-		let BQJ=BMA[2];
-		let BQK=BMA[3];
-		let BQL=BMB[0];
-		let BQM=BMB[1];
-		let BQN=BMB[2];
-		let BQO=BIR[0];
-		let BQP=BIR[1];
-		let BQQ=BIR[2];
-		let BQR=BMC[0];
-		let BQS=BMC[1];
-		let BQT=BMC[2];
-		let BQU=BMC[3];
-		let BQV=BJB[0];
-		let BQW=BJB[1];
-		let BQX=BJB[2];
-		let BQY=BJE[0];
-		let BQZ=BJE[1];
-		let BRA=BJE[2];
-		let BRB=BJE[3];
-		let BRC=BJE[4];
-		let BRD=BJG[0];
-		let BRE=BJG[1];
-		let BRF=BJG[2];
-		let BRG=BJJ[0];
-		let BRH=BJJ[1];
-		let BRI=BJJ[2];
-		let BRJ=BJJ[3];
-		let BRK=BJJ[4];
-		let BRL=BJJ[5];
-		let BRM=BLO[0];
-		let BRN=BLO[1];
-		let BRO=BLO[2];
-		let BRP=BLO[3];
-		let BRQ=BLO[4];
-		let BRR=BLP[0];
-		let BRS=BLP[1];
-		let BRT=BLN;
-		let BRU=BLM[0];
-		let BRV=BLM[1];
-		let BRW=BLM[2];
-		let BRX=BLM[3];
-		let BRY=BLM[4];
-		let BRZ=BLM[5];
-		let BSA=BLM[6];
-		let BSB=BLM[7];
-		let BSC=BLM[8];
-		let BSD=BLM[9];
-		let BSE=BLM[10];
-		let BSF=BPF[0];
-		let BSG=BPF[1];
-		let BSH=BPF[2];
-		let BSI=BPF[3];
-		let BSJ=BPG[0];
-		let BSK=BPG[1];
-		let BSL=BPG[2];
-		let BSM=BPH[0];
-		let BSN=BPH[1];
-		let BSO=BPH[2];
-		let BSP=BPI[0];
-		let BSQ=BPI[1];
-		let BSR=BPI[2];
-		let BSS=BPJ[0];
-		let BST=BPJ[1];
-		let BSU=BPJ[2];
-		let BSV=BPJ[3];
-		let BSW=BPJ[4];
-		let BSX=BPK[0];
-		let BSY=BPK[1];
-		let BSZ=BPL[0];
-		let BTA=BPL[1];
+		let BPO=BLV[0];
+		let BPP=BLV[1];
+		let BPQ=BLV[2];
+		let BPR=BLV[3];
+		let BPS=BLW[0];
+		let BPT=BLW[1];
+		let BPU=BLW[2];
+		let BPV=BLW[3];
+		let BPW=BLX;
+		let BPX=BLY[0];
+		let BPY=BLY[1];
+		let BPZ=BLY[2];
+		let BQA=BLY[3];
+		let BQB=BLZ[0];
+		let BQC=BLZ[1];
+		let BQD=BLZ[2];
+		let BQE=BLZ[3];
+		let BQF=BLZ[4];
+		let BQG=BMA[0];
+		let BQH=BMA[1];
+		let BQI=BMA[2];
+		let BQJ=BMA[3];
+		let BQK=BMB[0];
+		let BQL=BMB[1];
+		let BQM=BMB[2];
+		let BQN=BIR[0];
+		let BQO=BIR[1];
+		let BQP=BIR[2];
+		let BQQ=BMC[0];
+		let BQR=BMC[1];
+		let BQS=BMC[2];
+		let BQT=BMC[3];
+		let BQU=BJB[0];
+		let BQV=BJB[1];
+		let BQW=BJB[2];
+		let BQX=BJE[0];
+		let BQY=BJE[1];
+		let BQZ=BJE[2];
+		let BRA=BJE[3];
+		let BRB=BJE[4];
+		let BRC=BJG[0];
+		let BRD=BJG[1];
+		let BRE=BJG[2];
+		let BRF=BJJ[0];
+		let BRG=BJJ[1];
+		let BRH=BJJ[2];
+		let BRI=BJJ[3];
+		let BRJ=BJJ[4];
+		let BRK=BJJ[5];
+		let BRL=BLO[0];
+		let BRM=BLO[1];
+		let BRN=BLO[2];
+		let BRO=BLO[3];
+		let BRP=BLO[4];
+		let BRQ=BLP[0];
+		let BRR=BLP[1];
+		let BRS=BLN;
+		let BRT=BLM[0];
+		let BRU=BLM[1];
+		let BRV=BLM[2];
+		let BRW=BLM[3];
+		let BRX=BLM[4];
+		let BRY=BLM[5];
+		let BRZ=BLM[6];
+		let BSA=BLM[7];
+		let BSB=BLM[8];
+		let BSC=BLM[9];
+		let BSD=BLM[10];
+		let BSE=BPE[0];
+		let BSF=BPE[1];
+		let BSG=BPE[2];
+		let BSH=BPE[3];
+		let BSI=BPF[0];
+		let BSJ=BPF[1];
+		let BSK=BPF[2];
+		let BSL=BPG[0];
+		let BSM=BPG[1];
+		let BSN=BPG[2];
+		let BSO=BPH[0];
+		let BSP=BPH[1];
+		let BSQ=BPH[2];
+		let BSR=BPI[0];
+		let BSS=BPI[1];
+		let BST=BPI[2];
+		let BSU=BPI[3];
+		let BSV=BPI[4];
+		let BSW=BPJ[0];
+		let BSX=BPJ[1];
+		let BSY=BPK[0];
+		let BSZ=BPK[1];
+		let BTA=BPL;
 		let BTB=BPM;
 		let BTC=BPN;
-		let BTD=BPO;
-		let BTE=BOZ[0];
-		let BTF=BOZ[1];
-		let BTG=BOZ[2];
-		let BTH=BOZ[3];
-		let BTI=BPA[0];
-		let BTJ=BPA[1];
-		let BTK=BPA[2];
-		let BTL=BPB[0];
-		let BTM=BPB[1];
-		let BTN=BPB[2];
-		let BTO=BPC[0];
-		let BTP=BPC[1];
-		let BTQ=BPC[2];
-		let BTR=BPD[0];
-		let BTS=BPD[1];
-		let BTT=BPD[2];
-		let BTU=BPD[3];
-		let BTV=BPD[4];
-		let BTW=BOU[0];
-		let BTX=BOU[1];
-		let BTY=BOV[0];
-		let BTZ=BOV[1];
-		let BUA=BOX;
-		let BUB=BOY;
-		let BUC=BOW;
+		let BTD=BOZ[0];
+		let BTE=BOZ[1];
+		let BTF=BOZ[2];
+		let BTG=BOZ[3];
+		let BTH=BPA[0];
+		let BTI=BPA[1];
+		let BTJ=BPA[2];
+		let BTK=BPB[0];
+		let BTL=BPB[1];
+		let BTM=BPB[2];
+		let BTN=BPC[0];
+		let BTO=BPC[1];
+		let BTP=BPC[2];
+		let BTQ=BPD[0];
+		let BTR=BPD[1];
+		let BTS=BPD[2];
+		let BTT=BPD[3];
+		let BTU=BPD[4];
+		let BTV=BOU[0];
+		let BTW=BOU[1];
+		let BTX=BOV[0];
+		let BTY=BOV[1];
+		let BTZ=BOX;
+		let BUA=BOY;
+		let BUB=BOW;
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = CM; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = WG; }
         if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = EE; }
@@ -2706,7 +2715,7 @@ impl Instance {
             Some(8),
             multiplicity * (AQK),
             [3, 5, 7, 8],
-            [BPP, BPQ, BPR, BPS],
+            [BPO, BPP, BPQ, BPR],
             [],
             [],
             multiplicity,
@@ -2716,7 +2725,7 @@ impl Instance {
             Some(8),
             multiplicity * (AQL),
             [3, 6, 7, 8],
-            [BPT, BPU, BPV, BPW],
+            [BPS, BPT, BPU, BPV],
             [],
             [],
             multiplicity,
@@ -2726,7 +2735,7 @@ impl Instance {
             Some(8),
             multiplicity * (AQM),
             [11],
-            [BPX],
+            [BPW],
             [],
             [],
             multiplicity,
@@ -2736,7 +2745,7 @@ impl Instance {
             Some(5),
             multiplicity * (AQN),
             [3, 5, 7, 8],
-            [BPY, BPZ, BQA, BQB],
+            [BPX, BPY, BPZ, BQA],
             [],
             [],
             multiplicity,
@@ -2746,7 +2755,7 @@ impl Instance {
             Some(5),
             multiplicity * (AQO),
             [3, 5, 7, 8, 11],
-            [BQC, BQD, BQE, BQF, BQG],
+            [BQB, BQC, BQD, BQE, BQF],
             [],
             [],
             multiplicity,
@@ -2756,7 +2765,7 @@ impl Instance {
             Some(4),
             multiplicity * (AQP),
             [0, 3, 4, 6],
-            [BQH, BQI, BQJ, BQK],
+            [BQG, BQH, BQI, BQJ],
             [],
             [],
             multiplicity,
@@ -2766,7 +2775,7 @@ impl Instance {
             Some(9),
             multiplicity * (AQQ),
             [3, 6, 9],
-            [BQL, BQM, BQN],
+            [BQK, BQL, BQM],
             [],
             [],
             multiplicity,
@@ -2776,7 +2785,7 @@ impl Instance {
             Some(4),
             multiplicity * (AQR),
             [0, 3, 4],
-            [BQO, BQP, BQQ],
+            [BQN, BQO, BQP],
             [],
             [],
             multiplicity,
@@ -2786,7 +2795,7 @@ impl Instance {
             Some(5),
             multiplicity * (AQS),
             [3, 4, 5, 7],
-            [BQR, BQS, BQT, BQU],
+            [BQQ, BQR, BQS, BQT],
             [],
             [],
             multiplicity,
@@ -2796,7 +2805,7 @@ impl Instance {
             Some(6),
             multiplicity * (AQT),
             [1, 3, 6],
-            [BQV, BQW, BQX],
+            [BQU, BQV, BQW],
             [],
             [],
             multiplicity,
@@ -2806,7 +2815,7 @@ impl Instance {
             Some(7),
             multiplicity * (AQU),
             [3, 5, 6, 7, 8],
-            [BQY, BQZ, BRA, BRB, BRC],
+            [BQX, BQY, BQZ, BRA, BRB],
             [],
             [],
             multiplicity,
@@ -2816,7 +2825,7 @@ impl Instance {
             Some(8),
             multiplicity * (AQV),
             [2, 3, 8],
-            [BRD, BRE, BRF],
+            [BRC, BRD, BRE],
             [],
             [],
             multiplicity,
@@ -2826,7 +2835,7 @@ impl Instance {
             Some(4),
             multiplicity * (AQW),
             [3, 4, 5, 6, 7, 9],
-            [BRG, BRH, BRI, BRJ, BRK, BRL],
+            [BRF, BRG, BRH, BRI, BRJ, BRK],
             [],
             [],
             multiplicity,
@@ -2836,7 +2845,7 @@ impl Instance {
             None,
             multiplicity * (AQX),
             [3, 5, 7, 8, 11],
-            [BRM, BRN, BRO, BRP, BRQ],
+            [BRL, BRM, BRN, BRO, BRP],
             [],
             [],
             multiplicity,
@@ -2846,7 +2855,7 @@ impl Instance {
             None,
             multiplicity * (AQY),
             [10, 11],
-            [BRR, BRS],
+            [BRQ, BRR],
             [],
             [],
             multiplicity,
@@ -2856,7 +2865,7 @@ impl Instance {
             None,
             multiplicity * (AQZ),
             [3],
-            [BRT],
+            [BRS],
             [],
             [],
             multiplicity,
@@ -2866,7 +2875,7 @@ impl Instance {
             None,
             multiplicity * (ARA),
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11],
-            [BRU, BRV, BRW, BRX, BRY, BRZ, BSA, BSB, BSC, BSD, BSE],
+            [BRT, BRU, BRV, BRW, BRX, BRY, BRZ, BSA, BSB, BSC, BSD],
             [],
             [],
             multiplicity,
@@ -2876,7 +2885,7 @@ impl Instance {
             Some(8),
             multiplicity * (ARC),
             [3, 5, 7, 8],
-            [BSF, BSG, BSH, BSI],
+            [BSE, BSF, BSG, BSH],
             [],
             [],
             multiplicity,
@@ -2886,7 +2895,7 @@ impl Instance {
             Some(8),
             multiplicity * (ARE),
             [3, 6, 8],
-            [BSJ, BSK, BSL],
+            [BSI, BSJ, BSK],
             [],
             [],
             multiplicity,
@@ -2896,7 +2905,7 @@ impl Instance {
             Some(5),
             multiplicity * (ARG),
             [3, 5, 7],
-            [BSM, BSN, BSO],
+            [BSL, BSM, BSN],
             [],
             [],
             multiplicity,
@@ -2906,7 +2915,7 @@ impl Instance {
             Some(4),
             multiplicity * (ARI),
             [3, 4, 7],
-            [BSP, BSQ, BSR],
+            [BSO, BSP, BSQ],
             [],
             [],
             multiplicity,
@@ -2916,7 +2925,7 @@ impl Instance {
             Some(9),
             multiplicity * (ARK),
             [3, 5, 6, 7, 9],
-            [BSS, BST, BSU, BSV, BSW],
+            [BSR, BSS, BST, BSU, BSV],
             [],
             [],
             multiplicity,
@@ -2926,7 +2935,7 @@ impl Instance {
             Some(2),
             multiplicity * (ARM),
             [1, 2],
-            [BSX, BSY],
+            [BSW, BSX],
             [],
             [],
             multiplicity,
@@ -2936,7 +2945,7 @@ impl Instance {
             Some(0),
             multiplicity * (ARO),
             [0, 1],
-            [BSZ, BTA],
+            [BSY, BSZ],
             [],
             [],
             multiplicity,
@@ -2946,7 +2955,7 @@ impl Instance {
             None,
             multiplicity * (ARQ),
             [10],
-            [BTB],
+            [BTA],
             [],
             [],
             multiplicity,
@@ -2956,7 +2965,7 @@ impl Instance {
             None,
             multiplicity * (ARS),
             [11],
-            [BTC],
+            [BTB],
             [],
             [],
             multiplicity,
@@ -2966,7 +2975,7 @@ impl Instance {
             None,
             multiplicity * (ARU),
             [3],
-            [BTD],
+            [BTC],
             [],
             [],
             multiplicity,
@@ -3119,40 +3128,40 @@ impl Instance {
         self.canonical_reactive[15] = AQZ;
         self.canonical_reactive[16] = ARA;
         self.canonical_reactive[17] = AQF;
-        self.canonical_reactive[18] = BTE;
-        self.canonical_reactive[19] = BTF;
-        self.canonical_reactive[20] = BTG;
-        self.canonical_reactive[21] = BTH;
+        self.canonical_reactive[18] = BTD;
+        self.canonical_reactive[19] = BTE;
+        self.canonical_reactive[20] = BTF;
+        self.canonical_reactive[21] = BTG;
         self.canonical_reactive[22] = AQG;
-        self.canonical_reactive[23] = BTI;
-        self.canonical_reactive[24] = BTJ;
-        self.canonical_reactive[25] = BTK;
+        self.canonical_reactive[23] = BTH;
+        self.canonical_reactive[24] = BTI;
+        self.canonical_reactive[25] = BTJ;
         self.canonical_reactive[26] = AQH;
-        self.canonical_reactive[27] = BTL;
-        self.canonical_reactive[28] = BTM;
-        self.canonical_reactive[29] = BTN;
+        self.canonical_reactive[27] = BTK;
+        self.canonical_reactive[28] = BTL;
+        self.canonical_reactive[29] = BTM;
         self.canonical_reactive[30] = AQI;
-        self.canonical_reactive[31] = BTO;
-        self.canonical_reactive[32] = BTP;
-        self.canonical_reactive[33] = BTQ;
+        self.canonical_reactive[31] = BTN;
+        self.canonical_reactive[32] = BTO;
+        self.canonical_reactive[33] = BTP;
         self.canonical_reactive[34] = AQJ;
-        self.canonical_reactive[35] = BTR;
-        self.canonical_reactive[36] = BTS;
-        self.canonical_reactive[37] = BTT;
-        self.canonical_reactive[38] = BTU;
-        self.canonical_reactive[39] = BTV;
+        self.canonical_reactive[35] = BTQ;
+        self.canonical_reactive[36] = BTR;
+        self.canonical_reactive[37] = BTS;
+        self.canonical_reactive[38] = BTT;
+        self.canonical_reactive[39] = BTU;
         self.canonical_reactive[40] = APW;
-        self.canonical_reactive[41] = BTW;
-        self.canonical_reactive[42] = BTX;
+        self.canonical_reactive[41] = BTV;
+        self.canonical_reactive[42] = BTW;
         self.canonical_reactive[43] = APY;
-        self.canonical_reactive[44] = BTY;
-        self.canonical_reactive[45] = BTZ;
+        self.canonical_reactive[44] = BTX;
+        self.canonical_reactive[45] = BTY;
         self.canonical_reactive[46] = AQC;
-        self.canonical_reactive[47] = BUA;
+        self.canonical_reactive[47] = BTZ;
         self.canonical_reactive[48] = AQE;
-        self.canonical_reactive[49] = BUB;
+        self.canonical_reactive[49] = BUA;
         self.canonical_reactive[50] = AQA;
-        self.canonical_reactive[51] = BUC;
+        self.canonical_reactive[51] = BUB;
         self.canonical_reactive[52] = ASW;
         self.canonical_reactive[53] = ASX;
         self.canonical_reactive[54] = ASY;

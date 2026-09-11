@@ -271,6 +271,11 @@ pub enum Node {
     },
     /// Companion-model Jacobian factor for `ddt`.
     DdtCompanion(NodeId),
+    /// Tangent of a DDT candidate, retaining its accepted-history site.
+    DdtDerivative {
+        primal: NodeId,
+        input_derivative: NodeId,
+    },
     /// Companion-model Jacobian factor for `idt`.
     IdtCompanion(NodeId),
     /// Conditional: condition, then, else.
@@ -917,7 +922,11 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         }
     };
     match node {
-        Node::Binary(_, left, right) => {
+        Node::Binary(_, left, right)
+        | Node::DdtDerivative {
+            primal: left,
+            input_derivative: right,
+        } => {
             f(*left);
             f(*right);
         }
@@ -1246,6 +1255,20 @@ pub fn rebuild_children(
                 return id;
             }
             arena.push(Node::Binary(op, new_left, new_right))
+        }
+        Node::DdtDerivative {
+            primal,
+            input_derivative,
+        } => {
+            let new_primal = descend(arena, primal);
+            let new_input = descend(arena, input_derivative);
+            if new_primal == primal && new_input == input_derivative {
+                return id;
+            }
+            arena.push(Node::DdtDerivative {
+                primal: new_primal,
+                input_derivative: new_input,
+            })
         }
         Node::Unary(op, inner) => {
             let new_inner = descend(arena, inner);
@@ -1737,6 +1760,10 @@ mod tests {
         out.push(arena.push(Node::TableDerivative { input: one, table }));
         out.push(arena.push(Node::Ddx { expr: one, axis }));
         out.push(arena.push(Node::DdtCompanion(one)));
+        out.push(arena.push(Node::DdtDerivative {
+            primal: one,
+            input_derivative: two,
+        }));
         out.push(arena.push(Node::IdtCompanion(one)));
         out.push(arena.push(Node::LastCrossing {
             expr: one,

@@ -2,16 +2,26 @@
 #![allow(dead_code, non_snake_case, unused_imports, unused_mut, unused_parens, unused_variables)]
 
 use super::state::Instance;
-use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError};
+use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, L2, L3, L4, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11])];
-        let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
-        let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
+        let ddt_derivative_coefficients = self.ddt_coefficients;
+        let ddt_derivative = |slot: usize, primal: f64, input: f64| -> f64 {
+            let result = if !primal.is_finite() || !input.is_finite() {
+                Err(GeneratedDdtCandidateError::NonFiniteInput { field: "derivative operands" })
+            } else if !ctx.integration_operators_enabled() { Ok(0.0) } else {
+                evaluate_generated_ddt_derivative(ddt_derivative_coefficients, ddt_state.ddt_initialized[slot], input)
+            };
+            match result {
+                Ok(value) => value,
+                Err(source) => { ctx.report_ddt_candidate_error(slot, source); 0.0 }
+            }
+        };
         let integration_operators_enabled = ctx.integration_operators_enabled();
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
@@ -93,7 +103,6 @@ impl Instance {
 		let OK=0f64;
 		let OV=2f64;
 		let PU=L4([0f64;4]);
-		let XQ=ddt_scale();
 		let G=temperature+ F;
 		let I=G/ H;
 		let OB=NN/ H;
@@ -736,19 +745,19 @@ impl Instance {
 		let NB=NA* F;
 		let XP=NN* NA;
 		let NC=ddt(0, NB);
-		let XR=XP* XQ;
+		let XQ=ddt_derivative(0,NC,XP);
 		let ND=A+ NC;
 		let NE=A+ (-(((MS* AN)+ (MZ* MK))+ (MZ* MM)));
-		let XS=NN/ MX;
+		let XR=NN/ MX;
 		let NF=A+ (F/ MX);
 		NH=ND;
 		NI=NE;
 		NJ=NF;
 		NK=A;
 		NL=NB;
-		NW=XR;
+		NW=XQ;
 		NX=XO;
-		NY=XS;
+		NY=XR;
 		NZ=OK;
 		OA=XP;
 		}else{
@@ -765,26 +774,26 @@ impl Instance {
 		NZ=XK;
 		OA=OK;
 		}
-		let XT=XJ[0];
-		let XU=XJ[1];
-		let XV=XJ[2];
-		let XW=XJ[3];
-		let XX=XH[0];
-		let XY=XH[1];
-		let XZ=XH[2];
-		let YA=XH[3];
-		let YB=XI[0];
-		let YC=XI[1];
-		let YD=XI[2];
-		let YE=XI[3];
-		let YF=NW;
-		let YG=NX[0];
-		let YH=NX[1];
-		let YI=NX[2];
-		let YJ=NX[3];
-		let YK=NY;
-		let YL=NZ;
-		let YM=OA;
+		let XS=XJ[0];
+		let XT=XJ[1];
+		let XU=XJ[2];
+		let XV=XJ[3];
+		let XW=XH[0];
+		let XX=XH[1];
+		let XY=XH[2];
+		let XZ=XH[3];
+		let YA=XI[0];
+		let YB=XI[1];
+		let YC=XI[2];
+		let YD=XI[3];
+		let YE=NW;
+		let YF=NX[0];
+		let YG=NX[1];
+		let YH=NX[2];
+		let YI=NX[3];
+		let YJ=NY;
+		let YK=NZ;
+		let YL=OA;
         if (C != 0.0) {
             stamper.stamp_potential_branch_local(Some(6), Some(2), 0, multiplicity);
         } else {
@@ -805,7 +814,7 @@ impl Instance {
             0,
             MT,
             [1, 4, 5, 6],
-            [XT, XU, XV, XW],
+            [XS, XT, XU, XV],
             [],
             [],
         );
@@ -815,7 +824,7 @@ impl Instance {
             Some(6),
             multiplicity * (MU),
             [1, 4, 5, 6],
-            [XX, XY, XZ, YA],
+            [XW, XX, XY, XZ],
             [],
             [],
             multiplicity,
@@ -825,7 +834,7 @@ impl Instance {
             1,
             MV,
             [1, 4, 5, 6],
-            [YB, YC, YD, YE],
+            [YA, YB, YC, YD],
             [],
             [],
         );
@@ -845,7 +854,7 @@ impl Instance {
             None,
             multiplicity * (NH),
             [4],
-            [YF],
+            [YE],
             [],
             [],
             multiplicity,
@@ -855,7 +864,7 @@ impl Instance {
             None,
             multiplicity * (NI),
             [1, 4, 5, 6],
-            [YG, YH, YI, YJ],
+            [YF, YG, YH, YI],
             [],
             [],
             multiplicity,
@@ -865,7 +874,7 @@ impl Instance {
             None,
             multiplicity * (NJ),
             [4],
-            [YK],
+            [YJ],
             [],
             [],
             multiplicity,
@@ -875,7 +884,7 @@ impl Instance {
             None,
             multiplicity * (NK),
             [4],
-            [YL],
+            [YK],
             [],
             [],
             multiplicity,
@@ -885,7 +894,7 @@ impl Instance {
         self.canonical_reactive[2] = MV;
         self.canonical_reactive[3] = MW;
         self.canonical_reactive[4] = NL;
-        self.canonical_reactive[5] = YM;
+        self.canonical_reactive[5] = YL;
         self.canonical_reactive[6] = NI;
         self.canonical_reactive[7] = NJ;
         self.canonical_reactive[8] = NK;
