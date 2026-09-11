@@ -24,6 +24,7 @@ pub mod arithmetic;
 mod compatibility_catalog;
 mod event_control;
 pub mod integer;
+mod integration;
 mod noise_frequency;
 pub mod polynomial;
 mod simparam;
@@ -46,6 +47,12 @@ pub use compatibility_catalog::{
     generated_veriloga_checkpoint_compatibility_entry, generated_veriloga_compatibility_entry,
     generated_veriloga_v26_compatibility_entry, generated_veriloga_wire_compatibility_entry,
     validate_generated_veriloga_compatibility_catalog,
+};
+
+pub use integration::{
+    GeneratedIdtAcceptedHistory, GeneratedIdtCandidate, GeneratedIdtCandidateError,
+    GeneratedIdtModCandidate, GeneratedIdtModCandidateError, evaluate_generated_idt_candidate,
+    evaluate_generated_idtmod_candidate, idtmod_wrapped_value, rspice_eval_idt,
 };
 
 pub use event_control::{
@@ -783,45 +790,6 @@ pub fn rspice_limited_exp_derivative(x: f64) -> f64 {
     }
 }
 
-/// Evaluate one generated `idt` Newton candidate without publishing it as
-/// accepted history.
-#[doc(hidden)]
-#[inline]
-#[allow(clippy::too_many_arguments)]
-pub fn rspice_eval_idt<const STATE_COUNT: usize>(
-    current: &mut [f64; STATE_COUNT],
-    candidate_previous: &mut [f64; STATE_COUNT],
-    input_current: &mut [f64; STATE_COUNT],
-    previous: &[f64; STATE_COUNT],
-    older: &[f64; STATE_COUNT],
-    input_previous: &[f64; STATE_COUNT],
-    initialized: &[bool; STATE_COUNT],
-    candidate_valid: &mut [bool; STATE_COUNT],
-    coefficients: GeneratedDdtCoefficients,
-    slot: usize,
-    value: f64,
-    ic: f64,
-) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
-    debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
-    candidate_valid[slot] = false;
-    let history = GeneratedIdtAcceptedHistory {
-        initialized: initialized[slot],
-        integral_previous: previous[slot],
-        integral_older: older[slot],
-        input_previous: input_previous[slot],
-    };
-    let candidate = evaluate_generated_idt_candidate(coefficients, value, ic, history)?;
-    current[slot] = candidate.value;
-    candidate_previous[slot] = if history.initialized {
-        history.integral_previous
-    } else {
-        ic
-    };
-    input_current[slot] = value;
-    candidate_valid[slot] = true;
-    Ok(candidate)
-}
-
 /// Evaluate one generated `ddt` Newton candidate without publishing it as
 /// accepted history.
 #[doc(hidden)]
@@ -1256,54 +1224,6 @@ impl Default for GeneratedDdtCoefficients {
     }
 }
 
-/// Accepted history consumed by one generated `idt` candidate evaluation.
-///
-/// The history is immutable: evaluating a Newton candidate must not publish it
-/// as accepted state. An uninitialized operator starts from its initial
-/// condition and uses the current input as its synthetic previous input.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GeneratedIdtAcceptedHistory {
-    pub initialized: bool,
-    pub integral_previous: Value,
-    pub integral_older: Value,
-    pub input_previous: Value,
-}
-
-/// Pure result of applying the selected companion rule to one `idt` slot.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GeneratedIdtCandidate {
-    pub value: Value,
-    /// Exact partial derivative of the candidate integral with respect to its
-    /// current input. This is zero outside active transient integration.
-    pub jacobian_scale: Value,
-}
-
-/// Malformed numeric input to [`evaluate_generated_idt_candidate`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneratedIdtCandidateError {
-    NonFiniteInput { field: &'static str },
-    ZeroDerivativeScale,
-    NonFiniteResult { field: &'static str },
-}
-
-impl std::fmt::Display for GeneratedIdtCandidateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteInput { field } => {
-                write!(f, "generated idt {field} must be finite")
-            }
-            Self::ZeroDerivativeScale => {
-                f.write_str("generated idt active derivative scale must be nonzero")
-            }
-            Self::NonFiniteResult { field } => {
-                write!(f, "generated idt produced a non-finite {field}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for GeneratedIdtCandidateError {}
-
 /// Malformed numeric input to one generated `ddt` candidate evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedDdtCandidateError {
@@ -1323,98 +1243,6 @@ impl std::fmt::Display for GeneratedDdtCandidateError {
 }
 
 impl std::error::Error for GeneratedDdtCandidateError {}
-
-/// Evaluate one generalized `idt` candidate without mutating accepted state.
-///
-/// For an active companion rule, this algebraically inverts the same
-/// derivative formula used by generated `ddt`:
-///
-/// `integral = (input + pv*previous + ov*older + pd*previous_input) / scale`.
-///
-/// Inactive integration returns the initial condition with a zero Jacobian.
-/// Every numeric operand is validated even when the history is uninitialized,
-/// so corrupted accepted lanes cannot remain latent until a later step.
-#[inline]
-pub fn evaluate_generated_idt_candidate(
-    coefficients: GeneratedDdtCoefficients,
-    input: Value,
-    initial_condition: Value,
-    history: GeneratedIdtAcceptedHistory,
-) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
-    let finite_inputs = [
-        ("input", input),
-        ("initial condition", initial_condition),
-        ("accepted previous integral", history.integral_previous),
-        ("accepted older integral", history.integral_older),
-        ("accepted previous input", history.input_previous),
-        ("derivative scale", coefficients.derivative_scale),
-        ("previous-value scale", coefficients.previous_value_scale),
-        ("older-value scale", coefficients.older_value_scale),
-        (
-            "previous-derivative scale",
-            coefficients.previous_derivative_scale,
-        ),
-    ];
-    if let Some((field, _)) = finite_inputs
-        .into_iter()
-        .find(|(_, value)| !value.is_finite())
-    {
-        return Err(GeneratedIdtCandidateError::NonFiniteInput { field });
-    }
-
-    if !coefficients.active {
-        return Ok(GeneratedIdtCandidate {
-            value: initial_condition,
-            jacobian_scale: 0.0,
-        });
-    }
-    if coefficients.derivative_scale == 0.0 {
-        return Err(GeneratedIdtCandidateError::ZeroDerivativeScale);
-    }
-
-    let previous = if history.initialized {
-        history.integral_previous
-    } else {
-        initial_condition
-    };
-    let older = if history.initialized {
-        history.integral_older
-    } else {
-        previous
-    };
-    let previous_input = if history.initialized {
-        history.input_previous
-    } else {
-        input
-    };
-    let numerator = input
-        + coefficients.previous_value_scale * previous
-        + coefficients.older_value_scale * older
-        + coefficients.previous_derivative_scale * previous_input;
-    if !numerator.is_finite() {
-        return Err(GeneratedIdtCandidateError::NonFiniteResult {
-            field: "companion numerator",
-        });
-    }
-
-    let value = numerator / coefficients.derivative_scale;
-    if !value.is_finite() {
-        return Err(GeneratedIdtCandidateError::NonFiniteResult {
-            field: "candidate value",
-        });
-    }
-    let jacobian_scale = coefficients.derivative_scale.recip();
-    if !jacobian_scale.is_finite() {
-        return Err(GeneratedIdtCandidateError::NonFiniteResult {
-            field: "Jacobian scale",
-        });
-    }
-
-    Ok(GeneratedIdtCandidate {
-        value,
-        jacobian_scale,
-    })
-}
 
 /// Accepted dynamic history needed to resume a generated Verilog-A instance.
 ///
@@ -8609,11 +8437,26 @@ mod fixed_lane_tests {
             })
         ));
 
-        let mut numerator_overflow = coefficients;
-        numerator_overflow.previous_value_scale = f64::MAX;
+        let mut rescued_numerator = coefficients;
+        rescued_numerator.previous_value_scale = f64::MAX;
+        assert_eq!(
+            evaluate_generated_idt_candidate(
+                rescued_numerator,
+                1.0,
+                0.0,
+                GeneratedIdtAcceptedHistory {
+                    integral_previous: 2.0,
+                    ..history
+                },
+            )
+            .unwrap()
+            .value,
+            f64::MAX,
+        );
+        rescued_numerator.derivative_scale = 1.0;
         assert!(matches!(
             evaluate_generated_idt_candidate(
-                numerator_overflow,
+                rescued_numerator,
                 1.0,
                 0.0,
                 GeneratedIdtAcceptedHistory {
@@ -8622,7 +8465,7 @@ mod fixed_lane_tests {
                 },
             ),
             Err(GeneratedIdtCandidateError::NonFiniteResult {
-                field: "companion numerator"
+                field: "candidate value"
             })
         ));
     }

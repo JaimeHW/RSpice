@@ -7,7 +7,7 @@
 //! scalar "real" and "imaginary" passes loses the cross products in, for
 //! example, two cascaded Laplace filters.
 
-use super::{VmContext, VmError, idtmod_wrapped_candidate};
+use super::{VmContext, VmError, idtmod_wrapped_value};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::assignment_liveness::{AssignmentEffects, assignment_step_is_live};
 use crate::codegen::{AssignmentStep, BytecodeProgram, Instruction, ZiRuntimeLayout};
@@ -1025,7 +1025,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 let modulus = self.pop_real("IdtModState modulus")?;
                 let initial = self.pop_real("IdtModState initial condition")?;
                 let _input = self.pop_real("IdtModState input")?;
-                let (wrapped, _) = idtmod_wrapped_candidate(initial, modulus, offset).map_err(
+                let wrapped = idtmod_wrapped_value(initial, modulus, offset).map_err(
                     |detail| {
                         VmError::InvalidNumericResult(format!(
                             "idtmod small-signal operating point {detail}: initial={initial}, modulus={modulus}, offset={offset}"

@@ -4458,6 +4458,54 @@ assert_eq!(rollback_after, rollback_before, "static DAE probe mutated trial hist
 }
 
 #[test]
+fn generated_integral_recovers_intermediate_overflow() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module large_integral(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ idt(V(p, n), 1.0e308);
+endmodule
+"#,
+        "finite large generated integral",
+    );
+    let body = r#"
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+let coefficients = runtime::GeneratedDdtCoefficients {
+    active: true,
+    derivative_scale: 4.0,
+    previous_value_scale: 4.0,
+    older_value_scale: 0.0,
+    previous_derivative_scale: 0.0,
+};
+let voltages = [0.0, 0.0];
+let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
+for time in [0.25, 0.5] {
+    instance.set_timepoint(time, 0.25, coefficients);
+    instance.begin_stateful_evaluation();
+    let mut sink = [0.0; 10];
+    let mut stamper = runtime::GeneratedStamper { sink: Some(&mut sink) };
+    instance.stamp(&ctx, &mut stamper);
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    let accepted = instance.capture_persistent_state();
+    assert_eq!(accepted.idt_previous, vec![1.0e308]);
+    assert_eq!(accepted.idt_older, vec![1.0e308]);
+    assert_eq!(accepted.idt_input_previous, vec![0.0]);
+}
+"#;
+    run_generated_main(
+        "finite large generated integral",
+        &state,
+        &stamp,
+        &noise,
+        body,
+    )
+    .unwrap_or_else(|report| panic!("large integral probe failed:\n{report}"));
+}
+
+#[test]
 fn generated_ddt_idt_candidates_are_transactional_and_skipped_retry_is_canonical() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -7155,61 +7203,15 @@ pub mod runtime {
         }
     }
 
-    #[derive(Debug, Clone, Copy)]
-    pub struct GeneratedIdtCandidate {
-        pub value: f64,
-        pub jacobian_scale: f64,
+    mod integration {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/integration.rs"),
+    r#"
     }
-
-    #[derive(Debug, Clone, Copy)]
-    pub struct GeneratedIdtCandidateError;
+    pub use integration::*;
 
     #[derive(Debug, Clone, Copy)]
     pub struct GeneratedDdtCandidateError;
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn rspice_eval_idt<const STATE_COUNT: usize>(
-        current: &mut [f64; STATE_COUNT],
-        candidate_previous: &mut [f64; STATE_COUNT],
-        input_current: &mut [f64; STATE_COUNT],
-        previous: &[f64; STATE_COUNT],
-        older: &[f64; STATE_COUNT],
-        input_previous: &[f64; STATE_COUNT],
-        initialized: &[bool; STATE_COUNT],
-        candidate_valid: &mut [bool; STATE_COUNT],
-        coefficients: GeneratedDdtCoefficients,
-        slot: usize,
-        value: f64,
-        ic: f64,
-    ) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
-        candidate_valid[slot] = false;
-        let base = if initialized[slot] { previous[slot] } else { ic };
-        let older = if initialized[slot] { older[slot] } else { base };
-        let previous_input = if initialized[slot] { input_previous[slot] } else { value };
-        let (total, jacobian_scale) = if coefficients.active {
-            if coefficients.derivative_scale == 0.0 {
-                return Err(GeneratedIdtCandidateError);
-            }
-            (
-                (value
-                    + coefficients.previous_value_scale * base
-                    + coefficients.older_value_scale * older
-                    + coefficients.previous_derivative_scale * previous_input)
-                    / coefficients.derivative_scale,
-                1.0 / coefficients.derivative_scale,
-            )
-        } else {
-            (ic, 0.0)
-        };
-        if !total.is_finite() || !jacobian_scale.is_finite() {
-            return Err(GeneratedIdtCandidateError);
-        }
-        current[slot] = total;
-        candidate_previous[slot] = base;
-        input_current[slot] = value;
-        candidate_valid[slot] = true;
-        Ok(GeneratedIdtCandidate { value: total, jacobian_scale })
-    }
 
     #[allow(clippy::too_many_arguments)]
     pub fn rspice_eval_ddt<const STATE_COUNT: usize>(

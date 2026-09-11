@@ -1798,6 +1798,38 @@ mod tests {
     }
 
     #[test]
+    fn integral_helpers_preserve_large_values_and_invalidate_failed_retries() {
+        for (opcode, operands, expected) in [
+            (442, [0.0, 1.0e308, 0.0, 0.0, 0.0], 1.0e308),
+            (444, [0.0, 1.0e16, 1.0, -0.5, 0.0], 0.0),
+            (444, [0.0, 1.0e16, 1.0, 0.25, 0.0], 1.0),
+        ] {
+            let mut context = VmContext::with_states(0, 1);
+            context
+                .try_set_integration_coefficients(
+                    IntegrationCoefficients::backward_euler(0.25).unwrap(),
+                )
+                .unwrap();
+            let mut session = WasmJitRuntimeSession::new(context);
+            assert_eq!(
+                evaluate_helper_with_session(opcode, 0, 0, 0, operands, &[], Some(&mut session),)
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(session.context().state_candidate_valid[0], 1);
+            let mut invalid = operands;
+            invalid[0] = f64::NAN;
+            assert_eq!(
+                evaluate_helper_with_session(opcode, 0, 0, 0, invalid, &[], Some(&mut session),),
+                Err(HelperError::StatefulRuntimeFailed)
+            );
+            assert!(session.take_error().unwrap().contains("must be finite"));
+            assert_eq!(session.context().state_candidate_valid[0], 0);
+            assert!(!session.context().state_initialized[0]);
+        }
+    }
+
+    #[test]
     fn idtmod_helper_preserves_common_branch_history_and_validation() {
         let mut context = VmContext::with_states(0, 1);
         context.state_values_prev[0] = 0.6;

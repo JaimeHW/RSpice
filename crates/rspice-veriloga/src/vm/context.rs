@@ -138,6 +138,19 @@ impl From<rspice_veriloga_runtime::GeneratedDdtCoefficients> for IntegrationCoef
     }
 }
 
+impl From<IntegrationCoefficients> for rspice_veriloga_runtime::GeneratedDdtCoefficients {
+    #[inline]
+    fn from(coefficients: IntegrationCoefficients) -> Self {
+        Self {
+            active: coefficients.active,
+            derivative_scale: coefficients.derivative_scale,
+            previous_value_scale: coefficients.previous_value_scale,
+            older_value_scale: coefficients.older_value_scale,
+            previous_derivative_scale: coefficients.previous_derivative_scale,
+        }
+    }
+}
+
 impl IntegrationCoefficients {
     pub const fn inactive() -> Self {
         Self {
@@ -233,51 +246,7 @@ impl Default for IntegrationCoefficients {
     }
 }
 
-/// Fold one finite circular-integrator candidate into its representable
-/// interval and return the common translation that must be applied to its
-/// accepted history. The translation is deliberately separate from the
-/// visible result: multistep formulas are invariant only when every history
-/// lane is moved by the same amount.
-pub(crate) fn idtmod_wrapped_candidate(
-    raw: f64,
-    modulus: f64,
-    offset: f64,
-) -> Result<(f64, f64), &'static str> {
-    if !raw.is_finite() {
-        return Err("integral candidate must be finite");
-    }
-    if !modulus.is_finite() || modulus <= 0.0 {
-        return Err("modulus must be finite and greater than zero");
-    }
-    if !offset.is_finite() {
-        return Err("offset must be finite");
-    }
-    let upper = offset + modulus;
-    if !upper.is_finite() || upper <= offset {
-        return Err("offset and modulus must form a finite, nonempty interval");
-    }
-
-    // Avoid turning two valid finite operands into infinity when their direct
-    // subtraction overflows. Reducing each operand first is algebraically
-    // equivalent modulo `modulus` and keeps the fallback finite.
-    let delta = raw - offset;
-    let phase = if delta.is_finite() {
-        delta.rem_euclid(modulus)
-    } else {
-        (raw.rem_euclid(modulus) - offset.rem_euclid(modulus)).rem_euclid(modulus)
-    };
-    let mut wrapped = offset + phase;
-    if wrapped >= upper {
-        // Addition can round a phase infinitesimally below the modulus to the
-        // exclusive upper endpoint. That point is the lower endpoint.
-        wrapped = offset;
-    }
-    let rebase = raw - wrapped;
-    if !wrapped.is_finite() || !rebase.is_finite() {
-        return Err("wrapped value or history translation is not finite");
-    }
-    Ok((wrapped, rebase))
-}
+pub(crate) use rspice_veriloga_runtime::idtmod_wrapped_value;
 
 /// Controls whether named Verilog-A limiter functions participate in an
 /// evaluation.
@@ -2041,7 +2010,7 @@ impl VmContext {
 mod tests {
     use super::{
         INTEGRATION_CANDIDATE_VALID, IntegrationCoefficients, VerilogAEvaluationMode, VmContext,
-        VmError, idtmod_wrapped_candidate,
+        VmError, idtmod_wrapped_value,
     };
     use crate::laplace::StateSpaceFilter;
     use crate::timing_contract::SlewRateMagnitudes;
@@ -2603,35 +2572,33 @@ mod tests {
     }
 
     #[test]
-    fn idtmod_wrap_returns_a_finite_common_branch_translation() {
-        let (wrapped, rebase) = idtmod_wrapped_candidate(1.2, 1.0, 0.0).unwrap();
+    fn idtmod_wrap_preserves_finite_phases_across_large_offsets() {
+        let wrapped = idtmod_wrapped_value(1.2, 1.0, 0.0).unwrap();
         assert!((wrapped - 0.2).abs() <= f64::EPSILON);
-        assert_eq!(rebase.to_bits(), 1.0_f64.to_bits());
 
         let raw = f64::MAX;
         let offset = -f64::MAX / 2.0;
-        let (wrapped, rebase) = idtmod_wrapped_candidate(raw, f64::MAX, offset)
+        let wrapped = idtmod_wrapped_value(raw, f64::MAX, offset)
             .expect("finite operands remain reducible when raw-offset overflows");
         assert_eq!(wrapped.to_bits(), 0.0_f64.to_bits());
-        assert_eq!(rebase.to_bits(), raw.to_bits());
     }
 
     #[test]
     fn idtmod_wrap_rejects_invalid_or_unrepresentable_intervals() {
         for modulus in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(
-                idtmod_wrapped_candidate(0.0, modulus, 0.0)
+                idtmod_wrapped_value(0.0, modulus, 0.0)
                     .unwrap_err()
                     .contains("modulus")
             );
         }
         assert!(
-            idtmod_wrapped_candidate(0.0, 1.0, f64::NAN)
+            idtmod_wrapped_value(0.0, 1.0, f64::NAN)
                 .unwrap_err()
                 .contains("offset")
         );
         assert!(
-            idtmod_wrapped_candidate(f64::MAX, 1.0, f64::MAX)
+            idtmod_wrapped_value(f64::MAX, 1.0, f64::MAX)
                 .unwrap_err()
                 .contains("interval")
         );

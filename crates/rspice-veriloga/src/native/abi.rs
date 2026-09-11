@@ -17,7 +17,7 @@ use std::cell::UnsafeCell;
 use crate::array_index::{checked_array_slot, checked_rounded_i64};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
-use crate::vm::{IntegrationCoefficients, idtmod_wrapped_candidate};
+use crate::vm::{IntegrationCoefficients, idtmod_wrapped_value};
 
 const INTEGER_DESCRIPTOR_KIND_MASK: usize = 0xff;
 const INTEGER_DESCRIPTOR_PAYLOAD_SHIFT: u32 = 32;
@@ -1017,7 +1017,7 @@ pub unsafe extern "C" fn rspice_table_derivative_native(
 /// External helper function for idtmod wrapping.
 #[unsafe(export_name = "rspice_idtmod_wrap")]
 pub extern "C" fn rspice_idtmod_wrap(raw: f64, modulus: f64, offset: f64) -> f64 {
-    idtmod_wrapped_candidate(raw, modulus, offset).map_or(f64::NAN, |(wrapped, _)| wrapped)
+    idtmod_wrapped_value(raw, modulus, offset).unwrap_or(f64::NAN)
 }
 
 /// External helper function for limited exponential.
@@ -1770,69 +1770,82 @@ unsafe fn rspice_integral_state_native(
     let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 4 } else { 2 }) };
     let input = operands[0];
     let initial_condition = operands[1];
-    if matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium() {
-        if !operands.iter().all(|value| value.is_finite()) {
-            return invalid_native_integration_context(
-                ctx,
-                operator,
-                state_id,
-                "operand is not finite",
-            );
+    use rspice_veriloga_runtime::{
+        GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory, evaluate_generated_idt_candidate,
+        evaluate_generated_idtmod_candidate,
+    };
+    let frozen = matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium();
+    let (coefficients, history) = if frozen {
+        (
+            GeneratedDdtCoefficients::inactive(),
+            GeneratedIdtAcceptedHistory {
+                initialized: false,
+                integral_previous: 0.0,
+                integral_older: 0.0,
+                input_previous: 0.0,
+            },
+        )
+    } else {
+        unsafe {
+            *ctx.state_candidate_valid.add(state_id) = 0;
         }
-        return if wrapped {
-            match idtmod_wrapped_candidate(initial_condition, operands[2], operands[3]) {
-                Ok((value, _)) => value,
-                Err(detail) => invalid_native_integration_context(ctx, operator, state_id, detail),
-            }
-        } else {
-            initial_condition
-        };
-    }
-    let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
-    let previous = if initialized {
-        unsafe { *ctx.state_prev.add(state_id) }
-    } else {
-        initial_condition
+        (
+            GeneratedDdtCoefficients {
+                active: ctx.integration_active != 0,
+                derivative_scale: ctx.integration_derivative_scale,
+                previous_value_scale: ctx.integration_previous_value_scale,
+                older_value_scale: ctx.integration_older_value_scale,
+                previous_derivative_scale: ctx.integration_previous_derivative_scale,
+            },
+            GeneratedIdtAcceptedHistory {
+                initialized: unsafe { *ctx.state_initialized.add(state_id) != 0 },
+                integral_previous: unsafe { *ctx.state_prev.add(state_id) },
+                integral_older: unsafe { *ctx.state_older.add(state_id) },
+                input_previous: unsafe { *ctx.state_derivatives_prev.add(state_id) },
+            },
+        )
     };
-    let older = if initialized {
-        unsafe { *ctx.state_older.add(state_id) }
-    } else {
-        previous
-    };
-    let previous_input = if initialized {
-        unsafe { *ctx.state_derivatives_prev.add(state_id) }
-    } else {
-        input
-    };
-    let raw = if ctx.integration_active != 0 {
-        (input
-            + previous * ctx.integration_previous_value_scale
-            + older * ctx.integration_older_value_scale
-            + previous_input * ctx.integration_previous_derivative_scale)
-            / ctx.integration_derivative_scale
-    } else {
-        initial_condition
-    };
-    let (value, wrap_translation) = if wrapped {
-        match idtmod_wrapped_candidate(raw, operands[2], operands[3]) {
-            Ok(candidate) => candidate,
-            Err(detail) => {
-                let detail = format!(
-                    "{detail}: raw={raw}, modulus={}, offset={}",
-                    operands[2], operands[3]
+    let (value, older_candidate) = if wrapped {
+        match evaluate_generated_idtmod_candidate(
+            coefficients,
+            input,
+            initial_condition,
+            operands[2],
+            operands[3],
+            history,
+        ) {
+            Ok(candidate) => (candidate.value, candidate.previous),
+            Err(error) => {
+                return invalid_native_integration_context(
+                    ctx,
+                    operator,
+                    state_id,
+                    &error.to_string(),
                 );
-                return invalid_native_integration_context(ctx, operator, state_id, &detail);
             }
         }
     } else {
-        (raw, 0.0)
+        match evaluate_generated_idt_candidate(coefficients, input, initial_condition, history) {
+            Ok(candidate) => (
+                candidate.value,
+                if history.initialized {
+                    history.integral_previous
+                } else {
+                    initial_condition
+                },
+            ),
+            Err(error) => {
+                return invalid_native_integration_context(
+                    ctx,
+                    operator,
+                    state_id,
+                    &error.to_string(),
+                );
+            }
+        }
     };
-    let older_candidate = previous - wrap_translation;
-    if !older_candidate.is_finite() {
-        let detail = format!(
-            "common-branch older history is not finite: previous={previous}, translation={wrap_translation}"
-        );
-        return invalid_native_integration_context(ctx, operator, state_id, &detail);
+    if frozen {
+        return value;
     }
     unsafe {
         *ctx.state_values.add(state_id) = value;
@@ -3013,6 +3026,19 @@ mod tests {
         assert_eq!(candidate_valid[0], 1);
         assert_eq!(older_candidate[0].to_bits(), 20.0_f64.to_bits());
         assert!(ctx.take_runtime_error().is_none());
+
+        let before = (values, derivatives, older_candidate);
+        for invalid in [[f64::NAN, 20.0], [3.0, f64::INFINITY]] {
+            candidate_valid[0] = 1;
+            unsafe { rspice_idt_state_native(invalid.as_ptr(), &ctx, 0) };
+            assert!(ctx.take_runtime_error().unwrap().contains("must be finite"));
+            assert_eq!(
+                candidate_valid[0], 0,
+                "failed retry must invalidate the candidate"
+            );
+            assert_eq!((values, derivatives, older_candidate), before);
+            assert_eq!(initialized[0], 0);
+        }
     }
 
     #[test]

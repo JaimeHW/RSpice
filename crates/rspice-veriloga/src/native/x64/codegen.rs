@@ -6397,7 +6397,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9263,7 +9264,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9369,7 +9371,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9500,7 +9503,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9650,7 +9654,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9695,7 +9700,8 @@ mod tests {
             ctx.state_derivatives_prev_len = previous_derivatives.len();
             ctx.state_initialized = state_initialized.as_mut_ptr();
             ctx.state_initialized_len = state_initialized.len();
-            ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+            let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+            ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
             ctx.state_candidate_valid_len = state_initialized.len();
             ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
             ctx.state_older_candidate_len = state_older_candidate.len();
@@ -9837,7 +9843,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
-        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         ctx.state_older_candidate_len = state_older_candidate.len();
@@ -13664,7 +13671,8 @@ mod tests {
         state_ctx.state_derivatives_prev_len = previous_derivatives.len();
         state_ctx.state_initialized = state_initialized.as_mut_ptr();
         state_ctx.state_initialized_len = state_initialized.len();
-        state_ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        let mut state_candidate_valid = vec![0_u8; state_initialized.len()];
+        state_ctx.state_candidate_valid = state_candidate_valid.as_mut_ptr();
         state_ctx.state_candidate_valid_len = state_initialized.len();
         state_ctx.state_older_candidate = state_older_candidate.as_mut_ptr();
         state_ctx.state_older_candidate_len = state_older_candidate.len();

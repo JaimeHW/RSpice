@@ -551,129 +551,84 @@ impl<'a> Vm<'a> {
                 self.stack.push(derivative);
             }
 
-            // State-based idt, algebraically inverted from the same companion
-            // derivative rule used by ddt.
-            Instruction::IdtState(idx) => {
+            // The VM and JIT use the same checked companion arithmetic as
+            // generated Rust. Evaluation publishes only speculative lanes.
+            Instruction::IdtState(idx) | Instruction::IdtModState(idx) => {
+                use rspice_veriloga_runtime::{
+                    GeneratedDdtCoefficients, GeneratedIdtAcceptedHistory,
+                    evaluate_generated_idt_candidate, evaluate_generated_idtmod_candidate,
+                };
+                let wrapped = matches!(instruction, Instruction::IdtModState(_));
+                let (modulus, offset) = if wrapped {
+                    let offset = self.pop()?;
+                    (self.pop()?, offset)
+                } else {
+                    (1.0, 0.0)
+                };
                 let ic = self.pop()?;
-                let current_value = self.pop()?;
-                if matches!(self.context.analysis_type, 1 | 3)
-                    && !self.context.analysis_phase.is_equilibrium()
-                {
-                    if !current_value.is_finite() || !ic.is_finite() {
-                        return Err(VmError::InvalidNumericResult(
-                            "idt operand is not finite".into(),
-                        ));
+                let input = self.pop()?;
+                let frozen = matches!(self.context.analysis_type, 1 | 3)
+                    && !self.context.analysis_phase.is_equilibrium();
+                let (coefficients, history) = if frozen {
+                    (
+                        GeneratedDdtCoefficients::inactive(),
+                        GeneratedIdtAcceptedHistory {
+                            initialized: false,
+                            integral_previous: 0.0,
+                            integral_older: 0.0,
+                            input_previous: 0.0,
+                        },
+                    )
+                } else {
+                    if self.context.state_values.len() <= *idx {
+                        self.context.allocate_states(*idx + 1);
                     }
-                    self.stack.push(ic);
-                    return Ok(());
-                }
-                if self.context.state_values.len() <= *idx {
-                    self.context.allocate_states(*idx + 1);
-                }
-                let initialized = self.context.state_initialized[*idx];
-                let prev_integral = self.context.state_values_prev[*idx];
-                let prev_integral = if initialized { prev_integral } else { ic };
-                let older_integral = if initialized {
-                    self.context.state_values_older[*idx]
-                } else {
-                    prev_integral
+                    self.context.state_candidate_valid[*idx] = 0;
+                    (
+                        self.context.integration_coefficients().into(),
+                        GeneratedIdtAcceptedHistory {
+                            initialized: self.context.state_initialized[*idx],
+                            integral_previous: self.context.state_values_prev[*idx],
+                            integral_older: self.context.state_values_older[*idx],
+                            input_previous: self.context.state_derivatives_prev[*idx],
+                        },
+                    )
                 };
-                let previous_input = if initialized {
-                    self.context.state_derivatives_prev[*idx]
-                } else {
-                    current_value
-                };
-                let coefficients = self.context.integration_coefficients();
-                let new_integral = if coefficients.active {
-                    (current_value
-                        + coefficients.previous_value_scale * prev_integral
-                        + coefficients.older_value_scale * older_integral
-                        + coefficients.previous_derivative_scale * previous_input)
-                        / coefficients.derivative_scale
-                } else {
-                    ic
-                };
-                self.context.state_values[*idx] = new_integral;
-                self.context.state_derivatives[*idx] = current_value;
-                self.context.state_older_candidate[*idx] = prev_integral;
-                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
-
-                self.stack.push(new_integral);
-            }
-
-            // Wrapped integration: idtmod(expr, ic, modulus, offset)
-            // Stack: [expr, ic, modulus, offset]; the integral folds into
-            // [offset, offset + modulus)
-            Instruction::IdtModState(idx) => {
-                let offset = self.pop()?;
-                let modulus = self.pop()?;
-                let ic = self.pop()?;
-                let current_value = self.pop()?;
-                if matches!(self.context.analysis_type, 1 | 3)
-                    && !self.context.analysis_phase.is_equilibrium()
-                {
-                    if ![current_value, ic, modulus, offset]
-                        .iter()
-                        .all(|value| value.is_finite())
-                    {
-                        return Err(VmError::InvalidNumericResult(
-                            "idtmod operand is not finite".into(),
-                        ));
-                    }
-                    let (value, _) = super::idtmod_wrapped_candidate(ic, modulus, offset)
-                        .map_err(|detail| VmError::InvalidNumericResult(detail.into()))?;
-                    self.stack.push(value);
-                    return Ok(());
-                }
-                if self.context.state_values.len() <= *idx {
-                    self.context.allocate_states(*idx + 1);
-                }
-                let initialized = self.context.state_initialized[*idx];
-                let prev = if initialized {
-                    self.context.state_values_prev[*idx]
-                } else {
-                    ic
-                };
-                let older = if initialized {
-                    self.context.state_values_older[*idx]
-                } else {
-                    prev
-                };
-                let previous_input = if initialized {
-                    self.context.state_derivatives_prev[*idx]
-                } else {
-                    current_value
-                };
-                let coefficients = self.context.integration_coefficients();
-                let raw = if coefficients.active {
-                    (current_value
-                        + coefficients.previous_value_scale * prev
-                        + coefficients.older_value_scale * older
-                        + coefficients.previous_derivative_scale * previous_input)
-                        / coefficients.derivative_scale
-                } else {
-                    ic
-                };
-
-                let (wrapped, rebase) = super::idtmod_wrapped_candidate(raw, modulus, offset)
-                    .map_err(|detail| {
-                        VmError::InvalidNumericResult(format!(
-                            "idtmod state {idx} {detail}: raw={raw}, modulus={modulus}, offset={offset}"
-                        ))
+                let (value, previous) = if wrapped {
+                    let candidate = evaluate_generated_idtmod_candidate(
+                        coefficients,
+                        input,
+                        ic,
+                        modulus,
+                        offset,
+                        history,
+                    )
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!("idtmod state {idx}: {error}"))
                     })?;
-                let older_candidate = prev - rebase;
-                if !older_candidate.is_finite() {
-                    return Err(VmError::InvalidNumericResult(format!(
-                        "idtmod state {idx} common-branch older history is not finite: previous={prev}, translation={rebase}"
-                    )));
+                    (candidate.value, candidate.previous)
+                } else {
+                    let candidate =
+                        evaluate_generated_idt_candidate(coefficients, input, ic, history)
+                            .map_err(|error| {
+                                VmError::InvalidNumericResult(format!("idt state {idx}: {error}"))
+                            })?;
+                    (
+                        candidate.value,
+                        if history.initialized {
+                            history.integral_previous
+                        } else {
+                            ic
+                        },
+                    )
+                };
+                if !frozen {
+                    self.context.state_values[*idx] = value;
+                    self.context.state_derivatives[*idx] = input;
+                    self.context.state_older_candidate[*idx] = previous;
+                    self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
                 }
-
-                self.context.state_values[*idx] = wrapped;
-                self.context.state_derivatives[*idx] = current_value;
-                self.context.state_older_candidate[*idx] = older_candidate;
-                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
-
-                self.stack.push(wrapped);
+                self.stack.push(value);
             }
 
             // Companion Jacobian factor for ddt: a / dt (0 at DC)

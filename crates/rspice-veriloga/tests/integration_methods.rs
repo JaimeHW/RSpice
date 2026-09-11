@@ -302,3 +302,44 @@ endmodule
         );
     }
 }
+
+#[test]
+fn integrators_preserve_large_initial_conditions_and_local_wrapped_history() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module large_integral(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ idt(0.0, 1.0e308);
+        I(p, n) <+ idtmod(0.0, 1.0e16, 1.0, -0.5);
+        I(p, n) <+ idtmod(0.0, 1.0e16, 1.0, 0.25);
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.set_analysis_type(2);
+    for (time, coefficients) in [
+        (0.0, IntegrationCoefficients::inactive()),
+        (0.25, IntegrationCoefficients::backward_euler(0.25).unwrap()),
+        (
+            0.5,
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 6.0,
+                previous_value_scale: 8.0,
+                older_value_scale: -2.0,
+                previous_derivative_scale: 0.0,
+            },
+        ),
+    ] {
+        device.set_time(time);
+        device.set_integration_coefficients(coefficients);
+        let values = device.try_evaluate().expect("finite integral candidates");
+        assert_eq!(values, vec![1.0e308, 0.0, 1.0], "time={time}");
+        assert_eq!(device.try_evaluate().unwrap(), values, "Newton retry");
+        device.advance_state();
+    }
+}

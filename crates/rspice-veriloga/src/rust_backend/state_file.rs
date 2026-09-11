@@ -1616,7 +1616,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 25 retains switched source kinds and their accepted-mode discontinuities.
 // Version 26 retains indirect-equation absolute tolerances.
 // Version 27 preserves generated last_crossing interpolation and accepted history.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 27;
+// Version 28 preserves finite integral candidates through intermediate range loss.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 28;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

@@ -1314,10 +1314,7 @@ mod tests {
         verify_x64_image_layout,
     };
     use crate::canonical_ir::hir::HirRegion;
-    use crate::canonical_ir::{
-        BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
-        MirEquationKind, NodeId,
-    };
+    use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, NodeId};
     use crate::codegen::{
         AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, JacobianEntry,
         StampIndex, StampProgram,
@@ -1935,27 +1932,14 @@ module native_canonical_kind_guard(p, n);
 endmodule
 "#;
         let compiler = VerilogACompiler::new(CompilerOptions::default());
-        let model = compiler.compile(source).expect("compile bytecode model");
-        let mut artifact = compiler
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
 
-        artifact.hir.contributions[0].kind = HirContributionKind::Potential;
-        let HirRegion::Contribution(region) = &mut artifact.hir.body[0] else {
-            panic!("fixture root must remain a contribution");
-        };
-        region.kind = HirContributionKind::Potential;
-        artifact.mir.equations[0].kind = MirEquationKind::Potential;
-        artifact.mir.equations[0].branch_unknown = Some(BranchUnknownId::new(0));
-        let equation = artifact.mir.equations[0].clone();
-        artifact.mir.branch_unknowns = vec![MirBranchUnknown {
-            id: BranchUnknownId::new(0),
-            equation: equation.id,
-            declared_name: equation.branch.declared_name,
-            pos_node: equation.branch.pos_node,
-            neg_node: equation.branch.neg_node,
-        }];
-        let artifact = rebuild_canonical_artifact(artifact);
+        // Change only the executable stamp kind. Rebuilding a potential HIR
+        // also changes its branch count and fails an earlier layout guard.
+        model.stamp_programs[0].indirect = true;
 
         let error = compile_model_with_canonical_ir(&model, &artifact)
             .expect_err("same-source wrong-kind canonical equation must be rejected");
