@@ -179,7 +179,9 @@ mod tests {
         let mut circuit = CircuitData::new();
         circuit.get_or_create_node("digital");
         circuit.xspice_has_event_driven_devices = true;
-        circuit.net_kinds.set(1, crate::circuit::NetKind::Discrete);
+        circuit
+            .net_kinds
+            .register(1, crate::circuit::NetKind::Digital);
         let mut matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
         let mut rhs = [0.0];
 

@@ -960,25 +960,59 @@ fn saving_one_bus_member_retains_every_member() {
 #[test]
 fn a_discrete_port_joined_to_an_xspice_event_net_is_refused() {
     let model = ModelFile::new("shared_event_net", CLOCK_DIVIDER);
-    let deck = format!(
-        "* the module's discrete output tied to an XSPICE event net\n\
-         vin in 0 pulse(0 1 0 1p 1p 1n 2n)\n\
-         r1 in 0 1k\n\
-         a_adc [in] [qdiv] adc\n\
-         .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
-         x1 p 0 qdiv clock_divider\n\
-         rp p 0 1meg\n\
-         .va \"{}\" clock_divider\n\
-         .tran 1n 20n\n\
-         .end\n",
-        model.deck_path()
-    );
-    let error = error_for(&deck, 20.0e-9, 1.0e-9);
-    let lowered = error.to_lowercase();
-    assert!(
-        lowered.contains("event-driven") && lowered.contains("qdiv"),
-        "the refusal must say the net is already event-driven and name it: {error}"
-    );
+    for (event_card, declaration, kind) in [
+        (
+            "a_adc [in] [qdiv] adc",
+            ".model adc adc_bridge (in_low=0.4 in_high=0.6)",
+            "four-state digital",
+        ),
+        (
+            "a_real qdiv observed rg",
+            ".model rg real_gain",
+            "real-valued",
+        ),
+    ] {
+        let mut previous_error = None;
+        for mixed_first in [false, true] {
+            let mixed = "x1 p 0 qdiv clock_divider";
+            let cards = if mixed_first {
+                format!("{mixed}\n{event_card}")
+            } else {
+                format!("{event_card}\n{mixed}")
+            };
+            let deck = format!(
+                "* direct mixed/event connections require the shared scheduler\n\
+                 vin in 0 dc 1\n\
+                 r1 in 0 1k\n\
+                 {cards}\n\
+                 {declaration}\n\
+                 rp p 0 1meg\n\
+                 .va \"{}\" clock_divider\n\
+                 .end\n",
+                model.deck_path()
+            );
+            let netlist = Netlist::parse(&deck).unwrap();
+            let error = Engine::default()
+                .build_circuit(&netlist)
+                .unwrap_err()
+                .to_string();
+            let lowered = error.to_lowercase();
+            assert!(
+                lowered.contains("event-driven")
+                    && lowered.contains("qdiv")
+                    && lowered.contains("x1")
+                    && lowered.contains(kind),
+                "the refusal must identify the actual instance, port, node and event type: {error}"
+            );
+            if let Some(previous) = previous_error {
+                assert_eq!(
+                    error, previous,
+                    "card order must not change the connection contract"
+                );
+            }
+            previous_error = Some(error);
+        }
+    }
 }
 
 #[test]

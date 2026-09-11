@@ -487,9 +487,9 @@ pub struct CircuitData {
     branch_name_by_ordinal: Vec<Option<String>>,
     /// Number of nodes (excluding ground)
     num_nodes: usize,
-    /// What kind of quantity each net carries. This is the one record of
-    /// which nets are event-driven rather than analog; the XSPICE event-node
-    /// accessors read it rather than keeping a node list of their own.
+    /// Event-value domains attached to each node identity. The existing
+    /// bridge route can attach digital and real representations to the same
+    /// electrical node; event-node accessors share this typed record.
     pub(crate) net_kinds: NetKinds,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,

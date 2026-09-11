@@ -173,6 +173,37 @@ impl CircuitData {
         self.mixed_signal_hosts.push(host);
     }
 
+    /// Check the existing electrical-boundary adapter against the complete
+    /// event topology, including instances created after a mixed module.
+    /// Direct event bindings require the circuit scheduling coordinator; the
+    /// current host must not accidentally reach them through an analog bridge.
+    pub(crate) fn validate_mixed_event_connections(&self) -> Result<(), SimulationError> {
+        for host in &self.mixed_signal_hosts {
+            for (signal, node) in host.boundary_connections() {
+                let kind = self.net_kinds.kind(node);
+                if !kind.is_discrete() {
+                    continue;
+                }
+                let node_names = self.node_names_sorted();
+                let node_name = node_names
+                    .get(node - 1)
+                    .map(String::as_str)
+                    .unwrap_or("<unnamed>");
+                return Err(SimulationError::Circuit(format!(
+                    "mixed Verilog-AMS instance '{}' connects its discrete port '{}' to node '{}', \
+                     which carries {} event-driven XSPICE values. Direct event connections \
+                     require a shared circuit event scheduler; this instance currently uses \
+                     an electrical boundary",
+                    host.instance_name(),
+                    signal,
+                    node_name,
+                    kind.description(),
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Begin digital execution only after the engine has delivered every
     /// model's analog initialization effects and ruled out a requested exit.
     pub(crate) fn start_mixed_digital_execution(&mut self) -> Result<(), SimulationError> {

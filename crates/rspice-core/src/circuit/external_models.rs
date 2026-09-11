@@ -192,26 +192,32 @@ fn mark_drained_fanout_dirty(
     dispatch.mark_fanout_dirty(instances, EventInputKind::Real, touched_real_nodes);
 }
 
-/// Mark every net one event connection reaches as discrete. Analog port
-/// connections carry a solved voltage and are left alone.
+/// Register each event connection's value domain. Analog connections retain
+/// their electrical meaning; the auto-bridge planner handles domain boundaries.
 fn mark_xspice_event_connection_nets(
     kinds: &mut NetKinds,
     connection: &crate::xspice::PortConnection,
 ) {
-    let mut mark = |node: NodeId| kinds.set(node, NetKind::Discrete);
+    use crate::xspice::PortConnection;
     match connection {
-        crate::xspice::PortConnection::Digital(node)
-        | crate::xspice::PortConnection::DigitalInverted(node)
-        | crate::xspice::PortConnection::Real(node) => mark(*node),
-        crate::xspice::PortConnection::DigitalVector(vector)
-        | crate::xspice::PortConnection::RealVector(vector) => {
-            vector.iter().copied().for_each(mark);
+        PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => {
+            kinds.register(*node, NetKind::Digital);
         }
-        crate::xspice::PortConnection::DigitalVectorMapped(vector) => {
-            vector
-                .iter()
-                .map(|connection| connection.node)
-                .for_each(mark);
+        PortConnection::Real(node) => kinds.register(*node, NetKind::Real),
+        PortConnection::DigitalVector(vector) => {
+            for &node in vector {
+                kinds.register(node, NetKind::Digital);
+            }
+        }
+        PortConnection::RealVector(vector) => {
+            for &node in vector {
+                kinds.register(node, NetKind::Real);
+            }
+        }
+        PortConnection::DigitalVectorMapped(vector) => {
+            for connection in vector {
+                kinds.register(connection.node, NetKind::Digital);
+            }
         }
         _ => {}
     }
@@ -327,11 +333,12 @@ impl CircuitData {
         self.invalidate_xspice_event_dispatch();
     }
 
-    /// Whether a net carries an event-driven value rather than a solved
-    /// voltage. Ground and unknown nodes are continuous.
+    /// Whether a node identity has an event-value representation. Its
+    /// electrical equations, when present, still belong to the analog solver.
+    /// Ground and unknown nodes have no registered event representation.
     #[inline]
     pub(crate) fn is_discrete_net(&self, node: NodeId) -> bool {
-        self.net_kinds.kind(node) == NetKind::Discrete
+        self.net_kinds.kind(node).is_discrete()
     }
 
     /// Zero-based MNA rows that also serve as XSPICE event-node identities.

@@ -120,10 +120,6 @@ struct BoundaryPort {
     /// significant end.
     bit: u32,
     node: usize,
-    /// Position of this net in the X-card's own node list, so a diagnostic can
-    /// quote the node the deck wrote rather than searching for one that
-    /// matches.
-    deck_index: usize,
     direction: BoundaryDirection,
 }
 
@@ -287,17 +283,9 @@ pub(super) fn try_build_mixed_signal_instance(
 
     let layout = classify_boundary_ports(artifact, element, subckt_name, &terminal_nodes)?;
     let boundary = &layout.ports;
-    for port in boundary {
-        if circuit.is_discrete_net(port.node) {
-            return Err(SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' connects its discrete port '{}' to node '{}', \
-                 which is already an event-driven XSPICE net. A mixed module's discrete port is a \
-                 discipline boundary onto an analog net; joining it to another device's event net \
-                 needs the module to share the circuit event queue, which this route does not do",
-                element.name, port.signal, element.nodes[port.deck_index]
-            )));
-        }
-    }
+    // Event connections may be declared by a later A-card or a generated
+    // bridge. The completed circuit validates this boundary after all of
+    // them are registered; querying a partial node table here is order dependent.
 
     let mut host = MixedSignalHost::from_compiled_with_analog_setup(
         &element.name,
@@ -536,7 +524,6 @@ fn classify_boundary_ports(
                 signal: port.name.to_string(),
                 bit,
                 node,
-                deck_index,
                 direction,
             });
         }

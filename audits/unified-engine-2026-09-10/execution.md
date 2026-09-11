@@ -897,16 +897,56 @@ remain in scope. No compiler/schema changes, generator refresh, platform or
 performance qualification, full release suite, or vendor-reference execution
 was performed. Production readiness and Spectre parity remain unproven.
 
+## MS04 increment: retain event types and validate completed connections
+
+The circuit node table now records digital, real, or separate digital and real
+representations. Registration combines the domains instead of overwriting an
+earlier port's type. XSPICE scalar, vector and inverted digital connections
+record their actual value family, and late ground remapping reconstructs that
+information. The existing auto-bridge route can attach both event representations
+to one electrical node; this remains two scheduler value maps and separate
+converters, not a digital/real resolver or an implicit cast. The matrix and shunt
+consumers retain their existing event-membership projection.
+
+Mixed HDL boundary validation now runs after every authored and generated XSPICE
+instance has been constructed. Previously it read a partial table while building
+each X-card: placing the HDL instance before its XSPICE peer could bypass the
+shared-event-net refusal and reach an electrical bridge instead. The completed
+connection check identifies the HDL instance, port, node and actual event type
+independently of card order. It reads wiring before digital startup and does not
+need to sample or execute the model to identify its connections.
+
+Five focused checks passed on the combined `abf8ad1bc` baseline (which includes
+the concurrent parameter-scoped initial-condition and semiconductor-assignment
+fixes). The expanded mixed-route check covers digital and real event connections
+in both card orders and requires the same diagnostic. The new typed-representation
+case covers two input families on a loaded electrical node in both orders, with
+explicit and automatically chosen ground, while preserving each generated
+converter. Existing late-ground-remap, event-row pinning and loaded HDL output
+checks also passed. Compilation took 1 minute 42 seconds; the selected test bodies
+took 0.05 seconds together. No full-suite or platform run was added.
+
+This is connection metadata and a construction-order correction. Direct
+HDL-to-HDL/XSPICE event wiring is still open: enabling it requires shared driver
+resolution, process regions, timing and circuit rollback rather than simply
+removing the guard. Event identities are still coupled to the deck/MNA node
+numbering. This increment does not close MS04 or MS05, and does not establish
+production readiness or Spectre parity. The user confirmed that no licensed
+reference installation is currently available; implementation continues while
+vendor qualification remains unavailable.
+
 ## Next implementation work
 
-Carry standalone library entries through project-editor and signed-PDK bindings;
-those adapters still require an executable module selection. Keep their compile
-profiles, terminal contracts and backend qualification consistent with the mixed
-model routes. Qualify the actual
-browser-worker path at its integrated target milestone.
-Continue hierarchical library/view binding with the typed design graph.
-Continue MS02 with remaining delay semantics and time declarations,
-then MS04 typed graph and the MS05 coordinator. The first circuit-wide slice must
-include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
-off-grid timing and a rejected trial. Continue through every remaining milestone
-in the approved plan; no parity claim is made at this intermediate checkpoint.
+Build the circuit-wide digital execution path from the elaborated typed graph,
+with stable signal/process/driver/probe identities and one precision/region
+authority. Migrate the per-instance hosts and connect HDL instances and XSPICE
+participants to resolved event nets without routing digital chains through
+unnecessary analog unknowns. Preserve explicit electrical loads and converters.
+The first whole-circuit slice must include two HDL instances, an XSPICE
+participant, a loaded SPICE boundary, off-grid timing and a rejected trial.
+
+Continue hierarchical source/library/view binding and the remaining MS02 delay
+and time-declaration semantics alongside those interfaces. Finish the controller,
+initialization, cache and effect/result portions of the circuit transaction, then
+all remaining MS00–MS15 requirements in the approved plan. Qualify the actual
+browser worker and other shipping platforms at their integration milestones.

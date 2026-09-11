@@ -1190,6 +1190,28 @@ impl MixedSignalHost {
         nodes
     }
 
+    /// Signal names and electrical endpoints of the built-in boundaries.
+    /// Wiring is available before digital startup, so circuit elaboration can
+    /// validate it against event ports declared by later instances.
+    pub(crate) fn boundary_connections(&self) -> impl Iterator<Item = (&str, usize)> + '_ {
+        self.state
+            .bridges
+            .adc
+            .iter()
+            .flat_map(|bridge| {
+                [
+                    (bridge.signal_name.as_str(), bridge.positive),
+                    (bridge.signal_name.as_str(), bridge.negative),
+                ]
+            })
+            .chain(self.state.bridges.dac.iter().flat_map(|bridge| {
+                [
+                    (bridge.signal_name.as_str(), bridge.positive),
+                    (bridge.signal_name.as_str(), bridge.negative),
+                ]
+            }))
+    }
+
     /// Every boundary net's committed four-state value, paired with the circuit
     /// node the deck attached it to.
     ///
