@@ -15,6 +15,7 @@ pub(super) fn parse_command(
     context: ParseCommandContext<'_>,
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
+        parameter_direction,
         parameter_overrides,
         logical_line,
         analyses,
@@ -448,15 +449,27 @@ pub(super) fn parse_command(
             analyses.push(parse_tf_command(stream, line_num)?);
         }
         ".PREPROCESS" => parse_preprocess_command(stream, line_num, diagnostics)?,
-        ".OPTIONS" | ".OPTION" | ".OPT" => parse_options_command(
-            stream,
-            line_num,
-            params,
-            options,
-            max_analysis_points,
-            unknown_warned,
-            diagnostics,
-        )?,
+        ".OPTIONS" | ".OPTION" | ".OPT" => {
+            let parameter_direction = if defer_scoped_values {
+                // Scoped option bindings have not retained instance directions.
+                if let Some(capture) = parameter_direction {
+                    capture.has_uncaptured_dependencies = true;
+                }
+                None
+            } else {
+                parameter_direction
+            };
+            parse_options_command(
+                stream,
+                line_num,
+                params,
+                options,
+                max_analysis_points,
+                unknown_warned,
+                diagnostics,
+                parameter_direction,
+            )?;
+        }
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
             let authored_source = remaining_command_source(stream);
@@ -1569,6 +1582,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
     Some(SaveSignal::Raw(trimmed.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn parse_options_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -1577,6 +1591,7 @@ pub(super) fn parse_options_command(
     max_analysis_points: usize,
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
+    mut parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let mut option_package: Option<String> = None;
 
@@ -2369,11 +2384,25 @@ pub(super) fn parse_options_command(
                 options.gmin = Some(parse_non_negative_real_option("GMIN", value, line_num)?);
             }
             (_, "RSHUNT") => {
-                let value = expect_value(stream, line_num, params)?;
+                let value = expect_value_with_direction(
+                    stream,
+                    line_num,
+                    params,
+                    parameter_direction
+                        .as_deref_mut()
+                        .map(|capture| capture.rshunt.insert(0.0.into())),
+                )?;
                 options.rshunt = Some(parse_positive_real_option("RSHUNT", value, line_num)?);
             }
             (_, "CSHUNT") => {
-                let value = expect_value(stream, line_num, params)?;
+                let value = expect_value_with_direction(
+                    stream,
+                    line_num,
+                    params,
+                    parameter_direction
+                        .as_deref_mut()
+                        .map(|capture| capture.cshunt.insert(0.0.into())),
+                )?;
                 options.cshunt = Some(parse_positive_real_option("CSHUNT", value, line_num)?);
             }
             (None, "XMU")

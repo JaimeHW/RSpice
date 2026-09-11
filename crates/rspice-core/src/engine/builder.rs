@@ -9044,6 +9044,11 @@ impl Engine {
                 circuit
                     .capacitors
                     .add_internal(format!("Cshunt.{name}"), node, 0, cshunt);
+                if let Some(capture) = &mut circuit.parameter_direction
+                    && capture.cshunt.is_some_and(|direction| direction != 0.0)
+                {
+                    capture.cshunt_rows.push(node - 1);
+                }
             }
         }
 

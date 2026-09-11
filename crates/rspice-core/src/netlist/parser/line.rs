@@ -374,7 +374,7 @@ pub(super) fn process_line(
                 &mut frame.local_params,
                 &mut dummy_measurements,
                 ParseLineContext {
-                    parameter_direction: None,
+                    parameter_direction: state.parameter_direction.as_deref_mut(),
                     parameter_overrides: &[],
                     analyses,
                     lin_analysis,
@@ -540,12 +540,17 @@ pub(super) fn parse_line(
     };
 
     let first_char = first.chars().next().unwrap_or(' ');
+    // Scoped devices capture their values only when instantiated. Commands
+    // still need the selected sink because options mutate the global deck.
+    let parameter_direction =
+        parameter_direction.filter(|_| !defer_simple_param_refs || first_char == '.');
 
     match first_char {
         '.' => parse_command(
             &mut stream,
             line_num,
             ParseCommandContext {
+                parameter_direction,
                 parameter_overrides,
                 logical_line: line,
                 analyses,

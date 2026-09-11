@@ -739,6 +739,10 @@ pub(crate) struct ParameterDirectionCapture {
     pub(crate) elements: std::collections::BTreeMap<String, ElementParameterDirection>,
     /// Flat electrical owners, moved from the builder after instantiation.
     pub(crate) owners: Vec<Element>,
+    pub(crate) rshunt: Option<crate::expr::Derivative>,
+    pub(crate) cshunt: Option<crate::expr::Derivative>,
+    /// Matrix rows receiving the builder's generated CSHUNT capacitors.
+    pub(crate) cshunt_rows: Vec<usize>,
     pub(crate) has_uncaptured_dependencies: bool,
 }
 

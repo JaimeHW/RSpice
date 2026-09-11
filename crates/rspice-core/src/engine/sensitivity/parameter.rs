@@ -355,6 +355,32 @@ impl Engine {
                     frequency,
                 )?;
             }
+            if let (Some(direction), Some(resistance)) = (capture.rshunt, directed.options.rshunt)
+                && direction != 0.0
+            {
+                let conductance_direction = -direction / resistance / resistance;
+                for row in 0..prepared.circuit.num_nodes() {
+                    if row.is_multiple_of(64) && abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    if !prepared.circuit.is_non_electrical_state_matrix_index(row) {
+                        rhs[row] = rhs[row] - times_phasor(conductance_direction, solution[row]);
+                    }
+                }
+            }
+            if frequencies.is_some()
+                && let Some(direction) = capture.cshunt
+            {
+                let susceptance_direction = direction * std::f64::consts::TAU * frequency;
+                for (index, &row) in capture.cshunt_rows.iter().enumerate() {
+                    if index.is_multiple_of(64) && abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    let value = solution[row];
+                    rhs[row] = rhs[row]
+                        - times_phasor(susceptance_direction, Complex64::new(-value.im, value.re));
+                }
+            }
             let mut derivative = ComplexDirection::zero();
             for (forcing, weight) in rhs.iter().zip(&adjoint) {
                 derivative = derivative
@@ -514,6 +540,157 @@ mod tests {
                     "{dialect:?}: {body}: AC {ac:e} != {expected_ac:e}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn parameter_sensitivity_includes_physical_shunt_options() {
+        let engine = Engine::default();
+        let slope = 1e-8;
+        let frequency = 1.0 / std::f64::consts::TAU;
+        let cases = [
+            (".options rshunt={1+1e-8*p}", slope, 0.0),
+            (".options cshunt={1+1e-8*p}", 0.0, slope),
+            (".options rshunt={1+1e-8*p} cshunt={1+1e-8*p}", slope, slope),
+            (
+                ".param q={1+1e-8*p}
+.options rshunt=q
+.param q={1+9e-8*p}",
+                slope,
+                0.0,
+            ),
+            (
+                ".options rshunt={1+1e-8*p}
+.options rshunt=1",
+                0.0,
+                0.0,
+            ),
+            (
+                ".options rshunt={aunif(1,0.25)*(1+1e-8*p)} cshunt={aunif(1,0.25)*(1+1e-8*p)}",
+                slope,
+                slope,
+            ),
+        ];
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (options, relative_r_direction, relative_c_direction) in cases {
+                // Each isolated unit load has Y = 1 + 1/Rshunt + j*Cshunt at omega=1.
+                // One load is inside a subcircuit, so its shunted node is private.
+                let netlist = Netlist::parse_with_options(
+                    &format!(
+                        "Shunt directions
+.param p=0
+{options}
+I1 0 out DC 1 AC 1
+R1 out 0 1
+X1 cell
+.subckt cell
+I2 0 internal DC 1 AC 1
+R2 internal 0 1
+.ends
+.end"
+                    ),
+                    crate::netlist::NetlistParseOptions {
+                        expression_dialect: dialect,
+                        statistical_seed: Some(351),
+                        parameter_redefinition_diagnostic_policy:
+                            crate::netlist::ParameterRedefinitionDiagnosticPolicy::Silent,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                let g = netlist.options.rshunt.map_or(0.0, |r| r.recip());
+                let c = netlist.options.cshunt.unwrap_or(0.0);
+                let dg = -relative_r_direction * g;
+                let dc = relative_c_direction * c;
+                let expected_dc = -dg / (1.0 + g).powi(2);
+                let expected_ac = -((1.0 + g) * dg + c * dc) / (1.0 + g).hypot(c).powi(3);
+                let circuit = engine.build_circuit(&netlist).unwrap();
+                let next_draw = netlist.params.random().next_uniform();
+                for name in ["out", "X1.internal"] {
+                    let output = AcSensitivityOutput::Voltage {
+                        positive: circuit.get_node_by_name(name).unwrap(),
+                        negative: None,
+                    };
+                    let mut runs = 0;
+                    let dc = engine
+                        .run_output_sensitivity_with_abort(
+                            &netlist,
+                            output.clone(),
+                            "p",
+                            0.0,
+                            None,
+                            &mut runs,
+                            &NoAbort,
+                        )
+                        .unwrap();
+                    assert_eq!(runs, 1);
+                    assert!(
+                        (dc - expected_dc).abs() <= expected_dc.abs() * 2e-12,
+                        "{dialect:?} {options} {name}: DC {dc:e} != {expected_dc:e}"
+                    );
+                    runs = 0;
+                    let ac = engine
+                        .run_output_sensitivity_ac_with_abort(
+                            &netlist,
+                            output,
+                            "p",
+                            0.0,
+                            &[frequency],
+                            None,
+                            &mut runs,
+                            &NoAbort,
+                        )
+                        .unwrap()[0];
+                    assert_eq!(runs, 1);
+                    assert!(
+                        (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
+                        "{dialect:?} {options} {name}: AC {ac:e} != {expected_ac:e}"
+                    );
+                }
+                let (directed, _) = Engine::replay_parameter_overrides(
+                    &netlist,
+                    &[("P".into(), 0.0)],
+                    Some("p"),
+                    engine.config.resource_limits,
+                    &NoAbort,
+                )
+                .unwrap();
+                engine.build_circuit(&directed).unwrap();
+                assert_eq!(directed.options.rshunt, netlist.options.rshunt);
+                assert_eq!(directed.options.cshunt, netlist.options.cshunt);
+                assert_eq!(directed.params.random().next_uniform(), next_draw);
+            }
+            let scoped_option = parse(
+                "Scoped options
+.param p=0
+I1 0 out 1
+X1 out cell
+.subckt cell a
+.options rshunt=1
+R1 a 0 1
+.ends
+.end",
+                dialect,
+            );
+            let mut runs = 0;
+            assert!(
+                engine
+                    .linear_parameter_sensitivity(
+                        &scoped_option,
+                        &AcSensitivityOutput::Voltage {
+                            positive: 1,
+                            negative: None
+                        },
+                        "p",
+                        0.0,
+                        None,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(runs, 0);
         }
     }
 

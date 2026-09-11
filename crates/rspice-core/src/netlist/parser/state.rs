@@ -363,6 +363,7 @@ pub(super) struct ParseLineContext<'a> {
 }
 
 pub(super) struct ParseCommandContext<'a> {
+    pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
     /// Complete logical card text used for byte-exact output operand slices.
     pub(super) logical_line: &'a str,
