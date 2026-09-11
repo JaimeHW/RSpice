@@ -2045,7 +2045,7 @@ impl StaticMatrix {
             }
             let residual = (row_ax - row_rhs).abs();
             let abstol = row_abstol(row);
-            let safe_abstol = if abstol.is_finite() && abstol > 0.0 {
+            let safe_abstol = if abstol.is_finite() && abstol >= 0.0 {
                 abstol
             } else {
                 1e-12
@@ -2066,7 +2066,11 @@ impl StaticMatrix {
             const CANCELLATION_NOISE_TERMS: Value = 256.0;
             let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * row_ax_gross;
             let scale = safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
-            let normalized = residual / scale.max(safe_abstol);
+            let normalized = if residual == 0.0 {
+                0.0
+            } else {
+                residual / scale.max(safe_abstol)
+            };
             visit(row, normalized);
         }
 
@@ -2168,13 +2172,20 @@ impl StaticMatrix {
                 continue;
             }
             let abstol = row_abstol(row);
-            let abstol = if abstol.is_finite() && abstol > 0.0 {
+            let abstol = if abstol.is_finite() && abstol >= 0.0 {
                 abstol
             } else {
                 1e-12
             };
             let scale = abstol + 256.0 * Value::EPSILON * gross + reltol * value.abs();
-            visit(row, value.abs() / scale);
+            visit(
+                row,
+                if *value == 0.0 {
+                    0.0
+                } else {
+                    value.abs() / scale
+                },
+            );
         }
         Ok(())
     }
@@ -6612,6 +6623,32 @@ mod tests {
             matrix.solve_into_with_row_denominator_floors(&[4.0, 9.0], &[1.0], &mut solution),
             Err(SolverError::InvalidCircuit(_))
         ));
+    }
+
+    #[test]
+    fn residual_scaling_preserves_zero_absolute_tolerance() {
+        let matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 1.0)]).unwrap();
+        for residual in [0.0, 1e-20] {
+            let affine = matrix
+                .scaled_residual_inf_norm_by_row(&[0.0], &[residual], 1e-3, |_| 0.0)
+                .unwrap();
+            let explicit = matrix
+                .scaled_explicit_residual_inf_norm_by_row(&[residual], &[0.0], 1e-3, |_| 0.0)
+                .unwrap();
+            if residual == 0.0 {
+                assert_eq!(affine, 0.0);
+                assert_eq!(explicit, 0.0);
+            } else {
+                assert!(
+                    affine > 1.0,
+                    "a zero tolerance must not become a 1e-12 default"
+                );
+                assert!(
+                    explicit > 1.0,
+                    "a zero tolerance must not become a 1e-12 default"
+                );
+            }
+        }
     }
 
     #[test]
