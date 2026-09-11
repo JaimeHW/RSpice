@@ -149,12 +149,9 @@ impl CircuitData {
             return false;
         }
 
-        #[cfg(feature = "veriloga")]
-        if !self.veriloga_devices.is_empty() {
-            return false;
-        }
-        #[cfg(feature = "veriloga-builtins-base")]
-        if !self.generated_veriloga_devices.is_empty() {
+        // Every compiled analog/mixed family must use a loader that includes
+        // its equations; the direct Core-only loader has no such contributions.
+        if self.has_any_veriloga_devices() {
             return false;
         }
 
@@ -353,6 +350,27 @@ mod tests {
         K1 L1 1 CORE_MODEL\n\
         .model CORE_MODEL CORE (LEVEL=2 MS=510K A=62 C=.92 K=25 ALPHA=3.7e-4 AREA=1.12 GAP=0 PATH=8.49)\n\
         .end\n";
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn direct_core_loader_does_not_omit_a_mixed_host() {
+        let deck = Netlist::parse(BH_LEVEL2_DECK).unwrap();
+        let mut circuit =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .build_circuit(&deck)
+                .unwrap();
+        assert!(circuit.supports_direct_xyce_level2_core_dae());
+        let node = circuit.get_node_by_name("1").unwrap();
+        let host = crate::xspice::verilog::MixedSignalHost::compile(
+            "module mixed(p); inout p; electrical p; reg q; initial q=1; analog I(p)<+q*V(p)*1e-3; endmodule",
+            None, "mixed", &[node], crate::xspice::event_scheduler::SchedulerLimits::default(),
+        ).unwrap();
+        circuit.add_mixed_signal_host(host);
+        assert!(
+            !circuit.supports_direct_xyce_level2_core_dae(),
+            "the specialized Core loader cannot silently omit a mixed host's equations"
+        );
+    }
 
     #[test]
     fn direct_core_dae_preserves_injections_with_tied_current_terminals() {

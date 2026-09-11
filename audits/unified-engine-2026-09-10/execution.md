@@ -837,6 +837,21 @@ still require the complete MS04/MS05 coordinator. All other MS00–MS15 requirem
 remain in scope. No broad suite, platform or vendor qualification, performance run,
 compiler-schema change or generated-model refresh was performed.
 
+## MS05 loader correction: exclude mixed hosts from the Core-only DAE path
+
+The specialized direct Xyce Level-2 Core loader explicitly supports a narrow
+native device population. Its capability proof excluded runtime/generated
+analog devices but omitted the separate mixed-host population, allowing a mixed
+host's equations to be absent from that specialized load. It now checks the
+common analog/mixed-family predicate. A circuit containing such a host therefore
+uses the general loader that includes its equations.
+
+The focused capability regression starts with an eligible native Core circuit,
+attaches a mixed host on an existing node, and verifies the specialized route is
+no longer eligible. It passed in the four-case joint-acceptance check on the
+`db76aceff` baseline. This verifies dispatch eligibility, not numerical
+qualification of every mixed Core feedback circuit.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;
