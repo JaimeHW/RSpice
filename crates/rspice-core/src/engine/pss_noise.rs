@@ -518,7 +518,12 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let h = fd_step * (1.0 + x0[j].abs());
+            let h = fd_step
+                * circuit.perturbation_scale(
+                    j,
+                    x0[j],
+                    self.current_abstol() / self.voltage_abstol(),
+                );
 
             let mut x_plus = x0.clone();
             x_plus[j] += h;

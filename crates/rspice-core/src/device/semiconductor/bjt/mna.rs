@@ -129,6 +129,26 @@ impl Bjt {
         })
     }
 
+    /// Incidence of all physical storage coordinates. The last three are
+    /// temperature rise (K) and two excess-phase transport currents (A),
+    /// even though MNA represents them with node unknowns.
+    pub(crate) fn charge_storage_nodes(
+        &self,
+    ) -> [Option<(NodeId, NodeId)>; BJT_DYNAMIC_CHARGE_COUNT] {
+        let electrical = self.electrical_charge_storage_nodes();
+        let mut storage = std::array::from_fn(|index| electrical.get(index).copied().flatten());
+        if self.uses_vbic_dynamic_charges() && self.mna_promoted() {
+            if self.node_rth != 0 && self.thermal_capacitance() > 0.0 {
+                storage[IDX_QCTH] = Some((self.node_rth, 0));
+            }
+            if self.td > 0.0 {
+                storage[IDX_QXF1] = (self.node_xf1 != 0).then_some((self.node_xf1, 0));
+                storage[IDX_QXF2] = (self.node_xf2 != 0).then_some((self.node_xf2, 0));
+            }
+        }
+        storage
+    }
+
     fn mna_checkpoint_runtime_tag(&self) -> &'static str {
         if self.uses_legacy_gummel_poon() {
             GP_MNA_ACCEPTED_NONLINEAR_RUNTIME_TAG

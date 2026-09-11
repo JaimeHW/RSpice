@@ -63,6 +63,7 @@ pub struct PssConfig {
     /// Absolute tolerance for small signals.
     /// A coordinate also converges when |x(T)-x(0)| < abstol, including
     /// when its initial value is zero and relative error is undefined.
+    /// Applied in each coordinate's SI unit: V, A, or K for temperature rise.
     /// Default: 1e-12
     pub abstol: Value,
 

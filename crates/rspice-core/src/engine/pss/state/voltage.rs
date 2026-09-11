@@ -398,7 +398,7 @@ impl PssVoltageConstraintBuilder {
             }
         }
         for bjt in &circuit.bjts.devices {
-            for (pos, neg) in bjt.electrical_charge_storage_nodes().into_iter().flatten() {
+            for (pos, neg) in bjt.charge_storage_nodes().into_iter().flatten() {
                 self.port(pos, neg, abort)?;
             }
         }

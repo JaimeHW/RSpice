@@ -111,7 +111,7 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 1e-8;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 91;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 92;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1052,7 +1052,9 @@ impl PssOperatingPointIdentity {
 pub struct PssOperatingPoint {
     config: PssConfig,
     analysis: PssAnalysisResult,
-    /// Independent charge-voltage followed by current shooting coordinates.
+    /// Independent storage-node coordinates followed by winding currents.
+    /// BJT qcth is temperature rise in K; qxf1/qxf2 are transport currents in A.
+    /// Other charge-node coordinates are voltages in V.
     #[cfg_attr(feature = "veriloga", serde(default))]
     shooting_state_basis: Vec<String>,
     shooting_state: Vec<Value>,
@@ -2199,11 +2201,11 @@ impl Engine {
                 .devices
                 .iter()
                 .all(|diode| !diode.has_charge_storage())
-            && circuit.bjts.devices.iter().all(|bjt| {
-                bjt.electrical_charge_storage_nodes()
-                    .iter()
-                    .all(Option::is_none)
-            })
+            && circuit
+                .bjts
+                .devices
+                .iter()
+                .all(|bjt| bjt.charge_storage_nodes().iter().all(Option::is_none))
             && circuit.jfets.iter().all(|jfet| {
                 jfet.classic_charge_storage_nodes()
                     .iter()
@@ -2369,8 +2371,13 @@ impl Engine {
                     other => other,
                 })?;
                 iteration += probe.iterations;
-                let floor_error =
-                    self.pss_grid_refinement_error(&fine, &probe, PssSampleMap::Identical, abort)?;
+                let floor_error = self.pss_grid_refinement_error(
+                    &circuit,
+                    &fine,
+                    &probe,
+                    PssSampleMap::Identical,
+                    abort,
+                )?;
                 if floor_error > 1.0 {
                     return Err(PssError::InvalidConfig(format!(
                         "PSS integration reached floating-point time precision: alternate-method waveform error {floor_error:.6e} exceeds tolerance on an interval with no representable refinement point"
@@ -2381,7 +2388,7 @@ impl Engine {
             let samples = retained
                 .as_deref()
                 .map_or(PssSampleMap::Doubled, PssSampleMap::Retained);
-            let error = self.pss_grid_refinement_error(&coarse, &fine, samples, abort)?;
+            let error = self.pss_grid_refinement_error(&circuit, &coarse, &fine, samples, abort)?;
             if config.verbose {
                 log::debug!(
                     "PSS grid {steps} -> {finer_steps}: normalized waveform error {error:.6e}"
@@ -2693,6 +2700,7 @@ impl Engine {
     /// Newton, and separately controls voltage and current waveform accuracy.
     fn pss_grid_refinement_error(
         &self,
+        circuit: &PssCircuit,
         coarse: &PssGridSolution,
         fine: &PssGridSolution,
         samples: PssSampleMap<'_>,
@@ -2738,7 +2746,13 @@ impl Engine {
             .voltages
             .iter()
             .zip(&fine.voltages)
-            .map(|pair| (pair, self.voltage_abstol()))
+            .enumerate()
+            .map(|(index, pair)| {
+                (
+                    pair,
+                    circuit.solution_abstol(index, self.voltage_abstol(), self.current_abstol()),
+                )
+            })
             .chain(
                 coarse
                     .branch_currents
@@ -2840,7 +2854,7 @@ impl Engine {
         circuit.reset_coupled_inductor_pair_state(dc_solution);
     }
 
-    /// Extract state vector (capacitor voltages + inductor currents)
+    /// Extract independent physical storage coordinates.
     fn pss_extract_reactive_state(&self, circuit: &PssCircuit) -> Vec<Value> {
         circuit.extract_state()
     }
@@ -3016,7 +3030,7 @@ impl Engine {
 
     /// Solve the network at t = 0 with the reactive state held frozen.
     ///
-    /// Independent charge voltages are imposed by auxiliary branch equations;
+    /// Independent storage-node values are imposed by auxiliary branch equations;
     /// inductor equations impose their accepted currents. Their reactions
     /// supply the instantaneous displacement currents and flux derivatives.
     /// No artificial timestep, stiffness or state drift enters this solve.
@@ -3115,7 +3129,12 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let h = fd_step * (1.0 + x0[j].abs());
+            let h = fd_step
+                * worker_circuit.perturbation_scale(
+                    j,
+                    x0[j],
+                    self.current_abstol() / self.voltage_abstol(),
+                );
 
             let mut x_plus = x0.to_vec();
             x_plus[j] += h;
@@ -3214,7 +3233,15 @@ impl Engine {
         let scaled_direction = direction
             .iter()
             .zip(x0)
-            .map(|(value, state)| value.abs() / (1.0 + state.abs()))
+            .enumerate()
+            .map(|(index, (value, state))| {
+                value.abs()
+                    / worker_circuit.perturbation_scale(
+                        index,
+                        *state,
+                        self.current_abstol() / self.voltage_abstol(),
+                    )
+            })
             .fold(0.0_f64, Value::max);
         if scaled_direction == 0.0 {
             return Ok(vec![0.0; x0.len()]);
@@ -3722,10 +3749,17 @@ impl Engine {
             };
             match solved {
                 Ok(()) => {
-                    let voltage_converged = self.node_voltage_convergence_met(
-                        &new_solution,
-                        &proposal,
-                        circuit.num_nodes(),
+                    let voltage_converged = new_solution.iter().zip(&proposal).enumerate().all(
+                        |(index, (&old, &new))| {
+                            old.is_finite()
+                                && new.is_finite()
+                                && (new - old).abs()
+                                    <= circuit.solution_abstol(
+                                        index,
+                                        self.voltage_abstol(),
+                                        self.current_abstol(),
+                                    ) + self.voltage_reltol() * old.abs().max(new.abs())
+                        },
                     );
                     // The correction solve certifies A*delta against its
                     // physical residual. The absolute companion RHS is no
@@ -4203,6 +4237,10 @@ impl Engine {
         }
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
+        // The stabilization estimator has one scalar absolute tolerance.
+        // Normalize current lanes into its node scale without changing the
+        // physical solution, accepted device histories or continuation trace.
+        let mut lte_solution = vec![0.0; if fixed_grid { 0 } else { solution.len() }];
         let mut trapgear = TrapGearController::new();
 
         let mut result = retain_waveform.then(|| TransientResult {
@@ -4403,10 +4441,21 @@ impl Engine {
             let accepted_step_scale = if fixed_grid {
                 None
             } else {
-                let (lte, _) = lte_estimator.estimate(&new_solution, dt);
+                for (index, (scaled, &value)) in
+                    lte_solution.iter_mut().zip(&new_solution).enumerate()
+                {
+                    *scaled = value
+                        * (self.voltage_abstol()
+                            / circuit.solution_abstol(
+                                index,
+                                self.voltage_abstol(),
+                                self.current_abstol(),
+                            ));
+                }
+                let (lte, _) = lte_estimator.estimate(&lte_solution, dt);
+                lte_estimator.record(&lte_solution, dt);
                 Some(lte_estimator.recommend_scale(lte))
             };
-            lte_estimator.record(&new_solution, dt);
             trapgear.update(&new_solution, dt);
 
             // Update inductor history

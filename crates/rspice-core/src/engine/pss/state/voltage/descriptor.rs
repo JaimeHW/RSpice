@@ -412,16 +412,16 @@ impl PssDescriptor {
                 representatives.push(index);
             }
         }
-        let mut voltage_branches = Vec::new();
+        let mut charge_branches = Vec::new();
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
             if circuit.capacitors.capacitances[index] != 0.0
                 && algebraic.add(
                     [(stamp.pp.row, 1.0), (stamp.nn.row, -1.0)],
-                    ForestValue::State(voltage_branches.len()),
+                    ForestValue::State(charge_branches.len()),
                     abort,
                 )?
             {
-                voltage_branches.push(VoltageBranch::Capacitor(index));
+                charge_branches.push(ChargeBranch::Capacitor(index));
             }
         }
         if nonlinear_ports.is_none() && !circuit.diodes.is_empty() {
@@ -448,7 +448,7 @@ impl PssDescriptor {
             // the first reducer and state vectors before allocating it.
             drop(algebraic);
             drop(representatives);
-            drop(voltage_branches);
+            drop(charge_branches);
             drop(ic_rows);
             return Self::build_with_ports(circuit, limits, abort, Some(nonlinear_ports));
         }
@@ -551,7 +551,8 @@ impl PssDescriptor {
             )?;
         }
         Ok(Some(PssStateBasis {
-            voltage_branches,
+            charge_branches,
+            node_units: vec![CoordinateUnit::Voltage; circuit.num_nodes() + 1],
             forest: Vec::new(),
             voltage_constraints: None,
             currents: PssCurrentBasis::from_descriptor(circuit, representatives),

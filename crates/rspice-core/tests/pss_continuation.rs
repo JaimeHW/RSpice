@@ -8,6 +8,156 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const F0: f64 = 1.0e6;
 
 #[test]
+fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    // ngspice 46: the NPN deck below, .tran .1n 20u 0 .1n, RELTOL=1e-7,
+    // ABSTOL=1e-15, CHGTOL=1e-20, GMIN=0, TEMP=TNOM=27. Samples of the
+    // settled 19--20 us cycle: [temperature rise K, XF1 A, XF2 A, I(VC), I(VB)].
+    // Adjacent settled cycles agree within 1 nK and 0.1 pA.
+    let reference = [
+        [
+            1.041077638037999e+00,
+            6.148510238585312e-04,
+            5.512131439845122e-04,
+            -5.501013932401927e-04,
+            -4.613003510449985e-05,
+        ],
+        [
+            1.066520218984637e+00,
+            1.030782930932765e-03,
+            9.071921254690163e-04,
+            -9.059728453870770e-04,
+            -6.058080549928584e-05,
+        ],
+        [
+            1.160121278249431e+00,
+            1.525986690155254e-03,
+            1.403162865590229e-03,
+            -1.402446905055711e-03,
+            -3.148136311295072e-05,
+        ],
+        [
+            1.262109443709324e+00,
+            1.666932333990812e-03,
+            1.666945997940638e-03,
+            -1.667459518545665e-03,
+            2.758726760902989e-05,
+        ],
+        [
+            1.289814930134844e+00,
+            1.249361845072509e-03,
+            1.383994125368064e-03,
+            -1.385545316522035e-03,
+            4.088852948242942e-05,
+        ],
+        [
+            1.237627277822640e+00,
+            7.230628060154461e-04,
+            8.502299211956250e-04,
+            -8.514960847744414e-04,
+            1.688861056198725e-05,
+        ],
+        [
+            1.155262105342785e+00,
+            4.552662655006599e-04,
+            5.094134103106141e-04,
+            -5.097121812717492e-04,
+            -2.633671005871926e-06,
+        ],
+        [
+            1.080247271555298e+00,
+            4.295708779729699e-04,
+            4.236696989826053e-04,
+            -4.230872781715032e-04,
+            -2.176024389696356e-05,
+        ],
+    ];
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = Netlist::parse(&format!(
+            "VBIC coupled thermal/delay orbit\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 0 th qm\n.model qm {kind}(LEVEL=4 IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=.8 SELFT=1 RTH=1000 CTH=1n TD=100n)\n.options GMIN=0\n.temp 27\n.end",
+            1.2*p, 0.65*p, 0.65*p, 0.02*p,
+        )).unwrap();
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let (analysis, state) = engine
+            .run_pss_with_continuation_state(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(512)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-9),
+            )
+            .unwrap_or_else(|error| panic!("{kind}: {error}"));
+        let names = ["th", "Q1.__xf1.internal", "Q1.__xf2.internal"];
+        for (column, name) in names.into_iter().enumerate() {
+            let node = analysis
+                .result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            let tolerance = if column == 0 { 1e-4 } else { 3e-7 };
+            for (phase, expected) in reference.iter().enumerate() {
+                let actual = analysis.result.waveforms[node].values[phase * 64];
+                assert!(
+                    (actual - expected[column]).abs() < tolerance,
+                    "{kind} PSS {name} phase={phase}: {actual} vs {}",
+                    expected[column]
+                );
+            }
+        }
+        let (continued, checkpoint) = engine
+            .run_tran_from_pss_state(&netlist, &state, 1e-6, 1e-9)
+            .unwrap();
+        let traces = [
+            continued.try_voltage_waveform_named(names[0]).unwrap(),
+            continued.try_voltage_waveform_named(names[1]).unwrap(),
+            continued.try_voltage_waveform_named(names[2]).unwrap(),
+            continued.try_branch_current_waveform_named("VC").unwrap(),
+            continued.try_branch_current_waveform_named("VB").unwrap(),
+        ];
+        for (phase, expected) in reference.iter().enumerate() {
+            let time = phase as f64 / (8.0 * F0);
+            let hi = continued.time.partition_point(|&t| t < time);
+            let lo = hi.saturating_sub(1);
+            let fraction = if lo == hi {
+                0.0
+            } else {
+                (time - continued.time[lo]) / (continued.time[hi] - continued.time[lo])
+            };
+            for (column, tolerance) in [1e-4, 3e-7, 3e-7, 3e-7, 5e-8].into_iter().enumerate() {
+                let trace = traces[column];
+                let sign = if column < 3 { 1.0 } else { p };
+                let actual = sign * (trace[lo] + fraction * (trace[hi] - trace[lo]));
+                assert!(
+                    (actual - expected[column]).abs() < tolerance,
+                    "{kind} continuation column={column} phase={phase}: {actual} vs {}",
+                    expected[column]
+                );
+            }
+        }
+        let (direct, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.2e-6, 1e-9)
+            .unwrap();
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let restored =
+                TransientCheckpoint::from_bytes(&checkpoint.to_bytes(encoding).unwrap()).unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&netlist, &restored, 1.2e-6, 1e-9)
+                .unwrap();
+            assert_eq!(resumed.time, direct.time);
+            assert_eq!(resumed.voltages, direct.voltages);
+            assert_eq!(resumed.branch_currents, direct.branch_currents);
+        }
+    }
+}
+
+#[test]
 fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
     // ngspice 46, identical NPN card below: TRAP, RELTOL=1e-9,

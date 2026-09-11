@@ -15,6 +15,73 @@ const R: f64 = 1.0e3;
 const C: f64 = 159.154943091895e-12; // RC corner ~ 1 MHz (w*RC = 1)
 
 #[test]
+fn vbic_thermal_and_delay_pss_match_physical_decay_modes() {
+    use rspice_core::engine::SpiceDialect;
+    // Independent RC heat balance and the two-pole VBIC delay network:
+    // Cth*dT/dt + T/Rth = P(t), TD^2*s^2/3 + TD*s + 1 = 0.
+    // SW_ET=0 separates the known injected heat from electrical feedback.
+    let tau = 100.0 * 5e-9;
+    let td = 400e-9;
+    let wt = std::f64::consts::TAU * F0 * tau;
+    let magnitude = (-1.5 / (F0 * td)).exp();
+    let angle = 3.0_f64.sqrt() / (2.0 * F0 * td);
+    let expected_modes = [
+        num_complex::Complex64::new((-1.0 / (F0 * tau)).exp(), 0.0),
+        num_complex::Complex64::from_polar(magnitude, angle),
+        num_complex::Complex64::from_polar(magnitude, -angle),
+    ];
+    for (dialect, kind) in [(SpiceDialect::Ngspice, "NPN"), (SpiceDialect::Xyce, "PNP")] {
+        let netlist = Netlist::parse(&format!(
+            "VBIC physical state modes\nQ1 0 0 0 th vm M=3 SW_ET=0\nIheat 0 th SIN(.03 .003 1meg)\n.model vm {kind}(LEVEL=11 IS=0 IBEI=0 IBEN=0 IBCI=0 IBCN=0 ISP=0 IBEIP=0 IBENP=0 IBCIP=0 IBCNP=0 RCI=0 RBI=0 RTH=100 CTH=5n TD=400n)\n.options GMIN=0 RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.end\n"
+        )).unwrap();
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let point = engine
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_points_per_period(256)
+                    .with_tstab_periods(0)
+                    .with_tolerance(1e-9),
+                &NoAbort,
+            )
+            .unwrap_or_else(|error| panic!("{dialect:?} {kind}: {error}"));
+        assert_eq!(
+            point.shooting_state_basis(),
+            ["Q:Q1:qcth", "Q:Q1:qxf1", "Q:Q1:qxf2"]
+        );
+        let result = &point.analysis().result;
+        let output = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("th"))
+            .unwrap();
+        for (&time, &actual) in result.time.iter().zip(&result.waveforms[output].values) {
+            let phase = std::f64::consts::TAU * F0 * time;
+            let expected = 1.0 + 0.1 * (phase.sin() - wt * phase.cos()) / (1.0 + wt * wt);
+            assert!(
+                (actual - expected).abs() < 5e-6,
+                "{dialect:?} t={time}: {actual} vs {expected}"
+            );
+        }
+        assert_eq!(point.analysis().floquet_multipliers.len(), 3);
+        for expected in expected_modes {
+            assert!(
+                point
+                    .analysis()
+                    .floquet_multipliers
+                    .iter()
+                    .any(|actual| (*actual - expected).norm() < 2e-5),
+                "{dialect:?}: expected {expected}, got {:?}",
+                point.analysis().floquet_multipliers
+            );
+        }
+    }
+}
+
+#[test]
 fn gummel_poon_pss_private_charge_matches_ac_poles_and_floquet() {
     let mut config = SimulationConfig::default();
     config.convergence_config.gmin_target = 0.0;

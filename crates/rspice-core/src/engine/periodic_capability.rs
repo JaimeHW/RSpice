@@ -427,7 +427,7 @@ pub(crate) const fn periodic_capability_descriptor(
             small_signal: Inapplicable,
             noise: Absent("periodic BJT noise sources need the exact periodic BJT residual"),
             pss_state: Restricted(
-                "native BJT electrical charge states without self-heating or excess-phase delay",
+                "native BJT electrical storage and VBIC thermal/excess-phase states",
             ),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
@@ -1243,9 +1243,9 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                             .bjts
                             .devices
                             .iter()
-                            .any(|bjt| bjt.node_rth != 0 || bjt.td > 0.0 || bjt.node_xf1 != 0 || bjt.node_xf2 != 0)
+                            .any(|bjt| bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0))
                         {
-                            gaps.push(CapabilityGap::new(family, "BJT thermal and excess-phase shooting-state units and constraints"));
+                            gaps.push(CapabilityGap::new(family, "legacy Gummel-Poon thermal and excess-phase model states"));
                         }
                     }
                     F::CoupledInductorPair => {
@@ -1632,9 +1632,10 @@ mod tests {
             ("NPN", true),
             ("NPN RB=100 RBM=20 CJE=1n", true),
             ("PNP RB=100 RBM=20 CJE=1n", true),
-            ("NPN TD=1n", false),
-            ("NPN LEVEL=4 TD=1n", false),
-            ("NPN LEVEL=4 SELFT=1 RTH=100 CTH=1n", false),
+            ("NPN TD=1n", true),
+            ("NPN LEVEL=1 TD=1n", false),
+            ("NPN LEVEL=4 TD=1n", true),
+            ("NPN LEVEL=4 SELFT=1 RTH=100 CTH=1n", true),
         ] {
             let netlist = crate::Netlist::parse(&format!("BJT periodic admission\nV1 c 0 1\nV2 b 0 0.7\nQ1 c b 0 vm\n.model vm {model}\n.end\n")).unwrap();
             let circuit = crate::engine::Engine::default()
