@@ -50,7 +50,7 @@ pub(crate) const FROZEN_DERIVATIVE_UNARY: &str = "FreezeDerivative";
 
 pub use crate::semantic::VectorBounds;
 pub use ad::{AdFunction, AdSeed, differentiate};
-pub use artifact::CanonicalIrArtifact;
+pub use artifact::{CanonicalConnectionContext, CanonicalIrArtifact};
 pub use cfg::{
     CfgBinaryOp, CfgBlock, CfgFunction, CfgInstruction, CfgIntegerBitwiseOp, CfgLaplaceTransfer,
     CfgStateSite, CfgTerminator, CfgUnaryOp, CfgValidationError, CfgValue, CfgValueKind,

@@ -275,7 +275,8 @@ use super::*;
 // Version 66 retains limiter affine residual corrections for Newton stamping.
 // Version 67 solves flow probes as simultaneous branch equations.
 // Version 68 also retains mixed parameter elaboration source and discrete analog inputs.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 68;
+// Version 69 retains the active connection source closure in the canonical artifact.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 69;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -689,7 +690,7 @@ pub(super) fn canonicalize_for_cache(path: &Path) -> PathBuf {
 }
 
 #[cfg(feature = "veriloga")]
-fn is_sealed_veriloga_virtual_path(path: &Path) -> bool {
+pub(super) fn is_sealed_veriloga_virtual_path(path: &Path) -> bool {
     let normalized = path.to_string_lossy().replace('\\', "/");
     normalized.split_once('/').is_some_and(|(root, _)| {
         root.eq_ignore_ascii_case("__rspice_project__")

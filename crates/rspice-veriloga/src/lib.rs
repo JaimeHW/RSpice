@@ -181,9 +181,13 @@ pub use virtual_source::{
 /// What one source file says about Verilog-AMS LRM 2.4 clause 7.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectSpecification {
+    /// Identity of the exact preprocessed closure used to interpret the rules.
+    pub source_identity: String,
     /// The file's `connectmodule` declarations and `connectrules` blocks,
     /// merged into one table.
     pub rules: connect::ConnectRuleTable,
+    /// Disciplines and natures from the same active source closure as the rules.
+    pub disciplines: disciplines::DisciplineDb,
     /// Whether the file declares an ordinary `module` as well.
     ///
     /// A file that declares only connect modules is a connect library: it has
@@ -819,9 +823,16 @@ impl VerilogACompiler {
         control: &dyn PipelineControl,
     ) -> CompileResult<RuntimeCompileReport> {
         artifact.validate().map_err(Self::canonical_ir_error)?;
-        let source = artifact.parameter_source.as_deref().ok_or_else(|| {
-            CompileError::ModuleSelection("mixed artifact has no parameter elaboration source; recompile it with the current compiler".into())
-        })?;
+        let source = artifact
+            .parameter_source
+            .as_deref()
+            .or_else(|| artifact.connections.source())
+            .ok_or_else(|| {
+                CompileError::ModuleSelection(
+                    "mixed artifact has no parameter elaboration source; recompile it with the current compiler"
+                        .into(),
+                )
+            })?;
         let mut measurements = metrics::MetricsRecorder::with_control(
             source.len(),
             self.options.performance_budget.clone(),
@@ -867,6 +878,7 @@ impl VerilogACompiler {
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             source_package,
             preprocessed,
+            &analyzed,
             &executable,
             measurements,
         )?;
@@ -1180,13 +1192,20 @@ impl VerilogACompiler {
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         let module = self.select_executable_module(analyzed, module_name)?;
-        self.build_canonical_ir_artifact_from_module(source_package, source, &module, measurements)
+        self.build_canonical_ir_artifact_from_module(
+            source_package,
+            source,
+            analyzed,
+            &module,
+            measurements,
+        )
     }
 
     fn build_canonical_ir_artifact_from_module(
         &self,
         source_package: &str,
         source: &str,
+        analyzed: &semantic::AnalyzedFile,
         module: &semantic::AnalyzedModule,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
@@ -1232,7 +1251,14 @@ impl VerilogACompiler {
         )
         .map_err(Self::canonical_ir_error)?
         .with_digital(digital);
-        if !artifact.digital.is_empty() && !artifact.hir.parameters.is_empty() {
+        if analyzed.source.items.iter().any(|item| {
+            matches!(
+                item,
+                ast::Item::ConnectModule(_) | ast::Item::ConnectRules(_)
+            )
+        }) {
+            artifact = artifact.with_connection_source(source);
+        } else if !artifact.digital.is_empty() && !artifact.hir.parameters.is_empty() {
             artifact.parameter_source = Some(source.into());
         }
         measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
@@ -1355,17 +1381,22 @@ impl VerilogACompiler {
             .any(|item| matches!(item, ast::Item::ConnectRules(_)))
         {
             return Ok(ConnectSpecification {
+                source_identity: canonical_ir::source_identity(source),
                 declares_module: source_file
                     .items
                     .iter()
                     .any(|item| matches!(item, ast::Item::Module(_))),
                 rules: Default::default(),
+                disciplines: disciplines::DisciplineDb::with_standard(),
             });
         }
-        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        let mut analyzer = SemanticAnalyzer::new();
+        let analyzed = analyzer.analyze(&source_file)?;
         Ok(ConnectSpecification {
+            source_identity: canonical_ir::source_identity(source),
             declares_module: !analyzed.modules.is_empty(),
             rules: analyzed.connect_rules,
+            disciplines: analyzer.into_disciplines(),
         })
     }
 
@@ -1610,6 +1641,7 @@ impl VerilogACompiler {
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &source_package,
             &preprocessed,
+            &analyzed,
             &executable,
             &mut measurements,
         )?;

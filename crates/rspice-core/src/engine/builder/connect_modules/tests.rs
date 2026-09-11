@@ -14,7 +14,7 @@ fn table(source: &str) -> (ConnectRuleTable, DisciplineDb) {
     let specification = VerilogACompiler::default()
         .connect_specification_from_preprocessed(source)
         .unwrap_or_else(|error| panic!("connect rules read: {error}"));
-    (specification.rules, DisciplineDb::with_standard())
+    (specification.rules, specification.disciplines)
 }
 
 fn select(kind: Kind, source: &str) -> PlannedConnectModule {
@@ -191,8 +191,7 @@ endconnectrules
     assert!(format!("{error}").contains("vlo"), "unexpected: {error}");
 }
 
-/// A connect module outside the library has a body only a Verilog-AMS mixed
-/// host could run, and the one this crate has is not wired to the engine.
+/// An authored connect body needs executable insertion into the mixed circuit.
 #[test]
 fn a_connect_module_outside_the_library_is_refused_with_the_blocker() {
     let source = "\
@@ -212,7 +211,7 @@ endconnectrules
     let error = format!("{error}");
     assert!(error.contains("my_a2d"), "names the module: {error}");
     assert!(
-        error.contains("integer-nanosecond grid"),
+        error.contains("executable connect-body elaboration and insertion"),
         "names the blocker: {error}"
     );
 }

@@ -5032,8 +5032,8 @@ impl Engine {
         // storage while applying each instance's independent XO value.
         let mut xyce_pem_models: HashMap<String, crate::device::XycePemMemristor> = HashMap::new();
 
-        // The design's clause 7 connect specification, read from the same
-        // `.veriloga` files as the models so that each is opened once.
+        // Device connection rules come from the compiled active source closure;
+        // a standalone connect library contributes its discovered specification.
         #[cfg(feature = "veriloga")]
         let mut design_connect_rules = connect_modules::DesignConnectRules::default();
         #[cfg(feature = "veriloga")]
@@ -5048,15 +5048,13 @@ impl Engine {
                     // One file can supply several explicitly selected devices,
                     // but its design-wide connect rules must be registered once.
                     let source = veriloga_cache::canonicalize_for_cache(&include.file_path);
-                    let declares_module = match connect_source_modules.entry(source) {
-                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                        std::collections::hash_map::Entry::Vacant(entry) => *entry.insert(
-                            design_connect_rules
-                                .read(&include.file_path)?
-                                .declares_module,
+                    let specification = match connect_source_modules.entry(source) {
+                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                            connect_modules::DesignConnectRules::discover(&include.file_path)?,
                         ),
                     };
-                    if !declares_module {
+                    if !specification.declares_module {
                         if let Some(module) = &include.selected_module {
                             return Err(SimulationError::Netlist(format!(
                                 "Verilog-A source '{}' declares no device module, so module '{}' cannot be selected",
@@ -5072,6 +5070,7 @@ impl Engine {
                             "Read connect rules from '{}', which declares no device module",
                             include.file_path.display()
                         );
+                        design_connect_rules.register(&include.file_path, specification.clone())?;
                         continue;
                     }
                 }
@@ -5081,6 +5080,14 @@ impl Engine {
                     self.config.resource_limits,
                     abort,
                 )?;
+                if let Some(artifact) = entry.canonical_ir.as_deref() {
+                    design_connect_rules.register_artifact(&include.file_path, artifact)?;
+                } else if let Some(specification) = connect_source_modules
+                    .get(&veriloga_cache::canonicalize_for_cache(&include.file_path))
+                {
+                    // Legacy analog-only registration has no canonical artifact.
+                    design_connect_rules.register(&include.file_path, specification.clone())?;
+                }
                 bind_veriloga_model(
                     &mut veriloga_models,
                     entry.model.name.as_str(),

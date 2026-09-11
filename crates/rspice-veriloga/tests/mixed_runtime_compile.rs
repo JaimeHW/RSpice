@@ -13,6 +13,85 @@ endmodule
 "#;
 
 #[test]
+fn connection_closure_is_retained_validated_and_reused_for_specialization() {
+    use rspice_veriloga::canonical_ir::{CanonicalConnectionContext, CanonicalIrArtifact};
+
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = format!(
+        "nature ProbeQuantity; units=\"V\"; access=Probe; abstol=1e-7; endnature\ndiscipline sensing; potential ProbeQuantity; enddiscipline\nmodule sized(q); parameter integer WIDTH=2; output [WIDTH-1:0] q; reg [WIDTH-1:0] q; initial q=1; endmodule\n{}",
+        rspice_veriloga::connect::library::builtin_connect_library_source()
+    );
+    let runtime = compiler.compile_runtime(&source, None).unwrap();
+    assert!(
+        runtime.canonical_ir.parameter_source.is_none(),
+        "the closure is stored once"
+    );
+    let encoded = serde_json::to_value(&runtime.canonical_ir).unwrap();
+    let artifact: CanonicalIrArtifact = serde_json::from_value(encoded.clone()).unwrap();
+    artifact.validate().unwrap();
+    assert!(
+        artifact
+            .connections
+            .source()
+            .unwrap()
+            .contains("connectrules")
+    );
+    let specification = compiler
+        .connect_specification_from_preprocessed(artifact.connections.source().unwrap())
+        .unwrap();
+    assert_eq!(
+        specification.disciplines.natures["ProbeQuantity"].abstol,
+        1e-7
+    );
+    assert_eq!(
+        specification.disciplines.disciplines["sensing"]
+            .potential
+            .as_deref(),
+        Some("ProbeQuantity")
+    );
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &artifact,
+            &[("WIDTH", 4.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(specialized.canonical_ir.digital.signals[0].width, 4);
+    assert_eq!(specialized.canonical_ir.connections, artifact.connections);
+
+    let mut missing = encoded;
+    missing.as_object_mut().unwrap().remove("connections");
+    assert!(serde_json::from_value::<CanonicalIrArtifact>(missing).is_err());
+    let mut lost = artifact.clone();
+    lost.connections = CanonicalConnectionContext::None;
+    assert!(
+        lost.validate()
+            .unwrap_err()
+            .iter()
+            .any(|error| { error.to_string().contains("stored connection identity") })
+    );
+    let mut altered = artifact;
+    altered.connections = CanonicalConnectionContext::Source(
+        altered
+            .connections
+            .source()
+            .unwrap()
+            .replace("WIDTH=2", "WIDTH=3")
+            .into(),
+    );
+    assert!(
+        altered
+            .validate()
+            .unwrap_err()
+            .iter()
+            .any(|error| { error.to_string().contains("connection elaboration source") })
+    );
+}
+
+#[test]
 fn mixed_parameter_specialization_survives_serialization_and_changes_port_shape() {
     let compiler = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,

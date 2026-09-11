@@ -519,6 +519,12 @@ impl SemanticAnalyzer {
         }
     }
 
+    /// Transfer the resolved physical definitions to design-level elaboration
+    /// after analysis, without rebuilding a different standard-only database.
+    pub(crate) fn into_disciplines(self) -> DisciplineDb {
+        self.disciplines
+    }
+
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();

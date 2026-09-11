@@ -117,6 +117,15 @@ resolves its own graph into a `VirtualSourceBundle` first.
 only in failure: it keeps source-authentic diagnostics mapped back to
 bundle paths instead of collapsing to a bare `CompileError`.
 
+When a source declares connection rules or connect modules, its canonical
+artifact retains the active preprocessed closure with a separate integrity
+identity. The core uses that closure and its discipline definitions for
+connection selection after file loading, cache reuse, or sealed virtual
+registration. Multiple selected modules from one closure share its rules.
+Retaining authored connect bodies does not yet provide their executable
+insertion; the current engine boundary route still uses supported built-in
+delegations.
+
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data
 for source-only artifact calls. `RustTranspiler::transpile_measured` reports

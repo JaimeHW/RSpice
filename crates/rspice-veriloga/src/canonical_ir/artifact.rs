@@ -28,6 +28,13 @@ pub struct CanonicalIrArtifact {
     /// instance elaboration can specialize both domains on every platform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_source: Option<SmolStr>,
+    /// Active source closure for design-level connection elaboration. This is
+    /// required in the serialized schema, even when the source has no rules;
+    /// losing it must not silently select default electrical conversions.
+    pub connections: CanonicalConnectionContext,
+    /// Separate from the payload so replacing a stored connection context with
+    /// `None` cannot silently discard design-level behavior.
+    pub connection_identity: [u8; 32],
     pub metadata: CanonicalMetadata,
     pub hir_digest: SmolStr,
     pub mir_digest: SmolStr,
@@ -44,6 +51,25 @@ pub struct CanonicalIrArtifact {
     /// an absent plan from a nonempty plan lost during storage or transport.
     #[serde(default, skip_serializing_if = "CanonicalDigitalPlan::is_empty")]
     pub digital: CanonicalDigitalPlan,
+}
+
+/// Connection declarations and bodies travel with their compiled source,
+/// including through sealed virtual registration and persistent model caches.
+/// The source identity is the artifact's existing full closure identity.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum CanonicalConnectionContext {
+    #[default]
+    None,
+    Source(SmolStr),
+}
+
+impl CanonicalConnectionContext {
+    pub fn source(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::Source(source) => Some(source),
+        }
+    }
 }
 
 impl CanonicalIrArtifact {
@@ -74,6 +100,8 @@ impl CanonicalIrArtifact {
 
         Ok(Self {
             parameter_source: None,
+            connections: CanonicalConnectionContext::None,
+            connection_identity: [0; 32],
             metadata,
             hir_digest,
             mir_digest,
@@ -98,18 +126,38 @@ impl CanonicalIrArtifact {
         self
     }
 
+    pub fn with_connection_source(mut self, source: &str) -> Self {
+        self.connection_identity = *blake3::hash(source.as_bytes()).as_bytes();
+        self.connections = CanonicalConnectionContext::Source(source.into());
+        self
+    }
+
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics =
             validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
-        if let Some(source) = &self.parameter_source {
+        for (kind, source) in [
+            ("parameter elaboration", self.parameter_source.as_deref()),
+            ("connection elaboration", self.connections.source()),
+        ] {
+            let Some(source) = source else { continue };
             if super::metadata::source_identity(source) != self.metadata.source_identity
                 || super::metadata::StableDigest::from_text(source).as_hex()
                     != self.metadata.source_digest
             {
-                diagnostics.push(artifact_error(
-                    "parameter elaboration source does not match its source identity",
-                ));
+                diagnostics.push(artifact_error(format!(
+                    "{kind} source does not match its source identity"
+                )));
             }
+        }
+        let connection_identity = self
+            .connections
+            .source()
+            .map(|source| *blake3::hash(source.as_bytes()).as_bytes())
+            .unwrap_or([0; 32]);
+        if self.connection_identity != connection_identity {
+            diagnostics.push(artifact_error(
+                "stored connection identity does not match the connection source",
+            ));
         }
         if let Err(mut errors) = self.digital.validate() {
             diagnostics.append(&mut errors);

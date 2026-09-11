@@ -44,13 +44,10 @@
 //! bridge code models that already implement them. A connect module named by a
 //! `connectrules` block and *not* in that library has a body only a
 //! Verilog-AMS mixed host could run, and the one this crate has
-//! (`crate::xspice::verilog::MixedSignalHost`) is not wired to the engine.
-//! It no longer refuses an off-grid trial time — it floors an analog timepoint
-//! onto its tick grid and keeps the unquantized time — so what is missing is
-//! the elaboration that would give a resolved connect module a `CircuitData`
-//! instance to be planned onto, not the host's own time base. Until that
-//! exists it is refused by name, with that reason, rather than silently
-//! bridged as if the deck had asked for nothing.
+//! (`crate::xspice::verilog::MixedSignalHost`) already executes mixed device
+//! instances. Arbitrary connect bodies still need their own executable
+//! elaboration and insertion into the circuit. Until that exists, selection
+//! reports the missing connect-body execution path by name.
 
 use rspice_veriloga::ast::PortDirection;
 use rspice_veriloga::connect::{
@@ -301,8 +298,8 @@ pub(super) fn check_delegable(
          execute: a connect module runs here by delegating to the XSPICE bridge code model \
          that implements it, and only the built-in library — a2d, d2a and bidir — has such a \
          delegation. Executing an arbitrary connect module's body needs the Verilog-AMS mixed \
-         host, which is not wired to the engine and refuses any trial time off its \
-         integer-nanosecond grid",
+         host with executable connect-body elaboration and insertion, which this \
+         boundary route does not yet implement",
         selected.name, selected.instance
     )))
 }
@@ -311,29 +308,18 @@ pub(super) fn check_delegable(
 // Where the rules come from, and the pass that runs over the planner's answers
 // ---------------------------------------------------------------------------
 
-/// The design's clause 7 connect specification, accumulated one `.veriloga`
-/// file at a time as the include loop reads them.
-///
-/// Two rules govern what gets in, both stated rather than discovered:
-///
-/// * **A file is read only if its text contains `connectrules`.** Compiling a
-///   Verilog-A model is cached and reading its connect rules is not, so the
-///   filter is what keeps a deck that has no connect rules — which is every
-///   deck that had none before this existed — from paying a preprocess per
-///   build. The consequence is that a `connectrules` block reached through an
-///   `` `include `` is not seen, and that is the stated rule: clause 7's block
-///   is a design-level statement and RSpice requires it in the file the deck
-///   names.
-/// * **At most one file may declare connect rules.** Clause 7 names a
-///   `connectrules` block and gives no way to select among several. Merging
-///   the blocks *within* one file is the only reading available and is what
-///   `rspice_veriloga::connect::build_connect_rule_table` does; extending that
-///   across files would be this crate inventing a rule the language does not
-///   have, so a second file is refused and both are named.
+/// A design's active connect specification. Compiled devices supply the exact
+/// preprocessed closure retained in their artifact, including virtual sources.
+/// Standalone connect libraries supply a separately discovered specification.
+/// Repeated modules from one closure register once. Distinct specifications
+/// require an explicit selection contract; the current deck route diagnoses
+/// that ambiguity instead of silently choosing by include traversal order.
 #[derive(Debug, Default)]
 pub(super) struct DesignConnectRules {
     declared_in: Option<std::path::PathBuf>,
+    source_identity: Option<String>,
     table: ConnectRuleTable,
+    disciplines: DisciplineDb,
 }
 
 impl DesignConnectRules {
@@ -344,47 +330,82 @@ impl DesignConnectRules {
     /// Sealed virtual sources are supplied by their registered artifact, so an
     /// absent filesystem source continues to be handled by the model cache.
     pub(super) fn may_declare(path: &std::path::Path) -> bool {
+        if super::veriloga_cache::is_sealed_veriloga_virtual_path(path) {
+            return false;
+        }
         std::fs::read_to_string(path)
             .is_ok_and(|text| text.contains("connectrules") || text.contains('`'))
     }
 
-    /// Read one file's specification, refusing a second file that declares
-    /// rules.
-    pub(super) fn read(
-        &mut self,
+    /// Discover standalone file libraries. Device rules are registered from
+    /// their compiled closure, so this preliminary read cannot override them.
+    pub(super) fn discover(
         path: &std::path::Path,
     ) -> Result<rspice_veriloga::ConnectSpecification, SimulationError> {
-        let specification = rspice_veriloga::VerilogACompiler::default()
+        rspice_veriloga::VerilogACompiler::default()
             .connect_specification_from_file(path)
             .map_err(|error| {
                 SimulationError::Circuit(format!(
                     "connect rules in '{}' could not be read: {error}",
                     path.display()
                 ))
-            })?;
+            })
+    }
+
+    pub(super) fn register(
+        &mut self,
+        path: &std::path::Path,
+        specification: rspice_veriloga::ConnectSpecification,
+    ) -> Result<(), SimulationError> {
         if specification.rules.insertions().is_empty()
             && specification.rules.resolutions().is_empty()
         {
-            return Ok(specification);
+            return Ok(());
+        }
+        if self.source_identity.as_deref() == Some(specification.source_identity.as_str()) {
+            return Ok(());
         }
         if let Some(first) = self.declared_in.as_ref() {
             return Err(SimulationError::Circuit(format!(
-                "'{}' and '{}' both declare connect rules; Verilog-AMS LRM 2.4 clause 7 names \
-                 one connectrules specification for a design and gives no way to select among \
-                 several",
+                "'{}' and '{}' declare distinct connect specifications; this deck has no \
+                 explicit selection between them",
                 first.display(),
                 path.display()
             )));
         }
         self.declared_in = Some(path.to_path_buf());
-        self.table = specification.rules.clone();
-        Ok(specification)
+        self.source_identity = Some(specification.source_identity);
+        self.table = specification.rules;
+        self.disciplines = specification.disciplines;
+        Ok(())
     }
 
-    fn selected(&self) -> Option<(&ConnectRuleTable, DisciplineDb)> {
+    pub(super) fn register_artifact(
+        &mut self,
+        path: &std::path::Path,
+        artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    ) -> Result<(), SimulationError> {
+        let Some(source) = artifact.connections.source() else {
+            return Ok(());
+        };
+        if self.source_identity.as_deref() == Some(artifact.metadata.source_identity.as_str()) {
+            return Ok(());
+        }
+        let specification = rspice_veriloga::VerilogACompiler::default()
+            .connect_specification_from_preprocessed(source)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "connect rules in compiled source '{}' could not be read: {error}",
+                    path.display()
+                ))
+            })?;
+        self.register(path, specification)
+    }
+
+    fn selected(&self) -> Option<(&ConnectRuleTable, &DisciplineDb)> {
         self.declared_in
             .as_ref()
-            .map(|_| (&self.table, DisciplineDb::with_standard()))
+            .map(|_| (&self.table, &self.disciplines))
     }
 
     /// Select a connect module for one boundary named directly rather than
@@ -410,7 +431,7 @@ impl DesignConnectRules {
         let Some((table, db)) = self.selected() else {
             return Ok(None);
         };
-        select_for_boundary(table, &db, kind, node_label, instance_name, port_name)
+        select_for_boundary(table, db, kind, node_label, instance_name, port_name)
     }
 }
 
@@ -475,7 +496,7 @@ pub(super) fn attach_to_planned_bridges(
             .unwrap_or_else(|| (node_label.clone(), "d".to_string()));
         let Some(selected) = select_for_boundary(
             table,
-            &db,
+            db,
             bridge.kind,
             &node_label,
             &instance_name,

@@ -76,7 +76,7 @@ checkpoint representation, before optimizing partitions or caches.
 | Required behavior | Packages | Implementation at this checkpoint | Qualification |
 |---|---|---|---|
 | Scheduled/startup analog sampling and unrelated timer isolation | MS02/03/05/06 | Reproduced baseline defects fixed; full contract open | Existing 10 mixed regressions pass after integration |
-| Active source, macro/include, cache and virtual connection closure | MS01 | In progress | Focused file/virtual transport cases pending |
+| Active source, macro/include, cache and virtual connection closure | MS01 | Artifact transport implemented; prepared-source caching and configuration work remain | Focused file/virtual transport cases pass |
 | Complete resolved module timing and scheduling regions | MS02 | Open | Pending |
 | Circuit-wide analog/digital handshake, roots and LTE/retry | MS03 | Host-level baseline; design-wide work open | Pending |
 | Typed SPICE/HDL/XSPICE graph, hierarchy and effective parameters | MS04 | Scalar specialization baseline; graph open | Pending |
@@ -116,6 +116,16 @@ invented throughput numbers do not qualify parity.
 | Increment | Evidence | Outcome |
 |---|---|---|
 | Remote integration and distinct schema/cache versions | `cargo test --locked -p rspice-core --no-default-features --features veriloga --test veriloga_mixed_signal_regressions --target-dir target/unified-mixed-fixes --jobs 2` with test debuginfo disabled | 10 passed; no full suite run |
+| Active connection closure transport | Core targets `veriloga_connect_source_closure` and `veriloga_mixed_signal_regressions`, filtered to `connect`, using the same portable build options | 2 passed: included file rules and serialized virtual models with shared rules/cache reuse |
+| Connection integrity and parameter-source reuse | Compiler target `mixed_runtime_compile`, filtered to `connection_closure_is_retained_validated_and_reused_for_specialization`, no default features | Passed: retained user definitions, specialization, round-trip, missing/lost/altered payload rejection |
+
+The source-transport increment advances canonical schema to 33 and core disk
+cache format to 69. Old records are rebuilt. Connection source is stored once
+when it can also supply mixed parameter specialization. Sealed paths bypass
+filesystem rule discovery. The preliminary standalone-library discovery pass
+and explicit configuration selection remain MS01 work; authored body execution
+remains MS07. Generated artifact regeneration and the complete target matrix
+remain integration/release work after the shared schemas stabilize.
 
 ## Next implementation work
 
