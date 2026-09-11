@@ -3738,8 +3738,8 @@ impl Instance {
 		let BTU=BIV[3];
 		let BTV=BIV[4];
 		let BTW=BKU;
-        self.event_state_candidate[0] = staged[224];
-        self.event_state_candidate[1] = staged[225];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[224]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[225]; }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(7),
             Some(8),

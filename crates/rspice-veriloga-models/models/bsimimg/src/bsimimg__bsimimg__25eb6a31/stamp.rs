@@ -4974,10 +4974,10 @@ impl Instance {
 		let DKR=CXJ[0];
 		let DKS=CXJ[1];
 		let DKT=DBT;
-        self.event_state_candidate[0] = staged[324];
-        self.event_state_candidate[1] = staged[325];
-        self.event_state_candidate[2] = staged[326];
-        self.event_state_candidate[3] = staged[327];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[324]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[325]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[326]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[327]; }
         if (staged[333] != 0.0) {
             stamper.stamp_potential_branch_local(Some(4), None, 0, multiplicity);
         } else {

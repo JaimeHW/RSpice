@@ -7,7 +7,7 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let parameter_given = &*self.param_given;
-        let event_state = &*self.event_state_accepted;
+        let event_state = if ctx.dynamic_operators_enabled() { &*self.event_state_accepted } else { &*self.event_state_candidate };
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13])];
@@ -3009,26 +3009,26 @@ impl Instance {
 		let CDT=BXU;
 		let CDU=BXV;
 		let CDV=BXT;
-        self.event_state_candidate[0] = CM;
-        self.event_state_candidate[1] = YM;
-        self.event_state_candidate[2] = EE;
-        self.event_state_candidate[3] = AIM;
-        self.event_state_candidate[4] = AUI;
-        self.event_state_candidate[5] = AUE;
-        self.event_state_candidate[6] = AUU;
-        self.event_state_candidate[7] = AHS;
-        self.event_state_candidate[8] = QO;
-        self.event_state_candidate[9] = AZJ;
-        self.event_state_candidate[10] = AZL;
-        self.event_state_candidate[11] = AMY;
-        self.event_state_candidate[12] = CU;
-        self.event_state_candidate[13] = O;
-        self.event_state_candidate[14] = P;
-        self.event_state_candidate[15] = Q;
-        self.event_state_candidate[16] = R;
-        self.event_state_candidate[17] = S;
-        self.event_state_candidate[18] = T;
-        self.event_state_candidate[19] = U;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = CM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = YM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = EE; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = AIM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = AUI; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = AUE; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = AUU; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = AHS; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = QO; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[9] = AZJ; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[10] = AZL; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[11] = AMY; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[12] = CU; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[13] = O; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[14] = P; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[15] = Q; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[16] = R; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[17] = S; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[18] = T; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[19] = U; }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(9),

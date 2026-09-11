@@ -19505,10 +19505,10 @@ impl Instance {
 		let PYY=PQQ[3];
 		let PYZ=PQQ[4];
 		let PZA=PQQ[5];
-        self.event_state_candidate[0] = staged[464];
-        self.event_state_candidate[1] = staged[465];
-        self.event_state_candidate[2] = staged[466];
-        self.event_state_candidate[3] = staged[467];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[464]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[465]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[466]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[467]; }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             Some(7),

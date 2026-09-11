@@ -2265,6 +2265,20 @@ impl CrossDetector {
         self.eval_event(value, time, direction, 0.0, 0.0, true)
     }
 
+    /// Validate a static observation without firing or proposing a detector
+    /// state. The event body has already produced the retained model candidate.
+    pub(crate) fn observe_event(
+        value: f64,
+        time: f64,
+        time_tol: f64,
+        expr_tol: f64,
+    ) -> Result<f64, String> {
+        Self::validate_value_and_time(value, time)?;
+        Self::validate_tolerance("time_tol", time_tol)?;
+        Self::validate_tolerance("expr_tol", expr_tol)?;
+        Ok(0.0)
+    }
+
     /// Evaluate `cross(expr, direction, time_tol, expr_tol, enable)`.
     pub fn eval_event(
         &mut self,

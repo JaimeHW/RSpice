@@ -2559,8 +2559,8 @@ impl Instance {
 		let AVJ=ALO[1];
 		let AVK=ALO[2];
 		let AVL=ALR;
-        self.event_state_candidate[0] = staged[98];
-        self.event_state_candidate[1] = staged[99];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[98]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[99]; }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(4),

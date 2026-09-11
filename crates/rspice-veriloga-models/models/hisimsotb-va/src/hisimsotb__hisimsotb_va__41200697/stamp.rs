@@ -17197,13 +17197,13 @@ impl Instance {
 		let PMT=OAS;
 		let PMU=OAW;
 		let PMV=(KFN* KGN);
-        self.event_state_candidate[0] = EOH;
-        self.event_state_candidate[1] = EOO;
-        self.event_state_candidate[2] = EOV;
-        self.event_state_candidate[3] = EPC;
-        self.event_state_candidate[4] = EPJ;
-        self.event_state_candidate[5] = EPQ;
-        self.event_state_candidate[6] = EPX;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = EOH; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = EOO; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = EOV; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = EPC; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = EPJ; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = EPQ; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = EPX; }
         if (H != 0.0) {
             stamper.stamp_potential_branch_local(Some(3), Some(6), 0, multiplicity);
         } else {

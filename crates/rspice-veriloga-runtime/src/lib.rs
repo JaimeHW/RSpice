@@ -2330,8 +2330,8 @@ impl<'a> GeneratedEvalContext<'a> {
             analysis_query_mask(
                 self.analysis.code(),
                 self.analysis_phase,
-                self.analysis_initial_step,
-                self.analysis_final_step,
+                self.analysis_initial_step(),
+                self.analysis_final_step(),
             ) & (1 << id)
                 != 0
         })
@@ -2386,12 +2386,12 @@ impl<'a> GeneratedEvalContext<'a> {
 
     #[inline]
     pub fn analysis_initial_step(&self) -> bool {
-        self.analysis_initial_step
+        self.dynamic_operators_enabled() && self.analysis_initial_step
     }
 
     #[inline]
     pub fn analysis_final_step(&self) -> bool {
-        self.analysis_final_step
+        self.dynamic_operators_enabled() && self.analysis_final_step
     }
 }
 
@@ -8531,8 +8531,8 @@ mod fixed_lane_tests {
             300.15,
             1,
             GeneratedAnalysisKind::Tran,
-            false,
-            false,
+            true,
+            true,
             GeneratedSimulationParameters::default(),
             GeneratedEvaluationMode::NewtonLimited,
         );
@@ -8541,8 +8541,8 @@ mod fixed_lane_tests {
             300.15,
             1,
             GeneratedAnalysisKind::Tran,
-            false,
-            false,
+            true,
+            true,
             GeneratedSimulationParameters::default(),
             GeneratedEvaluationMode::StaticProbe,
         );
@@ -8551,8 +8551,8 @@ mod fixed_lane_tests {
             300.15,
             1,
             GeneratedAnalysisKind::Tran,
-            false,
-            false,
+            true,
+            true,
             GeneratedSimulationParameters::default(),
             GeneratedEvaluationMode::StaticDaeProbe,
         );
@@ -8560,6 +8560,15 @@ mod fixed_lane_tests {
         assert!(dynamic.dynamic_operators_enabled());
         assert!(static_probe.dynamic_operators_enabled());
         assert!(!static_dae_probe.dynamic_operators_enabled());
+        for context in [&dynamic, &static_probe, &static_dae_probe] {
+            assert!(context.analysis("tran"));
+            assert!(context.analysis("__rspice_scope_tran"));
+            let events = context.dynamic_operators_enabled();
+            assert_eq!(context.analysis_initial_step(), events);
+            assert_eq!(context.analysis_final_step(), events);
+            assert_eq!(context.analysis("__rspice_initial_step"), events);
+            assert_eq!(context.analysis("__rspice_final_step"), events);
+        }
     }
 
     #[test]

@@ -1,0 +1,14 @@
+module static_dae_events(p, n, c);
+    inout p, n, c;
+    electrical p, n, c;
+    real starts = 0.0, ends = 0.0, ticks = 0.0, edges = 0.0, positives = 0.0;
+    analog begin
+        @(initial_step("tran")) starts = starts + 1.0;
+        @(final_step("tran")) ends = ends + 1.0;
+        @(timer(0.5, 0.5)) ticks = ticks + 1.0;
+        @(cross(V(p,n), 1, 1.0)) edges = edges + 1.0;
+        @(above(V(p,n), 1.0)) positives = positives + 1.0;
+        I(p,n) <+ 2.0*V(p,n) + starts + 10.0*ends + 100.0*ticks
+                   + 1000.0*edges + 10000.0*positives + ddt(3.0*V(p,n));
+    end
+endmodule

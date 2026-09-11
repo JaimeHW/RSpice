@@ -10851,10 +10851,10 @@ impl Instance {
 		let BLQ=BIW;
 		let BLR=BJI;
 		let BLS=BJU;
-        self.event_state_candidate[0] = staged[812];
-        self.event_state_candidate[1] = staged[813];
-        self.event_state_candidate[2] = staged[814];
-        self.event_state_candidate[3] = staged[815];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[812]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[813]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[814]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[815]; }
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(0),
             Some(2),

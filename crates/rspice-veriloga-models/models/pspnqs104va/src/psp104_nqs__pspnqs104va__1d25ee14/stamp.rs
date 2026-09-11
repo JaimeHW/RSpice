@@ -36228,13 +36228,13 @@ impl Instance {
 		let VEU=UMI[0];
 		let VEV=UMI[1];
 		let VEW=UMI[2];
-        self.event_state_candidate[0] = JOP;
-        self.event_state_candidate[1] = JOC;
-        self.event_state_candidate[2] = JNA;
-        self.event_state_candidate[3] = JNP;
-        self.event_state_candidate[4] = JMM;
-        self.event_state_candidate[5] = JLK;
-        self.event_state_candidate[6] = JLY;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = JOP; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = JOC; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = JNA; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = JNP; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = JMM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = JLK; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = JLY; }
         if (CH != 0.0) {
             stamper.stamp_potential_branch_local(Some(12), None, 0, multiplicity);
         } else {

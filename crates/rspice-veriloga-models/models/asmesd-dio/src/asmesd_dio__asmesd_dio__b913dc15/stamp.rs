@@ -942,10 +942,10 @@ impl Instance {
 		let VO=SK[4];
 		let VP=SV;
 		let VQ=(NO* OS);
-        self.event_state_candidate[0] = KA;
-        self.event_state_candidate[1] = KG;
-        self.event_state_candidate[2] = KM;
-        self.event_state_candidate[3] = KX;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = KA; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = KG; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = KM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = KX; }
         if (LT != 0.0) {
             stamper.stamp_potential_branch_local(Some(6), None, 0, multiplicity);
         } else {

@@ -2078,10 +2078,10 @@ impl Instance {
 		let AJX=ZY[0];
 		let AJY=ZY[1];
 		let AJZ=ADH;
-        self.event_state_candidate[0] = staged[36];
-        self.event_state_candidate[1] = staged[37];
-        self.event_state_candidate[2] = staged[38];
-        self.event_state_candidate[3] = staged[39];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[36]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[37]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[38]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[39]; }
         if (AM != 0.0) {
             stamper.stamp_potential_branch_local(Some(12), Some(13), 0, multiplicity);
         } else {

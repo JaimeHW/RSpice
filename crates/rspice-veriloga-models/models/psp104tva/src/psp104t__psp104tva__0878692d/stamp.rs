@@ -25515,13 +25515,13 @@ impl Instance {
 		let JZP=JNW[3];
 		let JZQ=JNW[4];
 		let JZR=JNW[5];
-        self.event_state_candidate[0] = staged[1583];
-        self.event_state_candidate[1] = staged[1584];
-        self.event_state_candidate[2] = staged[1585];
-        self.event_state_candidate[3] = staged[1586];
-        self.event_state_candidate[4] = staged[1587];
-        self.event_state_candidate[5] = staged[1588];
-        self.event_state_candidate[6] = staged[1589];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[1583]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[1584]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[1585]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[1586]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = staged[1587]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = staged[1588]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = staged[1589]; }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(8),
             Some(9),

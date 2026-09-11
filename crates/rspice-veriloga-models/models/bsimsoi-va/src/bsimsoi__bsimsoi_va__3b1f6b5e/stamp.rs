@@ -11507,15 +11507,15 @@ impl Instance {
 		let FXK=FOZ[3];
 		let FXL=FOZ[4];
 		let FXM=FOZ[5];
-        self.event_state_candidate[0] = staged[747];
-        self.event_state_candidate[1] = staged[748];
-        self.event_state_candidate[2] = staged[749];
-        self.event_state_candidate[3] = staged[750];
-        self.event_state_candidate[4] = staged[751];
-        self.event_state_candidate[5] = staged[752];
-        self.event_state_candidate[6] = staged[753];
-        self.event_state_candidate[7] = staged[754];
-        self.event_state_candidate[8] = staged[755];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[747]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[748]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[749]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[750]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = staged[751]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = staged[752]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = staged[753]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = staged[754]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = staged[755]; }
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(7),
             Some(8),

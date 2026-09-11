@@ -4399,6 +4399,47 @@ assert_eq!(active_again[1], -3.0, "reactive cache restores after re-enable: {act
 }
 
 #[test]
+fn generated_static_dae_event_bodies_retain_the_settled_candidate() {
+    let (state, stamp, noise) = generated_parts(
+        include_str!("fixtures/static_dae_events.va"),
+        "static DAE event observation",
+    );
+    let body = r#"
+let mut instance = device::state::Instance::new(&[0, 1, 2]);
+instance.finalize_parameters().unwrap();
+runtime::set_event_analysis(true, false);
+for (time, voltage, initial, final_step, expected) in [
+    (0.0, -1.0, true, false, -1.0),
+    (0.5, 1.0, false, true, 11113.0),
+] {
+    runtime::set_analysis_steps(initial, final_step);
+    let voltages = [voltage, 0.0, 0.0];
+    let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
+    instance.set_timepoint(time, 0.5, runtime::GeneratedDdtCoefficients {
+        active: true, derivative_scale: 2.0, previous_value_scale: 2.0,
+        older_value_scale: 0.0, previous_derivative_scale: 0.0,
+    });
+    instance.begin_stateful_evaluation();
+    let mut sink = [0.0; 10];
+    instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+    let before = instance.capture_rollback_state();
+    runtime::set_dynamic_operators_enabled(false);
+    for _ in 0..2 {
+        let mut sink = [0.0; 10];
+        instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
+        assert_eq!(sink[9], expected, "event static current: {sink:?}");
+        assert_eq!(instance.capture_rollback_state(), before);
+    }
+    runtime::set_dynamic_operators_enabled(true);
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+}
+"#;
+    run_generated_main("static DAE event observation", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("static DAE event observation failed:\n{report}"));
+}
+
+#[test]
 fn generated_static_dae_probe_excludes_dynamic_current_without_mutating_state() {
     let (state, stamp, noise) = generated_parts(
         r#"
@@ -7505,10 +7546,10 @@ pub mod runtime {
             if self.analysis("ac") { 1 } else if self.analysis("tran") { 2 } else { 0 }
         }
         pub fn analysis_initial_step(&self) -> bool {
-            ANALYSIS_INITIAL_STEP.load(std::sync::atomic::Ordering::SeqCst)
+            self.dynamic_operators_enabled() && ANALYSIS_INITIAL_STEP.load(std::sync::atomic::Ordering::SeqCst)
         }
         pub fn analysis_final_step(&self) -> bool {
-            ANALYSIS_FINAL_STEP.load(std::sync::atomic::Ordering::SeqCst)
+            self.dynamic_operators_enabled() && ANALYSIS_FINAL_STEP.load(std::sync::atomic::Ordering::SeqCst)
         }
         pub fn analysis_tran(&self) -> bool {
             ANALYSIS_TRAN.load(std::sync::atomic::Ordering::SeqCst)

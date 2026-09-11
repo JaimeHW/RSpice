@@ -3720,8 +3720,8 @@ impl Instance {
 		let CWL=COJ[4];
 		let CWM=COJ[5];
 		let CWN=COY;
-        self.event_state_candidate[0] = BHU;
-        self.event_state_candidate[1] = BIF;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = BHU; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = BIF; }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(7),
             Some(8),

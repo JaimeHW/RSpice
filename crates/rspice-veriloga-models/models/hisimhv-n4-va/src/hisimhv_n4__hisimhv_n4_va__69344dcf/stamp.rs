@@ -78088,18 +78088,18 @@ impl Instance {
 		let BRKH=BPBI;
 		let BRKI=BPBM;
 		let BRKJ=(AVYV* AWAH);
-        self.event_state_candidate[0] = UMH;
-        self.event_state_candidate[1] = UMO;
-        self.event_state_candidate[2] = UMV;
-        self.event_state_candidate[3] = UNB;
-        self.event_state_candidate[4] = UNI;
-        self.event_state_candidate[5] = UNP;
-        self.event_state_candidate[6] = UNV;
-        self.event_state_candidate[7] = UOC;
-        self.event_state_candidate[8] = UOJ;
-        self.event_state_candidate[9] = UOQ;
-        self.event_state_candidate[10] = UOX;
-        self.event_state_candidate[11] = UPE;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = UMH; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = UMO; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = UMV; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = UNB; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = UNI; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = UNP; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = UNV; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = UOC; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = UOJ; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[9] = UOQ; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[10] = UOX; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[11] = UPE; }
         stamper.stamp_current_sparse_local::<7, 0>(
             Some(5),
             Some(7),

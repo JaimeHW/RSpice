@@ -2853,7 +2853,7 @@ impl ModelPlan {
         {
             let _ = writeln!(
                 out,
-                "        self.event_state_candidate[{slot}] = {};",
+                "        if ctx.dynamic_operators_enabled() {{ self.event_state_candidate[{slot}] = {}; }}",
                 values[position]
             );
         }
@@ -3362,7 +3362,7 @@ impl ModelPlan {
             out.push_str("        let parameter_given = &*self.param_given;\n");
         }
         if wants.event_state {
-            out.push_str("        let event_state = &*self.event_state_accepted;\n");
+            out.push_str("        let event_state = if ctx.dynamic_operators_enabled() { &*self.event_state_accepted } else { &*self.event_state_candidate };\n");
         }
         if wants.multiplicity {
             out.push_str("        let multiplicity = self.multiplicity;\n");
@@ -3751,7 +3751,10 @@ impl ModelPlan {
             let _ = writeln!(out, "{pad}let parameter_given = &*self.param_given;");
         }
         if wants.event_state {
-            let _ = writeln!(out, "{pad}let event_state = &*self.event_state_accepted;");
+            let _ = writeln!(
+                out,
+                "{pad}let event_state = if ctx.dynamic_operators_enabled() {{ &*self.event_state_accepted }} else {{ &*self.event_state_candidate }};"
+            );
         }
         if wants.multiplicity {
             let _ = writeln!(out, "{pad}let multiplicity = self.multiplicity;");
@@ -3897,11 +3900,12 @@ impl ModelPlan {
                 "{pad}macro_rules! rspice_cross {{ ($slot:expr, $value:expr, $direction:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
                  {pad}    let slot = $slot;\n\
                  {pad}    match evaluate_generated_cross(self.cross_event_accepted[slot], $value, self.time, $direction, $time_tol, $expr_tol, $enable, ctx.analysis_tran()) {{\n\
-                 {pad}        Ok(evaluation) => {{\n\
+                 {pad}        Ok(evaluation) if ctx.dynamic_operators_enabled() => {{\n\
                  {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
                  {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
                  {pad}            evaluation.fired as u8 as f64\n\
                  {pad}        }}\n\
+                 {pad}        Ok(_) => 0.0,\n\
                  {pad}        Err(source) => {{ ctx.report_event_control_error(\"cross\", slot, source); 0.0 }}\n\
                  {pad}    }}\n\
                  {pad}}}}}; }}"
@@ -3922,11 +3926,12 @@ impl ModelPlan {
                 "{pad}macro_rules! rspice_above {{ ($slot:expr, $value:expr, $time_tol:expr, $expr_tol:expr, $enable:expr) => {{{{\n\
                  {pad}    let slot = $slot;\n\
                  {pad}    match evaluate_generated_above(self.cross_event_accepted[slot], $value, self.time, $time_tol, $expr_tol, $enable, ctx.analysis_static()) {{\n\
-                 {pad}        Ok(evaluation) => {{\n\
+                 {pad}        Ok(evaluation) if ctx.dynamic_operators_enabled() => {{\n\
                  {pad}            self.cross_event_candidate[slot] = evaluation.candidate;\n\
                  {pad}            if let Some(target) = evaluation.refinement_time {{ self.event_refinement_time = self.event_refinement_time.min(target); }}\n\
                  {pad}            evaluation.fired as u8 as f64\n\
                  {pad}        }}\n\
+                 {pad}        Ok(_) => 0.0,\n\
                  {pad}        Err(source) => {{ ctx.report_event_control_error(\"above\", slot, source); 0.0 }}\n\
                  {pad}    }}\n\
                  {pad}}}}}; }}"
@@ -3963,8 +3968,10 @@ impl ModelPlan {
                 "{pad}macro_rules! rspice_timer {{ ($slot:expr, $start:expr, $period:expr, $time_tol:expr, $enable:expr) => {{{{\n\
                  {pad}    let _ = $slot;\n\
                  {pad}    let (fired, next_event) = evaluate_generated_timer($start, $period, $time_tol, $enable, self.time, self.timestep);\n\
-                 {pad}    if let Some(target) = next_event {{ self.timer_event_bound_candidate = self.timer_event_bound_candidate.min(target); }}\n\
-                 {pad}    fired as u8 as f64\n\
+                 {pad}    if ctx.dynamic_operators_enabled() {{\n\
+                 {pad}        if let Some(target) = next_event {{ self.timer_event_bound_candidate = self.timer_event_bound_candidate.min(target); }}\n\
+                 {pad}        fired as u8 as f64\n\
+                 {pad}    }} else {{ 0.0 }}\n\
                  {pad}}}}}; }}"
             ));
         }

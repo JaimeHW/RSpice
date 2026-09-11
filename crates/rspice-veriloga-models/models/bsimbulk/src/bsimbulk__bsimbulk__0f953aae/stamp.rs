@@ -15582,17 +15582,17 @@ impl Instance {
 		let JCY=IMI[1];
 		let JCZ=IMI[2];
 		let JDA=IMT;
-        self.event_state_candidate[0] = staged[843];
-        self.event_state_candidate[1] = staged[844];
-        self.event_state_candidate[2] = staged[845];
-        self.event_state_candidate[3] = staged[846];
-        self.event_state_candidate[4] = staged[847];
-        self.event_state_candidate[5] = staged[848];
-        self.event_state_candidate[6] = staged[849];
-        self.event_state_candidate[7] = staged[850];
-        self.event_state_candidate[8] = staged[851];
-        self.event_state_candidate[9] = staged[852];
-        self.event_state_candidate[10] = staged[853];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[843]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[844]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[845]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[846]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = staged[847]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = staged[848]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = staged[849]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = staged[850]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = staged[851]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[9] = staged[852]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[10] = staged[853]; }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(7),

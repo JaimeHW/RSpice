@@ -19671,10 +19671,10 @@ impl Instance {
 		let QDU=PTK[3];
 		let QDV=PTK[4];
 		let QDW=PTK[5];
-        self.event_state_candidate[0] = staged[474];
-        self.event_state_candidate[1] = staged[475];
-        self.event_state_candidate[2] = staged[476];
-        self.event_state_candidate[3] = staged[477];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[474]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[475]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[476]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[477]; }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
             Some(7),

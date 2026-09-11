@@ -31134,17 +31134,17 @@ impl Instance {
 		let ACTS=ACQL[6];
 		let ACOV=ABSH[7];
 		let ACTT=ACQL[7];
-        self.event_state_candidate[0] = HOX;
-        self.event_state_candidate[1] = HPG;
-        self.event_state_candidate[2] = HPP;
-        self.event_state_candidate[3] = HPW;
-        self.event_state_candidate[4] = HQD;
-        self.event_state_candidate[5] = HQM;
-        self.event_state_candidate[6] = HQT;
-        self.event_state_candidate[7] = HRE;
-        self.event_state_candidate[8] = HRL;
-        self.event_state_candidate[9] = HRW;
-        self.event_state_candidate[10] = HSD;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = HOX; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = HPG; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = HPP; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = HPW; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = HQD; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = HQM; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = HQT; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = HRE; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = HRL; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[9] = HRW; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[10] = HSD; }
         if (C != 0.0) {
             stamper.stamp_potential_branch_local(Some(5), None, 0, multiplicity);
         } else {

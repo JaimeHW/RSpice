@@ -1521,6 +1521,71 @@ integral operators need the correct previous-input term independently of the
 weight applied to ddt contributions. No full-suite, shipping-platform or licensed
 reference qualification is claimed by this increment.
 
+## Static observations retain settled analog event state
+
+A static observation must not run an analog event body a second time on its
+retained candidate. Runtime StaticDaeProbe now suppresses initial/final-step,
+timer, cross and above event guards while preserving the physical analysis and
+phase. Cross/above observations still validate their numerical inputs and
+tolerances, without allocating or changing detectors or requesting a refinement.
+Timer observations cannot fire or publish another time bound. Native x64 and
+AArch64 global-event code reads the observation policy explicitly; VM/Wasm query
+masks suppress only the global event flags. Physical analysis queries remain
+unchanged.
+
+Generated Rust now reads procedural event variables from the candidate during a
+static observation, suppresses event firing, and avoids publishing event-variable,
+detector and timer updates. The core generated-device observation no longer
+resets event state from accepted history before stamping. Its existing rollback
+snapshot still restores all device state after either successful or failed
+observation. Ordinary Newton, residual-probe and small-signal lifecycle behavior
+retains the existing event evaluation policy.
+
+One shared authored model exercises five independent event counters: initial,
+final, timer, cross and above, together with static conductance and ddt current.
+Its exact static currents are -1 at startup and 11113 after the scheduled rising
+candidate; repeated static observations retain those values without replaying the
+counters. The native device test additionally verifies the static Jacobian and
+unchanged original context. The VM case checks frozen guards, physical tran
+identity and invalid tolerance diagnostics. Wasm automatic and postfix plans run
+in wasmi against the same model. Their harness now allocates detector/event state
+and transfers the variable array and analysis mask just as the primary worker
+dispatch does; the initially missing harness storage/mask produced the recorded
+failures, rather than successful qualification. The corrected Wasm event case
+passed in 0.01 seconds after a 6.86-second test build. Two generated-Rust static
+observation cases passed in 0.61 seconds after a 31.95-second build. The initial
+six-test VM/native/Wasm selection passed five cases; only the Wasm fixture needed
+those harness corrections. No full suite was run.
+
+Logs: static-dae-events.log, static-dae-events-wasm.log,
+static-dae-events-wasm-frame.log and static-dae-events-generated.log, all under
+target/unified-mixed-fixes. The actual generated runtime policy check passed in
+0.00 seconds after a 55.79-second dependency build; it keeps physical tran/scope
+queries true while suppressing the two global-event flags only in StaticDaeProbe.
+The native x64 emitted-query check passed in 0.00 seconds after a 7.52-second
+build, covering all query IDs, physical analyses, phases and initial/final flag
+combinations with and without static observation. The corresponding AArch64 case
+is updated for its platform run and was not executed on this x64 host. Logs:
+static-dae-event-mode.log and static-dae-event-analysis.log. The authoritative
+generator regenerated all 43 built-ins; 35 stamp files and three noise files now
+select the correct procedural-state bank, with their manifest hashes updated.
+Generator digest: 2c14fba97c54558578e51e4e4475399096eaf15a3d89448bbaf5e9e092f4deda.
+Log: static-dae-event-generator.log. Rebased onto concurrent main e94cdd760,
+preserving its BJT base-resistance/temperature-control changes. The initial core
+selection compiled but ran zero cases because VBIC13 is not a default feature;
+static-dae-event-core.log is build evidence only. With veriloga-model-vbic13
+explicitly enabled, generated_static_dae_probe_restores_event_candidate_bitwise
+passed in 0.00 seconds after a 110-second build. It exercises the production
+adapter and preserves all accepted/candidate numeric bits and flags. Log:
+static-dae-event-core-vbic.log. No additional broad test run was performed.
+
+This closes event-body re-entry for these static-observation routes. MS08 still
+requires filter/static decomposition, correct runtime/mixed OneStep2 derivative
+and integral weighting, and a settled shared candidate in complete circuit
+static-history capture. Actual AArch64, browser-worker and tablet execution
+remain platform qualifications; this native-host evidence does not replace them.
+No licensed reference installation is available and Spectre parity is unproven.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

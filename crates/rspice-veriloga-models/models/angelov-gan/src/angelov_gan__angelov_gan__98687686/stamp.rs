@@ -2366,10 +2366,10 @@ impl Instance {
 		let ARX=AMM[3];
 		let ARY=AML[4];
 		let ARZ=AMM[4];
-        self.event_state_candidate[0] = staged[51];
-        self.event_state_candidate[1] = staged[52];
-        self.event_state_candidate[2] = staged[53];
-        self.event_state_candidate[3] = staged[54];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[51]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[52]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[53]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[54]; }
         if (AR != 0.0) {
             stamper.stamp_potential_branch_local(Some(15), Some(16), 0, multiplicity);
         } else {

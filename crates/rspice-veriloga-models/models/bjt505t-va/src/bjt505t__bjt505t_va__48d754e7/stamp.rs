@@ -4078,8 +4078,8 @@ impl Instance {
 		let DHS=CYD[4];
 		let DHT=CYD[5];
 		let DHU=CYS;
-        self.event_state_candidate[0] = BOE;
-        self.event_state_candidate[1] = BOQ;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = BOE; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = BOQ; }
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(8),
             Some(9),

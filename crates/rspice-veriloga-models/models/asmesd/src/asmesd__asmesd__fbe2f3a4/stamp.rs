@@ -1777,11 +1777,11 @@ impl Instance {
 		let AST=AMM[3];
 		let ASU=ANB;
 		let ASV=(ABW* ACX);
-        self.event_state_candidate[0] = WU;
-        self.event_state_candidate[1] = XA;
-        self.event_state_candidate[2] = XH;
-        self.event_state_candidate[3] = XN;
-        self.event_state_candidate[4] = XY;
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = WU; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = XA; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = XH; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = XN; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = XY; }
         if (YU != 0.0) {
             stamper.stamp_potential_branch_local(Some(8), None, 0, multiplicity);
         } else {

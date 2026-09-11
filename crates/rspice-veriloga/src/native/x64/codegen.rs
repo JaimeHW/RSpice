@@ -4444,10 +4444,18 @@ impl FunctionCompiler {
             } else {
                 ANALYSIS_FINAL_STEP_OFFSET
             };
+            self.encoder.xorpd_xmm_xmm(dst, dst);
+            self.encoder.movzx_r32_m8_base_disp32(
+                Gpr::R10,
+                self.ctx_arg_reg(),
+                std::mem::offset_of!(EvalContext, static_dae_probe) as i32,
+            );
+            self.encoder.test_r64_r64(Gpr::R10, Gpr::R10);
+            let frozen = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
             self.encoder
                 .movzx_r32_m8_base_disp32(Gpr::R10, self.ctx_arg_reg(), offset);
             self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
-            return Ok(());
+            return self.patch_rel32_to_current(frozen);
         }
         if analysis_id >= rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT {
             self.encoder.xorpd_xmm_xmm(dst, dst);
@@ -12256,6 +12264,7 @@ mod tests {
                     for (initial, final_step) in
                         [(false, false), (true, false), (false, true), (true, true)]
                     {
+                        context.static_dae_probe = 0;
                         context.analysis_type = analysis;
                         context.analysis_phase = phase;
                         context.analysis_initial_step = u8::from(initial);
@@ -12269,6 +12278,16 @@ mod tests {
                             f(&context, std::ptr::null()),
                             expected,
                             "query {query}, analysis {analysis}, phase {phase:?}"
+                        );
+                        context.static_dae_probe = 1;
+                        assert_eq!(
+                            f(&context, std::ptr::null()),
+                            if matches!(query, 7 | 8) {
+                                0.0
+                            } else {
+                                expected
+                            },
+                            "static observation query {query}, analysis {analysis}, phase {phase:?}"
                         );
                     }
                 }

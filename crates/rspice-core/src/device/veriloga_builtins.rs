@@ -1807,15 +1807,11 @@ impl BuiltinVerilogAInstance {
         // event-controlled variables, DDT/IDT history, or limiter anchors.
         let static_dae_state = (evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe)
             .then(|| self.kind.capture_rollback_state());
-        // Procedural variables written by event controls are transactional in
-        // every analysis, including modes where dynamic operators are off.
-        // StaticDaeProbe must preserve the integration candidate produced by
-        // the preceding complete OneStep stamp, so only dynamic evaluations
-        // normalize the DDT/IDT candidates as well.
+        // Static history observes the settled candidate, including event
+        // variables and integration state. Only a new dynamic evaluation
+        // restarts those lanes from accepted history.
         if ctx.dynamic_operators_enabled() {
             self.kind.begin_stateful_evaluation();
-        } else {
-            self.kind.begin_event_state_evaluation();
         }
         if evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe {
             // OneStep history capture evaluates only F(x)-B(t), with dynamic

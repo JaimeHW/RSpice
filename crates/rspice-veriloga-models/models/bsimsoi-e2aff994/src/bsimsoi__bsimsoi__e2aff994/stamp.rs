@@ -27170,14 +27170,14 @@ impl Instance {
 		let WKI=VPX[1];
 		let WKJ=VQJ[0];
 		let WKK=VQJ[1];
-        self.event_state_candidate[0] = staged[1082];
-        self.event_state_candidate[1] = staged[1083];
-        self.event_state_candidate[2] = staged[1084];
-        self.event_state_candidate[3] = staged[1085];
-        self.event_state_candidate[4] = staged[1086];
-        self.event_state_candidate[5] = staged[1087];
-        self.event_state_candidate[6] = staged[1088];
-        self.event_state_candidate[7] = staged[1089];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[1082]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[1083]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[1084]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[1085]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = staged[1086]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = staged[1087]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = staged[1088]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = staged[1089]; }
         if (staged[1110] != 0.0) {
             stamper.stamp_potential_branch_local(Some(12), None, 0, multiplicity);
         } else {

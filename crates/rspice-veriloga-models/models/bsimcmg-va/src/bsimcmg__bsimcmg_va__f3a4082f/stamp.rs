@@ -21932,19 +21932,19 @@ impl Instance {
 		let NIL=MOC[9];
 		let NIM=MOC[10];
 		let NIN=MOC[11];
-        self.event_state_candidate[0] = staged[1089];
-        self.event_state_candidate[1] = staged[1090];
-        self.event_state_candidate[2] = staged[1091];
-        self.event_state_candidate[3] = staged[1092];
-        self.event_state_candidate[4] = staged[1093];
-        self.event_state_candidate[5] = staged[1094];
-        self.event_state_candidate[6] = staged[1095];
-        self.event_state_candidate[7] = staged[1096];
-        self.event_state_candidate[8] = staged[1097];
-        self.event_state_candidate[9] = staged[1098];
-        self.event_state_candidate[10] = staged[1099];
-        self.event_state_candidate[11] = staged[1100];
-        self.event_state_candidate[12] = staged[1101];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[1089]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[1090]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[1091]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[1092]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[4] = staged[1093]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[5] = staged[1094]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[6] = staged[1095]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[7] = staged[1096]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[8] = staged[1097]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[9] = staged[1098]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[10] = staged[1099]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[11] = staged[1100]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[12] = staged[1101]; }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(5),
             Some(6),

@@ -1003,6 +1003,17 @@ impl<'a> Vm<'a> {
                 let direction = event_integer_operand("cross direction", direction)?;
                 let enabled = event_integer_operand("cross enable", enable)? != 0;
                 let is_transient = self.context.analysis_type == 2;
+                if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    let result =
+                        super::CrossDetector::observe_event(value, time, time_tol, expr_tol)
+                            .map_err(|error| {
+                                VmError::InvalidNumericResult(format!(
+                                    "cross observation failed: {error}"
+                                ))
+                            })?;
+                    self.stack.push(result);
+                    return Ok(());
+                }
 
                 if self.context.cross_detectors.len() <= *detector_id {
                     self.context
@@ -1082,6 +1093,20 @@ impl<'a> Vm<'a> {
                 let expr_tol = self.pop()?;
                 let time_tol = self.pop()?;
                 let value = self.pop()?;
+                if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                    event_integer_operand("above enable", enable)?;
+                    let result = super::CrossDetector::observe_event(
+                        value,
+                        self.context.time,
+                        time_tol,
+                        expr_tol,
+                    )
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!("above observation failed: {error}"))
+                    })?;
+                    self.stack.push(result);
+                    return Ok(());
+                }
                 if self.context.cross_detectors.len() <= *detector_id {
                     self.context
                         .cross_detectors
@@ -1124,6 +1149,10 @@ impl<'a> Vm<'a> {
                     // `timer` is a transient event source. In particular, a
                     // one-shot at t=0 must not execute its event body during
                     // the equilibrium solve used by DC, AC, noise, or IC.
+                    self.stack.push(0.0);
+                    return Ok(());
+                }
+                if !self.context.evaluation_mode.dynamic_operators_enabled() {
                     self.stack.push(0.0);
                     return Ok(());
                 }
@@ -2010,6 +2039,69 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_event_guards_are_checked_without_detector_or_timer_changes() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.analysis_initial_step = true;
+        context.analysis_final_step = true;
+        context.time = 0.5;
+        context.set_timestep(0.5);
+        context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticDaeProbe;
+        context.begin_stateful_evaluation();
+        let before = format!("{context:?}");
+        for instructions in [
+            vec![Instruction::Analysis(7)],
+            vec![Instruction::Analysis(8)],
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
+                Instruction::CrossState(0),
+            ],
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
+                Instruction::AboveState(0),
+            ],
+            vec![
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(0.5),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
+                Instruction::TimerState(0),
+            ],
+        ] {
+            assert_eq!(
+                execute_with_context(&mut context, instructions).unwrap(),
+                0.0
+            );
+            assert_eq!(format!("{context:?}"), before);
+        }
+        assert_eq!(
+            execute_with_context(&mut context, vec![Instruction::Analysis(2)]).unwrap(),
+            1.0
+        );
+        assert!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(-1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::AboveState(0),
+                ]
+            )
+            .is_err(),
+            "static observation still validates authored event tolerances"
+        );
     }
 
     #[test]

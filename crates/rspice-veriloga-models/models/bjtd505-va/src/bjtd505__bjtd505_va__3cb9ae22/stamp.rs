@@ -3391,8 +3391,8 @@ impl Instance {
 		let BMU=BDF[3];
 		let BMV=BDF[4];
 		let BMW=BFE;
-        self.event_state_candidate[0] = staged[189];
-        self.event_state_candidate[1] = staged[190];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[189]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[190]; }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(6),
             Some(7),

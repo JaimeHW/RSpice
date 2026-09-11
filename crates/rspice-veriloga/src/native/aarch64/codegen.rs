@@ -2675,9 +2675,18 @@ impl FunctionCompiler {
             } else {
                 ANALYSIS_FINAL_STEP_OFFSET
             };
+            self.emit_literal(result, 0.0)?;
+            self.encoder.ldrb_w_unsigned(
+                XReg::X16,
+                self.context_register(),
+                std::mem::offset_of!(EvalContext, static_dae_probe),
+            )?;
+            let frozen = self.encoder.cbnz_placeholder(XReg::X16)?;
             self.encoder
                 .ldrb_w_unsigned(XReg::X16, self.context_register(), offset)?;
-            return self.encoder.scvtf_d_x(result, XReg::X16);
+            self.encoder.scvtf_d_x(result, XReg::X16)?;
+            self.encoder.patch_branch(frozen, self.encoder.position())?;
+            return Ok(());
         }
         if analysis_id >= rspice_veriloga_runtime::ANALYSIS_QUERY_COUNT {
             return self.emit_literal(result, 0.0);
@@ -4900,6 +4909,7 @@ mod tests {
                     for (initial, final_step) in
                         [(false, false), (true, false), (false, true), (true, true)]
                     {
+                        context.static_dae_probe = 0;
                         context.analysis_type = analysis;
                         context.analysis_phase = phase;
                         context.analysis_initial_step = u8::from(initial);
@@ -4913,6 +4923,16 @@ mod tests {
                             execute_with_context(&analysis_program, &context, &[]),
                             expected,
                             "query {query}, analysis {analysis}, phase {phase:?}"
+                        );
+                        context.static_dae_probe = 1;
+                        assert_eq!(
+                            execute_with_context(&analysis_program, &context, &[]),
+                            if matches!(query, 7 | 8) {
+                                0.0
+                            } else {
+                                expected
+                            },
+                            "static observation query {query}, analysis {analysis}, phase {phase:?}"
                         );
                     }
                 }

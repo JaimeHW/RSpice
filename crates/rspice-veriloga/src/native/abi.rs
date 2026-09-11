@@ -1977,6 +1977,9 @@ pub unsafe extern "C" fn rspice_timer_state_native(
         }
         return 0.0;
     }
+    if ctx.static_dae_probe != 0 {
+        return 0.0;
+    }
     let (result, next_event) = crate::vm::timer_event_evaluation(
         operands[0],
         operands[1],
@@ -2595,9 +2598,12 @@ pub unsafe extern "C" fn rspice_cross_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let crossed = match detectors[detector_id]
-        .eval_event(value, ctx.time, direction, time_tol, expr_tol, enabled)
-    {
+    let evaluation = if ctx.static_dae_probe != 0 {
+        crate::vm::CrossDetector::observe_event(value, ctx.time, time_tol, expr_tol)
+    } else {
+        detectors[detector_id].eval_event(value, ctx.time, direction, time_tol, expr_tol, enabled)
+    };
+    let crossed = match evaluation {
         Ok(crossed) => crossed,
         Err(error) => {
             set_native_context_error(ctx, format!("cross evaluation failed: {error}"));
@@ -2669,7 +2675,9 @@ pub unsafe extern "C" fn rspice_above_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let result = if rspice_veriloga_runtime::analysis_query_mask(
+    let result = if ctx.static_dae_probe != 0 {
+        crate::vm::CrossDetector::observe_event(operands[0], ctx.time, operands[1], operands[2])
+    } else if rspice_veriloga_runtime::analysis_query_mask(
         ctx.analysis_type,
         ctx.analysis_phase,
         false,

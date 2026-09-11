@@ -497,8 +497,8 @@ impl VmContext {
         rspice_veriloga_runtime::analysis_query_mask(
             self.analysis_type,
             self.analysis_phase,
-            self.analysis_initial_step,
-            self.analysis_final_step,
+            self.analysis_initial_step && self.evaluation_mode.dynamic_operators_enabled(),
+            self.analysis_final_step && self.evaluation_mode.dynamic_operators_enabled(),
         )
     }
 

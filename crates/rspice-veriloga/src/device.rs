@@ -8749,6 +8749,49 @@ mod static_dae_device_tests {
     use crate::{CompilerOptions, VerilogACompiler, vm::VerilogAEvaluationMode as Mode};
 
     #[test]
+    fn static_dae_observation_retains_event_bodies_without_replaying_them() {
+        let source = include_str!("../tests/fixtures/static_dae_events.va");
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "EVENT_STATIC",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0, 0],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        device.set_timestep(0.5);
+        for (time, voltage, initial, final_step, expected) in [
+            (0.0, -1.0, true, false, -1.0),
+            (0.5, 1.0, false, true, 11113.0),
+        ] {
+            device.set_time(time);
+            device.set_analysis_step(initial, final_step);
+            device
+                .try_stamp(&[voltage], |_, _, _| {}, |_, _| {})
+                .unwrap();
+            let before = format!("{:?}", device.context);
+            for _ in 0..2 {
+                let (mut jacobian, mut rhs) = (0.0, 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[voltage],
+                        |_, _, value| jacobian += value,
+                        |_, value| rhs += value,
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(jacobian, 2.0);
+                assert_eq!(jacobian * voltage - rhs, expected);
+                assert_eq!(format!("{:?}", device.context), before);
+            }
+            device.context.advance_state().unwrap();
+        }
+    }
+
+    #[test]
     fn static_dae_probe_retains_integrals_and_isolates_success_and_failure() {
         let source = r#"
 module static_history(p, n);

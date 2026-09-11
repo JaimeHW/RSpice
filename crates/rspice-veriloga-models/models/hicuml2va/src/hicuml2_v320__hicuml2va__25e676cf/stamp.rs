@@ -6107,7 +6107,7 @@ impl Instance {
 		let DUB=DKD;
 		let DUC=DKE;
 		let DUD=(DHU* KJ);
-        self.event_state_candidate[0] = staged[210];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[210]; }
         if (staged[235] != 0.0) {
             stamper.stamp_potential_branch_local(Some(7), Some(8), 0, multiplicity);
         } else {

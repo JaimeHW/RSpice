@@ -3170,7 +3170,7 @@ impl Instance {
 		let BTD=BKD;
 		let BTE=BKF;
 		let BTF=(BOD* FW);
-        self.event_state_candidate[0] = staged[88];
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[88]; }
         if (staged[98] != 0.0) {
             stamper.stamp_potential_branch_local(Some(7), Some(2), 0, multiplicity);
         } else {

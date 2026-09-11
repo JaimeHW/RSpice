@@ -1571,6 +1571,7 @@ endmodule
         /// Jacobian entry count per stamp, in model order.
         stamp_jacobians: Vec<usize>,
         parameters: usize,
+        event_state_variables: Vec<usize>,
     }
 
     impl FusedKernelHarness {
@@ -1651,11 +1652,20 @@ endmodule
             let state_layout = crate::canonical_ir::state::CanonicalStateLayout::from_hir(
                 &report.canonical_ir.hir,
             );
-            let context = crate::vm::VmContext::with_states(
+            let mut context = crate::vm::VmContext::with_states(
                 report.model.num_terminals,
                 state_layout
                     .family_len(crate::canonical_ir::state::CanonicalStateFamily::Integration),
             );
+            context.cross_detectors.resize_with(
+                state_layout
+                    .family_len(crate::canonical_ir::state::CanonicalStateFamily::CrossDetector),
+                Default::default,
+            );
+            context.variables.resize(report.model.num_variables, 0.0);
+            context
+                .configure_event_state_variables(&report.model.event_state_variables)
+                .unwrap();
             let mut store =
                 Store::new(&engine, super::runtime::WasmJitRuntimeSession::new(context));
             let memory = Memory::new(&mut store, MemoryType::new(1, None))
@@ -1772,6 +1782,7 @@ endmodule
                 frame,
                 stamp_jacobians,
                 parameters,
+                event_state_variables: report.model.event_state_variables.clone(),
             }
         }
 
@@ -2009,6 +2020,87 @@ endmodule
                 harness.call_prelude();
                 assert_eq!(harness.call(&export), 0);
                 assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn static_dae_wasm_event_bodies_retain_the_settled_candidate() {
+        use super::abi::{FRAME_ANALYSIS_MASK_OFFSET, FRAME_RESULT_OFFSET};
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/static_dae_events.va");
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_dae_events", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            for (time, voltage, initial, final_step, expected) in [
+                (0.0, -1.0, true, false, -1.0),
+                (0.5, 1.0, false, true, 11113.0),
+            ] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(0.5);
+                context.analysis_initial_step = initial;
+                context.analysis_final_step = final_step;
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                let mask = context.analysis_query_mask();
+                let inputs = context.variables.clone();
+                harness
+                    .memory
+                    .write(
+                        &mut harness.store,
+                        FRAME_ANALYSIS_MASK_OFFSET as usize,
+                        &mask.to_le_bytes(),
+                    )
+                    .unwrap();
+                for (index, value) in inputs.iter().copied().enumerate() {
+                    harness.write_f64(FusedKernelHarness::VARIABLES as usize + index * 8, value);
+                }
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                let variables = (0..inputs.len())
+                    .map(|index| {
+                        harness.read_f64(FusedKernelHarness::VARIABLES as usize + index * 8)
+                    })
+                    .collect::<Vec<_>>();
+                let context = harness.store.data_mut().context_mut();
+                context.variables.clone_from(&variables);
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                let mask = context.analysis_query_mask();
+                harness
+                    .memory
+                    .write(
+                        &mut harness.store,
+                        FRAME_ANALYSIS_MASK_OFFSET as usize,
+                        &mask.to_le_bytes(),
+                    )
+                    .unwrap();
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    expected,
+                    "postfix={postfix}, time={time}, candidate={variables:?}"
+                );
+                for &index in &harness.event_state_variables {
+                    assert_eq!(
+                        harness.read_f64(FusedKernelHarness::VARIABLES as usize + index * 8),
+                        variables[index]
+                    );
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
             }
         }
     }
