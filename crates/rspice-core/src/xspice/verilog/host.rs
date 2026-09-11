@@ -328,6 +328,11 @@ impl From<StoreError> for DigitalRunError {
         // crate-private type, and so a caller reading a refusal sees one
         // vocabulary rather than two.
         match error {
+            StoreError::LinkedNetRequiresDriver { name } => Self::Compile {
+                detail: format!(
+                    "external drive of linked event net {name} requires a declared driver identity"
+                ),
+            },
             StoreError::UndeclaredSignal(signal) => Self::UnknownSignal {
                 name: format!("signal#{}", usize::from(signal)),
             },
@@ -523,17 +528,35 @@ impl DigitalHost {
         self.scheduler.limits()
     }
 
+    pub(crate) fn connect_bits(
+        &mut self,
+        nets: &[Vec<super::store::DigitalBitConnection>],
+    ) -> Result<(), DigitalRunError> {
+        self.store
+            .connect_bits(nets)
+            .map_err(|detail| DigitalRunError::Compile { detail })
+    }
+
+    pub(crate) fn connected_bit(
+        &self,
+        net: usize,
+    ) -> Option<rspice_veriloga::four_state::FourStateBit> {
+        self.store.connected_bit(net)
+    }
+
     pub(crate) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {
         &self.plan
     }
 
     /// A fresh run sharing the immutable design and retaining scheduler limits.
     pub(crate) fn fresh(&self) -> Self {
-        Self::from_plan(
+        let mut fresh = Self::from_plan(
             Arc::clone(&self.plan),
             self.scheduler.resolution(),
             self.scheduler.limits(),
-        )
+        );
+        fresh.store.inherit_bit_connections(&self.store);
+        fresh
     }
 
     /// The signal a name refers to.

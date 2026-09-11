@@ -86,9 +86,9 @@ impl Engine {
         }
     }
 
-    /// Pin only numerically empty XSPICE event rows that carry no analog RHS.
+    /// Pin only numerically empty event rows that carry no analog RHS.
     ///
-    /// Event values live in the XSPICE scheduler, but their stable node IDs
+    /// Event values live in the event runtimes, but their stable node IDs
     /// share the circuit node namespace. A pure event net therefore owns an
     /// otherwise empty MNA placeholder row. Pinning that placeholder to zero
     /// restores matrix rank without adding conductance to any physical row or
@@ -98,7 +98,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
-        if !circuit.has_xspice_event_driven_devices() {
+        if circuit.xspice_event_node_matrix_rows().next().is_none() {
             return;
         }
         let deficient_rows = matrix.deficient_rows();

@@ -312,20 +312,19 @@ impl CircuitData {
         self.xspice_has_event_driven_devices
     }
 
-    /// Recompute every net kind from the XSPICE instances that decide it.
-    ///
-    /// `add_xspice_instance` is the only writer of `net_kinds`, so the
-    /// instances are the record and the table is a cache of it. Choosing a
-    /// late ground reference renumbers every node above the new ground, which
-    /// moves an event connection onto a different node ID; replaying the marks
-    /// against the already-renumbered connections is what keeps the cache
-    /// honest. Rebuilding rather than permuting in place also drops the marks
-    /// of a net that became ground, which is not a net and takes no kind.
+    /// Rebuild event kinds from the already-renumbered XSPICE connections and
+    /// circuit HDL graph. Ground has no event kind.
     pub(crate) fn rebuild_net_kinds(&mut self) {
         self.net_kinds = NetKinds::default();
         for instance in &self.xspice_instances {
             for connection in instance.connections() {
                 mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
+            }
+        }
+        #[cfg(feature = "veriloga")]
+        if let Some(digital) = &self.mixed_digital_coordinator {
+            for node in digital.event_nodes() {
+                self.net_kinds.register(node, NetKind::Digital);
             }
         }
         // Renumbered connections move the nets the sensitivity map is keyed
@@ -341,7 +340,7 @@ impl CircuitData {
         self.net_kinds.kind(node).is_discrete()
     }
 
-    /// Zero-based MNA rows that also serve as XSPICE event-node identities.
+    /// Zero-based MNA rows that also serve as event-node identities.
     pub(crate) fn xspice_event_node_matrix_rows(&self) -> impl Iterator<Item = usize> + '_ {
         self.net_kinds.discrete_nodes().map(|node| node - 1)
     }

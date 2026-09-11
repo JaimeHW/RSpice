@@ -12,11 +12,9 @@
 //! `.VERILOGA` compiles the file once, with `enable_ams` on, and the compiled
 //! artifact's *discrete plan* decides what the X-card builds: empty, and it is
 //! the `VerilogADevice` it has always been; non-empty, and it is a
-//! `MixedSignalHost` that executes both halves. Every module port named in that
-//! plan is a discipline boundary and takes a bridge — an A/D bridge for a port
-//! the module reads, a D/A bridge for one it drives — with the deck's supply
-//! setting the thresholds and levels exactly as the XSPICE auto-bridge sets
-//! its own.
+//! a mixed analog host plus the circuit's shared digital runtime. HDL-only
+//! port bits join resolved event nets. Bits also used by continuous devices
+//! keep A/D or D/A bridges, with supply-derived thresholds and output levels.
 //!
 //! # What the tests here are
 //!
@@ -105,7 +103,7 @@ endmodule
 "#,
     );
     let netlist = Netlist::parse(&format!(
-        "* internal potential and voltage contributions\n.param vcc=3.3\nX1 out sampled internal_probe\n.va \"{}\" internal_probe\n.end\n",
+        "* internal potential and voltage contributions\n.param vcc=3.3\nX1 out sampled internal_probe\nRsampled sampled 0 1k\n.va \"{}\" internal_probe\n.end\n",
         model.deck_path()
     )).unwrap();
     let result = Engine::default().run_tran(&netlist, 3e-9, 0.2e-9).unwrap();
@@ -125,7 +123,7 @@ endmodule
         .position(|name| name.eq_ignore_ascii_case("sampled"))
         .unwrap();
     assert!(result.voltages[sampled][0].abs() < 1e-10);
-    assert!((result.voltages[sampled].last().unwrap() - 3.3).abs() < 1e-6);
+    assert!((result.voltages[sampled].last().unwrap() - 3.3 / 1.02).abs() < 1e-6);
     let trace = result
         .digital_traces
         .iter()
@@ -1814,4 +1812,285 @@ endmodule
         let expected = ((rising + 25e-12) / 1e-12).round() * 1e-12;
         assert!((output[1].time - expected).abs() < 1e-22);
     }
+}
+
+#[test]
+fn direct_hdl_event_bits_resolve_partial_vectors_without_electrical_bridges() {
+    use rspice_core::xspice::DigitalState::{HighZ, One, Unknown, Zero};
+    let source = ModelFile::new(
+        "event_source",
+        r#"
+`timescale 1ns/1ps
+module event_source(q);
+ output [7:4] q; reg [7:4] q;
+ initial begin q=4'b0011; #1 q=4'b1100; #1 q=4'bz0z1; #1 q=4'bzzzz; end
+endmodule
+"#,
+    );
+    let sink = ModelFile::new(
+        "event_sink",
+        r#"
+`timescale 1ns/1ps
+module event_sink(d,q);
+ input [0:3] d; wire [0:3] d;
+ output q; reg q;
+ initial q=0;
+ always @(d) q <= (d === 4'b1100);
+endmodule
+"#,
+    );
+    let other = ModelFile::new(
+        "event_other",
+        r#"
+`timescale 1ns/1ps
+module event_other(q);
+ output q; wire q; reg enabled;
+ initial begin enabled=1; #1.5 enabled=0; #1 enabled=1; #1 enabled=0; end
+ assign q=enabled ? 1'b0 : 1'bz;
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let cards = if reverse {
+            "Xs b3 b2 b1 b0 loaded event_sink\nXo b0 event_other\nXd b3 b2 b1 b0 event_source"
+        } else {
+            "Xd b3 b2 b1 b0 event_source\nXo b0 event_other\nXs b3 b2 b1 b0 loaded event_sink"
+        };
+        let deck = format!(
+            "* event bit graph\n{cards}\nRload loaded 0 1k\n.va \"{}\" event_source\n.va \"{}\" event_sink\n.va \"{}\" event_other\n.end\n",
+            source.deck_path(),
+            sink.deck_path(),
+            other.deck_path()
+        );
+        let result = run(&deck, 4e-9, 0.1e-9);
+        let b0 = result.digital_trace_named("b0").unwrap();
+        assert_eq!(
+            b0.iter().map(|point| point.value.state).collect::<Vec<_>>(),
+            vec![Unknown, Zero, One, Unknown, Zero, HighZ],
+            "co-driver contention and release, reverse={reverse}"
+        );
+        for node in ["b3", "b2", "b1", "b0"] {
+            assert!(
+                waveform(&result, node)
+                    .iter()
+                    .all(|voltage| voltage.abs() < 1e-14),
+                "{node} must have an empty event placeholder, with no electrical D/A bridge"
+            );
+            assert_eq!(
+                result
+                    .digital_trace_named(node)
+                    .unwrap()
+                    .last()
+                    .unwrap()
+                    .value
+                    .state,
+                HighZ
+            );
+        }
+        let output = result.digital_trace_named("loaded").unwrap();
+        assert_eq!(
+            output
+                .iter()
+                .map(|point| point.value.state)
+                .collect::<Vec<_>>(),
+            vec![Zero, One, Zero]
+        );
+        assert!((output[1].time - 1e-9).abs() < 1e-22);
+        assert!((output[2].time - 2e-9).abs() < 1e-22);
+        assert!(
+            waveform(&result, "loaded")
+                .iter()
+                .any(|voltage| (voltage - 3.3 / 1.02).abs() < 1e-8),
+            "the physical output still drives its 20-ohm/1-kohm load"
+        );
+    }
+}
+
+#[test]
+fn a_partly_electrical_input_variable_preserves_its_direct_event_bits() {
+    let source = ModelFile::new(
+        "partial_source",
+        r#"
+module partial_source(q); output q; reg q; initial begin q=0; #1 q=1; end endmodule
+"#,
+    );
+    let sink = ModelFile::new(
+        "partial_sink",
+        r#"
+module partial_sink(d,q);
+ input [1:0] d; reg [1:0] d;
+ output q; reg q; initial q=0;
+ always @(d) q <= (d === 2'b11);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* input variable across physical and event nodes\nVupper high ref pwl(0 0 0.5n 0 1n 3.3)\nXd low partial_source\nXs high low out partial_sink\nRout out ref 1k\n.va \"{}\" partial_source\n.va \"{}\" partial_sink\n.end\n",
+        source.deck_path(),
+        sink.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    let output = result.digital_trace_named("out").unwrap();
+    assert_eq!(
+        output.len(),
+        2,
+        "one event bit edge after the analog bit has risen"
+    );
+    assert!((output[1].time - 1e-9).abs() < 1e-22);
+    assert!((waveform(&result, "out").last().unwrap() - 3.3 / 1.02).abs() < 1e-8);
+    assert!(
+        waveform(&result, "low")
+            .iter()
+            .all(|value| value.abs() < 1e-14)
+    );
+}
+
+#[test]
+fn implicit_ground_preserves_mixed_analog_unknowns_and_event_bus_identities() {
+    let source = ModelFile::new(
+        "ground_source",
+        r#"
+module ground_source(p,n,bus);
+ inout p,n; electrical p,n,inner;
+ output [1:0] bus; reg [1:0] bus;
+ initial begin bus=0; #1 bus=(V(inner,n)>1.5) ? 2'b11 : 2'b00; end
+ analog begin V(inner,n)<+2; V(p,n)<+3*V(inner,n); end
+endmodule
+"#,
+    );
+    let sink = ModelFile::new(
+        "ground_sink",
+        r#"
+module ground_sink(d,q);
+ input [1:0] d; wire [1:0] d;
+ output q; reg q; initial q=0;
+ always @(d) q <= (d === 2'b11);
+endmodule
+"#,
+    );
+    for reference in ["0", "ref"] {
+        let deck = format!(
+            "* ground remap across both domains\nVanchor anchor {reference} 1\nRanchor anchor {reference} 1k\nXsource analog_out {reference} b1 b0 ground_source\nXsink b1 b0 loaded ground_sink\nRout analog_out {reference} 1k\nRload loaded {reference} 1k\n.va \"{}\" ground_source\n.va \"{}\" ground_sink\n.end\n",
+            source.deck_path(),
+            sink.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        assert!(
+            waveform(&result, "analog_out")
+                .iter()
+                .all(|value| (value - 6.0).abs() < 1e-10)
+        );
+        assert!((waveform(&result, "loaded").last().unwrap() - 3.3 / 1.02).abs() < 1e-8);
+        for node in ["b1", "b0", "loaded"] {
+            let points = result.digital_trace_named(node).unwrap();
+            assert_eq!(points.len(), 2, "{node}, ground={reference}");
+            assert_eq!(
+                points[0].value.state,
+                rspice_core::xspice::DigitalState::Zero
+            );
+            assert_eq!(
+                points[1].value.state,
+                rspice_core::xspice::DigitalState::One
+            );
+            assert!((points[1].time - 1e-9).abs() < 1e-22);
+        }
+        let bus = result
+            .digital_buses
+            .iter()
+            .find(|bus| bus.name.eq_ignore_ascii_case("Xsource.bus"))
+            .unwrap();
+        assert_eq!(bus.members.len(), 2);
+        assert!(bus.members[0].eq_ignore_ascii_case("b1"));
+        assert!(bus.members[1].eq_ignore_ascii_case("b0"));
+    }
+}
+
+#[test]
+fn direct_hdl_connections_replay_after_rejected_analog_steps() {
+    let source = ModelFile::new(
+        "event_clock",
+        r#"
+module event_clock(clk); output clk; reg clk; initial clk=0; always #5 clk=~clk; endmodule
+"#,
+    );
+    let sink = ModelFile::new(
+        "event_divider",
+        r#"
+module event_divider(clk,q); input clk; wire clk; output q; reg q;
+ initial q=0; always @(posedge clk) q<=~q;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* replay direct HDL connections with an analog RC load\nXclock clk event_clock\nXdivider clk qdiv event_divider\nR1 qdiv out 1k\nC1 out 0 10p\n.va \"{}\" event_clock\n.va \"{}\" event_divider\n.end\n",
+        source.deck_path(),
+        sink.deck_path()
+    );
+    // End between clock events: replay is checked over interior activations,
+    // independently of a final time rounded on opposite sides of a tick.
+    let run_replay = |max_step| {
+        let netlist = Netlist::parse(&deck).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_tran(&netlist, 201e-9, max_step).unwrap();
+        (result, engine.convergence_quality().timestep_reductions)
+    };
+    let (coarse, rejected) = run_replay(1e-9);
+    let (fine, _) = run_replay(2e-11);
+    assert!(
+        rejected > 0,
+        "the candidate rollback must actually be exercised"
+    );
+    for (node, expected) in [("clk", 41), ("qdiv", 21)] {
+        let left = coarse.digital_trace_named(node).unwrap();
+        let right = fine.digital_trace_named(node).unwrap();
+        assert_eq!(left.len(), expected);
+        assert_eq!(left.len(), right.len());
+        for (left, right) in left.iter().zip(right) {
+            assert_eq!(left.value, right.value);
+            assert!((left.time - right.time).abs() < 1e-22);
+        }
+    }
+}
+
+#[test]
+fn behavioral_voltage_reads_retain_physical_hdl_boundaries() {
+    let source = ModelFile::new(
+        "observed_bits",
+        r#"
+module observed_bits(q); output [2:0] q; reg [2:0] q;
+ initial begin q=0; #1 q=3'b111; #1 q=0; end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* physical observation is a domain boundary\nXbits qv qi free observed_bits\nBvoltage vmirror 0 V=V(qv)\nBcurrent imirror 0 I=V(qi)/1000\nRload imirror 0 1k\n.va \"{}\" observed_bits\n.end\n",
+        source.deck_path()
+    );
+    let result = run(&deck, 3e-9, 0.1e-9);
+    for node in ["qv", "qi"] {
+        assert!(
+            waveform(&result, node)
+                .iter()
+                .any(|value| (value - 3.3).abs() < 1e-8)
+        );
+    }
+    for (mirror, input, sign) in [("vmirror", "qv", 1.0), ("imirror", "qi", -1.0)] {
+        for (actual, input) in waveform(&result, mirror)
+            .iter()
+            .zip(waveform(&result, input))
+        {
+            assert!(
+                (actual - sign * input).abs() < 1e-8,
+                "{mirror} must observe the electrical voltage"
+            );
+        }
+    }
+    assert!(
+        waveform(&result, "free")
+            .iter()
+            .all(|value| value.abs() < 1e-14)
+    );
+    let free = result.digital_trace_named("free").unwrap();
+    assert_eq!(free.len(), 3);
+    assert_eq!(free[1].value.state, rspice_core::xspice::DigitalState::One);
 }

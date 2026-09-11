@@ -4,7 +4,8 @@ use super::*;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
 use rspice_veriloga::canonical_ir::digital_link::{
-    DigitalLinkInstance, DigitalLinkedInstance, link_digital_plans,
+    DigitalLinkDirection, DigitalLinkInstance, DigitalLinkNet, DigitalLinkPort,
+    DigitalLinkedInstance, link_digital_plans,
 };
 
 /// An analog model observes resolved values; it owns no process, driver or queue.
@@ -196,6 +197,8 @@ impl MixedDigital {
 pub(crate) struct MixedDigitalCoordinator {
     digital: MixedCell<DigitalHost>,
     maps: Vec<DigitalLinkedInstance>,
+    port_signals: Vec<Vec<DigitalSignalId>>,
+    event_nodes: Vec<usize>,
     resolution: TimeResolution,
     enabled: bool,
     accepted_time: Option<f64>,
@@ -212,9 +215,19 @@ impl fmt::Debug for MixedDigitalCoordinator {
     }
 }
 
+fn port_net_name(instance: &str, signal: DigitalSignalId) -> String {
+    format!(
+        "@port:{}:{}:{}",
+        instance.len(),
+        instance,
+        usize::from(signal)
+    )
+}
+
 impl MixedDigitalCoordinator {
     pub(crate) fn enroll(
         hosts: &mut [MixedSignalHost],
+        event_nodes: &std::collections::BTreeSet<usize>,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<Self, MixedSignalError> {
         for host in hosts.iter() {
@@ -225,15 +238,86 @@ impl MixedDigitalCoordinator {
                 });
             }
         }
+        let mut ports = Vec::with_capacity(hosts.len());
+        let mut private_nets = Vec::new();
+        for host in hosts.iter() {
+            let mut directions = std::collections::BTreeMap::new();
+            for (signal, positive, negative, direction) in host
+                .state
+                .bridges
+                .adc
+                .iter()
+                .map(|bridge| {
+                    (
+                        bridge.signal,
+                        bridge.positive,
+                        bridge.negative,
+                        DigitalLinkDirection::Input,
+                    )
+                })
+                .chain(host.state.bridges.dac.iter().map(|bridge| {
+                    (
+                        bridge.signal,
+                        bridge.positive,
+                        bridge.negative,
+                        DigitalLinkDirection::Output,
+                    )
+                }))
+            {
+                if !event_nodes.contains(&positive) {
+                    continue;
+                }
+                if negative != 0 {
+                    return Err(MixedSignalError::InvalidBridge {
+                        detail: "a differential electrical bridge cannot become an event net"
+                            .into(),
+                    });
+                }
+                directions
+                    .entry(signal)
+                    .and_modify(|previous| {
+                        if *previous != direction {
+                            *previous = DigitalLinkDirection::Inout;
+                        }
+                    })
+                    .or_insert(direction);
+            }
+            let instance_ports: Vec<_> = directions
+                .into_iter()
+                .map(|(signal, direction)| {
+                    let name = host
+                        .state
+                        .digital
+                        .plan()
+                        .signal(signal)
+                        .unwrap()
+                        .name
+                        .to_string();
+                    private_nets.push(DigitalLinkNet {
+                        name: port_net_name(&host.instance, signal),
+                        ports: vec![(host.instance.clone(), name.clone())],
+                    });
+                    DigitalLinkPort {
+                        name,
+                        signal,
+                        direction,
+                    }
+                })
+                .collect();
+            ports.push(instance_ports);
+        }
         let instances: Vec<_> = hosts
             .iter()
-            .map(|host| DigitalLinkInstance {
+            .zip(&ports)
+            .map(|(host, ports)| DigitalLinkInstance {
                 name: &host.instance,
                 plan: host.state.digital.plan(),
-                ports: &[],
+                ports,
             })
             .collect();
-        let linked = link_digital_plans(&instances, &[], control).map_err(|errors| {
+        // Variable ports keep an explicit continuous connection process. The
+        // bit graph below only aliases wires and cannot bypass HDL regions.
+        let linked = link_digital_plans(&instances, &private_nets, control).map_err(|errors| {
             MixedSignalError::Compile {
                 detail: errors
                     .iter()
@@ -256,6 +340,49 @@ impl MixedDigitalCoordinator {
                     .expect("linker retained every instance")
             })
             .collect();
+        let port_signals: Vec<_> = hosts
+            .iter()
+            .zip(&maps)
+            .zip(&ports)
+            .map(|((host, map), ports)| {
+                let mut signals = map.signals.clone();
+                for port in ports {
+                    signals[usize::from(port.signal)] =
+                        linked.signal_names[&port_net_name(&host.instance, port.signal)];
+                }
+                signals
+            })
+            .collect();
+        let mut bit_nets = std::collections::BTreeMap::<
+            usize,
+            Vec<super::super::store::DigitalBitConnection>,
+        >::new();
+        for (host, signals) in hosts.iter().zip(&port_signals) {
+            for (signal, bit, node) in host
+                .state
+                .bridges
+                .adc
+                .iter()
+                .map(|bridge| (bridge.signal, bridge.bit, bridge.positive))
+                .chain(
+                    host.state
+                        .bridges
+                        .dac
+                        .iter()
+                        .map(|bridge| (bridge.signal, bridge.bit, bridge.positive)),
+                )
+            {
+                if event_nodes.contains(&node) {
+                    bit_nets.entry(node).or_default().push(
+                        super::super::store::DigitalBitConnection {
+                            signal: signals[usize::from(signal)],
+                            bit,
+                        },
+                    );
+                }
+            }
+        }
+        let (event_node_ids, bit_groups): (Vec<_>, Vec<_>) = bit_nets.into_iter().unzip();
         let views: Vec<_> = hosts
             .iter()
             .map(|host| {
@@ -285,14 +412,22 @@ impl MixedDigitalCoordinator {
                     .min(right.max_reported_oscillating_entities),
             })
             .unwrap_or_default();
-        let digital = DigitalHost::from_plan(Arc::new(linked.plan), resolution, limits);
+        let mut digital = DigitalHost::from_plan(Arc::new(linked.plan), resolution, limits);
+        if !bit_groups.is_empty() {
+            digital.connect_bits(&bit_groups)?;
+        }
         for (host, view) in hosts.iter_mut().zip(views) {
+            if !event_nodes.is_empty() {
+                host.strip_event_boundaries(event_nodes);
+            }
             host.state.digital = view;
             host.resolution = resolution;
         }
         Ok(Self {
             digital: MixedCell::new(digital),
             maps,
+            port_signals,
+            event_nodes: event_node_ids,
             resolution,
             enabled: false,
             accepted_time: None,
@@ -305,6 +440,8 @@ impl MixedDigitalCoordinator {
         Self {
             digital: MixedCell::new(self.digital.fresh()),
             maps: self.maps.clone(),
+            port_signals: self.port_signals.clone(),
+            event_nodes: self.event_nodes.clone(),
             resolution: self.resolution,
             enabled: false,
             accepted_time: None,
@@ -340,6 +477,29 @@ impl MixedDigitalCoordinator {
             self.enabled = true;
         }
         Ok(())
+    }
+
+    pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize) {
+        debug_assert!(!self.enabled);
+        // Retain group indices: the digital bit topology refers to these slots.
+        for node in &mut self.event_nodes {
+            *node = remap(*node);
+        }
+    }
+
+    pub(crate) fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.event_nodes.iter().copied().filter(|node| *node > 0)
+    }
+
+    pub(crate) fn event_values(&self) -> impl Iterator<Item = (usize, FourStateBit)> + '_ {
+        self.event_nodes.iter().enumerate().map(|(index, &node)| {
+            (
+                node,
+                self.digital
+                    .connected_bit(index)
+                    .expect("elaborated event bit"),
+            )
+        })
     }
 
     pub(crate) fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {
@@ -440,11 +600,24 @@ impl SharedDigitalTrial<'_> {
         let coordinator = &mut self.coordinator;
         coordinator.drives.clear();
         let mut tick = self.tick;
-        for (host, map) in hosts.iter().zip(&coordinator.maps) {
-            for (local, value) in &host.scratch.drives {
-                let global = map.signals[usize::from(*local)];
-                if coordinator.digital.read(global) != Some(value) {
-                    coordinator.drives.push((global, value.clone()));
+        for (host, map) in hosts.iter().zip(&coordinator.port_signals) {
+            for (local, _) in &host.scratch.drives {
+                let global = map[usize::from(*local)];
+                let mut value = coordinator
+                    .digital
+                    .read(global)
+                    .expect("mapped A/D port")
+                    .clone();
+                // Preserve event-connected bits of a partly electrical vector.
+                // Only physical A/D decisions are external forces.
+                for &(bridge_index, bit) in &host.scratch.bit_drives {
+                    let bridge = &host.state.bridges.adc[bridge_index];
+                    if bridge.signal == *local {
+                        value.set_bit(bridge.bit, bit);
+                    }
+                }
+                if coordinator.digital.read(global) != Some(&value) {
+                    coordinator.drives.push((global, value));
                 }
             }
             if let Some(trial) = &host.trial {

@@ -2152,8 +2152,41 @@ fn collect_flat_analog_nodes(
         if matches!(element.kind, ElementKind::Xspice { .. }) {
             continue;
         }
+        #[cfg(feature = "veriloga")]
+        if let Some(host) = circuit
+            .mixed_signal_hosts
+            .iter()
+            .find(|host| host.instance_name() == element.name)
+        {
+            for node in host.electrical_terminal_nodes() {
+                insert_non_ground_node(nodes, node);
+            }
+            continue;
+        }
         for node_name in &element.nodes {
             if let Some(node) = circuit.get_node_by_name(node_name) {
+                insert_non_ground_node(nodes, node);
+            }
+        }
+    }
+    // A voltage read is an electrical use even if the node is absent from
+    // the source's terminal list. Use compiled references after parameter
+    // and expression lowering, including behavioral R/C/L expansions.
+    for program in circuit
+        .behavioral_sources
+        .voltage_sources
+        .iter()
+        .map(|source| &source.program)
+        .chain(
+            circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .map(|source| &source.program),
+        )
+    {
+        for name in program.node_map.keys() {
+            if let Some(node) = circuit.get_node_by_name(name) {
                 insert_non_ground_node(nodes, node);
             }
         }
@@ -8773,8 +8806,26 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             circuit.validate_mixed_event_connections()?;
+            let mut physical_nodes = BTreeSet::new();
+            collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
+            for instance in &circuit.xspice_instances {
+                for index in 0..instance.ports().len() {
+                    if let Some(connection) = instance.connection_at(index) {
+                        collect_analog_connection_nodes(&mut physical_nodes, connection);
+                    }
+                }
+            }
+            let event_nodes: BTreeSet<_> = circuit
+                .mixed_signal_hosts
+                .iter()
+                .flat_map(|host| host.boundary_connections().map(|(_, node)| node))
+                .filter(|node| *node > 0 && !physical_nodes.contains(node))
+                .collect();
             circuit
-                .finalize_mixed_digital(&veriloga_cache::VerilogACompileControl { abort })
+                .finalize_mixed_digital(
+                    &event_nodes,
+                    &veriloga_cache::VerilogACompileControl { abort },
+                )
                 .map_err(|error| {
                     if abort.is_aborted() {
                         SimulationError::Aborted

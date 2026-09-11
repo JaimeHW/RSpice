@@ -1120,6 +1120,62 @@ unbracketed/non-monotonic event detection, XSPICE boundary root refinement, flow
 or analog-owned-variable reads, full feedback convergence, reference equivalence,
 or the whole MS03 package. The full approved plan remains active.
 
+## Direct HDL event bits and final circuit node identities
+
+HDL-only deck nodes now connect the original compiled wire-driver contributions
+inside the circuit digital runtime. Whole-vector publications update every
+connected alias before expression sensitivity observes the value bank. Aliases
+never re-enter resolution as additional drivers, so contention and high-impedance
+release propagate without resolved-value feedback. Variable ports retain the
+linker's explicit continuous connection processes, including input-variable
+copies; they are not collapsed into wire storage.
+
+The builder distinguishes physical use from discrete port use. Terminal
+connections and compiled behavioral voltage references retain their electrical
+converters and loads; an HDL-only bit uses the event graph. One vector can contain both. A/D
+publication updates only its physical bits on the global port wire, preserving
+the event-connected bits. Fresh analyses retain immutable bit topology while
+resetting values and execution state; speculative graph values and original
+driver contributions remain inside the existing circuit rollback image.
+
+Review also found that automatic ground selection follows mixed elaboration.
+It previously omitted the mixed host's node references. Remapping now includes
+analog terminals, internal potentials and allocated branch-current unknowns,
+analog-read probes, electrical bridges, event identities and bus members. The
+net-kind cache is rebuilt from both XSPICE and the HDL graph afterwards.
+
+Validation covers opposite vector directions and nonzero ranges, partial-vector
+co-drivers with contention/release, a partly physical input variable, explicit
+and automatically selected ground, a loaded SPICE output, and replay of a split
+HDL clock/divider through actual analog timestep rejections. The initial six
+selected cases passed after declaring the fractional-delay fixture's intended
+1 ps precision. The expanded route target passed 28 of 30 cases; two new oracle
+assumptions needed correction: SPICE canonicalizes node names, and an f64 stop
+time can lie just before the physical time of the nominally coincident digital
+tick. The replay fixture ends between events and checks interior activations;
+this does not close MS02's final-time/rounding qualification.
+
+After integrating remote main through d3b7ed56e, all 30 mixed-route cases passed
+in 0.99 seconds following a 70 second dependency build. That baseline includes
+the concurrent shared-process diagnostic, indirect-equation tolerance, residual
+scaling and BJT fixes. Subsequent review added classification of compiled
+behavioral voltage references; its new voltage/current-source observation case
+and the two affected direct/partial-vector cases passed in 0.09 seconds after a
+21 second build. Logs in the owned target directory: hdl-event-bit-graph.log,
+hdl-event-bit-graph-timing.log, hdl-event-bit-graph-route.log,
+hdl-event-bit-graph-integrated.log and hdl-event-bit-graph-observation.log. The
+full workspace suite and platform/release checks remain deferred to their
+integration milestones as requested.
+
+The graph currently covers four-state HDL wire bits and retains empty MNA rows
+for stable deck node identities; removing those unnecessary unknowns still
+belongs to MS04. Direct HDL/XSPICE connections are still refused until driver
+strengths and regional interleaving share the circuit authority. This is a
+required intermediate implementation, not completion of the planned two-HDL /
+XSPICE / loaded-SPICE / off-grid / rejected-trial slice. No compiler or generator
+inputs were changed by this increment. Reference, full-suite, backend, platform,
+capacity and commercial qualification remain open.
+
 ## Next implementation work
 
 Attach HDL and XSPICE drivers to resolved event nets under the circuit execution

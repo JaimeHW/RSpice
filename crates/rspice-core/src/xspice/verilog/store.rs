@@ -79,6 +79,10 @@
 //! already holds produces no transition, which is what stops a level-sensitive
 //! `@*` process from re-triggering itself forever.
 
+mod bindings;
+use bindings::ConnectedBits;
+pub(crate) use bindings::DigitalBitConnection;
+
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalDriverId, DigitalRealResolution, DigitalSchedulingRegion,
@@ -176,6 +180,9 @@ pub(crate) enum TransitionValues {
 /// Why a store operation was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum StoreError {
+    LinkedNetRequiresDriver {
+        name: String,
+    },
     /// A signal id the plan does not declare.
     UndeclaredSignal(DigitalSignalId),
     /// An external write to a net the design itself drives.
@@ -215,6 +222,10 @@ pub(crate) enum StoreError {
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::LinkedNetRequiresDriver { name } => write!(
+                f,
+                "external drive of linked event net {name} requires a declared driver identity"
+            ),
             Self::UndeclaredSignal(signal) => write!(
                 f,
                 "signal {} is not declared by this digital plan",
@@ -313,6 +324,7 @@ struct ExpressionSubscription {
 #[derive(Clone)]
 pub(crate) struct DigitalSignalStore {
     plan: Arc<CanonicalDigitalPlan>,
+    connected: Option<ConnectedBits>,
     expression_waits: BTreeMap<u64, ExpressionSubscription>,
     expression_inputs: Vec<BTreeSet<u64>>,
     expression_scratch: DigitalEvalScratch,
@@ -556,6 +568,7 @@ impl DigitalSignalStore {
             analog_potentials: vec![None; plan.analog_probes.len()],
             activation_clock: None,
             plan,
+            connected: None,
             expression_waits: BTreeMap::new(),
             expression_inputs: vec![BTreeSet::new(); count],
             expression_scratch: DigitalEvalScratch::new(),
@@ -653,6 +666,9 @@ impl DigitalSignalStore {
                 name,
                 drivers,
             });
+        }
+        if self.force_changes_connected_bit(signal, value) {
+            return Err(StoreError::LinkedNetRequiresDriver { name });
         }
         Ok(())
     }
@@ -790,6 +806,15 @@ impl DigitalSignalStore {
             return;
         }
         let previous = std::mem::replace(&mut self.values[index], value.clone());
+        self.record_bit_change(signal, previous, value);
+    }
+
+    fn record_bit_change(
+        &mut self,
+        signal: DigitalSignalId,
+        previous: FourStateValue,
+        value: FourStateValue,
+    ) {
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
@@ -1000,7 +1025,7 @@ impl DigitalEnvironment for DigitalSignalStore {
         };
         self.contributions[slot].value = ContributionValue::FourState(Some(drive.value));
         let resolved = self.resolve(drive.driver.signal);
-        self.publish(drive.driver.signal, resolved);
+        self.publish_connected(drive.driver.signal, resolved);
     }
 
     fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {

@@ -238,16 +238,21 @@ impl CircuitData {
 
     pub(crate) fn finalize_mixed_digital(
         &mut self,
+        event_nodes: &std::collections::BTreeSet<usize>,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<(), SimulationError> {
         if !self.mixed_signal_hosts.is_empty() && self.mixed_digital_coordinator.is_none() {
             self.mixed_digital_coordinator = Some(
                 crate::xspice::verilog::MixedDigitalCoordinator::enroll(
                     &mut self.mixed_signal_hosts,
+                    event_nodes,
                     control,
                 )
                 .map_err(shared_error)?,
             );
+            for &node in event_nodes {
+                self.net_kinds.register(node, super::NetKind::Digital);
+            }
         }
         Ok(())
     }
@@ -286,7 +291,10 @@ impl CircuitData {
     /// Begin digital execution only after the engine has delivered every
     /// model's analog initialization effects and ruled out a requested exit.
     pub(crate) fn start_mixed_digital_execution(&mut self) -> Result<(), SimulationError> {
-        self.finalize_mixed_digital(&rspice_veriloga::NoPipelineControl)?;
+        self.finalize_mixed_digital(
+            &std::collections::BTreeSet::new(),
+            &rspice_veriloga::NoPipelineControl,
+        )?;
         for host in &mut self.mixed_signal_hosts {
             let started = host.start_digital_execution();
             named(host, started)?;
@@ -622,6 +630,23 @@ impl CircuitData {
     ) {
         use rspice_veriloga::four_state::FourStateBit;
 
+        if let Some(digital) = &self.mixed_digital_coordinator {
+            for (node, bit) in digital.event_values() {
+                let state = match bit {
+                    FourStateBit::Zero => crate::xspice::DigitalState::Zero,
+                    FourStateBit::One => crate::xspice::DigitalState::One,
+                    FourStateBit::Unknown => crate::xspice::DigitalState::Unknown,
+                    FourStateBit::HighImpedance => crate::xspice::DigitalState::HighZ,
+                };
+                snapshot.push((
+                    node,
+                    crate::xspice::DigitalValue {
+                        state,
+                        strength: crate::xspice::DigitalStrength::Strong,
+                    },
+                ));
+            }
+        }
         for host in &self.mixed_signal_hosts {
             host.boundary_digital_values(|node, bit| {
                 if node == 0 {

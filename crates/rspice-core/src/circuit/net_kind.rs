@@ -63,11 +63,9 @@ impl NetKind {
 /// Only non-continuous nets take a slot, so a purely analog circuit carries an
 /// empty table and every lookup answers from the default.
 ///
-/// The table caches an answer the XSPICE instances own, so it is only valid
-/// against the node numbering the marks were recorded under. Choosing a late
-/// ground reference renumbers nodes; `CircuitData::rebuild_net_kinds` replays
-/// the marks afterwards rather than shifting them, because the net that became
-/// ground has to lose its kind entirely.
+/// XSPICE connections and the circuit HDL graph own these identities. After
+/// a ground remap, rebuilding the table from their updated node numbering
+/// preserves every event kind and drops the former ground identity.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NetKinds {
     by_node: Vec<NetKind>,

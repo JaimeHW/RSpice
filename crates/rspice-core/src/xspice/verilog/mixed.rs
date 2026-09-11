@@ -5,6 +5,10 @@
 //! drivers and event queues. The analog solver evaluates transactional trials;
 //! the circuit settles every participant before stamping or accepting a trial.
 //!
+//! Pure HDL port connections share resolved event bits in that runtime. Ports
+//! attached to continuous devices retain their A/D or D/A electrical bridges;
+//! a vector may have both kinds of bit connection.
+//!
 //! # The two time bases
 //!
 //! The analog side names a timepoint in seconds, chosen by a step controller
@@ -793,6 +797,7 @@ pub struct MixedSignalHost {
     /// never read by one, so it sits beside the probe table rather than inside
     /// [`MixedState`].
     boundary_buses: Vec<BoundaryBus>,
+    event_nodes: Vec<usize>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
 }
@@ -1042,6 +1047,7 @@ impl MixedSignalHost {
             analog_probes,
             discrete_inputs,
             boundary_buses: Vec::new(),
+            event_nodes: Vec::new(),
             max_circuit_node,
             max_bridge_iterations,
         })
@@ -1205,6 +1211,107 @@ impl MixedSignalHost {
         Ok(())
     }
 
+    /// Keep every physical and event identity aligned with the circuit's
+    /// final node numbering, before the first analysis begins.
+    pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize + Copy) {
+        debug_assert!(!self.digital_started && self.trial.is_none());
+        let branch_nodes: Vec<_> = (0..self.analog.num_branch_unknowns())
+            .map(|index| remap(self.analog.branch_current_index(index).unwrap()))
+            .collect();
+        let analog = self.analog.make_mut();
+        analog.remap_circuit_nodes(remap);
+        // The device remaps potential nodes itself; its separately allocated
+        // current unknowns also use this circuit's node numbering.
+        analog.set_branch_current_indices(&branch_nodes);
+        let bridges = self.state.bridges.make_mut();
+        for bridge in &mut bridges.adc {
+            bridge.positive = remap(bridge.positive);
+            bridge.negative = remap(bridge.negative);
+        }
+        for bridge in &mut bridges.dac {
+            bridge.positive = remap(bridge.positive);
+            bridge.negative = remap(bridge.negative);
+        }
+        for probe in &mut self.analog_probes {
+            probe.positive = remap(probe.positive);
+            probe.negative = remap(probe.negative);
+        }
+        for bus in &mut self.boundary_buses {
+            for member in &mut bus.members {
+                *member = remap(*member);
+            }
+        }
+        for node in &mut self.event_nodes {
+            *node = remap(*node);
+        }
+        self.event_nodes.sort_unstable();
+        self.event_nodes.dedup();
+        self.max_circuit_node = analog_solver_nodes(&self.analog)
+            .chain(
+                bridges
+                    .adc
+                    .iter()
+                    .flat_map(|bridge| [bridge.positive, bridge.negative]),
+            )
+            .chain(
+                bridges
+                    .dac
+                    .iter()
+                    .flat_map(|bridge| [bridge.positive, bridge.negative]),
+            )
+            .max()
+            .unwrap_or(0);
+    }
+
+    /// Physical module terminals, excluding the discrete port views.
+    pub(crate) fn electrical_terminal_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.analog
+            .terminal_names()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                (!self
+                    .state
+                    .digital
+                    .plan()
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == *name))
+                .then(|| self.analog.node_for_terminal(index))
+            })
+    }
+
+    /// Called only at fresh circuit elaboration after all connection validation.
+    fn strip_event_boundaries(&mut self, nodes: &std::collections::BTreeSet<usize>) {
+        let bridges = self.state.bridges.make_mut();
+        self.event_nodes.extend(
+            bridges
+                .adc
+                .iter()
+                .filter(|bridge| nodes.contains(&bridge.positive))
+                .map(|bridge| bridge.positive),
+        );
+        self.event_nodes.extend(
+            bridges
+                .dac
+                .iter()
+                .filter(|bridge| nodes.contains(&bridge.positive))
+                .map(|bridge| bridge.positive),
+        );
+        self.event_nodes.sort_unstable();
+        self.event_nodes.dedup();
+        bridges
+            .adc
+            .retain(|bridge| !nodes.contains(&bridge.positive));
+        bridges
+            .dac
+            .retain(|bridge| !nodes.contains(&bridge.positive));
+        self.state.accepted_adc_voltages = vec![0.0; bridges.adc.len()];
+        self.state.accepted_adc_transition_times = vec![None; bridges.adc.len()];
+        self.state.adc_history = vec![BoundaryNetHistory::default(); bridges.adc.len()];
+        self.state.dac_history = vec![BoundaryNetHistory::default(); bridges.dac.len()];
+    }
+
     /// Every circuit node this module's matrix contributions can reach, in
     /// ascending order and without ground.
     ///
@@ -1223,7 +1330,7 @@ impl MixedSignalHost {
                     .iter()
                     .flat_map(|bridge| [bridge.positive, bridge.negative]),
             )
-            .filter(|node| *node > 0)
+            .filter(|node| *node > 0 && self.event_nodes.binary_search(node).is_err())
             .collect();
         nodes.sort_unstable();
         nodes.dedup();

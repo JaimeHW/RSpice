@@ -564,8 +564,17 @@ impl CircuitData {
                 .make_mut()
                 .remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
         }
-        // The instances now carry renumbered connections, so the cached net
-        // kinds still describe the pre-remap node IDs. Replay them.
+        #[cfg(feature = "veriloga")]
+        {
+            for host in &mut self.mixed_signal_hosts {
+                host.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+            }
+            if let Some(digital) = &mut self.mixed_digital_coordinator {
+                digital.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+            }
+        }
+        // All participants now carry renumbered connections. Replay their
+        // event identities into the cached net-kind table.
         self.rebuild_net_kinds();
 
         #[cfg(feature = "veriloga")]
