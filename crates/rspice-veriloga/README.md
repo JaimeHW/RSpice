@@ -503,6 +503,9 @@ One private current unknown supports flow probes in either mode. Mode changes
 request an order-zero discontinuity relative to the last accepted timestep,
 including after rollback or checkpoint restore. Explicit `cross` events remain
 necessary when a model requires threshold-crossing time resolution.
+Direct and indirect contributions cannot share an analog net pair, including
+parallel named branches. Conflicts are rejected after hierarchy and ground
+resolution, before private flow equations are introduced.
 Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
 compatibility; authored sources and flow probes require distinct nets.
 

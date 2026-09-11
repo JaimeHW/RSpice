@@ -213,12 +213,6 @@ fn potential_sources_preserve_named_and_instance_branch_identity() {
         ),
         (
             "branch(p) a,b;",
-            "V(a)<+2*I(a); V(b): V(p)==3*I(b);",
-            2,
-            5.0 / 6.0,
-        ),
-        (
-            "branch(p) a,b;",
             "V(a): V(p)==2*I(a); V(b): V(p)==3*I(b);",
             2,
             5.0 / 6.0,

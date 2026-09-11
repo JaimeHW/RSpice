@@ -227,6 +227,35 @@ struct FlowBranch {
     switch: Option<super::switch_branches::SwitchState>,
 }
 
+fn validate_indirect_source_pairs(
+    module: &AnalyzedModule,
+    resolver: &BranchResolver<'_>,
+) -> CompileResult<()> {
+    if !module.contributions.iter().any(|source| source.indirect) {
+        return Ok(());
+    }
+    // VAMS 5.6.7.2 applies to the physical pair, including separately named
+    // parallel branches. Check before flow lowering introduces private nodes.
+    let mut kinds = HashMap::new();
+    for source in &module.contributions {
+        let (_, pos, neg, _) = resolver.contribution(source);
+        let pair = if pos <= neg { (pos, neg) } else { (neg, pos) };
+        if kinds
+            .insert(pair.clone(), source.indirect)
+            .is_some_and(|previous| previous != source.indirect)
+        {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(format!(
+                    "direct and indirect contributions cannot share analog nets '{}' and '{}' (including parallel branches)",
+                    pair.0, pair.1
+                )),
+                source.span,
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn lower<'a>(
     mut module: Cow<'a, AnalyzedModule>,
 ) -> CompileResult<Cow<'a, AnalyzedModule>> {
@@ -235,6 +264,7 @@ pub(crate) fn lower<'a>(
         declared: &module.branches,
         grounds: &module.ground_nodes,
     };
+    validate_indirect_source_pairs(&module, &resolver)?;
     let mut branches = BTreeMap::new();
     let mut port_reads = std::collections::BTreeSet::new();
     let mut potential_reads = HashSet::new();

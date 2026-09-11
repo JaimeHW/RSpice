@@ -95,7 +95,62 @@ module bad(p, n);
 endmodule
 "#,
     );
-    assert!(err.contains("over-determined"), "got: {err}");
+    assert!(err.contains("direct and indirect"), "got: {err}");
+}
+
+#[test]
+fn direct_current_cannot_share_an_indirect_source_pair() {
+    for statements in [
+        "V(p,n): V(q,n)==0; I(p,n)<+1;",
+        "I(p,n)<+1; V(p,n): V(q,n)==0;",
+        "V(p,n): V(q,n)==0; I(n,p)<+1;",
+        "I(p,n): V(q,n)==0; I(p,n)<+1;",
+    ] {
+        let source = format!(
+            "module bad(p,n,q); inout p,n,q; electrical p,n,q; analog begin {statements} end endmodule"
+        );
+        let err = compile_err(&source);
+        assert!(err.contains("direct") && err.contains("indirect"), "{err}");
+    }
+}
+
+#[test]
+fn parallel_named_branches_cannot_mix_direct_and_indirect_sources() {
+    for statements in [
+        "V(a): V(q,n)==0; I(b)<+1;",
+        "V(a): V(q,n)==0; V(b)<+1;",
+        "I(b)<+1; V(a): V(q,n)==0;",
+        "V(b)<+1; V(a): V(q,n)==0;",
+        "V(a): V(q,n)==0; I(p,n)<+1;",
+    ] {
+        let source = format!(
+            "module bad(p,n,q); inout p,n,q; electrical p,n,q; branch(p,n) a; branch(n,p) b; analog begin {statements} end endmodule"
+        );
+        let err = compile_err(&source);
+        assert!(err.contains("direct") && err.contains("indirect"), "{err}");
+    }
+}
+
+#[test]
+fn indirect_conflicts_resolve_ground_aliases_and_hierarchy_bindings() {
+    for source in [
+        "module bad(p,q); inout p,q; electrical p,q,g; ground g; analog begin V(p,g): V(q)==0; I(p)<+1; end endmodule",
+        "module child(p,n,q); inout p,n,q; electrical p,n,q; analog V(p,n): V(q,n)==0; endmodule
+         module bad(p,n,q); inout p,n,q; electrical p,n,q; child a(p,n,q); analog I(n,p)<+1; endmodule",
+    ] {
+        let compiler = VerilogACompiler::default();
+        let error = compiler.compile_module(source, Some("bad")).expect_err("mixed sources must fail");
+        assert!(error.to_string().contains("direct and indirect"), "{error}");
+        let error = compiler.compile_canonical_ir_module(source, Some("bad")).expect_err("canonical compilation must reject the same source");
+        assert!(error.to_string().contains("direct and indirect"), "{error}");
+    }
+}
+
+#[test]
+fn indirect_sources_allow_direct_contributions_on_different_pairs() {
+    compile(
+        "module allowed(p,n,q); inout p,n,q; electrical p,n,q; branch(p,n) a; branch(q,n) b; analog begin V(a): V(q,n)==0; I(b)<+1; end endmodule",
+    );
 }
 
 #[test]
