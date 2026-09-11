@@ -1111,7 +1111,11 @@ impl Engine {
 
     /// Share resolved voltage-tolerance semantics with every periodic consumer
     /// that constructs an HB carrier (PAC/PXF/PSP/PNoise included).
-    fn new_hb_solver(&self, config: HbConfig, num_nodes: usize) -> Result<HbSolver, SimulationError> {
+    fn new_hb_solver(
+        &self,
+        config: HbConfig,
+        num_nodes: usize,
+    ) -> Result<HbSolver, SimulationError> {
         HbSolver::try_new(config, num_nodes)
             .and_then(|solver| solver.with_voltage_abstol(self.voltage_abstol()))
             .map_err(|error| {

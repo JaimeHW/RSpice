@@ -489,7 +489,9 @@ impl Engine {
         }
     }
 
-    pub(in crate::engine) fn noise_source_label(identity: &crate::analysis::NoiseSourceIdentity) -> String {
+    pub(in crate::engine) fn noise_source_label(
+        identity: &crate::analysis::NoiseSourceIdentity,
+    ) -> String {
         identity.mechanism.as_ref().map_or_else(
             || identity.device.clone(),
             |mechanism| format!("{}:{mechanism}", identity.device),

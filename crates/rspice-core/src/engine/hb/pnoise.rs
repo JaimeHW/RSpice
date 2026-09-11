@@ -18,8 +18,8 @@ use crate::analysis::HbSolverState;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::analysis::harmonic_balance::{
-    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource, ScaledNonnegative,
-    PeriodicSidebandWindow,
+    HbConfig, PeriodicAcExcitation, PeriodicFlickerNoise, PeriodicNoiseSource,
+    PeriodicSidebandWindow, ScaledNonnegative,
 };
 #[cfg(test)]
 use crate::circuit::ResistorValues;
@@ -978,7 +978,10 @@ impl Engine {
                 })?,
         );
         sources.extend(self.native_bjt_periodic_noise_sources(
-            &mut solver, &state, temperature, abort,
+            &mut solver,
+            &state,
+            temperature,
+            abort,
         )?);
         let values_per_point = sources
             .len()

@@ -1278,97 +1278,94 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
         match capability_support(family, Cap) {
             Inapplicable | Complete => {}
             Absent(missing) => gaps.push(CapabilityGap::new(family, missing)),
-            Restricted(_) => {
-                match family {
-                    F::Jfet => {
-                        if circuit.jfets.iter().any(|jfet| {
-                            jfet.params.channel_model
-                                != crate::device::JfetChannelModel::ShichmanHodges
-                        }) {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "non-classic JFET/MESFET charge and trap history",
-                            ));
-                        }
+            Restricted(_) => match family {
+                F::Jfet => {
+                    if circuit.jfets.iter().any(|jfet| {
+                        jfet.params.channel_model != crate::device::JfetChannelModel::ShichmanHodges
+                    }) {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "non-classic JFET/MESFET charge and trap history",
+                        ));
                     }
-                    F::Bjt => {
-                        if circuit
-                            .bjts
-                            .devices
-                            .iter()
-                            .any(|bjt| !bjt.mna_promoted() && bjt.has_intrinsic_state_unknowns())
-                        {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "legacy Gummel-Poon BJT intrinsic charge-state constraints",
-                            ));
-                        }
-                        if circuit
-                            .bjts
-                            .devices
-                            .iter()
-                            .any(|bjt| bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0))
-                        {
-                            gaps.push(CapabilityGap::new(family, "legacy Gummel-Poon thermal and excess-phase model states"));
-                        }
+                }
+                F::Bjt => {
+                    if circuit
+                        .bjts
+                        .devices
+                        .iter()
+                        .any(|bjt| !bjt.mna_promoted() && bjt.has_intrinsic_state_unknowns())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "legacy Gummel-Poon BJT intrinsic charge-state constraints",
+                        ));
                     }
-                    F::CoupledInductorPair => {
-                        if !circuit.has_positive_definite_mutual_inductance() {
-                            gaps.push(CapabilityGap::new(
+                    if circuit.bjts.devices.iter().any(|bjt| {
+                        bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0)
+                    }) {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "legacy Gummel-Poon thermal and excess-phase model states",
+                        ));
+                    }
+                }
+                F::CoupledInductorPair => {
+                    if !circuit.has_positive_definite_mutual_inductance() {
+                        gaps.push(CapabilityGap::new(
                             family,
                             "coupled-inductor flux constraints: the inductance matrix must be positive definite for the current shooting basis",
                         ));
-                        }
                     }
-                    F::Resistor => {
-                        if circuit.resistors.thermal.iter().any(Option::is_some) {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "thermal resistor accepted temperature state",
-                            ));
-                        }
-                    }
-                    F::Capacitor => {
-                        if circuit.capacitors.has_solution_dependent_values() {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "solution-dependent capacitor charge/expression history",
-                            ));
-                        }
-                    }
-                    F::BehavioralSource => {
-                        let has_integral = circuit
-                            .behavioral_sources
-                            .voltage_sources
-                            .iter()
-                            .any(|source| source.program.sdt_count != 0)
-                            || circuit
-                                .behavioral_sources
-                                .current_sources
-                                .iter()
-                                .any(|source| source.program.sdt_count != 0);
-                        if has_integral {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "behavioral-source accepted-step memory",
-                            ));
-                        }
-                    }
-                    F::TransmissionLine => {
-                        if circuit
-                            .tlines
-                            .iter()
-                            .any(|line| !line.is_memoryless_two_port())
-                        {
-                            gaps.push(CapabilityGap::new(
-                                family,
-                                "transmission-line delay history",
-                            ));
-                        }
-                    }
-                    _ => {}
                 }
-            }
+                F::Resistor => {
+                    if circuit.resistors.thermal.iter().any(Option::is_some) {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "thermal resistor accepted temperature state",
+                        ));
+                    }
+                }
+                F::Capacitor => {
+                    if circuit.capacitors.has_solution_dependent_values() {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "solution-dependent capacitor charge/expression history",
+                        ));
+                    }
+                }
+                F::BehavioralSource => {
+                    let has_integral = circuit
+                        .behavioral_sources
+                        .voltage_sources
+                        .iter()
+                        .any(|source| source.program.sdt_count != 0)
+                        || circuit
+                            .behavioral_sources
+                            .current_sources
+                            .iter()
+                            .any(|source| source.program.sdt_count != 0);
+                    if has_integral {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "behavioral-source accepted-step memory",
+                        ));
+                    }
+                }
+                F::TransmissionLine => {
+                    if circuit
+                        .tlines
+                        .iter()
+                        .any(|line| !line.is_memoryless_two_port())
+                    {
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            "transmission-line delay history",
+                        ));
+                    }
+                }
+                _ => {}
+            },
         }
     }
 
