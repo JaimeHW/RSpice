@@ -20,7 +20,8 @@ pub(super) fn parse_resistor(
     // Skip optional parameter names (R=)
     skip_optional_param_name(stream, "R");
 
-    let mut direction = parameter_direction.as_ref().map(|_| Derivative::from(0.0));
+    let capture_direction = parameter_direction.is_some();
+    let mut direction = capture_direction.then(|| Ok(Derivative::from(0.0)));
     let mut value: Option<Value> = None;
     let mut value_expr: Option<String> = None;
     let mut model: Option<String> = None;
@@ -37,7 +38,7 @@ pub(super) fn parse_resistor(
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
-                value = Some(expect_value_with_direction(
+                value = Some(expect_value_capturing_direction(
                     stream,
                     line_num,
                     params,
@@ -52,8 +53,7 @@ pub(super) fn parse_resistor(
                         if let Some(direction) = &mut direction {
                             *direction = params
                                 .parameter_direction(&expr)
-                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
-                                .re;
+                                .map(|direction| direction.re);
                         }
                     } else {
                         value_expr = Some(expr);
@@ -68,15 +68,14 @@ pub(super) fn parse_resistor(
                             if let Some(direction) = &mut direction {
                                 *direction = params
                                     .parameter_direction(&expr)
-                                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?
-                                    .re;
+                                    .map(|direction| direction.re);
                             }
                         } else {
                             value_expr = Some(expr);
                         }
                     }
                 } else {
-                    value = Some(expect_value_with_direction(
+                    value = Some(expect_value_capturing_direction(
                         stream,
                         line_num,
                         params,
@@ -95,8 +94,7 @@ pub(super) fn parse_resistor(
                         if let Some(direction) = &mut direction {
                             *direction = params
                                 .parameter_direction(&ident)
-                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
-                                .re;
+                                .map(|direction| direction.re);
                         }
                     }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
@@ -119,11 +117,9 @@ pub(super) fn parse_resistor(
         }
     }
 
-    // Optional fields need their own derivatives before this whole element is qualified.
+    // Retain the accepted primary assignment. Model and optional fields still
+    // exclude the element from qualification below.
     skip_commas(stream);
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        direction = None;
-    }
     // Parse remaining instance parameters.
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -177,6 +173,11 @@ pub(super) fn parse_resistor(
                         if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
                             value = Some(resolved);
                             value_expr = None;
+                            direction = capture_direction.then(|| {
+                                params
+                                    .parameter_direction(&expr)
+                                    .map(|direction| direction.re)
+                            });
                         } else {
                             value_expr = Some(expr);
                             value = None;
@@ -184,11 +185,21 @@ pub(super) fn parse_resistor(
                         continue;
                     }
 
-                    let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
-                        .ok_or_else(|| ParseError::Syntax {
-                            line: line_num,
-                            message: format!("Expected value for resistor parameter '{raw_name}'"),
-                        })?;
+                    let primary = matches!(name_upper.as_str(), "R" | "VALUE");
+                    let mut assigned_direction = Ok(Derivative::from(0.0));
+                    let parsed = take_deferrable_value_with_direction(
+                        stream,
+                        params,
+                        defer_simple_param_refs,
+                        (capture_direction && primary).then_some(&mut assigned_direction),
+                    )
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected value for resistor parameter '{raw_name}'"),
+                    })?;
+                    if primary {
+                        direction = capture_direction.then_some(assigned_direction);
+                    }
                     match parsed {
                         DeferrableValue::Resolved(param_value) => {
                             if name_upper == "R" || name_upper == "VALUE" {
@@ -264,6 +275,7 @@ pub(super) fn parse_resistor(
                 {
                     value = Some(param_value);
                     value_expr = None;
+                    direction = capture_direction.then(|| Ok(0.0.into()));
                     continue;
                 } else {
                     return Err(ParseError::Syntax {
@@ -276,8 +288,14 @@ pub(super) fn parse_resistor(
             }
             TokenKind::Number(_) => {
                 // Allow trailing unnamed numeric value as explicit resistance override.
-                value = Some(expect_value(stream, line_num, params)?);
+                value = Some(expect_value_capturing_direction(
+                    stream,
+                    line_num,
+                    params,
+                    direction.as_mut(),
+                )?);
                 value_expr = None;
+                direction = capture_direction.then(|| Ok(0.0.into()));
                 consume_passive_unit_word(stream, PASSIVE_RESISTOR_UNITS);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
@@ -285,12 +303,23 @@ pub(super) fn parse_resistor(
                     if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
                         value = Some(resolved);
                         value_expr = None;
+                        direction = capture_direction.then(|| {
+                            params
+                                .parameter_direction(&expr)
+                                .map(|direction| direction.re)
+                        });
                     } else {
                         value_expr = Some(expr);
                         value = None;
                     }
                 } else {
-                    value = Some(expect_value(stream, line_num, params)?);
+                    direction = capture_direction.then(|| Ok(0.0.into()));
+                    value = Some(expect_value_capturing_direction(
+                        stream,
+                        line_num,
+                        params,
+                        direction.as_mut(),
+                    )?);
                     value_expr = None;
                 }
             }
@@ -346,7 +375,11 @@ pub(super) fn parse_resistor(
     {
         capture.elements.insert(
             name.clone(),
-            ElementParameterDirection::Passive { value, direction },
+            ElementParameterDirection::Passive {
+                value,
+                direction: direction
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?,
+            },
         );
     }
     let mut nodes = vec![node_pos, node_neg];
@@ -417,7 +450,7 @@ struct PspiceUGateModels<'a> {
 }
 
 struct PassiveTail {
-    direction: Option<Derivative>,
+    direction: Option<Result<Derivative, crate::netlist::expr::ExprError>>,
     value: Option<Value>,
     value_expr: Option<String>,
     model: Option<String>,
@@ -679,7 +712,7 @@ fn parse_passive_tail(
     capture_direction: bool,
 ) -> Result<PassiveTail, ParseError> {
     let mut tail = PassiveTail {
-        direction: capture_direction.then(|| 0.0.into()),
+        direction: capture_direction.then(|| Ok(0.0.into())),
         value: None,
         value_expr: None,
         model: None,
@@ -695,12 +728,7 @@ fn parse_passive_tail(
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
-                tail.value = Some(expect_value_with_direction(
-                    stream,
-                    line_num,
-                    params,
-                    tail.direction.as_mut(),
-                )?);
+                tail.value = Some(expect_value(stream, line_num, params)?);
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
@@ -713,7 +741,8 @@ fn parse_passive_tail(
                 if defer_simple_param_refs {
                     tail.value_expr = Some(expr);
                 } else {
-                    match evaluate_value_with_direction(&expr, params, tail.direction.as_mut()) {
+                    match evaluate_value_capturing_direction(&expr, params, tail.direction.as_mut())
+                    {
                         Ok(value) => tail.value = Some(value),
                         Err(error) => {
                             tail.direction = None;
@@ -746,8 +775,7 @@ fn parse_passive_tail(
                         if let Some(direction) = &mut tail.direction {
                             *direction = params
                                 .parameter_direction(&ident)
-                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
-                                .re;
+                                .map(|direction| direction.re);
                         }
                     }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
@@ -763,9 +791,6 @@ fn parse_passive_tail(
     }
 
     skip_commas(stream);
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        tail.direction = None;
-    }
     // Remaining named parameters (and a possible bare model name).
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -830,13 +855,23 @@ fn parse_passive_tail(
                         continue;
                     }
 
-                    let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
-                        .ok_or_else(|| ParseError::Syntax {
-                            line: line_num,
-                            message: format!(
-                                "Expected value for {element_label} parameter '{raw_name}'"
-                            ),
-                        })?;
+                    let primary = value_keys.iter().any(|key| name_upper == *key);
+                    let mut assigned_direction = Ok(Derivative::from(0.0));
+                    let parsed = take_deferrable_value_with_direction(
+                        stream,
+                        params,
+                        defer_simple_param_refs,
+                        (capture_direction && primary).then_some(&mut assigned_direction),
+                    )
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Expected value for {element_label} parameter '{raw_name}'"
+                        ),
+                    })?;
+                    if primary {
+                        tail.direction = capture_direction.then_some(assigned_direction);
+                    }
                     match parsed {
                         DeferrableValue::Resolved(param_value) => {
                             if value_keys.iter().any(|key| name_upper == *key) {
@@ -910,11 +945,17 @@ fn parse_passive_tail(
                     } else {
                         tail.value = Some(param_value);
                         tail.value_expr = None;
+                        tail.direction = capture_direction.then(|| {
+                            params
+                                .parameter_direction(&raw_name)
+                                .map(|direction| direction.re)
+                        });
                     }
                 } else if let Ok(param_value) = crate::netlist::lexer::parse_spice_value(&raw_name)
                 {
                     tail.value = Some(param_value);
                     tail.value_expr = None;
+                    tail.direction = capture_direction.then(|| Ok(0.0.into()));
                 } else if tail.model.is_none() {
                     tail.model = Some(raw_name);
                 } else {
@@ -929,6 +970,7 @@ fn parse_passive_tail(
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
                 tail.value_expr = None;
+                tail.direction = capture_direction.then(|| Ok(0.0.into()));
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
@@ -942,30 +984,35 @@ fn parse_passive_tail(
                     tail.value_expr = Some(expr);
                     tail.value = None;
                 } else {
-                    match eval_expression(&expr, params) {
+                    tail.direction = capture_direction.then(|| Ok(0.0.into()));
+                    match evaluate_value_capturing_direction(&expr, params, tail.direction.as_mut())
+                    {
                         Ok(value) => {
                             tail.value = Some(value);
                             tail.value_expr = None;
                         }
-                        Err(error) => match prepare_behavioral_expression(&expr, params) {
-                            Ok(prepared) => match eval_expression(&prepared, params) {
-                                Ok(value) => {
-                                    tail.value = Some(value);
-                                    tail.value_expr = None;
-                                }
+                        Err(error) => {
+                            tail.direction = None;
+                            match prepare_behavioral_expression(&expr, params) {
+                                Ok(prepared) => match eval_expression(&prepared, params) {
+                                    Ok(value) => {
+                                        tail.value = Some(value);
+                                        tail.value_expr = None;
+                                    }
+                                    Err(_) => {
+                                        // Keep the parameter-expanded form for
+                                        // solution-dependent passive values. The
+                                        // expression VM has circuit probes but no
+                                        // access to the parser's ParamContext.
+                                        tail.value_expr = Some(prepared);
+                                        tail.value = None;
+                                    }
+                                },
                                 Err(_) => {
-                                    // Keep the parameter-expanded form for
-                                    // solution-dependent passive values. The
-                                    // expression VM has circuit probes but no
-                                    // access to the parser's ParamContext.
-                                    tail.value_expr = Some(prepared);
-                                    tail.value = None;
+                                    return Err(ParseError::InvalidValue(error.to_string()));
                                 }
-                            },
-                            Err(_) => {
-                                return Err(ParseError::InvalidValue(error.to_string()));
                             }
-                        },
+                        }
                     }
                 }
             }
@@ -1025,7 +1072,11 @@ pub(super) fn parse_capacitor(
     {
         capture.elements.insert(
             name.clone(),
-            ElementParameterDirection::Passive { value, direction },
+            ElementParameterDirection::Passive {
+                value,
+                direction: direction
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?,
+            },
         );
     }
     let mut instance_params = tail.instance_params;
@@ -1092,7 +1143,11 @@ pub(super) fn parse_inductor(
     {
         capture.elements.insert(
             name.clone(),
-            ElementParameterDirection::Passive { value, direction },
+            ElementParameterDirection::Passive {
+                value,
+                direction: direction
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?,
+            },
         );
     }
     let mut instance_params = tail.instance_params;

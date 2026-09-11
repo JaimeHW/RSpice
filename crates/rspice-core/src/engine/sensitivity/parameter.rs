@@ -492,6 +492,11 @@ mod tests {
                 slope * crate::constants::thermal_voltage(1.0),
                 slope * crate::constants::thermal_voltage(1.0),
             ),
+            (
+                ".param q={-1-1e-8*p}\nI1 0 out DC 1 AC 1\nR0 out 0 1\nR1 out 0 -q",
+                0.25 * slope,
+                0.25 * slope,
+            ),
             ("V1 out 0 DC 1 AC 1", 0.0, 0.0),
         ];
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
@@ -542,6 +547,137 @@ mod tests {
                 assert!(
                     (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
                     "{dialect:?}: {body}: AC {ac:e} != {expected_ac:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn passive_sensitivity_tracks_the_accepted_primary_assignment() {
+        let engine = Engine::default();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for device in ["R", "C", "L"] {
+                for nested in [false, true] {
+                    for (fields, relative_direction) in [
+                        (format!("{device}=q"), 1e-8),
+                        ("VALUE=q".into(), 1e-8),
+                        (format!("3 {device}=q"), 1e-8),
+                        ("q VALUE=2".into(), 0.0),
+                        ("{q} 2".into(), 0.0),
+                        ("3 +{q}".into(), 1e-8),
+                        ("3 {q}".into(), 1e-8),
+                        ("{1+abs(p)} VALUE=2".into(), 0.0),
+                        ("n VALUE=2".into(), 0.0),
+                        ("3 VALUE={1+1e-8*p}".into(), 1e-8),
+                        ("3 VALUE=1+1e-8*p".into(), 1e-8),
+                        ("2 VALUE=n VALUE=2".into(), 0.0),
+                        ("3 VALUE={aunif(2,0.25)*(1+1e-8*p)}".into(), 1e-8),
+                    ] {
+                        let body = format!(
+                            ".param q={{1+1e-8*p}} n={{1+abs(p)}}\n{device}1 out 0 {fields}"
+                        );
+                        let body = if nested {
+                            format!("X1 out cell p={{p}}\n.subckt cell out p=99\n{body}\n.ends")
+                        } else {
+                            body
+                        };
+                        let netlist = Netlist::parse_with_options(
+                            &format!("Accepted passive value\n.param p=0\nI1 0 out DC 1 AC 1\nR0 out 0 1\n{body}\n.end"),
+                            crate::netlist::NetlistParseOptions {
+                                expression_dialect: dialect,
+                                statistical_seed: Some(749),
+                                ..Default::default()
+                            },
+                        ).unwrap();
+                        let circuit = engine.build_circuit(&netlist).unwrap();
+                        let value = match device {
+                            "R" => circuit.resistors.reported_resistances[1],
+                            "C" => circuit.capacitors.capacitances[0],
+                            _ => circuit.inductors.inductances[0],
+                        };
+                        let next_draw = netlist.params.random().next_uniform();
+                        let direction = value * relative_direction;
+                        let expected_dc = if device == "R" {
+                            direction / (1.0 + value).powi(2)
+                        } else {
+                            0.0
+                        };
+                        let expected_ac = match device {
+                            "R" => expected_dc,
+                            "C" => -value * direction / (1.0 + value * value).powf(1.5),
+                            _ => direction / (1.0 + value * value).powf(1.5),
+                        };
+                        let output = AcSensitivityOutput::Voltage {
+                            positive: circuit.get_node_by_name("out").unwrap(),
+                            negative: None,
+                        };
+                        for (frequencies, expected) in [
+                            (None, expected_dc),
+                            (Some([1.0 / std::f64::consts::TAU]), expected_ac),
+                        ] {
+                            let mut runs = 0;
+                            let result = if let Some(frequencies) = frequencies {
+                                engine
+                                    .run_output_sensitivity_ac_with_abort(
+                                        &netlist,
+                                        output.clone(),
+                                        "p",
+                                        0.0,
+                                        &frequencies,
+                                        None,
+                                        &mut runs,
+                                        &NoAbort,
+                                    )
+                                    .unwrap()[0]
+                            } else {
+                                engine
+                                    .run_output_sensitivity_with_abort(
+                                        &netlist,
+                                        output.clone(),
+                                        "p",
+                                        0.0,
+                                        None,
+                                        &mut runs,
+                                        &NoAbort,
+                                    )
+                                    .unwrap()
+                            };
+                            assert_eq!(runs, 1, "{dialect:?} {device} nested={nested}: {fields}");
+                            assert!(
+                                (result - expected).abs() <= expected.abs() * 2e-12,
+                                "{dialect:?} {device} nested={nested}: {fields}: {result:e} != {expected:e}"
+                            );
+                        }
+                        let (directed, _) = Engine::replay_parameter_overrides(
+                            &netlist,
+                            &[("P".into(), 0.0)],
+                            Some("p"),
+                            engine.config.resource_limits,
+                            &NoAbort,
+                        )
+                        .unwrap();
+                        let directed_circuit = engine.build_circuit(&directed).unwrap();
+                        let actual = match device {
+                            "R" => directed_circuit.resistors.reported_resistances[1],
+                            "C" => directed_circuit.capacitors.capacitances[0],
+                            _ => directed_circuit.inductors.inductances[0],
+                        };
+                        assert_eq!(actual, value);
+                        assert_eq!(directed.params.random().next_uniform(), next_draw);
+                    }
+                }
+                let netlist = parse(
+                    &format!(
+                        "Used nonsmooth primary\n.param p=0\nI1 0 out 1\nR0 out 0 1\n{device}1 out 0 VALUE={{1+abs(p)}}\n.end"
+                    ),
+                    dialect,
+                );
+                assert!(
+                    engine
+                        .run_sensitivity(&netlist, 1, "p", 0.0, None)
+                        .unwrap_err()
+                        .to_string()
+                        .contains("derivative")
                 );
             }
         }

@@ -9127,6 +9127,27 @@ mod tests {
                         assert_eq!(actual, expected, "{dialect:?} nested={nested}: {tail}");
                     }
                 }
+                for fields in ["3 VALUE=-.2", "3 R=-.2", "3 -.2", "R=-.2"] {
+                    let body = format!("R1 r 0 {fields}");
+                    let source = if nested {
+                        format!("Signed replacements\nX1 cell\n.subckt cell\n{body}\n.ends\n.end")
+                    } else {
+                        format!("Signed replacements\n{body}\n.end")
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &source,
+                        crate::netlist::NetlistParseOptions {
+                            expression_dialect: dialect,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    assert_eq!(
+                        circuit.resistors.conductances[0], -5.0,
+                        "{dialect:?} nested={nested}: {fields}"
+                    );
+                }
             }
         }
     }

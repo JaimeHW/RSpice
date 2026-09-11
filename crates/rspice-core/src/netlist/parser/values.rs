@@ -1863,7 +1863,7 @@ fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String>
     Some(name.to_string())
 }
 
-fn evaluate_value_capturing_direction(
+pub(super) fn evaluate_value_capturing_direction(
     expression: &str,
     params: &ParamContext,
     direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
@@ -1874,21 +1874,6 @@ fn evaluate_value_capturing_direction(
             .unwrap_or_else(|| Ok(crate::netlist::expr::ComplexDirection::zero()))
             .map(|tangent| tangent.re);
         Ok(value.re)
-    } else {
-        eval_expression(expression, params)
-    }
-}
-
-pub(super) fn evaluate_value_with_direction(
-    expression: &str,
-    params: &ParamContext,
-    direction: Option<&mut Derivative>,
-) -> Result<Value, crate::netlist::expr::ExprError> {
-    if let Some(direction) = direction {
-        let mut captured = Ok(0.0.into());
-        let value = evaluate_value_capturing_direction(expression, params, Some(&mut captured))?;
-        *direction = captured?;
-        Ok(value)
     } else {
         eval_expression(expression, params)
     }
@@ -1906,10 +1891,29 @@ pub(super) fn expect_value_with_direction(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    mut direction: Option<&mut Derivative>,
+    direction: Option<&mut Derivative>,
+) -> Result<Value, ParseError> {
+    let mut captured = Ok(0.0.into());
+    let value = expect_value_capturing_direction(
+        stream,
+        line_num,
+        params,
+        direction.as_ref().map(|_| &mut captured),
+    )?;
+    if let Some(direction) = direction {
+        *direction = captured.map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+    }
+    Ok(value)
+}
+
+pub(super) fn expect_value_capturing_direction(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    mut direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
 ) -> Result<Value, ParseError> {
     if let Some(direction) = direction.as_deref_mut() {
-        *direction = 0.0.into();
+        *direction = Ok(0.0.into());
     }
     skip_commas(stream);
 
@@ -1935,10 +1939,10 @@ pub(super) fn expect_value_with_direction(
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
-            let value = evaluate_value_with_direction(&expr, params, direction.as_deref_mut())
+            let value = evaluate_value_capturing_direction(&expr, params, direction.as_deref_mut())
                 .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
             if let Some(direction) = direction {
-                *direction = *direction * sign;
+                *direction = std::mem::replace(direction, Ok(0.0.into())).map(|value| value * sign);
             }
             Ok(value * sign)
         }
@@ -1948,9 +1952,7 @@ pub(super) fn expect_value_with_direction(
                 if let Some(direction) = direction {
                     *direction = params
                         .parameter_direction(s)
-                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?
-                        .re
-                        * sign;
+                        .map(|direction| direction.re * sign);
                 }
                 stream.advance();
                 Ok(v * sign)
@@ -2137,6 +2139,17 @@ pub(super) fn take_value_expression_string(
     params: &ParamContext,
 ) -> Option<String> {
     skip_commas(stream);
+
+    // A failed expression probe must leave a sign for the numeric reader.
+    let offset = usize::from(matches!(
+        stream.peek().kind,
+        TokenKind::Plus | TokenKind::Minus
+    ));
+    match &stream.peek_n(offset).kind {
+        TokenKind::Expression(_) => {}
+        TokenKind::Ident(name) if params.get(name).is_some() => {}
+        _ => return None,
+    }
 
     let sign = match &stream.peek().kind {
         TokenKind::Plus => {
