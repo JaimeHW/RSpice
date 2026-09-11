@@ -186,7 +186,7 @@ pub(super) trait PreparedEvaluation {
         xyce_constant_fold_builtin(name, args)
     }
 
-    fn discard_condition(&mut self) -> Result<(), ExprError> {
+    fn discard_condition(&mut self, _condition: ComplexValue) -> Result<(), ExprError> {
         Ok(())
     }
 }
@@ -279,10 +279,16 @@ impl PreparedExpression {
             Option<(ComplexValue, super::parameter_direction::ComplexDirection)>,
             ExprError,
         >,
-    ) -> Result<(ComplexValue, super::parameter_direction::ComplexDirection), ExprError> {
+    ) -> Result<
+        (
+            ComplexValue,
+            Result<super::parameter_direction::ComplexDirection, ExprError>,
+        ),
+        ExprError,
+    > {
         let mut evaluation = super::parameter_direction::ParameterDirection::new(resolver);
         let value = self.evaluate_using(ctx, &mut evaluation)?;
-        Ok((value, evaluation.finish()?))
+        Ok((value, evaluation.finish()))
     }
 
     fn evaluate_using<E: PreparedEvaluation>(
@@ -501,7 +507,7 @@ impl PreparedExpression {
                     scope,
                 } => {
                     let condition = pop_value(&mut self.values)?;
-                    evaluation.discard_condition()?;
+                    evaluation.discard_condition(condition.numeric)?;
                     self.frames.push(PreparedEvalFrame::MarkRuntime);
                     self.frames.push(PreparedEvalFrame::Eval {
                         expression: if complex_truth(condition.numeric) {

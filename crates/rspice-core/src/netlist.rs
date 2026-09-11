@@ -730,6 +730,25 @@ pub(crate) enum NetlistReplayContext {
     Sealed(SealedSourceBundle),
 }
 
+/// Derivatives recorded by the owning field reader during a selected root replay.
+/// Missing entries mean that an element has not yet been qualified for this path.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ParameterDirectionCapture {
+    pub(crate) elements: std::collections::BTreeMap<String, ElementParameterDirection>,
+    pub(crate) has_conditionals: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ElementParameterDirection {
+    Gain(crate::expr::Derivative),
+    Passive(crate::expr::Derivative),
+    Source {
+        dc: crate::expr::Derivative,
+        magnitude: crate::expr::Derivative,
+        phase: crate::expr::Derivative,
+    },
+}
+
 /// Canonical AST overrides that are not represented by the authored source.
 ///
 /// Device DATA/STEP overrides are applied after parameter-driven reparsing.
@@ -1009,6 +1028,7 @@ pub struct Netlist {
     pub(crate) replay_context: Option<NetlistReplayContext>,
     /// Canonical electrical overrides layered over the parsed source AST.
     pub(crate) ast_overlay: NetlistAstOverlay,
+    pub(crate) parameter_direction: Option<Box<ParameterDirectionCapture>>,
 }
 
 impl Netlist {
@@ -3343,6 +3363,7 @@ impl Default for Netlist {
             source_path: None,
             replay_context: None,
             ast_overlay: NetlistAstOverlay::default(),
+            parameter_direction: None,
         }
     }
 }

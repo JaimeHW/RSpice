@@ -310,8 +310,8 @@ impl CapturedStatisticalParameter {
 
 #[derive(Debug, Clone, Default)]
 struct ParameterDirections {
-    ordinary: HashMap<String, ComplexDirection>,
-    global: HashMap<String, ComplexDirection>,
+    ordinary: HashMap<String, Result<ComplexDirection, ExprError>>,
+    global: HashMap<String, Result<ComplexDirection, ExprError>>,
 }
 
 /// Context for parameter substitution during evaluation.
@@ -618,14 +618,31 @@ impl ParamContext {
     pub(crate) fn seed_parameter_direction(&mut self, name: &str, global: bool) {
         self.parameter_directions
             .get_or_insert_with(Default::default);
-        self.retain_parameter_direction(name, global, Some(1.0.into()));
+        self.retain_parameter_direction(name, global, Some(Ok(1.0.into())));
     }
 
-    pub(crate) fn parameter_direction(&self, name: &str) -> ComplexDirection {
+    pub(crate) fn parameter_direction(&self, name: &str) -> Result<ComplexDirection, ExprError> {
         let Some(directions) = &self.parameter_directions else {
-            return ComplexDirection::zero();
+            return Ok(ComplexDirection::zero());
         };
         let key = name.to_ascii_uppercase();
+        if !self.has_any_parameter_binding(&key) && matches!(key.as_str(), "TEMP" | "TEMPER" | "VT")
+        {
+            let temperature = if self.effective_numeric_without_builtin("TEMP").is_some() {
+                self.parameter_direction("TEMP")?
+            } else if self.effective_numeric_without_builtin("TEMPER").is_some() {
+                self.parameter_direction("TEMPER")?
+            } else {
+                ComplexDirection::zero()
+            };
+            // Builtins use the real effective temperature, even for a complex binding.
+            let direction = ComplexDirection::from(temperature.re);
+            return Ok(if key == "VT" {
+                direction * crate::constants::thermal_voltage(1.0)
+            } else {
+                direction
+            });
+        }
         let bindings = if self.has_parameter_binding(&key) {
             &directions.ordinary
         } else {
@@ -633,15 +650,15 @@ impl ParamContext {
         };
         bindings
             .get(&key)
-            .copied()
-            .unwrap_or_else(ComplexDirection::zero)
+            .cloned()
+            .unwrap_or_else(|| Ok(ComplexDirection::zero()))
     }
 
     pub(crate) fn retain_parameter_direction(
         &mut self,
         name: &str,
         global: bool,
-        direction: Option<ComplexDirection>,
+        direction: Option<Result<ComplexDirection, ExprError>>,
     ) {
         let (Some(directions), Some(direction)) = (&mut self.parameter_directions, direction)
         else {
@@ -652,7 +669,7 @@ impl ParamContext {
         } else {
             &mut directions.ordinary
         };
-        if !direction.is_zero() {
+        if !matches!(&direction, Ok(direction) if direction.is_zero()) {
             bindings.insert(name.to_ascii_uppercase(), direction);
         } else {
             bindings.remove(&name.to_ascii_uppercase());
@@ -664,17 +681,23 @@ impl ParamContext {
     pub(crate) fn evaluate_parameter_binding(
         &self,
         expression: &str,
-    ) -> Result<(ComplexValue, Option<ComplexDirection>), ExprError> {
+    ) -> Result<(ComplexValue, Option<Result<ComplexDirection, ExprError>>), ExprError> {
         if self.parameter_directions.is_none() {
             return eval_expression_complex(expression, self).map(|value| (value, None));
         }
         let expression = parse_expression(expression)?;
         let mut prepared = PreparedExpression::compile(&expression, self)?;
+        let mut dependency_error = None;
         let (value, direction) = prepared.evaluate_parameter_direction_with(self, &mut |name| {
-            Ok(self
-                .get_complex(name)
-                .map(|value| (value, self.parameter_direction(name))))
+            Ok(self.get_complex(name).map(|value| {
+                let direction = self.parameter_direction(name).unwrap_or_else(|error| {
+                    dependency_error.get_or_insert(error);
+                    ComplexDirection::zero()
+                });
+                (value, direction)
+            }))
         })?;
+        let direction = dependency_error.map_or(direction, Err);
         let value = if self.expression_dialect == ExpressionDialect::Xyce {
             normalize_xyce_expression_result(value)
         } else {
@@ -742,13 +765,13 @@ impl ParamContext {
                 incoming
                     .ordinary
                     .iter()
-                    .map(|(name, value)| (name.clone(), *value)),
+                    .map(|(name, value)| (name.clone(), value.clone())),
             );
             directions.global.extend(
                 incoming
                     .global
                     .iter()
-                    .map(|(name, value)| (name.clone(), *value)),
+                    .map(|(name, value)| (name.clone(), value.clone())),
             );
         }
         self.statistical_captures.extend(

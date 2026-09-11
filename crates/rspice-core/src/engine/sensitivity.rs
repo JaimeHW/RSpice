@@ -1,3 +1,4 @@
+mod parameter;
 mod refinement;
 
 use super::{Engine, SimulationError};
@@ -438,6 +439,16 @@ impl Engine {
         resource_limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<(Netlist, usize), SimulationError> {
+        Self::replay_parameter_overrides(netlist, overrides, None, resource_limits, abort)
+    }
+
+    fn replay_parameter_overrides(
+        netlist: &Netlist,
+        overrides: &[(String, Value)],
+        direction: Option<&str>,
+        resource_limits: crate::resource::ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, usize), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -480,7 +491,7 @@ impl Engine {
                 value: *value,
                 global: !netlist.params.has_parameter_binding(name)
                     && netlist.params.has_any_parameter_binding(name),
-                direction: false,
+                direction: direction.is_some_and(|target| name.eq_ignore_ascii_case(target)),
             })
             .collect();
         for (index, parameter) in effective_overrides.iter().enumerate() {
@@ -720,10 +731,10 @@ impl Engine {
     }
 
     /// Differentiate a DC voltage or branch-current probe with respect to an authored design parameter.
-    /// Expressions are replayed for each trial, using the shared refinement
-    /// driver. `runs` includes solver runs already consumed by the enclosing
-    /// study; nominal and attempted refinement runs consume the same budget.
-    /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
+    /// Qualified linear circuits use captured field derivatives and a sparse
+    /// adjoint. Other circuits replay expressions through the refinement driver.
+    /// `runs` includes prior study runs and each nominal or refinement run.
+    /// `delta` sets the initial step when refinement is needed.
     #[allow(clippy::too_many_arguments)]
     pub fn run_output_sensitivity_with_abort(
         &self,
@@ -739,6 +750,17 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let h = Self::sensitivity_step(param_value, delta)?;
+        if let Some((_, derivative)) = self.linear_parameter_sensitivity(
+            netlist,
+            &output,
+            param_name,
+            param_value,
+            None,
+            runs,
+            abort,
+        )? {
+            return Ok(derivative[0].re);
+        }
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
         let evaluate = |candidate| {
@@ -790,7 +812,7 @@ impl Engine {
         )
     }
 
-    /// Run finite-difference AC sensitivity with cooperative cancellation.
+    /// Run parameter AC sensitivity with cooperative cancellation.
     #[allow(clippy::too_many_arguments)]
     pub fn run_sensitivity_ac_with_abort(
         &self,
@@ -818,10 +840,10 @@ impl Engine {
     }
 
     /// Differentiate AC probe magnitude with respect to an authored design parameter.
-    /// Expressions are replayed for each trial, using the shared refinement
-    /// driver. `runs` includes solver runs already consumed by the enclosing
-    /// study; nominal and attempted refinement runs consume the same budget.
-    /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
+    /// Qualified linear circuits use captured field derivatives and a sparse
+    /// adjoint. Other circuits replay expressions through the refinement driver.
+    /// `runs` includes prior study runs and each nominal or refinement run.
+    /// `delta` sets the initial step when refinement is needed.
     #[allow(clippy::too_many_arguments)]
     pub fn run_output_sensitivity_ac_with_abort(
         &self,
@@ -840,6 +862,23 @@ impl Engine {
         let h = Self::sensitivity_step(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
         self.ensure_analysis_points(frequencies.len())?;
+        if let Some((nominal, derivatives)) = self.linear_parameter_sensitivity(
+            netlist,
+            &output,
+            param_name,
+            param_value,
+            Some(frequencies),
+            runs,
+            abort,
+        )? {
+            return Self::project_parameter_magnitude(
+                param_name,
+                frequencies,
+                &nominal,
+                derivatives,
+                abort,
+            );
+        }
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
         // Replay at every coordinate, including the requested nominal value:
@@ -864,6 +903,16 @@ impl Engine {
         let nominal = evaluate(param_value)?;
         let derivatives =
             self.refine_sensitivity(param_name, param_value, h, &nominal, runs, abort, evaluate)?;
+        Self::project_parameter_magnitude(param_name, frequencies, &nominal, derivatives, abort)
+    }
+
+    fn project_parameter_magnitude(
+        param_name: &str,
+        frequencies: &[Value],
+        nominal: &[Complex64],
+        derivatives: Vec<Complex64>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         nominal
             .iter()
             .zip(derivatives)

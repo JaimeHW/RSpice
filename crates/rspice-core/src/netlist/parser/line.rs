@@ -374,6 +374,7 @@ pub(super) fn process_line(
                 &mut frame.local_params,
                 &mut dummy_measurements,
                 ParseLineContext {
+                    parameter_direction: None,
                     parameter_overrides: &[],
                     analyses,
                     lin_analysis,
@@ -437,6 +438,7 @@ pub(super) fn process_line(
         &mut state.params,
         &mut state.measurements,
         ParseLineContext {
+            parameter_direction: state.parameter_direction.as_deref_mut(),
             parameter_overrides: &state.parameter_overrides,
             analyses: &mut state.analyses,
             lin_analysis: &mut state.lin_analysis,
@@ -490,6 +492,7 @@ pub(super) fn parse_line(
     let defer_simple_param_refs =
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
+        parameter_direction,
         parameter_overrides,
         analyses,
         lin_analysis,
@@ -578,6 +581,7 @@ pub(super) fn parse_line(
             params,
             diagnostics,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'C' => parse_capacitor(
             &mut stream,
@@ -585,6 +589,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'L' => parse_inductor(
             &mut stream,
@@ -592,6 +597,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'V' => parse_voltage_source(
             &mut stream,
@@ -599,6 +605,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'I' => parse_current_source(
             &mut stream,
@@ -606,6 +613,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'D' => parse_diode(
             &mut stream,
@@ -643,6 +651,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         )
         .map(|kind| {
             if kind == VoltageControlledSourceParseKind::PspiceChebyshev {
@@ -655,6 +664,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'G' => parse_vccs(
             &mut stream,
@@ -662,6 +672,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         )
         .map(|kind| {
             if kind == VoltageControlledSourceParseKind::PspiceChebyshev {
@@ -674,6 +685,7 @@ pub(super) fn parse_line(
             elements,
             params,
             defer_simple_param_refs,
+            parameter_direction,
         ),
         'B' => parse_behavioral(
             &mut stream,

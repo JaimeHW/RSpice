@@ -207,7 +207,7 @@ where
         Ok(value.into())
     }
 
-    fn discard_condition(&mut self) -> Result<(), ExprError> {
+    fn discard_condition(&mut self, _condition: ComplexValue) -> Result<(), ExprError> {
         self.pop().map(|_| ())
     }
 }

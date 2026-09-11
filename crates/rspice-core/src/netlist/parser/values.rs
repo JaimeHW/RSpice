@@ -1887,11 +1887,39 @@ fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String>
     Some(name.to_string())
 }
 
+pub(super) fn evaluate_value_with_direction(
+    expression: &str,
+    params: &ParamContext,
+    direction: Option<&mut Derivative>,
+) -> Result<Value, crate::netlist::expr::ExprError> {
+    if let Some(direction) = direction {
+        let (value, tangent) = params.evaluate_parameter_binding(expression)?;
+        *direction = tangent
+            .transpose()?
+            .map_or_else(|| 0.0.into(), |tangent| tangent.re);
+        Ok(value.re)
+    } else {
+        eval_expression(expression, params)
+    }
+}
+
 pub(super) fn expect_value(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
 ) -> Result<Value, ParseError> {
+    expect_value_with_direction(stream, line_num, params, None)
+}
+
+pub(super) fn expect_value_with_direction(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    mut direction: Option<&mut Derivative>,
+) -> Result<Value, ParseError> {
+    if let Some(direction) = direction.as_deref_mut() {
+        *direction = 0.0.into();
+    }
     skip_commas(stream);
 
     // Handle optional sign prefix (+15 or -15)
@@ -1916,13 +1944,23 @@ pub(super) fn expect_value(
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
-            eval_expression(&expr, params)
-                .map(|v| v * sign)
-                .map_err(|e| ParseError::InvalidValue(e.to_string()))
+            let value = evaluate_value_with_direction(&expr, params, direction.as_deref_mut())
+                .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
+            if let Some(direction) = direction {
+                *direction = *direction * sign;
+            }
+            Ok(value * sign)
         }
         TokenKind::Ident(s) => {
             // Could be a parameter reference
             if let Some(v) = params.get(s) {
+                if let Some(direction) = direction {
+                    *direction = params
+                        .parameter_direction(s)
+                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                        .re
+                        * sign;
+                }
                 stream.advance();
                 Ok(v * sign)
             } else if let Some(v) = parse_boolean_literal(s) {

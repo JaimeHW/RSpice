@@ -160,6 +160,7 @@ impl Div<Value> for ComplexDirection {
 pub(super) struct ParameterDirection<'a, F> {
     resolver: &'a mut F,
     directions: Vec<ComplexDirection>,
+    error: Option<ExprError>,
 }
 
 impl<'a, F> ParameterDirection<'a, F> {
@@ -167,6 +168,7 @@ impl<'a, F> ParameterDirection<'a, F> {
         Self {
             resolver,
             directions: Vec::new(),
+            error: None,
         }
     }
 
@@ -180,7 +182,23 @@ impl<'a, F> ParameterDirection<'a, F> {
         if self.directions.len() != 1 {
             return Err(invalid("parameter direction stack is inconsistent"));
         }
+        if let Some(error) = self.error.take() {
+            return Err(error);
+        }
         self.pop()
+    }
+
+    // Finish the nominal traversal and consume its authored random draws even
+    // when the derivative is undefined. Only a consumer of this direction
+    // should report that error; unrelated parameter definitions remain usable.
+    fn push_direction(&mut self, direction: Result<ComplexDirection, ExprError>) {
+        match direction {
+            Ok(direction) => self.directions.push(direction),
+            Err(error) => {
+                self.error.get_or_insert(error);
+                self.directions.push(ComplexDirection::zero());
+            }
+        }
     }
 }
 
@@ -208,6 +226,14 @@ where
 
     fn unary(&mut self, op: UnaryOpKind, value: ComplexValue) -> Result<ComplexValue, ExprError> {
         let direction = self.pop()?;
+        if matches!(op, UnaryOpKind::Not)
+            && value == ComplexValue::from(0.0)
+            && !direction.is_zero()
+        {
+            self.error.get_or_insert_with(|| {
+                invalid("boolean boundary has no two-sided parameter derivative")
+            });
+        }
         self.directions.push(match op {
             UnaryOpKind::Neg => -direction,
             UnaryOpKind::Pos => direction,
@@ -226,22 +252,48 @@ where
         let value = apply_binary(op, left, right, dialect)?;
         let dr = self.pop()?;
         let dl = self.pop()?;
-        let direction = if dl.is_zero() && dr.is_zero() {
-            ComplexDirection::zero()
-        } else {
-            match op {
-                BinOpKind::Add => dl + dr,
-                BinOpKind::Sub => dl - dr,
-                BinOpKind::Mul => dl * right + dr * left,
-                BinOpKind::Div => {
-                    (dl * right - dr * left) / (ComplexDirection::from(right) * right)
-                }
-                BinOpKind::Mod => (dl.re - dr.re * (left.re / right.re).trunc()).into(),
-                BinOpKind::Pow => power_direction(left, right, value, dl, dr, false)?,
-                _ => ComplexDirection::zero(),
+        let difference = dl - dr;
+        let boundary = match op {
+            BinOpKind::Gt | BinOpKind::Lt | BinOpKind::Ge | BinOpKind::Le => {
+                left.re == right.re && difference.re != 0.0
             }
+            BinOpKind::Eq | BinOpKind::Ne => {
+                let re = (left.re - right.re).abs();
+                let im = (left.im - right.im).abs();
+                (re == 1e-12 && im <= 1e-12 && difference.re != 0.0)
+                    || (im == 1e-12 && re <= 1e-12 && difference.im != 0.0)
+            }
+            BinOpKind::And | BinOpKind::Or => {
+                (left == ComplexValue::from(0.0) && !dl.is_zero())
+                    || (right == ComplexValue::from(0.0) && !dr.is_zero())
+            }
+            BinOpKind::Mod => remainder_boundary(left.re, right.re, dl.re, dr.re),
+            _ => false,
         };
-        self.directions.push(direction);
+        let direction = (|| {
+            if boundary {
+                return Err(invalid(
+                    "expression boundary has no two-sided parameter derivative",
+                ));
+            }
+            let direction = if dl.is_zero() && dr.is_zero() {
+                ComplexDirection::zero()
+            } else {
+                match op {
+                    BinOpKind::Add => dl + dr,
+                    BinOpKind::Sub => dl - dr,
+                    BinOpKind::Mul => dl * right + dr * left,
+                    BinOpKind::Div => {
+                        (dl * right - dr * left) / (ComplexDirection::from(right) * right)
+                    }
+                    BinOpKind::Mod => (dl.re - dr.re * (left.re / right.re).trunc()).into(),
+                    BinOpKind::Pow => power_direction(left, right, value, dl, dr, false)?,
+                    _ => ComplexDirection::zero(),
+                }
+            };
+            Ok(direction)
+        })();
+        self.push_direction(direction);
         Ok(value)
     }
 
@@ -260,7 +312,7 @@ where
             .ok_or_else(|| invalid("parameter direction argument stack underflow"))?;
         let directions = &self.directions[start..];
         let direction = if directions.iter().all(|direction| direction.is_zero()) {
-            ComplexDirection::zero()
+            Ok(ComplexDirection::zero())
         } else {
             builtin_direction(
                 name,
@@ -269,10 +321,10 @@ where
                 value,
                 ctx.expression_dialect(),
                 draw,
-            )?
+            )
         };
         self.directions.truncate(start);
-        self.directions.push(direction);
+        self.push_direction(direction);
         Ok(value)
     }
 
@@ -292,8 +344,14 @@ where
         Ok(value)
     }
 
-    fn discard_condition(&mut self) -> Result<(), ExprError> {
-        self.pop().map(|_| ())
+    fn discard_condition(&mut self, condition: ComplexValue) -> Result<(), ExprError> {
+        let direction = self.pop()?;
+        if condition == ComplexValue::from(0.0) && !direction.is_zero() {
+            self.error.get_or_insert_with(|| {
+                invalid("conditional boundary has no two-sided parameter derivative")
+            });
+        }
+        Ok(())
     }
 }
 
@@ -366,6 +424,11 @@ fn magnitude_direction(
     Ok(direction.re * (value.re / magnitude) + direction.im * (value.im / magnitude))
 }
 
+fn remainder_boundary(left: Value, right: Value, dl: Derivative, dr: Derivative) -> bool {
+    let quotient = left / right;
+    quotient != 0.0 && quotient.fract() == 0.0 && dl - dr * quotient != 0.0
+}
+
 fn builtin_direction(
     name: &str,
     a: &[ComplexValue],
@@ -378,6 +441,30 @@ fn builtin_direction(
     let dz = d.first().copied().unwrap_or_else(ComplexDirection::zero);
     let one = ComplexValue::from(1.0);
     let zero = ComplexDirection::zero();
+    let boundary = match name {
+        "FLOOR" | "CEIL" => z.re.fract() == 0.0 && dz.re != 0.0,
+        "INT" | "TRUNC" => z.re != 0.0 && z.re.fract() == 0.0 && dz.re != 0.0,
+        "ROUND" | "NINT" => z.re.fract().abs() == 0.5 && dz.re != 0.0,
+        "EQ0" | "NE0" => z.re.abs() == 1e-12 && dz.re != 0.0,
+        "SGN" | "U" | "USTEP" | "URAMP" | "GT0" | "LT0" | "GE0" | "LE0" => {
+            z.re == 0.0 && dz.re != 0.0
+        }
+        "SIGN" if dialect == ExpressionDialect::Xyce => a[1].re == 0.0 && d[1].re != 0.0,
+        "SIGN" => z.re == 0.0 && dz.re != 0.0,
+        "U2" => (z.re == 0.0 || z.re == 1.0) && dz.re != 0.0,
+        "LIMIT" if a.len() == 3 => {
+            (a[0].re == a[1].re && d[0].re != d[1].re) || (a[0].re == a[2].re && d[0].re != d[2].re)
+        }
+        "FMOD" | "MOD" => remainder_boundary(a[0].re, a[1].re, d[0].re, d[1].re),
+        "TANH" if dialect == ExpressionDialect::Xyce => z.re.abs() == 20.0 && dz.re != 0.0,
+        "ATANH" if dialect == ExpressionDialect::Xyce => z.re.abs() == 1.0 - 1e-12 && dz.re != 0.0,
+        _ => false,
+    };
+    if boundary {
+        return Err(invalid(
+            "function boundary has no two-sided parameter derivative",
+        ));
+    }
     Ok(match name {
         "R" | "RE" | "REAL" => dz.re.into(),
         "IMG" | "IMAG" => dz.im.into(),
@@ -497,7 +584,7 @@ fn builtin_direction(
             }
         }
         "FMOD" | "MOD" => (d[0].re - d[1].re * (a[0].re / a[1].re).trunc()).into(),
-        "TABLE" | "PWL" => table_direction(a, d),
+        "TABLE" | "PWL" => table_direction(a, d)?,
         "SIGN" if dialect == ExpressionDialect::Xyce => {
             (magnitude_direction(a[0], d[0])? * crate::expr::ordered_sign(a[1].re)).into()
         }
@@ -521,14 +608,39 @@ fn builtin_direction(
     })
 }
 
-fn table_direction(a: &[ComplexValue], d: &[ComplexDirection]) -> ComplexDirection {
+fn table_direction(
+    a: &[ComplexValue],
+    d: &[ComplexDirection],
+) -> Result<ComplexDirection, ExprError> {
     let last = 2 * ((a.len() - 1) / 2) - 1;
     let x = a[0].re;
+    for index in (1..=last).step_by(2) {
+        if x == a[index].re && d[0].re != d[index].re {
+            let motion = d[0] - d[index];
+            let left = if index == 1 {
+                d[index + 1]
+            } else {
+                d[index + 1]
+                    + motion / (a[index].re - a[index - 2].re) * (a[index + 1].re - a[index - 1].re)
+            };
+            let right = if index == last {
+                d[index + 1]
+            } else {
+                d[index + 1]
+                    + motion / (a[index + 2].re - a[index].re) * (a[index + 3].re - a[index + 1].re)
+            };
+            if left != right {
+                return Err(invalid(
+                    "table knot has unequal one-sided parameter derivatives",
+                ));
+            }
+        }
+    }
     if last == 1 || x <= a[1].re {
-        return d[2];
+        return Ok(d[2]);
     }
     if x >= a[last].re {
-        return d[last + 1];
+        return Ok(d[last + 1]);
     }
     for index in (1..last).step_by(2) {
         let x0 = a[index].re;
@@ -536,14 +648,14 @@ fn table_direction(a: &[ComplexValue], d: &[ComplexDirection]) -> ComplexDirecti
         if x >= x0 && x <= x1 {
             let width = x1 - x0;
             if width.abs() < 1e-18 {
-                return d[index + 1];
+                return Ok(d[index + 1]);
             }
             let weight = (x - x0) / width;
             let dw = (d[0] - d[index] - (d[index + 2] - d[index]) * weight) / width;
-            return d[index + 1]
+            return Ok(d[index + 1]
                 + (d[index + 3] - d[index + 1]) * weight
-                + dw * (a[index + 3].re - a[index + 1].re);
+                + dw * (a[index + 3].re - a[index + 1].re));
         }
     }
-    d[last + 1]
+    Ok(d[last + 1])
 }

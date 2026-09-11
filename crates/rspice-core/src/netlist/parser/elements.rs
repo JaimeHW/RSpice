@@ -11,6 +11,7 @@ pub(super) fn parse_resistor(
     params: &ParamContext,
     diagnostics: &mut Vec<ParseDiagnostic>,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -19,6 +20,7 @@ pub(super) fn parse_resistor(
     // Skip optional parameter names (R=)
     skip_optional_param_name(stream, "R");
 
+    let mut direction = parameter_direction.as_ref().map(|_| Derivative::from(0.0));
     let mut value: Option<Value> = None;
     let mut value_expr: Option<String> = None;
     let mut model: Option<String> = None;
@@ -35,13 +37,24 @@ pub(super) fn parse_resistor(
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
-                value = Some(expect_value(stream, line_num, params)?);
+                value = Some(expect_value_with_direction(
+                    stream,
+                    line_num,
+                    params,
+                    direction.as_mut(),
+                )?);
                 consume_passive_unit_word(stream, PASSIVE_RESISTOR_UNITS);
             }
             TokenKind::Expression(_) => {
                 if let Some(expr) = take_value_expression_string(stream, params) {
                     if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
                         value = Some(resolved);
+                        if let Some(direction) = &mut direction {
+                            *direction = params
+                                .parameter_direction(&expr)
+                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                                .re;
+                        }
                     } else {
                         value_expr = Some(expr);
                     }
@@ -52,12 +65,23 @@ pub(super) fn parse_resistor(
                     if let Some(expr) = take_value_expression_string(stream, params) {
                         if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
                             value = Some(resolved);
+                            if let Some(direction) = &mut direction {
+                                *direction = params
+                                    .parameter_direction(&expr)
+                                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                                    .re;
+                            }
                         } else {
                             value_expr = Some(expr);
                         }
                     }
                 } else {
-                    value = Some(expect_value(stream, line_num, params)?);
+                    value = Some(expect_value_with_direction(
+                        stream,
+                        line_num,
+                        params,
+                        direction.as_mut(),
+                    )?);
                 }
             }
             TokenKind::Ident(s) => {
@@ -68,6 +92,12 @@ pub(super) fn parse_resistor(
                         value_expr = Some(ident);
                     } else {
                         value = params.get(&ident);
+                        if let Some(direction) = &mut direction {
+                            *direction = params
+                                .parameter_direction(&ident)
+                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                                .re;
+                        }
                     }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
                     stream.advance();
@@ -89,6 +119,11 @@ pub(super) fn parse_resistor(
         }
     }
 
+    // Optional fields need their own derivatives before this whole element is qualified.
+    skip_commas(stream);
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        direction = None;
+    }
     // Parse remaining instance parameters.
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -293,6 +328,17 @@ pub(super) fn parse_resistor(
         }
     }
 
+    if !defer_simple_param_refs
+        && value_expr.is_none()
+        && model.is_none()
+        && instance_params.is_empty()
+        && deferred_params.is_empty()
+        && let (Some(capture), Some(direction)) = (parameter_direction, direction)
+    {
+        capture
+            .elements
+            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+    }
     let mut nodes = vec![node_pos, node_neg];
     expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
     elements.push(Element {
@@ -361,6 +407,7 @@ struct PspiceUGateModels<'a> {
 }
 
 struct PassiveTail {
+    direction: Option<Derivative>,
     value: Option<Value>,
     value_expr: Option<String>,
     model: Option<String>,
@@ -614,8 +661,10 @@ fn parse_passive_tail(
     value_keys: &[&str],
     unit_words: &[&str],
     defer_simple_param_refs: bool,
+    capture_direction: bool,
 ) -> Result<PassiveTail, ParseError> {
     let mut tail = PassiveTail {
+        direction: capture_direction.then(|| 0.0.into()),
         value: None,
         value_expr: None,
         model: None,
@@ -631,7 +680,12 @@ fn parse_passive_tail(
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Number(_) => {
-                tail.value = Some(expect_value(stream, line_num, params)?);
+                tail.value = Some(expect_value_with_direction(
+                    stream,
+                    line_num,
+                    params,
+                    tail.direction.as_mut(),
+                )?);
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
@@ -644,22 +698,25 @@ fn parse_passive_tail(
                 if defer_simple_param_refs {
                     tail.value_expr = Some(expr);
                 } else {
-                    match eval_expression(&expr, params) {
+                    match evaluate_value_with_direction(&expr, params, tail.direction.as_mut()) {
                         Ok(value) => tail.value = Some(value),
-                        Err(error) => match prepare_behavioral_expression(&expr, params) {
-                            Ok(prepared) => match eval_expression(&prepared, params) {
-                                Ok(value) => tail.value = Some(value),
-                                // Parameter and user-function expansion has
-                                // already succeeded.  Preserve that prepared
-                                // expression for the runtime evaluator rather
-                                // than reintroducing identifiers which only
-                                // existed in the parser's parameter scope.
-                                Err(_) => tail.value_expr = Some(prepared),
-                            },
-                            Err(_) => {
-                                return Err(ParseError::InvalidValue(error.to_string()));
+                        Err(error) => {
+                            tail.direction = None;
+                            match prepare_behavioral_expression(&expr, params) {
+                                Ok(prepared) => match eval_expression(&prepared, params) {
+                                    Ok(value) => tail.value = Some(value),
+                                    // Parameter and user-function expansion has
+                                    // already succeeded.  Preserve that prepared
+                                    // expression for the runtime evaluator rather
+                                    // than reintroducing identifiers which only
+                                    // existed in the parser's parameter scope.
+                                    Err(_) => tail.value_expr = Some(prepared),
+                                },
+                                Err(_) => {
+                                    return Err(ParseError::InvalidValue(error.to_string()));
+                                }
                             }
-                        },
+                        }
                     }
                 }
             }
@@ -671,6 +728,12 @@ fn parse_passive_tail(
                         tail.value_expr = Some(ident);
                     } else {
                         tail.value = params.get(&ident);
+                        if let Some(direction) = &mut tail.direction {
+                            *direction = params
+                                .parameter_direction(&ident)
+                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                                .re;
+                        }
                     }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
                     stream.advance();
@@ -684,6 +747,10 @@ fn parse_passive_tail(
         }
     }
 
+    skip_commas(stream);
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        tail.direction = None;
+    }
     // Remaining named parameters (and a possible bare model name).
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -893,6 +960,7 @@ pub(super) fn parse_capacitor(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -907,6 +975,7 @@ pub(super) fn parse_capacitor(
         &["C", "VALUE", "CAP"],
         PASSIVE_CAPACITOR_UNITS,
         defer_simple_param_refs,
+        parameter_direction.is_some(),
     )?;
 
     if tail.value.is_none() && tail.value_expr.is_none() && tail.model.is_none() {
@@ -916,6 +985,17 @@ pub(super) fn parse_capacitor(
         });
     }
 
+    if !defer_simple_param_refs
+        && tail.value_expr.is_none()
+        && tail.model.is_none()
+        && tail.instance_params.is_empty()
+        && tail.deferred_params.is_empty()
+        && let (Some(capture), Some(direction)) = (parameter_direction, tail.direction)
+    {
+        capture
+            .elements
+            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+    }
     let mut instance_params = tail.instance_params;
     let mut nodes = vec![node_pos, node_neg];
     expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
@@ -942,6 +1022,7 @@ pub(super) fn parse_inductor(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -956,6 +1037,7 @@ pub(super) fn parse_inductor(
         &["L", "VALUE", "IND"],
         PASSIVE_INDUCTOR_UNITS,
         defer_simple_param_refs,
+        parameter_direction.is_some(),
     )?;
 
     if tail.value.is_none() && tail.value_expr.is_none() && tail.model.is_none() {
@@ -968,6 +1050,17 @@ pub(super) fn parse_inductor(
     // Magnetic-core (Jiles-Atherton) vs linear model-card dispatch happens at
     // circuit-build time based on the referenced model's type; the parser
     // records the reference only.
+    if !defer_simple_param_refs
+        && tail.value_expr.is_none()
+        && tail.model.is_none()
+        && tail.instance_params.is_empty()
+        && tail.deferred_params.is_empty()
+        && let (Some(capture), Some(direction)) = (parameter_direction, tail.direction)
+    {
+        capture
+            .elements
+            .insert(name.clone(), ElementParameterDirection::Passive(direction));
+    }
     let mut instance_params = tail.instance_params;
     let mut nodes = vec![node_pos, node_neg];
     expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
@@ -994,6 +1087,7 @@ pub(super) fn parse_voltage_source(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_source_spec: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -1016,7 +1110,13 @@ pub(super) fn parse_voltage_source(
 
     let raw_spec = collect_deferred_source_spec(&mut stream.clone());
     let mut parsed_stream = stream.clone();
-    let source_spec = match parse_source_spec(&mut parsed_stream, line_num, params) {
+    let directions = std::cell::RefCell::new([Derivative::from(0.0); 3]);
+    let source_spec = match source_specs::parse_source_spec_with_direction(
+        &mut parsed_stream,
+        line_num,
+        params,
+        parameter_direction.as_ref().map(|_| &directions),
+    ) {
         Ok(source_spec) => {
             *stream = parsed_stream;
             source_spec
@@ -1037,6 +1137,22 @@ pub(super) fn parse_voltage_source(
         Err(err) => return Err(err),
     };
 
+    if matches!(
+        source_spec,
+        SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
+    ) && let Some(capture) = parameter_direction
+    {
+        let [dc, magnitude, phase] = directions.into_inner();
+        capture.elements.insert(
+            name.clone(),
+            ElementParameterDirection::Source {
+                dc,
+                magnitude,
+                phase,
+            },
+        );
+    }
+
     elements.push(Element {
         name,
         kind: ElementKind::VoltageSource(source_spec),
@@ -1053,6 +1169,7 @@ pub(super) fn parse_current_source(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_source_spec: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -1075,7 +1192,13 @@ pub(super) fn parse_current_source(
 
     let raw_spec = collect_deferred_source_spec(&mut stream.clone());
     let mut parsed_stream = stream.clone();
-    let source_spec = match parse_source_spec(&mut parsed_stream, line_num, params) {
+    let directions = std::cell::RefCell::new([Derivative::from(0.0); 3]);
+    let source_spec = match source_specs::parse_source_spec_with_direction(
+        &mut parsed_stream,
+        line_num,
+        params,
+        parameter_direction.as_ref().map(|_| &directions),
+    ) {
         Ok(source_spec) => {
             *stream = parsed_stream;
             source_spec
@@ -1095,6 +1218,22 @@ pub(super) fn parse_current_source(
         }
         Err(err) => return Err(err),
     };
+
+    if matches!(
+        source_spec,
+        SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. }
+    ) && let Some(capture) = parameter_direction
+    {
+        let [dc, magnitude, phase] = directions.into_inner();
+        capture.elements.insert(
+            name.clone(),
+            ElementParameterDirection::Source {
+                dc,
+                magnitude,
+                phase,
+            },
+        );
+    }
 
     elements.push(Element {
         name,
@@ -7504,6 +7643,7 @@ fn parse_voltage_controlled_source(
     params: &ParamContext,
     is_voltage_output: bool,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<VoltageControlledSourceParseKind, ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -7754,12 +7894,14 @@ fn parse_voltage_controlled_source(
 
             let ctrl_pos = expect_node(stream, line_num)?;
             let ctrl_neg = expect_node(stream, line_num)?;
+            let mut gain_direction = 0.0.into();
             let (gain, gain_expr) = expect_deferrable_controlled_source_value(
                 stream,
                 line_num,
                 params,
                 defer_simple_param_refs,
                 element_label,
+                parameter_direction.as_ref().map(|_| &mut gain_direction),
             )?;
             let multiplicity = parse_source_multiplicity_tail(
                 stream,
@@ -7769,6 +7911,15 @@ fn parse_voltage_controlled_source(
                 element_label,
                 !is_voltage_output,
             )?;
+            if !defer_simple_param_refs
+                && !multiplicity.given
+                && let Some(capture) = parameter_direction
+            {
+                capture.elements.insert(
+                    name.clone(),
+                    ElementParameterDirection::Gain(gain_direction),
+                );
+            }
             let kind = if is_voltage_output {
                 ElementKind::Vcvs {
                     gain,
@@ -7922,6 +8073,7 @@ fn parse_current_controlled_source(
     params: &ParamContext,
     is_voltage_output: bool,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -7986,13 +8138,21 @@ fn parse_current_controlled_source(
         }
         None => {
             let control_element = expect_ident(stream, line_num)?;
+            let mut gain_direction = 0.0.into();
             let (gain, gain_expr) = expect_deferrable_controlled_source_value(
                 stream,
                 line_num,
                 params,
                 defer_simple_param_refs,
                 element_label,
+                parameter_direction.as_ref().map(|_| &mut gain_direction),
             )?;
+            if !defer_simple_param_refs && let Some(capture) = parameter_direction {
+                capture.elements.insert(
+                    name.clone(),
+                    ElementParameterDirection::Gain(gain_direction),
+                );
+            }
             let kind = if is_voltage_output {
                 ElementKind::Ccvs {
                     transresistance: gain,
@@ -8025,9 +8185,11 @@ fn expect_deferrable_controlled_source_value(
     params: &ParamContext,
     defer_simple_param_refs: bool,
     element_label: &str,
+    direction: Option<&mut Derivative>,
 ) -> Result<(Value, Option<String>), ParseError> {
     if !defer_simple_param_refs {
-        return expect_value(stream, line_num, params).map(|value| (value, None));
+        return expect_value_with_direction(stream, line_num, params, direction)
+            .map(|value| (value, None));
     }
 
     match take_deferrable_value(stream, params, true) {
@@ -8052,6 +8214,7 @@ pub(super) fn parse_vcvs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<VoltageControlledSourceParseKind, ParseError> {
     parse_voltage_controlled_source(
         stream,
@@ -8060,6 +8223,7 @@ pub(super) fn parse_vcvs(
         params,
         true,
         defer_simple_param_refs,
+        parameter_direction,
     )
 }
 
@@ -8069,6 +8233,7 @@ pub(super) fn parse_cccs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     parse_current_controlled_source(
         stream,
@@ -8077,6 +8242,7 @@ pub(super) fn parse_cccs(
         params,
         false,
         defer_simple_param_refs,
+        parameter_direction,
     )
 }
 
@@ -8086,6 +8252,7 @@ pub(super) fn parse_vccs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<VoltageControlledSourceParseKind, ParseError> {
     parse_voltage_controlled_source(
         stream,
@@ -8094,6 +8261,7 @@ pub(super) fn parse_vccs(
         params,
         false,
         defer_simple_param_refs,
+        parameter_direction,
     )
 }
 
@@ -8103,6 +8271,7 @@ pub(super) fn parse_ccvs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     defer_simple_param_refs: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     parse_current_controlled_source(
         stream,
@@ -8111,6 +8280,7 @@ pub(super) fn parse_ccvs(
         params,
         true,
         defer_simple_param_refs,
+        parameter_direction,
     )
 }
 

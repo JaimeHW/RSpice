@@ -402,7 +402,7 @@ fn parameter_directions_preserve_complex_values_and_small_effects() {
                     "nominal {dialect:?} {source}: {value:?} != {ordinary:?}"
                 ));
             }
-            let actual = direction.unwrap().binary64();
+            let actual = direction.unwrap().unwrap().binary64();
             let scale = if expected == ComplexValue::from(0.0) {
                 1.0
             } else {
@@ -452,7 +452,7 @@ fn parameter_directions_use_the_authored_random_draws_once() {
             1e-8 + 1e-8 * first / 2.0 + uniform + limit + 1.0 + 2.0 * relative / 3.0
                 - 3.0 * sigma / 4.0
         };
-        assert!((direction.unwrap().binary64().re - expected).abs() < 2e-14);
+        assert!((direction.unwrap().unwrap().binary64().re - expected).abs() < 2e-14);
     }
 }
 
@@ -482,7 +482,7 @@ fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
         for (name, value, direction) in [("A", 17.0, 0.0), ("B", 0.0, 3.0), ("C", 0.0, 20.0)] {
             assert_eq!(parsed.params.get(name), Some(value));
             assert_eq!(
-                parsed.params.parameter_direction(name).binary64(),
+                parsed.params.parameter_direction(name).unwrap().binary64(),
                 direction.into(),
                 "{dialect:?} {name}"
             );
@@ -505,11 +505,21 @@ fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
     )
     .unwrap();
     assert_eq!(
-        parsed.params.parameter_direction("BEFORE").binary64(),
+        parsed
+            .params
+            .parameter_direction("BEFORE")
+            .unwrap()
+            .binary64(),
         1.0.into()
     );
     assert_eq!(parsed.params.get("AFTER"), Some(6.0));
-    assert!(parsed.params.parameter_direction("AFTER").is_zero());
+    assert!(
+        parsed
+            .params
+            .parameter_direction("AFTER")
+            .unwrap()
+            .is_zero()
+    );
 }
 
 #[test]

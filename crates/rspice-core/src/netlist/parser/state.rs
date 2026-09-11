@@ -83,6 +83,7 @@ pub(super) struct SubcktFrame {
 #[derive(Debug)]
 pub(super) struct ParseState {
     pub(super) parameter_overrides: Vec<ParameterOverride>,
+    pub(super) parameter_direction: Option<Box<ParameterDirectionCapture>>,
     pub(super) elements: Vec<Element>,
     pub(super) element_names: ElementNameRegistry,
     pub(super) analyses: Vec<AnalysisCommand>,
@@ -136,6 +137,7 @@ impl ParseState {
     pub(super) fn new() -> Self {
         Self {
             parameter_overrides: Vec::new(),
+            parameter_direction: None,
             elements: Vec::new(),
             element_names: ElementNameRegistry::default(),
             analyses: Vec::new(),
@@ -239,6 +241,7 @@ impl ParseState {
             source_path: None,
             replay_context: None,
             ast_overlay: Default::default(),
+            parameter_direction: self.parameter_direction,
         };
         apply_temp_directive_to_options(&mut netlist);
         let ground_policy = netlist.ground_policy();
@@ -331,6 +334,7 @@ fn apply_temp_directive_to_options(netlist: &mut Netlist) {
 }
 
 pub(super) struct ParseLineContext<'a> {
+    pub(super) parameter_direction: Option<&'a mut ParameterDirectionCapture>,
     pub(super) parameter_overrides: &'a [ParameterOverride],
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
     pub(super) lin_analysis: &'a mut Option<LinAnalysis>,

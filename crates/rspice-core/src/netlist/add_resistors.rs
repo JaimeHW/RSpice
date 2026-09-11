@@ -829,6 +829,7 @@ fn clone_netlist_with_abort(
         source_path,
         replay_context: None,
         ast_overlay: Default::default(),
+        parameter_direction: None,
     })
 }
 

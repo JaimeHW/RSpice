@@ -44,8 +44,10 @@ use super::{
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
+use super::{ElementParameterDirection, ParameterDirectionCapture};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::expr::Derivative;
 use crate::numerics::integration::{XYCE_DEFAULT_NLMAX, XYCE_DEFAULT_NLMIN};
 use std::collections::{HashMap, HashSet};
 
@@ -77,7 +79,6 @@ use line::*;
 use pspice_stim::*;
 use scoping::*;
 pub(super) use source_specs::map_source_spec_values;
-use source_specs::parse_source_spec;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
 use state::*;
 use tlines::*;
@@ -621,6 +622,9 @@ fn parse_netlist_impl(
             state.params.set(&parameter.name, parameter.value);
         }
         if parameter.direction {
+            state
+                .parameter_direction
+                .get_or_insert_with(Default::default);
             state
                 .params
                 .seed_parameter_direction(&parameter.name, parameter.global);
@@ -4374,6 +4378,9 @@ fn process_line_gated(
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
     if let Some(directive) = parse_conditional_directive(line) {
+        if let Some(capture) = &mut state.parameter_direction {
+            capture.has_conditionals = true;
+        }
         return state.apply_conditional_directive(directive, line_num);
     }
     if state.conditionals_suppress() {

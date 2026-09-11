@@ -19,6 +19,7 @@ struct SourceValueMapping<'a> {
 struct SourceParseContext<'a> {
     params: &'a ParamContext,
     mapping: Option<SourceValueMapping<'a>>,
+    direction: Option<&'a std::cell::RefCell<[Derivative; 3]>>,
 }
 
 impl std::ops::Deref for SourceParseContext<'_> {
@@ -76,12 +77,22 @@ pub(super) fn parse_source_spec(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
+    parse_source_spec_with_direction(stream, line_num, params, None)
+}
+
+pub(super) fn parse_source_spec_with_direction(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
+) -> Result<SourceSpec, ParseError> {
     parse_source_spec_impl(
         stream,
         line_num,
         &SourceParseContext {
             params,
             mapping: None,
+            direction,
         },
     )
 }
@@ -115,10 +126,7 @@ fn parse_source_spec_impl(
                     && !is_source_level_keyword(s)
                     && crate::netlist::lexer::parse_spice_value(s).is_ok() =>
             {
-                let v = expect_value(stream, line_num, params)?;
-                if !v.is_finite() {
-                    return Err(non_finite_source_value_error(line_num, "DC", "value", v));
-                }
+                let v = expect_finite_source_value(stream, line_num, params, "DC", "value")?;
                 dc_value = Some(v);
                 continue;
             }
@@ -150,10 +158,7 @@ fn parse_source_spec_impl(
                     && !is_source_level_keyword(s)
                     && params.get(s).is_some() =>
             {
-                let v = expect_value(stream, line_num, params)?;
-                if !v.is_finite() {
-                    return Err(non_finite_source_value_error(line_num, "DC", "value", v));
-                }
+                let v = expect_finite_source_value(stream, line_num, params, "DC", "value")?;
                 dc_value = Some(v);
                 continue;
             }
@@ -412,6 +417,7 @@ pub(in crate::netlist) fn map_source_spec_values(
     let tokens = tokenize(raw).map_err(|error| lex_to_parse_error(error, 0))?;
     let context = SourceParseContext {
         params,
+        direction: None,
         mapping: Some(SourceValueMapping {
             map,
             replacements: Default::default(),
@@ -706,10 +712,13 @@ fn optional_ac_value_or_default(
     }
 
     let found = stream.peek().kind.to_string();
-    let value = expect_value(stream, line_num, params).map_err(|err| ParseError::Syntax {
-        line: line_num,
-        message: format!("AC {arg_name} expected numeric value, found {found} ({err})"),
-    })?;
+    let value =
+        expect_source_field_value(stream, line_num, params, "AC", arg_name).map_err(|err| {
+            ParseError::Syntax {
+                line: line_num,
+                message: format!("AC {arg_name} expected numeric value, found {found} ({err})"),
+            }
+        })?;
     if !value.is_finite() {
         return Err(non_finite_source_value_error(
             line_num, "AC", arg_name, value,
@@ -1548,6 +1557,38 @@ fn source_optional_value(
     Ok(Some(value))
 }
 
+fn expect_source_field_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &SourceParseContext<'_>,
+    source_name: &str,
+    arg_name: &str,
+) -> Result<Value, ParseError> {
+    let slot = match (source_name, arg_name) {
+        ("DC", "value") => Some(0),
+        ("AC", "magnitude") => Some(1),
+        ("AC", "phase") => Some(2),
+        _ => None,
+    };
+    if let (Some(directions), Some(slot)) = (params.direction, slot) {
+        let mut direction = 0.0.into();
+        let value = super::expect_value_with_direction(
+            stream,
+            line_num,
+            params.params,
+            Some(&mut direction),
+        )?;
+        directions.borrow_mut()[slot] = if slot == 2 {
+            direction * (std::f64::consts::PI / 180.0)
+        } else {
+            direction
+        };
+        Ok(value)
+    } else {
+        expect_value(stream, line_num, params)
+    }
+}
+
 fn expect_finite_source_value(
     stream: &mut TokenStream,
     line_num: usize,
@@ -1555,7 +1596,7 @@ fn expect_finite_source_value(
     source_name: &str,
     arg_name: &str,
 ) -> Result<Value, ParseError> {
-    let value = expect_value(stream, line_num, params)?;
+    let value = expect_source_field_value(stream, line_num, params, source_name, arg_name)?;
     if !value.is_finite() {
         return Err(non_finite_source_value_error(
             line_num,
