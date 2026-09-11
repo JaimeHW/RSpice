@@ -632,9 +632,7 @@ impl Engine {
         self.ensure_result_shape(op_harmonics.saturating_add(1), num_nodes.saturating_mul(2))?;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
-        let mut solver = HbSolver::try_new(hb_config.clone(), num_nodes).map_err(|error| {
-            SimulationError::Circuit(format!("pnoise solver construction failed: {error}"))
-        })?;
+        let mut solver = self.new_hb_solver(hb_config.clone(), num_nodes)?;
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 

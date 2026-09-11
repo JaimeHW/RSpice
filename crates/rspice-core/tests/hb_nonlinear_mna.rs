@@ -451,3 +451,33 @@ fn vbic_physical_hb_thermal_rc_and_retained_pac_match_analytic_heat_balance() {
         }
     }
 }
+
+#[test]
+fn nonlinear_hb_honors_resolved_voltage_tolerance_for_small_ideal_sources() {
+    for (mode, authored) in [(".options HB TAHB=0", true), ("", false)] {
+        let options = if authored { ".options VNTOL=1e-12" } else { "" };
+        let netlist = Netlist::parse(&format!(
+            "HB sub-microvolt source\nV1 gate 0 DC 500n SIN(500n 200n 1meg)\nM1 0 gate 0 0 NSELECT\n{MOS_MODEL}\n{mode}\n{options}\n.end\n"
+        )).unwrap();
+        let mut simulation = SimulationConfig::default();
+        // Authored VNTOL must override even a deliberately loose engine value.
+        simulation.convergence_config.voltage_abstol = if authored { 1e-3 } else { 1e-12 };
+        for krylov in [false, true] {
+            let mut config = HbConfig::new(F0).with_harmonics(1).with_tolerance(1e-9);
+            config.use_krylov = krylov;
+            let hb = Engine::new(simulation.clone())
+                .run_hb(&netlist, config)
+                .unwrap();
+            for (harmonic, expected) in [Complex64::new(500e-9, 0.0), Complex64::new(0.0, -200e-9)]
+                .into_iter()
+                .enumerate()
+            {
+                let actual = coefficient(&hb, "gate", harmonic);
+                assert!(
+                    (actual - expected).norm() < 1e-12,
+                    "{mode} authored={authored} krylov={krylov} harmonic={harmonic}: {actual} vs {expected}"
+                );
+            }
+        }
+    }
+}

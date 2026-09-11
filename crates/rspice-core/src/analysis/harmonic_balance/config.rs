@@ -145,11 +145,13 @@ pub struct HbConfig {
     /// Empty for single-tone analysis
     pub tones: Vec<HbTone>,
 
-    /// Newton convergence tolerance (relative)
-    /// Iteration stops when ||F(X)||/||X|| < tolerance
+    /// Relative Newton residual tolerance, applied separately to every row
+    /// against the sum of that row's contribution magnitudes.
     pub tolerance: Value,
 
-    /// Absolute tolerance for small signals
+    /// Absolute residual tolerance for node equations: amperes for electrical
+    /// and delay nodes, watts for thermal nodes. The engine supplies VNTOL
+    /// separately for voltage-valued branch equations.
     pub abstol: Value,
 
     /// Maximum Newton iterations

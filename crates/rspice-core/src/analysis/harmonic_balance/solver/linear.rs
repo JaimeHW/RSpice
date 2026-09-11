@@ -278,6 +278,7 @@ impl HbSolver {
 
         Ok(Self {
             config,
+            voltage_abstol: crate::constants::VNTOL,
             configuration_error: None,
             fft,
             num_nodes,
@@ -310,6 +311,7 @@ impl HbSolver {
         let fft = HbFft::minimal();
         Self {
             config,
+            voltage_abstol: crate::constants::VNTOL,
             configuration_error: Some(error),
             fft,
             num_nodes: 0,
@@ -336,6 +338,16 @@ impl HbSolver {
             #[cfg(feature = "veriloga")]
             veriloga_nonlinear_devices: Vec::new(),
         }
+    }
+
+    /// Engine clients supply their resolved VNTOL; standalone clients retain
+    /// the default voltage tolerance without changing the public HB config.
+    pub(crate) fn with_voltage_abstol(mut self, tolerance: Value) -> Result<Self, HbError> {
+        if !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(HbConfigError::new("voltage_abstol", "must be finite and positive").into());
+        }
+        self.voltage_abstol = tolerance;
+        Ok(self)
     }
 
     pub(super) fn validate_configuration(&self) -> Result<(), HbError> {
@@ -1931,7 +1943,7 @@ impl HbSolver {
         state.converged = state.rows_converged_with_branch_tolerances(
             self.config.tolerance,
             self.config.abstol,
-            crate::constants::VNTOL,
+            self.voltage_abstol,
         );
 
         if state.converged {

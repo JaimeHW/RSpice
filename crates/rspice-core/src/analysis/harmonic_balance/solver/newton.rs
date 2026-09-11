@@ -983,7 +983,7 @@ impl HbSolver {
             // 2. Check convergence: per-row KCL test. A global norm hides a
             // microamp imbalance at a high-impedance node behind the amp
             // scale of stiff source rows, accepting grossly wrong bias.
-            if state.rows_converged_with_branch_tolerances(tol, abstol, crate::constants::VNTOL) {
+            if state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
                 return Ok(true);
             }
 
@@ -1294,7 +1294,7 @@ impl HbSolver {
             current_abstol,
         } = limits;
         let initial_merit =
-            state.certificate_merit(reltol, current_abstol, crate::constants::VNTOL, false)?;
+            state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
         let armijo_c = 1e-4;
         let min_alpha = 0.01;
         let vt = 0.02585; // Thermal voltage at 300K
@@ -1366,7 +1366,7 @@ impl HbSolver {
 
             self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
             let merit =
-                state.certificate_merit(reltol, current_abstol, crate::constants::VNTOL, false)?;
+                state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
 
             if merit < initial_merit * (1.0 - armijo_c * alpha) {
                 return Ok(());

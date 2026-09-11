@@ -909,6 +909,9 @@ pub struct HbSolver {
     /// Configuration
     config: HbConfig,
 
+    /// Resolved engine voltage tolerance for branch-equation certificates.
+    voltage_abstol: Value,
+
     /// Authentication failure retained by the backwards-compatible
     /// infallible constructor. Numerical entry points return this as a typed
     /// error before touching the placeholder FFT or storage.

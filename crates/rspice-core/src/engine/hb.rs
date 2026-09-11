@@ -47,7 +47,7 @@ pub use pnoise::PnoiseAnalysisResult;
 pub use psp::{PreparedPsp, PspAnalysisResult};
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
 
-const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 35;
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 36;
 
 fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -1109,6 +1109,16 @@ impl Engine {
         )
     }
 
+    /// Share resolved voltage-tolerance semantics with every periodic consumer
+    /// that constructs an HB carrier (PAC/PXF/PSP/PNoise included).
+    fn new_hb_solver(&self, config: HbConfig, num_nodes: usize) -> Result<HbSolver, SimulationError> {
+        HbSolver::try_new(config, num_nodes)
+            .and_then(|solver| solver.with_voltage_abstol(self.voltage_abstol()))
+            .map_err(|error| {
+                SimulationError::Circuit(format!("HB solver construction failed: {error}"))
+            })
+    }
+
     /// Apply analysis-local options authored for Xyce's HB packages.
     ///
     /// This deliberately returns a derived `HbConfig` instead of modifying
@@ -1490,9 +1500,7 @@ impl Engine {
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
         // Create solver
-        let mut solver = HbSolver::try_new(config.clone(), num_nodes).map_err(|error| {
-            SimulationError::Circuit(format!("HB solver construction failed: {error}"))
-        })?;
+        let mut solver = self.new_hb_solver(config.clone(), num_nodes)?;
 
         // Set node names from circuit's node map
         let node_names = self.hb_build_node_names(&circuit, num_nodes);

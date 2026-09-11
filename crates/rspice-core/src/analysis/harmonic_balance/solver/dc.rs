@@ -333,8 +333,7 @@ impl HbSolver {
             // Any circuit-wide reference (a norm, the max source current)
             // lets a microamp imbalance at a high-impedance node hide under
             // an unrelated large-row scale.
-            if state.dc_rows_converged_with_branch_tolerances(tol, abstol, crate::constants::VNTOL)
-            {
+            if state.dc_rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
                 return Ok(true);
             }
 
@@ -368,7 +367,7 @@ impl HbSolver {
                     gmin,
                     reltol: tol,
                     current_abstol: abstol,
-                    voltage_abstol: crate::constants::VNTOL,
+                    voltage_abstol: self.voltage_abstol,
                     source_scale,
                 },
             )?;
