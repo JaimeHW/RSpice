@@ -1070,14 +1070,65 @@ confirmed that no licensed reference installation is available. Spectre parity,
 production readiness, persisted mixed restart and all incomplete MS packages
 remain unproven/open.
 
+## Resolve mixed A/D roots before accepting their consequences
+
+The mixed HDL boundary now requests the transient controller's existing
+candidate rejection/refinement path. During candidate inspection it checks all
+A/D boundaries using the accepted digital level, accepted voltage and converged
+candidate voltage, and returns the earliest physical threshold root before
+opening another candidate HDL trial or delivering control tasks. It does not evaluate analog stateful operators again.
+The controller restores speculative state and solves at that root before any
+digital consequences are accepted.
+
+Root time remains in seconds; it is not rounded to the HDL tick grid. The
+effective time tolerance is the greater of 64 machine epsilons times the
+absolute time scale and the active solver's hard minimum timestep. A target
+extremely close to the accepted point advances by the first representable
+interval meeting that minimum. This removes requests for illegal subminimum
+steps while bounding delivery error by the solver's numerical capability.
+Zero-width thresholds use the entering direction at equality, retain the held
+level while stationary, and preserve the existing zero-at-threshold startup
+convention until an accepted voltage history exists.
+
+The shared crossing interpolation also no longer treats tiny finite voltage
+changes as flat or lets overflowing finite voltage differences fall back to
+the endpoint. Scaled, bracketed interpolation preserves the crossing fraction
+for both extremes and is reused by existing XSPICE callers.
+
+The previous increment's one-analog-sample allowance is removed from the timing
+regression. The 0.95 ns ramp crossing is checked against its analytical time
+with a declared 2e-20 s bound (twice the default solver hard minimum), for
+20 ps and 75 ps maximum steps and both instance orders. Its 500 ps and 25 ps
+delayed updates still land on the shared 1 ps grid. A new sinusoidal fixture
+checks concave and convex crossings in both directions against their analytical
+roots and checks the delayed output time. The existing oscillator counter again
+records all ten cycles, including the first edge after initialization.
+
+Four focused interpolation cases, including tiny/extreme finite values, and the
+existing rejected-timestep digital replay case passed on the initial run.
+That run caught requests below the solver floor and an unintended startup edge;
+both were corrected. The three affected circuit cases then passed on
+`862ec6491` plus this change; their test bodies took 0.13 seconds after a
+20 second build. Logs: `mixed-adc-roots.log` and `mixed-adc-root-floor.log` in
+the owned target directory. No compiler/generator inputs, broad suite or platform
+checks were added. The concurrent BJT branch-current change is integrated
+separately; these resistor/source/HDL fixtures do not exercise those BJT equations.
+
+This closes the observed sampled-delivery defect for the mixed HDL electrical
+A/D adapter within the stated time tolerance. It does not qualify arbitrary
+unbracketed/non-monotonic event detection, XSPICE boundary root refinement, flow
+or analog-owned-variable reads, full feedback convergence, reference equivalence,
+or the whole MS03 package. The full approved plan remains active.
+
 ## Next implementation work
 
 Attach HDL and XSPICE drivers to resolved event nets under the circuit execution
 authority, preserving explicit electrical loads and converters while removing
 unnecessary analog unknowns from digital chains. The first whole-circuit slice
 must include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
-off-grid timing and a rejected trial. Finish exact candidate refinement of A/D
-crossings and the broader root/flow-read handshake.
+off-grid timing and a rejected trial. Extend the root handshake to XSPICE
+boundaries and complete flow/analog-owned-variable dependencies and feedback
+convergence.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

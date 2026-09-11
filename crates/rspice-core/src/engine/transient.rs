@@ -3793,6 +3793,7 @@ impl Engine {
                 0.0,
                 &solution,
                 &CompanionCoefficients::backward_euler(),
+                0.0,
                 true,
                 false,
             )?
@@ -3898,6 +3899,7 @@ impl Engine {
                 0.0,
                 &solution,
                 &CompanionCoefficients::backward_euler(),
+                0.0,
                 true,
                 false,
             )?
@@ -6065,7 +6067,7 @@ impl Engine {
                         Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
                         let model_candidate = Self::inspect_transient_model_candidate(
                             &mut circuit, $candidate_time, dt, $candidate_solution,
-                            &coeff, analysis_initial_step, analysis_final_step,
+                            &coeff, timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
                         )?;
                         if let Some(target) = model_candidate.refinement_time {
                             let accepted_time = t;

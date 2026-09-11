@@ -1,8 +1,8 @@
-//! When, inside an accepted analog step, a voltage crossed a threshold.
+//! When, inside an analog interval, a voltage crossed a threshold.
 //!
 //! An analog solver reports a voltage at the timepoints its step controller
 //! chose, and nothing makes a logic threshold one of them. The crossing
-//! happened somewhere strictly inside the last accepted step, and dating the
+//! may lie inside the attempted interval, and dating the
 //! consequence at the step's end instead is an error of up to a whole
 //! timestep — which on a `.tran` whose step is chosen by truncation error is
 //! not a small or a fixed quantity.
@@ -25,9 +25,9 @@
 use crate::Value;
 
 /// The time at which a voltage moving from `previous_voltage` to `voltage`
-/// crossed `threshold`, interpolated inside the accepted step.
+/// crossed `threshold`, interpolated between the accepted and candidate samples.
 ///
-/// `time` is the end of the accepted step, `time_prev` its start, and
+/// `time` is the candidate endpoint, `time_prev` the accepted start, and
 /// `timestep` its length. The answer is clamped to the closed step interval,
 /// so it can never date a consequence outside the step that produced it.
 ///
@@ -56,26 +56,39 @@ pub(crate) fn threshold_crossing_time(
     voltage: Value,
     threshold: Value,
 ) -> Value {
-    let denominator = voltage - previous_voltage;
     if !timestep.is_finite()
         || timestep <= 0.0
         || !previous_voltage.is_finite()
         || !voltage.is_finite()
         || !threshold.is_finite()
-        || denominator.abs() <= Value::EPSILON
+        || voltage == previous_voltage
     {
         return time;
     }
-
-    // How far back from the end of the step the straight line between the two
-    // samples was at the threshold.
-    let delta = timestep * (voltage - threshold) / denominator;
-    let crossing = time - delta;
-    if crossing.is_finite() {
-        crossing.clamp(time_prev.min(time), time_prev.max(time))
-    } else {
-        time
+    // Resolve extrapolation before forming differences, so even extreme finite
+    // voltages cannot overflow into an incorrect endpoint fallback.
+    let rising = voltage > previous_voltage;
+    if (rising && threshold <= previous_voltage) || (!rising && threshold >= previous_voltage) {
+        return time_prev;
     }
+    if (rising && threshold >= voltage) || (!rising && threshold <= voltage) {
+        return time;
+    }
+    let mut before = (threshold - previous_voltage).abs();
+    let mut after = (voltage - threshold).abs();
+    if !before.is_finite() || !after.is_finite() {
+        let scale = previous_voltage
+            .abs()
+            .max(voltage.abs())
+            .max(threshold.abs());
+        before = (threshold / scale - previous_voltage / scale).abs();
+        after = (voltage / scale - threshold / scale).abs();
+    }
+    let scale = before.max(after);
+    let before = before / scale;
+    let after = after / scale;
+    let crossing = time - timestep * (after / (before + after));
+    crossing.clamp(time_prev.min(time), time_prev.max(time))
 }
 
 #[cfg(test)]
@@ -97,6 +110,21 @@ mod tests {
             (crossing - 1.25e-9).abs() < 1.0e-24,
             "expected 1.25 ns, got {crossing:e}"
         );
+    }
+
+    #[test]
+    fn small_and_extreme_finite_voltages_retain_their_crossing_fraction() {
+        for (previous, voltage, threshold) in [
+            (0.0, 1e-300, 2.5e-301),
+            (-1e308, 1e308, -5e307),
+            (1e308, -1e308, 5e307),
+        ] {
+            let crossing = threshold_crossing_time(1e-9, 0.0, 1e-9, previous, voltage, threshold);
+            assert!(
+                (crossing - 0.25e-9).abs() < 1e-24,
+                "{previous:e} -> {voltage:e}, threshold={threshold:e}: {crossing:e}"
+            );
+        }
     }
 
     #[test]

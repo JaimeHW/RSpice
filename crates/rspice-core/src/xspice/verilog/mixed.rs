@@ -392,6 +392,37 @@ struct AdcBridge {
     high: f64,
 }
 
+impl AdcBridge {
+    /// A zero-width threshold belongs to the side the signal is entering. At
+    /// a stationary threshold retain the resolved level (zero at startup).
+    /// This prevents a rising root from being postponed by the low-first test.
+    fn decision(
+        &self,
+        voltage: f64,
+        previous: Option<f64>,
+        held: Option<FourStateBit>,
+    ) -> Option<(FourStateBit, f64)> {
+        if self.low == self.high && voltage == self.low {
+            let bit = if previous.is_some_and(|previous| previous < voltage) {
+                FourStateBit::One
+            } else if previous.is_some_and(|previous| previous > voltage) {
+                FourStateBit::Zero
+            } else if held == Some(FourStateBit::One) {
+                FourStateBit::One
+            } else {
+                FourStateBit::Zero
+            };
+            Some((bit, self.low))
+        } else if voltage <= self.low {
+            Some((FourStateBit::Zero, self.low))
+        } else if voltage >= self.high {
+            Some((FourStateBit::One, self.high))
+        } else {
+            None
+        }
+    }
+}
+
 /// One digital-to-analog Thevenin bridge, carrying one bit of one discrete
 /// signal.
 ///
@@ -1752,6 +1783,70 @@ impl MixedSignalHost {
         Ok(())
     }
 
+    /// Ask the transient controller to solve at the earliest A/D crossing
+    /// before publishing this candidate's digital consequences. Only accepted
+    /// values are read; neither process state nor analog operators are evaluated.
+    pub(crate) fn analog_boundary_refinement_time(
+        &self,
+        time: f64,
+        voltages: &[f64],
+        minimum_timestep: f64,
+    ) -> Result<Option<f64>, MixedSignalError> {
+        self.require_idle("inspect analog boundary roots")?;
+        self.validate_solution(voltages)?;
+        if !self.state.started || time <= self.state.accepted_time {
+            return Ok(None);
+        }
+        if !minimum_timestep.is_finite() || minimum_timestep <= 0.0 {
+            return Err(MixedSignalError::TrialProtocol { detail: "boundary root refinement requires the solver's positive finite minimum timestep".into() });
+        }
+        let start = self.state.accepted_time;
+        // A physical root cannot be resolved more finely than the solver can
+        // advance. Keep this tolerance in seconds, independent of HDL precision.
+        let tolerance = (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(minimum_timestep);
+        let mut first_allowed = (start + minimum_timestep).max(start.next_up());
+        if first_allowed - start < minimum_timestep {
+            first_allowed = first_allowed.next_up();
+        }
+        let mut earliest: Option<f64> = None;
+        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
+            let voltage =
+                node_voltage(voltages, bridge.positive) - node_voltage(voltages, bridge.negative);
+            let previous = self.state.accepted_adc_voltages[index];
+            let held = self
+                .state
+                .digital
+                .read(bridge.signal)
+                .map(|value| value.bit(bridge.bit));
+            let Some((bit, threshold)) = bridge.decision(voltage, Some(previous), held) else {
+                continue;
+            };
+            if held == Some(bit) {
+                continue;
+            }
+            // A changed force or initial level with no physical bracket is not
+            // a root inside this interval. Resolve it at the current endpoint.
+            if (bit == FourStateBit::One && previous > threshold)
+                || (bit == FourStateBit::Zero && previous < threshold)
+            {
+                continue;
+            }
+            let crossing =
+                threshold_crossing_time(time, start, time - start, previous, voltage, threshold);
+            if time - crossing <= tolerance {
+                continue;
+            }
+            // Land on the entering side of a representable root, as the analog
+            // cross operator does. Never quantize this physical solve to HDL ticks.
+            let target = crossing.max(start).next_up().max(first_allowed);
+            if target >= time {
+                continue;
+            }
+            earliest = Some(earliest.map_or(target, |current| current.min(target)));
+        }
+        Ok(earliest)
+    }
+
     /// Sample all A/D bridges from one converged candidate, publish their
     /// changes simultaneously, and settle every same-time delta cycle.
     /// Returns true when digital activity changed any D/A input and Newton must
@@ -1859,14 +1954,20 @@ impl MixedSignalHost {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
                 - node_voltage(circuit_voltages, bridge.negative);
             scratch.sampled.push(voltage);
-            let (bit, threshold) = if voltage <= bridge.low {
-                (Some(FourStateBit::Zero), bridge.low)
-            } else if voltage >= bridge.high {
-                (Some(FourStateBit::One), bridge.high)
-            } else {
-                (None, 0.0)
+            let held = self
+                .state
+                .digital
+                .read(bridge.signal)
+                .map(|value| value.bit(bridge.bit));
+            let Some((bit, threshold)) = bridge.decision(
+                voltage,
+                self.state
+                    .started
+                    .then_some(self.state.accepted_adc_voltages[index]),
+                held,
+            ) else {
+                continue;
             };
-            let Some(bit) = bit else { continue };
             // Compared as a bit rather than by building the value the bridge
             // would publish: a bridge carries one bit, and a `FourStateValue`
             // is two heap planes, so building one to discover the boundary has

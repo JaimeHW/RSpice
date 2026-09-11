@@ -1685,10 +1685,8 @@ fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
 #[test]
 fn linked_circuit_instances_share_precision_and_sample_their_own_analog_inputs() {
     // The coarse process retains its 1 ns delay unit, but every boundary uses
-    // the circuit's finest 1 ps precision. Delays start at the delivered analog
-    // edge without rounding its activation onto the coarse model's 100 ps grid.
-    // Exact localization of the continuous threshold crossing is separate from
-    // this event-grid check: the adapter currently delivers at an analog sample.
+    // the circuit's finest 1 ps precision. Delays start at the resolved analog
+    // threshold crossing, independent of the maximum analog step and deck order.
     let source = r#"
 `timescale UNIT/PRECISION
 module NAME(p, clk, q);
@@ -1732,43 +1730,88 @@ endmodule
             coarse.deck_path(),
             fine.deck_path()
         );
-        let result = run(&deck, 2e-9, 20e-12);
+        for max_step in [20e-12, 75e-12] {
+            let result = run(&deck, 2e-9, max_step);
+            let clock = result.digital_trace_named("clk").unwrap();
+            assert_eq!(clock.len(), 2, "one shared A/D edge");
+            let delivered = clock[1].time;
+            assert!(
+                (delivered - 0.95e-9).abs() < 2e-20,
+                "the analog threshold crossing must be resolved: {delivered:e}, max_step={max_step:e}"
+            );
+            assert!(
+                (delivered - (delivered / 1e-10).round() * 1e-10).abs() > 1e-11,
+                "the fixture must exercise promotion away from the coarse model's tick grid"
+            );
+            for (node, initial, final_value, delay) in [
+                ("qc", 0.0, 1.0 / 1.02, 500e-12),
+                ("qf", 1.0 / 1.02, 0.0, 25e-12),
+            ] {
+                let event_time = ((delivered + delay) / 1e-12).round() * 1e-12;
+                let voltage = waveform(&result, node);
+                assert!(
+                    (voltage[0] - initial).abs() < 1e-8,
+                    "{node}: initial analog probe/load"
+                );
+                assert!(
+                    (voltage.last().unwrap() - final_value).abs() < 1e-8,
+                    "{node}: final analog probe/load"
+                );
+                let points = result.digital_trace_named(node).unwrap();
+                assert_eq!(
+                    points.len(),
+                    2,
+                    "{node}: one delayed transition, reverse={reverse}"
+                );
+                assert!(
+                    (points[1].time - event_time).abs() < 1e-22,
+                    "{node}: expected {event_time:e}, got {:e}, reverse={reverse}",
+                    points[1].time
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_adc_refines_curved_rising_and_falling_crossings() {
+    let model = ModelFile::new(
+        "curved_sampler",
+        r#"
+`timescale 1ps/1ps
+module curved_sampler(clk, q);
+    input clk; wire clk;
+    output q; reg q;
+    initial q=0;
+    always @(posedge clk) q<=#25 1;
+endmodule
+"#,
+    );
+    // The default solver cannot advance by less than 1e-20 s. Root delivery
+    // is bounded by that floor plus endpoint roundoff, independently of the
+    // 75 ps maximum step and the 1 ps digital tick grid.
+    for (offset, rising, falling) in [(0, 1e-9 / 3.0, 2e-9 / 3.0), (1, 1e-9 / 6.0, 5e-9 / 6.0)] {
+        let deck = format!(
+            "* curved A/D event roots\n.param vcc=1\nVclk clk 0 sin({offset} 1 1g 0 0 -90)\nX1 clk q curved_sampler\nRq q 0 1k\n.va \"{}\" curved_sampler\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 1e-9, 75e-12);
         let clock = result.digital_trace_named("clk").unwrap();
-        assert_eq!(clock.len(), 2, "one shared A/D edge");
-        let delivered = clock[1].time;
-        assert!(
-            delivered >= 0.95e-9 - 1e-22 && delivered <= 0.97e-9 + 1e-22,
-            "the ramp crossing is delivered within one analog sample: {delivered:e}"
+        assert_eq!(
+            clock.len(),
+            3,
+            "one rising and one falling edge, offset={offset}"
         );
-        assert!(
-            (delivered - (delivered / 1e-10).round() * 1e-10).abs() > 1e-11,
-            "the fixture must exercise promotion away from the coarse model's tick grid"
-        );
-        for (node, initial, final_value, delay) in [
-            ("qc", 0.0, 1.0 / 1.02, 500e-12),
-            ("qf", 1.0 / 1.02, 0.0, 25e-12),
-        ] {
-            let event_time = ((delivered + delay) / 1e-12).round() * 1e-12;
-            let voltage = waveform(&result, node);
+        for (event, expected) in clock.iter().skip(1).zip([rising, falling]) {
             assert!(
-                (voltage[0] - initial).abs() < 1e-8,
-                "{node}: initial analog probe/load"
-            );
-            assert!(
-                (voltage.last().unwrap() - final_value).abs() < 1e-8,
-                "{node}: final analog probe/load"
-            );
-            let points = result.digital_trace_named(node).unwrap();
-            assert_eq!(
-                points.len(),
-                2,
-                "{node}: one delayed transition, reverse={reverse}"
-            );
-            assert!(
-                (points[1].time - event_time).abs() < 1e-22,
-                "{node}: expected {event_time:e}, got {:e}, reverse={reverse}",
-                points[1].time
+                (event.time - expected).abs() < 2e-20,
+                "offset={offset}: expected {expected:e}, got {:e}",
+                event.time
             );
         }
+        let output = result.digital_trace_named("q").unwrap();
+        assert_eq!(output.len(), 2);
+        let expected = ((rising + 25e-12) / 1e-12).round() * 1e-12;
+        assert!((output[1].time - expected).abs() < 1e-22);
     }
 }

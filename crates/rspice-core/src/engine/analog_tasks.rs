@@ -283,6 +283,7 @@ impl Engine {
         dt: f64,
         solution: &[f64],
         coefficients: &crate::numerics::integration::CompanionCoefficients,
+        minimum_timestep: f64,
         initial_step: bool,
         final_step: bool,
     ) -> Result<TransientModelCandidate, SimulationError> {
@@ -319,6 +320,7 @@ impl Engine {
                 dt,
                 solution,
                 coefficients,
+                minimum_timestep,
                 initial_step,
                 final_step,
                 AnalogTaskKind::Finish,
@@ -327,7 +329,14 @@ impl Engine {
             )?;
         #[cfg(not(feature = "veriloga"))]
         let (mixed_refinement_time, mixed_discontinuity) = (None, false);
-        let _ = (dt, solution, coefficients, initial_step, final_step);
+        let _ = (
+            dt,
+            solution,
+            coefficients,
+            minimum_timestep,
+            initial_step,
+            final_step,
+        );
         if let Some(error) = invalid {
             return Err(SimulationError::Circuit(error.into()));
         }
@@ -345,6 +354,7 @@ impl Engine {
                 dt,
                 solution,
                 coefficients,
+                minimum_timestep,
                 initial_step,
                 final_step,
                 AnalogTaskKind::Finish,

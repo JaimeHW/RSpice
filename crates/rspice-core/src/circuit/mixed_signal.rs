@@ -523,6 +523,7 @@ impl CircuitData {
         dt: Value,
         voltages: &[Value],
         coefficients: &crate::numerics::integration::CompanionCoefficients,
+        minimum_timestep: Value,
         initial_step: bool,
         final_step: bool,
         kind: rspice_veriloga_runtime::AnalogTaskKind,
@@ -531,6 +532,18 @@ impl CircuitData {
     ) -> Result<(Option<Value>, bool), SimulationError> {
         if self.mixed_signal_hosts.is_empty() {
             return Ok((None, false));
+        }
+        let mut boundary_root: Option<Value> = None;
+        for host in &self.mixed_signal_hosts {
+            if let Some(target) = named(
+                host,
+                host.analog_boundary_refinement_time(time, voltages, minimum_timestep),
+            )? {
+                boundary_root = Some(boundary_root.map_or(target, |current| current.min(target)));
+            }
+        }
+        if boundary_root.is_some() {
+            return Ok((boundary_root, false));
         }
         let integration = mixed_integration_coefficients(time, dt, coefficients)?;
         let mut refinement: Option<Value> = None;
