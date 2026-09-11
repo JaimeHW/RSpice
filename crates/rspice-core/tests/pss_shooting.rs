@@ -429,66 +429,71 @@ fn periodic_current_waveform_is_independent_of_its_dc_specification() {
     }
 }
 
+// Live ngspice 46, 2026-09-08, the NPN LEVEL=4 deck below with
+// RELTOL=1e-7 VNTOL=1e-9 ABSTOL=1e-15 and .tran 0.2n 21u 19u 0.2n.
+// Collector voltage interpolated every 1/16 period in the settled 20–21 us
+// cycle. Xyce 7.10 LEVEL=12 agrees within 0.6 uV on the same mesh;
+// LEVEL=11 is a different three-terminal substrate topology.
+// Includes all seven intrinsic electrical nodes, nonlinear forward
+// and reverse diffusion, split depletion charge, epi and substrate charge.
+const VBIC_FOUR_TERMINAL_REFERENCE: [f64; 17] = [
+    1.3981978158,
+    1.2433328436,
+    1.0637934817,
+    0.8830475405,
+    0.7315884376,
+    0.6402557219,
+    0.6336042015,
+    0.7244707505,
+    0.9056791472,
+    1.1402121144,
+    1.3656502858,
+    1.5258380514,
+    1.6057943323,
+    1.6220745688,
+    1.5901940628,
+    1.5152586291,
+    1.3981978556,
+];
+// Xyce 7.10 LEVEL=11, same settled mesh, 2026-09-08. The three-terminal
+// result differs by 5 mV from the four-terminal waveform, so a shared
+// topology cannot satisfy the 0.2 mV integration-error bound.
+const VBIC_THREE_TERMINAL_REFERENCE: [f64; 17] = [
+    1.3954399520,
+    1.2397637940,
+    1.0597084600,
+    0.8789465493,
+    0.7281096900,
+    0.6380552643,
+    0.6332519076,
+    0.7263252858,
+    0.9096050192,
+    1.1453053530,
+    1.3704296340,
+    1.5290815530,
+    1.6072918720,
+    1.6222274090,
+    1.5893073480,
+    1.5134234290,
+    1.3954400000,
+];
+
+fn vbic_periodic_electrical_oracle(level: u32, polarity: &str, sign: f64) -> Netlist {
+    // Prescribe zero thermal rise for the electrical shooting oracle.
+    let thermal_pin = if level == 12 { " 0" } else { "" };
+    Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0{thermal_pin} vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap()
+}
+
 #[test]
 fn nonlinear_vbic_charge_pss_matches_settled_reference_simulators() {
     use rspice_core::engine::SpiceDialect;
-    // Live ngspice 46, 2026-09-08, the NPN LEVEL=4 deck below with
-    // RELTOL=1e-7 VNTOL=1e-9 ABSTOL=1e-15 and .tran 0.2n 21u 19u 0.2n.
-    // Collector voltage interpolated every 1/16 period in the settled 20–21 us
-    // cycle. Xyce 7.10 LEVEL=12 agrees within 0.6 uV on the same mesh;
-    // LEVEL=11 is a different three-terminal substrate topology.
-    // Includes all seven intrinsic electrical nodes, nonlinear forward
-    // and reverse diffusion, split depletion charge, epi and substrate charge.
-    let four_terminal_reference = [
-        1.3981978158,
-        1.2433328436,
-        1.0637934817,
-        0.8830475405,
-        0.7315884376,
-        0.6402557219,
-        0.6336042015,
-        0.7244707505,
-        0.9056791472,
-        1.1402121144,
-        1.3656502858,
-        1.5258380514,
-        1.6057943323,
-        1.6220745688,
-        1.5901940628,
-        1.5152586291,
-        1.3981978556,
-    ];
-    // Xyce 7.10 LEVEL=11, same settled mesh, 2026-09-08. The three-terminal
-    // result differs by 5 mV from the four-terminal waveform, so a shared
-    // topology cannot satisfy the 0.2 mV integration-error bound.
-    let three_terminal_reference = [
-        1.3954399520,
-        1.2397637940,
-        1.0597084600,
-        0.8789465493,
-        0.7281096900,
-        0.6380552643,
-        0.6332519076,
-        0.7263252858,
-        0.9096050192,
-        1.1453053530,
-        1.3704296340,
-        1.5290815530,
-        1.6072918720,
-        1.6222274090,
-        1.5893073480,
-        1.5134234290,
-        1.3954400000,
-    ];
     for (dialect, level, reference) in [
-        (SpiceDialect::Ngspice, 4, four_terminal_reference),
-        (SpiceDialect::Xyce, 12, four_terminal_reference),
-        (SpiceDialect::Xyce, 11, three_terminal_reference),
+        (SpiceDialect::Ngspice, 4, VBIC_FOUR_TERMINAL_REFERENCE),
+        (SpiceDialect::Xyce, 12, VBIC_FOUR_TERMINAL_REFERENCE),
+        (SpiceDialect::Xyce, 11, VBIC_THREE_TERMINAL_REFERENCE),
     ] {
         for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
-            // Prescribe zero thermal rise for the electrical shooting oracle.
-            let thermal_pin = if level == 12 { " 0" } else { "" };
-            let netlist = Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0{thermal_pin} vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap();
+            let netlist = vbic_periodic_electrical_oracle(level, polarity, sign);
             let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
             let point = engine
                 .run_pss_operating_point_with_abort(
@@ -3514,4 +3519,74 @@ fn coupled_series_windings_preserve_flux_and_internal_resistive_voltage_drops() 
             }
         }
     }
+}
+
+fn assert_native_vbic_hb_oracle(
+    dialect: rspice_core::engine::SpiceDialect,
+    level: u32,
+    reference: [f64; 17],
+) {
+    use num_complex::Complex64;
+    use rspice_core::analysis::harmonic_balance::HbConfig;
+    for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = vbic_periodic_electrical_oracle(level, polarity, sign);
+        let mut config = HbConfig::new(F0).with_harmonics(23).with_tolerance(1e-9);
+        config.abstol = 1e-14;
+        config.use_krylov = sign < 0.0;
+        let hb = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_hb(&netlist, config)
+            .unwrap_or_else(|error| panic!("{dialect:?} {polarity}: {error}"));
+        let spectrum = &hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|s| s.node_name.eq_ignore_ascii_case("c"))
+            .unwrap()
+            .coefficients;
+        for (phase, expected) in reference.iter().enumerate() {
+            let actual = sign
+                * spectrum
+                    .iter()
+                    .enumerate()
+                    .map(|(k, c)| {
+                        (*c * Complex64::from_polar(
+                            1.0,
+                            std::f64::consts::TAU * k as f64 * phase as f64 / 16.0,
+                        ))
+                        .re
+                    })
+                    .sum::<f64>();
+            assert!(
+                (actual - expected).abs() < 5e-6,
+                "{dialect:?} {polarity} phase={phase}: {actual} vs {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_vbic_hb_ngspice_matches_electrical_oracle() {
+    assert_native_vbic_hb_oracle(
+        rspice_core::engine::SpiceDialect::Ngspice,
+        4,
+        VBIC_FOUR_TERMINAL_REFERENCE,
+    );
+}
+
+#[test]
+fn native_vbic_hb_xyce12_matches_electrical_oracle() {
+    assert_native_vbic_hb_oracle(
+        rspice_core::engine::SpiceDialect::Xyce,
+        12,
+        VBIC_FOUR_TERMINAL_REFERENCE,
+    );
+}
+
+#[test]
+fn native_vbic_hb_xyce11_matches_electrical_oracle() {
+    assert_native_vbic_hb_oracle(
+        rspice_core::engine::SpiceDialect::Xyce,
+        11,
+        VBIC_THREE_TERMINAL_REFERENCE,
+    );
 }

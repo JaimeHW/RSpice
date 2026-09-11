@@ -17,6 +17,7 @@ mod devices;
 mod krylov;
 mod linear;
 mod linear_algebra;
+mod native_bjt;
 mod newton;
 mod nonlinear_api;
 mod periodic_ac;
@@ -775,10 +776,10 @@ pub(crate) enum ExactMnaBranch {
         node_pos: usize,
         node_neg: usize,
     },
-    /// Port-current unknown owned by an exact frequency-dependent network.
-    /// Nodal KCL incidence is canonical, while the branch row is supplied in
-    /// full by `exact_periodic_networks`.
-    NetworkPort {
+    /// Port-current unknown with canonical nodal KCL incidence. Its complete
+    /// constitutive row comes from a registered nonlinear device or exact
+    /// frequency-dependent network.
+    ConstitutivePort {
         branch_ordinal: usize,
         node_pos: usize,
         node_neg: usize,
@@ -811,7 +812,7 @@ impl ExactMnaBranch {
                 node_pos,
                 node_neg,
             }
-            | Self::NetworkPort {
+            | Self::ConstitutivePort {
                 branch_ordinal,
                 node_pos,
                 node_neg,
@@ -984,6 +985,8 @@ pub struct HbSolver {
 
     /// Registered nonlinear devices for Newton iteration
     nonlinear_devices: Vec<HbNonlinearDevice>,
+    /// Native physical BJT models retain every internal MNA state.
+    native_bjts: Vec<crate::device::Bjt>,
     /// Stable contributor owners aligned exactly with `nonlinear_devices`.
     /// Engine clients retain authored instance names; direct solver clients
     /// receive deterministic type-and-registration-index fallbacks.

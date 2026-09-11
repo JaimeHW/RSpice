@@ -115,15 +115,15 @@ fn harmonic_balance_names_the_missing_residual_capability() {
     let cases = [
         (
             "\
-* a Gummel-Poon BJT has no exact periodic residual
+* legacy GP excess phase has no qualified HB state
 vin in 0 sin(0 0.2 1meg)
 r1 in b 10k
 q1 c b 0 qmod
 vcc c 0 dc 5
-.model qmod npn (is=1e-16 bf=100)
+.model qmod npn (level=1 is=1e-16 bf=100 td=1n)
 .end
 ",
-            "Gummel-Poon/VBIC equations are not represented by exact HB",
+            "thermal and excess-phase HB state qualification is incomplete",
         ),
         (
             "\

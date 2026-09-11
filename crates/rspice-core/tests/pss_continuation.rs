@@ -157,55 +157,57 @@ fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
     }
 }
 
+// ngspice 46, identical NPN card below: TRAP, RELTOL=1e-9,
+// ABSTOL=1e-18, CHGTOL=1e-22, GMIN=0, max step 0.1 ns.
+// Linear interpolation at eight phases of the settled 19--20 us cycle:
+// [intrinsic VBE, I(VC), I(VB)]. No private RSpice solver supplies this oracle.
+const GP_PERIODIC_REFERENCE: [[f64; 3]; 8] = [
+    [
+        6.30578767042357602e-1,
+        -2.98997251485324980e-4,
+        -1.41771813619889610e-5,
+    ],
+    [
+        6.46714289880719662e-1,
+        -4.89399659214451318e-4,
+        -1.89337801930940490e-5,
+    ],
+    [
+        6.58914686737243738e-1,
+        -6.93674739233193999e-4,
+        -1.70222715296312860e-5,
+    ],
+    [
+        6.60355903066060068e-1,
+        -7.23571014206733447e-4,
+        -7.55605874014792859e-6,
+    ],
+    [
+        6.50928684442999894e-1,
+        -5.57669368421028606e-4,
+        2.57948906010152257e-6,
+    ],
+    [
+        6.35716106317155916e-1,
+        -3.55988591001042383e-4,
+        5.87537526912878170e-6,
+    ],
+    [
+        6.22950573595932755e-1,
+        -2.36858621669185071e-4,
+        1.77974652209541728e-6,
+    ],
+    [
+        6.20579689520069921e-1,
+        -2.17246220750473361e-4,
+        -6.21136165965052330e-6,
+    ],
+];
+
 #[test]
 fn gummel_poon_nonlinear_pss_matches_ngspice_and_retains_its_orbit() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
-    // ngspice 46, identical NPN card below: TRAP, RELTOL=1e-9,
-    // ABSTOL=1e-18, CHGTOL=1e-22, GMIN=0, max step 0.1 ns.
-    // Linear interpolation at eight phases of the settled 19--20 us cycle:
-    // [intrinsic VBE, I(VC), I(VB)]. No private RSpice solver supplies this oracle.
-    let reference = [
-        [
-            6.30578767042357602e-1,
-            -2.98997251485324980e-4,
-            -1.41771813619889610e-5,
-        ],
-        [
-            6.46714289880719662e-1,
-            -4.89399659214451318e-4,
-            -1.89337801930940490e-5,
-        ],
-        [
-            6.58914686737243738e-1,
-            -6.93674739233193999e-4,
-            -1.70222715296312860e-5,
-        ],
-        [
-            6.60355903066060068e-1,
-            -7.23571014206733447e-4,
-            -7.55605874014792859e-6,
-        ],
-        [
-            6.50928684442999894e-1,
-            -5.57669368421028606e-4,
-            2.57948906010152257e-6,
-        ],
-        [
-            6.35716106317155916e-1,
-            -3.55988591001042383e-4,
-            5.87537526912878170e-6,
-        ],
-        [
-            6.22950573595932755e-1,
-            -2.36858621669185071e-4,
-            1.77974652209541728e-6,
-        ],
-        [
-            6.20579689520069921e-1,
-            -2.17246220750473361e-4,
-            -6.21136165965052330e-6,
-        ],
-    ];
+    let reference = GP_PERIODIC_REFERENCE;
     for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
         let netlist = Netlist::parse(&format!(
             "Nonlinear GP periodic reference\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 qm\n.model qm {kind}(IS=1e-14 BF=100 VAF=50 IKF=1m RB=2k RBM=100 CJE=30p CJC=20p TF=2n XCJC=.4)\n.end\n",
@@ -1322,5 +1324,63 @@ fn zero_ohm_charge_constraints_survive_transient_continuation() {
             (current - expected).abs() < 2e-12,
             "t={time}: {current} vs {expected}"
         );
+    }
+}
+
+#[test]
+fn native_gp_hb_matches_independent_ngspice_current_and_voltage_orbit() {
+    use num_complex::Complex64;
+    use rspice_core::analysis::harmonic_balance::HbConfig;
+    for (kind, p, krylov) in [("NPN", 1.0, false), ("PNP", -1.0, true)] {
+        let netlist = Netlist::parse(&format!("Nonlinear GP HB reference\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 qm\n.model qm {kind}(IS=1e-14 BF=100 VAF=50 IKF=1m RB=2k RBM=100 CJE=30p CJC=20p TF=2n XCJC=.4)\n.end\n", p*1.2, p*0.65, p*0.65, p*0.03)).unwrap();
+        let mut simulation = SimulationConfig::default();
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let mut config = HbConfig::new(F0).with_harmonics(15).with_tolerance(1e-9);
+        config.abstol = 1e-14;
+        config.use_krylov = krylov;
+        let hb = Engine::new(simulation).run_hb(&netlist, config).unwrap();
+        let voltage = &hb
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|s| s.node_name.eq_ignore_ascii_case("Q1.__bi.internal"))
+            .unwrap()
+            .coefficients;
+        let currents: Vec<_> = ["VC", "VB"]
+            .map(|name| {
+                &hb.result
+                    .mna_branch_currents
+                    .iter()
+                    .find(|s| s.device_name.eq_ignore_ascii_case(name))
+                    .unwrap()
+                    .coefficients
+            })
+            .into_iter()
+            .collect();
+        for (phase, expected) in GP_PERIODIC_REFERENCE.iter().enumerate() {
+            for ((spectrum, expected), tolerance) in [voltage, currents[0], currents[1]]
+                .into_iter()
+                .zip(expected)
+                .zip([1e-6, 2e-8, 2e-9])
+            {
+                let actual = spectrum
+                    .iter()
+                    .enumerate()
+                    .map(|(k, c)| {
+                        (*c * Complex64::from_polar(
+                            1.0,
+                            std::f64::consts::TAU * k as f64 * phase as f64 / 8.0,
+                        ))
+                        .re
+                    })
+                    .sum::<f64>()
+                    * p;
+                assert!(
+                    (actual - expected).abs() < tolerance,
+                    "{kind} phase={phase}: {actual:e} vs {expected:e}"
+                );
+            }
+        }
     }
 }

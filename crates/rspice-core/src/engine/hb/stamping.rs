@@ -15,6 +15,7 @@ enum PeriodicMnaRegistration {
     Resistor(usize),
     Vcvs(usize),
     Ccvs(usize),
+    BjtBase(usize),
 }
 
 impl Engine {
@@ -25,6 +26,12 @@ impl Engine {
         num_nodes: usize,
     ) -> Result<(), SimulationError> {
         use crate::analysis::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
+
+        for bjt in &circuit.bjts.devices {
+            solver
+                .add_native_bjt(bjt.clone())
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
 
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
@@ -709,6 +716,30 @@ impl Engine {
             cpl_branches[line_index] = Some((near, far));
         }
 
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            if let Some(matrix_node) = bjt.mna_rbi_branch_matrix_node(circuit.num_nodes()) {
+                let ordinal = matrix_node - circuit.num_nodes();
+                let slot = ordinal
+                    .checked_sub(1)
+                    .and_then(|index| registrations.get_mut(index))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "BJT '{}' has an invalid periodic RBI branch",
+                            bjt.name
+                        ))
+                    })?;
+                if slot
+                    .replace(PeriodicMnaRegistration::BjtBase(index))
+                    .is_some()
+                {
+                    return Err(SimulationError::Circuit(format!(
+                        "BJT '{}' duplicates a periodic MNA branch",
+                        bjt.name
+                    )));
+                }
+            }
+        }
+
         for (slot_index, registration) in registrations.into_iter().enumerate() {
             let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
                 SimulationError::Circuit(
@@ -720,6 +751,17 @@ impl Engine {
                     "periodic MNA canonical branch ordinal {branch_ordinal} is unassigned"
                 ))
             })? {
+                PeriodicMnaRegistration::BjtBase(index) => {
+                    let bjt = &circuit.bjts.devices[index];
+                    solver
+                        .try_add_periodic_constitutive_port_branch(
+                            bjt.node_bx,
+                            bjt.node_bi,
+                            branch_ordinal,
+                            &canonical_branch_names[slot_index],
+                        )
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                }
                 PeriodicMnaRegistration::VoltageSource(source_index) => {
                     let name = &circuit.voltage_sources.names[source_index];
                     solver
@@ -778,7 +820,7 @@ impl Engine {
                         (line.node2_pos, line.node2_neg)
                     };
                     solver
-                        .try_add_periodic_network_port_branch(
+                        .try_add_periodic_constitutive_port_branch(
                             node_pos,
                             node_neg,
                             branch_ordinal,
@@ -794,7 +836,7 @@ impl Engine {
                         (line.far_nodes[conductor], line.far_ref)
                     };
                     solver
-                        .try_add_periodic_network_port_branch(
+                        .try_add_periodic_constitutive_port_branch(
                             node_pos,
                             node_neg,
                             branch_ordinal,
@@ -861,7 +903,7 @@ impl Engine {
             }
             let branch1 = solver.exact_mna_branches().len() + 1;
             solver
-                .try_add_periodic_network_port_branch(
+                .try_add_periodic_constitutive_port_branch(
                     line.node1_pos,
                     line.node1_neg,
                     branch1,
@@ -870,7 +912,7 @@ impl Engine {
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             let branch2 = solver.exact_mna_branches().len() + 1;
             solver
-                .try_add_periodic_network_port_branch(
+                .try_add_periodic_constitutive_port_branch(
                     line.node2_pos,
                     line.node2_neg,
                     branch2,
@@ -888,7 +930,7 @@ impl Engine {
             for conductor in 0..line.conductors() {
                 let ordinal = solver.exact_mna_branches().len() + 1;
                 solver
-                    .try_add_periodic_network_port_branch(
+                    .try_add_periodic_constitutive_port_branch(
                         line.near_nodes[conductor],
                         line.near_ref,
                         ordinal,
@@ -900,7 +942,7 @@ impl Engine {
             for conductor in 0..line.conductors() {
                 let ordinal = solver.exact_mna_branches().len() + 1;
                 solver
-                    .try_add_periodic_network_port_branch(
+                    .try_add_periodic_constitutive_port_branch(
                         line.far_nodes[conductor],
                         line.far_ref,
                         ordinal,
@@ -923,7 +965,7 @@ impl Engine {
             // The RG two-port is frequency independent, so its complete branch
             // rows go in as static MNA entries rather than as a distributed
             // network evaluated per harmonic. Its ports are still canonical
-            // `NetworkPort` branches, which contribute their nodal KCL
+            // `ConstitutivePort` branches, which contribute their nodal KCL
             // incidence and leave the branch rows to those entries.
             if let Some(two_port) = line.ltra_rg_two_port() {
                 let (row1, row2) = (branch_index(branch1), branch_index(branch2));

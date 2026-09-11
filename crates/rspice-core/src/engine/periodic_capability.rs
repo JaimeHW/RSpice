@@ -419,13 +419,13 @@ pub(crate) const fn periodic_capability_descriptor(
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
         },
         F::Bjt => PeriodicCapabilityDescriptor {
-            residual_jacobian: Absent(
-                "native BJT/VBIC models whose complete Gummel-Poon/VBIC equations are not \
-                 represented by exact HB",
+            residual_jacobian: Restricted(
+                "native Gummel-Poon and VBIC electrical states; thermal and excess-phase \
+                 HB state qualification is incomplete",
             ),
             dynamic_state: Complete,
-            small_signal: Inapplicable,
-            noise: Absent("periodic BJT noise sources need the exact periodic BJT residual"),
+            small_signal: Complete,
+            noise: Absent("native BJT cyclostationary noise sources are not registered"),
             pss_state: Restricted(
                 "native BJT electrical storage and VBIC thermal/excess-phase states",
             ),
@@ -976,6 +976,23 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
         }
     }
 
+    for bjt in &circuit.bjts.devices {
+        if bjt.node_rth != 0 || bjt.td > 0.0 {
+            gaps.push(CapabilityGap::new(
+                F::Bjt,
+                format!(
+                    "BJT '{}' thermal and excess-phase HB state qualification is incomplete",
+                    bjt.name
+                ),
+            ));
+        } else if !bjt.mna_promoted() && bjt.has_intrinsic_state_unknowns() {
+            gaps.push(CapabilityGap::new(
+                F::Bjt,
+                format!("BJT '{}' has unbound periodic internal states", bjt.name),
+            ));
+        }
+    }
+
     if F::Mosfet.instance_count(circuit) > 0
         && matches!(capability_support(F::Mosfet, Cap), Restricted(_))
     {
@@ -1195,6 +1212,12 @@ fn every_branch_has_a_periodic_owner(circuit: &CircuitData) -> bool {
                     mark(far, &mut represented);
                 }
             }
+        }
+    }
+
+    for bjt in &circuit.bjts.devices {
+        if let Some(node) = bjt.mna_rbi_branch_matrix_node(circuit.num_nodes()) {
+            mark(node - circuit.num_nodes(), &mut represented);
         }
     }
 
@@ -1581,7 +1604,7 @@ mod tests {
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
             F::Diode => [R, C, C, R, C, A],
-            F::Bjt => [A, C, I, A, R, A],
+            F::Bjt => [R, C, C, A, R, A],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],

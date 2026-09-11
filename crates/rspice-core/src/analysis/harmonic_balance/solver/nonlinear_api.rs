@@ -141,7 +141,7 @@ impl HbSolver {
 
     /// Check if circuit has nonlinear devices
     pub fn has_nonlinear_devices(&self) -> bool {
-        if !self.nonlinear_devices.is_empty() {
+        if !self.nonlinear_devices.is_empty() || !self.native_bjts.is_empty() {
             return true;
         }
         #[cfg(feature = "veriloga")]

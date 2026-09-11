@@ -887,10 +887,10 @@ impl PeriodicConversionOperator<'_> {
             ("capacitance", self.c_spectra),
         ] {
             for (entry, &(row, column, ref spectrum)) in spectra.iter().enumerate() {
-                if row >= self.num_nodes || column >= self.num_nodes {
+                if row >= num_unknowns || column >= num_unknowns {
                     return Err(HbError::InvalidCircuit(format!(
-                        "{context} periodic {kind} entry #{entry} ({row}, {column}) is outside its {}-node operator",
-                        self.num_nodes
+                        "{context} periodic {kind} entry #{entry} ({row}, {column}) is outside its {}-unknown MNA operator",
+                        num_unknowns
                     )));
                 }
                 if spectrum.is_empty() {
@@ -979,7 +979,7 @@ impl PeriodicConversionOperator<'_> {
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * s + k_idx;
                     visitor(node_coordinate, branch_coordinate, Complex64::new(1.0, 0.0));
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         visitor(branch_coordinate, node_coordinate, Complex64::new(1.0, 0.0));
                     }
                 }
@@ -990,7 +990,7 @@ impl PeriodicConversionOperator<'_> {
                         branch_coordinate,
                         Complex64::new(-1.0, 0.0),
                     );
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         visitor(
                             branch_coordinate,
                             node_coordinate,
@@ -1166,18 +1166,12 @@ impl PeriodicConversionOperator<'_> {
             }
         }
         for &(i, j, ref spectrum) in self.g_spectra {
-            if i < node_count
-                && j < node_count
-                && let Some(&coefficient) = spectrum.first()
-            {
+            if let Some(&coefficient) = spectrum.first() {
                 block[i * n + j] += coefficient;
             }
         }
         for &(i, j, ref spectrum) in self.c_spectra {
-            if i < node_count
-                && j < node_count
-                && let Some(&coefficient) = spectrum.first()
-            {
+            if let Some(&coefficient) = spectrum.first() {
                 block[i * n + j] += jw * coefficient;
             }
         }
@@ -1187,14 +1181,14 @@ impl PeriodicConversionOperator<'_> {
             if node_pos > 0 {
                 let node = node_pos - 1;
                 block[node * n + row] += Complex64::new(1.0, 0.0);
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     block[row * n + node] += Complex64::new(1.0, 0.0);
                 }
             }
             if node_neg > 0 {
                 let node = node_neg - 1;
                 block[node * n + row] -= Complex64::new(1.0, 0.0);
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     block[row * n + node] -= Complex64::new(1.0, 0.0);
                 }
             }
@@ -1419,7 +1413,7 @@ impl super::krylov::KrylovPreconditioner for PeriodicPreconditioner {
 }
 
 impl HbSolver {
-    fn periodic_state_waveforms(
+    pub(super) fn periodic_state_waveforms(
         &mut self,
         state: &HbSolverState,
         context: &str,
@@ -1451,7 +1445,7 @@ impl HbSolver {
         Ok(waveforms)
     }
 
-    fn checked_periodic_spectrum(
+    pub(super) fn checked_periodic_spectrum(
         &mut self,
         waveform: &[Value],
         harmonic_count: usize,
@@ -1663,6 +1657,7 @@ impl HbSolver {
             )?;
             spectra.push((i, j, spectrum));
         }
+        spectra.extend(self.native_bjt_spectra(state, harmonic_count, false)?);
         Ok(spectra)
     }
 
@@ -1680,7 +1675,7 @@ impl HbSolver {
             .iter()
             .any(|d| d.has_charge_storage())
         {
-            return Ok(Vec::new());
+            return self.native_bjt_spectra(state, harmonic_count, true);
         }
         let n_time = self.fft.size();
         let v_time = self.periodic_state_waveforms(state, "periodic capacitance evaluation")?;
@@ -1734,6 +1729,7 @@ impl HbSolver {
             )?;
             spectra.push((i, j, spectrum));
         }
+        spectra.extend(self.native_bjt_spectra(state, harmonic_count, true)?);
         Ok(spectra)
     }
 

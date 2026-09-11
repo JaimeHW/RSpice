@@ -10,12 +10,16 @@ const F0: f64 = 1.0e6;
 const OFFSET: f64 = 1.0e4;
 
 fn pac_transfer(deck: &str, input: &str, output: &str) -> Complex64 {
+    pac_transfer_sidebands(deck, input, output, 0)
+}
+
+fn pac_transfer_sidebands(deck: &str, input: &str, output: &str, sidebands: i32) -> Complex64 {
     let netlist = Netlist::parse(deck).expect("physical-Jacobian deck parses");
     let config = PacConfig::new()
         .with_fundamental(F0)
         .with_sweep(OFFSET, OFFSET, 1)
         .with_sweep_type(PacSweepType::Linear)
-        .with_sidebands(0, 0)
+        .with_sidebands(-sidebands, sidebands)
         .with_tolerances(1.0e-10, 1.0e-15)
         .with_input_source(input)
         .with_output_node(output);
@@ -329,6 +333,31 @@ fn forward_body_mos1_gain_matches_the_threshold_derivative_in_ac_and_pac() {
                     );
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn native_gp_pac_includes_private_base_charge_and_branch_equations() {
+    for base in ["RB=1k RBM=20", "RB=1k"] {
+        let output = if base.contains("RBM") {
+            "Q1.__bi.internal"
+        } else {
+            "Q1.__bint"
+        };
+        let deck = format!(
+            "GP PAC RC oracle\nV1 in 0 DC -1\nQ1 0 in 0 qm AREA=2 M=3\n.model qm NPN(LEVEL=1 IS=0 {base} CJE=100p CJC=200p MJE=0 MJC=0 XCJC=.25)\n.end\n"
+        );
+        let expected =
+            Complex64::new(1.0, 0.0) / Complex64::new(1.0, std::f64::consts::TAU * OFFSET * 150e-9);
+        // The 65-sideband private-base circuit crosses the automatic Krylov
+        // threshold, exercising the full-MNA periodic preconditioner too.
+        for sidebands in [0, 32] {
+            let actual = pac_transfer_sidebands(&deck, "V1", output, sidebands);
+            assert!(
+                (actual - expected).norm() < 1e-10,
+                "{base} sidebands={sidebands}: {actual} vs {expected}"
+            );
         }
     }
 }

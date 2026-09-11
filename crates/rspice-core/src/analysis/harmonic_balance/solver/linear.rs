@@ -297,6 +297,7 @@ impl HbSolver {
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
+            native_bjts: Vec::new(),
             nonlinear_device_names: Vec::new(),
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
@@ -327,6 +328,7 @@ impl HbSolver {
             node_names: Vec::new(),
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
+            native_bjts: Vec::new(),
             nonlinear_device_names: Vec::new(),
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
@@ -768,7 +770,7 @@ impl HbSolver {
         )
     }
 
-    pub(crate) fn try_add_periodic_network_port_branch(
+    pub(crate) fn try_add_periodic_constitutive_port_branch(
         &mut self,
         node_pos: usize,
         node_neg: usize,
@@ -777,7 +779,7 @@ impl HbSolver {
     ) -> Result<(), HbError> {
         self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
         self.try_push_periodic_mna_branch(
-            ExactMnaBranch::NetworkPort {
+            ExactMnaBranch::ConstitutivePort {
                 branch_ordinal,
                 node_pos,
                 node_neg,
@@ -1258,7 +1260,7 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg, false),
-                ExactMnaBranch::NetworkPort {
+                ExactMnaBranch::ConstitutivePort {
                     branch_ordinal,
                     node_pos,
                     node_neg,
@@ -1646,7 +1648,7 @@ impl HbSolver {
                             )
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
-                        ExactMnaBranch::NetworkPort { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                        ExactMnaBranch::ConstitutivePort { .. } => (Complex64::new(0.0, 0.0), 0.0),
                     };
                     state.mna_branch_residual[branch_index][k] = residual;
                     state.mna_branch_residual_scale[branch_index][k] =
@@ -1822,14 +1824,14 @@ impl HbSolver {
                     if node_pos > 0 {
                         let node = node_pos - 1;
                         y_matrix[node][row] += Complex64::new(1.0, 0.0);
-                        if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                             y_matrix[row][node] += Complex64::new(1.0, 0.0);
                         }
                     }
                     if node_neg > 0 {
                         let node = node_neg - 1;
                         y_matrix[node][row] -= Complex64::new(1.0, 0.0);
-                        if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                        if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                             y_matrix[row][node] -= Complex64::new(1.0, 0.0);
                         }
                     }
@@ -1850,7 +1852,7 @@ impl HbSolver {
                             y_matrix[row][row] -= *resistance;
                         }
                         ExactMnaBranch::ControlledVoltageSource { .. } => {}
-                        ExactMnaBranch::NetworkPort { .. } => {}
+                        ExactMnaBranch::ConstitutivePort { .. } => {}
                     }
                 }
                 for &(row, column, value) in &self.exact_mna_static_entries {

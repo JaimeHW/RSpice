@@ -113,8 +113,8 @@ impl ExactHbOperator<'_> {
             ("capacitance", self.c_spectra),
         ] {
             if let Some((row, column, _)) = spectra.iter().find(|(row, column, spectrum)| {
-                *row >= self.num_nodes
-                    || *column >= self.num_nodes
+                *row >= self.entity_count()
+                    || *column >= self.entity_count()
                     || spectrum
                         .iter()
                         .any(|value| !value.re.is_finite() || !value.im.is_finite())
@@ -315,7 +315,7 @@ impl ExactHbOperator<'_> {
                         Complex64::new(-1.0, 0.0),
                         &mut visitor,
                     );
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         self.visit_linear_term(
                             branch_entity,
                             k,
@@ -336,7 +336,7 @@ impl ExactHbOperator<'_> {
                         Complex64::new(1.0, 0.0),
                         &mut visitor,
                     );
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         self.visit_linear_term(
                             branch_entity,
                             k,
@@ -391,9 +391,6 @@ impl ExactHbOperator<'_> {
         }
 
         for &(i, j, ref spectrum) in self.g_spectra {
-            if i >= n || j >= n {
-                continue;
-            }
             for k in 0..h {
                 for l in 0..h {
                     let diff = k as isize - l as isize;
@@ -414,9 +411,6 @@ impl ExactHbOperator<'_> {
             }
         }
         for &(i, j, ref spectrum) in self.c_spectra {
-            if i >= n || j >= n {
-                continue;
-            }
             for k in 0..h {
                 let jw = Complex64::new(0.0, (k as Value) * self.omega0);
                 for l in 0..h {
@@ -1077,8 +1071,8 @@ impl HbSolver {
     }
 
     /// Add canonical exact-MNA KCL incidence and KVL branch equations to the
-    /// full-spectrum residual. Nonlinear current and charge contributions are
-    /// node-only and are accumulated after this seam.
+    /// full-spectrum residual. Nonlinear current, charge and constitutive
+    /// branch contributions are accumulated after this seam.
     fn add_exact_mna_residual(
         &self,
         state: &mut HbSolverState,
@@ -1162,7 +1156,7 @@ impl HbSolver {
                         (resistor_voltage - voltage_drop, resistor_voltage.norm())
                     }
                     ExactMnaBranch::ControlledVoltageSource { .. } => (-voltage_drop, 0.0),
-                    ExactMnaBranch::NetworkPort { .. } => (Complex64::new(0.0, 0.0), 0.0),
+                    ExactMnaBranch::ConstitutivePort { .. } => (Complex64::new(0.0, 0.0), 0.0),
                 };
                 if !residual.re.is_finite()
                     || !residual.im.is_finite()
@@ -1402,6 +1396,14 @@ impl HbSolver {
 
     /// Add nonlinear device contributions to residual
     fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
+        let native_only = self.nonlinear_devices.is_empty();
+        #[cfg(feature = "veriloga")]
+        let native_only = native_only && self.veriloga_nonlinear_devices.is_empty();
+        if native_only {
+            self.add_native_periodic_residual(state)?;
+            state.compute_residual_norm();
+            return Ok(());
+        }
         let n_time = self.fft.size();
 
         // Convert spectral voltages to time domain
@@ -1501,6 +1503,7 @@ impl HbSolver {
             }
         }
 
+        self.add_native_periodic_residual(state)?;
         state.compute_residual_norm();
         Ok(())
     }
@@ -1582,14 +1585,14 @@ impl HbSolver {
                 if node_pos > 0 {
                     let node_coordinate = (node_pos - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] -= 1.0;
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         jac[branch_coordinate][node_coordinate] -= 1.0;
                     }
                 }
                 if node_neg > 0 {
                     let node_coordinate = (node_neg - 1) * h + k;
                     jac[node_coordinate][branch_coordinate] += 1.0;
-                    if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                    if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                         jac[branch_coordinate][node_coordinate] += 1.0;
                     }
                 }
@@ -1634,161 +1637,27 @@ impl HbSolver {
         jac: &mut [Vec<Complex64>],
         state: &HbSolverState,
     ) -> Result<(), HbError> {
-        let n = self.num_nodes;
         let h = self.num_harmonics + 1;
-        let n_time = self.fft.size();
-
-        // Convert voltages to time domain
-        let v_time: Vec<Vec<Value>> = (0..n)
-            .map(|node| self.fft.to_time_domain(&state.x[node]))
-            .collect();
-
-        // Accumulate conductance stamps in time domain for each node pair
-        let mut g_time = vec![vec![vec![0.0; n_time]; n]; n]; // [i][j][t]
-
-        if !self.nonlinear_devices.is_empty() {
-            let mut node_voltages = vec![0.0; n];
-            for t in 0..n_time {
-                for node in 0..n {
-                    node_voltages[node] = v_time[node][t];
-                }
-                for device in &self.nonlinear_devices {
-                    for ((i, j), g) in device.jacobian(&node_voltages) {
-                        if i < n && j < n {
-                            g_time[i][j][t] += g;
-                        }
-                    }
-                }
-            }
-        }
-
-        #[cfg(feature = "veriloga")]
-        if !self.veriloga_nonlinear_devices.is_empty() {
-            let mut circuit_voltages = vec![0.0; n];
-            for t in 0..n_time {
-                for node in 0..n {
-                    circuit_voltages[node] = v_time[node][t];
-                }
-                for device in &mut self.veriloga_nonlinear_devices {
-                    device.device.update_all_voltages(&circuit_voltages);
-                    let jac_entries =
-                        device.try_compute_jacobian("time-domain Jacobian evaluation")?;
-                    for entry in jac_entries {
-                        let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
-                            continue;
-                        };
-                        let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
-                            continue;
-                        };
-                        if let (Some(i), Some(j)) = (row, col)
-                            && i < n
-                            && j < n
-                        {
-                            g_time[i][j][t] += entry.value;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Convert each conductance waveform to frequency domain (Toeplitz row)
-        // Then build the proper convolution Jacobian
-        for (i, g_row) in g_time.iter().enumerate().take(n) {
-            for (j, g_waveform) in g_row.iter().enumerate().take(n) {
-                // Check if there's any significant conductance
-                let max_g: Value = g_waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
-                if max_g < 1e-30 {
-                    continue;
-                }
-
-                // FFT the conductance waveform to get G[k] spectrum
-                let g_spectrum = self.fft.to_frequency_domain(g_waveform);
-
-                // Build Toeplitz block for this (i,j) node pair
-                // J[i*h+k][j*h+l] = G[k-l] (with periodic extension for negative indices)
+        let omega = std::f64::consts::TAU * self.config.fundamental_freq;
+        // Share the sparse physical derivatives with the matrix-free solver
+        // and PAC, including constitutive rows for internal branch currents.
+        for charge in [false, true] {
+            let spectra = if charge {
+                self.capacitance_spectra(state, self.num_harmonics)?
+            } else {
+                self.conductance_spectra(state, self.num_harmonics)?
+            };
+            for (i, j, spectrum) in spectra {
                 for k in 0..h {
+                    let factor = if charge {
+                        Complex64::new(0.0, omega * k as Value)
+                    } else {
+                        Complex64::new(1.0, 0.0)
+                    };
                     for l in 0..h {
-                        let row = i * h + k;
-                        let col = j * h + l;
-
-                        // Compute index for G[k-l] with wrap-around
-                        let diff = k as isize - l as isize;
-                        let g_idx = if diff >= 0 {
-                            diff as usize
-                        } else {
-                            // Negative index - use conjugate symmetry: G[-m] = G[m]*
-                            // For real g(t), G[-m] = conj(G[m])
-                            (-diff) as usize
-                        };
-
-                        if g_idx < g_spectrum.len() {
-                            let g_val = if diff >= 0 {
-                                g_spectrum[g_idx]
-                            } else {
-                                // Use conjugate for negative frequency
-                                g_spectrum[g_idx].conj()
-                            };
-                            // SUBTRACT device Jacobian for KCL: residual = I_source - I_device
-                            // So J = ∂res/∂V = -∂I_device/∂V = -gd
-                            jac[row][col] -= g_val;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Charge-storage coupling: the residual carries jw_k * Q_k, so its
-        // derivative is jw_k * C[k-m] - the same Toeplitz structure as the
-        // conductances with the ROW harmonic's frequency in front.
-        if self
-            .nonlinear_devices
-            .iter()
-            .any(|d| d.has_charge_storage())
-        {
-            let omega0 = 2.0 * PI * self.config.fundamental_freq;
-            let mut c_time = vec![vec![vec![0.0; n_time]; n]; n];
-            let mut node_voltages = vec![0.0; n];
-            for t in 0..n_time {
-                for node in 0..n {
-                    node_voltages[node] = v_time[node][t];
-                }
-                for device in &self.nonlinear_devices {
-                    for ((i, j), c) in device.charge_jacobian(&node_voltages) {
-                        if i < n && j < n {
-                            c_time[i][j][t] += c;
-                        }
-                    }
-                }
-            }
-
-            for (i, c_row) in c_time.iter().enumerate().take(n) {
-                for (j, c_waveform) in c_row.iter().enumerate().take(n) {
-                    let max_c: Value = c_waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
-                    if max_c < 1e-30 {
-                        continue;
-                    }
-
-                    let c_spectrum = self.fft.to_frequency_domain(c_waveform);
-
-                    for k in 0..h {
-                        let omega_k = (k as f64) * omega0;
-                        let jw = Complex64::new(0.0, omega_k);
-                        for l in 0..h {
-                            let row = i * h + k;
-                            let col = j * h + l;
-
-                            let diff = k as isize - l as isize;
-                            let c_idx = diff.unsigned_abs();
-                            if c_idx < c_spectrum.len() {
-                                let c_val = if diff >= 0 {
-                                    c_spectrum[c_idx]
-                                } else {
-                                    c_spectrum[c_idx].conj()
-                                };
-                                // Residual carries +jw_k*Q_k; J = d(res)/dV
-                                // gets -(jw_k * dQ/dV) like the linear caps.
-                                jac[row][col] -= jw * c_val;
-                            }
+                        if let Some(&value) = spectrum.get(k.abs_diff(l)) {
+                            let value = if k >= l { value } else { value.conj() };
+                            jac[i * h + k][j * h + l] -= factor * value;
                         }
                     }
                 }
@@ -1945,7 +1814,7 @@ impl HbSolver {
                 || !outcome.relative_residual.is_finite()
             {
                 Err(rspice_matrix::SolverError::Overflow)
-            } else if outcome.converged {
+            } else {
                 match exact_hb_candidate_report(&operator, &mut outcome.solution, &rhs_complex) {
                     Ok((candidate_report, relative_residual)) => {
                         outcome.relative_residual = relative_residual;
@@ -1961,17 +1830,15 @@ impl HbSolver {
                     }
                     Err(error) => Err(error),
                 }
-            } else {
-                Err(rspice_matrix::SolverError::ConvergenceFailed(
-                    outcome.iterations,
-                ))
             };
 
             // A global normwise GMRES tolerance can hide a poor equation in
             // mixed KCL/KVL systems. Keep the strict componentwise
-            // certificate and refine only an otherwise finite, converged
-            // candidate. Power-of-two row scaling makes GMRES spend its
-            // residual budget in proportion to each equation's exact
+            // certificate and assess every finite candidate, including a
+            // GMRES stagnation result. The normwise flag cannot determine
+            // whether the componentwise certificate passes. Power-of-two row
+            // scaling makes GMRES spend its residual budget in proportion to
+            // each equation's exact
             // acceptance threshold without changing the represented system.
             if matches!(
                 &qualification,
@@ -2053,12 +1920,6 @@ impl HbSolver {
                             "exact HB refinement returned {} values for a {size}-unknown system",
                             correction.solution.len()
                         )));
-                        break;
-                    }
-                    if !correction.converged {
-                        qualification = Err(rspice_matrix::SolverError::ConvergenceFailed(
-                            outcome.iterations,
-                        ));
                         break;
                     }
                     if !correction.relative_residual.is_finite()
@@ -2786,12 +2647,12 @@ mod exact_matrix_free_tests {
     #[test]
     fn matrix_free_operator_applies_exact_delay_line_branch_rows() {
         let branches = vec![
-            ExactMnaBranch::NetworkPort {
+            ExactMnaBranch::ConstitutivePort {
                 branch_ordinal: 1,
                 node_pos: 1,
                 node_neg: 0,
             },
-            ExactMnaBranch::NetworkPort {
+            ExactMnaBranch::ConstitutivePort {
                 branch_ordinal: 2,
                 node_pos: 2,
                 node_neg: 0,
@@ -2916,10 +2777,10 @@ mod exact_matrix_free_tests {
         let impedance = 50.0;
         let mut solver = HbSolver::new(HbConfig::new(fundamental).with_harmonics(2), 2);
         solver
-            .try_add_periodic_network_port_branch(1, 0, 1, "T1#port1")
+            .try_add_periodic_constitutive_port_branch(1, 0, 1, "T1#port1")
             .expect("first line port registers");
         solver
-            .try_add_periodic_network_port_branch(2, 0, 2, "T1#port2")
+            .try_add_periodic_constitutive_port_branch(2, 0, 2, "T1#port2")
             .expect("second line port registers");
         solver
             .try_add_exact_periodic_network(ExactPeriodicNetwork::ScalarWave {

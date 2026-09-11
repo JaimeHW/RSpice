@@ -298,14 +298,14 @@ d1 out 0 dmod
         ),
         (
             "\
-* complete Gummel-Poon is not the reduced HB Ebers-Moll kernel
+* legacy GP excess phase must not be silently omitted
 vcc c 0 dc 5
 vb b 0 dc 0.7
 q1 c b 0 qmod
-.model qmod npn (is=1e-16 bf=100 ikf=1m)
+.model qmod npn (level=1 is=1e-16 bf=100 ikf=1m td=1n)
 .end
 ",
-            "native BJT/VBIC",
+            "thermal and excess-phase HB state qualification is incomplete",
         ),
         (
             "\
@@ -362,5 +362,38 @@ s1 out 0 ctrl 0 smod
             message.contains(expected_capability),
             "failure must identify missing capability '{expected_capability}': {message}"
         );
+    }
+}
+
+#[test]
+fn native_gp_hb_base_charge_and_branch_current_match_analytic_rc() {
+    let omega = std::f64::consts::TAU * F0;
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for (base, output) in [("RB=1k RBM=20", "Q1.__bi.internal"), ("RB=1k", "Q1.__bint")] {
+            let deck = format!(
+                "GP HB RC oracle\nV1 in 0 DC {} SIN({} {} 1meg)\nQ1 0 in 0 qm AREA=2 M=3\n.model qm {kind}(LEVEL=1 IS=0 {base} CJE=100p CJC=200p MJE=0 MJC=0 XCJC=.25)\n.end\n",
+                -p,
+                -p,
+                p * 0.01
+            );
+            for krylov in [false, true] {
+                let hb = run(&deck, krylov, 2);
+                let input = Complex64::new(0.0, -p * 0.01);
+                let expected = input / Complex64::new(1.0, omega * 150e-9);
+                assert!((coefficient(&hb, output, 1) - expected).norm() < 1e-10);
+                let branch = hb
+                    .result
+                    .mna_branch_currents
+                    .iter()
+                    .find(|s| s.device_name.eq_ignore_ascii_case("V1"))
+                    .unwrap();
+                let current = -Complex64::new(0.0, omega * 900e-12) * (input + expected);
+                assert!(
+                    (branch.coefficients[1] - current).norm() < 1e-12,
+                    "{kind} {base} krylov={krylov}: current={} expected={current}",
+                    branch.coefficients[1]
+                );
+            }
+        }
     }
 }

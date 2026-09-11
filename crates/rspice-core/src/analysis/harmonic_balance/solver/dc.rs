@@ -258,13 +258,13 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 g_dc[node_pos - 1][row] += 1.0;
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     g_dc[row][node_pos - 1] += 1.0;
                 }
             }
             if node_neg > 0 {
                 g_dc[node_neg - 1][row] -= 1.0;
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     g_dc[row][node_neg - 1] -= 1.0;
                 }
             }
@@ -498,13 +498,12 @@ impl HbSolver {
                 ExactMnaBranch::Resistor { resistance, .. } => {
                     state.mna_branch_currents[branch_index][0].re * *resistance
                 }
-                ExactMnaBranch::NetworkPort { .. } => 0.0,
+                ExactMnaBranch::ConstitutivePort { .. } => 0.0,
                 _ => self.dc_branch_source(branch, source_scale)?,
             };
-            if matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
-                // A distributed-network branch row is wholly supplied by its
-                // frequency-domain two-port below; it has no independent base
-                // KVL term to count or differentiate a second time.
+            if matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
+                // The registered device or distributed network supplies the
+                // complete constitutive row after the canonical KCL incidence.
                 state.mna_branch_residual[branch_index][0] = Complex64::new(0.0, 0.0);
                 state.mna_branch_residual_scale[branch_index][0] = 0.0;
             } else {
@@ -552,6 +551,7 @@ impl HbSolver {
             })?;
         }
 
+        self.add_native_dc_residual(state)?;
         self.validate_dc_residual_state(state)?;
         let diagnostic_norm: Value = state
             .residual
@@ -656,13 +656,13 @@ impl HbSolver {
             let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
             if node_pos > 0 {
                 jacobian[node_pos - 1][branch_coordinate] -= 1.0;
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     jacobian[branch_coordinate][node_pos - 1] -= 1.0;
                 }
             }
             if node_neg > 0 {
                 jacobian[node_neg - 1][branch_coordinate] += 1.0;
-                if !matches!(branch, ExactMnaBranch::NetworkPort { .. }) {
+                if !matches!(branch, ExactMnaBranch::ConstitutivePort { .. }) {
                     jacobian[branch_coordinate][node_neg - 1] += 1.0;
                 }
             }
@@ -680,6 +680,7 @@ impl HbSolver {
             })?;
         }
 
+        self.add_native_dc_jacobian(state, &mut jacobian)?;
         Ok(jacobian)
     }
 
@@ -882,7 +883,7 @@ impl HbSolver {
                     node_pos,
                     node_neg,
                 } => (*branch_ordinal, *node_pos, *node_neg),
-                ExactMnaBranch::NetworkPort {
+                ExactMnaBranch::ConstitutivePort {
                     branch_ordinal,
                     node_pos,
                     node_neg,
@@ -1034,7 +1035,7 @@ impl HbSolver {
             ExactMnaBranch::Inductor { .. } => 0.0,
             ExactMnaBranch::Resistor { .. } => 0.0,
             ExactMnaBranch::ControlledVoltageSource { .. } => 0.0,
-            ExactMnaBranch::NetworkPort { .. } => 0.0,
+            ExactMnaBranch::ConstitutivePort { .. } => 0.0,
         };
         if !source.is_finite() {
             return Err(HbError::InvalidCircuit(
