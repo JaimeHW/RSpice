@@ -5568,7 +5568,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
- "zip",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -6003,7 +6003,7 @@ version = "0.92.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac5cfcf481735a0ea276735b979d6a61873e286da8133d9aee6d5e47d8664a0d"
 dependencies = [
- "zip",
+ "zip 7.2.0",
 ]
 
 [[package]]
@@ -8891,6 +8891,19 @@ dependencies = [
  "memchr",
  "typed-path",
  "zopfli",
+]
+
+[[package]]
+name = "zip"
+version = "8.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "typed-path",
 ]
 
 [[package]]
