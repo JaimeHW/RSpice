@@ -7877,6 +7877,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         // duplicate conditional potential contributions select the same leader
         // unknown as canonical CFG lowering and the generated backend.
         Ok(self.mir.branch_unknowns.iter().find_map(|branch_unknown| {
+            if branch_unknown.declared_name.is_some() {
+                return None;
+            }
             if branch_unknown.pos_node == pos && branch_unknown.neg_node == neg {
                 Some((usize::from(branch_unknown.id), false))
             } else if branch_unknown.pos_node == neg && branch_unknown.neg_node == pos {

@@ -773,7 +773,7 @@ struct Stamps {
 }
 
 /// How one potential contribution maps onto the single solver branch used for
-/// its physical node pair.
+/// its declared identity or unnamed node pair.
 #[derive(Debug, Clone, Copy)]
 struct PotentialEquationPlan {
     branch: usize,
@@ -787,6 +787,7 @@ struct PotentialEquationPlan {
 /// Verilog-A branch semantics: one physical flow unknown, one structural KCL
 /// coupling, and the sum of every active potential contribution on that branch.
 struct PotentialBranchGroup {
+    identity: crate::branch_identity::BranchIdentity<Option<NodeId>>,
     pos: Option<NodeId>,
     neg: Option<NodeId>,
     branch: usize,
@@ -865,7 +866,7 @@ struct ModelPlan {
     node_count: usize,
     /// Physical-branch target and orientation per potential equation.
     potential_equations: Vec<Option<PotentialEquationPlan>>,
-    /// Stable source-order groups of potential equations sharing a node pair.
+    /// Stable source-order groups of potential equations on the same branch.
     potential_groups: Vec<PotentialBranchGroup>,
     /// Output position of each equation's control-flow activation value.
     activation_positions: Vec<Option<usize>>,
@@ -2293,9 +2294,12 @@ fn plan_potential_branches(
         let pos = equation.branch.pos_node;
         let neg = equation.branch.neg_node;
 
-        let existing = groups.iter().position(|group| {
-            (group.pos == pos && group.neg == neg) || (group.pos == neg && group.neg == pos)
-        });
+        let identity = crate::branch_identity::BranchIdentity::new(
+            equation.branch.declared_name.as_ref(),
+            pos,
+            neg,
+        );
+        let existing = groups.iter().position(|group| group.identity == identity);
         let (group_index, sign) = match existing {
             Some(group_index) => {
                 let group = &mut groups[group_index];
@@ -2311,6 +2315,7 @@ fn plan_potential_branches(
             None => {
                 let group_index = groups.len();
                 groups.push(PotentialBranchGroup {
+                    identity,
                     pos,
                     neg,
                     branch,

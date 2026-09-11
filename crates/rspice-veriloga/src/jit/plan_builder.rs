@@ -2526,6 +2526,7 @@ pub(crate) fn canonical_branch_unknown_runtime_map(
         .map(|(index, source)| {
             Ok((
                 index,
+                source.declared_name.as_ref(),
                 compiled_branch_endpoint(model, &source.pos)?,
                 compiled_branch_endpoint(model, &source.neg)?,
             ))
@@ -2540,7 +2541,10 @@ pub(crate) fn canonical_branch_unknown_runtime_map(
             let Some(mapping) =
                 runtime_sources
                     .iter()
-                    .find_map(|(index, source_pos, source_neg)| {
+                    .find_map(|(index, source_name, source_pos, source_neg)| {
+                        if *source_name != unknown.declared_name.as_ref() {
+                            return None;
+                        }
                         if *source_pos == pos && *source_neg == neg {
                             Some(BranchUnknownRuntimeMapping {
                                 runtime_index: *index,

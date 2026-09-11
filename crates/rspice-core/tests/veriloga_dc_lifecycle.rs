@@ -35,6 +35,63 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
 }
 
 #[test]
+fn parallel_potential_branches_preserve_dc_ac_and_independent_noise() {
+    for (name, source, resistance, noise) in [
+        (
+            "named_parallel",
+            "module top(p); inout p; electrical p; branch(p) a,b; analog begin V(a)<+2*I(a)+white_noise(4,\"a\"); V(b)<+3*I(b)+white_noise(9,\"b\"); end endmodule",
+            1.2,
+            2.88,
+        ),
+        (
+            "same_branch",
+            "module top(p); inout p; electrical p; branch(p) a; analog begin V(a)<+2*I(a)+white_noise(4,\"a\"); V(a)<+3*I(a)+white_noise(9,\"b\"); end endmodule",
+            5.0,
+            13.0,
+        ),
+        (
+            "instance_parallel",
+            "module resistor(p); inout p; electrical p; parameter real r=2; analog V(p)<+r*I(p)+white_noise(r*r,\"thermal\"); endmodule module top(p); inout p; electrical p; resistor #(.r(2)) a(p); resistor #(.r(3)) b(p); endmodule",
+            1.2,
+            2.88,
+        ),
+    ] {
+        let model = write_model(name, source);
+        let netlist=Netlist::parse_validated(&format!("* parallel potential branches\nI1 0 out DC 1 AC 1\nX1 out top\n.va \"{}\" top module=top\n.end\n",deck_path(&model))).unwrap();
+        let engine = Engine::default();
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        assert!(
+            (node_voltage(&dc, "out") - resistance).abs() < 1e-8,
+            "{name}: {dc:?}"
+        );
+        for point in engine.run_ac(&netlist, &[0.0, 1.0, 1e6]).unwrap() {
+            let output = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let value = point.voltages[output];
+            assert!(
+                (value.re - resistance).abs() < 1e-8 && value.im.abs() < 1e-12,
+                "{name}: {value:?}"
+            );
+        }
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let output = circuit.get_node_by_name("out").unwrap();
+        for point in engine
+            .run_noise(&netlist, output, &[1.0, 1e6], 300.15)
+            .unwrap()
+        {
+            assert!(
+                (point.output_noise_density / noise - 1.0).abs() < 1e-8,
+                "{name}: {point:?}"
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+}
+
+#[test]
 fn hierarchy_port_currents_preserve_dc_ac_and_independent_noise() {
     let model = write_model(
         "hierarchical_port_currents",

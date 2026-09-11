@@ -486,7 +486,7 @@ pub(crate) struct CfgModelPlan {
 /// The solver does not work that way: a branch has one flow, so the shipped
 /// route gives the whole branch a single `branch_sources` entry and
 /// [`ColumnAxis::Branch`] numbers *those*. The CFG route agrees with the solver
-/// — `CfgLowerer::branch_unknown_by_nodes` reads a branch's flow as the first
+/// — `CfgLowerer::branch_unknown` reads a branch's flow as the first
 /// MIR unknown on it — so the derivative row is populated at that leader's lane
 /// and nowhere else on the branch.
 ///
@@ -506,12 +506,12 @@ pub(crate) struct ShippedColumnLanes {
 }
 
 impl ShippedColumnLanes {
-    /// Built from the same endpoint matching the runtime binding uses, so the
+    /// Built from the same branch identity matching the runtime binding uses, so the
     /// two agree about which solver branch an unknown belongs to by
     /// construction rather than by a second rule that could drift.
     ///
     /// The leader is the first MIR unknown on the branch, in MIR order, which
-    /// is the one `branch_unknown_by_nodes` picks. An `inverted` leader would
+    /// is the one `branch_unknown` picks. An `inverted` leader would
     /// mean the solver source runs against the equation that minted it; the
     /// derivative would then need a sign the lane cannot carry, so no lane is
     /// recorded and the module is refused rather than lowered with a flipped

@@ -118,7 +118,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 30 to 31 publishes limiter affine residual correction entries.
 /// 31 to 32 resolves flow probes through simultaneous current equations.
 /// 32 to 33 preserves instance branch ownership and nested port-flow equations.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 33;
+/// 33 to 34 retains distinct potential branches and consistent source directions.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 34;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2231,6 +2232,93 @@ endmodule
                     expected,
                     "postfix={postfix}, degree={degree}, voltage={voltage}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_potential_sources_preserve_branch_identity_in_both_plans() {
+        use super::abi::{
+            FRAME_BRANCH_UNKNOWNS_LEN_OFFSET, FRAME_BRANCH_UNKNOWNS_PTR_OFFSET, FRAME_RESULT_OFFSET,
+        };
+        use crate::codegen::ColumnAxis;
+        for (declarations, body, branches, derivatives) in [
+            (
+                "branch(p) a,b;",
+                "V(a)<+2*I(a); V(b)<+3*I(b);",
+                2,
+                [[2.0, 0.0], [0.0, 3.0]],
+            ),
+            (
+                "branch(p) a;",
+                "V(a)<+2*I(a); V(p)<+3*I(p);",
+                2,
+                [[2.0, 0.0], [0.0, 3.0]],
+            ),
+            (
+                "branch(p) a,b;",
+                "V(a)<+2*I(a)+I(b); V(b)<+I(a)+3*I(b);",
+                2,
+                [[2.0, 1.0], [1.0, 3.0]],
+            ),
+            (
+                "branch(p) a;",
+                "V(a)<+2*I(a); V(a)<+3*I(a);",
+                1,
+                [[2.0, 0.0], [3.0, 0.0]],
+            ),
+            (
+                "ground g;",
+                "V(p)<+2*I(p); V(g,p)<+3*I(g,p);",
+                1,
+                [[2.0, 0.0], [3.0, 0.0]],
+            ),
+            (
+                "branch(p) a,b;",
+                "V(a)<+I(a)+ddx(I(a)*I(b),I(b)); V(b)<+3*I(b)+ddx(I(a)*I(a),I(b));",
+                2,
+                [[2.0, 0.0], [0.0, 3.0]],
+            ),
+        ] {
+            let source = format!(
+                "module parallel(p); inout p; electrical p; {declarations} analog begin {body} end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, Some("parallel"))
+                .unwrap();
+            assert_eq!(report.model.branch_sources.len(), branches);
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "parallel", postfix);
+                harness.reset();
+                let currents = FusedKernelHarness::VOLTAGES + 64;
+                harness.poke_frame_u32(FRAME_BRANCH_UNKNOWNS_PTR_OFFSET, currents);
+                harness.poke_frame_u32(FRAME_BRANCH_UNKNOWNS_LEN_OFFSET, branches as u32);
+                harness.write_f64(currents as usize, 1.0);
+                harness.write_f64(currents as usize + 8, 2.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (stamp, program) in report.model.stamp_programs.iter().enumerate() {
+                    let export = harness.stamp_value_export(stamp);
+                    assert_eq!(harness.call(&export), 0);
+                    let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    let expected = derivatives[stamp][0] + 2.0 * derivatives[stamp][1];
+                    assert!(
+                        (value - expected).abs() < 1e-12,
+                        "{body}; postfix={postfix}, stamp={stamp}: {value} != {expected}"
+                    );
+                    let mut actual = [0.0; 2];
+                    for (entry, jacobian) in program.jacobian_programs.iter().enumerate() {
+                        let export = harness.jacobian_export(stamp, entry);
+                        assert_eq!(harness.call(&export), 0);
+                        let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        match jacobian.col_axis {
+                            ColumnAxis::Branch(column) => actual[column] = value,
+                            ColumnAxis::Node(_) => assert_eq!(value, 0.0),
+                        }
+                    }
+                    assert_eq!(actual, derivatives[stamp], "{body}; postfix={postfix}");
+                }
             }
         }
     }

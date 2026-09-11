@@ -33,6 +33,7 @@ use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::AccessKind;
+use crate::branch_identity::BranchIdentity;
 
 use super::cfg::{
     CfgBinaryOp, CfgDdxAxis, CfgFunction, CfgIntegerBitwiseOp, CfgLaplaceTransfer, CfgTerminator,
@@ -2751,7 +2752,7 @@ impl<'a> CfgLowerer<'a> {
         };
 
         if kind == AccessKind::Flow {
-            let Some((unknown, reversed)) = self.branch_unknown_by_nodes(pos_node, neg_node) else {
+            let Some((unknown, reversed)) = self.branch_unknown(None, pos_node, neg_node) else {
                 if let Some(contributed) = self.contributed_flow(pos_node, neg_node) {
                     return contributed;
                 }
@@ -2912,7 +2913,7 @@ impl<'a> CfgLowerer<'a> {
     /// plausible number.
     ///
     /// A branch driven by potential contributions from both arms of an `if` has
-    /// two unknowns for one physical current — see [`Self::branch_unknown_by_nodes`]
+    /// two unknowns for one physical current — see [`Self::branch_unknown`]
     /// — so the unknowns are taken one per distinct branch, or the terminal
     /// current would double-count.
     fn port_flow(&mut self, node: NodeId) -> Option<ValueId> {
@@ -2970,7 +2971,7 @@ impl<'a> CfgLowerer<'a> {
             terms.push((accumulated, reversed));
         }
 
-        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut seen = HashSet::new();
         for unknown in &mir.branch_unknowns {
             let reversed = if unknown.pos_node == Some(node) {
                 false
@@ -2979,14 +2980,12 @@ impl<'a> CfgLowerer<'a> {
             } else {
                 continue;
             };
-            let pos_key = unknown.pos_node.map(usize::from).unwrap_or(usize::MAX);
-            let neg_key = unknown.neg_node.map(usize::from).unwrap_or(usize::MAX);
-            let physical_key = if pos_key <= neg_key {
-                (pos_key, neg_key)
-            } else {
-                (neg_key, pos_key)
-            };
-            if !seen.insert(physical_key) {
+            let identity = BranchIdentity::new(
+                unknown.declared_name.as_ref(),
+                unknown.pos_node,
+                unknown.neg_node,
+            );
+            if !seen.insert(identity) {
                 continue;
             }
             let flow = self.leaf(
@@ -3030,7 +3029,7 @@ impl<'a> CfgLowerer<'a> {
         let (pos_node, neg_node, id) = (branch.pos_node, branch.neg_node, branch.id);
 
         if kind == AccessKind::Flow {
-            if let Some((unknown, reversed)) = self.branch_unknown_by_nodes(pos_node, neg_node) {
+            if let Some((unknown, reversed)) = self.branch_unknown(Some(name), pos_node, neg_node) {
                 let flow = self.leaf(
                     LeafKey::BranchUnknownFlow(unknown),
                     CfgValueType::Real,
@@ -3104,24 +3103,25 @@ impl<'a> CfgLowerer<'a> {
     /// optional series resistance — produces two unknowns for one branch. A
     /// branch has one flow, so the first is the answer; the duplication is
     /// MIR's modelling of contributions, not two physical quantities.
-    fn branch_unknown_by_nodes(
+    fn branch_unknown(
         &self,
+        name: Option<&SmolStr>,
         pos: Option<NodeId>,
         neg: Option<NodeId>,
     ) -> Option<(BranchUnknownId, bool)> {
-        // Preserve MIR/source order across both orientations. The canonical
-        // generated backend uses the first potential contribution on a physical
-        // branch as its leader unknown; preferring a later exact orientation
-        // over an earlier reversed one would make I(a,b) read an unused duplicate
-        // that the topology layer correctly pins to zero.
+        let identity = BranchIdentity::new(name, pos, neg);
+        // Repeated contribution sites use the first unknown of this branch.
+        // Distinct named branches never share a solver flow.
         self.mir.branch_unknowns.iter().find_map(|unknown| {
-            if unknown.pos_node == pos && unknown.neg_node == neg {
-                Some((unknown.id, false))
-            } else if unknown.pos_node == neg && unknown.neg_node == pos {
-                Some((unknown.id, true))
-            } else {
-                None
+            if BranchIdentity::new(
+                unknown.declared_name.as_ref(),
+                unknown.pos_node,
+                unknown.neg_node,
+            ) != identity
+            {
+                return None;
             }
+            Some((unknown.id, unknown.pos_node != pos))
         })
     }
 
@@ -3613,7 +3613,7 @@ impl<'a> CfgLowerer<'a> {
                 if kind == AccessKind::Potential {
                     return Some(CfgDdxAxis::Potential { pos_node, neg_node });
                 }
-                match self.branch_unknown_by_nodes(pos_node, neg_node) {
+                match self.branch_unknown(None, pos_node, neg_node) {
                     Some((unknown, reversed)) => Some(CfgDdxAxis::BranchFlow { unknown, reversed }),
                     None => {
                         self.unsupported(
@@ -3636,7 +3636,7 @@ impl<'a> CfgLowerer<'a> {
                         neg_node: branch.neg_node,
                     });
                 }
-                match self.branch_unknown_by_nodes(branch.pos_node, branch.neg_node) {
+                match self.branch_unknown(Some(&name), branch.pos_node, branch.neg_node) {
                     Some((unknown, reversed)) => Some(CfgDdxAxis::BranchFlow { unknown, reversed }),
                     None => {
                         self.unsupported(

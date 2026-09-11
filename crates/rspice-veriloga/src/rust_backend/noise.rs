@@ -1818,6 +1818,7 @@ fn noise_branch_unknowns(artifact: &CanonicalIrArtifact) -> HashMap<String, Bran
             slots
                 .entry(name.to_string())
                 .or_insert_with(|| BranchCurrentSlot::forward(slot));
+            continue;
         }
         let pos = unknown.pos_node.map(|node| node.index() as usize);
         let neg = unknown.neg_node.map(|node| node.index() as usize);
@@ -1833,7 +1834,7 @@ fn noise_branch_unknowns(artifact: &CanonicalIrArtifact) -> HashMap<String, Bran
 
 fn potential_branch_leaders(artifact: &CanonicalIrArtifact) -> Vec<Option<u32>> {
     let mut leaders = vec![None; artifact.mir.equations.len()];
-    let mut physical: Vec<(Option<NodeId>, Option<NodeId>, u32)> = Vec::new();
+    let mut physical = HashMap::new();
     for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
         if equation.kind != crate::canonical_ir::MirEquationKind::Potential {
             continue;
@@ -1847,17 +1848,12 @@ fn potential_branch_leaders(artifact: &CanonicalIrArtifact) -> Vec<Option<u32>> 
         else {
             continue;
         };
-        let leader = physical
-            .iter()
-            .find(|(pos, neg, _)| {
-                (*pos == equation.branch.pos_node && *neg == equation.branch.neg_node)
-                    || (*pos == equation.branch.neg_node && *neg == equation.branch.pos_node)
-            })
-            .map(|(_, _, leader)| *leader)
-            .unwrap_or_else(|| {
-                physical.push((equation.branch.pos_node, equation.branch.neg_node, branch));
-                branch
-            });
+        let identity = crate::branch_identity::BranchIdentity::new(
+            equation.branch.declared_name.as_ref(),
+            equation.branch.pos_node,
+            equation.branch.neg_node,
+        );
+        let leader = *physical.entry(identity).or_insert(branch);
         leaders[equation_index] = Some(leader);
     }
     leaders

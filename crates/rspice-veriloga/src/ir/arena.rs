@@ -42,7 +42,7 @@
 //!    memoize them by [`NodeId`] — that is the one rewrite whose result is not
 //!    a function of the subtree alone.
 //! 3. **Pure rewrites may memoize by [`NodeId`].** `simplify`, `resolve_ddx`,
-//!    `rewrite_branch_probes`, `rename_variable_reads`, `simplified_constant`
+//!    `rename_variable_reads`, `simplified_constant`
 //!    and the noise-axis collector all answer a question about a subtree, so
 //!    computing the answer once and reusing it is the same answer. The two
 //!    memos keyed by node address today become [`NodeId`]-keyed.

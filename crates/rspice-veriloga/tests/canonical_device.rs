@@ -22,6 +22,85 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_potential_sources_preserve_parallel_branch_identity() {
+    for (source, active, sum) in [
+        (
+            "module parallel(p); inout p; electrical p; branch(p) a,b; analog begin V(a)<+2*I(a); V(b)<+3*I(b); end endmodule",
+            2,
+            8.0,
+        ),
+        (
+            "module parallel(p); inout p; electrical p; branch(p) a; analog begin V(a)<+2*I(a); V(a)<+3*I(a); end endmodule",
+            1,
+            5.0,
+        ),
+        (
+            "module resistor(p); inout p; electrical p; parameter real r=2; analog V(p)<+r*I(p); endmodule module parallel(p); inout p; electrical p; resistor #(.r(2)) a(p); resistor #(.r(3)) b(p); endmodule",
+            2,
+            8.0,
+        ),
+    ] {
+        let (state, stamp, noise) =
+            generated_parts_selected(source, "parallel potential branches", Some("parallel"));
+        let main = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.set_branch_indices(&[1,2]);
+instance.finalize_parameters().unwrap();
+let bias=[0.0,1.0,2.0];
+let ctx=runtime::GeneratedEvalContext {{ voltages:&bias, temperature:300.15 }};
+let mut sink=[0.0;10];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {{ sink:Some(&mut sink) }});
+assert_eq!(sink[0],{active}.0,"each branch has its own structural coupling: {{sink:?}}");
+assert_eq!(sink[1],{}.0,"only duplicate contribution slots are inactive: {{sink:?}}");
+assert_eq!(sink[2],{sum:?},"each source reads its own current: {{sink:?}}");
+assert_eq!(sink[4],5.0,"sum of source derivatives: {{sink:?}}");
+assert_eq!(sink[9],{sum:?},"derivative columns retain branch identity: {{sink:?}}");
+assert!(!ctx.evaluation_failed());
+"#,
+            2 - active
+        );
+        run_generated_main("parallel potential branches", &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
+#[test]
+fn generated_parallel_potential_noise_preserves_branch_currents_and_destinations() {
+    let (state, stamp, noise) = generated_parts(
+        "module parallel(p); inout p; electrical p; branch(p) a,b; analog begin
+         V(a)<+2*I(a)+white_noise(abs(I(a))+1,\"a\");
+         V(b)<+3*I(b)+white_noise(abs(I(b))+2,\"b\"); end endmodule",
+        "parallel potential noise",
+    );
+    run_generated_main(
+        "parallel potential noise",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+#[derive(Default)] struct Capture(Vec<f64>);
+impl runtime::GeneratedNoiseVisitor for Capture {
+    fn visit(&mut self, _index:usize, value:runtime::GeneratedNoiseEvaluationRef<'_>)->bool {
+        assert!(value.active); self.0.push(value.psd); true
+    }
+}
+assert_eq!(device::noise::NOISE_SOURCES[0].branch_ordinal,Some(0));
+assert_eq!(device::noise::NOISE_SOURCES[1].branch_ordinal,Some(1));
+let mut instance=device::state::Instance::new(&[0]);
+instance.set_branch_indices(&[1,2]);
+instance.finalize_parameters().unwrap();
+let bias=[0.0,1.0,2.0];
+let ctx=runtime::GeneratedEvalContext { voltages:&bias, temperature:300.15 };
+let mut capture=Capture::default();
+instance.evaluate_noise_sources(&ctx,&mut capture).unwrap();
+assert_eq!(capture.0,vec![2.0,4.0]);
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_hierarchy_preserves_instance_port_currents() {
     let (state, stamp, noise) = generated_parts_selected(
         "module child(p,q); inout p,q; electrical p,q; parameter real gain=1;
@@ -7315,6 +7394,9 @@ pub mod runtime {
                 if let Some(value) = sink.get_mut(5) { *value += _branch as f64 + 1.0; }
                 if let Some(value) = sink.get_mut(6) {
                     *value += _branch_indices.iter().map(|index| *index as f64 + 1.0).sum::<f64>();
+                }
+                if let Some(value) = sink.get_mut(9) {
+                    *value += _branch_indices.iter().zip(_branch_derivatives).map(|(index, derivative)| (*index as f64 + 1.0) * derivative).sum::<f64>();
                 }
             }
         }

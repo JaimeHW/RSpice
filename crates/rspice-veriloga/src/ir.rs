@@ -7,6 +7,7 @@
 pub mod arena;
 
 use crate::ast::{BinaryOp, UnaryOp};
+use crate::branch_identity::BranchIdentity;
 use crate::error::CompileResult;
 pub use crate::ir::arena::NodeId;
 use crate::ir::arena::{ExprArena, Heavy, HeavyKind, IndexedRead, Node, unpack_index};
@@ -422,6 +423,8 @@ pub struct BranchEquation {
 /// A branch-current unknown introduced by potential contributions
 #[derive(Debug, Clone)]
 pub struct BranchUnknownDef {
+    /// Scoped declared branch, or an unnamed endpoint pair.
+    pub declared_name: Option<SmolStr>,
     /// Positive node (unified index)
     pub pos: usize,
     /// Negative node (unified index)
@@ -842,12 +845,11 @@ impl DeviceIR {
         ));
 
         // Pre-pass over contributions: parse branch refs and register a
-        // branch-current unknown per node pair receiving a potential
-        // contribution. Pairs are normalized so V(a,b) and V(b,a) share
-        // one unknown (the reversed orientation flips the sign).
+        // branch-current unknown per named or unnamed branch receiving a
+        // potential contribution. Repeated contributions share an unknown;
+        // distinct declared branches retain independent flows.
         let mut parsed_contribs: Vec<BranchRef> = Vec::with_capacity(module.contributions.len());
-        // (min,max) node pair -> (ordinal, oriented positive node)
-        let mut branch_table: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
+        let mut branch_table: HashMap<BranchIdentity<usize>, (usize, usize)> = HashMap::new();
         for contrib in &module.contributions {
             let branch_ref = Self::parse_branch_name(&contrib.branch, &ctx).ok_or_else(|| {
                 crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::InvalidExpression(
@@ -858,20 +860,22 @@ impl DeviceIR {
             // Potential contributions and indirect contributions (either
             // target kind) introduce a branch-current unknown
             if !contrib.is_current || contrib.indirect {
-                let key = (
-                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
-                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                let key = BranchIdentity::new(
+                    contrib.declared_branch.as_ref(),
+                    branch_ref.pos_terminal,
+                    branch_ref.neg_terminal,
                 );
                 let ordinal = match branch_table.get(&key) {
                     Some(&(ordinal, _)) => ordinal,
                     None => {
                         let ordinal = ir.branch_unknowns.len();
                         ir.branch_unknowns.push(BranchUnknownDef {
+                            declared_name: contrib.declared_branch.clone(),
                             pos: branch_ref.pos_terminal,
                             neg: branch_ref.neg_terminal,
                             indirect: contrib.indirect,
                         });
-                        branch_table.insert(key, (ordinal, branch_ref.pos_terminal));
+                        branch_table.insert(key.clone(), (ordinal, branch_ref.pos_terminal));
                         ordinal
                     }
                 };
@@ -881,13 +885,14 @@ impl DeviceIR {
                 let registered_indirect = ir.branch_unknowns[ordinal].indirect;
                 if registered_indirect != contrib.indirect
                     || (contrib.indirect && registered_indirect && {
-                        // Second indirect contribution on the same pair
+                        // Second indirect contribution on the same branch
                         parsed_contribs.iter().zip(module.contributions.iter()).any(
                             |(prev_ref, prev)| {
                                 prev.indirect
-                                    && (
-                                        prev_ref.pos_terminal.min(prev_ref.neg_terminal),
-                                        prev_ref.pos_terminal.max(prev_ref.neg_terminal),
+                                    && BranchIdentity::new(
+                                        prev.declared_branch.as_ref(),
+                                        prev_ref.pos_terminal,
+                                        prev_ref.neg_terminal,
                                     ) == key
                             },
                         )
@@ -926,7 +931,7 @@ impl DeviceIR {
                 &mut transition_site_ordinal,
             );
             expr = autodiff::assign_absdelay_site_ordinals(arena, expr, &mut absdelay_site_ordinal);
-            converted_contribs.push(autodiff::rewrite_branch_probes(arena, expr, &branch_table));
+            converted_contribs.push(expr);
         }
         span.finish(&format!(
             "module={} contributions={}",
@@ -1001,13 +1006,6 @@ impl DeviceIR {
             module.name,
             ir.noise_sources.len()
         ));
-
-        // Current probes I(a,b) of a branch that carries a potential
-        // contribution read the branch unknown (exact), not the inferred
-        // contribution cache.
-        if !branch_table.is_empty() {
-            autodiff::rewrite_branch_probes_in_items(&mut ir.exprs, &mut items, &branch_table);
-        }
 
         // There is no seam any more: the converter wrote these nodes into
         // `ir.exprs` directly, so the statement list is already the arena's and
@@ -1148,9 +1146,10 @@ impl DeviceIR {
                 // Constraint equations are orientation-free (f == g holds
                 // whichever way the target was written); the KCL couplings
                 // use the unknown's registered orientation
-                let key = (
-                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
-                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                let key = BranchIdentity::new(
+                    contrib.declared_branch.as_ref(),
+                    branch_ref.pos_terminal,
+                    branch_ref.neg_terminal,
                 );
                 let (ordinal, _) = branch_table[&key];
                 let unknown = &branch_unknowns[ordinal];
@@ -1165,9 +1164,10 @@ impl DeviceIR {
             } else if contrib.is_current {
                 (branch_ref, expr, None)
             } else {
-                let key = (
-                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
-                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                let key = BranchIdentity::new(
+                    contrib.declared_branch.as_ref(),
+                    branch_ref.pos_terminal,
+                    branch_ref.neg_terminal,
                 );
                 let (ordinal, oriented_pos) = branch_table[&key];
                 if branch_ref.pos_terminal == oriented_pos {
@@ -3772,62 +3772,6 @@ pub mod autodiff {
         *assignments =
             interleave_auxiliary_shadows(exprs, originals, variables, &shadow_index, ctx, family);
         span.finish(&format!("assignments={}", assignments.len()));
-    }
-
-    /// Rewrite I(a,b) probes of branches carrying potential contributions
-    /// into branch-current unknown references. The table maps a normalized
-    /// (min,max) node pair to (ordinal, oriented positive node); a probe
-    /// against the orientation negates.
-    pub fn rewrite_branch_probes(
-        arena: &mut ExprArena,
-        expr: NodeId,
-        table: &HashMap<(usize, usize), (usize, usize)>,
-    ) -> NodeId {
-        rewrite(arena, expr, &mut |arena, node| {
-            let Node::Current(packed_pos, packed_neg) = node else {
-                return None;
-            };
-            let pos = arena::unpack_index(packed_pos);
-            let neg = arena::unpack_index(packed_neg);
-            let key = (pos.min(neg), pos.max(neg));
-            let &(ordinal, oriented_pos) = table.get(&key)?;
-            let unknown = Node::BranchCurrent(arena::pack_index(ordinal));
-            Some(if pos == oriented_pos {
-                unknown
-            } else {
-                Node::Unary(UnaryOp::Neg, arena.push(unknown))
-            })
-        })
-    }
-
-    /// Apply [`rewrite_branch_probes`] across an assignment-item tree
-    pub fn rewrite_branch_probes_in_items(
-        arena: &mut ExprArena,
-        items: &mut [IrAssignmentItem],
-        table: &HashMap<(usize, usize), (usize, usize)>,
-    ) {
-        for item in items {
-            match item {
-                IrAssignmentItem::Initialization { body, .. } => {
-                    rewrite_branch_probes_in_items(arena, body, table)
-                }
-                IrAssignmentItem::Task(task) => {
-                    for expression in task.expressions_mut() {
-                        *expression = rewrite_branch_probes(arena, *expression, table);
-                    }
-                }
-                IrAssignmentItem::Assign(assign) => {
-                    assign.expr = rewrite_branch_probes(arena, assign.expr, table);
-                    if let Some(target) = &mut assign.index {
-                        target.index = rewrite_branch_probes(arena, target.index, table);
-                    }
-                }
-                IrAssignmentItem::Loop { condition, body } => {
-                    *condition = rewrite_branch_probes(arena, *condition, table);
-                    rewrite_branch_probes_in_items(arena, body, table);
-                }
-            }
-        }
     }
 
     /// Resolve ddx() operators into explicit derivative expressions

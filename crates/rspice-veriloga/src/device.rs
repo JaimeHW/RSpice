@@ -160,6 +160,11 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     }
     usize_field(&mut hasher, model.branch_sources.len());
     for source in &model.branch_sources {
+        hasher.update(&[u8::from(source.declared_name.is_some())]);
+        if let Some(name) = &source.declared_name {
+            usize_field(&mut hasher, name.len());
+            hasher.update(name.as_bytes());
+        }
         stamp_index(&mut hasher, &source.pos);
         stamp_index(&mut hasher, &source.neg);
         hasher.update(&[u8::from(source.indirect)]);

@@ -12,6 +12,7 @@ use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CallExpr, Expression, Identifier,
     NumberLit, SystemFunction,
 };
+use crate::branch_identity::BranchIdentity;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::arena::{ExprArena, Heavy, IndexedRead, Node, ZiPolynomial, pack_index};
 use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
@@ -303,7 +304,7 @@ pub struct ConversionContext {
     branch_map: HashMap<SmolStr, (usize, usize)>,
     /// Normalized branch pairs carrying solver-owned current unknowns, mapped
     /// to (ordinal, authored positive endpoint).
-    branch_current_map: HashMap<(usize, usize), (usize, usize)>,
+    branch_current_map: HashMap<BranchIdentity<usize>, (usize, usize)>,
     /// Map from parameter name to index
     param_map: HashMap<SmolStr, usize>,
     /// Map from variable name to index
@@ -377,7 +378,7 @@ impl ConversionContext {
             else {
                 continue;
             };
-            let key = (pos.min(neg), pos.max(neg));
+            let key = BranchIdentity::new(contribution.declared_branch.as_ref(), pos, neg);
             if !branch_current_map.contains_key(&key) {
                 let ordinal = branch_current_map.len();
                 branch_current_map.insert(key, (ordinal, pos));
@@ -423,8 +424,13 @@ impl ConversionContext {
         self.branch_map.get(name).copied()
     }
 
-    fn branch_current_axis(&self, pos: usize, neg: usize) -> Option<(usize, bool)> {
-        let key = (pos.min(neg), pos.max(neg));
+    fn branch_current_axis(
+        &self,
+        name: Option<&SmolStr>,
+        pos: usize,
+        neg: usize,
+    ) -> Option<(usize, bool)> {
+        let key = BranchIdentity::new(name, pos, neg);
         self.branch_current_map
             .get(&key)
             .map(|(ordinal, authored_pos)| (*ordinal, pos != *authored_pos))
@@ -570,9 +576,11 @@ impl<'a> ExprConverter<'a> {
                     (pos_node, neg_node)
                 };
                 if kind == AccessKind::Flow {
-                    let Some((ordinal, reversed)) =
-                        self.ctx.branch_current_axis(pos_node, neg_node)
-                    else {
+                    let Some((ordinal, reversed)) = self.ctx.branch_current_axis(
+                        (neg.is_none() && self.ctx.branch_nodes(pos).is_some()).then_some(pos),
+                        pos_node,
+                        neg_node,
+                    ) else {
                         return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
                             "ddx flow probe requires a solver-owned branch-current unknown from a potential or indirect contribution".into(),
                         ))
@@ -598,9 +606,11 @@ impl<'a> ExprConverter<'a> {
                     )
                 };
                 if kind == AccessKind::Flow {
-                    let Some((ordinal, reversed)) =
-                        self.ctx.branch_current_axis(pos_node, neg_node)
-                    else {
+                    let Some((ordinal, reversed)) = self.ctx.branch_current_axis(
+                        self.ctx.branch_nodes(name).is_some().then_some(name),
+                        pos_node,
+                        neg_node,
+                    ) else {
                         return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
                             format!(
                                 "ddx flow probe I(<{name}>) requires a solver-owned branch-current unknown from a potential or indirect contribution"
@@ -2047,7 +2057,7 @@ impl<'a> ExprConverter<'a> {
                 if neg.is_none()
                     && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
                 {
-                    return Self::access_to_ir(arena, kind, pos_idx, neg_idx);
+                    return self.access_to_ir(arena, kind, Some(pos), pos_idx, neg_idx);
                 }
 
                 let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
@@ -2070,7 +2080,7 @@ impl<'a> ExprConverter<'a> {
                     .transpose()?
                     .unwrap_or(self.ctx.ground());
 
-                Self::access_to_ir(arena, kind, pos_idx, neg_idx)
+                self.access_to_ir(arena, kind, None, pos_idx, neg_idx)
             }
             BranchAccess::Branch { name, .. } => {
                 let (pos_idx, neg_idx) = if let Some(nodes) = self.ctx.branch_nodes(name) {
@@ -2084,7 +2094,13 @@ impl<'a> ExprConverter<'a> {
                     })?;
                     (pos_idx, self.ctx.ground())
                 };
-                Self::access_to_ir(arena, kind, pos_idx, neg_idx)
+                self.access_to_ir(
+                    arena,
+                    kind,
+                    self.ctx.branch_nodes(name).is_some().then_some(name),
+                    pos_idx,
+                    neg_idx,
+                )
             }
         }
     }
@@ -2094,13 +2110,26 @@ impl<'a> ExprConverter<'a> {
     /// Potential accesses (V, Temp, Pos, ...) read the node-pair potential;
     /// flow accesses (I, Pwr, ...) read the branch flow.
     fn access_to_ir(
+        &self,
         arena: &mut ExprArena,
         kind: AccessKind,
+        name: Option<&SmolStr>,
         pos: usize,
         neg: usize,
     ) -> CompileResult<NodeId> {
         match kind {
-            AccessKind::Flow => Ok(arena.push(Node::Current(pack_index(pos), pack_index(neg)))),
+            AccessKind::Flow => {
+                if let Some((ordinal, reversed)) = self.ctx.branch_current_axis(name, pos, neg) {
+                    let current = arena.push(Node::BranchCurrent(pack_index(ordinal)));
+                    Ok(if reversed {
+                        arena.push(Node::Unary(crate::ast::UnaryOp::Neg, current))
+                    } else {
+                        current
+                    })
+                } else {
+                    Ok(arena.push(Node::Current(pack_index(pos), pack_index(neg))))
+                }
+            }
             AccessKind::Potential => {
                 Ok(arena.push(Node::Voltage(pack_index(pos), pack_index(neg))))
             }
@@ -3006,7 +3035,9 @@ mod tests {
         let mut context = empty_context();
         context.node_map.insert("p".into(), 0);
         context.node_map.insert("n".into(), 1);
-        context.branch_current_map.insert((0, 1), (0, 0));
+        context
+            .branch_current_map
+            .insert(BranchIdentity::Nodes(0, 1), (0, 0));
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
@@ -3042,7 +3073,9 @@ mod tests {
         let mut context = empty_context();
         context.node_map.insert("p".into(), 0);
         context.node_map.insert("n".into(), 1);
-        context.branch_current_map.insert((0, 1), (0, 0));
+        context
+            .branch_current_map
+            .insert(BranchIdentity::Nodes(0, 1), (0, 0));
         context.num_terminals = 2;
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();

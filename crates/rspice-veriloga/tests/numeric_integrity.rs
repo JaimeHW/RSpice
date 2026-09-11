@@ -4,6 +4,122 @@ use rspice_veriloga::vm::VmError;
 use support::DeviceFixture;
 
 #[test]
+fn potential_sources_preserve_named_and_instance_branch_identity() {
+    for (declarations, body, branches, conductance) in [
+        (
+            "branch(p) a,b;",
+            "V(a)<+2*I(a); V(b)<+3*I(b);",
+            2,
+            5.0 / 6.0,
+        ),
+        ("branch(p) a;", "V(a)<+2*I(a); V(p)<+3*I(p);", 2, 5.0 / 6.0),
+        (
+            "ground g; branch(p) a; branch(g,p) b;",
+            "V(a)<+2*I(a); V(b)<+3*I(b);",
+            2,
+            5.0 / 6.0,
+        ),
+        (
+            "branch(p) a,b;",
+            "V(a)<+2*I(a)+I(b); V(b)<+I(a)+3*I(b);",
+            2,
+            0.6,
+        ),
+        ("branch(p) a;", "V(a)<+2*I(a); V(a)<+3*I(a);", 1, 0.2),
+        ("ground g;", "V(p)<+2*I(p); V(g,p)<+3*I(g,p);", 1, 0.2),
+        (
+            "ground g; parameter integer enabled=1;",
+            "V(p)<+2*I(p); if(enabled) V(g,p)<+3*I(g,p);",
+            1,
+            0.2,
+        ),
+        (
+            "ground g; parameter integer enabled=0;",
+            "V(p)<+2*I(p); if(enabled) V(g,p)<+3*I(g,p);",
+            1,
+            0.5,
+        ),
+        (
+            "branch(p) a,b;",
+            "V(a)<+2*I(a); V(b)<+2*I(b)+I(<p>)-I(a);",
+            2,
+            5.0 / 6.0,
+        ),
+        (
+            "branch(p) a,b;",
+            "V(a)<+2*I(a); V(b): V(p)==3*I(b);",
+            2,
+            5.0 / 6.0,
+        ),
+        (
+            "branch(p) a,b;",
+            "V(a): V(p)==2*I(a); V(b): V(p)==3*I(b);",
+            2,
+            5.0 / 6.0,
+        ),
+        (
+            "branch(p) a,b;",
+            "V(a)<+I(a)+ddx(I(a)*I(b),I(b)); V(b)<+3*I(b)+ddx(I(a)*I(a),I(b));",
+            2,
+            5.0 / 6.0,
+        ),
+    ] {
+        assert_potential_conductance(
+            &format!(
+                "module parallel(p); inout p; electrical p; {declarations} analog begin {body} end endmodule"
+            ),
+            branches,
+            conductance,
+        );
+    }
+    assert_potential_conductance(
+        "module resistor(p); inout p; electrical p; parameter real r=2; analog V(p)<+r*I(p); endmodule
+         module parallel(p); inout p; electrical p; resistor #(.r(2)) a(p); resistor #(.r(3)) b(p); endmodule",
+        2,
+        5.0 / 6.0,
+    );
+}
+
+fn assert_potential_conductance(source: &str, branches: usize, conductance: f64) {
+    let report = rspice_veriloga::VerilogACompiler::default()
+        .compile_runtime(source, Some("parallel"))
+        .unwrap();
+    let fixture = DeviceFixture {
+        model: report.model,
+        canonical_ir: report.canonical_ir,
+    };
+    assert_eq!(fixture.branch_sources.len(), branches, "{source}");
+    assert_eq!(fixture.internal_nodes, 0, "{source}");
+    let dimension = 1 + branches;
+    let mut device = fixture.device("PARALLEL", &[1]);
+    device.set_branch_current_indices(&(2..=dimension).collect::<Vec<_>>());
+    let mut matrix = vec![vec![0.0; dimension]; dimension];
+    let mut rhs = vec![0.0; dimension];
+    let mut bias = vec![0.0; dimension];
+    bias[0] = 1.0;
+    device
+        .try_stamp(&bias, |r, c, v| matrix[r][c] += v, |r, v| rhs[r] += v)
+        .unwrap();
+    for pivot in (1..dimension).rev() {
+        let (rows, tail) = matrix.split_at_mut(pivot);
+        let pivot_row = &tail[0];
+        assert!(pivot_row[pivot].abs() > 0.1, "{source}: {pivot_row:?}");
+        for (row, coefficients) in rows.iter_mut().enumerate() {
+            let factor = coefficients[pivot] / pivot_row[pivot];
+            for (value, pivot_value) in coefficients[..pivot].iter_mut().zip(&pivot_row[..pivot]) {
+                *value -= factor * pivot_value;
+            }
+            rhs[row] -= factor * rhs[pivot];
+        }
+    }
+    assert!(
+        (matrix[0][0] - conductance).abs() < 1e-12,
+        "{source}: {matrix:?}"
+    );
+    assert!(rhs.iter().all(|v| v.abs() < 1e-12), "{source}: {rhs:?}");
+}
+
+#[test]
 fn flow_probes_preserve_simultaneous_equations_and_jacobians() {
     for (declarations, body, expected_pp, expected_qp) in [
         ("", "I(p,n)<+2*V(p,n); I(q,n)<+3*I(p,n);", 2.0, 6.0),

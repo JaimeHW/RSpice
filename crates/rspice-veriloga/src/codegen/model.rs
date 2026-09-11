@@ -664,6 +664,8 @@ pub enum ColumnAxis {
 /// A branch-current unknown of a potential contribution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledBranchSource {
+    /// Scoped declaration identity; unnamed sources use their endpoint pair.
+    pub declared_name: Option<SmolStr>,
     /// Positive node of the source branch
     pub pos: StampIndex,
     /// Negative node of the source branch

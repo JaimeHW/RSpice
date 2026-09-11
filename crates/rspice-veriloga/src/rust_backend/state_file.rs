@@ -1576,7 +1576,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 19 supports default limiters and rejects invalid candidates before publication.
 // Version 20 solves flow-source probes through private current unknowns.
 // Version 21 preserves branch ownership and port-current boundaries in hierarchy.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 21;
+// Version 22 retains independent potential branches and normalizes source direction.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 22;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

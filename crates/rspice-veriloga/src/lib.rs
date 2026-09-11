@@ -87,6 +87,7 @@
 pub mod analog_tasks;
 mod array_index;
 pub mod ast;
+mod branch_identity;
 mod canonical_compat;
 pub mod canonical_ir;
 pub mod codegen;

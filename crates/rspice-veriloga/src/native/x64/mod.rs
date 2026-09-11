@@ -3156,7 +3156,9 @@ endmodule
             native
                 .run_stamp_value(1, &ctx, std::ptr::null())
                 .expect("second stamp value entry"),
-            -6.0
+            // I(p,n) reads -3 A; reversing the source into the solver's
+            // first (n,p) direction negates that expression once more.
+            6.0
         );
         assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![0_usize]);
     }
@@ -3164,7 +3166,7 @@ endmodule
     #[test]
     fn compile_model_with_canonical_ir_maps_named_branch_unknowns() {
         let source = r#"
-module native_canonical_named_duplicate_vsrc(p, n);
+module native_canonical_named_independent_vsrc(p, n);
   inout p, n;
   electrical p, n;
   branch (p, n) probe;
@@ -3179,13 +3181,13 @@ endmodule
         let artifact = compiler
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
-        assert_eq!(model.branch_sources.len(), 1);
+        assert_eq!(model.branch_sources.len(), 2);
         assert_eq!(artifact.mir.branch_unknowns.len(), 2);
 
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("named canonical branch unknown maps to runtime branch slot");
 
-        let branch_unknowns = [3.0_f64];
+        let branch_unknowns = [3.0_f64, 5.0];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
         ctx.branch_unknowns = branch_unknowns.as_ptr();
         // The device publishes the prelude before any entry is read, and since
@@ -3195,9 +3197,9 @@ endmodule
             native
                 .run_stamp_value(1, &ctx, std::ptr::null())
                 .expect("named branch stamp value entry"),
-            -6.0
+            10.0
         );
-        assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![0_usize]);
+        assert_eq!(stamp_value_branch_unknowns(&native, 1), vec![1_usize]);
     }
 
     #[test]

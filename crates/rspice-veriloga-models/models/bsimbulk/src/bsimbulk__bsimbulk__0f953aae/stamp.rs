@@ -15773,7 +15773,7 @@ impl Instance {
         if staged[872] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
-            -(staged[848]),
+            staged[848],
             [],
             [],
             [],
@@ -15853,7 +15853,7 @@ impl Instance {
         if staged[875] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             4,
-            -(staged[854]),
+            staged[854],
             [],
             [],
             [],

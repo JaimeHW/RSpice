@@ -6,14 +6,11 @@
 //! AC and noise use the same solver dependency as ordinary voltage probes.
 
 use super::*;
+use crate::branch_identity::BranchIdentity;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum BranchKey {
-    Named(SmolStr),
-    Nodes(SmolStr, SmolStr),
-}
+type BranchKey = BranchIdentity<SmolStr>;
 
 struct BranchResolver<'a> {
     declared: &'a [AnalyzedBranch],
@@ -232,6 +229,7 @@ struct FlowBranch {
 pub(crate) fn lower<'a>(
     mut module: Cow<'a, AnalyzedModule>,
 ) -> CompileResult<Cow<'a, AnalyzedModule>> {
+    normalize_potential_directions(&mut module);
     let resolver = BranchResolver {
         declared: &module.branches,
         grounds: &module.ground_nodes,
@@ -479,6 +477,63 @@ fn potential(pos: &str, neg: &str, span: Span) -> Expression {
         neg: Some(neg.into()),
         span,
     })
+}
+
+/// Every equation of one potential branch uses its first source's direction.
+/// Normalize before the flat and structured IRs diverge so residuals, AD and
+/// noise agree with the solver's single structural branch row.
+fn normalize_potential_directions(module: &mut Cow<'_, AnalyzedModule>) {
+    let resolver = BranchResolver {
+        declared: &module.branches,
+        grounds: &module.ground_nodes,
+    };
+    let mut directions = HashMap::new();
+    let mut rewrites = HashMap::new();
+    for contribution in &module.contributions {
+        if contribution.is_current || contribution.indirect {
+            continue;
+        }
+        let (key, _, _, sign) = resolver.contribution(contribution);
+        let (first_sign, label) = directions
+            .entry(key)
+            .or_insert_with(|| (sign, contribution.branch.clone()));
+        if sign != *first_sign {
+            rewrites.insert(contribution.site, label.clone());
+        }
+    }
+    if rewrites.is_empty() {
+        return;
+    }
+    let target = module.to_mut();
+    let redirect = |contribution: &mut AnalyzedContribution, flat| {
+        if let Some(label) = rewrites.get(&contribution.site) {
+            contribution.branch = label.clone();
+            negate_contribution(contribution, flat);
+        }
+    };
+    for contribution in &mut target.contributions {
+        redirect(contribution, true);
+    }
+    let mut pending = vec![target.body.as_mut_slice()];
+    while let Some(body) = pending.pop() {
+        for region in body {
+            match region {
+                AnalyzedRegion::Contribution(contribution) => redirect(contribution, false),
+                AnalyzedRegion::Conditional {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    pending.push(then_body);
+                    pending.push(else_body);
+                }
+                AnalyzedRegion::Loop { body, .. } | AnalyzedRegion::Initialization { body, .. } => {
+                    pending.push(body)
+                }
+                AnalyzedRegion::Assignment(_) | AnalyzedRegion::Task(_) => {}
+            }
+        }
+    }
 }
 
 pub(super) fn signed(expression: Expression, sign: f64) -> Expression {

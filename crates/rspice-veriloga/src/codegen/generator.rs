@@ -510,6 +510,7 @@ impl CodeGenerator {
                 .branch_unknowns
                 .iter()
                 .map(|b| CompiledBranchSource {
+                    declared_name: b.declared_name.clone(),
                     pos: Self::node_stamp_index(num_terminals, b.pos),
                     neg: Self::node_stamp_index(num_terminals, b.neg),
                     indirect: b.indirect,

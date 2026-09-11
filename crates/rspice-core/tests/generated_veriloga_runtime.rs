@@ -61,6 +61,25 @@ fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
         ctx.take_evaluation_error()
     );
     let history = instance.capture_rollback_state();
+    // Each collocation node has a resistor branch and an independent spline
+    // voltage source. Merging their currents loses the resistor's loading.
+    let real = matrix.to_dense_real();
+    for name in [
+        "int1", "int2", "int3", "int4", "int5", "int6", "int7", "int8", "int9",
+    ] {
+        let internal = Instance::INTERNAL_NODE_NAMES
+            .iter()
+            .position(|node| *node == name)
+            .unwrap();
+        let couplings = real[4 + internal][nodes.len()..]
+            .iter()
+            .filter(|value| value.abs() > 0.5)
+            .count();
+        assert_eq!(
+            couplings, 2,
+            "{name} must couple to separate RES and SPLINE currents"
+        );
+    }
     let mut samples = Vec::new();
     for omega in [1e6, 2e6] {
         matrix.clear_values();
