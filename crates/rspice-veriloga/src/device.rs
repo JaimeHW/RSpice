@@ -8749,6 +8749,91 @@ mod static_dae_device_tests {
     use crate::{CompilerOptions, VerilogACompiler, vm::VerilogAEvaluationMode as Mode};
 
     #[test]
+    fn static_dae_native_edges_preserve_trajectories_and_algebraic_paths() {
+        let source = include_str!("../tests/fixtures/static_dae_edges.va");
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "EDGES_STATIC",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0, 2],
+        )
+        .unwrap();
+        device.try_begin_analysis(2).unwrap();
+        // Time, dt, input, held sum, direct limited-slew gain, rate direction.
+        for (time, dt, voltage, held, direct, rate_direction) in [
+            (0.0, 1.0, 1.0, 2.0, 1.0, 0.0),
+            (1.0, 1.0, 5.0, 3.5, 0.0, 1.0),
+            (1.5, 0.5, 5.0, 4.75, 0.0, 1.0),
+            (2.0, 0.5, 5.0, 6.0, 0.0, 1.0),
+            (3.0, 1.0, 5.0, 12.5, 0.0, 1.0),
+            (4.0, 1.0, 1.0, 12.0, 0.0, -1.0),
+            (4.5, 0.5, 1.0, 10.75, 0.0, -1.0),
+            (5.0, 0.5, 1.0, 9.5, 0.0, -1.0),
+            (6.0, 1.0, 1.0, 2.0, 1.0, 0.0),
+        ] {
+            device.set_time(time);
+            device.set_timestep(dt);
+            let mut dynamic = [0.0; 2];
+            device
+                .try_stamp(
+                    &[voltage, 0.5],
+                    |row, col, value| {
+                        assert_eq!(row, 0);
+                        dynamic[col] += value;
+                    },
+                    |_, _| {},
+                )
+                .unwrap();
+            assert_eq!(
+                dynamic,
+                [
+                    4.0 + direct + 3.0 / dt + if time == 0.0 { 2.0 } else { 0.0 },
+                    rate_direction * dt
+                ]
+            );
+            let before = format!("{:?}", device.context);
+            for (probe, rate) in [(voltage, 0.5), (voltage + 0.25, 0.25), (voltage, 0.5)] {
+                let (mut jacobian, mut rhs) = ([0.0; 2], 0.0);
+                device
+                    .try_stamp_with_mode(
+                        &[probe, rate],
+                        |row, col, value| {
+                            assert_eq!(row, 0);
+                            jacobian[col] += value;
+                        },
+                        |row, value| {
+                            assert_eq!(row, 0);
+                            rhs += value;
+                        },
+                        Mode::StaticDaeProbe,
+                    )
+                    .unwrap();
+                assert_eq!(jacobian, [4.0 + direct, 0.0], "time={time} probe={probe}");
+                assert_eq!(
+                    jacobian[0] * probe + jacobian[1] * rate - rhs,
+                    (4.0 + direct) * probe + held
+                );
+                assert_eq!(format!("{:?}", device.context), before);
+            }
+            let mut callbacks = 0;
+            device
+                .try_stamp_with_mode(
+                    &[-1.0, 0.5],
+                    |_, _, _| callbacks += 1,
+                    |_, _| {},
+                    Mode::StaticDaeProbe,
+                )
+                .expect_err("late invalid contribution");
+            assert_eq!(callbacks, 0);
+            assert_eq!(format!("{:?}", device.context), before);
+            device.context.advance_state().unwrap();
+        }
+    }
+
+    #[test]
     fn static_dae_native_delay_retains_waveform_and_control_jacobian() {
         let source = include_str!("../tests/fixtures/static_dae_delay.va");
         let runtime = VerilogACompiler::new(CompilerOptions::default())

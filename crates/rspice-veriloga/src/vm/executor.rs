@@ -934,26 +934,41 @@ impl<'a> Vm<'a> {
                 let input = self.pop()?;
                 let time = self.context.time;
                 if self.context.transition_filters.len() <= *filter_id {
+                    if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                        return Err(VmError::InvalidInstruction(
+                            "missing static transition filter",
+                        ));
+                    }
                     self.context
                         .transition_filters
                         .resize_with(*filter_id + 1, Default::default);
                 }
                 let filter = &mut self.context.transition_filters[*filter_id];
-                let result = match self.context.analysis_type {
-                    2 => filter.eval(input, time, delay, rise_time, fall_time),
-                    // DC and explicit initial-condition analysis pass the
-                    // input through while retaining the final Newton
-                    // candidate as the direct-transient seed.
-                    0 | 4 => filter.eval_operating_point(input, time, delay, rise_time, fall_time),
-                    // AC/noise use the LRM's approximate unity small-signal
-                    // transfer without perturbing accepted time-domain state.
-                    1 | 3 => super::filters::TransitionFilter::validate_operands(
-                        input, time, delay, rise_time, fall_time,
-                    )
-                    .map(|()| input),
-                    analysis_type => Err(format!(
-                        "transition received invalid analysis type {analysis_type}"
-                    )),
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    && matches!(self.context.analysis_type, 0..=4)
+                {
+                    filter
+                        .static_dae_with_input_coefficient(input, time, delay, rise_time, fall_time)
+                        .map(|evaluation| evaluation.output)
+                } else {
+                    match self.context.analysis_type {
+                        2 => filter.eval(input, time, delay, rise_time, fall_time),
+                        // DC and explicit initial-condition analysis pass the
+                        // input through while retaining the final Newton
+                        // candidate as the direct-transient seed.
+                        0 | 4 => {
+                            filter.eval_operating_point(input, time, delay, rise_time, fall_time)
+                        }
+                        // AC/noise use the LRM's approximate unity small-signal
+                        // transfer without perturbing accepted time-domain state.
+                        1 | 3 => super::filters::TransitionFilter::validate_operands(
+                            input, time, delay, rise_time, fall_time,
+                        )
+                        .map(|()| input),
+                        analysis_type => Err(format!(
+                            "transition received invalid analysis type {analysis_type}"
+                        )),
+                    }
                 }
                 .map_err(|error| VmError::InvalidNumericResult(format!("transition: {error}")))?;
 
@@ -968,8 +983,19 @@ impl<'a> Vm<'a> {
                 let filter = self.context.transition_filters.get(*filter_id).ok_or(
                     VmError::InvalidInstruction("missing transition derivative filter"),
                 )?;
-                let result = filter
-                    .eval_derivative(
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    && matches!(self.context.analysis_type, 0..=4)
+                {
+                    filter.static_dae_derivative(
+                        input,
+                        input_derivative,
+                        self.context.time,
+                        delay,
+                        rise_time,
+                        fall_time,
+                    )
+                } else {
+                    filter.eval_derivative(
                         input,
                         input_derivative,
                         self.context.time,
@@ -978,9 +1004,10 @@ impl<'a> Vm<'a> {
                         fall_time,
                         self.context.analysis_type,
                     )
-                    .map_err(|error| {
-                        VmError::InvalidNumericResult(format!("transition derivative: {error}"))
-                    })?;
+                }
+                .map_err(|error| {
+                    VmError::InvalidNumericResult(format!("transition derivative: {error}"))
+                })?;
                 self.stack.push(result);
             }
 
@@ -1001,25 +1028,37 @@ impl<'a> Vm<'a> {
                     ));
                 };
                 if self.context.slew_filters.len() <= *filter_id {
+                    if !self.context.evaluation_mode.dynamic_operators_enabled() {
+                        return Err(VmError::InvalidInstruction("missing static slew filter"));
+                    }
                     self.context
                         .slew_filters
                         .resize_with(*filter_id + 1, Default::default);
                 }
                 let analysis_type = self.context.analysis_type;
                 let filter = &mut self.context.slew_filters[*filter_id];
-                let result = match analysis_type {
-                    2 => filter.eval(input, time, rates),
-                    // DC and explicit initial-condition analysis establish
-                    // the seed promoted when transient integration starts.
-                    0 | 4 => filter.eval_operating_point(input, time),
-                    // AC/noise are read-only small-signal evaluations. They
-                    // must not publish an OP candidate or perturb checkpoint
-                    // readiness/later transient startup.
-                    1 | 3 => input,
-                    _ => {
-                        return Err(VmError::InvalidRuntimeConfiguration(format!(
-                            "slew received invalid analysis type {analysis_type}"
-                        )));
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    && matches!(analysis_type, 0..=4)
+                {
+                    filter
+                        .static_dae_with_input_coefficient(input, time)
+                        .map_err(VmError::InvalidNumericResult)?
+                        .output
+                } else {
+                    match analysis_type {
+                        2 => filter.eval(input, time, rates),
+                        // DC and explicit initial-condition analysis establish
+                        // the seed promoted when transient integration starts.
+                        0 | 4 => filter.eval_operating_point(input, time),
+                        // AC/noise are read-only small-signal evaluations. They
+                        // must not publish an OP candidate or perturb checkpoint
+                        // readiness/later transient startup.
+                        1 | 3 => input,
+                        _ => {
+                            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                                "slew received invalid analysis type {analysis_type}"
+                            )));
+                        }
                     }
                 };
 
@@ -1046,20 +1085,34 @@ impl<'a> Vm<'a> {
                     .slew_filters
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing slew filter"))?;
-                let result = match self.context.analysis_type {
-                    2 => filter.eval_derivative(
-                        input,
-                        input_derivative,
-                        max_pos_slew_derivative,
-                        max_neg_slew_derivative,
-                        self.context.time,
-                        rates,
-                    ),
-                    0 | 1 | 3 | 4 => input_derivative,
-                    analysis_type => {
-                        return Err(VmError::InvalidRuntimeConfiguration(format!(
-                            "slew derivative received invalid analysis type {analysis_type}"
-                        )));
+                let result = if !self.context.evaluation_mode.dynamic_operators_enabled()
+                    && matches!(self.context.analysis_type, 0..=4)
+                {
+                    filter
+                        .static_dae_derivative(
+                            input,
+                            input_derivative,
+                            max_pos_slew_derivative,
+                            max_neg_slew_derivative,
+                            self.context.time,
+                        )
+                        .map_err(VmError::InvalidNumericResult)?
+                } else {
+                    match self.context.analysis_type {
+                        2 => filter.eval_derivative(
+                            input,
+                            input_derivative,
+                            max_pos_slew_derivative,
+                            max_neg_slew_derivative,
+                            self.context.time,
+                            rates,
+                        ),
+                        0 | 1 | 3 | 4 => input_derivative,
+                        analysis_type => {
+                            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                                "slew derivative received invalid analysis type {analysis_type}"
+                            )));
+                        }
                     }
                 };
                 self.stack.push(result);
@@ -2112,6 +2165,109 @@ mod tests {
         .expect("transient operating-point derivative uses DC action");
         assert_eq!(derivative, 2.0);
         assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+    }
+
+    #[test]
+    fn static_dae_vm_edges_require_settled_state_and_do_not_publish_events() {
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let transition = |input, derivative| {
+            let mut code = vec![Instruction::PushConst(input)];
+            if let Some(derivative) = derivative {
+                code.push(Instruction::PushConst(derivative));
+            }
+            code.extend([
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(2.0),
+            ]);
+            code.push(if derivative.is_some() {
+                Instruction::TransitionStateDerivative(0)
+            } else {
+                Instruction::TransitionState(0)
+            });
+            code
+        };
+        let slew = |input, derivative| {
+            if let Some(derivative) = derivative {
+                vec![
+                    Instruction::PushConst(input),
+                    Instruction::PushConst(derivative),
+                    Instruction::PushConst(0.5),
+                    Instruction::PushConst(7.0),
+                    Instruction::PushConst(-0.5),
+                    Instruction::PushConst(-7.0),
+                    Instruction::SlewStateDerivative(0),
+                ]
+            } else {
+                vec![
+                    Instruction::PushConst(input),
+                    Instruction::PushConst(0.5),
+                    Instruction::PushConst(-0.5),
+                    Instruction::SlewState(0),
+                ]
+            }
+        };
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.evaluation_mode = Mode::StaticDaeProbe;
+        for code in [transition(1.0, None), slew(1.0, None)] {
+            assert!(execute_with_context(&mut context, code).is_err());
+        }
+        assert!(context.transition_filters.is_empty());
+        assert!(context.slew_filters.is_empty());
+        context.evaluation_mode = Mode::NewtonLimited;
+        for code in [transition(0.0, None), slew(0.0, None)] {
+            execute_with_context(&mut context, code).unwrap();
+        }
+        context.advance_state().unwrap();
+        context.time = 1.0;
+        context.begin_stateful_evaluation();
+        for code in [transition(2.0, None), slew(2.0, None)] {
+            execute_with_context(&mut context, code).unwrap();
+        }
+        context.evaluation_mode = Mode::StaticDaeProbe;
+        context.begin_stateful_evaluation();
+        for accepted in [false, true] {
+            if accepted {
+                context.advance_state().unwrap();
+            }
+            let before = format!(
+                "{:?} {:?}",
+                context.transition_filters, context.slew_filters
+            );
+            for (code, expected) in [
+                (transition(10.0, None), 0.0),
+                (transition(10.0, Some(3.0)), 0.0),
+                (slew(10.0, None), 0.5),
+                (slew(10.0, Some(3.0)), 0.0),
+            ] {
+                assert_eq!(execute_with_context(&mut context, code).unwrap(), expected);
+            }
+            for code in [
+                transition(f64::NAN, None),
+                transition(1.0, Some(f64::NAN)),
+                slew(f64::NAN, None),
+                slew(1.0, Some(f64::NAN)),
+            ] {
+                assert!(execute_with_context(&mut context, code).is_err());
+            }
+            assert_eq!(
+                format!(
+                    "{:?} {:?}",
+                    context.transition_filters, context.slew_filters
+                ),
+                before
+            );
+        }
+        context.time = 2.0;
+        for code in [transition(1.0, None), slew(1.0, None)] {
+            assert!(
+                execute_with_context(&mut context, code)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("settled")
+            );
+        }
     }
 
     #[test]

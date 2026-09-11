@@ -1,0 +1,11 @@
+`default_transition 0
+module static_edges(p, n, c);
+  inout p, n, c; electrical p, n, c;
+  analog begin
+    I(p,n) <+ 2.0*V(p,n) + transition(V(p,n),0.0,0.0,0.0)
+      + transition(V(p,n),1.0,1.0,1.0) + transition(V(p,n),0.0,2.0,2.0)
+      + slew(V(p,n),V(c,n),-V(c,n)) + slew(V(p,n),100.0,-100.0)
+      + ddt(3.0*V(p,n));
+    if (V(p,n) < 0.0) I(p,n) <+ sqrt(V(p,n));
+  end
+endmodule

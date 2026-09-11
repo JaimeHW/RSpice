@@ -1594,6 +1594,61 @@ impl TransitionFilter {
         Ok(evaluation)
     }
 
+    /// Observe the settled trajectory without accepting an input change or
+    /// advancing/cancelling its event queue. A quiet instantaneous definition
+    /// retains its direct algebraic input path.
+    pub(crate) fn static_dae_with_input_coefficient(
+        &self,
+        input: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> Result<StatefulEvaluation, String> {
+        Self::validate_operands(input, time, delay, rise_time, fall_time)?;
+        let state = if self.candidate_valid {
+            &self.candidate
+        } else {
+            &self.committed
+        };
+        if !state.initialized || state.time.to_bits() != time.to_bits() {
+            return Err(format!(
+                "static observation requires a settled transition state at time {time}"
+            ));
+        }
+        if !state.output.is_finite() {
+            return Err("static transition output must be finite".into());
+        }
+        let direct = delay == 0.0
+            && rise_time == 0.0
+            && fall_time == 0.0
+            && state.active.is_none()
+            && state.pending.is_empty()
+            && state.output == state.input;
+        Ok(StatefulEvaluation {
+            output: if direct { input } else { state.output },
+            input_coefficient: if direct { 1.0 } else { 0.0 },
+        })
+    }
+
+    pub(crate) fn static_dae_derivative(
+        &self,
+        input: f64,
+        input_derivative: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> Result<f64, String> {
+        if !input_derivative.is_finite() {
+            return Err(format!(
+                "transition input derivative must be finite, got {input_derivative}"
+            ));
+        }
+        self.static_dae_with_input_coefficient(input, time, delay, rise_time, fall_time)
+            .map(|evaluation| evaluation.input_coefficient * input_derivative)
+    }
+
     /// Read-only exact local Jacobian action for one transition candidate.
     ///
     /// Transient evaluation recomputes the same branch from accepted history
@@ -2070,6 +2125,62 @@ impl SlewFilter {
         self.candidate = state;
         self.candidate_valid = true;
         evaluation
+    }
+
+    /// Hold the settled rate-limited trajectory while preserving the
+    /// algebraic input path of a segment that has caught up to its target.
+    pub(crate) fn static_dae_with_input_coefficient(
+        &self,
+        input: f64,
+        time: f64,
+    ) -> Result<StatefulEvaluation, String> {
+        if !input.is_finite() || !time.is_finite() || time < 0.0 {
+            return Err("static slew input and non-negative time must be finite".into());
+        }
+        let state = if self.candidate_valid {
+            &self.candidate
+        } else {
+            &self.committed
+        };
+        if !state.initialized || state.prev_time.to_bits() != time.to_bits() {
+            return Err(format!(
+                "static observation requires a settled slew state at time {time}"
+            ));
+        }
+        if !state.output.is_finite()
+            || state
+                .next_corner_time
+                .is_some_and(|corner| !corner.is_finite() || corner <= time)
+        {
+            return Err("static slew state has an invalid output or catch-up corner".into());
+        }
+        let direct = state.next_corner_time.is_none();
+        Ok(StatefulEvaluation {
+            output: if direct { input } else { state.output },
+            input_coefficient: if direct { 1.0 } else { 0.0 },
+        })
+    }
+
+    pub(crate) fn static_dae_derivative(
+        &self,
+        input: f64,
+        input_derivative: f64,
+        positive_rate_derivative: f64,
+        negative_rate_derivative: f64,
+        time: f64,
+    ) -> Result<f64, String> {
+        if ![
+            input_derivative,
+            positive_rate_derivative,
+            negative_rate_derivative,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+        {
+            return Err("static slew derivatives must be finite".into());
+        }
+        self.static_dae_with_input_coefficient(input, time)
+            .map(|evaluation| evaluation.input_coefficient * input_derivative)
     }
 
     fn candidate_evaluation(

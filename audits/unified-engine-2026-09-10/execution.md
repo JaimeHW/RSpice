@@ -1774,6 +1774,60 @@ Runtime and mixed models continue to use complete ordinary companions.
 The user confirmed that no licensed Spectre reference installation is available;
 reference parity and production qualification remain open.
 
+## Transition and slew observations preserve settled trajectories
+
+Static DAE transition observation now reads the settled candidate, or the
+accepted state at the same physical time, without advancing, cancelling or
+appending events. A quiet instantaneous transition retains its algebraic input
+path. Slew observation holds a rate-limited segment's output and suppresses its
+input/rate actions; a segment that has caught up follows its input with unit
+gain. Invalid inputs, derivatives, times and missing settled state fail through
+the checked runtime channel. VM observation cannot allocate a missing filter.
+Native ABI and checkpoint payloads are unchanged.
+
+A combined authored fixture exercises instantaneous, delayed and finite ramps,
+a voltage-controlled slew rate, an unsaturated slew path, conductance and ddt.
+Nine points cover startup, rising/falling segments, delayed starts, ramp ends
+and the slew catch-up endpoint. Changed observation input and rate values
+preserve queues/corners and integration state while the direct terms respond.
+Native checks include atomic failure from a later invalid contribution. Emitted
+Wasm automatic/postfix checks run the same values and both Jacobian columns.
+The harness now preallocates the compiled transition and slew state families.
+A VM case separately verifies pending/accepted fallback, invalid operands,
+missing storage and future observations without a settled state.
+
+This fixture exposed another production compiler mismatch: canonical transition
+derivatives were emitted as unconditional input derivatives instead of using
+the existing state-aware runtime helper. First and second derivatives now use
+the transition site's timing operands and branch action. Ordinary transient
+Jacobians of delayed and finite ramps therefore retain their actual zero local
+input gain; instantaneous and startup behavior follow the helper's semantics.
+The initial static Jacobian was 7 instead of 5. After that compiler correction,
+the fixture needed an explicit zero default_transition directive: authored zero
+rise/fall operands otherwise select the module's finite default. Both failures
+and the diagnostic state check remain recorded in their logs.
+
+The VM case passed in 0.01 seconds with the first derivative-fix selection.
+After the fixture correction, native and emitted-Wasm cases passed in 0.02
+seconds after a 7.76-second build. Logs under target/unified-mixed-fixes:
+static-dae-edges.log, static-dae-edges-derivative.log, static-dae-edges-state.log,
+static-dae-edges-final.log. No full suite was run. Native automatic selection
+uses the compiled postfix plan because transition CFG lowering is unavailable.
+Shipping browser/tablet execution remains a separate qualification.
+
+The authoritative generator regenerated all 43 built-ins. No generated model
+source changed; the manifest generator digest is now
+a0fa8572e26e54966a0bf661432bfec5b0c59b4834d4061639d9d4676155f35f.
+Log: target/unified-mixed-fixes/static-dae-edges-generator.log.
+The increment incorporates the separate native BJT core commits already on main
+through f0fced348; those changes do not overlap these compiler/runtime files.
+
+This closes the remaining transition/slew observation prerequisite, not MS08.
+Complete runtime/mixed static-history capture, separate integral input history
+for weighted companions, all-owner acceptance integration and analysis dispatch
+remain open. Runtime/mixed models retain the complete ordinary companion path.
+Reference parity and release qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

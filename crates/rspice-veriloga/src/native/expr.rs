@@ -4836,7 +4836,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 };
                 self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, wrt)
             }
-            "transition" => self.lower_state_passthrough_derivative(name, args, wrt),
+            "transition" => self.lower_transition_operator(expr_id, args, Some((wrt, None))),
             "absdelay" => {
                 let (expr, delay, max_delay) = match args {
                     [expr, delay] => (*expr, *delay, None),
@@ -5056,8 +5056,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 )
             }
             "transition" => {
-                self.require_intrinsic_arity_range(name, args, 1, 5)?;
-                self.lower_second_derivative(args[0], first, second)
+                self.lower_transition_operator(expr_id, args, Some((first, Some(second))))
             }
             "absdelay" => Err(self.unsupported(format!(
                 "second derivative of absdelay at expression {expr_id}"
@@ -5895,21 +5894,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_unary(NativeOp::IdtJacobian)
     }
 
-    fn lower_state_passthrough_derivative(
-        &mut self,
-        name: &str,
-        args: &[ExprId],
-        wrt: CanonicalDerivativeAxis,
-    ) -> JitResult<()> {
-        let max_args = if normalize_intrinsic_name(name) == "transition" {
-            5
-        } else {
-            3
-        };
-        self.require_intrinsic_arity_range(name, args, 1, max_args)?;
-        self.lower_derivative(args[0], wrt)
-    }
-
     fn lower_limit_derivative(
         &mut self,
         expr_id: ExprId,
@@ -6406,6 +6390,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_transition_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        self.lower_transition_operator(expr_id, args, None)
+    }
+
+    fn lower_transition_operator(
+        &mut self,
+        expr_id: ExprId,
+        args: &[ExprId],
+        derivative: Option<(CanonicalDerivativeAxis, Option<CanonicalDerivativeAxis>)>,
+    ) -> JitResult<()> {
         // The fifth operand is `time_tol`, which this lowering does not honour.
         let (expr, delay, rise, fall) = match args {
             [expr] => (*expr, None, None, None),
@@ -6427,6 +6420,15 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             )));
         };
         self.lower(expr)?;
+        if let Some((first, second)) = derivative {
+            // The runtime helper is a branch oracle: apply its local gain to
+            // either the first or second derivative of the authored input.
+            if let Some(second) = second {
+                self.lower_second_derivative(expr, first, second)?;
+            } else {
+                self.lower_derivative(expr, first)?;
+            }
+        }
         if let Some(delay) = delay {
             self.lower(delay)?;
         } else {
@@ -6447,10 +6449,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.entry_kind,
             "canonical transition",
             self.depth,
-            4,
+            if derivative.is_some() { 5 } else { 4 },
         )?;
-        self.depth -= 3;
-        self.ops.push(NativeOp::TransitionState(slot));
+        self.depth -= if derivative.is_some() { 4 } else { 3 };
+        self.ops.push(if derivative.is_some() {
+            NativeOp::TransitionStateDerivative(slot)
+        } else {
+            NativeOp::TransitionState(slot)
+        });
         Ok(())
     }
 

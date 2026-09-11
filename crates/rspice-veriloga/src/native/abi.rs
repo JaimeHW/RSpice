@@ -2083,10 +2083,10 @@ pub unsafe extern "C" fn rspice_transition_state_native(
         set_native_context_error(ctx, format!("native transition: {error}"));
         return 0.0;
     }
-    if matches!(ctx.analysis_type, 1 | 3) {
+    if matches!(ctx.analysis_type, 1 | 3) && ctx.static_dae_probe == 0 {
         return input;
     }
-    if !matches!(ctx.analysis_type, 0 | 2 | 4) {
+    if !matches!(ctx.analysis_type, 0..=4) {
         set_native_context_error(
             ctx,
             format!(
@@ -2120,7 +2120,11 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     let filters = unsafe {
         std::slice::from_raw_parts_mut(ctx.transition_filters, ctx.transition_filters_len)
     };
-    let result = if ctx.analysis_type == 2 {
+    let result = if ctx.static_dae_probe != 0 {
+        filters[filter_id]
+            .static_dae_with_input_coefficient(input, ctx.time, delay, rise_time, fall_time)
+            .map(|evaluation| evaluation.output)
+    } else if ctx.analysis_type == 2 {
         filters[filter_id].eval(input, ctx.time, delay, rise_time, fall_time)
     } else {
         filters[filter_id].eval_operating_point(input, ctx.time, delay, rise_time, fall_time)
@@ -2176,7 +2180,7 @@ pub unsafe extern "C" fn rspice_transition_derivative_native(
         return 0.0;
     }
 
-    if ctx.analysis_type != 2 {
+    if ctx.analysis_type != 2 && ctx.static_dae_probe == 0 {
         match crate::vm::TransitionFilter::validate_operands(
             operands[0],
             ctx.time,
@@ -2213,15 +2217,27 @@ pub unsafe extern "C" fn rspice_transition_derivative_native(
     }
     let filters =
         unsafe { std::slice::from_raw_parts(ctx.transition_filters, ctx.transition_filters_len) };
-    match filters[filter_id].eval_derivative(
-        operands[0],
-        operands[1],
-        ctx.time,
-        operands[2],
-        operands[3],
-        operands[4],
-        ctx.analysis_type,
-    ) {
+    let result = if ctx.static_dae_probe != 0 {
+        filters[filter_id].static_dae_derivative(
+            operands[0],
+            operands[1],
+            ctx.time,
+            operands[2],
+            operands[3],
+            operands[4],
+        )
+    } else {
+        filters[filter_id].eval_derivative(
+            operands[0],
+            operands[1],
+            ctx.time,
+            operands[2],
+            operands[3],
+            operands[4],
+            ctx.analysis_type,
+        )
+    };
+    match result {
         Ok(value) => value,
         Err(error) => {
             set_native_context_error(ctx, format!("native transition derivative: {error}"));
@@ -2301,6 +2317,15 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     }
 
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.slew_filters, ctx.slew_filters_len) };
+    if ctx.static_dae_probe != 0 && matches!(ctx.analysis_type, 0..=4) {
+        return match filters[filter_id].static_dae_with_input_coefficient(input, ctx.time) {
+            Ok(evaluation) => evaluation.output,
+            Err(error) => {
+                set_native_context_error(ctx, error);
+                0.0
+            }
+        };
+    }
     match ctx.analysis_type {
         2 => filters[filter_id].eval(input, ctx.time, rates),
         0 | 4 => filters[filter_id].eval_operating_point(input, ctx.time),
@@ -2370,6 +2395,22 @@ pub unsafe extern "C" fn rspice_slew_derivative_native(
             ),
         );
         return 0.0;
+    }
+    if ctx.static_dae_probe != 0 && matches!(ctx.analysis_type, 0..=4) {
+        let filters = unsafe { std::slice::from_raw_parts(ctx.slew_filters, ctx.slew_filters_len) };
+        return match filters[filter_id].static_dae_derivative(
+            operands[0],
+            operands[1],
+            operands[3],
+            operands[5],
+            ctx.time,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                set_native_context_error(ctx, error);
+                0.0
+            }
+        };
     }
     match ctx.analysis_type {
         2 => {

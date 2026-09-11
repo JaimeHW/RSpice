@@ -1664,6 +1664,16 @@ endmodule
             );
             context.laplace_filters = report.model.laplace_filters.clone();
             context.zi_filters = report.model.zi_filters.clone();
+            context.transition_filters.resize_with(
+                state_layout
+                    .family_len(crate::canonical_ir::state::CanonicalStateFamily::TransitionFilter),
+                Default::default,
+            );
+            context.slew_filters.resize_with(
+                state_layout
+                    .family_len(crate::canonical_ir::state::CanonicalStateFamily::SlewFilter),
+                Default::default,
+            );
             context.delay_buffers.resize_with(
                 state_layout
                     .family_len(crate::canonical_ir::state::CanonicalStateFamily::DelayBuffer),
@@ -2029,6 +2039,100 @@ endmodule
                 harness.call_prelude();
                 assert_eq!(harness.call(&export), 0);
                 assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn static_dae_wasm_edges_preserve_trajectories_and_algebraic_paths() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::VerilogAEvaluationMode as Mode;
+        let source = include_str!("../../tests/fixtures/static_dae_edges.va");
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, None)
+            .unwrap();
+        let control_entry = report.model.stamp_programs[0]
+            .jacobian_programs
+            .iter()
+            .position(|entry| matches!(entry.col_axis, crate::codegen::ColumnAxis::Node(2)))
+            .unwrap();
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "static_edges", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let control = harness.jacobian_export(0, control_entry);
+            for (time, dt, voltage, held, direct, rate_direction) in [
+                (0.0, 1.0, 1.0, 2.0, 1.0, 0.0),
+                (1.0, 1.0, 5.0, 3.5, 0.0, 1.0),
+                (1.5, 0.5, 5.0, 4.75, 0.0, 1.0),
+                (2.0, 0.5, 5.0, 6.0, 0.0, 1.0),
+                (3.0, 1.0, 5.0, 12.5, 0.0, 1.0),
+                (4.0, 1.0, 1.0, 12.0, 0.0, -1.0),
+                (4.5, 0.5, 1.0, 10.75, 0.0, -1.0),
+                (5.0, 0.5, 1.0, 9.5, 0.0, -1.0),
+                (6.0, 1.0, 1.0, 2.0, 1.0, 0.0),
+            ] {
+                let context = harness.store.data_mut().context_mut();
+                context.analysis_type = 2;
+                context.time = time;
+                context.set_timestep(dt);
+                context.evaluation_mode = Mode::NewtonLimited;
+                context.begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, 0.5);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.call(&jacobian), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    4.0 + direct + 3.0 / dt + if time == 0.0 { 2.0 } else { 0.0 }
+                );
+                assert_eq!(harness.call(&control), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    rate_direction * dt
+                );
+                let context = harness.store.data_mut().context_mut();
+                let before = format!(
+                    "{:?} {:?}",
+                    context.transition_filters, context.slew_filters
+                );
+                let states = context.state_values.clone();
+                context.evaluation_mode = Mode::StaticDaeProbe;
+                context.begin_stateful_evaluation();
+                for (probe, rate) in [(voltage, 0.5), (voltage + 0.25, 0.25), (voltage, 0.5)] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, probe);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 16, rate);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        (4.0 + direct) * probe + held
+                    );
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 4.0 + direct);
+                    assert_eq!(harness.call(&control), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+                    let context = harness.store.data_mut().context_mut();
+                    assert_eq!(
+                        format!(
+                            "{:?} {:?}",
+                            context.transition_filters, context.slew_filters
+                        ),
+                        before
+                    );
+                    assert_eq!(context.state_values, states);
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
             }
         }
     }
