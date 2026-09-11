@@ -218,21 +218,61 @@ pub struct ResolutionRule {
     pub span: Span,
 }
 
-/// The typed table a file's `connectrules` blocks become.
+/// A named configuration in a source closure. Rule order within the block is
+/// retained for discipline resolution; alternative blocks remain independent.
+#[derive(Debug, Clone)]
+pub struct ConnectRuleBlock {
+    pub name: SmolStr,
+    pub span: Span,
+    insertions: std::ops::Range<usize>,
+    resolutions: std::ops::Range<usize>,
+}
+
+/// Validated connect declarations and named rule blocks from one source closure.
 ///
-/// Every block in the file contributes to one table. Clause 7 names a
-/// `connectrules` block but gives no way to select among several, so merging
-/// them is the only reading available; the consequence is that two blocks each
-/// declaring a rule for one discipline pair make that pair ambiguous, which
-/// [`Self::select`] refuses rather than resolving by block order.
+/// The complete table exposes all rules for inspection. A design with multiple
+/// blocks must choose its configuration with [`Self::select_block`] before
+/// performing boundary selection; alternative blocks are not an implicit union.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectRuleTable {
     modules: BTreeMap<SmolStr, ConnectModuleDecl>,
     insertions: Vec<InsertionRule>,
     resolutions: Vec<ResolutionRule>,
+    blocks: Vec<ConnectRuleBlock>,
 }
 
 impl ConnectRuleTable {
+    pub fn blocks(&self) -> &[ConnectRuleBlock] {
+        &self.blocks
+    }
+
+    /// Select one case-sensitive Verilog-AMS `connectrules` identifier.
+    /// Module declarations stay available, but only the selected block's
+    /// insertion and resolution statements can affect the resulting table.
+    pub fn select_block(&self, name: &str) -> Result<Self, ConnectError> {
+        let block = self
+            .blocks
+            .iter()
+            .find(|block| block.name == name)
+            .ok_or_else(|| ConnectError::UnknownConnectRules {
+                name: name.into(),
+                available: self.blocks.iter().map(|block| block.name.clone()).collect(),
+            })?;
+        let insertions = self.insertions[block.insertions.clone()].to_vec();
+        let resolutions = self.resolutions[block.resolutions.clone()].to_vec();
+        Ok(Self {
+            modules: self.modules.clone(),
+            blocks: vec![ConnectRuleBlock {
+                name: block.name.clone(),
+                span: block.span,
+                insertions: 0..insertions.len(),
+                resolutions: 0..resolutions.len(),
+            }],
+            insertions,
+            resolutions,
+        })
+    }
+
     pub fn insertions(&self) -> &[InsertionRule] {
         &self.insertions
     }
@@ -903,8 +943,8 @@ fn required_direction(direction: PortDirection, upper_domain: Domain) -> Connect
     }
 }
 
-/// Read every `connectmodule` and `connectrules` block in a file into one
-/// validated table.
+/// Validate every `connectmodule` and `connectrules` block in a file, preserving
+/// named configurations and their statement order for subsequent selection.
 pub fn build_connect_rule_table(
     source: &SourceFile,
     db: &DisciplineDb,
@@ -913,6 +953,15 @@ pub fn build_connect_rule_table(
     for item in &source.items {
         if let Item::ConnectModule(module) = item {
             let decl = connect_module_decl(module, db)?;
+            if let Some(first) = modules.get(&decl.name) {
+                let first: &ConnectModuleDecl = first;
+                return Err(ConnectError::DuplicateConnectDeclaration {
+                    kind: "connectmodule",
+                    name: decl.name,
+                    first: first.span,
+                    second: decl.span,
+                });
+            }
             modules.insert(decl.name.clone(), decl);
         }
     }
@@ -925,7 +974,23 @@ pub fn build_connect_rule_table(
         let Item::ConnectRules(block) = item else {
             continue;
         };
+        if let Some(first) = table.blocks.iter().find(|first| first.name == block.name) {
+            return Err(ConnectError::DuplicateConnectDeclaration {
+                kind: "connectrules",
+                name: block.name.clone(),
+                first: first.span,
+                second: block.span,
+            });
+        }
+        let insertion_start = table.insertions.len();
+        let resolution_start = table.resolutions.len();
         extend_table(&mut table, block, db)?;
+        table.blocks.push(ConnectRuleBlock {
+            name: block.name.clone(),
+            span: block.span,
+            insertions: insertion_start..table.insertions.len(),
+            resolutions: resolution_start..table.resolutions.len(),
+        });
     }
     Ok(table)
 }
@@ -1150,6 +1215,20 @@ fn connect_module_decl(
 /// Everything clause 7's machinery refuses, each naming what it refused.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ConnectError {
+    #[error("unknown connectrules '{name}'; available configurations: {available:?}")]
+    UnknownConnectRules {
+        name: SmolStr,
+        available: Vec<SmolStr>,
+    },
+
+    #[error("{kind} '{name}' is declared more than once ({first:?} and {second:?})")]
+    DuplicateConnectDeclaration {
+        kind: &'static str,
+        name: SmolStr,
+        first: Span,
+        second: Span,
+    },
+
     #[error(
         "connect statement names '{name}', which is not a declared connectmodule \
          (Verilog-AMS LRM 2.4 section 7.7.1)"

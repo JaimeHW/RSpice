@@ -121,6 +121,7 @@ invented throughput numbers do not qualify parity.
 | Immutable preparation (`0b92805e8`) | Compiler target `prepared_source`, no default features | 2 passed: multiple modules compile with a removed include, captured identities remain correct, a new preparation sees changed bytes, source limits apply, standalone libraries need no device module |
 | Engine source groups and cache provenance | Core target `veriloga_connect_source_closure`, portable Verilog feature | Both cases pass: shared virtual rules/cache reuse and a source edit during multi-module compilation followed by a fresh run |
 | Cross-root source consistency | Core target `veriloga_connect_source_closure`, filtered to `snapshot`, portable Verilog feature | 2 passed: same-root frozen compilation and cross-root conflict/retry |
+| Named connection configurations | Compiler target `prepared_source`, filtered to `named_connection`, no default features | Passed: independent 1 V/5 V alternatives, empty block, exact-case selection, duplicate module/block rejection |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -148,6 +149,11 @@ can reuse or invalidate the captured cache entries normally. Explicit
 configuration selection remains MS01 work; authored body execution remains MS07.
 Generated artifact regeneration and the complete target matrix
 remain integration/release work after the shared schemas stabilize.
+
+The compiler now retains each named connection configuration and its declaration
+span. Selecting a block excludes every alternative's insertion and resolution
+statements. Duplicate declarations cannot silently overwrite a module. This is
+the compiler seam for explicit deck selection; circuit integration follows.
 
 ## Next implementation work
 

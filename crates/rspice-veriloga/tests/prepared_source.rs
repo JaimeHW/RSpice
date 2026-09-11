@@ -104,3 +104,68 @@ fn standalone_connect_library_is_prepared_without_a_device_module() {
     assert_eq!(specification.rules.insertions().len(), 3);
     assert!(prepared.compile_runtime(None).is_err());
 }
+
+#[test]
+fn named_connection_configurations_preserve_alternatives_and_reject_duplicate_declarations() {
+    let files = Sources::new();
+    let mut source = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+        .iter()
+        .map(|(_, body)| *body)
+        .collect::<String>();
+    source.push_str("\nconnectrules Low; connect d2a #(.vsup(1.0)); endconnectrules\nconnectrules High; connect d2a #(.vsup(5.0)); endconnectrules\nconnectrules Empty; endconnectrules\n");
+    let root = files.write("alternatives.vams", &source);
+    let compiler = VerilogACompiler::default();
+    let specification = compiler
+        .prepare_file_runtime_source(&root)
+        .unwrap()
+        .connect_specification();
+    assert_eq!(
+        specification
+            .rules
+            .blocks()
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Low", "High", "Empty"]
+    );
+    for (name, supply) in [("Low", 1.0), ("High", 5.0)] {
+        let selected = specification.rules.select_block(name).unwrap();
+        assert_eq!(selected.blocks().len(), 1);
+        assert_eq!(selected.insertions().len(), 1);
+        let rule = selected
+            .select(
+                "electrical",
+                "logic",
+                rspice_veriloga::connect::ConnectDirection::DiscreteToAnalog,
+                &specification.disciplines,
+            )
+            .unwrap();
+        assert_eq!(rule.numeric_parameters().unwrap()[0].1, supply);
+    }
+    assert!(
+        specification
+            .rules
+            .select_block("Empty")
+            .unwrap()
+            .insertions()
+            .is_empty()
+    );
+    assert!(specification.rules.select_block("low").is_err());
+    for (duplicate, expected) in [
+        ("connectrules Low; endconnectrules", "connectrules 'Low'"),
+        (
+            rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES[0].1,
+            "connectmodule 'a2d'",
+        ),
+    ] {
+        files.write("alternatives.vams", &format!("{source}\n{duplicate}\n"));
+        let error = compiler
+            .prepare_file_runtime_source(&root)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(expected) && error.contains("more than once"),
+            "{error}"
+        );
+    }
+}

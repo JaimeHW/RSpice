@@ -140,6 +140,12 @@ cache entries carry their own connection closure. Cache dependency hashes come
 from captured preprocessing bytes, so a later source edit cannot relabel old
 compiled behavior as current.
 
+Connection tables retain case-sensitive named `connectrules` blocks, including
+empty blocks. `blocks()` lists their declaration spans; `select_block(name)`
+returns only that configuration's ordered insertion and resolution statements.
+The complete table is an inspection view, not an implicit union of alternative
+configurations. Duplicate connect-module or rule-block declarations are errors.
+
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data
 for source-only artifact calls. `RustTranspiler::transpile_measured` reports

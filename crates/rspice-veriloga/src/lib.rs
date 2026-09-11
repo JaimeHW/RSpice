@@ -184,8 +184,8 @@ pub use virtual_source::{
 pub struct ConnectSpecification {
     /// Identity of the exact preprocessed closure used to interpret the rules.
     pub source_identity: String,
-    /// The file's `connectmodule` declarations and `connectrules` blocks,
-    /// merged into one table.
+    /// Validated `connectmodule` declarations and named `connectrules` blocks.
+    /// Use `rules.select_block(name)` to choose among alternative configurations.
     pub rules: connect::ConnectRuleTable,
     /// Disciplines and natures from the same active source closure as the rules.
     pub disciplines: disciplines::DisciplineDb,
