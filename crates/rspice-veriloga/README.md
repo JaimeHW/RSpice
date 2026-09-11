@@ -536,6 +536,9 @@ feedback, parameter-controlled activation, transient integration, AC derivatives
 and grouped noise. These rows couple the source current into KCL without adding
 a structural voltage term, preserving small constraint derivatives. They reuse
 the sparse row and operator-state paths used by direct sources.
+Both compiler paths enforce one indirect constraint per source, analysis-constant
+control flow, and an access function (optionally under `ddt`, `idt`, or `idtmod`)
+on the equality's left side. MIR validation also rejects conflicting source rows.
 Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
 compatibility; authored sources and flow probes require distinct nets.
 

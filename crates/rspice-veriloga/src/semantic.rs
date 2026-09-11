@@ -4174,6 +4174,14 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
+        if self.dynamic_analog_operator_guard_depth != 0 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(
+                    "indirect contribution controls must remain constant during an analysis".into(),
+                ),
+                stmt.span,
+            )));
+        }
         if self.runtime_loop_depth > 0 {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidContribution(
@@ -4187,6 +4195,18 @@ impl SemanticAnalyzer {
             self.resolve_contribution_target(&stmt.branch, module, stmt.span)?;
 
         let lhs = self.lower_expression_with_side_effects(&stmt.lhs, module, sink)?;
+        let valid_lhs = matches!(&lhs, Expression::BranchAccess(_))
+            || matches!(&lhs, Expression::Call(call)
+                if matches!(call.name.as_str(), "ddt" | "idt" | "idtmod")
+                    && matches!(call.args.first(), Some(Expression::BranchAccess(_))));
+        if !valid_lhs {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(
+                    "the left side of an indirect equation must be an access function, or ddt, idt, or idtmod applied to an access function".into(),
+                ),
+                stmt.lhs.span(),
+            )));
+        }
         let rhs = self.lower_expression_with_side_effects(&stmt.rhs, module, sink)?;
         for (side, expr) in [("left", &lhs), ("right", &rhs)] {
             let ty = self.infer_type(expr)?;
@@ -7693,6 +7713,18 @@ impl SemanticAnalyzer {
                 self.expression_is_simulation_invariant(&conditional.condition)
                     && self.expression_is_simulation_invariant(&conditional.then_expr)
                     && self.expression_is_simulation_invariant(&conditional.else_expr)
+            }
+            // Physical analysis selection is fixed across its solver phases.
+            // IC, static, nodeset, and step-event queries may change within it.
+            // Unknown literal queries are consistently false.
+            Expression::Call(call) if call.name == "analysis" && !call.args.is_empty() => {
+                call.args.iter().all(|argument| {
+                    matches!(argument, Expression::StringLit(value)
+                    if !matches!(
+                        rspice_veriloga_runtime::analysis_query_id(&value.value),
+                        Some(4 | 5 | 7..=9)
+                    ))
+                })
             }
             // Connectivity is fixed when an instance is elaborated. Compact
             // models use it together with model selectors to choose which

@@ -25,6 +25,118 @@ fn compile_err(source: &str) -> String {
 }
 
 #[test]
+fn indirect_validation_rejects_duplicate_constraints_in_both_compilers() {
+    for statements in [
+        "V(p,n): V(q,n)==1; V(p,n): V(q,n)==2;",
+        "V(p,n): V(q,n)==1; I(n,p): V(q,n)==2;",
+        "V(a): V(q,n)==1; V(a): V(q,n)==2;",
+    ] {
+        let source = format!(
+            "module bad(p,n,q); inout p,n,q; electrical p,n,q;
+            branch(p,n) a; analog begin {statements} end endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        let error = compiler
+            .compile_canonical_ir(&source)
+            .expect_err("duplicate constraint must fail");
+        assert!(error.to_string().contains("over-determined"), "{error}");
+        assert!(compile_err(&source).contains("over-determined"));
+    }
+}
+
+#[test]
+fn indirect_validation_requires_analysis_constant_controls() {
+    for control in [
+        "if(V(q,n)>0)",
+        "if($abstime>0)",
+        "if(analysis(\"ic\"))",
+        "if(analysis(\"nodeset\"))",
+        "if(analysis(\"static\"))",
+        "case(V(q,n)) 1:",
+    ] {
+        let end = if control.starts_with("case") {
+            "endcase"
+        } else {
+            ""
+        };
+        let source = format!(
+            "module bad(p,n,q); inout p,n,q; electrical p,n,q;
+            analog {control} V(p,n): V(q,n)==0; {end} endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        let error = compiler
+            .compile_canonical_ir(&source)
+            .expect_err("dynamic constraint control must fail");
+        assert!(
+            error.to_string().contains("constant during an analysis"),
+            "{error}"
+        );
+        assert!(compile_err(&source).contains("constant during an analysis"));
+    }
+    for condition in [
+        "enabled",
+        "!enabled",
+        "analysis(\"ac\")",
+        "analysis(\"tran\",\"noise\")",
+        "analysis(\"unknown_analysis\")",
+    ] {
+        let source = format!(
+            "module allowed(p,n,q); inout p,n,q; electrical p,n,q;
+            parameter integer enabled=1;
+            analog if({condition}) V(p,n): ddt(V(q,n))==I(p,n); endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        compiler
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("{condition}: {error}"));
+        compiler
+            .compile(&source)
+            .unwrap_or_else(|error| panic!("{condition}: {error}"));
+    }
+}
+
+#[test]
+fn indirect_validation_requires_an_access_on_the_equation_left_side() {
+    for lhs in [
+        "1",
+        "2*V(q,n)",
+        "sin(V(q,n))",
+        "ddt(2*V(q,n))",
+        "ddt(ddt(V(q,n)))",
+    ] {
+        let source = format!(
+            "module bad(p,n,q); inout p,n,q; electrical p,n,q;
+            analog V(p,n): {lhs}==I(p,n); endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        let error = compiler
+            .compile_canonical_ir(&source)
+            .expect_err("invalid constraint LHS must fail");
+        assert!(error.to_string().contains("left side"), "{error}");
+        assert!(compile_err(&source).contains("left side"));
+    }
+    for lhs in [
+        "V(q,n)",
+        "ddt(V(q,n))",
+        "idt(V(q,n),0)",
+        "idtmod(V(q,n),0,1)",
+        "I(<q>)",
+    ] {
+        let source = format!(
+            "module allowed(p,n,q); inout p,n,q; electrical p,n,q;
+            analog V(p,n): {lhs}==I(p,n); endmodule"
+        );
+        let compiler = VerilogACompiler::default();
+        compiler
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("{lhs}: {error}"));
+        compiler
+            .compile(&source)
+            .unwrap_or_else(|error| panic!("{lhs}: {error}"));
+    }
+}
+
+#[test]
 fn ideal_opamp_compiles_with_one_branch_unknown() {
     // V(out): V(inp, inn) == 0 — the classic ideal-opamp idiom
     let model = compile(

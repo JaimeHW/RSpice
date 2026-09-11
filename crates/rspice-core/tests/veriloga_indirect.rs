@@ -84,14 +84,14 @@ const IMPLICIT_EXP: &str = r#"
 module impexp(out);
     inout out;
     electrical out;
-    analog V(out): exp(V(out)) == 2.0;
+    analog V(out): V(out) == exp(-V(out));
 endmodule
 "#;
 
 #[test]
 fn implicit_transcendental_equation_solves() {
     let model = write_model("impexp.va", IMPLICIT_EXP);
-    // exp(v) = 2 -> v = ln 2 (Newton iterates on the constraint row)
+    // v = exp(-v) has one root in (0, 1); Newton iterates on the constraint row.
     let v = node_voltage(
         &format!(
             "* implicit equation\n\
@@ -102,7 +102,8 @@ fn implicit_transcendental_equation_solves() {
         ),
         "out",
     );
-    assert!((v - std::f64::consts::LN_2).abs() < 1e-9, "ln(2): got {v}");
+    assert!(v > 0.0 && v < 1.0, "root outside (0, 1): {v}");
+    assert!((v - (-v).exp()).abs() < 1e-9, "constraint residual at {v}");
 }
 
 const CURRENT_REGULATOR: &str = r#"

@@ -291,7 +291,8 @@ use super::*;
 // Version 83 carries computed event expressions and runtime bit indices.
 // Version 82 rejects direct/indirect source conflicts across parallel branches.
 // Version 84 carries normalized repeat counts and repeated event subscriptions.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 84;
+// Version 85 validates indirect constraint controls, left sides, and uniqueness.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 85;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

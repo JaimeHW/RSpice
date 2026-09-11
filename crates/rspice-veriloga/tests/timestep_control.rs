@@ -837,7 +837,7 @@ fn limiter_rhs_preserves_branch_signs_multiplicity_and_probe_modes() {
     for (contribution, row, limited_g, limited_rhs, physical_g, physical_rhs) in [
         ("I(p,n)<+x*x;", 0, 0.5, 0.0625, 2.0, 1.0),
         ("V(p,n)<+x*x;", 1, 0.5, -0.0625, -1.0, -1.0),
-        ("V(p,n): x*x==0;", 1, 0.5, 0.0625, 2.0, 1.0),
+        ("V(p,n): V(p,n)==-x*x;", 1, 1.5, 0.0625, 3.0, 1.0),
     ] {
         for m in [1.0, 3.0] {
             let source = format!(

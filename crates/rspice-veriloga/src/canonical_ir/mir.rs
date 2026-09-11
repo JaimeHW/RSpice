@@ -813,6 +813,19 @@ fn validate_branch_unknowns(
             continue;
         };
         first_equations[usize::from(id)].get_or_insert(equation.id);
+        if let Some(representative) = equations.get(usize::from(unknown.equation))
+            && (representative.kind != equation.kind
+                || (equation.kind == MirEquationKind::Indirect && representative.id != equation.id))
+        {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} must carry one indirect constraint or direct potential contributions, not both",
+                    unknown.id
+                ),
+                equation.span,
+            ));
+        }
         let same_endpoints = (unknown.pos_node == equation.branch.pos_node
             && unknown.neg_node == equation.branch.neg_node)
             || (unknown.pos_node == equation.branch.neg_node

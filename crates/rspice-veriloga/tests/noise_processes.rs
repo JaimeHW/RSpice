@@ -1465,7 +1465,7 @@ endmodule
 module indirect_current_noise(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n): white_noise(1.0, "constraint") == 0.0;
+    analog I(p, n): V(p, n) == -white_noise(1.0, "constraint");
 endmodule
 "#;
         let compiler =

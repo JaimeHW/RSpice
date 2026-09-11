@@ -24,6 +24,32 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn mir_validation_rejects_shared_indirect_constraint_rows() {
+    let source = "module sources(p); inout p; electrical p;
+        analog begin V(p)<+1; V(p)<+2; end endmodule";
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap();
+    assert_eq!(artifact.mir.branch_unknowns.len(), 1);
+    for indirect in [[true, false], [false, true], [true, true]] {
+        let mut mir = artifact.mir.clone();
+        for (equation, indirect) in mir.equations.iter_mut().zip(indirect) {
+            if indirect {
+                equation.kind = MirEquationKind::Indirect;
+            }
+        }
+        let diagnostics = mir
+            .validate()
+            .expect_err("conflicting source rows must fail");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("one indirect constraint"))
+        );
+    }
+}
+
+#[test]
 fn switch_branch_metadata_rejects_invalid_state_slots() {
     let source = "module switched(p); inout p; electrical p; analog begin I(p)<+3*V(p); V(p)<+2*I(p); end endmodule";
     let artifact = VerilogACompiler::default()

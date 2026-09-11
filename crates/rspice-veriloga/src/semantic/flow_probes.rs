@@ -237,8 +237,18 @@ fn validate_indirect_source_pairs(
     // VAMS 5.6.7.2 applies to the physical pair, including separately named
     // parallel branches. Check before flow lowering introduces private nodes.
     let mut kinds = HashMap::new();
+    let mut indirect_branches = BTreeSet::new();
     for source in &module.contributions {
-        let (_, pos, neg, _) = resolver.contribution(source);
+        let (branch, pos, neg, _) = resolver.contribution(source);
+        if source.indirect && !indirect_branches.insert(branch) {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(
+                    "over-determined branch: multiple indirect constraints target the same source"
+                        .into(),
+                ),
+                source.span,
+            )));
+        }
         let pair = if pos <= neg { (pos, neg) } else { (neg, pos) };
         if kinds
             .insert(pair.clone(), source.indirect)

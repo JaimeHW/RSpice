@@ -77,11 +77,33 @@ module parent(p, n);
     child u1(p, n);
 endmodule
 "#;
-    let model = VerilogACompiler::new(CompilerOptions::default())
-        .compile_module(source, Some("parent"))
+    let report = VerilogACompiler::new(CompilerOptions::default())
+        .compile_runtime(source, Some("parent"))
         .expect("declared child hierarchy must elaborate");
-    assert_eq!(model.stamp_programs.len(), 1);
-    assert_eq!(model.stamp_programs[0].value_program.instructions.len(), 3);
+    let fixture = DeviceFixture {
+        model: report.model,
+        canonical_ir: report.canonical_ir,
+    };
+    assert_eq!(fixture.stamp_programs.len(), 1);
+    let mut device = fixture.device("X", &[1, 0]);
+    for voltage in [-0.5, 0.0, 0.75] {
+        let mut conductance = 0.0;
+        let mut rhs = 0.0;
+        device
+            .try_stamp(
+                &[voltage],
+                |row, col, value| {
+                    assert_eq!((row, col), (0, 0));
+                    conductance += value;
+                },
+                |row, value| {
+                    assert_eq!(row, 0);
+                    rhs += value;
+                },
+            )
+            .unwrap();
+        assert_eq!((conductance, rhs), (2.0, 0.0));
+    }
 }
 
 #[test]
