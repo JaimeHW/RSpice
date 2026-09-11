@@ -1,12 +1,9 @@
-//! Transactional interleave for one mixed Verilog-AMS module.
+//! Analog equations and electrical boundaries for a mixed Verilog-AMS module.
 //!
-//! The analog solver owns Newton iteration and calls [`MixedSignalHost::stamp`]
-//! for every evaluation. The host owns the digital time wheel. A trial begins
-//! by delivering the exact digital slot at its timestamp; after Newton
-//! convergence [`MixedSignalHost::settle_analog_bridges`] samples every A/D
-//! bridge simultaneously and reports whether a same-time digital/D/A change
-//! requires another Newton solve. Nothing is committed until
-//! [`MixedSignalHost::accept_trial`].
+//! A standalone host owns its digital runtime. Once enrolled in a circuit it
+//! holds a signal view, and the circuit's shared runtime owns all HDL processes,
+//! drivers and event queues. The analog solver evaluates transactional trials;
+//! the circuit settles every participant before stamping or accepting a trial.
 //!
 //! # The two time bases
 //!
@@ -50,6 +47,10 @@
 //! instead, which made `0` mean ground on one side of the module and the
 //! circuit's first node on the other; a bridge referred to ground then stamped
 //! its Thevenin conductance onto whichever node happened to occupy row zero.
+
+mod shared;
+use shared::MixedDigital;
+pub(crate) use shared::{MixedDigitalCoordinator, SharedDigitalTrial};
 
 use std::fmt;
 use std::sync::Arc;
@@ -575,8 +576,8 @@ struct TrialVectors {
 /// says why.
 #[derive(Clone)]
 struct MixedState {
-    digital: MixedCell<DigitalHost>,
-    initial_digital: Option<MixedCell<DigitalHost>>,
+    digital: MixedCell<MixedDigital>,
+    initial_digital: Option<MixedCell<MixedDigital>>,
     bridges: MixedCell<Bridges>,
     /// Differential voltage each A/D bridge saw at the last accepted timepoint,
     /// which is the far end of the interval a threshold crossing is
@@ -616,7 +617,7 @@ struct ActiveTrial {
     /// unwinds a trial there happens strictly before the first of those
     /// writes. Copying them into an image per trial was copying values no
     /// trial could have changed.
-    rollback: MixedCell<DigitalHost>,
+    rollback: MixedCell<MixedDigital>,
     /// The analog device's solver inputs as they stood when the trial opened.
     ///
     /// The device's *accepted* record needs no image, but these five inputs do:
@@ -992,7 +993,7 @@ impl MixedSignalHost {
             analog: MixedCell::new(analog),
             analog_inputs: AnalogSolverInputs::analysis_start(2),
             state: MixedState {
-                digital: MixedCell::new(digital),
+                digital: MixedCell::new(MixedDigital::Owned(digital)),
                 initial_digital: None,
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
@@ -1663,6 +1664,13 @@ impl MixedSignalHost {
 
     /// Apply co-timed external digital input drives during the active trial.
     pub fn force_digital(&mut self, drives: &[(&str, &str)]) -> Result<(), MixedSignalError> {
+        if self.state.digital.is_view() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail:
+                    "circuit-owned digital inputs must be driven through the circuit coordinator"
+                        .into(),
+            });
+        }
         let tick = self.active_tick()?;
         let mut parsed = Vec::with_capacity(drives.len());
         for &(name, spelling) in drives {
@@ -1924,7 +1932,10 @@ impl MixedSignalHost {
             }
         }
         read_dac_bits(&self.state, &mut scratch.dac_after)?;
-        let changed = self.sample_discrete_inputs()? || scratch.dac_before != scratch.dac_after;
+        // Circuit-owned processes see the complete A/D bank before any analog
+        // equation reads their outputs. The group samples these inputs at stamp.
+        let changed = (!self.state.digital.is_view() && self.sample_discrete_inputs()?)
+            || scratch.dac_before != scratch.dac_after;
         if let Some(trial) = self.trial.as_mut() {
             // Which D/A nets moved, not merely that one did. The boundary
             // diagnostic names participants, and a `!=` on the whole vector
@@ -2148,6 +2159,11 @@ impl MixedSignalHost {
 
     /// Capture a restart image. Speculative state is never checkpointable.
     pub fn checkpoint(&self) -> Result<MixedSignalCheckpoint, MixedSignalError> {
+        if self.state.digital.is_view() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "a circuit-owned digital domain requires a circuit checkpoint".into(),
+            });
+        }
         if !self.digital_started {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "cannot checkpoint a mixed module before digital execution starts".into(),
@@ -2172,6 +2188,11 @@ impl MixedSignalHost {
     /// host, validating analog and source identity before mutation.
     pub fn restore(&mut self, checkpoint: &MixedSignalCheckpoint) -> Result<(), MixedSignalError> {
         self.require_idle("restore a checkpoint")?;
+        if self.state.digital.is_view() || checkpoint.state.digital.is_view() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "a circuit-owned digital domain requires a circuit checkpoint".into(),
+            });
+        }
         if checkpoint.source_digest != self.source_digest {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "checkpoint source identity does not match this mixed module".into(),

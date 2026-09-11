@@ -8770,7 +8770,18 @@ impl Engine {
         // Validate mixed bindings only after source and generated XSPICE
         // connections have completed the event-domain table.
         #[cfg(feature = "veriloga")]
-        circuit.validate_mixed_event_connections()?;
+        {
+            circuit.validate_mixed_event_connections()?;
+            circuit
+                .finalize_mixed_digital(&veriloga_cache::VerilogACompileControl { abort })
+                .map_err(|error| {
+                    if abort.is_aborted() {
+                        SimulationError::Aborted
+                    } else {
+                        error
+                    }
+                })?;
+        }
 
         // Register each multi-winding Core as one shared constitutive device
         // after all component L-card branches have been allocated.  The

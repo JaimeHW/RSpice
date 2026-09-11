@@ -1681,3 +1681,94 @@ fn an_ascending_boundary_port_puts_its_leading_index_on_the_decks_first_net() {
         "the write to `q[4]` moves the leading bit and the write to `q[7]` the trailing one"
     );
 }
+
+#[test]
+fn linked_circuit_instances_share_precision_and_sample_their_own_analog_inputs() {
+    // The coarse process retains its 1 ns delay unit, but every boundary uses
+    // the circuit's finest 1 ps precision. Delays start at the delivered analog
+    // edge without rounding its activation onto the coarse model's 100 ps grid.
+    // Exact localization of the continuous threshold crossing is separate from
+    // this event-grid check: the adapter currently delivers at an analog sample.
+    let source = r#"
+`timescale UNIT/PRECISION
+module NAME(p, clk, q);
+    inout p; electrical p;
+    input clk; wire clk;
+    output q; reg q;
+    initial q = (V(p) > 0.5);
+    always @(posedge clk) q <= #DELAY (V(p) > 0.5);
+    analog I(p) <+ V(p) / 1000000.0;
+endmodule
+"#;
+    let coarse = ModelFile::new(
+        "coarse_sampler",
+        &source
+            .replace("UNIT", "1ns")
+            .replace("PRECISION", "100ps")
+            .replace("NAME", "coarse_sampler")
+            .replace("DELAY", "0.5"),
+    );
+    let fine = ModelFile::new(
+        "fine_sampler",
+        &source
+            .replace("UNIT", "1ps")
+            .replace("PRECISION", "1ps")
+            .replace("NAME", "fine_sampler")
+            .replace("DELAY", "25"),
+    );
+    for reverse in [false, true] {
+        let instances = if reverse {
+            "Xfine pf clk qf fine_sampler\nXcoarse pc clk qc coarse_sampler"
+        } else {
+            "Xcoarse pc clk qc coarse_sampler\nXfine pf clk qf fine_sampler"
+        };
+        let deck = format!(
+            "* shared digital precision and analog probe bank\n.param vcc=1\n\
+             Vcoarse pc 0 pwl(0 0.25 0.2n 0.25 0.3n 0.75)\n\
+             Vfine pf 0 pwl(0 0.75 0.2n 0.75 0.3n 0.25)\n\
+             Vclock clk 0 pwl(0 0 0.9n 0 1n 1)\n\
+             {instances}\nRc qc 0 1k\nRf qf 0 1k\n\
+             .va \"{}\" coarse_sampler\n.va \"{}\" fine_sampler\n.end\n",
+            coarse.deck_path(),
+            fine.deck_path()
+        );
+        let result = run(&deck, 2e-9, 20e-12);
+        let clock = result.digital_trace_named("clk").unwrap();
+        assert_eq!(clock.len(), 2, "one shared A/D edge");
+        let delivered = clock[1].time;
+        assert!(
+            delivered >= 0.95e-9 - 1e-22 && delivered <= 0.97e-9 + 1e-22,
+            "the ramp crossing is delivered within one analog sample: {delivered:e}"
+        );
+        assert!(
+            (delivered - (delivered / 1e-10).round() * 1e-10).abs() > 1e-11,
+            "the fixture must exercise promotion away from the coarse model's tick grid"
+        );
+        for (node, initial, final_value, delay) in [
+            ("qc", 0.0, 1.0 / 1.02, 500e-12),
+            ("qf", 1.0 / 1.02, 0.0, 25e-12),
+        ] {
+            let event_time = ((delivered + delay) / 1e-12).round() * 1e-12;
+            let voltage = waveform(&result, node);
+            assert!(
+                (voltage[0] - initial).abs() < 1e-8,
+                "{node}: initial analog probe/load"
+            );
+            assert!(
+                (voltage.last().unwrap() - final_value).abs() < 1e-8,
+                "{node}: final analog probe/load"
+            );
+            let points = result.digital_trace_named(node).unwrap();
+            assert_eq!(
+                points.len(),
+                2,
+                "{node}: one delayed transition, reverse={reverse}"
+            );
+            assert!(
+                (points[1].time - event_time).abs() < 1e-22,
+                "{node}: expected {event_time:e}, got {:e}, reverse={reverse}",
+                points[1].time
+            );
+        }
+    }
+}

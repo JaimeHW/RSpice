@@ -99,6 +99,8 @@ impl CircuitData {
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
             #[cfg(feature = "veriloga")]
             mixed_signal_hosts: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            mixed_digital_coordinator: None,
             #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices:
                 crate::device::veriloga_builtins::BuiltinVerilogADevices::new(),

@@ -1011,15 +1011,73 @@ and Wasm digital execution are not newly qualified by this portable runtime path
 Production readiness and Spectre parity remain unproven, with no licensed vendor
 reference currently available.
 
+## Circuit ownership of linked mixed HDL execution
+
+Circuit elaboration now enrolls all mixed HDL instances into one running
+`DigitalHost`. Each analog model keeps its immutable local signal metadata and a
+value view; it has no independent process resumptions, driver contributions or
+event queue. Instance relocation maps connect these views to the linked plan.
+The circuit uses the finest participating precision while each process retains
+its declared delay unit. The shared scheduler honors the strictest participating
+configured event/delta limits.
+
+Newton probes, candidate control-task inspection and final acceptance open all
+model trials together. Every digital analog-potential probe is populated before
+due process execution. All A/D decisions from the candidate are then published
+as one bank before dependent processes run; analog equations read the resulting
+values only after settlement. Separate scoped guards restore the shared queues
+and every participating model on errors or numerical rejection. Acceptance
+prepares every model before promoting any model or the shared digital state.
+Circuit clones include the shared state, and successful analysis reinitialization
+resets it with the model views. An individual enrolled model's checkpoint or
+external force is refused because neither can represent a circuit-wide update.
+Standalone mixed-host APIs retain their existing owned-runtime behavior.
+
+The production circuit builder, operating-point/transient stamps, scheduled
+breakpoints and the existing native/external acceptance barrier use this path.
+This change does not yet attach XSPICE drivers to the shared HDL nets: the
+existing explicit refusal of that connection remains. Analog boundaries retain
+their physical D/A source resistance and external loads.
+
+The focused native/HDL/XSPICE acceptance refusal/retry case passed before
+integration and again on `f5742a7fe`, after the concurrent BJT junction-geometry
+change. Five existing circuit cases passed: initialization finish before digital
+execution, internal potential/branch wiring, analog oscillator counting, a packed
+port above bit zero, and accepted digital replay across rejected timesteps. The
+new two-instance circuit passed in both deck orders on the combined revision:
+independent initial and edge-triggered analog reads, loaded 20-ohm D/A sources
+against 1-kohm resistors, one shared 1-ps grid, and retained 500-ps/25-ps process
+delays. The final two selected test bodies took 0.07 seconds after a 1 minute
+6 second build. Unaffected passing circuit cases were not repeated for the
+core-only BJT integration. Logs in the owned target directory:
+`circuit-digital-acceptance.log`, `circuit-digital-route.log` and
+`circuit-digital-combined.log`.
+
+The new circuit timing fixture also made an existing limitation explicit: a
+continuous A/D threshold crossing can be delivered at the next accepted analog
+sample. In its 20 ps-step ramp, the mathematical 0.95 ns crossing was delivered
+at 0.97 ns. The initial assertion expecting an output exactly 0.5 ns after the
+mathematical crossing failed. The shared-grid oracle now separately bounds that
+sampling delay and checks exact scheduled delay from the recorded delivered
+edge. This establishes circuit precision and retained process units; it does
+not establish exact threshold localization. MS03's candidate root refinement
+must remove that delivery-time dependence rather than treating this fixture as
+qualification of crossing accuracy.
+
+No compiler schema, generator inputs or generated device bodies changed. No
+vendor, full-suite, backend or platform qualification was performed. The user
+confirmed that no licensed reference installation is available. Spectre parity,
+production readiness, persisted mixed restart and all incomplete MS packages
+remain unproven/open.
+
 ## Next implementation work
 
-Use the linker and its instance identity maps in circuit elaboration. Move the
-per-instance mixed adapters' digital execution and accepted/trial state under a
-circuit-owned authority, publish all analog probe and boundary inputs consistently,
-and attach HDL and XSPICE drivers to resolved event nets. Preserve explicit
-electrical loads and converters while removing unnecessary analog unknowns from
-digital chains. The first whole-circuit slice must include two HDL instances, an
-XSPICE participant, a loaded SPICE boundary, off-grid timing and a rejected trial.
+Attach HDL and XSPICE drivers to resolved event nets under the circuit execution
+authority, preserving explicit electrical loads and converters while removing
+unnecessary analog unknowns from digital chains. The first whole-circuit slice
+must include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
+off-grid timing and a rejected trial. Finish exact candidate refinement of A/D
+crossings and the broader root/flow-read handshake.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,

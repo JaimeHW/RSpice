@@ -349,7 +349,7 @@ mod tests {
                 MixedSignalHost::compile(&source, None, name, &nodes, SchedulerLimits::default())
                     .unwrap();
             host.add_adc_bridge("adc", 0, (adc, 0), 0.4, 0.6).unwrap();
-            circuit.add_mixed_signal_host(host);
+            circuit.add_mixed_signal_host(host).unwrap();
         }
         let compiled=VerilogACompiler::default().compile_runtime(
             "module observer(p); inout p; electrical p; analog begin I(p)<+V(p)*1e-3; if(V(p)>0.5) $finish(0); end endmodule",None).unwrap();

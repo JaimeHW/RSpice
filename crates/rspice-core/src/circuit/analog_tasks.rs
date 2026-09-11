@@ -225,7 +225,7 @@ endmodule"#;
         // This transport-level test deliberately resumes after consuming the
         // initial call. The engine instead returns a normal finish outcome.
         host.start_digital_execution().unwrap();
-        circuit.add_mixed_signal_host(host);
+        circuit.add_mixed_signal_host(host).unwrap();
         circuit.mixed_signal_hosts[0]
             .begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
             .unwrap();

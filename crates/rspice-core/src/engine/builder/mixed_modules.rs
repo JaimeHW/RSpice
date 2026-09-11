@@ -388,7 +388,7 @@ pub(super) fn try_build_mixed_signal_instance(
         boundary.len(),
         host.boundary_buses().len()
     );
-    circuit.add_mixed_signal_host(host);
+    circuit.add_mixed_signal_host(host)?;
     Ok(true)
 }
 

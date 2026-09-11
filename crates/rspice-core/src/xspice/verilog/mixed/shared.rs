@@ -1,0 +1,535 @@
+//! Circuit ownership of digital execution and per-model observation banks.
+use super::super::store::StoreError;
+use super::*;
+use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
+use rspice_veriloga::canonical_ir::digital_link::{
+    DigitalLinkInstance, DigitalLinkedInstance, link_digital_plans,
+};
+
+/// An analog model observes resolved values; it owns no process, driver or queue.
+#[derive(Clone)]
+pub(super) struct SignalView {
+    plan: Arc<CanonicalDigitalPlan>,
+    bits: Vec<FourStateValue>,
+    reals: Vec<f64>,
+}
+
+impl SignalView {
+    fn new(plan: Arc<CanonicalDigitalPlan>) -> Self {
+        let bits = plan
+            .signals
+            .iter()
+            .map(|signal| {
+                FourStateValue::splat(
+                    signal.width,
+                    if signal.procedurally_assignable {
+                        FourStateBit::Unknown
+                    } else {
+                        FourStateBit::HighImpedance
+                    },
+                )
+            })
+            .collect();
+        Self {
+            reals: vec![0.0; plan.signals.len()],
+            plan,
+            bits,
+        }
+    }
+
+    fn check(
+        &self,
+        signal: DigitalSignalId,
+        value: &FourStateValue,
+    ) -> Result<(), DigitalRunError> {
+        let declared = self
+            .plan
+            .signal(signal)
+            .ok_or(StoreError::UndeclaredSignal(signal))?;
+        if declared.kind.is_real() {
+            return Err(StoreError::RealPortDrivenWithBits {
+                signal,
+                name: declared.name.to_string(),
+            }
+            .into());
+        }
+        if declared.width != value.width() {
+            return Err(StoreError::WidthMismatch {
+                signal,
+                name: declared.name.to_string(),
+                declared: declared.width,
+                offered: value.width(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    fn force_many(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+    ) -> Result<(), DigitalRunError> {
+        for (signal, value) in drives {
+            self.check(*signal, value)?;
+        }
+        for (signal, value) in drives {
+            self.bits[usize::from(*signal)].clone_from(value);
+        }
+        Ok(())
+    }
+}
+
+/// Standalone hosts execute locally. Enrolled circuit models hold only values;
+/// the owning circuit supplies every process activation and resolved output.
+#[derive(Clone)]
+pub(super) enum MixedDigital {
+    Owned(DigitalHost),
+    View(SignalView),
+}
+
+impl MixedDigital {
+    pub(super) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {
+        match self {
+            Self::Owned(host) => host.plan(),
+            Self::View(view) => &view.plan,
+        }
+    }
+    pub(super) fn is_view(&self) -> bool {
+        matches!(self, Self::View(_))
+    }
+    pub(super) fn fresh(&self) -> Self {
+        match self {
+            Self::Owned(host) => Self::Owned(host.fresh()),
+            Self::View(view) => Self::View(SignalView::new(Arc::clone(&view.plan))),
+        }
+    }
+    pub(super) fn signal(&self, name: &str) -> Result<DigitalSignalId, DigitalRunError> {
+        self.plan()
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .map(|signal| signal.id)
+            .ok_or_else(|| DigitalRunError::UnknownSignal { name: name.into() })
+    }
+    pub(super) fn read(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
+        match self {
+            Self::Owned(host) => host.read(signal),
+            Self::View(view) => view.bits.get(usize::from(signal)),
+        }
+    }
+    pub(super) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
+        match self {
+            Self::Owned(host) => host.read_real(signal),
+            Self::View(view) => view.reals.get(usize::from(signal)).copied(),
+        }
+    }
+    pub(super) fn is_real(&self, signal: DigitalSignalId) -> bool {
+        self.plan()
+            .signal(signal)
+            .is_some_and(|signal| signal.kind.is_real())
+    }
+    pub(super) fn declared_range(&self, signal: DigitalSignalId) -> VectorBounds {
+        match self {
+            Self::Owned(host) => host.declared_range(signal),
+            Self::View(view) => view
+                .plan
+                .signal(signal)
+                .map_or(VectorBounds::SCALAR, |signal| signal.declared_range()),
+        }
+    }
+    pub(super) fn next_tick(&self) -> Option<u64> {
+        match self {
+            Self::Owned(host) => host.next_tick(),
+            Self::View(_) => None,
+        }
+    }
+    pub(super) fn sample_analog_potentials(&mut self, values: &[f64]) {
+        if let Self::Owned(host) = self {
+            host.sample_analog_potentials(values);
+        }
+    }
+    pub(super) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
+        match self {
+            Self::Owned(host) => host.prepare_start(),
+            Self::View(_) => Ok(()),
+        }
+    }
+    pub(super) fn start(&mut self) -> Result<(), DigitalRunError> {
+        match self {
+            Self::Owned(host) => host.start(),
+            Self::View(_) => Ok(()),
+        }
+    }
+    pub(super) fn advance_to(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        match self {
+            Self::Owned(host) => host.advance_to(tick),
+            Self::View(_) => Ok(()),
+        }
+    }
+    pub(super) fn force_many(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
+        match self {
+            Self::Owned(host) => host.force_many(drives, tick),
+            Self::View(view) => view.force_many(drives),
+        }
+    }
+    pub(super) fn force_many_from_analog(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+        seconds: f64,
+    ) -> Result<(), DigitalRunError> {
+        match self {
+            Self::Owned(host) => host.force_many_from_analog(drives, tick, seconds),
+            Self::View(view) => view.force_many(drives),
+        }
+    }
+}
+
+/// The circuit's one HDL process/driver/queue state. Instance maps are aligned
+/// with CircuitData's analog-host order, independently of linked process order.
+#[derive(Clone)]
+pub(crate) struct MixedDigitalCoordinator {
+    digital: MixedCell<DigitalHost>,
+    maps: Vec<DigitalLinkedInstance>,
+    resolution: TimeResolution,
+    enabled: bool,
+    accepted_time: Option<f64>,
+    probes: Vec<f64>,
+    drives: Vec<(DigitalSignalId, FourStateValue)>,
+}
+
+impl fmt::Debug for MixedDigitalCoordinator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MixedDigitalCoordinator")
+            .field("instances", &self.maps.len())
+            .field("accepted_time", &self.accepted_time)
+            .finish()
+    }
+}
+
+impl MixedDigitalCoordinator {
+    pub(crate) fn enroll(
+        hosts: &mut [MixedSignalHost],
+        control: &dyn rspice_veriloga::PipelineControl,
+    ) -> Result<Self, MixedSignalError> {
+        for host in hosts.iter() {
+            host.require_idle("link circuit digital execution")?;
+            if host.digital_started || host.state.started || host.state.digital.is_view() {
+                return Err(MixedSignalError::TrialProtocol {
+                    detail: "digital linking requires fresh, unenrolled instances".into(),
+                });
+            }
+        }
+        let instances: Vec<_> = hosts
+            .iter()
+            .map(|host| DigitalLinkInstance {
+                name: &host.instance,
+                plan: host.state.digital.plan(),
+                ports: &[],
+            })
+            .collect();
+        let linked = link_digital_plans(&instances, &[], control).map_err(|errors| {
+            MixedSignalError::Compile {
+                detail: errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            }
+        })?;
+        let resolution = TimeResolution::new(linked.plan.timing.precision_exponent)
+            .map_err(DigitalRunError::from)?;
+        let mut maps: std::collections::BTreeMap<_, _> = linked
+            .instances
+            .into_iter()
+            .map(|map| (map.name.clone(), map))
+            .collect();
+        let maps: Vec<_> = hosts
+            .iter()
+            .map(|host| {
+                maps.remove(&host.instance)
+                    .expect("linker retained every instance")
+            })
+            .collect();
+        let views: Vec<_> = hosts
+            .iter()
+            .map(|host| {
+                MixedCell::new(MixedDigital::View(SignalView::new(Arc::clone(
+                    host.state.digital.plan(),
+                ))))
+            })
+            .collect();
+        let probes = vec![0.0; linked.plan.analog_probes.len()];
+        // Global execution honors the strictest participant's configured
+        // ceilings; enrolling a model must never silently relax its limits.
+        let limits = hosts
+            .iter()
+            .map(|host| {
+                let MixedDigital::Owned(digital) = &*host.state.digital else {
+                    unreachable!("validated unenrolled instance")
+                };
+                digital.scheduler_limits()
+            })
+            .reduce(|left, right| SchedulerLimits {
+                max_delta_cycles_per_tick: left
+                    .max_delta_cycles_per_tick
+                    .min(right.max_delta_cycles_per_tick),
+                max_events_per_tick: left.max_events_per_tick.min(right.max_events_per_tick),
+                max_reported_oscillating_entities: left
+                    .max_reported_oscillating_entities
+                    .min(right.max_reported_oscillating_entities),
+            })
+            .unwrap_or_default();
+        let digital = DigitalHost::from_plan(Arc::new(linked.plan), resolution, limits);
+        for (host, view) in hosts.iter_mut().zip(views) {
+            host.state.digital = view;
+            host.resolution = resolution;
+        }
+        Ok(Self {
+            digital: MixedCell::new(digital),
+            maps,
+            resolution,
+            enabled: false,
+            accepted_time: None,
+            probes,
+            drives: Vec::new(),
+        })
+    }
+
+    pub(crate) fn fresh(&self) -> Self {
+        Self {
+            digital: MixedCell::new(self.digital.fresh()),
+            maps: self.maps.clone(),
+            resolution: self.resolution,
+            enabled: false,
+            accepted_time: None,
+            probes: vec![0.0; self.probes.len()],
+            drives: Vec::new(),
+        }
+    }
+
+    pub(crate) fn start(&mut self) -> Result<(), MixedSignalError> {
+        if !self.enabled {
+            self.digital.make_mut().prepare_start()?;
+            self.enabled = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {
+        self.digital
+            .next_tick()
+            .map(|tick| {
+                self.resolution
+                    .ticks_to_seconds(tick)
+                    .map_err(DigitalRunError::from)
+                    .map_err(Into::into)
+            })
+            .transpose()
+    }
+
+    pub(crate) fn begin_trial(
+        &mut self,
+        time: f64,
+        probe: bool,
+    ) -> Result<SharedDigitalTrial<'_>, MixedSignalError> {
+        if !self.enabled {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "circuit digital execution must start before a trial".into(),
+            });
+        }
+        let tick = self
+            .resolution
+            .seconds_to_floor_ticks(time)
+            .map_err(DigitalRunError::from)?;
+        if !probe && self.accepted_time.is_some_and(|accepted| time <= accepted) {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "circuit digital acceptance must advance time".into(),
+            });
+        }
+        if let Some(next) = self.digital.next_tick()
+            && next < tick
+        {
+            return Err(MixedSignalError::MissedDigitalBreakpoint {
+                scheduled_seconds: self
+                    .resolution
+                    .ticks_to_seconds(next)
+                    .map_err(DigitalRunError::from)?,
+                trial_seconds: time,
+            });
+        }
+        let rollback = self.digital.clone();
+        Ok(SharedDigitalTrial {
+            coordinator: self,
+            rollback: Some(rollback),
+            time,
+            tick,
+            probe,
+        })
+    }
+}
+
+/// The shared event state rolls back on every exit except explicit acceptance.
+pub(crate) struct SharedDigitalTrial<'a> {
+    coordinator: &'a mut MixedDigitalCoordinator,
+    rollback: Option<MixedCell<DigitalHost>>,
+    time: f64,
+    tick: u64,
+    probe: bool,
+}
+
+impl SharedDigitalTrial<'_> {
+    /// Read every process probe before allowing any instance to run.
+    pub(crate) fn advance(
+        &mut self,
+        hosts: &[MixedSignalHost],
+        solution: &[f64],
+    ) -> Result<(), MixedSignalError> {
+        let coordinator = &mut self.coordinator;
+        for (host, map) in hosts.iter().zip(&coordinator.maps) {
+            host.validate_solution(solution)?;
+            for (probe, global) in host.analog_probes.iter().zip(&map.analog_probes) {
+                coordinator.probes[usize::from(*global)] =
+                    node_voltage(solution, probe.positive) - node_voltage(solution, probe.negative);
+            }
+        }
+        if coordinator
+            .digital
+            .next_tick()
+            .is_some_and(|next| next <= self.tick)
+        {
+            let digital = coordinator.digital.make_mut();
+            digital.sample_analog_potentials(&coordinator.probes);
+            digital.advance_to(self.tick)?;
+        }
+        Ok(())
+    }
+
+    /// Apply all A/D decisions together, preserving analog activation provenance.
+    pub(crate) fn publish_adc(
+        &mut self,
+        hosts: &[MixedSignalHost],
+    ) -> Result<bool, MixedSignalError> {
+        let coordinator = &mut self.coordinator;
+        coordinator.drives.clear();
+        let mut tick = self.tick;
+        for (host, map) in hosts.iter().zip(&coordinator.maps) {
+            for (local, value) in &host.scratch.drives {
+                let global = map.signals[usize::from(*local)];
+                if coordinator.digital.read(global) != Some(value) {
+                    coordinator.drives.push((global, value.clone()));
+                }
+            }
+            if let Some(trial) = &host.trial {
+                for (moved, crossing) in trial
+                    .vectors
+                    .adc_moved
+                    .iter()
+                    .zip(&trial.vectors.transition_times)
+                {
+                    if *moved && let Some(crossing) = crossing {
+                        tick = tick.max(
+                            coordinator
+                                .resolution
+                                .seconds_to_ticks(*crossing)
+                                .map_err(DigitalRunError::from)?,
+                        );
+                    }
+                }
+            }
+        }
+        if coordinator.drives.is_empty() {
+            return Ok(false);
+        }
+        let digital = coordinator.digital.make_mut();
+        digital.sample_analog_potentials(&coordinator.probes);
+        digital.force_many_from_analog(&coordinator.drives, tick, self.time)?;
+        Ok(true)
+    }
+
+    /// Refresh analog-facing values after shared settlement. No model view can
+    /// advance a process or resolve a driver independently.
+    pub(crate) fn synchronize(
+        &mut self,
+        hosts: &mut [MixedSignalHost],
+    ) -> Result<bool, MixedSignalError> {
+        let mut changed = false;
+        for (host, map) in hosts.iter_mut().zip(&self.coordinator.maps) {
+            let differs = map.signals.iter().enumerate().any(|(local, &global)| {
+                let local = DigitalSignalId::from(local);
+                if host.state.digital.is_real(local) {
+                    host.state.digital.read_real(local).map(f64::to_bits)
+                        != self.coordinator.digital.read_real(global).map(f64::to_bits)
+                } else {
+                    host.state.digital.read(local) != self.coordinator.digital.read(global)
+                }
+            });
+            if !differs {
+                continue;
+            }
+            let mut dac_moved = Vec::new();
+            for (index, bridge) in host.state.bridges.dac.iter().enumerate() {
+                if host
+                    .state
+                    .digital
+                    .read(bridge.signal)
+                    .map(|value| value.bit(bridge.bit))
+                    != self
+                        .coordinator
+                        .digital
+                        .read(map.signals[usize::from(bridge.signal)])
+                        .map(|value| value.bit(bridge.bit))
+                {
+                    dac_moved.push(index);
+                }
+            }
+            let MixedDigital::View(view) = host.state.digital.make_mut() else {
+                return Err(MixedSignalError::TrialProtocol {
+                    detail: "a coordinated mixed instance lost its signal view".into(),
+                });
+            };
+            for (local, &global) in map.signals.iter().enumerate() {
+                if view.plan.signals[local].kind.is_real() {
+                    view.reals[local] = self
+                        .coordinator
+                        .digital
+                        .read_real(global)
+                        .expect("linked real signal");
+                } else if let Some(value) = self.coordinator.digital.read(global) {
+                    if view.bits[local] != *value {
+                        view.bits[local].clone_from(value);
+                    }
+                }
+            }
+            if let Some(trial) = &mut host.trial {
+                for index in dac_moved {
+                    trial.vectors.dac_moved[index] = true;
+                }
+                trial.bridges_quiet = false;
+            }
+            changed = true;
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn commit(mut self) {
+        assert!(
+            !self.probe,
+            "a numerical probe cannot commit shared digital state"
+        );
+        self.coordinator.accepted_time = Some(self.time);
+        self.rollback = None;
+    }
+}
+
+impl Drop for SharedDigitalTrial<'_> {
+    fn drop(&mut self) {
+        if let Some(rollback) = self.rollback.take() {
+            self.coordinator.digital = rollback;
+        }
+    }
+}

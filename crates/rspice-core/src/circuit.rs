@@ -657,6 +657,9 @@ pub struct CircuitData {
     /// the transactional idiom, not the storage.
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_signal_hosts: Vec<crate::xspice::verilog::MixedSignalHost>,
+    /// One process, driver and event-queue authority for every mixed HDL instance.
+    #[cfg(feature = "veriloga")]
+    pub(crate) mixed_digital_coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not

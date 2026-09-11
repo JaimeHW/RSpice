@@ -2,6 +2,8 @@
 
 Status: implementation plan; remaining packages are open. Baseline: `e89b1494b88a7cfd56fadaac22e1c0f3b6eb288d`, September 10, 2026.
 
+Current implementation changes, focused verification and remaining limits are recorded in [the execution ledger](execution.md). The baseline descriptions below are historical; a completed increment does not close an entire MS package.
+
 ## Objective and relationship to existing work
 
 Complete RSpice's unified mixed-simulation engine so that the supported SPICE and Verilog-AMS design workflows, correctness, analysis coverage, reliability, and measured performance can be qualified against a specified Cadence reference configuration. Retain Rust, EGUI, the shared analog solver, compiler-independent runtime, and desktop/browser/tablet delivery.

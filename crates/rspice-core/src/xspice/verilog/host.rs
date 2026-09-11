@@ -519,6 +519,14 @@ impl DigitalHost {
         }
     }
 
+    pub(crate) fn scheduler_limits(&self) -> SchedulerLimits {
+        self.scheduler.limits()
+    }
+
+    pub(crate) fn plan(&self) -> &Arc<CanonicalDigitalPlan> {
+        &self.plan
+    }
+
     /// A fresh run sharing the immutable design and retaining scheduler limits.
     pub(crate) fn fresh(&self) -> Self {
         Self::from_plan(

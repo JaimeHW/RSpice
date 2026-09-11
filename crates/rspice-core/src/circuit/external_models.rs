@@ -2740,6 +2740,10 @@ impl CircuitData {
             }
             self.veriloga_devices = runtime;
             self.mixed_signal_hosts = mixed;
+            self.mixed_digital_coordinator = self
+                .mixed_digital_coordinator
+                .as_ref()
+                .map(|digital| digital.fresh());
         }
         #[cfg(feature = "veriloga-builtins-base")]
         {

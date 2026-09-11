@@ -365,7 +365,7 @@ mod tests {
             "module mixed(p); inout p; electrical p; reg q; initial q=1; analog I(p)<+q*V(p)*1e-3; endmodule",
             None, "mixed", &[node], crate::xspice::event_scheduler::SchedulerLimits::default(),
         ).unwrap();
-        circuit.add_mixed_signal_host(host);
+        circuit.add_mixed_signal_host(host).unwrap();
         assert!(
             !circuit.supports_direct_xyce_level2_core_dae(),
             "the specialized Core loader cannot silently omit a mixed host's equations"
