@@ -438,51 +438,78 @@ impl Bjt {
         &self,
         eval: EvaluatedBjtState,
     ) -> [BranchLinearization; EXTERNAL_DIM] {
-        let [collector_internal, base_internal, emitter_internal] =
-            self.intrinsic_terminal_branches(&eval);
+        let mut rows = [BranchLinearization::default(); EXTERNAL_DIM];
+        self.visit_external_kcl_terms(eval, false, |index, terms| {
+            rows[index] = Self::sum_branch_terms(terms);
+        });
+        rows
+    }
 
-        let collector = if Self::series_active(self.rcx) {
-            eval.ircx
+    pub(super) fn sum_branch_terms(terms: &[BranchLinearization]) -> BranchLinearization {
+        terms
+            .iter()
+            .copied()
+            .reduce(Self::add_branches)
+            .unwrap_or_default()
+    }
+
+    pub(super) fn visit_external_kcl_terms(
+        &self,
+        eval: EvaluatedBjtState,
+        external_rbi_port: bool,
+        mut visit: impl FnMut(usize, &[BranchLinearization]),
+    ) {
+        let [collector, base, emitter] = self.intrinsic_terminal_branches(&eval);
+        let negative = |branch| Self::scale_branch(branch, -1.0);
+        let rbi = if external_rbi_port {
+            BranchLinearization::default()
         } else {
-            Self::sub_branches(
-                if Self::series_active(self.rci) {
-                    eval.irci
-                } else {
-                    collector_internal
-                },
-                Self::add_branches(self.parasitic_base_collector_branch(&eval), eval.igcx),
-            )
+            eval.irbi
         };
-        let base = if Self::series_active(self.rbx) {
-            eval.irbx
+        if Self::series_active(self.rcx) {
+            visit(EXT_C, &[eval.ircx]);
         } else {
-            Self::add_branches(
-                Self::add_branches(
-                    Self::add_branches(
-                        if Self::series_active(self.rbi) {
-                            eval.irbi
-                        } else {
-                            base_internal
-                        },
-                        eval.ibex,
-                    ),
+            visit(
+                EXT_C,
+                &[
+                    if Self::series_active(self.rci) {
+                        eval.irci
+                    } else {
+                        collector
+                    },
+                    negative(self.parasitic_base_collector_branch(&eval)),
+                    negative(eval.igcx),
+                ],
+            );
+        }
+        if Self::series_active(self.rbx) {
+            visit(EXT_B, &[eval.irbx]);
+        } else {
+            visit(
+                EXT_B,
+                &[
+                    if Self::series_active(self.rbi) {
+                        rbi
+                    } else {
+                        base
+                    },
+                    eval.ibex,
                     eval.ibep,
-                ),
-                Self::add_branches(eval.iccp, eval.igcx),
-            )
-        };
-        let emitter = if Self::series_active(self.re) {
-            eval.ire
+                    eval.iccp,
+                    eval.igcx,
+                ],
+            );
+        }
+        if Self::series_active(self.re) {
+            visit(EXT_E, &[eval.ire]);
         } else {
-            Self::sub_branches(emitter_internal, eval.ibex)
-        };
-        let substrate = if self.has_substrate_resistance() {
-            eval.irs
+            visit(EXT_E, &[emitter, negative(eval.ibex)]);
+        }
+        if self.has_substrate_resistance() {
+            visit(EXT_S, &[eval.irs]);
         } else {
-            Self::sub_branches(eval.ibcp, eval.iccp)
-        };
-
-        [collector, base, emitter, substrate]
+            visit(EXT_S, &[eval.ibcp, negative(eval.iccp)]);
+        }
     }
 
     pub(super) fn thermal_sink_branch(&self, vrth: Value) -> BranchLinearization {

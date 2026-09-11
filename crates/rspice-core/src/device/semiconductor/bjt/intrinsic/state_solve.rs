@@ -889,176 +889,124 @@ impl Bjt {
         [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
         [Value; INTERNAL_DIM],
     ) {
-        let [vc, vb, ve, vs] = external;
-        let has_rcx = Self::series_active(self.rcx);
-        let has_rci = Self::series_active(self.rci);
-        let has_rbx = Self::series_active(self.rbx);
-        let has_rbi = Self::series_active(self.rbi);
-        let has_re = Self::series_active(self.re);
-        let has_rs = self.has_substrate_resistance();
-        let has_self_heat = self.thermal_model_enabled();
-        let solve_vbp = self.vbic_solves_vbp();
-        let [collector_internal, base_internal, emitter_internal] =
-            self.intrinsic_terminal_branches(&eval);
-        let thermal_sink = self.thermal_sink_branch(state.vrth);
-        let thermal_power = self.thermal_power_branch(
-            eval,
-            [vc, vb, ve, vs],
-            [
-                state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
-                state.vrth,
-            ],
-        );
-
         let mut jacobian = [[0.0; INTERNAL_DIM]; INTERNAL_DIM];
         let mut external_partials = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
         let mut source = [0.0; INTERNAL_DIM];
-        let assign_row = |row_idx: usize,
-                          row: BranchLinearization,
-                          jacobian: &mut [[Value; INTERNAL_DIM]; INTERNAL_DIM],
-                          external_partials: &mut [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
-                          source: &mut [Value; INTERNAL_DIM]| {
-            jacobian[row_idx] = row.d_internal;
-            external_partials[row_idx] = row.d_external;
-            source[row_idx] = source_for_branch(row);
-        };
-
-        if has_rcx {
-            let row = Self::sub_branches(
-                Self::add_branches(
-                    Self::add_branches(eval.ircx, self.parasitic_base_collector_branch(&eval)),
-                    eval.igcx,
-                ),
-                if has_rci {
-                    eval.irci
-                } else {
-                    collector_internal
-                },
-            );
-            assign_row(
-                IDX_VCX,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VCX][IDX_VCX] = 1.0;
-            external_partials[IDX_VCX][EXT_C] = -1.0;
-        }
-
-        if has_rci {
-            let row = Self::sub_branches(eval.irci, collector_internal);
-            assign_row(
-                IDX_VCI,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VCI][IDX_VCI] = 1.0;
-            jacobian[IDX_VCI][IDX_VCX] = -1.0;
-        }
-
-        if has_rbx {
-            let row = Self::sub_branches(
-                Self::sub_branches(
-                    Self::sub_branches(
-                        Self::sub_branches(
-                            eval.irbx,
-                            if has_rbi { eval.irbi } else { base_internal },
-                        ),
-                        eval.ibex,
-                    ),
-                    eval.ibep,
-                ),
-                Self::add_branches(eval.iccp, eval.igcx),
-            );
-            assign_row(
-                IDX_VBX,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VBX][IDX_VBX] = 1.0;
-            external_partials[IDX_VBX][EXT_B] = -1.0;
-        }
-
-        if has_rbi {
-            let row = Self::sub_branches(eval.irbi, base_internal);
-            assign_row(
-                IDX_VBI,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VBI][IDX_VBI] = 1.0;
-            jacobian[IDX_VBI][IDX_VBX] = -1.0;
-        }
-
-        if has_re {
-            let row = Self::sub_branches(Self::add_branches(eval.ire, eval.ibex), emitter_internal);
-            assign_row(
-                IDX_VEI,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VEI][IDX_VEI] = 1.0;
-            external_partials[IDX_VEI][EXT_E] = -1.0;
-        }
-
-        if solve_vbp {
-            let row = Self::sub_branches(Self::add_branches(eval.ibep, eval.ibcp), eval.irbp);
-            assign_row(
-                IDX_VBP,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VBP][IDX_VBP] = 1.0;
-            jacobian[IDX_VBP][IDX_VCX] = -1.0;
-        }
-
-        if has_rs {
-            let row = Self::sub_branches(Self::add_branches(eval.irs, eval.iccp), eval.ibcp);
-            assign_row(
+        // Inactive private coordinates retain their exact alias constraints.
+        for (row, active, internal_parent, external_parent) in [
+            (IDX_VCX, Self::series_active(self.rcx), None, Some(EXT_C)),
+            (IDX_VCI, Self::series_active(self.rci), Some(IDX_VCX), None),
+            (IDX_VBX, Self::series_active(self.rbx), None, Some(EXT_B)),
+            (IDX_VBI, Self::series_active(self.rbi), Some(IDX_VBX), None),
+            (IDX_VEI, Self::series_active(self.re), None, Some(EXT_E)),
+            (IDX_VBP, self.vbic_solves_vbp(), Some(IDX_VCX), None),
+            (
                 IDX_VSI,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VSI][IDX_VSI] = 1.0;
-            if !self.vbic_three_terminal {
-                external_partials[IDX_VSI][EXT_S] = -1.0;
+                self.has_substrate_resistance(),
+                None,
+                (!self.vbic_three_terminal).then_some(EXT_S),
+            ),
+            (IDX_VRTH, self.thermal_model_enabled(), None, None),
+        ] {
+            if !active {
+                jacobian[row][row] = 1.0;
+                if let Some(column) = internal_parent {
+                    jacobian[row][column] = -1.0;
+                }
+                if let Some(column) = external_parent {
+                    external_partials[row][column] = -1.0;
+                }
             }
         }
-
-        if has_self_heat {
-            let row = Self::sub_branches(thermal_sink, thermal_power);
-            assign_row(
-                IDX_VRTH,
-                row,
-                &mut jacobian,
-                &mut external_partials,
-                &mut source,
-            );
-        } else {
-            jacobian[IDX_VRTH][IDX_VRTH] = 1.0;
-        }
-
+        self.visit_internal_kcl_terms(state, eval, external, false, |index, terms| {
+            let row = Self::sum_branch_terms(terms);
+            jacobian[index] = row.d_internal;
+            external_partials[index] = row.d_external;
+            source[index] = source_for_branch(row);
+        });
         (jacobian, external_partials, source)
+    }
+
+    /// Physical terms of each active private KCL/heat row. Keeping the terms
+    /// separate lets periodic convergence retain their scale after cancellation.
+    /// The independent RBI port may own its two linear electrical incidences;
+    /// its current still participates in the native heat equation.
+    pub(in crate::device::semiconductor::bjt) fn visit_internal_kcl_terms(
+        &self,
+        state: IntrinsicTerminalState,
+        eval: EvaluatedBjtState,
+        external: [Value; EXTERNAL_DIM],
+        external_rbi_port: bool,
+        mut visit: impl FnMut(usize, &[BranchLinearization]),
+    ) {
+        let [collector, base, emitter] = self.intrinsic_terminal_branches(&eval);
+        let negative = |branch| Self::scale_branch(branch, -1.0);
+        let rbi = if external_rbi_port {
+            BranchLinearization::default()
+        } else {
+            eval.irbi
+        };
+        if Self::series_active(self.rcx) {
+            visit(
+                IDX_VCX,
+                &[
+                    eval.ircx,
+                    self.parasitic_base_collector_branch(&eval),
+                    eval.igcx,
+                    negative(if Self::series_active(self.rci) {
+                        eval.irci
+                    } else {
+                        collector
+                    }),
+                ],
+            );
+        }
+        if Self::series_active(self.rci) {
+            visit(IDX_VCI, &[eval.irci, negative(collector)]);
+        }
+        if Self::series_active(self.rbx) {
+            visit(
+                IDX_VBX,
+                &[
+                    eval.irbx,
+                    negative(if Self::series_active(self.rbi) {
+                        rbi
+                    } else {
+                        base
+                    }),
+                    negative(eval.ibex),
+                    negative(eval.ibep),
+                    negative(eval.iccp),
+                    negative(eval.igcx),
+                ],
+            );
+        }
+        if Self::series_active(self.rbi) {
+            visit(IDX_VBI, &[rbi, negative(base)]);
+        }
+        if Self::series_active(self.re) {
+            visit(IDX_VEI, &[eval.ire, eval.ibex, negative(emitter)]);
+        }
+        if self.vbic_solves_vbp() {
+            visit(IDX_VBP, &[eval.ibep, eval.ibcp, negative(eval.irbp)]);
+        }
+        if self.has_substrate_resistance() {
+            visit(IDX_VSI, &[eval.irs, eval.iccp, negative(eval.ibcp)]);
+        }
+        if self.thermal_model_enabled() {
+            let power = self.thermal_power_branch(
+                eval,
+                external,
+                [
+                    state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+                    state.vrth,
+                ],
+            );
+            visit(
+                IDX_VRTH,
+                &[self.thermal_sink_branch(state.vrth), negative(power)],
+            );
+        }
     }
 
     pub(in crate::device::semiconductor::bjt) fn reduced_linearization_from_state_and_eval(
