@@ -11,9 +11,74 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 _XYCE_EXCLUSION_FIXTURE = None
 
+# The `veriloga`-gated rspice-core integration targets that no pull-request lane
+# names, each with the reason it cannot run on a hosted runner. Anything not
+# listed here must appear in both Verilog-A steps of `ci.yml`; see
+# `CiConfigurationTests.test_veriloga_gated_core_suites_run_on_both_routes`.
+VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
+    "veriloga_bsim4_oracle": (
+        "pins DC currents against an externally supplied BSIM4.8 Verilog-A "
+        "source. The file is not vendored (no models/veriloga/bsim4.va, and "
+        "RSPICE_BSIM4_VA is unset on hosted runners), so every case returns "
+        "before it measures anything."
+    ),
+    "veriloga_bsim4_ac_oracle": (
+        "the AC arm of the same externally supplied BSIM4.8 source, unavailable "
+        "for the same reason."
+    ),
+}
+
+# The two routes a Verilog-A module can reach the solver through, and the step
+# that runs the gated core suites on each. Both lower the same modules, so a
+# suite passing on one says nothing about the other.
+VERILOGA_GATED_CORE_TEST_STEPS = (
+    (
+        "test-linux-veriloga",
+        "Test Verilog-A-gated core suites through the bytecode interpreter",
+        "veriloga",
+    ),
+    (
+        "test-linux-native",
+        "Test Verilog-A-gated core suites through the native JIT (Linux x64)",
+        "veriloga-native",
+    ),
+)
+
 
 def read_text(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def workflow_job_body(workflow: str, job: str) -> str:
+    """The YAML of one workflow job, up to the next job's key."""
+    body = workflow.split(f"\n  {job}:\n", 1)
+    if len(body) != 2:
+        raise AssertionError(f"workflow has no job named {job!r}")
+    return re.split(r"\n  [a-z][a-z0-9-]*:", body[1], maxsplit=1)[0]
+
+
+def workflow_step_body(job: str, name: str) -> str:
+    """The YAML of one step of a job, up to the next step's `- name:`."""
+    body = job.split(f"- name: {name}\n", 1)
+    if len(body) != 2:
+        raise AssertionError(f"job has no step named {name!r}")
+    return body[1].split("- name:", 1)[0]
+
+
+def veriloga_gated_core_test_targets() -> set[str]:
+    """Every rspice-core integration target `--features veriloga` switches on.
+
+    Matched on the `cfg` predicate rather than the inner-attribute spelling: a
+    file gated item by item, as `transient_checkpoint` is, links under the
+    default feature set but runs a shorter suite there, which is exactly the
+    silent coverage hole this scan exists to close.
+    """
+    directory = ROOT / "crates" / "rspice-core" / "tests"
+    return {
+        path.stem
+        for path in sorted(directory.glob("*.rs"))
+        if 'cfg(feature = "veriloga")' in path.read_text(encoding="utf-8")
+    }
 
 
 def cargo_tree_for_target(package: str, target: str) -> str:
@@ -622,6 +687,97 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Full test suite (release)", nightly_workflow)
         self.assertIn("cargo test --locked --workspace", nightly_workflow)
         self.assertNotIn("--exclude rspice-core", nightly_workflow)
+
+    def test_veriloga_gated_core_suites_run_on_both_routes(self) -> None:
+        """A `veriloga`-gated core suite cannot be added without a lane.
+
+        `cargo test -p rspice-core` resolves the default feature set, under
+        which every one of these files compiles to an empty test binary. The
+        core lane therefore linked and ran nothing for any of them, and the
+        only lane that reached them was nightly's `--workspace` run. Roughly
+        nine thousand lines of mixed-signal engine code landed with these
+        suites never executed on a pull request, and `connect_module_insertion`
+        was already red on `main` when this gate was written.
+
+        The list of targets is scanned out of the test directory rather than
+        written down here, because a hand-maintained list is the failure being
+        fixed: a new gated file would join it only if someone remembered. Each
+        route gets the whole set -- the bytecode interpreter and the x64 JIT
+        are separate lowerings of the same modules -- minus the explicit
+        exclusions above, each of which must still be a gated target, so an
+        exclusion for a file that no longer exists fails instead of rotting.
+        """
+        import shlex
+
+        workflow = read_text(".github/workflows/ci.yml")
+        gated = veriloga_gated_core_test_targets()
+
+        # A scan that silently collapses to nothing would pass every assertion
+        # below, so the floor is checked before the set is used.
+        self.assertGreaterEqual(
+            len(gated),
+            20,
+            "the gated-target scan found suspiciously few files; "
+            f"found {sorted(gated)}",
+        )
+        self.assertIn("connect_module_insertion", gated)
+        self.assertIn("transient_checkpoint", gated)
+
+        for name, reason in VERILOGA_GATED_CORE_TEST_EXCLUSIONS.items():
+            self.assertIn(
+                name,
+                gated,
+                f"{name} is excluded but is no longer a Verilog-A-gated target",
+            )
+            self.assertGreater(len(reason), 40, f"{name} needs a written reason")
+        expected = gated - set(VERILOGA_GATED_CORE_TEST_EXCLUSIONS)
+
+        for job_name, step_name, feature in VERILOGA_GATED_CORE_TEST_STEPS:
+            with self.subTest(step=step_name):
+                job = workflow_job_body(workflow, job_name)
+                step = workflow_step_body(job, step_name)
+                command = shlex.split(step.split("run: >-", 1)[1])
+
+                self.assertEqual(
+                    command[:5],
+                    ["cargo", "test", "--locked", "-p", "rspice-core"],
+                )
+                features = command[command.index("--features") + 1].split(",")
+                self.assertIn(
+                    feature,
+                    features,
+                    f"{step_name} must select {feature}, got {features}",
+                )
+                # One broken suite must not hide the findings of the
+                # independent ones behind it.
+                self.assertIn("--no-fail-fast", command)
+
+                targets = [
+                    command[index + 1]
+                    for index, word in enumerate(command)
+                    if word == "--test"
+                ]
+                self.assertEqual(
+                    len(targets),
+                    len(set(targets)),
+                    f"{step_name} names a target twice: {sorted(targets)}",
+                )
+                self.assertEqual(
+                    set(targets),
+                    expected,
+                    f"{step_name} does not run every Verilog-A-gated core "
+                    f"suite; missing={sorted(expected - set(targets))}, "
+                    f"unexpected={sorted(set(targets) - expected)}",
+                )
+
+        # The native lane serializes its harness because the JIT maps
+        # executable pages per process; the interpreter lane has no such
+        # constraint and pays nothing for parallelism.
+        native = workflow_step_body(
+            workflow_job_body(workflow, "test-linux-native"),
+            VERILOGA_GATED_CORE_TEST_STEPS[1][1],
+        )
+        self.assertIn("-- --test-threads=1", " ".join(native.split()))
 
     def test_digital_verilog_suites_are_named_in_the_fast_tier(self) -> None:
         """Every digital Verilog conformance target runs on every push.

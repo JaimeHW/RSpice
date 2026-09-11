@@ -7,7 +7,8 @@ pinned. Actionlint checks workflow syntax. Configuration tests guard coverage.
 | Lane | Responsibility |
 | --- | --- |
 | Quality | Every handwritten member's formatting; workspace Clippy over all targets; tooling, browser worker, packaging and runtime harness tests; model provenance and licensing |
-| Core, Linux | All core unit, integration and documentation tests; routine digital and mixed-signal conformance and execution corpora |
+| Core, Linux | All default-feature core unit, integration and documentation tests; routine digital and mixed-signal conformance and execution corpora |
+| Verilog-A & mixed signal, Linux | Every `veriloga`-gated core integration suite through the bytecode interpreter; the desktop lane runs the same suites through the x64 JIT |
 | UI, Linux | All default UI unit, integration and documentation tests; generated-catalog UI contracts |
 | Remaining workspace, Linux | Every other member's default tests, including output, design, automation, cloud, engine adapter, publishers and viewers; new members are selected automatically |
 | Generated models | Portable feature shards, full catalog validation, XSPICE registry, resource and numerical checks, representative performance qualification |
@@ -28,6 +29,9 @@ Broad test commands finish the remaining test binaries after a failure so one
 broken suite does not hide independent findings.
 Conformance's default features already include the Verilog-A oracle and admitted
 generated models; its library tests run once, without a duplicate base-feature pass.
+The two optional BSIM4 Verilog-A oracle suites are the only `veriloga`-gated core
+targets neither Verilog-A lane names: their model source is externally supplied
+rather than vendored, so every pin in them returns without measuring anything.
 Browser size reports measure the production `_bg.wasm` modules emitted by
 wasm-bindgen, before rebuilding the UI with qualification instrumentation.
 The Cargo linker output includes binding metadata removed before delivery.
