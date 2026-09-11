@@ -661,8 +661,8 @@ fn exact_hb_candidate_report(
             });
         },
     )?;
-    let rhs_norm = stable_complex_l2_norm(rhs);
-    let residual_norm = stable_complex_l2_norm(report.residual());
+    let rhs_norm = super::krylov::complex_l2_norm(rhs);
+    let residual_norm = super::krylov::complex_l2_norm(report.residual());
     let relative_residual = if rhs_norm == 0.0 {
         residual_norm
     } else {
@@ -672,12 +672,6 @@ fn exact_hb_candidate_report(
         return Err(rspice_matrix::SolverError::Overflow);
     }
     Ok((report, relative_residual))
-}
-
-fn stable_complex_l2_norm(values: &[Complex64]) -> Value {
-    values
-        .iter()
-        .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im))
 }
 
 impl HbSolver {

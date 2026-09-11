@@ -19,6 +19,7 @@
 //! Callers must independently qualify it as required by their analysis and
 //! keep any recovery path within that analysis's resource contract.
 
+use crate::numerics::DenseScalar;
 use num_complex::Complex64;
 
 const ZERO: Complex64 = Complex64::new(0.0, 0.0);
@@ -51,7 +52,7 @@ pub(super) fn bounded_gmres_restart(requested: usize, dimension: usize) -> usize
 
 /// LU factors of one dense complex block with partial pivoting.
 ///
-/// Near-singular pivots are regularized rather than failed: the
+/// Zero pivots are regularized rather than failed: the
 /// preconditioner only steers GMRES, so an approximate inverse of a
 /// degenerate block is still useful, and the exact-solve fallback path
 /// protects correctness.
@@ -74,9 +75,9 @@ impl LuFactors {
         for k in 0..n {
             // Partial pivoting: largest magnitude in column k at/below row k.
             let mut p = k;
-            let mut max_norm = a[k * n + k].norm_sqr();
+            let mut max_norm = a[k * n + k].magnitude();
             for i in (k + 1)..n {
-                let cand = a[i * n + k].norm_sqr();
+                let cand = a[i * n + k].magnitude();
                 if cand > max_norm {
                     max_norm = cand;
                     p = i;
@@ -90,7 +91,7 @@ impl LuFactors {
             }
 
             let mut pivot = a[k * n + k];
-            if pivot.norm_sqr() < 1e-300 {
+            if pivot == ZERO {
                 // Regularize: identity-scale placeholder keeps the block
                 // invertible as a preconditioner.
                 pivot = Complex64::new(1e-12, 0.0);
@@ -99,7 +100,7 @@ impl LuFactors {
             }
 
             for i in (k + 1)..n {
-                let factor = a[i * n + k] / pivot;
+                let factor = a[i * n + k].quotient(pivot);
                 a[i * n + k] = factor;
                 if factor != ZERO {
                     for j in (k + 1)..n {
@@ -146,7 +147,7 @@ impl LuFactors {
             for (j, &solved) in x.iter().enumerate().take(n).skip(i + 1) {
                 sum -= self.lu[i * n + j] * solved;
             }
-            x[i] = sum / self.lu[i * n + i];
+            x[i] = sum.quotient(self.lu[i * n + i]);
         }
     }
 }
@@ -255,9 +256,27 @@ fn dot(u: &[Complex64], v: &[Complex64]) -> Complex64 {
     u.iter().zip(v).map(|(a, b)| a.conj() * b).sum()
 }
 
-#[inline]
-fn norm(v: &[Complex64]) -> f64 {
-    v.iter().map(|c| c.norm_sqr()).sum::<f64>().sqrt()
+/// Scaled sum of squares preserves every representable Euclidean norm.
+/// The scale only grows; squaring a component cannot overflow or erase a
+/// nonzero vector. One square root suffices for the entire reduction.
+pub(super) fn complex_l2_norm(v: &[Complex64]) -> f64 {
+    let mut scale = 0.0_f64;
+    let mut sum_squares = 1.0;
+    for value in v.iter().flat_map(|v| [v.re, v.im]) {
+        let magnitude = value.abs();
+        if !magnitude.is_finite() {
+            return magnitude;
+        }
+        if magnitude > scale {
+            let ratio = scale / magnitude;
+            sum_squares = 1.0 + sum_squares * ratio * ratio;
+            scale = magnitude;
+        } else if magnitude != 0.0 {
+            let ratio = magnitude / scale;
+            sum_squares += ratio * ratio;
+        }
+    }
+    scale * sum_squares.sqrt()
 }
 
 /// Complex Givens rotation zeroing `b` against `a`:
@@ -267,13 +286,22 @@ fn givens(a: Complex64, b: Complex64) -> (f64, Complex64) {
     if b == ZERO {
         return (1.0, ZERO);
     }
+    let b_scale = b.magnitude();
     if a == ZERO {
-        return (0.0, b.conj() / b.norm());
+        let b_unit = b / b_scale;
+        return (0.0, b_unit.conj() / b_unit.norm());
     }
-    let t = (a.norm_sqr() + b.norm_sqr()).sqrt();
-    let c = a.norm() / t;
-    let s = (a / a.norm()) * b.conj() / t;
-    (c, s)
+    let a_scale = a.magnitude();
+    let scale = a_scale.max(b_scale);
+    let scaled_a = a / scale;
+    let scaled_b = b / scale;
+    let a_norm = scaled_a.norm();
+    let combined = a_norm.hypot(scaled_b.norm());
+    // Compute phase from a's own scale: a/scale may underflow when the
+    // two magnitudes are far apart, but the phase still determines s.
+    let a_unit = a / a_scale;
+    let phase = a_unit / a_unit.norm();
+    (a_norm / combined, phase * (scaled_b.conj() / combined))
 }
 
 /// Solve `A x = b` with restarted GMRES(m), right-preconditioned by `precond`.
@@ -316,7 +344,7 @@ pub(super) fn gmres_with_abort(
         return Err(GmresAborted);
     }
     let size = b.len();
-    let b_norm = norm(b);
+    let b_norm = complex_l2_norm(b);
     if b_norm == 0.0 {
         return Ok(GmresOutcome {
             solution: vec![ZERO; size],
@@ -375,7 +403,7 @@ pub(super) fn gmres_with_abort(
                     *w_k -= h_ij * v_k;
                 }
             }
-            let w_norm = norm(&w);
+            let w_norm = complex_l2_norm(&w);
             h_col[j + 1] = Complex64::new(w_norm, 0.0);
 
             // Apply accumulated rotations to the new column.
@@ -401,7 +429,7 @@ pub(super) fn gmres_with_abort(
                 happy_breakdown = true;
                 break;
             }
-            if w_norm < 1e-300 {
+            if w_norm == 0.0 {
                 happy_breakdown = true;
                 break;
             }
@@ -427,7 +455,7 @@ pub(super) fn gmres_with_abort(
                     converged: false,
                 });
             }
-            y[i] = sum / hessenberg[i][i];
+            y[i] = sum.quotient(hessenberg[i][i]);
         }
 
         // x += M⁻¹ (V y)
@@ -456,7 +484,7 @@ pub(super) fn gmres_with_abort(
         for ((r_i, b_i), ax_i) in r.iter_mut().zip(b).zip(&ax) {
             *r_i = b_i - ax_i;
         }
-        let new_beta = norm(&r);
+        let new_beta = complex_l2_norm(&r);
         let relative = new_beta / b_norm;
 
         if relative < GMRES_REL_TOL {
@@ -480,7 +508,7 @@ pub(super) fn gmres_with_abort(
         beta = new_beta;
     }
 
-    let relative = norm(&r) / b_norm;
+    let relative = complex_l2_norm(&r) / b_norm;
     Ok(GmresOutcome {
         solution: x,
         iterations: total_iterations,
@@ -637,6 +665,102 @@ mod tests {
                 .map(|row| row.iter().zip(x).map(|(m, v)| m * v).sum())
                 .collect()
         }
+    }
+
+    #[test]
+    fn krylov_preserves_solutions_across_matrix_and_rhs_scales() {
+        let base = hb_like_matrix(2, 2, 0.15, 71);
+        let expected = [
+            Complex64::new(0.25, -0.5),
+            Complex64::new(-0.75, 0.125),
+            Complex64::new(0.5, 0.25),
+            Complex64::new(-0.25, -0.5),
+        ];
+        let base_rhs = matvec_of(&base)(&expected);
+        for (matrix_scale, solution_scale) in [
+            (1.0, 1.0),
+            (1e-300, 1.0),
+            (1e300, 1.0),
+            (1.0, 1e-300),
+            (1.0, 1e300),
+            (1e-150, 1e-150),
+            (1e150, 1e150),
+        ] {
+            let matrix: Vec<Vec<_>> = base
+                .iter()
+                .map(|row| row.iter().map(|&v| v * matrix_scale).collect())
+                .collect();
+            let rhs: Vec<_> = base_rhs
+                .iter()
+                .map(|&v| v * (matrix_scale * solution_scale))
+                .collect();
+            let precond = BlockJacobiPreconditioner::build(&matrix, 2, 2);
+            assert!(
+                precond.factors.iter().all(|f| !f.regularized),
+                "physical scale is not singular"
+            );
+            let outcome = gmres(&matvec_of(&matrix), &precond, &rhs, 8, 4);
+            assert!(
+                outcome.converged,
+                "scales {matrix_scale:e}/{solution_scale:e}: residual {}",
+                outcome.relative_residual
+            );
+            for (&actual, &expected) in outcome.solution.iter().zip(&expected) {
+                assert!(
+                    (actual / solution_scale - expected).norm() < 1e-12,
+                    "scales {matrix_scale:e}/{solution_scale:e}: {actual} vs {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn givens_rotation_is_unitary_and_annihilates_across_binary_scales() {
+        for exponent in [-1022, -800, 0, 800, 1023] {
+            let scale = libm::scalbn(1.0, exponent);
+            for (a, b) in [
+                (Complex64::new(0.5, 0.25), Complex64::new(-0.125, 0.25)),
+                (ZERO, Complex64::new(0.5, 0.25)),
+                (Complex64::new(0.5, 0.25), ZERO),
+            ] {
+                let (c, s) = givens(a * scale, b * scale);
+                assert!(c.is_finite() && s.finite());
+                assert!((c * c + s.norm_sqr() - 1.0).abs() < 1e-15);
+                // Evaluate the rotation in the original normalized coordinates,
+                // independently of any overflow/underflow in its physical norm.
+                assert!(
+                    (-s.conj() * a + c * b).norm() < 1e-15,
+                    "exponent {exponent}"
+                );
+            }
+        }
+        let (c, s) = givens(Complex64::new(0.0, 1e-300), Complex64::new(1e300, 0.0));
+        assert_eq!(c, 0.0);
+        assert_eq!(s, Complex64::new(0.0, 1.0));
+    }
+
+    #[test]
+    fn complex_l2_norm_preserves_subnormal_vectors_and_large_finite_norms() {
+        for scale in [
+            f64::from_bits(1),
+            f64::MIN_POSITIVE,
+            1e-200,
+            1.0,
+            1e200,
+            1e307,
+        ] {
+            let vector = [
+                Complex64::new(3.0 * scale, 0.0),
+                Complex64::new(0.0, 4.0 * scale),
+            ];
+            let actual = complex_l2_norm(&vector);
+            assert!(
+                (actual / scale - 5.0).abs() < 2e-15,
+                "scale {scale:e}: {actual:e}"
+            );
+        }
+        assert_eq!(complex_l2_norm(&[ZERO]), 0.0);
+        assert!(!complex_l2_norm(&[Complex64::new(f64::NAN, 0.0)]).is_finite());
     }
 
     #[test]
