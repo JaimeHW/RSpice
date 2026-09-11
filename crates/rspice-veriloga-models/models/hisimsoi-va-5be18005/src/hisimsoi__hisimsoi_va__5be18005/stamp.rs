@@ -31056,36 +31056,31 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(9);
         }
-        stamper.stamp_inactive_potential_branch_local(17);
         if (HRL != 0.0) || (HRW != 0.0) {
             stamper.stamp_potential_branch_local(Some(13), None, 10, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(10);
         }
-        stamper.stamp_inactive_potential_branch_local(16);
         if (HRN != 0.0) || (HRQ != 0.0) {
             stamper.stamp_potential_branch_local(Some(17), None, 11, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(11);
         }
-        stamper.stamp_inactive_potential_branch_local(13);
         if (HRP != 0.0) {
             stamper.stamp_potential_branch_local(Some(3), Some(12), 12, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(12);
         }
         if (HRS != 0.0) || (HRZ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(15), None, 14, multiplicity);
+            stamper.stamp_potential_branch_local(Some(15), None, 13, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(13);
+        }
+        if (HRU != 0.0) || (HSA != 0.0) {
+            stamper.stamp_potential_branch_local(Some(16), None, 14, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(14);
         }
-        stamper.stamp_inactive_potential_branch_local(18);
-        if (HRU != 0.0) || (HSA != 0.0) {
-            stamper.stamp_potential_branch_local(Some(16), None, 15, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(15);
-        }
-        stamper.stamp_inactive_potential_branch_local(19);
         if HQX != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
@@ -31798,7 +31793,7 @@ impl Instance {
         );
         if HRS != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            14,
+            13,
             HQO,
             [],
             [],
@@ -31808,7 +31803,7 @@ impl Instance {
         }
         if HRU != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            15,
+            14,
             HQQ,
             [],
             [],
@@ -31838,7 +31833,7 @@ impl Instance {
         }
         if HRZ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            14,
+            13,
             HQV,
             [],
             [],
@@ -31848,7 +31843,7 @@ impl Instance {
         }
         if HSA != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            15,
+            14,
             HQW,
             [],
             [],

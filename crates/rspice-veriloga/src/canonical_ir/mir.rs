@@ -96,6 +96,7 @@ pub struct MirBranch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MirBranchUnknown {
     pub id: BranchUnknownId,
+    /// First contribution that establishes this physical branch and direction.
     pub equation: EquationId,
     pub declared_name: Option<SmolStr>,
     pub pos_node: Option<NodeId>,
@@ -107,6 +108,9 @@ pub struct MirEquation {
     pub id: EquationId,
     pub contribution: ContributionId,
     pub branch: MirBranchRef,
+    /// Physical solver current shared by contributions to the same branch.
+    /// Current contributions do not require a potential-source unknown.
+    pub branch_unknown: Option<BranchUnknownId>,
     pub kind: MirEquationKind,
     pub expression: HirExprRef,
     pub active_domains: Vec<MirAnalysisDomain>,
@@ -200,7 +204,7 @@ impl MirModel {
                 }
             })
             .collect();
-        let equations: Vec<MirEquation> = hir
+        let mut equations: Vec<MirEquation> = hir
             .contributions
             .iter()
             .enumerate()
@@ -213,13 +217,14 @@ impl MirModel {
                     hir,
                     &node_ids_by_name,
                 ),
+                branch_unknown: None,
                 kind: MirEquationKind::from(contribution.kind),
                 expression: contribution.expression.clone(),
                 active_domains: default_active_domains(),
                 span: contribution.span,
             })
             .collect();
-        let branch_unknowns = collect_branch_unknowns(&equations);
+        let branch_unknowns = collect_branch_unknowns(&mut equations);
         span.finish(&format!("equations={}", equations.len()));
 
         let span = crate::metrics::FineSpan::new("mir.arena_clone");
@@ -340,24 +345,32 @@ fn default_active_domains() -> Vec<MirAnalysisDomain> {
     ]
 }
 
-fn collect_branch_unknowns(equations: &[MirEquation]) -> Vec<MirBranchUnknown> {
-    equations
-        .iter()
-        .filter(|equation| {
-            matches!(
-                equation.kind,
-                MirEquationKind::Potential | MirEquationKind::Indirect
-            )
-        })
-        .enumerate()
-        .map(|(index, equation)| MirBranchUnknown {
-            id: BranchUnknownId::from(index),
-            equation: equation.id,
-            declared_name: equation.branch.declared_name.clone(),
-            pos_node: equation.branch.pos_node,
-            neg_node: equation.branch.neg_node,
-        })
-        .collect()
+fn collect_branch_unknowns(equations: &mut [MirEquation]) -> Vec<MirBranchUnknown> {
+    let mut unknowns = Vec::new();
+    let mut physical = HashMap::new();
+    for equation in equations {
+        if equation.kind == MirEquationKind::Current {
+            continue;
+        }
+        let identity = crate::branch_identity::BranchIdentity::new(
+            equation.branch.declared_name.as_ref(),
+            equation.branch.pos_node,
+            equation.branch.neg_node,
+        );
+        let id = *physical.entry(identity).or_insert_with(|| {
+            let id = BranchUnknownId::from(unknowns.len());
+            unknowns.push(MirBranchUnknown {
+                id,
+                equation: equation.id,
+                declared_name: equation.branch.declared_name.clone(),
+                pos_node: equation.branch.pos_node,
+                neg_node: equation.branch.neg_node,
+            });
+            id
+        });
+        equation.branch_unknown = Some(id);
+    }
+    unknowns
 }
 
 fn node_ids_by_name(nodes: &[MirNode]) -> HashMap<SmolStr, NodeId> {
@@ -648,7 +661,22 @@ fn validate_branch_unknowns(
     nodes: &[MirNode],
 ) {
     let mut equations_seen = HashSet::new();
+    let mut branches_seen = HashSet::new();
     for unknown in branch_unknowns {
+        let identity = crate::branch_identity::BranchIdentity::new(
+            unknown.declared_name.as_ref(),
+            unknown.pos_node,
+            unknown.neg_node,
+        );
+        if !branches_seen.insert(identity) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR duplicate solver unknown for physical branch {}",
+                    unknown.id
+                ),
+            ));
+        }
         if !equations_seen.insert(unknown.equation) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
@@ -712,6 +740,15 @@ fn validate_branch_unknowns(
                 ),
             ));
         }
+        if equation.branch_unknown != Some(unknown.id) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} is not referenced by its representative equation {}",
+                    unknown.id, unknown.equation
+                ),
+            ));
+        }
         if unknown.pos_node.is_none() && unknown.neg_node.is_none() {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
@@ -746,6 +783,63 @@ fn validate_branch_unknowns(
                     ),
                 ));
             }
+        }
+    }
+    let mut first_equations = vec![None; branch_unknowns.len()];
+    for equation in equations {
+        let needs_unknown = equation.kind != MirEquationKind::Current;
+        if needs_unknown != equation.branch_unknown.is_some() {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR equation {} branch unknown presence does not match {:?} contribution",
+                    equation.id, equation.kind
+                ),
+                equation.span,
+            ));
+        }
+        let Some(id) = equation.branch_unknown else {
+            continue;
+        };
+        let Some(unknown) = branch_unknowns.get(usize::from(id)) else {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR equation {} branch unknown {} is out of range",
+                    equation.id, id
+                ),
+                equation.span,
+            ));
+            continue;
+        };
+        first_equations[usize::from(id)].get_or_insert(equation.id);
+        let same_endpoints = (unknown.pos_node == equation.branch.pos_node
+            && unknown.neg_node == equation.branch.neg_node)
+            || (unknown.pos_node == equation.branch.neg_node
+                && unknown.neg_node == equation.branch.pos_node);
+        if unknown.id != id
+            || unknown.declared_name != equation.branch.declared_name
+            || !same_endpoints
+        {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR equation {} references a different physical branch in unknown {}",
+                    equation.id, id
+                ),
+                equation.span,
+            ));
+        }
+    }
+    for (unknown, first) in branch_unknowns.iter().zip(first_equations) {
+        if first != Some(unknown.equation) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR branch unknown {} representative must be its first contribution",
+                    unknown.id
+                ),
+            ));
         }
     }
 }

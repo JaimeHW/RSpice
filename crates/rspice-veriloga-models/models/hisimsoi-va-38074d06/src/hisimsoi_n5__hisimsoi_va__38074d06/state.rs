@@ -528,7 +528,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 
 pub struct Instance {
 	pub nodes: [usize; 19],
-	pub branches: [usize; 19],
+	pub branches: [usize; 14],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
 	pub(crate) param_given: Box<[bool; 296]>,
@@ -867,7 +867,7 @@ impl Instance {
 	pub const INTERNAL_NODE_NAMES: [&str; 14] = ["n6", "dp", "sp", "db", "sb", "temp", "gp", "bp", "nqs_qb", "n", "nqs_qd", "nqs_qs", "nqs_qhs", "nqs_qi"];
 
 	pub const INTERNAL_STATE_NODES: &[usize] = &[];
-	pub const BRANCH_COUNT: usize = 19;
+	pub const BRANCH_COUNT: usize = 14;
 	pub const PARAMETER_COUNT: usize = 296;
 	pub const VARIABLE_COUNT: usize = 1892;
 	pub const DDT_STATE_COUNT: usize = 15;
@@ -876,7 +876,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "a5fd81157722597a1ee839fcf06d4eaa2081f006ebdfffe8ed5205992bf06cb9";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "06c9b5fcfaf4b34365a60061687fdb44965171ee766697231bee85f233e15453";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

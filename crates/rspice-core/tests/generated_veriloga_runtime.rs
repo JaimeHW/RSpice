@@ -197,6 +197,71 @@ fn generated_utsoi_nqs_capacitors_reference_global_ground() {
     }
 }
 
+#[cfg(feature = "veriloga-model-angelov")]
+#[test]
+fn generated_angelov_series_resistance_keeps_its_physical_current_column() {
+    use rspice_core::device::veriloga_builtins::builtins::angelov__angelov__98b92059::Instance;
+
+    let nodes = (1..=Instance::NODE_COUNT).collect::<Vec<_>>();
+    let branches = (1..=Instance::BRANCH_COUNT).collect::<Vec<_>>();
+    let width = nodes.len() + branches.len();
+    let entries = (0..width)
+        .flat_map(|row| (0..width).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let mut matrix = StaticMatrix::from_triplets(width, width, &entries).unwrap();
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, nodes.len());
+    let voltages = vec![0.0; width];
+    let ctx = GeneratedEvalContext::new(&voltages, 300.15, nodes.len());
+    let mut instance = Instance::new(&nodes);
+    instance.set_branch_indices(&branches);
+    instance.set_parameter("Rd2", 0.0).unwrap();
+    instance.set_parameter("Tcrs", 0.0).unwrap();
+    let local = |name| {
+        3 + Instance::INTERNAL_NODE_NAMES
+            .iter()
+            .position(|node| *node == name)
+            .unwrap()
+    };
+    let (si, sii) = (local("si"), local("sii"));
+    for resistance in [0.05, 0.125] {
+        instance.set_parameter("Rs", resistance).unwrap();
+        instance.finalize_parameters().unwrap();
+        matrix.clear_values();
+        let mut rhs = vec![0.0; width];
+        instance.stamp(
+            &ctx,
+            &mut GeneratedStamper::new_with_static_cache(
+                &mut matrix,
+                &mut rhs,
+                &voltages,
+                nodes.len(),
+                &cache,
+            ),
+        );
+        assert!(
+            !ctx.evaluation_failed(),
+            "{:?}",
+            ctx.take_evaluation_error()
+        );
+        let positions = matrix.stored_positions().collect::<Vec<_>>();
+        let mut dense = vec![vec![0.0; width]; width];
+        for ((row, column), &value) in positions.into_iter().zip(matrix.values_mut().iter()) {
+            dense[row][column] = value;
+        }
+        let rows = (nodes.len()..width)
+            .filter(|&row| dense[row][si].abs() == 1.0 && dense[row][sii] == -dense[row][si])
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "Rs must own one physical branch row");
+        let row = rows[0];
+        // Several earlier V(g,gi) contributions must not shift the column
+        // differentiating V(si,sii) = Rs * I(si,sii).
+        assert!((dense[row][row].abs() - resistance).abs() < 1e-12);
+        assert_eq!(dense[si][row].abs(), 1.0);
+        assert_eq!(dense[sii][row], -dense[si][row]);
+    }
+}
+
 #[cfg(feature = "veriloga-model-hicuml2va")]
 fn stamp_hicuml2(instance: &mut hicuml2::Instance, temperature: f64) -> (Vec<u64>, Vec<u64>) {
     const NODE_COUNT: usize = hicuml2::Instance::NODE_COUNT;

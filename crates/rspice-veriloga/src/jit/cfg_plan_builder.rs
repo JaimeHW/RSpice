@@ -1844,19 +1844,15 @@ endmodule
 
     /// A branch written twice must not shift the next branch's column.
     ///
-    /// The census measured this on Angelov as `jacobians[29][5]`: the shipped
-    /// route stamped `Rs_T` = 0.05 into the matrix and the CFG route held the
-    /// entry structurally absent, because solver column 6 was read as MIR
-    /// unknown 6 — one of the five on `V(g,gi)` — instead of unknown 10, the
-    /// one the equation actually differentiates against.
+    /// Canonical and runtime tables both allocate one current per physical
+    /// branch; repeated contribution sites do not consume derivative columns.
     #[test]
     fn a_branch_contributed_to_twice_does_not_shift_the_next_branchs_column() {
         let (model, artifact) = compile(REPEATED_POTENTIAL_CONTRIBUTION);
-        // Not vacuous: the two numbering spaces really do differ here.
         assert_eq!(
             artifact.mir.branch_unknowns.len(),
-            3,
-            "MIR mints one branch unknown per potential equation"
+            2,
+            "MIR allocates one unknown per physical branch"
         );
         assert_eq!(
             model.branch_sources.len(),
@@ -1869,8 +1865,8 @@ endmodule
         assert_eq!(lanes.lane(&ColumnAxis::Branch(0)), Some(nodes));
         assert_eq!(
             lanes.lane(&ColumnAxis::Branch(1)),
-            Some(nodes + 2),
-            "solver column 1 is the third MIR unknown, not the second"
+            Some(nodes + 1),
+            "the second physical branch has the second MIR current column"
         );
 
         let plan =

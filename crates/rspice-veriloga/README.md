@@ -438,9 +438,8 @@ correction while retaining physical contribution values for current probes.
 The correction follows assignments, arrays, loops, `ddx`, and transient
 companions. Executable limiter models currently use the postfix scalar stamp
 driver; publishing the correction lane through CFG and fused stamp drivers
-remains outstanding. Compiled-model cache version 72, canonical IR version 35,
-WebAssembly emitter version 34, and generated semantics version 22 invalidate
-artifacts that merge independent potential branches or disagree on source direction.
+remains outstanding. Compiled-model caches, canonical artifacts, WebAssembly
+modules, and generated-model checkpoints reject incompatible branch layouts.
 
 Probed flow sources use private current unknowns with simultaneous equations.
 Forward reads, self and mutual feedback, named parallel flow branches, reverse
@@ -455,6 +454,8 @@ including nested instances and distinct ports bound to the same circuit node
 or ground. Cancelled sources retain evaluation and state through private
 equations. Potential sources retain independent named and instance-local branches;
 repeated contributions to one branch share its current unknown and source direction.
+MIR maps each contribution to that physical unknown, so generated devices need
+no padding rows. Each contribution retains its own evaluation and operator state.
 Mixed potential/flow switch branches still require further work.
 Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
 compatibility; authored sources and flow probes require distinct nets.

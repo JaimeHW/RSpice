@@ -26918,8 +26918,6 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
         }
-        stamper.stamp_inactive_potential_branch_local(7);
-        stamper.stamp_inactive_potential_branch_local(8);
         if (staged[1097] != 0.0) {
             stamper.stamp_potential_branch_local(Some(12), None, 1, multiplicity);
         } else {
@@ -26951,19 +26949,19 @@ impl Instance {
             stamper.stamp_inactive_potential_branch_local(6);
         }
         if (staged[1105] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(4), Some(10), 9, multiplicity);
+            stamper.stamp_potential_branch_local(Some(4), Some(10), 7, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(9);
+            stamper.stamp_inactive_potential_branch_local(7);
         }
         if (staged[1106] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(4), Some(11), 10, multiplicity);
+            stamper.stamp_potential_branch_local(Some(4), Some(11), 8, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(10);
+            stamper.stamp_inactive_potential_branch_local(8);
         }
         if (staged[1107] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(10), Some(11), 11, multiplicity);
+            stamper.stamp_potential_branch_local(Some(10), Some(11), 9, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(11);
+            stamper.stamp_inactive_potential_branch_local(9);
         }
         if staged[1096] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
@@ -27697,7 +27695,7 @@ impl Instance {
         }
         if staged[1105] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            9,
+            7,
             staged[1093],
             [],
             [],
@@ -27707,7 +27705,7 @@ impl Instance {
         }
         if staged[1106] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            10,
+            8,
             staged[1094],
             [],
             [],
@@ -27717,7 +27715,7 @@ impl Instance {
         }
         if staged[1107] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            11,
+            9,
             staged[1095],
             [],
             [],

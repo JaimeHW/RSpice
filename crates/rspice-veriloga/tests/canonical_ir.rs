@@ -781,10 +781,7 @@ endmodule
     MirModel::from_hir(&hir).expect("lower limiter MIR");
 }
 
-fn lower_fixture_parts(
-    source: &'static str,
-    module_name: &str,
-) -> (CanonicalMetadata, HirModel, MirModel) {
+fn lower_fixture_parts(source: &str, module_name: &str) -> (CanonicalMetadata, HirModel, MirModel) {
     let analyzed = analyze_fixture(source, module_name).expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", source);
     let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
@@ -2755,6 +2752,78 @@ fn mir_lowering_resolves_named_branch_endpoints() {
     assert_eq!(mir.equations[0].branch.label.as_str(), "p,n");
     assert_eq!(mir.equations[0].branch.pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(1)));
+}
+
+#[test]
+fn mir_repeated_potential_sites_share_physical_unknowns_without_merging_named_branches() {
+    for (declarations, body, expected) in [
+        ("", "V(p,n)<+2*I(p,n); V(n,p)<+3*I(n,p);", vec![0, 0]),
+        (
+            "branch(p,n) a,b;",
+            "V(a)<+2*I(a); V(b)<+3*I(b); V(a)<+ddt(I(a));",
+            vec![0, 1, 0],
+        ),
+        (
+            "branch(p,n) a;",
+            "V(p,n)<+2*I(p,n); V(a)<+3*I(a); V(n,p)<+4*I(n,p);",
+            vec![0, 1, 0],
+        ),
+    ] {
+        let source = format!(
+            "module shared(p,n); inout p,n; electrical p,n; {declarations} analog begin {body} end endmodule"
+        );
+        let (_, _, mir) = lower_fixture_parts(&source, "shared");
+        assert_eq!(
+            mir.branch_unknowns.len(),
+            1 + *expected.iter().max().unwrap() as usize
+        );
+        assert_eq!(
+            mir.equations.len(),
+            expected.len(),
+            "contribution sites retain separate evaluation and state"
+        );
+        for (site, expected) in expected.into_iter().enumerate() {
+            assert_eq!(
+                mir.equations[site].branch_unknown,
+                Some(BranchUnknownId::new(expected))
+            );
+            assert_eq!(mir.equations[site].contribution.index(), site as u32);
+        }
+    }
+}
+
+#[test]
+fn mir_validation_rejects_missing_and_misdirected_physical_unknown_links() {
+    let source = "module shared(p,n); inout p,n; electrical p,n; branch(p,n) a,b; analog begin V(a)<+2*I(a); V(b)<+3*I(b); V(a)<+4*I(a); end endmodule";
+    let (_, _, original) = lower_fixture_parts(source, "shared");
+    let mut missing_table = original.clone();
+    missing_table.branch_unknowns.clear();
+    assert_mir_validation_message(
+        &missing_table,
+        "branch unknown BranchUnknownId(0) is out of range",
+    );
+    let mut missing_link = original.clone();
+    missing_link.equations[2].branch_unknown = None;
+    assert_mir_validation_message(
+        &missing_link,
+        "branch unknown presence does not match Potential",
+    );
+    let mut wrong_branch = original.clone();
+    wrong_branch.equations[2].branch_unknown = Some(BranchUnknownId::new(1));
+    assert_mir_validation_message(&wrong_branch, "references a different physical branch");
+    let mut wrong_representative = original.clone();
+    wrong_representative.branch_unknowns[0].equation = EquationId::new(2);
+    assert_mir_validation_message(
+        &wrong_representative,
+        "representative must be its first contribution",
+    );
+    let mut duplicate = original;
+    let mut extra = duplicate.branch_unknowns[0].clone();
+    extra.id = BranchUnknownId::new(2);
+    extra.equation = EquationId::new(2);
+    duplicate.branch_unknowns.push(extra);
+    duplicate.equations[2].branch_unknown = Some(BranchUnknownId::new(2));
+    assert_mir_validation_message(&duplicate, "duplicate solver unknown for physical branch");
 }
 
 #[test]

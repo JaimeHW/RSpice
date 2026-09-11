@@ -3852,7 +3852,7 @@ fn digital_index_and_delay_boundary_values_execute_exactly() {
 
 #[test]
 fn parameter_delays_outside_the_executable_range_are_never_clamped() {
-    for delay in ["9223372036854775808", "1e30", "-2147483649", "-1"] {
+    for delay in ["9223372036854775808.0", "1e30", "-2147483649", "-1"] {
         let section = format!("parameter real DELAY = {delay}; reg q; initial #DELAY q = 1'b1;");
         let error = VerilogACompiler::default()
             .compile_canonical_ir(&digital_module(&section))

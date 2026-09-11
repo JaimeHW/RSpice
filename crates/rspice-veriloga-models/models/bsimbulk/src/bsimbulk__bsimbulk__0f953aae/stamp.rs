@@ -15307,58 +15307,55 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
         }
-        stamper.stamp_inactive_potential_branch_local(9);
         if (staged[870] != 0.0) || (staged[872] != 0.0) {
             stamper.stamp_potential_branch_local(Some(5), Some(6), 1, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(3);
         if (staged[871] != 0.0) {
             stamper.stamp_potential_branch_local(Some(0), Some(6), 2, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(2);
         }
         if (staged[873] != 0.0) || (staged[875] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(7), Some(8), 4, multiplicity);
+            stamper.stamp_potential_branch_local(Some(7), Some(8), 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
+        if (staged[874] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(2), Some(8), 4, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(4);
         }
-        stamper.stamp_inactive_potential_branch_local(6);
-        if (staged[874] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), Some(8), 5, multiplicity);
+        if (staged[876] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(10), 5, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(5);
         }
-        if (staged[876] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(10), 7, multiplicity);
+        if (staged[877] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(10), Some(9), 6, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(6);
+        }
+        if (staged[879] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(3), Some(12), 7, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(7);
         }
-        if (staged[877] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(10), Some(9), 8, multiplicity);
+        if (staged[880] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(3), Some(11), 8, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(8);
         }
-        if (staged[879] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(3), Some(12), 10, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(10);
-        }
-        if (staged[880] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(3), Some(11), 11, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(11);
-        }
         if (staged[881] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(3), Some(13), 12, multiplicity);
+            stamper.stamp_potential_branch_local(Some(3), Some(13), 9, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(12);
+            stamper.stamp_inactive_potential_branch_local(9);
         }
         if (staged[882] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(14), 13, multiplicity);
+            stamper.stamp_potential_branch_local(Some(0), Some(14), 10, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(13);
+            stamper.stamp_inactive_potential_branch_local(10);
         }
         if staged[869] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
@@ -15832,7 +15829,7 @@ impl Instance {
         );
         if staged[873] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            4,
+            3,
             staged[852],
             [],
             [],
@@ -15842,7 +15839,7 @@ impl Instance {
         }
         if staged[874] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            5,
+            4,
             staged[853],
             [],
             [],
@@ -15852,7 +15849,7 @@ impl Instance {
         }
         if staged[875] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            4,
+            3,
             staged[854],
             [],
             [],
@@ -15862,7 +15859,7 @@ impl Instance {
         }
         if staged[876] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            7,
+            5,
             staged[855],
             [],
             [],
@@ -15902,7 +15899,7 @@ impl Instance {
         );
         if staged[877] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            8,
+            6,
             staged[857],
             [],
             [],
@@ -16032,7 +16029,7 @@ impl Instance {
         );
         if staged[879] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            10,
+            7,
             staged[864],
             [],
             [],
@@ -16042,7 +16039,7 @@ impl Instance {
         }
         if staged[880] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            11,
+            8,
             staged[865],
             [],
             [],
@@ -16052,7 +16049,7 @@ impl Instance {
         }
         if staged[881] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            12,
+            9,
             staged[866],
             [],
             [],
@@ -16162,7 +16159,7 @@ impl Instance {
         );
         if staged[882] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            13,
+            10,
             staged[868],
             [],
             [],

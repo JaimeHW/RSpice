@@ -21957,165 +21957,135 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
         }
-        stamper.stamp_inactive_potential_branch_local(56);
         if (KDD != 0.0) || (KEZ != 0.0) {
             stamper.stamp_potential_branch_local(Some(5), None, 1, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(21);
         if (KDE != 0.0) || (KDJ != 0.0) || (KEF != 0.0) || (KFE != 0.0) {
             stamper.stamp_potential_branch_local(Some(6), None, 2, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(2);
         }
-        stamper.stamp_inactive_potential_branch_local(7);
-        stamper.stamp_inactive_potential_branch_local(16);
-        stamper.stamp_inactive_potential_branch_local(22);
         if (KDF != 0.0) || (KDL != 0.0) || (KDT != 0.0) || (KEJ != 0.0) || (KFT != 0.0) {
             stamper.stamp_potential_branch_local(Some(12), None, 3, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(3);
         }
-        stamper.stamp_inactive_potential_branch_local(8);
-        stamper.stamp_inactive_potential_branch_local(12);
-        stamper.stamp_inactive_potential_branch_local(17);
-        stamper.stamp_inactive_potential_branch_local(25);
         if (KDG != 0.0) || (KDN != 0.0) || (KDW != 0.0) || (KEN != 0.0) || (KFZ != 0.0) {
             stamper.stamp_potential_branch_local(Some(14), None, 4, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(4);
         }
-        stamper.stamp_inactive_potential_branch_local(9);
-        stamper.stamp_inactive_potential_branch_local(13);
-        stamper.stamp_inactive_potential_branch_local(18);
-        stamper.stamp_inactive_potential_branch_local(26);
         if (KDH != 0.0) || (KDP != 0.0) || (KDZ != 0.0) || (KER != 0.0) || (KFJ != 0.0) || (KGF != 0.0) {
             stamper.stamp_potential_branch_local(Some(11), None, 5, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(5);
         }
-        stamper.stamp_inactive_potential_branch_local(10);
-        stamper.stamp_inactive_potential_branch_local(14);
-        stamper.stamp_inactive_potential_branch_local(19);
-        stamper.stamp_inactive_potential_branch_local(23);
-        stamper.stamp_inactive_potential_branch_local(27);
         if (KDI != 0.0) || (KDR != 0.0) || (KEC != 0.0) || (KEV != 0.0) || (KFO != 0.0) || (KGL != 0.0) {
             stamper.stamp_potential_branch_local(Some(13), None, 6, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(6);
         }
-        stamper.stamp_inactive_potential_branch_local(11);
-        stamper.stamp_inactive_potential_branch_local(15);
-        stamper.stamp_inactive_potential_branch_local(20);
-        stamper.stamp_inactive_potential_branch_local(24);
-        stamper.stamp_inactive_potential_branch_local(28);
         if (KGR != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(18), 29, multiplicity);
+            stamper.stamp_potential_branch_local(Some(0), Some(18), 7, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(29);
+            stamper.stamp_inactive_potential_branch_local(7);
         }
         if (KGT != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), Some(22), 30, multiplicity);
+            stamper.stamp_potential_branch_local(Some(2), Some(22), 8, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(30);
+            stamper.stamp_inactive_potential_branch_local(8);
         }
         if (KGV != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(7), 31, multiplicity);
+            stamper.stamp_potential_branch_local(Some(0), Some(7), 9, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(31);
+            stamper.stamp_inactive_potential_branch_local(9);
         }
         if (KGX != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(2), 32, multiplicity);
+            stamper.stamp_potential_branch_local(Some(8), Some(2), 10, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(32);
+            stamper.stamp_inactive_potential_branch_local(10);
         }
         if (KGZ != 0.0) || (KHB != 0.0) {
-            stamper.stamp_potential_branch_local(Some(15), Some(7), 33, multiplicity);
+            stamper.stamp_potential_branch_local(Some(15), Some(7), 11, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(33);
+            stamper.stamp_inactive_potential_branch_local(11);
         }
-        stamper.stamp_inactive_potential_branch_local(34);
         if (KHC != 0.0) || (KHE != 0.0) || (KHF != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(19), 35, multiplicity);
+            stamper.stamp_potential_branch_local(Some(8), Some(19), 12, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(35);
+            stamper.stamp_inactive_potential_branch_local(12);
         }
-        stamper.stamp_inactive_potential_branch_local(36);
-        stamper.stamp_inactive_potential_branch_local(37);
         if (KHH != 0.0) {
-            stamper.stamp_potential_branch_local(Some(16), Some(15), 38, multiplicity);
+            stamper.stamp_potential_branch_local(Some(16), Some(15), 13, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(38);
+            stamper.stamp_inactive_potential_branch_local(13);
         }
         if (KHJ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(16), Some(7), 39, multiplicity);
+            stamper.stamp_potential_branch_local(Some(16), Some(7), 14, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(39);
+            stamper.stamp_inactive_potential_branch_local(14);
         }
         if (KHK != 0.0) {
-            stamper.stamp_potential_branch_local(Some(19), Some(20), 40, multiplicity);
+            stamper.stamp_potential_branch_local(Some(19), Some(20), 15, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(40);
+            stamper.stamp_inactive_potential_branch_local(15);
         }
         if (KHM != 0.0) || (KHN != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(20), 41, multiplicity);
+            stamper.stamp_potential_branch_local(Some(8), Some(20), 16, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(41);
+            stamper.stamp_inactive_potential_branch_local(16);
         }
-        stamper.stamp_inactive_potential_branch_local(42);
         if (KHP != 0.0) {
-            stamper.stamp_potential_branch_local(Some(17), Some(16), 43, multiplicity);
+            stamper.stamp_potential_branch_local(Some(17), Some(16), 17, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(43);
+            stamper.stamp_inactive_potential_branch_local(17);
         }
         if (KHR != 0.0) {
-            stamper.stamp_potential_branch_local(Some(17), Some(7), 44, multiplicity);
+            stamper.stamp_potential_branch_local(Some(17), Some(7), 18, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(44);
+            stamper.stamp_inactive_potential_branch_local(18);
         }
         if (KHS != 0.0) {
-            stamper.stamp_potential_branch_local(Some(20), Some(21), 45, multiplicity);
+            stamper.stamp_potential_branch_local(Some(20), Some(21), 19, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(45);
+            stamper.stamp_inactive_potential_branch_local(19);
         }
         if (KHU != 0.0) || (KHV != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(21), 46, multiplicity);
+            stamper.stamp_potential_branch_local(Some(8), Some(21), 20, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(46);
+            stamper.stamp_inactive_potential_branch_local(20);
         }
-        stamper.stamp_inactive_potential_branch_local(47);
         if (KHX != 0.0) {
-            stamper.stamp_potential_branch_local(Some(18), Some(17), 48, multiplicity);
+            stamper.stamp_potential_branch_local(Some(18), Some(17), 21, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(48);
+            stamper.stamp_inactive_potential_branch_local(21);
         }
         if (KHZ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(18), Some(7), 49, multiplicity);
+            stamper.stamp_potential_branch_local(Some(18), Some(7), 22, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(49);
+            stamper.stamp_inactive_potential_branch_local(22);
         }
         if (KIA != 0.0) {
-            stamper.stamp_potential_branch_local(Some(21), Some(22), 50, multiplicity);
+            stamper.stamp_potential_branch_local(Some(21), Some(22), 23, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(50);
+            stamper.stamp_inactive_potential_branch_local(23);
         }
         if (KIC != 0.0) || (KID != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(22), 51, multiplicity);
+            stamper.stamp_potential_branch_local(Some(8), Some(22), 24, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(51);
+            stamper.stamp_inactive_potential_branch_local(24);
         }
-        stamper.stamp_inactive_potential_branch_local(52);
         if (KIF != 0.0) || (KII != 0.0) {
-            stamper.stamp_potential_branch_local(Some(10), Some(9), 53, multiplicity);
+            stamper.stamp_potential_branch_local(Some(10), Some(9), 25, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(53);
+            stamper.stamp_inactive_potential_branch_local(25);
         }
-        stamper.stamp_inactive_potential_branch_local(55);
         if (KIG != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(10), 54, multiplicity);
+            stamper.stamp_potential_branch_local(Some(1), Some(10), 26, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(54);
+            stamper.stamp_inactive_potential_branch_local(26);
         }
         if KDB != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
@@ -22729,7 +22699,7 @@ impl Instance {
         );
         if KGR != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            29,
+            7,
             JPT,
             [],
             [],
@@ -22739,7 +22709,7 @@ impl Instance {
         }
         if KGT != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            30,
+            8,
             JPV,
             [],
             [],
@@ -22749,7 +22719,7 @@ impl Instance {
         }
         if KGV != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            31,
+            9,
             JPX,
             [],
             [],
@@ -22759,7 +22729,7 @@ impl Instance {
         }
         if KGX != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            32,
+            10,
             JPZ,
             [],
             [],
@@ -22849,7 +22819,7 @@ impl Instance {
         );
         if KGZ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            33,
+            11,
             JQS,
             [],
             [],
@@ -22859,7 +22829,7 @@ impl Instance {
         }
         if KHB != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            33,
+            11,
             JQU,
             [],
             [],
@@ -22879,7 +22849,7 @@ impl Instance {
         );
         if KHC != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            35,
+            12,
             JQX,
             [],
             [],
@@ -22889,7 +22859,7 @@ impl Instance {
         }
         if KHE != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            35,
+            12,
             JQZ,
             [],
             [],
@@ -22899,7 +22869,7 @@ impl Instance {
         }
         if KHF != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            35,
+            12,
             JRA,
             [],
             [],
@@ -22919,7 +22889,7 @@ impl Instance {
         );
         if KHH != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            38,
+            13,
             JRE,
             [],
             [],
@@ -22929,7 +22899,7 @@ impl Instance {
         }
         if KHJ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            39,
+            14,
             JRG,
             [],
             [],
@@ -22949,7 +22919,7 @@ impl Instance {
         );
         if KHK != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            40,
+            15,
             JRJ,
             [],
             [],
@@ -22959,7 +22929,7 @@ impl Instance {
         }
         if KHM != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            41,
+            16,
             JRL,
             [],
             [],
@@ -22969,7 +22939,7 @@ impl Instance {
         }
         if KHN != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            41,
+            16,
             JRM,
             [],
             [],
@@ -22989,7 +22959,7 @@ impl Instance {
         );
         if KHP != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            43,
+            17,
             JRQ,
             [],
             [],
@@ -22999,7 +22969,7 @@ impl Instance {
         }
         if KHR != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            44,
+            18,
             JRS,
             [],
             [],
@@ -23019,7 +22989,7 @@ impl Instance {
         );
         if KHS != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            45,
+            19,
             JRV,
             [],
             [],
@@ -23029,7 +22999,7 @@ impl Instance {
         }
         if KHU != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            46,
+            20,
             JRX,
             [],
             [],
@@ -23039,7 +23009,7 @@ impl Instance {
         }
         if KHV != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            46,
+            20,
             JRY,
             [],
             [],
@@ -23059,7 +23029,7 @@ impl Instance {
         );
         if KHX != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            48,
+            21,
             JSC,
             [],
             [],
@@ -23069,7 +23039,7 @@ impl Instance {
         }
         if KHZ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            49,
+            22,
             JSE,
             [],
             [],
@@ -23089,7 +23059,7 @@ impl Instance {
         );
         if KIA != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            50,
+            23,
             JSH,
             [],
             [],
@@ -23099,7 +23069,7 @@ impl Instance {
         }
         if KIC != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            51,
+            24,
             JSJ,
             [],
             [],
@@ -23109,7 +23079,7 @@ impl Instance {
         }
         if KID != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            51,
+            24,
             JSK,
             [],
             [],
@@ -23129,7 +23099,7 @@ impl Instance {
         );
         if KIF != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            53,
+            25,
             JSN,
             [],
             [],
@@ -23159,7 +23129,7 @@ impl Instance {
         );
         if KIG != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            54,
+            26,
             JSS,
             [],
             [],
@@ -23169,7 +23139,7 @@ impl Instance {
         }
         if KII != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            53,
+            25,
             JSU,
             [],
             [],

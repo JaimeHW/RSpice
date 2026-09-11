@@ -1946,6 +1946,7 @@ endmodule
         };
         region.kind = HirContributionKind::Potential;
         artifact.mir.equations[0].kind = MirEquationKind::Potential;
+        artifact.mir.equations[0].branch_unknown = Some(BranchUnknownId::new(0));
         let equation = artifact.mir.equations[0].clone();
         artifact.mir.branch_unknowns = vec![MirBranchUnknown {
             id: BranchUnknownId::new(0),
@@ -2122,7 +2123,7 @@ endmodule
     }
 
     #[test]
-    fn compile_model_with_canonical_ir_maps_duplicate_potential_branch_unknowns() {
+    fn compile_model_with_canonical_ir_maps_repeated_contributions_to_one_unknown() {
         let source = r#"
 module native_canonical_duplicate_vsrc(p, n);
   inout p, n;
@@ -2145,12 +2146,12 @@ endmodule
         );
         assert_eq!(
             artifact.mir.branch_unknowns.len(),
-            2,
-            "canonical MIR keeps a dense branch unknown per potential equation"
+            1,
+            "canonical MIR shares the physical branch current"
         );
 
         let native = compile_model_with_canonical_ir(&model, &artifact)
-            .expect("duplicate canonical potential branch unknowns map to runtime branch slot");
+            .expect("repeated potential contributions map to one runtime branch slot");
 
         let branch_unknowns = [3.0_f64];
         let mut ctx = eval_context(&[], &[0.0, 0.0]);
@@ -3120,7 +3121,7 @@ endmodule
     }
 
     #[test]
-    fn compile_model_with_canonical_ir_maps_reversed_duplicate_branch_unknowns() {
+    fn compile_model_with_canonical_ir_maps_reversed_contributions_to_one_unknown() {
         let source = r#"
 module native_canonical_reversed_duplicate_vsrc(p, n);
   inout p, n;
@@ -3141,7 +3142,7 @@ endmodule
             1,
             "compiled solver allocation should merge opposite branch orientations"
         );
-        assert_eq!(artifact.mir.branch_unknowns.len(), 2);
+        assert_eq!(artifact.mir.branch_unknowns.len(), 1);
 
         let native = compile_model_with_canonical_ir(&model, &artifact)
             .expect("reversed canonical branch unknown maps to runtime branch slot");

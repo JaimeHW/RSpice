@@ -419,7 +419,6 @@ fn emit_event_state_seed(out: &mut String, artifact: &CanonicalIrArtifact) {
 /// from is exactly what the two disagree about.
 pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
     let mut out = String::new();
-    let potential_leaders = potential_branch_leaders(artifact);
     writeln!(
         out,
         "pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; {}] = [",
@@ -428,15 +427,7 @@ pub(super) fn descriptor_table(artifact: &CanonicalIrArtifact) -> String {
     .expect("write noise descriptor header");
     for source in &artifact.noise_sources.sources {
         let table = source.table.as_ref();
-        let branch_ordinal = if source.is_current {
-            source.branch_ordinal.map(|ordinal| ordinal.index())
-        } else {
-            potential_leaders
-                .get(source.equation.index() as usize)
-                .copied()
-                .flatten()
-                .or_else(|| source.branch_ordinal.map(|ordinal| ordinal.index()))
-        };
+        let branch_ordinal = source.branch_ordinal.map(|ordinal| ordinal.index());
         writeln!(
             out,
             "    GeneratedNoiseDescriptor {{ mechanism: {:?}, label: {}, kind: GeneratedNoiseKind::{}, equation: {}, is_current: {}, branch_ordinal: {}, pos: {}, neg: {}, table_len: {}, table_log_interp: {} }},",
@@ -510,7 +501,6 @@ pub(super) fn grouped_noise_extension(
         );
     };
     let mut out = String::new();
-    let potential_leaders = potential_branch_leaders(artifact);
     writeln!(
         out,
         "\npub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; {}] = [",
@@ -539,11 +529,7 @@ pub(super) fn grouped_noise_extension(
     for &(process, equation_index) in &plan.descriptors {
         let equation = &artifact.mir.equations[equation_index];
         let is_current = equation.kind == MirEquationKind::Current;
-        let branch_ordinal = if is_current {
-            None
-        } else {
-            potential_leaders.get(equation_index).copied().flatten()
-        };
+        let branch_ordinal = equation.branch_unknown.map(|ordinal| ordinal.index());
         let pos = equation.branch.pos_node;
         let neg = equation.branch.neg_node;
         let pos_name = pos.map_or("0", |node| {
@@ -1830,33 +1816,6 @@ fn noise_branch_unknowns(artifact: &CanonicalIrArtifact) -> HashMap<String, Bran
             .or_insert_with(|| BranchCurrentSlot::reverse(slot));
     }
     slots
-}
-
-fn potential_branch_leaders(artifact: &CanonicalIrArtifact) -> Vec<Option<u32>> {
-    let mut leaders = vec![None; artifact.mir.equations.len()];
-    let mut physical = HashMap::new();
-    for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
-        if equation.kind != crate::canonical_ir::MirEquationKind::Potential {
-            continue;
-        }
-        let Some(branch) = artifact
-            .mir
-            .branch_unknowns
-            .iter()
-            .find(|unknown| unknown.equation == equation.id)
-            .map(|unknown| unknown.id.index())
-        else {
-            continue;
-        };
-        let identity = crate::branch_identity::BranchIdentity::new(
-            equation.branch.declared_name.as_ref(),
-            equation.branch.pos_node,
-            equation.branch.neg_node,
-        );
-        let leader = *physical.entry(identity).or_insert(branch);
-        leaders[equation_index] = Some(leader);
-    }
-    leaders
 }
 
 fn emit_lines(out: &mut String, lines: &[String], indentation: usize) {

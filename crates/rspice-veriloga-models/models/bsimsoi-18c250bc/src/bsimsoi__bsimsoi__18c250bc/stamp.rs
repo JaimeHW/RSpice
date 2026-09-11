@@ -10987,64 +10987,56 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
         }
-        stamper.stamp_inactive_potential_branch_local(2);
-        stamper.stamp_inactive_potential_branch_local(3);
-        stamper.stamp_inactive_potential_branch_local(4);
-        stamper.stamp_inactive_potential_branch_local(6);
-        stamper.stamp_inactive_potential_branch_local(15);
         if (EYF != 0.0) || (EYX != 0.0) || (EZS != 0.0) {
             stamper.stamp_potential_branch_local(Some(4), None, 1, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(5);
-        stamper.stamp_inactive_potential_branch_local(16);
         if (EZH != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(7), 7, multiplicity);
+            stamper.stamp_potential_branch_local(Some(0), Some(7), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (EZI != 0.0) {
+            stamper.stamp_potential_branch_local(Some(2), Some(8), 3, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(3);
+        }
+        if (EZJ != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(4), 4, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(4);
+        }
+        if (EZK != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(10), 5, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(5);
+        }
+        if (EZL != 0.0) {
+            stamper.stamp_potential_branch_local(Some(10), Some(9), 6, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(6);
+        }
+        if (EZM != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(12), 7, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(7);
         }
-        if (EZI != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), Some(8), 8, multiplicity);
+        if (EZN != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(11), 8, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(8);
         }
-        if (EZJ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(5), Some(4), 9, multiplicity);
+        if (EZO != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(8), 9, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(9);
         }
-        if (EZK != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(10), 10, multiplicity);
+        if (EZW != 0.0) || (FAA != 0.0) {
+            stamper.stamp_potential_branch_local(Some(6), None, 10, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(10);
         }
-        if (EZL != 0.0) {
-            stamper.stamp_potential_branch_local(Some(10), Some(9), 11, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(11);
-        }
-        if (EZM != 0.0) {
-            stamper.stamp_potential_branch_local(Some(5), Some(12), 12, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(12);
-        }
-        if (EZN != 0.0) {
-            stamper.stamp_potential_branch_local(Some(5), Some(11), 13, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(13);
-        }
-        if (EZO != 0.0) {
-            stamper.stamp_potential_branch_local(Some(5), Some(8), 14, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(14);
-        }
-        if (EZW != 0.0) || (FAA != 0.0) {
-            stamper.stamp_potential_branch_local(Some(6), None, 17, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(17);
-        }
-        stamper.stamp_inactive_potential_branch_local(18);
         if EYB != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
@@ -11247,7 +11239,7 @@ impl Instance {
         );
         if EZH != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            7,
+            2,
             EVM,
             [],
             [],
@@ -11277,7 +11269,7 @@ impl Instance {
         );
         if EZI != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            8,
+            3,
             EVP,
             [],
             [],
@@ -11407,7 +11399,7 @@ impl Instance {
         );
         if EZJ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            9,
+            4,
             EVU,
             [],
             [],
@@ -11627,7 +11619,7 @@ impl Instance {
         );
         if EZK != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            10,
+            5,
             EWD,
             [],
             [],
@@ -11657,7 +11649,7 @@ impl Instance {
         );
         if EZL != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            11,
+            6,
             EWG,
             [],
             [],
@@ -11727,7 +11719,7 @@ impl Instance {
         );
         if EZM != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            12,
+            7,
             EWO,
             [],
             [],
@@ -11737,7 +11729,7 @@ impl Instance {
         }
         if EZN != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            13,
+            8,
             EWP,
             [],
             [],
@@ -11747,7 +11739,7 @@ impl Instance {
         }
         if EZO != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            14,
+            9,
             EWQ,
             [],
             [],
@@ -11837,7 +11829,7 @@ impl Instance {
         }
         if EZW != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            17,
+            10,
             EXV,
             [],
             [],
@@ -11847,7 +11839,7 @@ impl Instance {
         }
         if FAA != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            17,
+            10,
             EXZ,
             [],
             [],

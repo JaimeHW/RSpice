@@ -143,11 +143,7 @@ impl CanonicalNoiseSourcePlan {
                     source.id, source.mechanism, expected_mechanism
                 )));
             }
-            let expected_ordinal = mir
-                .branch_unknowns
-                .iter()
-                .find(|unknown| unknown.equation == source.equation)
-                .map(|unknown| unknown.id);
+            let expected_ordinal = equation.branch_unknown;
             if source.branch_ordinal != expected_ordinal {
                 diagnostics.push(plan_error(format!(
                     "canonical noise source {} branch ordinal does not match equation {}",
@@ -222,11 +218,7 @@ fn extract_equation(
     equation: &MirEquation,
     sources: &mut Vec<CanonicalNoiseSource>,
 ) -> Result<(), IrDiagnostic> {
-    let branch_ordinal = mir
-        .branch_unknowns
-        .iter()
-        .find(|unknown| unknown.equation == equation.id)
-        .map(|unknown| unknown.id);
+    let branch_ordinal = equation.branch_unknown;
     let is_current = matches!(equation.kind, MirEquationKind::Current);
     let pos = endpoint(mir, equation.branch.pos_node);
     let neg = endpoint(mir, equation.branch.neg_node);

@@ -1937,27 +1937,25 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(2);
-        stamper.stamp_inactive_potential_branch_local(4);
         if (staged[57] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(3), None, 3, multiplicity);
+            stamper.stamp_potential_branch_local(Some(3), None, 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (staged[59] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(5), 3, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(3);
         }
-        if (staged[59] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(5), 5, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(5);
-        }
         if (staged[60] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), Some(6), 6, multiplicity);
+            stamper.stamp_potential_branch_local(Some(2), Some(6), 4, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(6);
+            stamper.stamp_inactive_potential_branch_local(4);
         }
         if (staged[61] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(4), 7, multiplicity);
+            stamper.stamp_potential_branch_local(Some(0), Some(4), 5, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(7);
+            stamper.stamp_inactive_potential_branch_local(5);
         }
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(9),
@@ -2141,7 +2139,7 @@ impl Instance {
         }
         if staged[57] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            3,
+            2,
             staged[43],
             [],
             [],
@@ -2211,7 +2209,7 @@ impl Instance {
         );
         if staged[59] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            5,
+            3,
             staged[46],
             [],
             [],
@@ -2241,7 +2239,7 @@ impl Instance {
         );
         if staged[60] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            6,
+            4,
             staged[48],
             [],
             [],
@@ -2271,7 +2269,7 @@ impl Instance {
         );
         if staged[61] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            7,
+            5,
             staged[50],
             [],
             [],

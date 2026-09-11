@@ -1022,10 +1022,11 @@ fn write_mir_state_slot(out: &mut String, state_slot: &MirStateSlot) {
 fn write_mir_equation(out: &mut String, equation: &MirEquation) {
     writeln!(
         out,
-        "equation id={} contribution={} branch={} kind={} expression={} domains={} span={}",
+        "equation id={} contribution={} branch={} branch_unknown={} kind={} expression={} domains={} span={}",
         equation.id.index(),
         equation.contribution.index(),
         branch_ref_label(&equation.branch),
+        option_id(equation.branch_unknown.map(|id| id.index())),
         equation_kind_label(equation.kind),
         expr_ref_label(Some(&equation.expression)),
         join_domains(&equation.active_domains),

@@ -1107,22 +1107,20 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(2);
-        stamper.stamp_inactive_potential_branch_local(4);
         if (staged[37] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), None, 3, multiplicity);
+            stamper.stamp_potential_branch_local(Some(2), None, 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (staged[39] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(0), Some(3), 3, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(3);
         }
-        if (staged[39] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(3), 5, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(5);
-        }
         if (staged[40] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(4), 6, multiplicity);
+            stamper.stamp_potential_branch_local(Some(1), Some(4), 4, multiplicity);
         } else {
-            stamper.stamp_inactive_potential_branch_local(6);
+            stamper.stamp_inactive_potential_branch_local(4);
         }
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(6),
@@ -1276,7 +1274,7 @@ impl Instance {
         }
         if staged[37] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            3,
+            2,
             staged[26],
             [],
             [],
@@ -1326,7 +1324,7 @@ impl Instance {
         );
         if staged[39] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            5,
+            3,
             staged[29],
             [],
             [],
@@ -1356,7 +1354,7 @@ impl Instance {
         );
         if staged[40] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            6,
+            4,
             staged[31],
             [],
             [],

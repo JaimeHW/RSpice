@@ -1578,7 +1578,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 21 preserves branch ownership and port-current boundaries in hierarchy.
 // Version 22 retains independent potential branches and normalizes source direction.
 // Version 23 resolves declared grounds before allocating solver nodes.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 23;
+// Version 24 removes duplicate potential-current unknowns from generated devices.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 24;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

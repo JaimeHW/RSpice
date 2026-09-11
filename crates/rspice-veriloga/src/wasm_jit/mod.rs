@@ -120,7 +120,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 32 to 33 preserves instance branch ownership and nested port-flow equations.
 /// 33 to 34 retains distinct potential branches and consistent source directions.
 /// Version 35 resolves declared grounds before allocating solver nodes.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 35;
+/// Version 36 uses one canonical unknown per physical potential branch.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 36;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

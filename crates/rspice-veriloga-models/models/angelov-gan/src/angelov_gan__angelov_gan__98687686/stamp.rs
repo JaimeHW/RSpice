@@ -621,7 +621,7 @@ impl Instance {
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18])];
-        let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5]), ctx.branch_current(self.branches[6]), ctx.branch_current(self.branches[7]), ctx.branch_current(self.branches[8]), ctx.branch_current(self.branches[9]), ctx.branch_current(self.branches[10]), ctx.branch_current(self.branches[11]), ctx.branch_current(self.branches[12]), ctx.branch_current(self.branches[13]), ctx.branch_current(self.branches[14]), ctx.branch_current(self.branches[15]), ctx.branch_current(self.branches[16]), ctx.branch_current(self.branches[17]), ctx.branch_current(self.branches[18])];
+        let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5]), ctx.branch_current(self.branches[6]), ctx.branch_current(self.branches[7]), ctx.branch_current(self.branches[8]), ctx.branch_current(self.branches[9]), ctx.branch_current(self.branches[10]), ctx.branch_current(self.branches[11])];
         let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
@@ -790,11 +790,11 @@ impl Instance {
 		let AEP=0f64;
 		let AES=parameters[54];
 		let AEY=staged[39]!=0.0;
-		let AEZ=branch_unknown_flows[11];
+		let AEZ=branch_unknown_flows[8];
 		let AFD=L7([0f64;7]);
 		let AFG=parameters[53];
 		let AFM=staged[40]!=0.0;
-		let AFN=branch_unknown_flows[15];
+		let AFN=branch_unknown_flows[10];
 		let AFR=L7([0f64;7]);
 		let AFU=parameters[52];
 		let AGC=staged[41]!=0.0;
@@ -1860,14 +1860,14 @@ impl Instance {
 		let AER;
 		if AEL{
 		let AEN=1f64* AEM;
-		let AEO=AL+ (branch_unknown_flows[7]* AEM);
+		let AEO=AL+ (branch_unknown_flows[6]* AEM);
 		AEQ=AEO;
 		AER=AEN;
 		}else{
 		AEQ=AL;
 		AER=AEP;
 		}
-		let AET=AES* branch_unknown_flows[10];
+		let AET=AES* branch_unknown_flows[7];
 		let AEU=1f64* AES;
 		let AEV=ddt(12, AET);
 		let AEW=AEU* SI;
@@ -1884,7 +1884,7 @@ impl Instance {
 		AFE=AL;
 		AFF=AFD;
 		}
-		let AFH=AFG* branch_unknown_flows[14];
+		let AFH=AFG* branch_unknown_flows[9];
 		let AFI=1f64* AFG;
 		let AFJ=ddt(13, AFH);
 		let AFK=AFI* SI;
@@ -1901,7 +1901,7 @@ impl Instance {
 		AFS=AL;
 		AFT=AFR;
 		}
-		let AFV=AFU* branch_unknown_flows[18];
+		let AFV=AFU* branch_unknown_flows[11];
 		let AFW=1f64* AFU;
 		let AFX=ddt(14, AFV);
 		let AFY=AFW* SI;
@@ -2244,62 +2244,55 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(1);
         }
-        stamper.stamp_inactive_potential_branch_local(2);
         if (staged[72] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(11), Some(8), 3, multiplicity);
+            stamper.stamp_potential_branch_local(Some(11), Some(8), 2, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(2);
+        }
+        if (staged[73] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(14), Some(8), 3, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(3);
         }
-        if (staged[73] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(14), Some(8), 4, multiplicity);
+        if (staged[74] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(13), Some(10), 4, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(4);
         }
-        if (staged[74] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(13), Some(10), 5, multiplicity);
+        if (staged[75] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(13), Some(11), 5, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(5);
         }
-        if (staged[75] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(13), Some(11), 6, multiplicity);
+        if (staged[76] != 0.0) || (staged[77] != 0.0) || (staged[78] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(7), Some(13), 6, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(6);
         }
-        if (staged[76] != 0.0) || (staged[77] != 0.0) || (staged[78] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(7), Some(13), 7, multiplicity);
+        if (AQ != 0.0) {
+            stamper.stamp_potential_branch_local(Some(1), Some(7), 7, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(7);
         }
-        stamper.stamp_inactive_potential_branch_local(8);
-        stamper.stamp_inactive_potential_branch_local(9);
+        if (staged[79] != 0.0) || (staged[80] != 0.0) || (staged[81] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(8), Some(9), 8, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(8);
+        }
         if (AQ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(1), Some(7), 10, multiplicity);
+            stamper.stamp_potential_branch_local(Some(9), Some(2), 9, multiplicity);
+        } else {
+            stamper.stamp_inactive_potential_branch_local(9);
+        }
+        if (staged[82] != 0.0) || (staged[83] != 0.0) || (staged[84] != 0.0) {
+            stamper.stamp_potential_branch_local(Some(5), Some(6), 10, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(10);
         }
-        if (staged[79] != 0.0) || (staged[80] != 0.0) || (staged[81] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(8), Some(9), 11, multiplicity);
+        if (AQ != 0.0) {
+            stamper.stamp_potential_branch_local(Some(6), Some(0), 11, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(11);
-        }
-        stamper.stamp_inactive_potential_branch_local(12);
-        stamper.stamp_inactive_potential_branch_local(13);
-        if (AQ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(9), Some(2), 14, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(14);
-        }
-        if (staged[82] != 0.0) || (staged[83] != 0.0) || (staged[84] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(5), Some(6), 15, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(15);
-        }
-        stamper.stamp_inactive_potential_branch_local(16);
-        stamper.stamp_inactive_potential_branch_local(17);
-        if (AQ != 0.0) {
-            stamper.stamp_potential_branch_local(Some(6), Some(0), 18, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(18);
         }
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(15),
@@ -2493,7 +2486,7 @@ impl Instance {
         );
         if staged[72] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            3,
+            2,
             staged[47],
             [],
             [],
@@ -2523,7 +2516,7 @@ impl Instance {
         );
         if staged[73] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            4,
+            3,
             staged[48],
             [],
             [],
@@ -2543,7 +2536,7 @@ impl Instance {
         );
         if staged[74] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            5,
+            4,
             staged[49],
             [],
             [],
@@ -2573,7 +2566,7 @@ impl Instance {
         );
         if staged[75] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            6,
+            5,
             staged[51],
             [],
             [],
@@ -2583,17 +2576,17 @@ impl Instance {
         }
         if staged[76] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 1>(
-            7,
+            6,
             AEQ,
             [],
             [],
-            [7],
+            [6],
             [AMI],
         );
         }
         if staged[77] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            7,
+            6,
             staged[52],
             [],
             [],
@@ -2603,7 +2596,7 @@ impl Instance {
         }
         if staged[78] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            7,
+            6,
             staged[53],
             [],
             [],
@@ -2613,27 +2606,27 @@ impl Instance {
         }
         if AQ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 1>(
-            10,
+            7,
             AEX,
             [],
             [],
-            [10],
+            [7],
             [AMJ],
         );
         }
         if staged[79] != 0.0 {
         stamper.stamp_potential_sparse_local::<6, 1>(
-            11,
+            8,
             AFE,
             [3, 4, 5, 8, 10, 12],
             [AMK, AML, AMM, AMN, AMO, AMP],
-            [11],
+            [8],
             [AMQ],
         );
         }
         if staged[80] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            11,
+            8,
             staged[54],
             [],
             [],
@@ -2643,7 +2636,7 @@ impl Instance {
         }
         if staged[81] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            11,
+            8,
             staged[55],
             [],
             [],
@@ -2653,27 +2646,27 @@ impl Instance {
         }
         if AQ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 1>(
-            14,
+            9,
             AFL,
             [],
             [],
-            [14],
+            [9],
             [AMR],
         );
         }
         if staged[82] != 0.0 {
         stamper.stamp_potential_sparse_local::<6, 1>(
-            15,
+            10,
             AFS,
             [3, 4, 5, 8, 10, 12],
             [AMS, AMT, AMU, AMV, AMW, AMX],
-            [15],
+            [10],
             [AMY],
         );
         }
         if staged[83] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            15,
+            10,
             staged[56],
             [],
             [],
@@ -2683,7 +2676,7 @@ impl Instance {
         }
         if staged[84] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
-            15,
+            10,
             staged[57],
             [],
             [],
@@ -2693,11 +2686,11 @@ impl Instance {
         }
         if AQ != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 1>(
-            18,
+            11,
             AFZ,
             [],
             [],
-            [18],
+            [11],
             [AMZ],
         );
         }
@@ -3174,24 +3167,24 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_potential_reactive_indexed_dense_local(
-            10,
+            7,
             &[],
             &[],
-            &[10],
+            &[7],
             &[cached[63]],
         );
         stamper.stamp_potential_reactive_indexed_dense_local(
-            14,
+            9,
             &[],
             &[],
-            &[14],
+            &[9],
             &[cached[68]],
         );
         stamper.stamp_potential_reactive_indexed_dense_local(
-            18,
+            11,
             &[],
             &[],
-            &[18],
+            &[11],
             &[cached[73]],
         );
         stamper.stamp_current_reactive_indexed_dense_local(

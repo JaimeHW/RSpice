@@ -1899,6 +1899,7 @@ mod tests {
             },
         ];
         CfgDigitalProcess {
+            time_scale: Default::default(),
             id: DigitalProcessId::from(0usize),
             kind: DigitalProcessKind::Always,
             function: CfgFunction {

@@ -81,20 +81,20 @@ fn generated_potential_sources_preserve_parallel_branch_identity() {
         let main = format!(
             r#"
 let mut instance=device::state::Instance::new(&[0]);
-instance.set_branch_indices(&[1,2]);
+assert_eq!(device::state::Instance::BRANCH_COUNT,{active});
+instance.set_branch_indices(&(1..={active}).collect::<Vec<_>>());
 instance.finalize_parameters().unwrap();
 let bias=[0.0,1.0,2.0];
 let ctx=runtime::GeneratedEvalContext {{ voltages:&bias, temperature:300.15 }};
 let mut sink=[0.0;10];
 instance.stamp(&ctx,&mut runtime::GeneratedStamper {{ sink:Some(&mut sink) }});
 assert_eq!(sink[0],{active}.0,"each branch has its own structural coupling: {{sink:?}}");
-assert_eq!(sink[1],{}.0,"only duplicate contribution slots are inactive: {{sink:?}}");
+assert_eq!(sink[1],0.0,"no unused solver rows: {{sink:?}}");
 assert_eq!(sink[2],{sum:?},"each source reads its own current: {{sink:?}}");
 assert_eq!(sink[4],5.0,"sum of source derivatives: {{sink:?}}");
 assert_eq!(sink[9],{sum:?},"derivative columns retain branch identity: {{sink:?}}");
 assert!(!ctx.evaluation_failed());
-"#,
-            2 - active
+"#
         );
         run_generated_main("parallel potential branches", &state, &stamp, &noise, &main)
             .unwrap_or_else(|report| panic!("{report}"));
@@ -1500,7 +1500,8 @@ fn generated_dynamic_potential_rows_preserve_branch_orientation_and_flow_axes() 
     );
     run_generated_main("dynamic potential orientation", &state, &stamp, &noise, r#"
 let mut instance = device::state::Instance::new(&[0,1]);
-instance.set_branch_indices(&[2,3]);
+assert_eq!(device::state::Instance::BRANCH_COUNT,1);
+instance.set_branch_indices(&[2]);
 instance.finalize_parameters().unwrap();
 runtime::set_dynamic_operators_enabled(false);
 let ctx = runtime::GeneratedEvalContext { voltages: &[0.5,0.0,0.25,100.0], temperature: 123.0 };
@@ -2793,7 +2794,8 @@ endmodule
     let body = r#"
 fn sample(temperature: f64) -> [f64; 9] {
     let mut instance = device::state::Instance::new(&[0, 1]);
-    instance.set_branch_indices(&[2, 3]);
+    assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[2]);
     instance.finalize_parameters().unwrap();
     let voltages = [0.0, 0.0, 0.0, 0.0];
     let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature };
@@ -2804,10 +2806,10 @@ fn sample(temperature: f64) -> [f64; 9] {
 }
 let open = sample(300.15);
 assert_eq!(open[0], 0.0, "both environment guards false open: {open:?}");
-assert_eq!(open[1], 2.0, "leader and duplicate pinned: {open:?}");
+assert_eq!(open[1], 1.0, "the inactive physical current is pinned: {open:?}");
 let hot = sample(400.0);
 assert_eq!(hot[0], 1.0, "temperature guard closes topology: {hot:?}");
-assert_eq!(hot[1], 1.0, "duplicate remains pinned: {hot:?}");
+assert_eq!(hot[1], 0.0, "active branch has no unused rows: {hot:?}");
 assert_eq!(hot[2], 1.0, "temperature contribution: {hot:?}");
 let ac = sample(123.0);
 assert_eq!(ac[0], 1.0, "analysis guard closes topology: {ac:?}");
@@ -2837,7 +2839,8 @@ endmodule
     let body = r#"
 fn sample(enabled: f64) -> [f64; 9] {
     let mut instance = device::state::Instance::new(&[0, 1]);
-    instance.set_branch_indices(&[2, 3]);
+    assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[2]);
     instance.set_parameter("enabled", enabled).unwrap();
     instance.finalize_parameters().unwrap();
     let voltages = [0.0; 4];
@@ -2849,7 +2852,7 @@ fn sample(enabled: f64) -> [f64; 9] {
 }
 let base = sample(0.0);
 assert_eq!(base[0], 1.0, "unguarded source owns topology: {base:?}");
-assert_eq!(base[1], 1.0, "duplicate pinned: {base:?}");
+assert_eq!(base[1], 0.0, "active branch has no unused rows: {base:?}");
 assert_eq!(base[2], 1.0, "unguarded residual: {base:?}");
 let summed = sample(1.0);
 assert_eq!(summed[0], 1.0, "physical branch still couples once: {summed:?}");
@@ -2886,7 +2889,8 @@ endmodule
     );
     let body = r#"
 let mut instance = device::state::Instance::new(&[0, 1, 2]);
-instance.set_branch_indices(&[3, 4]);
+assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[3]);
 instance.set_parameter("mode", 2.0).unwrap();
 instance.finalize_parameters().unwrap();
 // The first contribution is inactive but its branch is the physical leader.
@@ -2898,7 +2902,7 @@ let mut stamper = runtime::GeneratedStamper { sink: Some(&mut sink) };
 instance.stamp(&ctx, &mut stamper);
 assert_eq!(sink[0], 1.5, "one topology call plus 0.5 A current: {sink:?}");
 assert_eq!(sink[9], 0.5, "I(<p>) reads the physical leader exactly once: {sink:?}");
-assert_eq!(sink[1], 1.0, "duplicate unknown remains pinned: {sink:?}");
+assert_eq!(sink[1], 0.0, "active branch has no unused rows: {sink:?}");
 "#;
     run_generated_main(
         "one terminal physical port flow",
@@ -2937,11 +2941,12 @@ endmodule
     let body = r#"
 fn sample(mode: f64) -> [f64; 9] {
     let mut instance = device::state::Instance::new(&[0, 1]);
-    instance.set_branch_indices(&[2, 3, 4, 5, 6]);
+    assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[2]);
     instance.set_parameter("mode", mode).unwrap();
     instance.finalize_parameters().unwrap();
-    // Only the physical leader (solver index 2) is 0.5 A. Duplicate MIR
-    // unknowns are deliberately large so a wrong I(p,n) mapping is obvious.
+    // The shared physical current (solver index 2) is 0.5 A. Unrelated
+    // solver values are large so a wrong I(p,n) mapping is obvious.
     let voltages = [0.25, 0.0, 0.5, 10.0, 20.0, 30.0, 40.0];
     let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
     let mut sink = [0.0; 9];
@@ -2951,12 +2956,12 @@ fn sample(mode: f64) -> [f64; 9] {
 }
 let open = sample(0.0);
 assert_eq!(open[0], 0.0, "all inactive must stay open: {open:?}");
-assert_eq!(open[1], 5.0, "leader and four duplicates must be pinned: {open:?}");
-assert_eq!(open[8], 15.0, "each branch ordinal pinned exactly once: {open:?}");
+assert_eq!(open[1], 1.0, "the inactive physical current is pinned: {open:?}");
+assert_eq!(open[8], 1.0, "physical current is pinned exactly once: {open:?}");
 
 let forward = sample(1.0);
 assert_eq!(forward[0], 1.0, "one physical coupling: {forward:?}");
-assert_eq!(forward[1], 4.0, "only duplicates pinned: {forward:?}");
+assert_eq!(forward[1], 0.0, "active branch has no unused rows: {forward:?}");
 assert_eq!(forward[2], 1.0, "forward residual: {forward:?}");
 assert_eq!(forward[5], 1.0, "residual targets leader branch: {forward:?}");
 
@@ -2967,7 +2972,7 @@ assert_eq!(reversed[5], 1.0, "reversed residual targets leader: {reversed:?}");
 
 let summed = sample(3.0);
 assert_eq!(summed[0], 1.0, "simultaneous contributions still couple once: {summed:?}");
-assert_eq!(summed[1], 4.0, "duplicates remain pinned: {summed:?}");
+assert_eq!(summed[1], 0.0, "active branch has no unused rows: {summed:?}");
 assert_eq!(summed[2], 2.5, "4.0 + reversed 1.5 must sum: {summed:?}");
 assert_eq!(summed[5], 2.0, "both residuals target leader ordinal zero: {summed:?}");
 
@@ -3013,9 +3018,10 @@ assert_eq!(device::noise::NOISE_SOURCES[1].branch_ordinal, Some(0),
     "reversed duplicate descriptor must name the physical leader");
 
 let mut instance = device::state::Instance::new(&[0, 1]);
-instance.set_branch_indices(&[2, 3]);
+assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[2]);
 instance.finalize_parameters().unwrap();
-// The physical leader is 0.5 A; the pinned duplicate is deliberately 40 A.
+// The physical current is 0.5 A; an unrelated solver value is 40 A.
 // Both I(p,n) and reversed I(n,p) must read ordinal zero exactly once.
 let voltages = [0.0, 0.0, 0.5, 40.0];
 let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
@@ -4104,17 +4110,18 @@ fn evaluate(instance: &mut device::state::Instance, enabled: f64) -> ([f64; 9], 
     (real, reactive)
 }
 let mut instance = device::state::Instance::new(&[0, 1]);
-instance.set_branch_indices(&[2, 3]);
+assert_eq!(device::state::Instance::BRANCH_COUNT, 1);
+instance.set_branch_indices(&[2]);
 let (active_real, active_reactive) = evaluate(&mut instance, 1.0);
 assert_eq!(active_real[0], 1.0, "group couples once: {active_real:?}");
-assert_eq!(active_real[1], 1.0, "duplicate reactive unknown pinned: {active_real:?}");
+assert_eq!(active_real[1], 0.0, "active branch has no unused rows: {active_real:?}");
 assert_eq!(active_real[3], -6.0, "reversed ddt derivative includes scale and sign: {active_real:?}");
 assert_eq!(active_reactive[0], 1.0, "reactive row targets leader ordinal: {active_reactive:?}");
 assert_eq!(active_reactive[1], -3.0, "reversed charge derivative sign: {active_reactive:?}");
 
 let (inactive_real, inactive_reactive) = evaluate(&mut instance, 0.0);
 assert_eq!(inactive_real[0], 0.0, "all static guards false open group: {inactive_real:?}");
-assert_eq!(inactive_real[1], 2.0, "leader and duplicate pinned: {inactive_real:?}");
+assert_eq!(inactive_real[1], 1.0, "the inactive physical current is pinned: {inactive_real:?}");
 assert_eq!(inactive_reactive[1], 0.0, "inactive evaluation clears cached derivative: {inactive_reactive:?}");
 
 let (_, active_again) = evaluate(&mut instance, 1.0);

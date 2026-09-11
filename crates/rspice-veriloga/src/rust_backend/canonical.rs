@@ -782,17 +782,13 @@ struct PotentialEquationPlan {
     sign: i8,
 }
 
-/// A physical potential branch. Canonical MIR intentionally owns one branch
-/// unknown per contribution statement; generated devices instead assemble the
-/// Verilog-A branch semantics: one physical flow unknown, one structural KCL
-/// coupling, and the sum of every active potential contribution on that branch.
+/// One structural KCL coupling and the sum of every active potential
+/// contribution sharing a physical MIR branch unknown.
 struct PotentialBranchGroup {
-    identity: crate::branch_identity::BranchIdentity<Option<NodeId>>,
     pos: Option<NodeId>,
     neg: Option<NodeId>,
     branch: usize,
     equations: Vec<usize>,
-    duplicate_branches: Vec<usize>,
 }
 
 struct InitializationPlan {
@@ -1472,21 +1468,7 @@ impl ModelPlan {
             );
         }
 
-        let branch_of_equation: Vec<Option<usize>> = artifact
-            .mir
-            .equations
-            .iter()
-            .map(|equation| {
-                artifact
-                    .mir
-                    .branch_unknowns
-                    .iter()
-                    .find(|unknown| unknown.equation == equation.id)
-                    .map(|unknown| usize::from(unknown.id))
-            })
-            .collect();
-        let (potential_equations, potential_groups) =
-            plan_potential_branches(artifact, &branch_of_equation)?;
+        let (potential_equations, potential_groups) = plan_potential_branches(artifact)?;
         record_phase(
             artifact,
             measurements,
@@ -2265,7 +2247,6 @@ fn plan_stamps(
 
 fn plan_potential_branches(
     artifact: &CanonicalIrArtifact,
-    branch_of_equation: &[Option<usize>],
 ) -> Result<
     (
         Vec<Option<PotentialEquationPlan>>,
@@ -2275,31 +2256,23 @@ fn plan_potential_branches(
 > {
     let mut equations = vec![None; artifact.mir.equations.len()];
     let mut groups: Vec<PotentialBranchGroup> = Vec::new();
+    let mut group_by_branch: Vec<Option<usize>> = vec![None; artifact.mir.branch_unknowns.len()];
 
     for (equation_index, equation) in artifact.mir.equations.iter().enumerate() {
         if equation.kind != MirEquationKind::Potential {
             continue;
         }
-        let branch = branch_of_equation
-            .get(equation_index)
-            .copied()
-            .flatten()
-            .ok_or_else(|| {
-                RustBackendError::internal(
-                    artifact.metadata.source_package.as_str(),
-                    artifact.mir.module_name.as_str(),
-                    format!("potential equation {equation_index} has no branch unknown"),
-                )
-            })?;
+        let branch = equation.branch_unknown.map(usize::from).ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("potential equation {equation_index} has no branch unknown"),
+            )
+        })?;
         let pos = equation.branch.pos_node;
         let neg = equation.branch.neg_node;
 
-        let identity = crate::branch_identity::BranchIdentity::new(
-            equation.branch.declared_name.as_ref(),
-            pos,
-            neg,
-        );
-        let existing = groups.iter().position(|group| group.identity == identity);
+        let existing = group_by_branch[branch];
         let (group_index, sign) = match existing {
             Some(group_index) => {
                 let group = &mut groups[group_index];
@@ -2309,18 +2282,16 @@ fn plan_potential_branches(
                     -1
                 };
                 group.equations.push(equation_index);
-                group.duplicate_branches.push(branch);
                 (group_index, sign)
             }
             None => {
                 let group_index = groups.len();
+                group_by_branch[branch] = Some(group_index);
                 groups.push(PotentialBranchGroup {
-                    identity,
                     pos,
                     neg,
                     branch,
                     equations: vec![equation_index],
-                    duplicate_branches: Vec::new(),
                 });
                 (group_index, 1)
             }
@@ -3538,16 +3509,6 @@ impl ModelPlan {
                  \x20       }}",
                 group.branch, group.branch,
             );
-            // MIR keeps one branch-current unknown per contribution statement.
-            // Only the source-first unknown represents the physical branch;
-            // every duplicate remains in the generated ABI and is pinned to
-            // zero current so it cannot make the solver matrix singular.
-            for duplicate in &group.duplicate_branches {
-                let _ = writeln!(
-                    out,
-                    "        stamper.stamp_inactive_potential_branch_local({duplicate});"
-                );
-            }
         }
     }
 

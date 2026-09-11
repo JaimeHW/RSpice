@@ -282,7 +282,8 @@ use super::*;
 // Version 73 resolves declared grounds and rejects conflicting net disciplines.
 // Version 74 retains declared module timing and delays in resolved design ticks.
 // Version 75 resolves module time queries and scales retained analog $realtime.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 75;
+// Version 76 links canonical equations to shared physical branch unknowns.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 76;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -1764,7 +1765,7 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 /// on an analog-only module is a no-op — so the `CompiledModel` and the
 /// canonical artifact a deck's analog `.va` produces are the ones it produced
 /// before.
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
     rspice_veriloga::CompilerOptions {
         enable_ams: true,
