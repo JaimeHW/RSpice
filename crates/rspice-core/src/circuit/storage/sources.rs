@@ -461,12 +461,11 @@ impl VoltageSources {
     /// Return the exact complex excitation stamped into this source's AC
     /// branch equation.
     ///
-    /// Keep the inactive-source cutoff here so the matrix right-hand side and
-    /// the post-solve ideal-constraint projection cannot disagree at the
-    /// cutoff boundary or reconstruct a phasor with different low bits.
+    /// The matrix RHS and ideal-constraint projection must use the same
+    /// phasor, including nonzero excitations below solver tolerances.
     pub(crate) fn ac_excitation(&self, index: usize) -> Complex64 {
         let magnitude = self.ac_magnitudes[index];
-        if magnitude.abs() <= 1.0e-15 {
+        if magnitude == 0.0 {
             Complex64::new(0.0, 0.0)
         } else {
             Complex64::from_polar(magnitude, self.ac_phases[index])

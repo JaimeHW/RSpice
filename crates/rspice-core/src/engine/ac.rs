@@ -3182,6 +3182,33 @@ mod tests {
     }
 
     #[test]
+    fn ac_voltage_sources_preserve_small_nonzero_excitations() {
+        for magnitude in [1e-14, 1e-15, 1e-16, 1e-30, 1e-200, 1e-300] {
+            for phase in [0.0_f64, 37.0, -90.0] {
+                let netlist = Netlist::parse(&format!(
+                    "Small voltage excitation\nV1 out 0 DC 0 AC {magnitude:e} {phase}\nR1 out 0 1\n.end"
+                )).unwrap();
+                let point = Engine::default()
+                    .run_ac(&netlist, &[1.0])
+                    .unwrap()
+                    .remove(0);
+                let expected = Complex64::from_polar(1.0, phase.to_radians());
+                let actual = voltage_at(&point, "out") / magnitude;
+                assert!(
+                    (actual - expected).norm() < 2e-14,
+                    "{magnitude:e}, {phase}: {actual}"
+                );
+                let branch = point
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("V1"))
+                    .unwrap();
+                assert!((point.currents[branch] / magnitude + expected).norm() < 2e-14);
+            }
+        }
+    }
+
+    #[test]
     fn ac_complex_source_stack_preserves_every_constraint() {
         let netlist = Netlist::parse(
             "Complex stacked AC constraints\n\
