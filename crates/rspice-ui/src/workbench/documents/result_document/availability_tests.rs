@@ -660,6 +660,7 @@ fn result_tabs_follow_the_upgraded_mockup_mode_order() {
             ResultViewer::PhaseNoise,
             ResultViewer::Smith,
             ResultViewer::Polar,
+            ResultViewer::NetworkMatrix,
             ResultViewer::TransferFunction,
             ResultViewer::Contribution,
             ResultViewer::Op,

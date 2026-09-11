@@ -113,7 +113,8 @@ pub(crate) struct PspPath {
 pub(crate) struct PspData {
     pub frequencies: Vec<Value>,
     pub paths: Vec<PspPath>,
-    /// Authored physical-port references; mixed-mode channels need modal metadata.
+    /// Authored physical-port references in port-number order. Adjacent equal
+    /// pairs define differential (2 Z0) and common (Z0 / 2) power-wave channels.
     pub reference_impedances_ohm: Option<Vec<Value>>,
 }
 
@@ -256,10 +257,11 @@ fn run_periodic_sparameter_analysis(
             result_limit,
         ));
     }
-    // Physical references cannot describe the differential/common-mode
-    // channels through the existing single-ended result metadata schema.
-    let reference_impedances_ohm =
-        (!config.mixed_mode).then(|| ports.iter().map(|port| port.z0).collect());
+    // The metadata retains physical-port references, including when the
+    // coefficients use paired power waves. Consumers derive differential
+    // (2 Z0) and common (Z0 / 2) references from the validated equal-Z0 pairs.
+    // Dropping this authority made a successful mixed-mode run unviewable.
+    let reference_impedances_ohm = Some(ports.iter().map(|port| port.z0).collect());
     let port_count = ports.len();
     let result = prepared
         .run_with_abort(abort)
@@ -715,6 +717,17 @@ mod tests {
         assert!(result.paths.iter().all(|path| {
             path.output_sideband == path.input_sideband || path.values[0].norm() < 1.0e-9
         }));
+
+        request.mixed_mode = true;
+        let mixed = run_psp_analysis_from_pss_with_source_path_and_abort(
+            deck,
+            &request,
+            &operating_point,
+            None,
+            &NoAbort,
+        )
+        .expect("mixed-mode PSP completes");
+        assert_mixed_matched_network(&mixed);
     }
 
     #[test]
@@ -774,6 +787,40 @@ mod tests {
         assert!(result.paths.iter().all(|path| {
             path.output_sideband == path.input_sideband || path.values[0].norm() < 1.0e-9
         }));
+
+        request.mixed_mode = true;
+        let mixed = run_hbsp_analysis_from_hb_with_source_path_and_abort(
+            deck,
+            &request,
+            operating_point.as_ref(),
+            None,
+            &NoAbort,
+        )
+        .expect("mixed-mode HBSP completes");
+        assert_mixed_matched_network(&mixed);
+    }
+
+    fn assert_mixed_matched_network(data: &PspData) {
+        assert_eq!(data.reference_impedances_ohm, Some(vec![50.0, 50.0]));
+        for (name, expected) in [
+            ("Sdd11", -1.0 / 3.0),
+            ("Scc11", 1.0),
+            ("Sdc11", 0.0),
+            ("Scd11", 0.0),
+        ] {
+            let path = data
+                .paths
+                .iter()
+                .find(|path| {
+                    path.base_name == name && path.output_sideband == 0 && path.input_sideband == 0
+                })
+                .expect("complete modal matrix");
+            assert!(
+                (path.values[0] - Complex64::new(expected, 0.0)).norm() < 1e-8,
+                "{name}: {:?}",
+                path.values[0]
+            );
+        }
     }
 
     fn hbsp_fixture(deck: &str) -> ServiceRunResult<PspData> {

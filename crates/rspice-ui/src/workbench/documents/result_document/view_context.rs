@@ -341,6 +341,7 @@ fn viewer_can_render(
         // question is the same one Nyquist asks — the analysis kind decides
         // which quantities it can name, not whether it can draw at all.
         ResultViewer::Polar => !super::polar::quantities(analysis).is_empty(),
+        ResultViewer::NetworkMatrix => structural(super::StructuralGate::NetworkMatrix, analysis),
         ResultViewer::Scatter | ResultViewer::BoxViolin => matches!(
             analysis.family_metadata,
             Some(AnalysisResultFamilyMetadata::MonteCarlo { ref variables, ref member_measurements, .. })

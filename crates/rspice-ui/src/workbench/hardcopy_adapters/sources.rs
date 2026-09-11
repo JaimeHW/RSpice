@@ -1200,6 +1200,11 @@ fn quick_result_availability(
         ResultViewer::Smith => {
             crate::workbench::documents::result_document::smith_analysis_is_renderable(analysis)
         }
+        ResultViewer::NetworkMatrix => {
+            crate::workbench::documents::result_document::view_context::analysis_supports_viewer(
+                viewer, analysis,
+            )
+        }
         ResultViewer::Polar => visible_waveforms().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
                 !complex.real.is_empty() && complex.real.len() == complex.imag.len()

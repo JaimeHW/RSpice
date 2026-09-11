@@ -199,6 +199,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             )]),
         ResultViewer::Bode | ResultViewer::Nyquist => ac_analysis(),
         ResultViewer::Smith | ResultViewer::Polar => sparameter_analysis(),
+        ResultViewer::NetworkMatrix => super::super::network_matrix::tests::fixture(false),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             // The distribution sheets need a bounded measurement to normalize
             // against, and the box's default grouping draws nothing without

@@ -661,7 +661,10 @@ fn paint_canvas(
     let painter = ui.painter().with_clip_rect(rect);
     let grid = egui::Stroke::new(1.0, c.canvas_grid);
 
-    // Rings, labelled on the 0° spoke.
+    // Stack radial labels beside the 90° spoke. Along the horizontal spoke,
+    // long SI labels overlapped one another in smaller panes. Thin the labels
+    // if even their line heights cannot fit, while retaining every grid ring.
+    let label_stride = ((tokens::FS_0 + 4.0) / (radius / 5.0)).ceil().max(1.0) as i32;
     for step in 1..=5 {
         let fraction = f64::from(step) / 5.0;
         let emphasized = rule.emphasizes_unit_circle()
@@ -675,15 +678,15 @@ fn paint_canvas(
                 grid
             },
         );
-        // Inside the ring, not outside it: the 0 degree spoke label lives
-        // just past the outermost ring, and the two collided there.
-        painter.text(
-            egui::pos2(centre.x + radius * fraction as f32 - 3.0, centre.y - 3.0),
-            egui::Align2::RIGHT_BOTTOM,
-            rule.ring_label(fraction),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.text_faint,
-        );
+        if (5 - step) % label_stride == 0 {
+            painter.text(
+                egui::pos2(centre.x + 5.0, centre.y - radius * fraction as f32 + 3.0),
+                egui::Align2::LEFT_TOP,
+                rule.ring_label(fraction),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.text_faint,
+            );
+        }
     }
     // The unit circle when it falls between rings rather than on one.
     if rule.emphasizes_unit_circle() {
@@ -787,8 +790,15 @@ fn paint_canvas(
         painter.circle_filled(point, 3.5, color);
         painter.circle_stroke(point, 6.0, egui::Stroke::new(1.2, color));
         painter.text(
-            egui::pos2(point.x + 8.0, point.y - 8.0),
-            egui::Align2::LEFT_BOTTOM,
+            egui::pos2(
+                point.x + 8.0,
+                point.y + if label == "A" { -8.0 } else { 8.0 },
+            ),
+            if label == "A" {
+                egui::Align2::LEFT_BOTTOM
+            } else {
+                egui::Align2::LEFT_TOP
+            },
             label,
             theme::mono(tokens::FS_0, FontWeight::SemiBold),
             color,

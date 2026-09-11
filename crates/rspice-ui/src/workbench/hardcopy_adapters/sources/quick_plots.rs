@@ -60,6 +60,7 @@ pub(super) fn resolve_results_quick_view_parts(
             &presentation.overlay.for_analysis(active.analysis.id),
         )?),
         ResultViewer::Op
+        | ResultViewer::NetworkMatrix
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
         | ResultViewer::Specs

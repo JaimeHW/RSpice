@@ -1262,6 +1262,20 @@ pub(super) fn semantic_result_summary(
                 HardcopySourceError::MissingViewerEvidence("typed periodic result"),
             )?);
         }
+        ResultViewer::NetworkMatrix => {
+            let retained =
+                crate::workbench::documents::result_document::network_matrix::hardcopy_tables(
+                    analysis,
+                )
+                .map_err(|reason| {
+                    HardcopySourceError::InvalidVisualizationSource(reason.to_owned())
+                })?;
+            tables.extend(retained.into_iter().map(|table| SemanticTable {
+                title: table.title,
+                columns: table.columns,
+                rows: table.rows,
+            }));
+        }
         ResultViewer::PoleZero => {
             let Some(AnalysisResultPayload::PoleZero {
                 poles,

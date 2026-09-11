@@ -15,6 +15,7 @@ pub(crate) mod frame_work;
 mod harmonic_balance;
 mod hist;
 pub(crate) mod manifest;
+pub(crate) mod network_matrix;
 mod noise_contrib;
 mod nyquist;
 mod op_inspector;
@@ -923,6 +924,8 @@ pub enum ResultViewer {
     /// This is dataset-native and deliberately has no Visualization Studio
     /// viewer-document identity.
     Manifest,
+    /// Exact single-ended and mixed-mode power-wave matrices.
+    NetworkMatrix,
 }
 
 impl ResultViewer {
@@ -946,6 +949,7 @@ impl ResultViewer {
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::Polar => "POLAR",
+            ResultViewer::NetworkMatrix => "NETWORK",
             ResultViewer::PoleZero => "PZ",
             ResultViewer::Scatter => "SCATTER",
             ResultViewer::BoxViolin => "DIST",
@@ -957,7 +961,7 @@ impl ResultViewer {
         }
     }
 
-    const PRIMARY: [ResultViewer; 24] = [
+    const PRIMARY: [ResultViewer; 25] = [
         ResultViewer::Waves,
         ResultViewer::DcSweep,
         ResultViewer::Bode,
@@ -968,6 +972,7 @@ impl ResultViewer {
         ResultViewer::PhaseNoise,
         ResultViewer::Smith,
         ResultViewer::Polar,
+        ResultViewer::NetworkMatrix,
         ResultViewer::TransferFunction,
         ResultViewer::Contribution,
         ResultViewer::Op,
@@ -1019,6 +1024,7 @@ impl ResultViewer {
             ResultViewer::Nyquist => "Nyquist",
             ResultViewer::Smith => "Smith",
             ResultViewer::Polar => "Polar",
+            ResultViewer::NetworkMatrix => "Network Matrix",
             ResultViewer::PoleZero => "PZ",
             ResultViewer::Scatter => "Scatter",
             ResultViewer::BoxViolin => "Distribution",
@@ -1058,6 +1064,7 @@ impl ResultViewer {
             ResultViewer::TransferFunction => "viewer-transfer-function",
             ResultViewer::Smith => "viewer-smith",
             ResultViewer::Polar => "viewer-polar",
+            ResultViewer::NetworkMatrix => "viewer-mixed-mode-network",
             ResultViewer::PoleZero => "viewer-pz",
             ResultViewer::Scatter => "viewer-scatter",
             ResultViewer::BoxViolin => "viewer-box-violin",
@@ -1086,6 +1093,7 @@ impl ResultViewer {
             "viewer-phase-noise" => ResultViewer::PhaseNoise,
             "viewer-smith" => ResultViewer::Smith,
             "viewer-polar" => ResultViewer::Polar,
+            "viewer-mixed-mode-network" => ResultViewer::NetworkMatrix,
             "viewer-table" => ResultViewer::Table,
             "viewer-histogram" => ResultViewer::Hist,
             "viewer-scatter" => ResultViewer::Scatter,
@@ -1121,6 +1129,7 @@ impl ResultViewer {
             | ResultViewer::Polar
             | ResultViewer::PoleZero => WorkbenchIcon::Target,
             ResultViewer::Op
+            | ResultViewer::NetworkMatrix
             | ResultViewer::TransferFunction
             | ResultViewer::Specs
             | ResultViewer::Soa
@@ -2138,6 +2147,7 @@ pub(crate) enum StructuralGate {
     /// S-parameter traces with per-port reference impedances; see
     /// [`smith::structure_is_renderable`].
     SParameterStructure,
+    NetworkMatrix,
     /// Exact event histories or validated legacy event projections.
     EventHistory,
 }
@@ -2157,6 +2167,7 @@ pub(crate) fn structural_gate_is_answered_directly(
         StructuralGate::HarmonicSpectrum => harmonic_balance::analysis_is_renderable(analysis),
         StructuralGate::PhaseNoiseSpectrum => phase_noise::phase_noise_is_renderable(analysis),
         StructuralGate::SParameterStructure => smith::structure_is_renderable(analysis),
+        StructuralGate::NetworkMatrix => network_matrix::structure_is_renderable(analysis),
         StructuralGate::EventHistory => events::analysis_is_renderable(analysis),
     }
 }
@@ -2403,6 +2414,7 @@ pub struct ResultsState {
     /// Polar sheet controls: the network term, the radius ruling, the decade
     /// marks and the normalization.
     pub(crate) polar: polar::PolarSheetState,
+    network_matrix: network_matrix::NetworkMatrixState,
     /// Scatter sheet controls and the brushed trial selection.
     pub(crate) scatter: scatter::ScatterSheetState,
     /// Box/violin sheet controls: the grouping, the margin scale, the body
@@ -4997,6 +5009,9 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::Polar => polar::show(ui, &mut SheetContext::of(&mut app.state)),
+        ResultViewer::NetworkMatrix => {
+            network_matrix::show(ui, &mut SheetContext::of(&mut app.state))
+        }
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
         ResultViewer::Scatter => scatter::show(ui, &mut SheetContext::of(&mut app.state)),
         ResultViewer::BoxViolin => box_violin::show(ui, &mut SheetContext::of(&mut app.state)),
@@ -6194,26 +6209,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
-        ResultViewer::Smith => {
-            if active_run.is_some_and(|run| {
-                state.simulation.active_analysis().is_some_and(|analysis| {
-                    analysis_answers_structural_gate(
-                        state,
-                        run.dataset_id,
-                        analysis,
-                        StructuralGate::SParameterStructure,
-                    ) && analysis_evidence_is_valid(state, run.dataset_id, analysis)
-                })
-            }) {
-                ViewerAvailability::available(
-                    "Retained S-parameter coefficients and per-port reference impedances are available",
-                )
-            } else {
-                ViewerAvailability::unavailable(
-                    "Requires SP, PSP, or HBSP with exact complex traces and retained port impedances",
-                )
-            }
-        }
+        ResultViewer::Smith => smith::availability(state),
         ResultViewer::Polar => {
             if active_run.is_some_and(|run| {
                 state.simulation.active_analysis().is_some_and(|analysis| {
@@ -6231,6 +6227,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::PoleZero => specialized_availability(state, ActiveViewer::PoleZero),
+        ResultViewer::NetworkMatrix => network_matrix::availability(state),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             if active_run.is_some_and(|run| {
                 state.simulation.active_analysis().is_some_and(|analysis| {
@@ -6508,6 +6505,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
+        ResultViewer::NetworkMatrix => network_matrix::right_panel(ui),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
         ResultViewer::Scatter => scatter::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),

@@ -5082,7 +5082,7 @@
       },
       "capability": {
         "viewerId": "viewer-mixed-mode-network",
-        "classification": "release-planned",
+        "classification": "release-target",
         "creationFamilyIds": [
           "rf-network"
         ],

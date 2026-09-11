@@ -91,6 +91,32 @@ pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) ->
     analysis.validate_retained_evidence().is_ok() && structure_is_renderable(analysis)
 }
 
+/// What the tab strip says about this sheet, in the sheet's own words.
+///
+/// The verdict comes from the workspace memo rather than a fresh walk, which
+/// is why it is spelled through the structural gate and not through
+/// [`analysis_is_renderable`].
+pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
+    if state.simulation.active_run().is_some_and(|run| {
+        state.simulation.active_analysis().is_some_and(|analysis| {
+            super::analysis_answers_structural_gate(
+                state,
+                run.dataset_id,
+                analysis,
+                super::StructuralGate::SParameterStructure,
+            ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+        })
+    }) {
+        super::ViewerAvailability::available(
+            "Retained S-parameter coefficients and per-port reference impedances are available",
+        )
+    } else {
+        super::ViewerAvailability::unavailable(
+            "Requires SP, PSP, or HBSP with exact complex traces and retained port impedances",
+        )
+    }
+}
+
 /// The same question with the retained-evidence verdict left to the caller.
 ///
 /// Split out because the per-frame callers — the tab strip's availability

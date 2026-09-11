@@ -2809,6 +2809,7 @@ fn resolved_viewer_availability_for_binding(
                 && payload.validate_for(analysis.analysis_type).is_ok()
         }),
         ResultViewer::Smith => result_document::smith_analysis_is_renderable(analysis),
+        ResultViewer::NetworkMatrix => result_document::view_context::analysis_supports_viewer(viewer, analysis),
         ResultViewer::Hist
         | ResultViewer::Op
         | ResultViewer::NoiseContrib
