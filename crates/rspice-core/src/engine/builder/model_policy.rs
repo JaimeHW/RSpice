@@ -635,6 +635,7 @@ pub(super) fn effective_native_bjt_tnom_celsius(
 pub(super) fn validate_bjt_model_level(
     element_name: &str,
     model: &str,
+    spice_dialect: SpiceDialect,
     params: &HashMap<String, f64>,
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
@@ -735,6 +736,50 @@ pub(super) fn validate_bjt_model_level(
     }
 
     let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
+    for name in ["IBE", "IBC", "ISS", "NS"] {
+        let authored = params.contains_key(name)
+            || expr_params
+                .iter()
+                .chain(string_params.iter())
+                .any(|(key, _)| key.eq_ignore_ascii_case(name));
+        if !authored {
+            continue;
+        }
+        if native_vbic_level || spice_dialect == SpiceDialect::Xyce {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} requires a native ngspice Gummel-Poon model"
+            )));
+        }
+        if !params.get(name).is_some_and(|value| {
+            value.is_finite()
+                && if name == "NS" {
+                    *value > 0.0
+                } else {
+                    *value >= 0.0
+                }
+        }) {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} must be a finite scalar {}",
+                if name == "NS" {
+                    "greater than zero"
+                } else {
+                    "greater than or equal to zero"
+                }
+            )));
+        }
+    }
+    if params.contains_key("IBE") && params.contains_key("IBC") {
+        for name in ["NF", "NR"] {
+            if params
+                .get(name)
+                .is_some_and(|value| !value.is_finite() || *value <= 0.0)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': model '{model}' parameter {name} must be finite and positive for split junction currents"
+                )));
+            }
+        }
+    }
     reject_unsupported_vbic13_params(
         element_name,
         model,
@@ -1807,8 +1852,16 @@ mod tests {
     fn bjt_policy_rejects_redundant_aliases_before_model_construction() {
         let params = diode_params(&[("VAF", 50.0), ("VBF", 75.0)]);
 
-        let err = validate_bjt_model_level("Q1", "QMOD", &params, &[], &[], false)
-            .expect_err("Xyce rejects multiple names for one BJT model quantity");
+        let err = validate_bjt_model_level(
+            "Q1",
+            "QMOD",
+            SpiceDialect::Ngspice,
+            &params,
+            &[],
+            &[],
+            false,
+        )
+        .expect_err("Xyce rejects multiple names for one BJT model quantity");
         let message = err.to_string();
         assert!(
             message.contains("forward Early voltage"),

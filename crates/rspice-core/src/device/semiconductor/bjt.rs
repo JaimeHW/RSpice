@@ -612,9 +612,15 @@ const EXT_E: usize = 2;
 const EXT_S: usize = 3;
 
 #[derive(Debug, Clone, Default)]
-struct LegacyJunctionAreas {
+struct LegacyJunctionParameters {
     base: Option<Value>,
     collector: Option<Value>,
+    split_saturation: Option<(Value, Value)>,
+    substrate_saturation: Value,
+    substrate_emission: Option<Value>,
+    // Operating values are independent: IBE may be zero while IBC is not.
+    bc_saturation: Option<Value>,
+    substrate_current: Value,
 }
 
 /// BJT device using the Ebers-Moll model
@@ -930,9 +936,9 @@ pub struct Bjt {
     pub ncnp: Value,
     /// Instance area factor
     pub area: Value,
-    /// Optional independent base/collector geometry for ngspice GP devices.
+    /// Optional junction geometry and current controls for ngspice GP devices.
     /// Omitted factors track AREA at each temperature/instance refresh.
-    legacy_junction_areas: Option<Box<LegacyJunctionAreas>>,
+    legacy_junction_params: Option<Box<LegacyJunctionParameters>>,
     /// Instance multiplicity factor
     pub m: Value,
     /// Instance OFF flag used for operating-point startup seeding.
@@ -1944,7 +1950,7 @@ impl Bjt {
             ncip: 1.0,
             ncnp: 2.0,
             area: 1.0,
-            legacy_junction_areas: None,
+            legacy_junction_params: None,
             m: 1.0,
             initial_off: false,
             initial_condition_vbe: None,

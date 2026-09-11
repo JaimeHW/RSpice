@@ -16,12 +16,11 @@ impl Bjt {
         } else {
             0.0
         };
+        let reverse_is = self.legacy_reverse_saturation_current();
         let ifi = self.diode_current(vbe_eff, self.nf) + gmin * vbe_eff;
-        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
-            + gmin * vbc_eff;
+        let iri = self.diode_current_with_is(reverse_is, vbc_eff, self.nr) + gmin * vbc_eff;
         let gfi = self.diode_conductance(vbe_eff, self.nf) + gmin;
-        let gri =
-            self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr) + gmin;
+        let gri = self.diode_conductance_with_is(reverse_is, vbc_eff, self.nr) + gmin;
 
         let raw_q1_inv =
             1.0 - if self.var.is_finite() && self.var > 0.0 {

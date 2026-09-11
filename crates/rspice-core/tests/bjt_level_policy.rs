@@ -2244,6 +2244,377 @@ fn zero_gummel_poon_saturation_current_stays_disabled() {
 }
 
 #[test]
+fn legacy_split_currents_reach_dc_ac_and_transient() {
+    use rspice_core::Complex64;
+    // Independent ngspice 46 DC measurements. AC is checked against the
+    // derivative of the diode laws: bjtacld.c omits substrate conductance.
+    for (temperature, subs, reference) in [
+        (
+            27.0,
+            1,
+            [
+                3.165937836533358e-06,
+                -1.0344045040664362e-06,
+                -6.277506987883802e-08,
+            ],
+        ),
+        (
+            27.0,
+            -1,
+            [
+                5.171970789437013e-06,
+                -1.729405840116699e-06,
+                5.398661789424142e-09,
+            ],
+        ),
+        (
+            70.0,
+            1,
+            [
+                7.688199823184137e-05,
+                -2.4835816379930253e-05,
+                -2.3821803046106603e-06,
+            ],
+        ),
+        (
+            70.0,
+            -1,
+            [
+                0.0001241713025082066,
+                -4.16523084041259e-05,
+                2.59330497203629e-07,
+            ],
+        ),
+    ] {
+        let temp = temperature + 273.15;
+        let vt = rspice_core::constants::thermal_voltage(temp);
+        let ratio = temp / 300.15;
+        let log_factor = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
+        let bc_area = if subs == 1 { 3.0 } else { 5.0 };
+        let substrate_area = if subs == 1 { 5.0 } else { 3.0 };
+        let is_be = 2e-12 * 2.0 * 4.0 * (log_factor / 1.1).exp();
+        let is_bc = 7e-12 * bc_area * 4.0 * (log_factor / 1.3).exp();
+        let is_sub = 5e-12 * substrate_area * 4.0 * (log_factor / 1.3).exp();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            temperature: temp,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-9,
+                voltage_abstol: 1e-12,
+                current_abstol: 1e-18,
+                ..Default::default()
+            },
+            integration_method:
+                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=20).map(|i| f64::from(i) * 1e-8).collect(),
+            )),
+            ..Default::default()
+        });
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let polarity = p * f64::from(subs);
+            // No Early effect, rolloff or depletion capacitance: transport
+            // and stored charge have closed-form independent solutions.
+            let response = |vb: f64, drive: &str| {
+                let diode = |isat: f64, voltage: f64, n: f64| {
+                    (
+                        isat * (voltage / (n * vt)).exp_m1(),
+                        isat * (voltage / (n * vt)).exp() / (n * vt),
+                    )
+                };
+                let (forward, gf) = diode(is_be, vb, 1.1);
+                let (reverse, gr) = diode(is_bc, vb + 0.3, 1.3);
+                let vsub = if subs == 1 { 0.2 } else { vb + 0.1 };
+                let (substrate, gs) = diode(is_sub, vsub, 1.2);
+                let (dc_c, dc_b) = if subs == 1 {
+                    (
+                        p * (-forward + 1.5 * reverse) + polarity * substrate,
+                        p * (-forward / 100.0 - reverse / 2.0),
+                    )
+                } else {
+                    (
+                        p * (-forward + 1.5 * reverse),
+                        p * (-forward / 100.0 - reverse / 2.0) + polarity * substrate,
+                    )
+                };
+                let dvbe = if drive == "VB" { p } else { 0.0 };
+                let dvbc = dvbe;
+                let dvsub = polarity
+                    * if drive == "VS" {
+                        1.0
+                    } else if subs == -1 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
+                let substrate_g = polarity * gs * dvsub;
+                let re_c =
+                    p * (-gf * dvbe + 1.5 * gr * dvbc) + if subs == 1 { substrate_g } else { 0.0 };
+                let re_b = p * (-gf * dvbe / 100.0 - gr * dvbc / 2.0)
+                    + if subs == -1 { substrate_g } else { 0.0 };
+                let omega = std::f64::consts::TAU * 1e6;
+                (
+                    [dc_c, dc_b, -polarity * substrate],
+                    [
+                        Complex64::new(re_c, p * omega * 2e-9 * gr * dvbc),
+                        Complex64::new(re_b, -p * omega * (1e-9 * gf * dvbe + 2e-9 * gr * dvbc)),
+                        Complex64::new(-substrate_g, 0.0),
+                    ],
+                    [p * 1e-9 * forward, p * 2e-9 * reverse],
+                )
+            };
+            for nested in [false, true] {
+                let make = |drive: &str| {
+                    let device = format!(
+                        "Q1 c b e s qm AREA=2 AREAB=3 AREAC=5 M=4\n.model qm {kind}(IS=3e-12 IBE={{be}} IBC={{bc}} ISS={{sub}} NS=1.2 BF=100 BR=2 NF=1.1 NR=1.3 TF=1n TR=2n SUBS={subs})"
+                    );
+                    let device = if nested {
+                        format!(
+                            "X1 c b e s cell be=2p bc=7p sub=5p\n.subckt cell c b e s be=13p bc=17p sub=19p\n{device}\n.ends"
+                        )
+                    } else {
+                        device
+                    };
+                    Netlist::parse(&format!("Split junctions\n.param be=2p bc=7p sub=5p\nVC c 0 {}\nVB b 0 PWL(0 {} 200n {}) DC {} AC {}\nVE e 0 0\nVS s 0 DC {} AC {}\n{device}\n.end",
+                        -0.3*p, 0.04*p, 0.08*p, 0.04*p, u8::from(drive=="VB"), -0.1*p, u8::from(drive=="VS"))).unwrap()
+                };
+                let deck = make("VB");
+                let dc = engine.run_dc_op(&deck).unwrap();
+                let (expected_dc, _, _) = response(0.04, "VB");
+                for (index, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                    let actual = dc.branch_current_named(name).unwrap();
+                    // The known SI/older ngspice k/q difference is <8 ppm.
+                    assert_rel_close(
+                        &format!("{kind} SUBS={subs} T={temperature} nested={nested} {name}"),
+                        actual,
+                        p * reference[index],
+                        8e-6,
+                    );
+                    assert!(
+                        (actual - expected_dc[index]).abs()
+                            < 1e-9 * expected_dc[index].abs() + 1e-18
+                    );
+                }
+                for drive in ["VB", "VS"] {
+                    let result = engine.run_ac(&make(drive), &[1e6]).unwrap();
+                    let (_, expected, _) = response(0.04, drive);
+                    for (index, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                        let branch = result[0]
+                            .branch_names
+                            .iter()
+                            .position(|key| key.eq_ignore_ascii_case(name))
+                            .unwrap();
+                        let actual = result[0].currents[branch];
+                        assert!(
+                            (actual - expected[index]).norm()
+                                < 1e-9 * expected[index].norm() + 1e-17,
+                            "{kind} SUBS={subs} T={temperature} nested={nested} drive={drive} {name}: {actual:?} != {:?}",
+                            expected[index]
+                        );
+                    }
+                }
+                let result = engine.run_tran(&deck, 200e-9, 10e-9).unwrap();
+                let voltages = result.try_voltage_waveform_named("b").unwrap();
+                let currents = ["VC", "VB", "VS"]
+                    .map(|name| result.try_branch_current_waveform_named(name).unwrap());
+                for i in 1..result.time.len() {
+                    let (mut expected, _, charge) = response(p * voltages[i], "VB");
+                    let (_, _, previous) = response(p * voltages[i - 1], "VB");
+                    let dt = result.time[i] - result.time[i - 1];
+                    expected[0] += (charge[1] - previous[1]) / dt;
+                    expected[1] -= (charge[0] - previous[0] + charge[1] - previous[1]) / dt;
+                    for terminal in 0..3 {
+                        assert!(
+                            (currents[terminal][i] - expected[terminal]).abs()
+                                < 2e-9 * expected[terminal].abs() + 1e-17,
+                            "{kind} SUBS={subs} T={temperature} nested={nested} transient {terminal}: {} != {}",
+                            currents[terminal][i],
+                            expected[terminal]
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_substrate_current_and_charge_flow_through_the_intrinsic_lead() {
+    use rspice_core::Complex64;
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Ngspice,
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            voltage_reltol: 1e-9,
+            voltage_abstol: 1e-12,
+            current_abstol: 1e-18,
+            ..Default::default()
+        },
+        integration_method: rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+        locked_time_grid: Some(std::sync::Arc::new(
+            (0..=20).map(|i| f64::from(i) * 1e-8).collect(),
+        )),
+        ..Default::default()
+    });
+    let nvt = 1.2 * rspice_core::constants::thermal_voltage(300.15);
+    let isat = 8e-12; // Unsplit ISS uses AREA*M, independently of AREAB/C.
+    let resistance = 1000.0; // Authored 8 kohm / (AREA=2 * M=4).
+    for (subs, lead, capacitance) in [(1, "RC=8k", 40e-12), (-1, "RB=8k RBM=1k", 24e-12)] {
+        // The scalar R-diode-C circuit has a monotone implicit equation;
+        // bisection is independent of the engine's Newton implementation.
+        let solve = |drive: f64, previous: f64, dt: f64| {
+            let mut low = 0.0;
+            let mut high = drive;
+            for _ in 0..80 {
+                let voltage = 0.5 * (low + high);
+                let current = isat * (voltage / nvt).exp_m1()
+                    + if dt > 0.0 {
+                        capacitance * (voltage - previous) / dt
+                    } else {
+                        0.0
+                    };
+                if voltage + resistance * current > drive {
+                    high = voltage;
+                } else {
+                    low = voltage;
+                }
+            }
+            0.5 * (low + high)
+        };
+        let operating_voltage = solve(0.5, 0.0, 0.0);
+        let current = isat * (operating_voltage / nvt).exp_m1();
+        let admittance = Complex64::new(
+            isat * (operating_voltage / nvt).exp() / nvt,
+            std::f64::consts::TAU * 1e6 * capacitance,
+        );
+        let ac_expected = -admittance / (Complex64::new(1.0, 0.0) + resistance * admittance);
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let polarity = p * f64::from(subs);
+            let deck = Netlist::parse(&format!("Substrate lead\nVC c 0 0\nVB b 0 0\nVS s 0 PWL(0 {} 200n {}) DC {} AC 1\nQ1 c b 0 s qm AREA=2 AREAB=3 AREAC=5 M=4\n.model qm {kind}(IS=0 ISS=1p NS=1.2 {lead} CJS=2p MJS=0 SUBS={subs})\n.end",polarity*0.5,polarity*0.7,polarity*0.5)).unwrap();
+            let dc = engine.run_dc_op(&deck).unwrap();
+            assert_rel_close(
+                "substrate DC",
+                dc.branch_current_named("VS").unwrap(),
+                -polarity * current,
+                1e-8,
+            );
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            let branch = ac[0]
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("VS"))
+                .unwrap();
+            assert!((ac[0].currents[branch] - ac_expected).norm() < ac_expected.norm() * 1e-8);
+            let result = engine.run_tran(&deck, 200e-9, 10e-9).unwrap();
+            let currents = result.try_branch_current_waveform_named("VS").unwrap();
+            let mut previous = operating_voltage;
+            for i in 1..result.time.len() {
+                let drive = 0.5 + 0.2 * (result.time[i] / 200e-9);
+                let voltage = solve(drive, previous, result.time[i] - result.time[i - 1]);
+                let expected = -polarity * (drive - voltage) / resistance;
+                assert!(
+                    (currents[i] - expected).abs() < 2e-7 * expected.abs() + 1e-13,
+                    "{kind} SUBS={subs} t={}: {} != {expected:e}",
+                    result.time[i],
+                    currents[i]
+                );
+                previous = voltage;
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
+#[test]
+fn legacy_split_current_presence_and_validation_follow_the_model_family() {
+    let config = SimulationConfig {
+        spice_dialect: SpiceDialect::Ngspice,
+        convergence_config: ConvergenceConfig {
+            gmin_target: 0.0,
+            junction_gmin_target: 0.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let engine = Engine::new(config);
+    let vt = rspice_core::constants::thermal_voltage(300.15);
+    for (fields, be, bc) in [
+        ("IBE=0 IBC=7p", 0.0, 7e-12),
+        ("IBE=2p IBC=0", 2e-12, 0.0),
+        ("IBE=0 IBC=0", 0.0, 0.0),
+        ("IBE=9p", 3e-12, 6e-12),
+        ("IBC=9p", 3e-12, 6e-12),
+    ] {
+        let deck = Netlist::parse(&format!("Split presence\nVC c 0 -.3\nVB b 0 .04\nQ1 c b 0 qm AREA=2 AREAB=3 M=4\n.model qm NPN(IS=3p {fields} BF=100 BR=2)\n.end")).unwrap();
+        let result = engine.run_dc_op(&deck).unwrap();
+        let forward = be * 8.0 * (0.04 / vt).exp_m1();
+        let reverse = bc * 12.0 * (0.34 / vt).exp_m1();
+        for (name, expected) in [
+            ("VC", -forward + 1.5 * reverse),
+            ("VB", -forward / 100.0 - reverse / 2.0),
+        ] {
+            let actual = result.branch_current_named(name).unwrap();
+            assert!(
+                (actual - expected).abs() <= expected.abs() * 1e-9 + 1e-18,
+                "{fields} {name}: {actual:e} != {expected:e}"
+            );
+        }
+    }
+    for name in ["IBE", "IBC", "ISS", "NS"] {
+        for value in [-1.0, f64::NAN, f64::INFINITY] {
+            let mut deck =
+                Netlist::parse("Invalid junction\nQ1 0 0 0 qm\n.model qm NPN\n.end").unwrap();
+            deck.models[0].params.push((name.into(), value));
+            assert!(
+                engine
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        for (dialect, level) in [(SpiceDialect::Xyce, 1), (SpiceDialect::Ngspice, 4)] {
+            let deck = Netlist::parse(&format!(
+                "Wrong junction family\nQ1 0 0 0 qm\n.model qm NPN(LEVEL={level} {name}=1)\n.end"
+            ))
+            .unwrap();
+            assert!(
+                Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+    }
+    let deck =
+        Netlist::parse("Invalid emission\nQ1 0 0 0 qm\n.model qm NPN(ISS=1p NS=0)\n.end").unwrap();
+    assert!(
+        engine
+            .run_dc_op(&deck)
+            .unwrap_err()
+            .to_string()
+            .contains("NS")
+    );
+    for name in ["NF", "NR"] {
+        let deck = Netlist::parse(&format!(
+            "Invalid split emission\nQ1 0 0 0 qm\n.model qm NPN(IBE=1p IBC=2p {name}=0)\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+    }
+}
+
+#[test]
 fn legacy_junction_areas_match_ngspice_currents_and_stored_charge() {
     // Independently captured ngspice 46 DC and 1 MHz AC currents at C/B/S.
     // Both polarities were measured; DC changes sign and AC is identical.

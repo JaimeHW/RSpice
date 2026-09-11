@@ -622,13 +622,20 @@ impl Bjt {
         if self.charge_model != BjtChargeModel::LegacyGummelPoon || self.xyce_compatibility {
             return (self.area, self.area);
         }
-        let areas = self.legacy_junction_areas.as_deref();
+        let areas = self.legacy_junction_params.as_deref();
         let base = areas.and_then(|areas| areas.base).unwrap_or(self.area);
         let collector = areas.and_then(|areas| areas.collector).unwrap_or(self.area);
         match self.substrate_topology {
             BjtSubstrateTopology::Vertical => (base, collector),
             BjtSubstrateTopology::Lateral => (collector, base),
         }
+    }
+
+    pub(super) fn legacy_reverse_saturation_current(&self) -> Value {
+        self.legacy_junction_params
+            .as_ref()
+            .and_then(|junctions| junctions.bc_saturation)
+            .unwrap_or(self.is * self.isrr.max(0.0))
     }
 
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
@@ -939,7 +946,7 @@ impl Bjt {
             0.0
         };
         // bjttemp.c applies the BC geometry to the already AREA-scaled IS
-        // when separate ISBE/ISBC are absent. This includes the default
+        // when separate IBE/IBC are absent. This includes the default
         // AREAB/AREAC=AREA. Xyce GP uses only the common AREA multiplier.
         self.isrr = isrr_temp.max(0.0)
             * if legacy_model && !self.xyce_compatibility {
@@ -947,6 +954,35 @@ impl Bjt {
             } else {
                 1.0
             };
+        if let Some(junctions) = &mut self.legacy_junction_params {
+            junctions.bc_saturation = None;
+            junctions.substrate_current = 0.0;
+            if legacy_model && !self.xyce_compatibility {
+                let (substrate_log_factor, substrate_area) =
+                    if let Some((be, bc)) = junctions.split_saturation {
+                        self.is = crate::numerics::scaled_exp_product(
+                            &[be, self.area, self.m],
+                            &[],
+                            legacy_factlog / self.nf_nominal,
+                        );
+                        junctions.bc_saturation = Some(crate::numerics::scaled_exp_product(
+                            &[bc, bc_area, self.m],
+                            &[],
+                            legacy_factlog / self.nr_nominal,
+                        ));
+                        // bjttemp.c reuses the reverse temperature factor for
+                        // ISS when both split transport currents are supplied.
+                        (legacy_factlog / self.nr_nominal, substrate_area)
+                    } else {
+                        (legacy_factlog, self.area)
+                    };
+                junctions.substrate_current = crate::numerics::scaled_exp_product(
+                    &[junctions.substrate_saturation, substrate_area, self.m],
+                    &[],
+                    substrate_log_factor,
+                );
+            }
+        }
         self.ibei = (ibei_temp * scale).max(0.0);
         self.iben = (iben_temp * scale).max(0.0);
         self.ibci = (ibci_temp * bc_scale).max(0.0);
@@ -1080,6 +1116,26 @@ impl Bjt {
         {
             self.irb_nominal = v;
             self.irb = v;
+        }
+
+        // Ngspice switches to split transport only when both fields are
+        // authored. A lone IBE or IBC deliberately retains common IS.
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            if ["IBE", "IBC", "ISS", "NS"]
+                .iter()
+                .any(|key| params.contains_key(*key))
+            {
+                self.legacy_junction_params
+                    .get_or_insert_with(Default::default);
+            }
+            if let Some(junctions) = &mut self.legacy_junction_params {
+                junctions.split_saturation = params
+                    .get("IBE")
+                    .zip(params.get("IBC"))
+                    .map(|(&be, &bc)| (be, bc));
+                junctions.substrate_saturation = params.get("ISS").copied().unwrap_or(0.0);
+                junctions.substrate_emission = params.get("NS").copied();
+            }
         }
 
         // DC parameters
@@ -1964,7 +2020,7 @@ impl Bjt {
 
             if name.eq_ignore_ascii_case("AREAB") || name.eq_ignore_ascii_case("AREAC") {
                 let areas = self
-                    .legacy_junction_areas
+                    .legacy_junction_params
                     .get_or_insert_with(Default::default);
                 if name.eq_ignore_ascii_case("AREAB") {
                     areas.base = Some(*value);

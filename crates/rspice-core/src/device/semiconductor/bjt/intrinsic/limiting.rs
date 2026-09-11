@@ -95,8 +95,18 @@ impl Bjt {
     ) -> (Value, Value, Value) {
         self.with_temperature_variant(previous_vrth, |model| {
             let vt = model.vt.max(1e-18);
-            let vcrit = Self::junction_critical_voltage(vt, model.is);
-            (vt, vcrit, 50.0)
+            let vcrit = Self::junction_critical_voltage(
+                vt,
+                model.is.max(model.legacy_reverse_saturation_current()),
+            );
+            let sub_vcrit = model
+                .legacy_junction_params
+                .as_ref()
+                .filter(|junctions| junctions.substrate_current > 0.0)
+                .map_or(50.0, |junctions| {
+                    Self::junction_critical_voltage(vt, junctions.substrate_current)
+                });
+            (vt, vcrit, sub_vcrit)
         })
     }
 
@@ -109,7 +119,10 @@ impl Bjt {
         LegacyNonlinearBranchVoltages {
             vbe: p * (internal[IDX_VBI] - internal[IDX_VEI]),
             vbc: p * (internal[IDX_VBI] - internal[IDX_VCI]),
-            vsub: p * (internal[IDX_VSI] - internal[IDX_VCI]),
+            vsub: match self.substrate_topology {
+                BjtSubstrateTopology::Vertical => p * (internal[IDX_VSI] - internal[IDX_VCI]),
+                BjtSubstrateTopology::Lateral => p * (internal[IDX_VBI] - internal[IDX_VSI]),
+            },
         }
     }
 
@@ -261,12 +274,25 @@ impl Bjt {
         if tied(EXT_C, EXT_E) {
             limited.vbc = limited.vbe;
         }
-        if tied(EXT_S, EXT_C) {
-            limited.vsub = 0.0;
-        } else if tied(EXT_S, EXT_B) {
-            limited.vsub = limited.vbc;
-        } else if tied(EXT_S, EXT_E) {
-            limited.vsub = limited.vbc - limited.vbe;
+        match self.substrate_topology {
+            BjtSubstrateTopology::Vertical => {
+                if tied(EXT_S, EXT_C) {
+                    limited.vsub = 0.0;
+                } else if tied(EXT_S, EXT_B) {
+                    limited.vsub = limited.vbc;
+                } else if tied(EXT_S, EXT_E) {
+                    limited.vsub = limited.vbc - limited.vbe;
+                }
+            }
+            BjtSubstrateTopology::Lateral => {
+                if tied(EXT_S, EXT_B) {
+                    limited.vsub = 0.0;
+                } else if tied(EXT_S, EXT_C) {
+                    limited.vsub = limited.vbc;
+                } else if tied(EXT_S, EXT_E) {
+                    limited.vsub = limited.vbe;
+                }
+            }
         }
         let p = self.polarity();
         let raw_nodes = [
@@ -281,7 +307,10 @@ impl Bjt {
         let constraints = [
             [0.0, 0.0, 0.0, p, -p, 0.0, 0.0],
             [0.0, -p, 0.0, p, 0.0, 0.0, 0.0],
-            [0.0, -p, 0.0, 0.0, 0.0, 0.0, p],
+            match self.substrate_topology {
+                BjtSubstrateTopology::Vertical => [0.0, -p, 0.0, 0.0, 0.0, 0.0, p],
+                BjtSubstrateTopology::Lateral => [0.0, 0.0, 0.0, p, 0.0, 0.0, -p],
+            },
         ];
         let targets = [limited.vbe, limited.vbc, limited.vsub];
 

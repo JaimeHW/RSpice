@@ -420,6 +420,17 @@ impl Bjt {
                 branch.current = gmin * (vsi - connection);
                 branch.d_internal[IDX_VSI] = gmin;
                 branch.d_internal[index] = -gmin;
+                if let Some(junctions) = &self.legacy_junction_params {
+                    let polarity = self.polarity() * self.substrate_topology.ngspice_sign();
+                    let (current, conductance) = self.diode_iv_with_is(
+                        junctions.substrate_current,
+                        polarity * (vsi - connection),
+                        junctions.substrate_emission.unwrap_or(1.0),
+                    );
+                    branch.current += polarity * current;
+                    branch.d_internal[IDX_VSI] += conductance;
+                    branch.d_internal[index] -= conductance;
+                }
             }
             return branch;
         }

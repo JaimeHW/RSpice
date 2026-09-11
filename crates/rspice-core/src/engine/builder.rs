@@ -6150,6 +6150,7 @@ impl Engine {
                         validate_bjt_model_level(
                             &element.name,
                             model,
+                            self.config.spice_dialect,
                             &params_map,
                             &device_model.expr_params,
                             &device_model.string_params,

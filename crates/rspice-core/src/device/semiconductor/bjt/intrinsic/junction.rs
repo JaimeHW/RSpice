@@ -57,7 +57,12 @@ impl Bjt {
         }
     }
 
-    fn diode_iv_with_is(&self, isat: Value, v: Value, n: Value) -> (Value, Value) {
+    pub(in crate::device::semiconductor::bjt) fn diode_iv_with_is(
+        &self,
+        isat: Value,
+        v: Value,
+        n: Value,
+    ) -> (Value, Value) {
         let nvt = n * self.vt;
         if !isat.is_finite() || isat <= 0.0 || !v.is_finite() || !nvt.is_finite() || nvt <= 0.0 {
             return (0.0, 0.0);
