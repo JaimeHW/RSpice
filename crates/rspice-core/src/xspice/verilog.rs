@@ -14,6 +14,11 @@
 //! between two runs of one compiled design (the plan, which is immutable) and
 //! what is not (all of the running state).
 //!
+//! [`CompiledDigitalDesign::link`] combines compiled instances into a single
+//! executable plan. Connected net ports share signals and drivers; variable
+//! outputs contribute through continuous assignments. The resulting design
+//! runs through the same host, with one scheduling region order and precision.
+//!
 //! # Why it lives under `xspice`
 //!
 //! Not because it is an XSPICE code model; it is not. Because of the layering
@@ -105,6 +110,8 @@
 //! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 
 pub(crate) mod host;
+#[cfg(test)]
+mod linked_tests;
 mod mixed;
 pub(crate) mod store;
 #[cfg(test)]
@@ -113,7 +120,9 @@ mod tests;
 use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
+pub use rspice_veriloga::canonical_ir::digital_link::DigitalLinkNet;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
+use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
@@ -263,6 +272,8 @@ pub struct DigitalRunReport {
 pub struct CompiledDigitalDesign {
     /// The front end's output, shared by every host built from it.
     plan: Arc<CanonicalDigitalPlan>,
+    ports: Vec<rspice_veriloga::canonical_ir::digital_link::DigitalLinkPort>,
+    signal_aliases: std::collections::BTreeMap<String, DigitalSignalId>,
     /// The module that was compiled, so a stimulus naming another one is
     /// refused rather than silently run against this.
     module: String,
@@ -302,10 +313,125 @@ impl CompiledDigitalDesign {
             });
         }
 
+        use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkDirection, DigitalLinkPort};
+        let mut ports = Vec::new();
+        for port in &artifact.hir.ports {
+            let Some(signal) = artifact
+                .digital
+                .signals
+                .iter()
+                .find(|signal| signal.name == port.name)
+            else {
+                continue;
+            };
+            let direction = match port.direction.as_str() {
+                "input" => DigitalLinkDirection::Input,
+                "output" => DigitalLinkDirection::Output,
+                "inout" => DigitalLinkDirection::Inout,
+                direction => {
+                    return Err(DigitalRunError::Compile {
+                        detail: format!("invalid direction '{direction}' for port '{}'", port.name),
+                    });
+                }
+            };
+            ports.push(DigitalLinkPort {
+                name: port.name.to_string(),
+                signal: signal.id,
+                direction,
+            });
+        }
         Ok(Self {
+            ports,
+            signal_aliases: Default::default(),
             module: artifact.mir.module_name.to_string(),
             resolution: TimeResolution::new(artifact.digital.timing.precision_exponent)?,
             plan: Arc::new(artifact.digital),
+        })
+    }
+
+    /// Connect compiled instances into one executable digital design. Net ports
+    /// share resolution directly; variable outputs retain separate storage and
+    /// drive their connections continuously. Inputs may be supplied through a
+    /// named net or a qualified instance signal such as `controller.clk`.
+    ///
+    /// Connections are whole ports with matching domains and widths. Different
+    /// packed ranges are positional. Stimulus ticks use the finest precision of
+    /// all linked instances; each module keeps its own delay and time units.
+    pub fn link(
+        name: &str,
+        instances: &[(&str, &Self)],
+        nets: &[DigitalLinkNet],
+    ) -> Result<Self, DigitalRunError> {
+        Self::link_with_control(name, instances, nets, &rspice_veriloga::NoPipelineControl)
+    }
+
+    /// The cancellable form used by a circuit or worker during elaboration.
+    pub fn link_with_control(
+        name: &str,
+        instances: &[(&str, &Self)],
+        nets: &[DigitalLinkNet],
+        control: &dyn rspice_veriloga::PipelineControl,
+    ) -> Result<Self, DigitalRunError> {
+        use rspice_veriloga::canonical_ir::digital_link::{
+            DigitalLinkDirection, DigitalLinkInstance, DigitalLinkPort, link_digital_plans,
+        };
+        if name.is_empty() {
+            return Err(DigitalRunError::Compile {
+                detail: "linked design name must not be empty".into(),
+            });
+        }
+        let inputs: Vec<_> = instances
+            .iter()
+            .map(|(name, design)| DigitalLinkInstance {
+                name,
+                plan: &design.plan,
+                ports: &design.ports,
+            })
+            .collect();
+        let linked = link_digital_plans(&inputs, nets, control).map_err(|diagnostics| {
+            DigitalRunError::Compile {
+                detail: diagnostics
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            }
+        })?;
+        let mut signal_aliases = linked.signal_names;
+        // Retain aliases through repeated linking, including collapsed net names.
+        for instance in &linked.instances {
+            let design = instances
+                .iter()
+                .find(|(name, _)| *name == instance.name)
+                .unwrap()
+                .1;
+            for (alias, original) in &design.signal_aliases {
+                let name = format!("{}.{}", instance.name, alias);
+                let signal = instance.signals[usize::from(*original)];
+                if signal_aliases
+                    .insert(name.clone(), signal)
+                    .is_some_and(|old| old != signal)
+                {
+                    return Err(DigitalRunError::Compile {
+                        detail: format!("linked name '{name}' identifies different signals"),
+                    });
+                }
+            }
+        }
+        let ports = nets
+            .iter()
+            .map(|net| DigitalLinkPort {
+                name: net.name.clone(),
+                signal: signal_aliases[&net.name],
+                direction: DigitalLinkDirection::Inout,
+            })
+            .collect();
+        Ok(Self {
+            module: name.into(),
+            ports,
+            signal_aliases,
+            resolution: TimeResolution::new(linked.plan.timing.precision_exponent)?,
+            plan: Arc::new(linked.plan),
         })
     }
 
@@ -386,17 +512,22 @@ impl CompiledDigitalDesign {
         let inputs = stimulus
             .inputs
             .iter()
-            .map(|port| resolve_port(&host, port))
+            .map(|port| resolve_port(&host, port, &self.signal_aliases))
             .collect::<Result<Vec<_>, DigitalRunError>>()?;
         let outputs = stimulus
             .outputs
             .iter()
-            .map(|port| resolve_port(&host, port))
+            .map(|port| resolve_port(&host, port, &self.signal_aliases))
             .collect::<Result<Vec<_>, DigitalRunError>>()?;
         let clock = stimulus
             .clock
             .as_ref()
-            .map(|clock| Ok::<_, DigitalRunError>((host.signal(&clock.port)?, clock.half_period)))
+            .map(|clock| {
+                Ok::<_, DigitalRunError>((
+                    resolve_signal(&host, &clock.port, &self.signal_aliases)?,
+                    clock.half_period,
+                ))
+            })
             .transpose()?;
 
         let mut observations = Vec::with_capacity(stimulus.vectors.len());
@@ -521,8 +652,24 @@ struct ResolvedPort {
 }
 
 /// Resolve one stimulus port and check that the two agree about its domain.
-fn resolve_port(host: &DigitalHost, port: &DigitalPort) -> Result<ResolvedPort, DigitalRunError> {
-    let signal = host.signal(&port.name)?;
+fn resolve_signal(
+    host: &DigitalHost,
+    name: &str,
+    aliases: &std::collections::BTreeMap<String, DigitalSignalId>,
+) -> Result<DigitalSignalId, DigitalRunError> {
+    aliases
+        .get(name)
+        .copied()
+        .map(Ok)
+        .unwrap_or_else(|| host.signal(name))
+}
+
+fn resolve_port(
+    host: &DigitalHost,
+    port: &DigitalPort,
+    aliases: &std::collections::BTreeMap<String, DigitalSignalId>,
+) -> Result<ResolvedPort, DigitalRunError> {
+    let signal = resolve_signal(host, &port.name, aliases)?;
     let real = host.is_real(signal);
     if real != (port.width == 0) {
         return Err(DigitalRunError::StimulusValueDomain {

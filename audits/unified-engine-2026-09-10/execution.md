@@ -935,15 +935,91 @@ production readiness or Spectre parity. The user confirmed that no licensed
 reference installation is currently available; implementation continues while
 vendor qualification remains unavailable.
 
+## MS04/MS05 increment: link HDL instances into one executable digital domain
+
+The compiler now exposes `link_digital_plans`, which combines immutable instance
+plans and resolved whole-port connections into one sealed canonical plan. Net
+ports collapse into common signals while each continuous driver keeps a distinct
+identity. Variable outputs keep their storage and drive the connected net through
+an ordinary continuous process; variable inputs use an input copy. Compatible
+packed widths may use different ascending or descending declaration ranges:
+reads retain their local bounds and write targets map to normalized positions.
+Digital and real resolution domains remain distinct, including the existing
+single-driver and explicitly selected real-resolution policies. Partial-port and
+width-converting connections still require elaborated adapters.
+
+The linked design has one precision and process-region authority. Each process
+retains its module time scale and delay-conversion operations, while the design
+uses the finest linked precision. Signals, processes, drivers, analog probes and
+source-file IDs acquire deterministic design identities. The returned instance
+maps retain original-to-design identities, connection-process ownership and source
+file provenance for the circuit analog adapters and debugger. Qualified signal
+names and collapsed net aliases remain addressable; instance/net input order does
+not change the sealed plan. Linking validates the inputs and result and supports
+cancellation without mutating the input plans.
+
+`CompiledDigitalDesign::link` and `link_with_control` execute the result through
+the existing `DigitalHost`, rather than building another event interpreter.
+Linked designs can themselves be instantiated, retaining collapsed aliases.
+This is an executable digital integration path and the linker needed by circuit
+elaboration. The current `.va`/X-card mixed adapter has not yet migrated its owned
+digital state into this common domain, and its direct-XSPICE-connection guard
+remains in place. Removing that guard before common scheduling and rollback are
+wired would still be incorrect.
+
+Five focused execution cases passed initially on `8c83eca1a` and again on the
+combined `cfcc01897` baseline after the concurrent physical-nature/schema and
+positional semiconductor-parameter changes. The first compilation caught a test
+fixture supplying probe-ID/value tuples to an API that takes an indexed value
+slice; the corrected fixture passed on its first execution. The cases verify:
+
+- Two separately compiled samplers exchange their previous values on a common
+  clock edge, so all samples precede any nonblocking update. Reordered instance,
+  net and endpoint lists produce the same plan and trace; nested linking retains
+  aliases.
+- A 1 ns/100 ps clock and a 10 ps/1 ps delayed sampler retain their own units on
+  a shared 1 ps grid. Restoring a shared host snapshot preserves the delayed
+  cross-instance update at 750 ps and the later update at 1750 ps.
+- Multiple partial drivers preserve bit order across ascending/nonzero ranges,
+  produce X on opposing drives and Z on release. Two real contributions resolve
+  to the expected sum under the explicitly selected sum policy.
+- Computed event sensitivity and a captured nonblocking assignment waiting for
+  two later clock edges retain their relocated dependencies and captured value.
+- Two instances of an analog-reading process see independently supplied probe
+  values and retain distinct source identities. Invalid single-driver real-net
+  connections, unknown ports and cancellation are refused.
+
+The port compatibility and deferred-update requirements are recorded in
+[VAMS-2023 sections 6.5.7 and 8.5.3.4](https://www.accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+These are independent expected-value fixtures, not vendor comparisons. The final
+selected test bodies took 0.01 seconds after a 1 minute 4 second build. No broad
+suite or platform run was added. The authoritative generator regenerated all 43
+built-ins after the final compiler inputs were stable; only its manifest identity
+changed, preserving the concurrent published-model updates. Generator digest:
+`40c90aa3be3cfd31644a5c5761998599c7fc8e96ab04e4827cca5c5e13a91609`.
+The later core-only semiconductor-IC binding commit `d3c1db7af` was incorporated
+without changing this compiler/runtime path or its generator inputs; the focused
+checks were not repeated for that unrelated integration.
+This API addition changes neither the existing artifact wire format nor existing
+source lowering, so it adds no schema/cache-format bump beyond upstream schema 50.
+
+The required whole-circuit HDL/XSPICE/loaded-SPICE example, circuit-wide root and
+retry coordination, platform/backend qualification and every remaining MS00–MS15
+requirement remain open. The host snapshot fixture verifies shared digital replay;
+it does not qualify complete circuit rollback or persisted restart. Native/JIT
+and Wasm digital execution are not newly qualified by this portable runtime path.
+Production readiness and Spectre parity remain unproven, with no licensed vendor
+reference currently available.
+
 ## Next implementation work
 
-Build the circuit-wide digital execution path from the elaborated typed graph,
-with stable signal/process/driver/probe identities and one precision/region
-authority. Migrate the per-instance hosts and connect HDL instances and XSPICE
-participants to resolved event nets without routing digital chains through
-unnecessary analog unknowns. Preserve explicit electrical loads and converters.
-The first whole-circuit slice must include two HDL instances, an XSPICE
-participant, a loaded SPICE boundary, off-grid timing and a rejected trial.
+Use the linker and its instance identity maps in circuit elaboration. Move the
+per-instance mixed adapters' digital execution and accepted/trial state under a
+circuit-owned authority, publish all analog probe and boundary inputs consistently,
+and attach HDL and XSPICE drivers to resolved event nets. Preserve explicit
+electrical loads and converters while removing unnecessary analog unknowns from
+digital chains. The first whole-circuit slice must include two HDL instances, an
+XSPICE participant, a loaded SPICE boundary, off-grid timing and a rejected trial.
 
 Continue hierarchical source/library/view binding and the remaining MS02 delay
 and time-declaration semantics alongside those interfaces. Finish the controller,
