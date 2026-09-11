@@ -637,23 +637,33 @@ impl Engine {
         Ok(())
     }
 
-    fn sensitivity_step(
+    fn validate_parameter_sensitivity_inputs(
         param_value: Value,
         delta: Option<Value>,
-    ) -> Result<Value, SimulationError> {
+    ) -> Result<(), SimulationError> {
         if !param_value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Sensitivity param_value must be finite, got {param_value}"
             )));
         }
+        if let Some(delta) = delta
+            && (!delta.is_finite() || delta <= 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Sensitivity delta must be a positive finite number, got {delta}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn sensitivity_step(
+        param_value: Value,
+        delta: Option<Value>,
+    ) -> Result<Value, SimulationError> {
+        Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         // A dimensionful floor can exceed the entire nominal value (for
         // example a 100 fF capacitance) and cross its physical domain.
         let h = delta.unwrap_or_else(|| Self::relative_sensitivity_step(param_value, 1e-12));
-        if !h.is_finite() || h <= 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Sensitivity delta must be a positive finite number, got {h}"
-            )));
-        }
         let lower = param_value - h;
         let upper = param_value + h;
         if !(lower.is_finite() && lower < param_value || upper.is_finite() && upper > param_value) {
@@ -683,7 +693,8 @@ impl Engine {
 
     /// Run sensitivity analysis
     ///
-    /// Computes dVout/dparam using finite differences.
+    /// Computes dVout/dparam using captured analytic derivatives when available,
+    /// or finite-difference refinement otherwise.
     /// Useful for design optimization and tolerance analysis.
     /// A defined parameter may have zero influence on the selected output.
     /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
@@ -705,7 +716,7 @@ impl Engine {
         )
     }
 
-    /// Run finite-difference DC sensitivity with cooperative cancellation.
+    /// Run parameter DC sensitivity with cooperative cancellation.
     #[allow(clippy::too_many_arguments)]
     pub fn run_sensitivity_with_abort(
         &self,
@@ -749,7 +760,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let h = Self::sensitivity_step(param_value, delta)?;
+        Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         if let Some((_, derivative)) = self.linear_parameter_sensitivity(
             netlist,
             &output,
@@ -761,6 +772,7 @@ impl Engine {
         )? {
             return Ok(derivative[0].re);
         }
+        let h = Self::sensitivity_step(param_value, delta)?;
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
         let evaluate = |candidate| {
@@ -859,7 +871,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let h = Self::sensitivity_step(param_value, delta)?;
+        Self::validate_parameter_sensitivity_inputs(param_value, delta)?;
         super::ac::validate_ac_frequencies(frequencies)?;
         self.ensure_analysis_points(frequencies.len())?;
         if let Some((nominal, derivatives)) = self.linear_parameter_sensitivity(
@@ -879,6 +891,7 @@ impl Engine {
                 abort,
             );
         }
+        let h = Self::sensitivity_step(param_value, delta)?;
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
         // Replay at every coordinate, including the requested nominal value:

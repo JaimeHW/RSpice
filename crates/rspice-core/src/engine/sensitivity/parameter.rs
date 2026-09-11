@@ -518,6 +518,141 @@ mod tests {
     }
 
     #[test]
+    fn analytic_parameter_sensitivity_does_not_require_finite_probes() {
+        let engine = Engine::default();
+        let output = AcSensitivityOutput::Voltage {
+            positive: 2,
+            negative: None,
+        };
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let netlist = parse(
+                "Analytic coordinate
+.param p=1
+V1 in 0 DC 1 AC 1
+E1 out 0 in 0 {p/1e308}
+.end",
+                dialect,
+            );
+            for value in [1.0, f64::MAX, -f64::MAX] {
+                let delta = Some(f64::MIN_POSITIVE);
+                // These requested probe coordinates round to the same value.
+                assert!(Engine::sensitivity_step(value, delta).is_err());
+                let mut runs = 0;
+                let dc = engine
+                    .run_output_sensitivity_with_abort(
+                        &netlist,
+                        output.clone(),
+                        "p",
+                        value,
+                        delta,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                assert_eq!(runs, 1);
+                assert!((dc / 1e-308 - 1.0).abs() < 2e-14, "{dialect:?}: {dc:e}");
+                runs = 0;
+                let ac = engine
+                    .run_output_sensitivity_ac_with_abort(
+                        &netlist,
+                        output.clone(),
+                        "p",
+                        value,
+                        &[1.0],
+                        delta,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                assert_eq!(runs, 1);
+                assert!(
+                    (ac[0] / (value.signum() * 1e-308) - 1.0).abs() < 2e-14,
+                    "{dialect:?}: {ac:?}"
+                );
+            }
+            // Invalid input remains an error even when no probes would be used.
+            for (value, delta, diagnostic) in [
+                (f64::NAN, None, "param_value"),
+                (f64::INFINITY, None, "param_value"),
+                (f64::NEG_INFINITY, None, "param_value"),
+                (1.0, Some(0.0), "delta"),
+                (1.0, Some(-1.0), "delta"),
+                (1.0, Some(f64::NAN), "delta"),
+                (1.0, Some(f64::INFINITY), "delta"),
+            ] {
+                for ac in [false, true] {
+                    let mut runs = 0;
+                    let error = if ac {
+                        engine
+                            .run_output_sensitivity_ac_with_abort(
+                                &netlist,
+                                output.clone(),
+                                "p",
+                                value,
+                                &[1.0],
+                                delta,
+                                &mut runs,
+                                &NoAbort,
+                            )
+                            .unwrap_err()
+                    } else {
+                        engine
+                            .run_output_sensitivity_with_abort(
+                                &netlist,
+                                output.clone(),
+                                "p",
+                                value,
+                                delta,
+                                &mut runs,
+                                &NoAbort,
+                            )
+                            .unwrap_err()
+                    };
+                    assert_eq!(runs, 0);
+                    assert!(error.to_string().contains(diagnostic), "{error}");
+                }
+            }
+            // A nonlinear owner still requires distinct refinement coordinates.
+            let nonlinear = parse(
+                "Refinement coordinate
+.param p=1
+V1 in 0 DC 1 AC 1
+B1 out 0 V={p*V(in)}
+.end",
+                dialect,
+            );
+            let mut runs = 0;
+            let dc = engine
+                .run_output_sensitivity_with_abort(
+                    &nonlinear,
+                    output.clone(),
+                    "p",
+                    1.0,
+                    Some(f64::MIN_POSITIVE),
+                    &mut runs,
+                    &NoAbort,
+                )
+                .unwrap_err();
+            let ac = engine
+                .run_output_sensitivity_ac_with_abort(
+                    &nonlinear,
+                    output.clone(),
+                    "p",
+                    1.0,
+                    &[1.0],
+                    Some(f64::MIN_POSITIVE),
+                    &mut runs,
+                    &NoAbort,
+                )
+                .unwrap_err();
+            assert_eq!(runs, 0);
+            for error in [dc, ac] {
+                assert!(error.to_string().contains("representable"), "{error}");
+            }
+        }
+    }
+
+    #[test]
     fn hierarchical_root_sensitivity_uses_flattened_physical_owners() {
         let slope = 1e-8;
         let frequency = 1.0 / (2.0 * std::f64::consts::PI);
