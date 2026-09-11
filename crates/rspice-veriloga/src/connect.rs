@@ -1142,15 +1142,20 @@ fn connect_module_decl(
     db: &DisciplineDb,
 ) -> Result<ConnectModuleDecl, ConnectError> {
     let mut ports: Vec<ConnectModulePort> = Vec::new();
-    // A net declaration overrides the discipline written on the port itself,
-    // which is what `crate::semantic` does for an ordinary module.
+    // Untyped ground declarations qualify the net without replacing its
+    // discipline. Conflicting explicit declarations are rejected by semantics.
     let net_disciplines: HashMap<&str, &str> = module
         .nets
         .iter()
-        .flat_map(|net| {
+        .filter_map(|net| {
+            net.discipline
+                .as_deref()
+                .map(|discipline| (net, discipline))
+        })
+        .flat_map(|(net, discipline)| {
             net.names
                 .iter()
-                .map(move |name| (name.as_str(), net.discipline.as_str()))
+                .map(move |name| (name.as_str(), discipline))
         })
         .collect();
 

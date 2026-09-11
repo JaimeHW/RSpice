@@ -279,7 +279,8 @@ use super::*;
 // Version 70 fingerprints the source bytes actually consumed by preprocessing.
 // Version 71 retains instance-local branches, nested port flows, and coincident-probe derivatives.
 // Version 72 records potential branch identity in each compiled solver source.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 72;
+// Version 73 resolves declared grounds and rejects conflicting net disciplines.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 73;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

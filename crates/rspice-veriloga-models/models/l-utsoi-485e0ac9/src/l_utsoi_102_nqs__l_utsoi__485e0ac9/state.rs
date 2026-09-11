@@ -720,7 +720,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 
 pub(crate) type CanonicalModelValues = [f64; 256];
 pub struct Instance {
-	pub nodes: [usize; 15],
+	pub nodes: [usize; 14],
 	pub branches: [usize; 4],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
@@ -731,7 +731,7 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 118]>,
+	pub(crate) canonical_reactive: Box<[f64; 115]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
 	pub(crate) canonical_staged: Box<[f64; 492]>,
 	pub(crate) canonical_instance_valid: bool,
@@ -1274,11 +1274,11 @@ impl Instance {
 		P::model("RSHD", Some(0.0)).minimum(B::inclusive(0.0)),
 		P::model("RWELLO", Some(0.0)).minimum(B::inclusive(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 10;
-	pub const NODE_COUNT: usize = 15;
-	pub const INTERNAL_NODE_NAMES: [&str; 10] = ["NSIG", "si", "di", "bp", "gp", "Gnqs", "Gnqs2", "Dnqs", "gndnqs", "__flow_state0"];
+	pub const INTERNAL_NODE_COUNT: usize = 9;
+	pub const NODE_COUNT: usize = 14;
+	pub const INTERNAL_NODE_NAMES: [&str; 9] = ["NSIG", "si", "di", "bp", "gp", "Gnqs", "Gnqs2", "Dnqs", "__flow_state0"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[9];
+	pub const INTERNAL_STATE_NODES: &[usize] = &[8];
 	pub const BRANCH_COUNT: usize = 4;
 	pub const PARAMETER_COUNT: usize = 503;
 	pub const VARIABLE_COUNT: usize = 1911;
@@ -1288,7 +1288,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "c9364c097368595e78da179d27a0407fd8362297ff1b371b6809fc5afd7b2f65";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "28d9cc9fe36d9e23bb9fec5d3429d5326a48a9f88d092781ee433128fcac7a81";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

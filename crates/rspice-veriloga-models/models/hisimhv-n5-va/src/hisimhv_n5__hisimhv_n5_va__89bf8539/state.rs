@@ -1928,7 +1928,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "975e7fc7b523faaab6940761e0e828c2c4d1fa6b1f20e892b27e81b5094e2d3e";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "e8fada958da93973e1d7ab9f5d8e97f5eb62a0e27fcef1f100e3924b9262ee4a";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

@@ -276,9 +276,13 @@ exercised by the test suite:
   shadowed derivatives), runtime-bounded loops, parameters with dependent
   defaults/ranges/exclusions, localparams, `aliasparam`, attribute
   instances (`(* desc, units *)`), string parameters
-- **Structure**: internal nodes, named branches, ground nets, user
+- **Structure**: internal nodes, named branches, scalar ground nets, user
   disciplines beyond electrical (thermal, mechanical, …), ANSI and
-  non-ANSI port styles
+  non-ANSI port styles. Ground qualifiers inherit the declared discipline
+  (`thermal g; ground g;`); typed grounds (`ground thermal g;`) are also
+  supported. The undeclared shorthand `ground g;` defaults to electrical.
+  Analog net buses and ground declarations on module ports remain
+  unsupported; connect those ports to ground in the containing circuit.
 - **Control flow**, lowered to guarded dataflow: `if`/`else`, `case`,
   compile-time-bounded `for`/`repeat` loops, event controls
   (`initial_step`, `final_step`, `cross`, `above`, `timer`)

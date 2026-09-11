@@ -120,6 +120,83 @@ fn generated_nqs_integrators_stamp_inverse_frequency_on_potential_rows() {
     );
 }
 
+#[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+#[test]
+fn generated_utsoi_nqs_capacitors_reference_global_ground() {
+    use rspice_core::device::veriloga_builtins::builtins::l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance;
+
+    // The source declares `electrical gndnqs; ground gndnqs;`. Allocating it
+    // as an internal node leaves the NQS network floating instead of grounded.
+    assert!(!Instance::INTERNAL_NODE_NAMES.contains(&"gndnqs"));
+    let nodes = (1..=Instance::NODE_COUNT).collect::<Vec<_>>();
+    let branches = (1..=Instance::BRANCH_COUNT).collect::<Vec<_>>();
+    let width = nodes.len() + branches.len();
+    let entries = (0..width)
+        .flat_map(|row| (0..width).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let structure = StaticMatrix::from_triplets(width, width, &entries).unwrap();
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&structure, &nodes, &branches, nodes.len());
+    let mut matrix = ComplexMatrix::from_real_structure(&structure);
+    let mut voltages = vec![0.0; width];
+    voltages[0] = 0.1;
+    voltages[1] = 1.0;
+    for (index, name) in Instance::INTERNAL_NODE_NAMES.iter().enumerate() {
+        voltages[5 + index] = match *name {
+            "gp" => 1.0,
+            "di" => 0.1,
+            _ => 0.0,
+        };
+    }
+    let ctx = GeneratedEvalContext::with_analysis(
+        &voltages,
+        300.15,
+        nodes.len(),
+        GeneratedAnalysisKind::Ac,
+    );
+    let mut instance = Instance::new(&nodes);
+    instance.set_branch_indices(&branches);
+    instance.finalize_parameters().unwrap();
+    instance.stamp(
+        &ctx,
+        &mut GeneratedStamper::new_ac_real_with_static_cache(
+            &mut matrix,
+            &voltages,
+            nodes.len(),
+            &cache,
+        ),
+    );
+    instance.stamp_reactive(
+        &ctx,
+        &mut GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+            &mut matrix,
+            &nodes,
+            &branches,
+            nodes.len(),
+            1e6,
+            &cache,
+        ),
+    );
+    assert!(
+        !ctx.evaluation_failed(),
+        "{:?}",
+        ctx.take_evaluation_error()
+    );
+    let reactive = matrix.to_dense_imag();
+    for name in ["Gnqs", "Dnqs"] {
+        let row = 5 + Instance::INTERNAL_NODE_NAMES
+            .iter()
+            .position(|node| *node == name)
+            .unwrap();
+        // Both state equations explicitly contribute ddt(1e-9*V(node,gndnqs)).
+        assert!(
+            (reactive[row][row] - 1e-3).abs() < 1e-12,
+            "{name}: {:?}",
+            reactive[row]
+        );
+    }
+}
+
 #[cfg(feature = "veriloga-model-hicuml2va")]
 fn stamp_hicuml2(instance: &mut hicuml2::Instance, temperature: f64) -> (Vec<u64>, Vec<u64>) {
     const NODE_COUNT: usize = hicuml2::Instance::NODE_COUNT;

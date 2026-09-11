@@ -4,6 +4,34 @@ use rspice_veriloga::vm::VmError;
 use support::DeviceFixture;
 
 #[test]
+fn declared_ground_preserves_reference_topology_and_conductance() {
+    for (declarations, body) in [
+        ("electrical p,g; ground g;", "I(p,g)<+0.5*V(p,g);"),
+        ("ground g; electrical p,g;", "I(p,g)<+0.5*V(p,g);"),
+        ("electrical p; ground electrical g;", "I(p,g)<+0.5*V(p,g);"),
+        ("thermal p,g; ground g;", "Pwr(p,g)<+0.5*Temp(p,g);"),
+        (
+            "thermal p; ground electrical g; branch(g,p) heat;",
+            "Pwr(heat)<+0.5*Temp(heat);",
+        ),
+    ] {
+        assert_potential_conductance(
+            &format!(
+                "module parallel(p); inout p; {declarations} analog begin {body} end endmodule"
+            ),
+            0,
+            0.5,
+        );
+    }
+    assert_potential_conductance(
+        "module resistor(p,n); inout p,n; electrical p,n; analog I(p,n)<+0.5*V(p,n); endmodule
+         module parallel(p); inout p; electrical p,g; ground g; resistor r(p,g); endmodule",
+        0,
+        0.5,
+    );
+}
+
+#[test]
 fn potential_sources_preserve_named_and_instance_branch_identity() {
     for (declarations, body, branches, conductance) in [
         (

@@ -1022,7 +1022,7 @@ fn ground_alias_source() -> &'static str {
 module ground_alias(p);
     inout p;
     electrical p;
-    electrical mid;
+    electrical mid, earth;
     ground earth;
     analog I(mid, earth) <+ V(mid);
 endmodule

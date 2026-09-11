@@ -1860,6 +1860,74 @@ fn thermal_contribution_is_flow() {
 }
 
 #[test]
+fn ground_declarations_resolve_before_internal_node_allocation() {
+    for declarations in [
+        "electrical mid,gnd,tail; ground gnd;",
+        "ground gnd; electrical mid,gnd,tail;",
+        "electrical mid,tail; ground electrical gnd;",
+        "electrical mid,gnd,tail; ground electrical gnd; ground gnd;",
+    ] {
+        let m = analyze_one(&module_src(&format!(
+            "{declarations} analog I(p,gnd)<+V(p,gnd);"
+        )));
+        assert_eq!(m.ground_nodes, vec![SmolStr::from("gnd")]);
+        assert_eq!(m.internal_nodes.len(), 2, "{declarations}");
+        for (index, name) in ["mid", "tail"].iter().enumerate() {
+            assert_eq!(m.internal_nodes[index].name, *name);
+            assert_eq!(m.internal_nodes[index].index, index);
+        }
+    }
+}
+
+#[test]
+fn ground_inherits_thermal_discipline_and_is_compatible_with_electrical() {
+    for declarations in [
+        "thermal g; ground g;",
+        "ground g; thermal g;",
+        "ground thermal g;",
+    ] {
+        let m = analyze_one(&format!(
+            "module dut(t,p); inout t,p; thermal t; electrical p;
+             {declarations} branch(g,t) heat;
+             analog begin Pwr(heat)<+Temp(heat)+Temp(g); I(p,g)<+V(p,g); end endmodule"
+        ));
+        assert!(m.internal_nodes.is_empty(), "{declarations}");
+        assert_eq!(m.branches[0].discipline, "thermal");
+        assert!(
+            m.contributions
+                .iter()
+                .all(|contribution| contribution.is_current)
+        );
+    }
+}
+
+#[test]
+fn ground_declarations_reject_discrete_nets_conflicts_and_unimplemented_port_binding() {
+    for (source, message) in [
+        (
+            "discipline logic; domain discrete; enddiscipline module dut; logic g; ground g; endmodule",
+            "continuous discipline",
+        ),
+        (
+            "discipline logic; domain discrete; enddiscipline module dut; ground logic g; endmodule",
+            "continuous discipline",
+        ),
+        (
+            "module dut; thermal g; ground electrical g; endmodule",
+            "Incompatible disciplines",
+        ),
+        ("module dut; ground missing g; endmodule", "missing"),
+        (
+            "module dut(p); inout p; electrical p; ground p; endmodule",
+            "ground declaration on module port",
+        ),
+    ] {
+        let error = analyze(source).unwrap_err().to_string();
+        assert!(error.contains(message), "{source}: {error}");
+    }
+}
+
+#[test]
 fn ground_net_does_not_allocate_internal_node() {
     let m = analyze_one(&module_src(
         r#"

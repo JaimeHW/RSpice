@@ -1368,7 +1368,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
-            discipline: discipline.into(),
+            discipline: Some(discipline.into()),
             names,
             is_ground: false,
             is_internal: false, // Will be determined after parsing completes
@@ -1381,6 +1381,15 @@ impl<'a> Parser<'a> {
         let start = self.current_span();
         self.advance(); // consume 'ground'
 
+        // Two adjacent identifiers distinguish a typed scalar ground from
+        // an untyped list. Resolve the discipline name in semantic analysis.
+        let discipline = if (self.check(TokenKind::Identifier) || self.is_discipline_keyword())
+            && self.peek_is(TokenKind::Identifier)
+        {
+            Some(self.expect_identifier("ground discipline")?.into())
+        } else {
+            None
+        };
         let mut names = Vec::new();
         loop {
             names.push(self.expect_identifier("ground name")?.into());
@@ -1391,7 +1400,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
-            discipline: "electrical".into(),
+            discipline,
             names,
             is_ground: true,
             is_internal: false, // Ground nodes are never internal
@@ -3820,7 +3829,7 @@ mod tests {
             endmodule"#,
         );
         assert_eq!(m.nets.len(), 3);
-        assert_eq!(m.nets[1].discipline.as_str(), "thermal");
+        assert_eq!(m.nets[1].discipline.as_deref(), Some("thermal"));
         assert_eq!(m.nets[1].names, vec![SmolStr::from("t")]);
     }
 

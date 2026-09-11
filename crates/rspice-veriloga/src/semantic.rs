@@ -833,14 +833,72 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Phase 3: Update port disciplines from net declarations
+        // Phase 3: Resolve all declarations before allocating nodes. Ground
+        // qualifies a net; it must not lose to an earlier discipline declaration
+        // or overwrite that declaration with an implicit electrical discipline.
+        let mut net_disciplines: HashMap<SmolStr, SmolStr> = port_info
+            .iter()
+            .filter_map(|(name, (_, discipline))| {
+                discipline
+                    .clone()
+                    .map(|discipline| (name.clone(), discipline))
+            })
+            .collect();
+        let mut ground_names = std::collections::HashSet::new();
         for net in &module.nets {
-            self.require_discipline(&net.discipline, net.span)?;
-            let discipline = net.discipline.clone();
+            if let Some(discipline) = &net.discipline {
+                self.require_discipline(discipline, net.span)?;
+            }
             for name in &net.names {
-                // If this is a port, update its discipline
-                if let Some((dir, _)) = port_info.get(name) {
-                    port_info.insert(name.clone(), (*dir, Some(discipline.clone())));
+                if let Some(discipline) = &net.discipline {
+                    if let Some(previous) = net_disciplines.insert(name.clone(), discipline.clone())
+                        && previous != *discipline
+                    {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::IncompatibleDisciplines(
+                                previous.to_string(),
+                                discipline.to_string(),
+                            ),
+                            net.span,
+                        )));
+                    }
+                }
+                if net.is_ground {
+                    ground_names.insert(name.clone());
+                }
+            }
+        }
+        for net in module.nets.iter().filter(|net| net.is_ground) {
+            for name in &net.names {
+                // Preserve the existing shorthand `ground g;` for undeclared
+                // electrical nets, while inheriting every explicit discipline.
+                let discipline = net_disciplines
+                    .get(name)
+                    .map_or("electrical", |d| d.as_str());
+                if self
+                    .disciplines
+                    .get_discipline(discipline)
+                    .is_some_and(|discipline| {
+                        discipline.domain != crate::disciplines::Domain::Continuous
+                    })
+                {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidNodeReference {
+                            name: name.clone(),
+                            kind:
+                                "discrete net declared as ground (requires a continuous discipline)"
+                                    .into(),
+                        },
+                        net.span,
+                    )));
+                }
+                if port_names.contains(name) {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "ground declaration on module port '{name}'; connect this port to ground in the containing circuit"
+                        )),
+                        net.span,
+                    )));
                 }
             }
         }
@@ -852,7 +910,11 @@ impl SemanticAnalyzer {
                 .cloned()
                 .unwrap_or((PortDirection::Inout, None));
 
-            let disc_name = discipline.unwrap_or_else(|| "electrical".into());
+            let disc_name = net_disciplines
+                .get(port_name)
+                .cloned()
+                .or(discipline)
+                .unwrap_or_else(|| "electrical".into());
 
             let disc = self.disciplines.get_discipline(&disc_name).ok_or_else(|| {
                 CompileError::Semantic(SemanticError::new(
@@ -887,14 +949,17 @@ impl SemanticAnalyzer {
         // Phase 5: Define internal and ground nodes (nets that aren't ports)
         let mut internal_node_idx = 0usize;
         for net in &module.nets {
-            let discipline = net.discipline.clone();
             for name in &net.names {
                 // Skip if already defined as a port
                 if self.symbols.lookup_local(name).is_some() {
                     continue;
                 }
 
-                if net.is_ground {
+                let discipline = net_disciplines
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| "electrical".into());
+                if ground_names.contains(name) {
                     // Ground nets reference the global reference node and
                     // must not consume an internal node slot.
                     self.define_symbol(Symbol {
@@ -944,9 +1009,14 @@ impl SemanticAnalyzer {
                 self.validate_node(&branch.neg, branch.span)?;
             }
             self.validate_distinct_branch_nodes(&branch.pos, &branch.neg, branch.span)?;
+            let discipline_node = if ground_names.contains(&branch.pos) {
+                &branch.neg
+            } else {
+                &branch.pos
+            };
             let discipline = self
                 .symbols
-                .lookup(&branch.pos)
+                .lookup(discipline_node)
                 .and_then(|s| s.attrs.discipline.clone())
                 .unwrap_or_else(|| "electrical".into());
 
@@ -4501,6 +4571,16 @@ impl SemanticAnalyzer {
         }
         let kind = pos_kind
             .or(neg_kind)
+            .or_else(|| {
+                // Ground-only potential reads still retain the declared
+                // physical role (for example, Temp(thermal_ground)).
+                [Some(pos), neg].into_iter().flatten().find_map(|name| {
+                    self.symbols
+                        .lookup(name)
+                        .and_then(|symbol| symbol.attrs.discipline.as_deref())
+                        .and_then(|discipline| self.disciplines.access_kind(discipline, access))
+                })
+            })
             .or_else(|| self.disciplines.access_kind("electrical", access))
             .ok_or_else(|| {
                 CompileError::Semantic(SemanticError::new(
@@ -4559,6 +4639,11 @@ impl SemanticAnalyzer {
                 },
                 span,
             )));
+        }
+        // A reference net is compatible with every continuous discipline;
+        // resolve the physical role using the other branch endpoint.
+        if symbol.attrs.is_ground {
+            return Ok(None);
         }
         let discipline = symbol.attrs.discipline.as_deref().unwrap_or("electrical");
         if self.disciplines.get_discipline(discipline).is_none() {

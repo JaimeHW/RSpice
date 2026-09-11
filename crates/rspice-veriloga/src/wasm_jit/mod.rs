@@ -119,7 +119,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 31 to 32 resolves flow probes through simultaneous current equations.
 /// 32 to 33 preserves instance branch ownership and nested port-flow equations.
 /// 33 to 34 retains distinct potential branches and consistent source directions.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 34;
+/// Version 35 resolves declared grounds before allocating solver nodes.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 35;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2268,7 +2269,7 @@ endmodule
                 [[2.0, 0.0], [3.0, 0.0]],
             ),
             (
-                "ground g;",
+                "electrical g; ground g;",
                 "V(p)<+2*I(p); V(g,p)<+3*I(g,p);",
                 1,
                 [[2.0, 0.0], [3.0, 0.0]],

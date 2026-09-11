@@ -549,8 +549,9 @@ pub struct ArrayDimension {
 /// Net declaration (nodes, wires, etc.)
 #[derive(Debug, Clone)]
 pub struct NetDecl {
-    /// Discipline (electrical, thermal, etc.)
-    pub discipline: SmolStr,
+    /// Explicit discipline (electrical, thermal, etc.). An untyped ground
+    /// declaration inherits the net's discipline during semantic analysis.
+    pub discipline: Option<SmolStr>,
     /// Net names
     pub names: Vec<SmolStr>,
     /// Whether this is a ground node

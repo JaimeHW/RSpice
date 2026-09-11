@@ -25,6 +25,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 fn generated_potential_sources_preserve_parallel_branch_identity() {
     for (source, active, sum) in [
         (
+            "module parallel(p); inout p; thermal p,g; ground g; branch(p,g) a,b; analog begin Temp(a)<+2*Pwr(a); Temp(b)<+3*Pwr(b); end endmodule",
+            2,
+            8.0,
+        ),
+        (
             "module parallel(p); inout p; electrical p; branch(p) a,b; analog begin V(a)<+2*I(a); V(b)<+3*I(b); end endmodule",
             2,
             8.0,
