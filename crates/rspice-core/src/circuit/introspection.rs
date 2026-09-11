@@ -499,7 +499,9 @@ impl CircuitData {
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
             let [_, _, ie, is] = bjt.operating_point_terminal_currents();
-            let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
+            // Multiplicity scales both currents; it must not erase a finite
+            // current gain. Retain the zero-current convention only at zero IB.
+            let beta = if ib != 0.0 { ic / ib } else { 0.0 };
             entries.push(DeviceOpEntry::new(
                 bjt.name.clone(),
                 OpLabel::BJT,

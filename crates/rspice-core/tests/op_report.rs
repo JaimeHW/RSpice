@@ -441,3 +441,48 @@ fn every_reported_device_family_uses_readable_labels() {
         "the family sweep lost coverage; it exercised only {families_seen:?}"
     );
 }
+
+#[test]
+fn bjt_beta_report_retains_gain_at_tiny_multiplicity() {
+    let mut config = SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    config.convergence_config.junction_gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
+        for multiplicity in [1.0, 1e-40, 1e-200] {
+            for bias in [0.0, 0.6] {
+                // VBC=0 removes reverse injection. With no Early effect or
+                // roll-off, the ideal GP current gain is BF at every M.
+                let netlist = Netlist::parse(&format!(
+                    "scaled BJT report\nVC c 0 {voltage}\nVB b 0 {voltage}\nQ1 c b 0 qm M={multiplicity}\n.model qm {kind}(LEVEL=1 IS=1e-15 BF=100)\n.options GMIN=0\n.end\n",
+                    voltage = polarity * bias,
+                )).unwrap();
+                let (_, report) = engine.run_dc_op_with_report(&netlist).unwrap();
+                let device = report
+                    .entries
+                    .iter()
+                    .find(|entry| entry.name.eq_ignore_ascii_case("Q1"))
+                    .unwrap();
+                let value = |name: &str| {
+                    device
+                        .params
+                        .iter()
+                        .find(|(key, _)| *key == name)
+                        .unwrap()
+                        .1
+                };
+                if bias == 0.0 {
+                    assert_eq!(value("ib"), 0.0);
+                    assert_eq!(value("beta"), 0.0);
+                } else {
+                    assert!(value("ib") != 0.0);
+                    assert!(
+                        (value("beta") / 100.0 - 1.0).abs() < 1e-12,
+                        "{kind} M={multiplicity:e}: beta={}",
+                        value("beta")
+                    );
+                }
+            }
+        }
+    }
+}
