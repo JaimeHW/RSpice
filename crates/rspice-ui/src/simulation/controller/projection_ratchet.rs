@@ -289,6 +289,11 @@ fn perturbations(kind: AnalysisKind, path: &str, current: &Value) -> Vec<Value> 
             Value::from(3u64),
             Value::from(1.5f64),
             Value::from(0u64),
+            // A two-position mode selector — sensitivity's DC/AC index — only
+            // ever reaches its second position at 1. Without this candidate no
+            // perturbation can open the mode that gates the dependent field,
+            // and the gated field reads as inert when it is merely unreachable.
+            Value::from(1u64),
         ],
         Value::String(_) => {
             let mut strings = vec![
@@ -497,10 +502,14 @@ fn judge_under_sibling_modes(
             let Some(current) = value_at(body, sibling) else {
                 continue;
             };
-            // Lists are included because a whole axis can be the gate: a
+            // Numeric indices select modes such as sensitivity DC/AC. Lists
+            // are included because a whole axis can be the gate: a
             // corner run set whose process dimension is empty is what makes
             // the rest of its configuration reachable at all.
-            if !matches!(current, Value::Bool(_) | Value::String(_) | Value::Array(_)) {
+            if !matches!(
+                current,
+                Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_)
+            ) {
                 continue;
             }
             for candidate in perturbations(kind, sibling, current) {

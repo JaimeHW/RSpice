@@ -58,7 +58,7 @@ impl SensConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.output_expr.is_empty() {
+        if self.output_expr.trim().is_empty() {
             return Err("Output expression required".into());
         }
         if self.sens_type == SensType::Ac && (!self.ac_freq.is_finite() || self.ac_freq <= 0.0) {
@@ -129,10 +129,17 @@ impl SensDialogState {
     pub fn to_config(&self) -> Result<SensConfig, String> {
         let sens_type = match self.sens_type_idx {
             0 => SensType::Dc,
-            _ => SensType::Ac,
+            1 => SensType::Ac,
+            _ => return Err("Select a valid sensitivity mode (DC or AC)".to_owned()),
         };
-        let freq = super::options::parse_si_value(&self.ac_freq)
-            .map_err(|err| format!("Invalid AC frequency: {}", err))?;
+        let freq = if sens_type == SensType::Ac {
+            super::options::parse_si_value(&self.ac_freq)
+                .map_err(|err| format!("Invalid AC frequency: {}", err))?
+        } else {
+            // A disabled AC field has no effect on a DC solve. Keep its draft
+            // text intact so switching back to AC restores the authored value.
+            SensConfig::default().ac_freq
+        };
         let config = SensConfig {
             output_expr: self.output_expr.clone(),
             sens_type,
@@ -164,6 +171,28 @@ fn format_freq(f: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{SensConfig, SensDialogState, SensType};
+
+    #[test]
+    fn dc_sensitivity_ignores_disabled_frequency_without_changing_the_draft() {
+        for text in ["", "not-a-frequency", "-1", "NaN"] {
+            let mut state = SensDialogState::from_config(&SensConfig::new("I(V1)"));
+            state.ac_freq = text.to_owned();
+            assert_eq!(state.to_config().unwrap().sens_type, SensType::Dc);
+            assert_eq!(state.ac_freq, text);
+            state.sens_type_idx = 1;
+            assert!(state.to_config().is_err());
+        }
+    }
+
+    #[test]
+    fn sensitivity_rejects_unknown_modes_and_blank_outputs() {
+        let mut state = SensDialogState::from_config(&SensConfig::default());
+        state.sens_type_idx = 2;
+        assert!(state.to_config().unwrap_err().contains("mode"));
+        state.sens_type_idx = 0;
+        state.output_expr = " \t ".to_owned();
+        assert!(state.to_config().unwrap_err().contains("Output expression"));
+    }
 
     #[test]
     fn ac_sensitivity_dialog_rejects_invalid_frequency_text() {

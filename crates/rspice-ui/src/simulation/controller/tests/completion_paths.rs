@@ -546,6 +546,37 @@ fn incomplete_reliability_and_soa_results_fail_closed_without_retained_payloads(
 }
 
 #[test]
+fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
+    let controller = SimulationController::new();
+    let mut state = AppState::default();
+    state.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
+        &crate::simulation::dialog::sens::SensConfig::default(),
+    );
+    state.sim_setup.sens.ac_freq = "invalid".to_owned();
+    assert!(matches!(
+        controller.build_sensitivity_spec(&state).unwrap(),
+        crate::simulation::multi_run::AnalysisSpec::Sensitivity {
+            ac_mode: false,
+            frequency: None,
+            ..
+        }
+    ));
+    state.sim_setup.sens.sens_type_idx = 1;
+    assert!(controller.build_sensitivity_spec(&state).is_err());
+    for (text, expected) in [("2k", 2_000.0), ("3Meg", 3_000_000.0)] {
+        state.sim_setup.sens.ac_freq = text.to_owned();
+        let crate::simulation::multi_run::AnalysisSpec::Sensitivity {
+            ac_mode, frequency, ..
+        } = controller.build_sensitivity_spec(&state).unwrap()
+        else {
+            panic!("sensitivity spec")
+        };
+        assert!(ac_mode);
+        assert_eq!(frequency, Some(expected));
+    }
+}
+
+#[test]
 fn sensitivity_completion_preserves_unavailable_results_and_finite_console_values() {
     use rspice_core::analysis::sensitivity::{SensitivityUnavailability, SensitivityValue};
     let mut controller = SimulationController::new();
