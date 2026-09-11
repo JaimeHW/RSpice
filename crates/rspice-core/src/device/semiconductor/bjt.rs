@@ -630,6 +630,12 @@ struct LegacyCurrentScale {
     thermal_exponent: Value,
 }
 
+#[derive(Debug, Clone)]
+struct LegacyEmissionTemperature {
+    coefficients: [[Value; 2]; 5],
+    operating: [Value; 5],
+}
+
 #[derive(Debug, Clone, Default)]
 struct LegacyJunctionParameters {
     base: Option<Value>,
@@ -641,6 +647,7 @@ struct LegacyJunctionParameters {
     bc_saturation: Option<Value>,
     substrate_current: Value,
     current_scales: Option<Box<[Option<LegacyCurrentScale>; 6]>>,
+    emission_temperature: Option<Box<LegacyEmissionTemperature>>,
 }
 
 /// BJT device using the Ebers-Moll model
@@ -2429,7 +2436,9 @@ impl Bjt {
     }
 
     #[inline]
-    fn uses_vbic_charge_model(params: &std::collections::HashMap<String, Value>) -> bool {
+    pub(crate) fn uses_vbic_charge_model(
+        params: &std::collections::HashMap<String, Value>,
+    ) -> bool {
         if let Some(level) = params
             .get("LEVEL")
             .copied()

@@ -132,6 +132,21 @@ impl Bjt {
         v: Value,
         n: Value,
     ) -> (Value, Value) {
+        let n = if !self.xyce_compatibility {
+            self.legacy_junction_params
+                .as_ref()
+                .and_then(|junctions| junctions.emission_temperature.as_ref())
+                .map_or(n, |mapping| match kind {
+                    LegacyCurrent::Forward => mapping.operating[0],
+                    LegacyCurrent::Reverse => mapping.operating[1],
+                    LegacyCurrent::BaseLeakage => mapping.operating[2],
+                    LegacyCurrent::CollectorLeakage => mapping.operating[3],
+                    LegacyCurrent::Substrate => mapping.operating[4],
+                    LegacyCurrent::CollectorIdealLeakage => n,
+                })
+        } else {
+            n
+        };
         let Some(scale) = self.legacy_current_scale(kind) else {
             return self.diode_iv_with_is(isat, v, n);
         };

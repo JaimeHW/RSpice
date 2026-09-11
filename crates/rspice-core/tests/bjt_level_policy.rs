@@ -2984,6 +2984,312 @@ fn legacy_substrate_current_and_charge_flow_through_the_intrinsic_lead() {
 }
 
 #[test]
+fn legacy_emission_temperature_controls_match_ngspice_and_dynamic_equations() {
+    use rspice_core::Complex64;
+    // ngspice 46 DC measurements, with all ten temperature coefficients.
+    for (celsius, split, subs, reference) in [
+        (
+            -40.0,
+            false,
+            1,
+            [
+                -2.9925472958073084e-10,
+                -4.503503995608123e-12,
+                -3.1295715077895627e-12,
+            ],
+        ),
+        (
+            -40.0,
+            false,
+            -1,
+            [
+                -3.0231067632677105e-10,
+                -7.66089833194704e-12,
+                3.1295715077895675e-12,
+            ],
+        ),
+        (
+            -40.0,
+            true,
+            1,
+            [
+                -1.8212370887476451e-9,
+                -2.0670103702046962e-11,
+                -1.6045707931178532e-10,
+            ],
+        ),
+        (
+            -40.0,
+            true,
+            -1,
+            [
+                -1.9770204707795798e-9,
+                -1.1833039651373654e-10,
+                9.627424758707138e-11,
+            ],
+        ),
+        (
+            70.0,
+            false,
+            1,
+            [
+                -8.797857401786394e-6,
+                -6.464716998513668e-7,
+                -3.8303392575241673e-7,
+            ],
+        ),
+        (
+            70.0,
+            false,
+            -1,
+            [
+                -8.186289954942817e-6,
+                -1.3821188090943843e-6,
+                3.8303392575241736e-7,
+            ],
+        ),
+        (
+            70.0,
+            true,
+            1,
+            [
+                -1.0993852425834656e-5,
+                -6.267683687268213e-7,
+                -2.5232486948176016e-7,
+            ],
+        ),
+        (
+            70.0,
+            true,
+            -1,
+            [
+                -1.0328895276546684e-5,
+                -1.103368719652946e-6,
+                1.5139492168905626e-7,
+            ],
+        ),
+    ] {
+        let temperature = celsius + 273.15;
+        let delta = celsius - 27.0;
+        let vt = rspice_core::constants::thermal_voltage(temperature);
+        let ratio = temperature / 300.15;
+        let factlog = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
+        let beta = ratio.powf(-0.7);
+        let bf = 100.0 * beta;
+        let br = 2.0 * beta;
+        let bc_area = if subs == 1 { 3.0 } else { 5.0 };
+        let sub_area = if subs == 1 { 5.0 } else { 3.0 };
+        let nominal_n = [1.1, 1.3, 1.5, 1.7, 1.2];
+        let coefficients = [
+            (1e-3, 2e-6),
+            (-1.5e-3, 1e-6),
+            (2e-3, 3e-6),
+            (-1e-3, 4e-6),
+            (1.3e-3, 5e-6),
+        ];
+        let operating_n: [f64; 5] = core::array::from_fn(|i| {
+            nominal_n[i] * (1.0 + coefficients[i].0 * delta + coefficients[i].1 * delta * delta)
+        });
+        // Nominal N belongs to saturation scaling; operating N belongs only
+        // to the diode slope. Confusing them changes every result below.
+        let saturation = [
+            if split {
+                2e-14 * 6.0 * (factlog / nominal_n[0]).exp()
+            } else {
+                1e-14 * 6.0 * factlog.exp()
+            },
+            if split {
+                7e-14 * bc_area * 3.0 * (factlog / nominal_n[1]).exp()
+            } else {
+                1e-14 * 6.0 * bc_area * factlog.exp()
+            },
+            1e-16 * 6.0 * (factlog / nominal_n[2]).exp() / beta,
+            3e-16 * bc_area * 3.0 * (factlog / nominal_n[3]).exp() / beta,
+            if split {
+                5e-15 * sub_area * 3.0 * (factlog / nominal_n[1]).exp()
+            } else {
+                5e-15 * 6.0 * factlog.exp()
+            },
+        ];
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            temperature,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-10,
+                current_abstol: 1e-24,
+                ..Default::default()
+            },
+            integration_method:
+                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=4).map(|i| f64::from(i) * 1e-8).collect(),
+            )),
+            ..Default::default()
+        });
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let response = |vb: f64| {
+                let vsub = if subs == 1 { 0.4 } else { vb - 0.05 };
+                let [(f, gf), (r, gr), (be, gbe), (bc, gbc), (sub, gs)] =
+                    core::array::from_fn(|i| {
+                        let v = [vb, vb - 0.1, vb, vb - 0.1, vsub][i];
+                        let nvt = operating_n[i] * vt;
+                        (
+                            saturation[i] * (v / nvt).exp_m1(),
+                            saturation[i] * (v / nvt).exp() / nvt,
+                        )
+                    });
+                let dc = [
+                    p * (-f + (1.0 + 1.0 / br) * r + bc + if subs == 1 { sub } else { 0.0 }),
+                    -p * (f / bf + r / br + be + bc + if subs == -1 { sub } else { 0.0 }),
+                    -p * f64::from(subs) * sub,
+                ];
+                let omega = core::f64::consts::TAU * 1e6;
+                let ac = [
+                    Complex64::new(-gf + (1.0 + 1.0 / br) * gr + gbc, omega * 2e-9 * gr),
+                    Complex64::new(
+                        -gf / bf - gr / br - gbe - gbc - if subs == -1 { gs } else { 0.0 },
+                        -omega * (1e-9 * gf + 2e-9 * gr),
+                    ),
+                    Complex64::new(if subs == -1 { gs } else { 0.0 }, 0.0),
+                ];
+                (dc, ac, [p * 1e-9 * f, p * 2e-9 * r])
+            };
+            let split_fields = if split { "IBE=2e-14 IBC=7e-14" } else { "" };
+            let device = format!(
+                "Q1 c b 0 s qm AREA=2 AREAB=3 AREAC=5 M=3\n.model qm {kind}(IS=1e-14 {split_fields} ISS=5e-15 NS=1.2 BF=100 BR=2 NF=1.1 NR=1.3 ISE=1e-16 NE=1.5 ISC=3e-16 NC=1.7 XTB=-.7 TF=1n TR=2n SUBS={subs} TNF1={{a*1m}} TNF2={{a*2u}} TNR1={{a*-1.5m}} TNR2={{a*1u}} TNE1={{a*2m}} TNE2={{a*3u}} TNC1={{a*-1m}} TNC2={{a*4u}} TNS1={{a*1.3m}} TNS2={{a*5u}})"
+            );
+            let device = if split {
+                format!("X1 c b s cell a=1\n.subckt cell c b s a=9\n{device}\n.ends")
+            } else {
+                format!(".param a=1\n{device}")
+            };
+            let deck = Netlist::parse(&format!("Emission temperature\nVC c 0 {}\nVB b 0 PWL(0 {} 40n {}) DC {} AC 1\nVS s 0 {}\n{device}\n.end", p*0.1,p*0.45,p*0.4505,p*0.45,p*if subs==1 {0.5} else {0.05})).unwrap();
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            let (expected_dc, expected_ac, _) = response(0.45);
+            for (i, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                let actual = dc.branch_current_named(name).unwrap();
+                let label = format!("T={celsius} split={split} SUBS={subs} {kind} {name}");
+                // ngspice's older k/q constants cause a few ppm of drift.
+                assert_rel_close(&label, actual, p * reference[i], 1e-5);
+                assert!(
+                    (actual - expected_dc[i]).abs() < expected_dc[i].abs() * 1e-9 + 1e-24,
+                    "{label}: {actual:e} != {:e}",
+                    expected_dc[i]
+                );
+                let branch = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|key| key.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    (ac[0].currents[branch] - expected_ac[i]).norm()
+                        < expected_ac[i].norm() * 1e-9 + 1e-23,
+                    "{label} AC"
+                );
+            }
+            if celsius == 70.0 && split && subs == -1 && p == 1.0 {
+                let result = engine.run_tran(&deck, 40e-9, 10e-9).unwrap();
+                let voltage = result.try_voltage_waveform_named("b").unwrap();
+                let currents = ["VC", "VB", "VS"]
+                    .map(|name| result.try_branch_current_waveform_named(name).unwrap());
+                for i in 1..result.time.len() {
+                    let (mut expected, _, q) = response(voltage[i]);
+                    let (_, _, previous) = response(voltage[i - 1]);
+                    let dt = result.time[i] - result.time[i - 1];
+                    expected[0] += (q[1] - previous[1]) / dt;
+                    expected[1] -= (q[0] - previous[0] + q[1] - previous[1]) / dt;
+                    for terminal in 0..3 {
+                        assert!(
+                            (currents[terminal][i] - expected[terminal]).abs()
+                                < expected[terminal].abs() * 1e-9 + 1e-22
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_emission_temperature_controls_validate_family_and_operating_domain() {
+    let config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    let engine = Engine::new(config.clone());
+    let names = [
+        "TNF1", "TNF2", "TNR1", "TNR2", "TNE1", "TNE2", "TNC1", "TNC2", "TNS1", "TNS2",
+    ];
+    for name in names {
+        for invalid in [f64::NAN, f64::INFINITY] {
+            let mut deck =
+                Netlist::parse("Invalid coefficient\nQ1 0 0 0 qm\n.model qm NPN\n.end").unwrap();
+            deck.models[0].params.push((name.into(), invalid));
+            assert!(
+                engine
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        for (dialect, family) in [
+            (SpiceDialect::Xyce, "LEVEL=1"),
+            (SpiceDialect::Ngspice, "LEVEL=4"),
+            (SpiceDialect::Ngspice, "TNF=0"),
+        ] {
+            let deck = Netlist::parse(&format!(
+                "Wrong emission family\nQ1 0 0 0 qm\n.model qm NPN({family} {name}=0)\n.end"
+            ))
+            .unwrap();
+            assert!(
+                Engine::new(config.clone().with_spice_dialect(dialect))
+                    .run_dc_op(&deck)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        // Finite coefficients can still yield a nonpositive operating N.
+        let deck = Netlist::parse(&format!(
+            "Invalid operating emission\nQ1 0 0 0 qm TEMP=28\n.model qm NPN({name}=-2)\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+    }
+    for name in ["NF", "NR", "NE", "NC", "NS"] {
+        let deck = Netlist::parse(&format!(
+            "Invalid nominal emission\nQ1 0 0 0 qm\n.model qm NPN(TNF1=0 {name}=0)\n.end"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .run_dc_op(&deck)
+                .unwrap_err()
+                .to_string()
+                .contains(name)
+        );
+    }
+    // An explicit zero polynomial overrides shared TNF for only that axis.
+    let control = Netlist::parse("Zero emission polynomial\nVC c 0 .1\nVB b 0 .45\nQ1 c b 0 qm TEMP=70\n.model qm NPN(LEVEL=1 IS=1e-14 TNF=1m TNF1=0 TNR1=0)\n.end").unwrap();
+    let nominal = Netlist::parse("Zero emission reference\nVC c 0 .1\nVB b 0 .45\nQ1 c b 0 qm TEMP=70\n.model qm NPN(IS=1e-14)\n.end").unwrap();
+    let actual = engine.run_dc_op(&control).unwrap();
+    let expected = engine.run_dc_op(&nominal).unwrap();
+    for name in ["VC", "VB"] {
+        assert_eq!(
+            actual.branch_current_named(name),
+            expected.branch_current_named(name)
+        );
+    }
+}
+
+#[test]
 fn legacy_split_current_presence_and_validation_follow_the_model_family() {
     let config = SimulationConfig {
         spice_dialect: SpiceDialect::Ngspice,
@@ -3031,9 +3337,13 @@ fn legacy_split_current_presence_and_validation_follow_the_model_family() {
                     .contains(name)
             );
         }
-        for (dialect, level) in [(SpiceDialect::Xyce, 1), (SpiceDialect::Ngspice, 4)] {
+        for (dialect, family) in [
+            (SpiceDialect::Xyce, "LEVEL=1"),
+            (SpiceDialect::Ngspice, "LEVEL=4"),
+            (SpiceDialect::Ngspice, "TNF=0"),
+        ] {
             let deck = Netlist::parse(&format!(
-                "Wrong junction family\nQ1 0 0 0 qm\n.model qm NPN(LEVEL={level} {name}=1)\n.end"
+                "Wrong junction family\nQ1 0 0 0 qm\n.model qm NPN({family} {name}=1)\n.end"
             ))
             .unwrap();
             assert!(

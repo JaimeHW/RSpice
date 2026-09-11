@@ -748,7 +748,51 @@ pub(super) fn validate_bjt_model_level(
         }
     }
 
-    let native_vbic_level = level.is_some_and(is_native_vbic_bjt_level);
+    // Parameter-based VBIC inference must agree with device construction.
+    let native_vbic_model = crate::device::Bjt::uses_vbic_charge_model(params);
+    let mut emission_temperature_given = false;
+    for &name in crate::device::Bjt::LEGACY_EMISSION_TEMPERATURE_PARAMS
+        .iter()
+        .flatten()
+    {
+        let authored = params.contains_key(name)
+            || expr_params
+                .iter()
+                .chain(string_params)
+                .any(|(key, _)| key.eq_ignore_ascii_case(name));
+        if !authored {
+            continue;
+        }
+        emission_temperature_given = true;
+        if native_vbic_model || spice_dialect == SpiceDialect::Xyce {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} requires a native ngspice Gummel-Poon model"
+            )));
+        }
+        if !params.get(name).is_some_and(|value| value.is_finite()) {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{element_name}': model '{model}' parameter {name} must be a finite scalar"
+            )));
+        }
+    }
+    if emission_temperature_given {
+        for name in ["NF", "NR", "NE", "NLE", "NC", "NS"] {
+            let authored = params.contains_key(name)
+                || expr_params
+                    .iter()
+                    .chain(string_params)
+                    .any(|(key, _)| key.eq_ignore_ascii_case(name));
+            if authored
+                && !params
+                    .get(name)
+                    .is_some_and(|value| value.is_finite() && *value > 0.0)
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{element_name}': model '{model}' parameter {name} must be finite and positive for temperature-dependent emission coefficients"
+                )));
+            }
+        }
+    }
     for name in ["IBE", "IBC", "ISS", "NS"] {
         let authored = params.contains_key(name)
             || expr_params
@@ -758,7 +802,7 @@ pub(super) fn validate_bjt_model_level(
         if !authored {
             continue;
         }
-        if native_vbic_level || spice_dialect == SpiceDialect::Xyce {
+        if native_vbic_model || spice_dialect == SpiceDialect::Xyce {
             return Err(SimulationError::Circuit(format!(
                 "BJT '{element_name}': model '{model}' parameter {name} requires a native ngspice Gummel-Poon model"
             )));
@@ -799,10 +843,10 @@ pub(super) fn validate_bjt_model_level(
         params,
         expr_params,
         string_params,
-        native_vbic_level,
+        native_vbic_model,
     )?;
 
-    if native_vbic_level {
+    if native_vbic_model {
         reject_deferred_native_bjt_model_params(
             element_name,
             model,

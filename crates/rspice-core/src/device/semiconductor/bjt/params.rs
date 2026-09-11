@@ -11,6 +11,41 @@ fn model_parameter_alias(
 }
 
 impl Bjt {
+    pub(crate) const LEGACY_EMISSION_TEMPERATURE_PARAMS: [[&str; 2]; 5] = [
+        ["TNF1", "TNF2"],
+        ["TNR1", "TNR2"],
+        ["TNE1", "TNE2"],
+        ["TNC1", "TNC2"],
+        ["TNS1", "TNS2"],
+    ];
+
+    pub(crate) fn validate_legacy_emission_temperature(&self) -> Result<(), String> {
+        let Some(mapping) = self
+            .legacy_junction_params
+            .as_ref()
+            .and_then(|junctions| junctions.emission_temperature.as_ref())
+        else {
+            return Ok(());
+        };
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon || self.xyce_compatibility {
+            return Ok(());
+        }
+        for (index, value) in mapping.operating.iter().enumerate() {
+            if !value.is_finite()
+                || *value <= 0.0
+                || !(value * self.vt).is_finite()
+                || value * self.vt <= 0.0
+            {
+                let [first, second] = Self::LEGACY_EMISSION_TEMPERATURE_PARAMS[index];
+                return Err(format!(
+                    "BJT '{}': {first}/{second} at {} K must yield a finite positive emission coefficient and thermal voltage, got {value}",
+                    self.name, self.temperature
+                ));
+            }
+        }
+        Ok(())
+    }
+
     #[inline]
     pub(super) fn apply_legacy_spice_model_defaults(&mut self) {
         self.substrate_topology = BjtSubstrateTopology::default_for_type(self.bjt_type);
@@ -1027,8 +1062,33 @@ impl Bjt {
             self.eaic,
             self.area,
         );
-        let nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
-        let nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
+        let mut nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
+        let mut nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
+        if legacy_model && !self.xyce_compatibility {
+            if let Some(junctions) = &mut self.legacy_junction_params {
+                if let Some(mapping) = &mut junctions.emission_temperature {
+                    // bjttemp.c maps the junction slopes independently; the
+                    // saturation-current temperature law still uses nominal N.
+                    let nominal = [
+                        self.nf_nominal,
+                        self.nr_nominal,
+                        self.nen,
+                        self.ncn,
+                        junctions.substrate_emission.unwrap_or(1.0),
+                    ];
+                    for ((operating, nominal), [first, second]) in mapping
+                        .operating
+                        .iter_mut()
+                        .zip(nominal)
+                        .zip(mapping.coefficients)
+                    {
+                        *operating = nominal * (1.0 + delta_t * (first + delta_t * second));
+                    }
+                    nf_temp = mapping.operating[0];
+                    nr_temp = mapping.operating[1];
+                }
+            }
+        }
         let avc2_temp = self.avc2_nominal * (1.0 + (temp - self.tnom) * self.tavc);
         let vbbe_temp = self.vbbe_nominal * (1.0 + delta_t * (self.tvbbe1 + delta_t * self.tvbbe2));
         let nbbe_temp = self.nbbe_nominal * (1.0 + delta_t * self.tnbbe);
@@ -1043,8 +1103,22 @@ impl Bjt {
         self.bf = (self.bf_nominal * beta_scale).max(1e-18);
         self.br = (self.br_nominal * beta_scale).max(1e-18);
         self.is = is_temp;
-        self.nf = nf_temp.max(1e-12);
-        self.nr = nr_temp.max(1e-12);
+        let explicit_emission_temperature = legacy_model
+            && !self.xyce_compatibility
+            && self
+                .legacy_junction_params
+                .as_ref()
+                .is_some_and(|j| j.emission_temperature.is_some());
+        self.nf = if explicit_emission_temperature {
+            nf_temp
+        } else {
+            nf_temp.max(1e-12)
+        };
+        self.nr = if explicit_emission_temperature {
+            nr_temp
+        } else {
+            nr_temp.max(1e-12)
+        };
         // Xyce's VBIC equations multiply every completed current branch by
         // instance M.  Scaling each linear branch resistance by 1/(AREA*M)
         // is the equivalent native-MNA representation; the nonlinear branch
@@ -2001,6 +2075,36 @@ impl Bjt {
                 self.cth_nominal = 1e-12;
             }
         }
+        let emission_controls = self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && Self::LEGACY_EMISSION_TEMPERATURE_PARAMS
+                .iter()
+                .flatten()
+                .any(|key| params.contains_key(*key));
+        if emission_controls {
+            let coefficients = core::array::from_fn(|index| {
+                let [first, second] = Self::LEGACY_EMISSION_TEMPERATURE_PARAMS[index];
+                // Retain the existing shared TNF extension for an axis with
+                // no explicit polynomial; even an authored zero overrides it.
+                let fallback =
+                    if index < 2 && !params.contains_key(first) && !params.contains_key(second) {
+                        self.tnf
+                    } else {
+                        0.0
+                    };
+                [
+                    params.get(first).copied().unwrap_or(fallback),
+                    params.get(second).copied().unwrap_or(0.0),
+                ]
+            });
+            self.legacy_junction_params
+                .get_or_insert_with(Default::default)
+                .emission_temperature = Some(Box::new(LegacyEmissionTemperature {
+                coefficients,
+                operating: [0.0; 5],
+            }));
+        } else if let Some(junctions) = &mut self.legacy_junction_params {
+            junctions.emission_temperature = None;
+        }
         self.refresh_operating_scaling();
         self
     }
@@ -2449,7 +2553,7 @@ mod tests {
                     continue;
                 }
                 let make = || {
-                    let mut model = model_with(&[
+                    let mut params = vec![
                         ("LEVEL", level),
                         ("IS", 1e-16),
                         ("TF", 1e-9),
@@ -2461,8 +2565,21 @@ mod tests {
                         ("RE", 0.0),
                         ("RBP", 0.0),
                         ("RS", 0.0),
-                    ])
-                    .with_instance_params(&[("SW_ET".into(), 0.0)]);
+                    ];
+                    if level == 1.0 {
+                        params.extend([
+                            ("TNF1", 1e-3),
+                            ("TNR2", 2e-6),
+                            ("TNE1", -2e-3),
+                            ("TNC2", 3e-6),
+                            ("TNS1", 1e-3),
+                            ("ISE", 1e-16),
+                            ("ISC", 2e-16),
+                            ("ISS", 3e-16),
+                        ]);
+                    }
+                    let mut model =
+                        model_with(&params).with_instance_params(&[("SW_ET".into(), 0.0)]);
                     model.set_voltage_limiting_enabled(false);
                     if promoted {
                         let mut next = 4;
@@ -2504,6 +2621,8 @@ mod tests {
                 let cold = model.operating_point_currents();
                 let cold_intrinsic = model.intrinsic_linearization.ic;
                 let cold_charge = charges(&model);
+                model.set_temperature(320.15);
+                model.set_temperature(340.15);
                 model.set_temperature(340.15);
                 let mut fresh = make();
                 fresh.set_temperature(340.15);
