@@ -1531,7 +1531,7 @@ fn eval_function_with_derivative(
             let (x, dx) = eval_arg(0)?;
             let clamped = x.max(1.0e-38);
             if context.expression_dialect == ExpressionDialect::Xyce {
-                derivative_pair(clamped.log10(), dx / (std::f64::consts::LN_10 * clamped))
+                derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
             } else {
                 derivative_pair(clamped.ln(), dx / clamped)
             }
@@ -1544,7 +1544,7 @@ fn eval_function_with_derivative(
         Function::Log10 => {
             let (x, dx) = eval_arg(0)?;
             let clamped = x.max(1.0e-38);
-            derivative_pair(clamped.log10(), dx / (std::f64::consts::LN_10 * clamped))
+            derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
         }
         Function::Sin => unary_derivative(eval_arg(0)?, |x| x.sin(), |x| x.cos()),
         Function::Cos => unary_derivative(eval_arg(0)?, |x| x.cos(), |x| -x.sin()),
@@ -1607,13 +1607,13 @@ fn eval_function_with_derivative(
             }
         }
         Function::Asinh => {
-            unary_derivative(eval_arg(0)?, |x| x.asinh(), |x| 1.0 / (x * x + 1.0).sqrt())
+            let (x, dx) = eval_arg(0)?;
+            derivative_pair(x.asinh(), dx / x.hypot(1.0))
         }
-        Function::Acosh => unary_derivative(
-            eval_arg(0)?,
-            |x| x.acosh(),
-            |x| 1.0 / ((x - 1.0).sqrt() * (x + 1.0).sqrt()),
-        ),
+        Function::Acosh => {
+            let (x, dx) = eval_arg(0)?;
+            derivative_pair(x.acosh(), dx / (x - 1.0).sqrt() / (x + 1.0).sqrt())
+        }
         Function::Atanh => {
             let (x, dx) = eval_arg(0)?;
             if context.expression_dialect == ExpressionDialect::Xyce {
@@ -3423,6 +3423,64 @@ mod tests {
                     BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
                 source.expression_dialect = dialect;
                 assert_eq!(source.explicit_time_derivative(0.0), None);
+            }
+        }
+    }
+
+    #[test]
+    fn analytic_primitive_coefficients_preserve_finite_scaled_derivatives() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let log_slope = if dialect == ExpressionDialect::Xyce {
+                1.0 / std::f64::consts::LN_10
+            } else {
+                1.0
+            };
+            for (expression, point, expected) in [
+                ("asinh(1e200*v(in))", 1.0, 1.0),
+                ("asinh(1e200*v(in))", -1.0, 1.0),
+                ("asinh(v(in))", 0.0, 1.0),
+                ("acosh(1e308*v(in))", 1.0, 1.0),
+                ("acosh(v(in))", 2.0, 1.0 / 3.0_f64.sqrt()),
+                ("log10(1e308*v(in))", 1.0, 1.0 / std::f64::consts::LN_10),
+                ("log(1e308*v(in))", 1.0, log_slope),
+            ] {
+                let (_, actual) = eval_node_derivative_with_dialect(expression, point, dialect);
+                assert!(
+                    (actual / expected - 1.0).abs() < 3e-15,
+                    "{dialect:?} {expression}: {actual:e}, expected {expected:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn analytic_power_coefficients_preserve_finite_scaled_derivatives() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, expected) in [
+                ("pow(1e-300*v(in),-0.03)*1e-9", -0.03),
+                ("pow(-1e-200*v(in),2)*1e200", 2e-200),
+                ("(-1e-200*v(in))^2*1e200", 2e-200),
+                ("pwrs(-1e-200*v(in),2)*1e200", -2e-200),
+                (
+                    "pwr(-1e-200*v(in),2)*1e200",
+                    if dialect == ExpressionDialect::Xyce {
+                        2e-200
+                    } else {
+                        -2e-200
+                    },
+                ),
+            ] {
+                let (_, actual) = eval_node_derivative_with_dialect(expression, 1.0, dialect);
+                assert!(
+                    (actual / expected - 1.0).abs() < 3e-15,
+                    "{dialect:?} {expression}: {actual:e}, expected {expected:e}"
+                );
+            }
+            for expression in ["v(in)^0", "pow(v(in),0)"] {
+                assert_eq!(
+                    eval_node_derivative_with_dialect(expression, 0.0, dialect),
+                    (1.0, 0.0)
+                );
             }
         }
     }

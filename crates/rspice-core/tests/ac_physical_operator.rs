@@ -58,6 +58,25 @@ fn behavioral_ac_transfer_retains_derivatives_through_nested_scales() {
     }
 }
 
+#[test]
+fn behavioral_ac_transfer_preserves_primitive_derivative_coefficients() {
+    let mut failures = Vec::new();
+    for (expression, expected) in [
+        ("asinh(1e200*(1+V(in)))", 1.0_f64),
+        ("log10(1e308*(1+V(in)))", 1.0 / std::f64::consts::LN_10),
+        ("pow(1e-300*(1+V(in)),-0.03)*1e-9", -0.03),
+    ] {
+        let point = solve_one(&format!(
+            "Primitive derivative\nV1 in 0 DC 0 AC 1\nB1 out 0 V={{{expression}}}\n.end\n"
+        ));
+        let actual = voltage(&point, "out");
+        if !((actual.re / expected - 1.0).abs() < 1e-12 && actual.im == 0.0) {
+            failures.push(format!("{expression}: {actual}, expected {expected}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn voltage(point: &AcResult, node: &str) -> Complex64 {
     let index = point
         .node_names

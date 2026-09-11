@@ -143,7 +143,7 @@ pub(crate) fn real_pow_with_derivative(
     if base > 0.0 {
         let mut derivative = Derivative::from(0.0);
         if d_base != 0.0 {
-            derivative += d_base * exponent * base.powf(exponent - 1.0);
+            derivative += power_base_direction(base, exponent, value, d_base);
         }
         if d_exponent != 0.0 {
             derivative += d_exponent * value * base.ln();
@@ -154,7 +154,6 @@ pub(crate) fn real_pow_with_derivative(
     if base < 0.0 {
         let magnitude = base.abs().powf(exponent);
         let (sin_pi_exponent, cos_pi_exponent) = sin_cos_pi(exponent);
-        let base_partial = Derivative::from(exponent) * magnitude * cos_pi_exponent / base;
         let exponent_partial = Derivative::from(magnitude)
             * (base.abs().ln() * cos_pi_exponent - std::f64::consts::PI * sin_pi_exponent);
         // Do not manufacture NaN from an absent direction (`inf * 0`).  This
@@ -163,7 +162,8 @@ pub(crate) fn real_pow_with_derivative(
         // independent of it.
         let mut derivative = Derivative::from(0.0);
         if d_base != 0.0 {
-            derivative += base_partial * d_base;
+            derivative +=
+                -power_base_direction(base.abs(), exponent, magnitude, d_base) * cos_pi_exponent;
         }
         if d_exponent != 0.0 {
             derivative += exponent_partial * d_exponent;
@@ -231,7 +231,8 @@ fn magnitude_power_with_derivative(
     let mut derivative = Derivative::from(0.0);
     if d_base != 0.0 {
         let base_polarity = if preserve_sign { 1.0 } else { branch_sign };
-        derivative += d_base * base_polarity * exponent * magnitude.powf(exponent - 1.0);
+        derivative +=
+            power_base_direction(magnitude, exponent, value.abs(), d_base) * base_polarity;
     }
     if d_exponent != 0.0 {
         derivative += d_exponent * value * magnitude.ln();
@@ -247,15 +248,35 @@ fn legacy_real_pow_with_derivative(
 ) -> Option<(Value, Derivative)> {
     let value = base.powf(exponent);
     if d_exponent == 0.0 {
-        return derivative_pair(value, d_base * exponent * base.powf(exponent - 1.0));
+        return derivative_pair(value, power_base_direction(base, exponent, value, d_base));
     }
     if base > 0.0 {
         derivative_pair(
             value,
-            value * (d_exponent * base.ln() + exponent * d_base / base),
+            power_base_direction(base, exponent, value, d_base) + d_exponent * value * base.ln(),
         )
     } else {
         None
+    }
+}
+
+/// Reuse a normal power value before dividing by the base. Besides avoiding
+/// an overflowing shifted power, this avoids rounding `exponent - 1` in the
+/// common case. If the primal underflows or overflows, the shifted power may
+/// still give a usable slope (for example the derivative of a tiny square).
+fn power_base_direction(
+    base: Value,
+    exponent: Value,
+    power: Value,
+    direction: Derivative,
+) -> Derivative {
+    if direction == 0.0 || exponent == 0.0 {
+        return 0.0.into();
+    }
+    if base != 0.0 && power.is_normal() {
+        direction * exponent * power / base
+    } else {
+        direction * exponent * base.powf(exponent - 1.0)
     }
 }
 
