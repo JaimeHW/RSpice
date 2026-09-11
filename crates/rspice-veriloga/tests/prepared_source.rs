@@ -169,3 +169,175 @@ fn named_connection_configurations_preserve_alternatives_and_reject_duplicate_de
         );
     }
 }
+
+#[derive(Default)]
+struct PreparationObserver {
+    cancelled: std::sync::atomic::AtomicBool,
+    phases: std::sync::Mutex<Vec<rspice_veriloga::PipelinePhase>>,
+    cancel_at: Option<rspice_veriloga::PipelinePhase>,
+}
+impl rspice_veriloga::PipelineControl for PreparationObserver {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+    fn phase_completed(
+        &self,
+        timing: rspice_veriloga::PhaseTiming,
+        _: &rspice_veriloga::PipelineMetrics,
+    ) {
+        self.phases.lock().unwrap().push(timing.phase);
+        if self.cancel_at == Some(timing.phase) {
+            self.cancelled.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+#[test]
+fn prepared_virtual_source_shares_front_end_and_transports_standalone_connections() {
+    use rspice_veriloga::{
+        ConnectionLibraryArtifact, PipelinePhase, RuntimeQualificationOptions,
+        VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile,
+    };
+    let files = Sources::new();
+    let rules = rspice_veriloga::connect::library::builtin_connect_library_source();
+    let root = files.write("rules.vams", &rules);
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let file_artifact = compiler
+        .prepare_file_runtime_source(&root)
+        .unwrap()
+        .connection_artifact()
+        .unwrap();
+    let connection_bundle =
+        VirtualSourceBundle::new("rules.vams", [VirtualSourceFile::new("rules.vams", &rules)])
+            .unwrap();
+    let standalone = compiler
+        .prepare_virtual_runtime_source(&connection_bundle, VirtualCompileLimits::default())
+        .unwrap();
+    assert!(standalone.is_connect_library());
+    assert_eq!(standalone.module_names().count(), 0);
+    let artifact = standalone.connection_artifact().unwrap();
+    assert_eq!(artifact, file_artifact);
+    let packet = serde_json::to_value(&artifact).unwrap();
+    let transported: ConnectionLibraryArtifact = serde_json::from_value(packet.clone()).unwrap();
+    assert_eq!(
+        transported
+            .connect_specification()
+            .unwrap()
+            .rules
+            .insertions()
+            .len(),
+        3
+    );
+    for field in ["source_package", "preprocessed_source", "schema_version"] {
+        let mut altered = packet.clone();
+        altered[field] = if field == "schema_version" {
+            serde_json::json!(999)
+        } else {
+            serde_json::json!("altered")
+        };
+        let altered: ConnectionLibraryArtifact = serde_json::from_value(altered).unwrap();
+        assert!(altered.validate_integrity().is_err(), "{field}");
+    }
+    let mut missing = packet;
+    missing.as_object_mut().unwrap().remove("identity");
+    assert!(serde_json::from_value::<ConnectionLibraryArtifact>(missing).is_err());
+
+    let modules = "`include \"rules.vams\"\nmodule first(p,n); inout p,n; electrical p,n; analog I(p,n)<+V(p,n); endmodule\nmodule second(p,n); inout p,n; electrical p,n; analog I(p,n)<+2*V(p,n); endmodule\n";
+    let bundle = VirtualSourceBundle::new(
+        "models.vams",
+        [
+            VirtualSourceFile::new("models.vams", modules),
+            VirtualSourceFile::new("rules.vams", rules),
+        ],
+    )
+    .unwrap();
+    let observer = PreparationObserver::default();
+    let prepared = compiler
+        .prepare_virtual_runtime_source_with_control(
+            &bundle,
+            VirtualCompileLimits::default(),
+            &observer,
+        )
+        .unwrap();
+    assert_eq!(
+        prepared.module_names().collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    for name in ["first", "second"] {
+        let compiled = prepared
+            .compile_runtime_with_qualifications_and_control(
+                name,
+                RuntimeQualificationOptions::NONE,
+                &observer,
+            )
+            .unwrap();
+        compiled.validate_integrity().unwrap();
+        assert_eq!(
+            compiled
+                .runtime
+                .canonical_ir
+                .metadata
+                .source_identity
+                .as_str(),
+            prepared.connect_specification().source_identity
+        );
+        assert_eq!(compiled.dependency_closure, prepared.dependency_closure());
+        assert_eq!(compiled.include_graph, prepared.include_graph());
+    }
+    // Compiler work is actually shared, rather than merely relabelled in metrics.
+    let observed = observer.phases.lock().unwrap();
+    for phase in [
+        PipelinePhase::Preprocess,
+        PipelinePhase::Lex,
+        PipelinePhase::Parse,
+        PipelinePhase::Semantic,
+    ] {
+        assert_eq!(
+            observed.iter().filter(|&&seen| seen == phase).count(),
+            1,
+            "{phase}"
+        );
+    }
+    drop(observed);
+    observer.cancelled.store(true, Ordering::SeqCst);
+    let error = prepared
+        .compile_runtime_with_qualifications_and_control(
+            "first",
+            RuntimeQualificationOptions::NONE,
+            &observer,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error.error,
+        rspice_veriloga::CompileError::Cancelled(_)
+    ));
+    let error = compiler
+        .prepare_virtual_runtime_source_with_control(
+            &bundle,
+            VirtualCompileLimits::default(),
+            &observer,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error.error,
+        rspice_veriloga::CompileError::Cancelled(_)
+    ));
+    let late_cancel = PreparationObserver {
+        cancel_at: Some(PipelinePhase::Semantic),
+        ..Default::default()
+    };
+    let error = compiler
+        .prepare_virtual_runtime_source_with_control(
+            &bundle,
+            VirtualCompileLimits::default(),
+            &late_cancel,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error.error,
+        rspice_veriloga::CompileError::Cancelled(_)
+    ));
+}

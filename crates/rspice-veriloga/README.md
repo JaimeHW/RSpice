@@ -146,6 +146,23 @@ returns only that configuration's ordered insertion and resolution statements.
 The complete table is an inspection view, not an implicit union of alternative
 configurations. Duplicate connect-module or rule-block declarations are errors.
 
+`prepare_virtual_runtime_source` provides the same immutable preparation for a
+sealed bundle. It retains the exact active dependency/include graph, diagnostic
+source map, compiler options and limits. Its module emissions reuse the front
+end and report only newly performed phases to a progress observer; each report
+retains the shared preparation metrics as provenance. The existing virtual
+discovery and compilation APIs now use this path. A control variant supports
+cancellation during preparation and subsequent module emission.
+
+Both file and virtual preparation can produce a `ConnectionLibraryArtifact`,
+including when there are no ordinary modules. This versioned source artifact
+retains the active connection declarations and authored bodies independently of
+a device ABI. Validate its integrity before registration and use
+`connect_specification()` to resolve its physical definitions and named rules
+without filesystem access. The containing project or signed package authenticates
+the artifact identity. Engine registration for this standalone artifact remains
+integration work; module artifacts continue to carry their connection closure.
+
 Runtime reports and file-metadata results carry `PipelineMetrics`.
 `compile_measured` and `compile_canonical_ir_measured` expose the same data
 for source-only artifact calls. `RustTranspiler::transpile_measured` reports

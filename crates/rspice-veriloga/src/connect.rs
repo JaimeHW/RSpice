@@ -242,6 +242,10 @@ pub struct ConnectRuleTable {
 }
 
 impl ConnectRuleTable {
+    pub fn has_declarations(&self) -> bool {
+        !self.modules.is_empty() || !self.blocks.is_empty()
+    }
+
     pub fn blocks(&self) -> &[ConnectRuleBlock] {
         &self.blocks
     }

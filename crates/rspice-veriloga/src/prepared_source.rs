@@ -72,6 +72,14 @@ impl PreparedRuntimeSource {
         }
     }
 
+    /// Retain active connection declarations and authored bodies without
+    /// requiring an ordinary device module or generating executable code.
+    pub fn connection_artifact(&self) -> Option<crate::ConnectionLibraryArtifact> {
+        self.analyzed.connect_rules.has_declarations().then(|| {
+            crate::ConnectionLibraryArtifact::from_prepared(&self.source_package, &self.source)
+        })
+    }
+
     pub fn compile_runtime(&self, module: Option<&str>) -> CompileResult<CompiledRuntimeFile> {
         self.compile_runtime_with_control(module, &NoPipelineControl)
     }

@@ -92,6 +92,7 @@ pub mod canonical_ir;
 pub mod codegen;
 mod complex_arithmetic;
 pub mod connect;
+mod connection_artifact;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
@@ -104,6 +105,7 @@ pub mod metrics;
 mod numeric_literal;
 pub mod parser;
 mod prepared_source;
+mod prepared_virtual_source;
 pub mod preprocessor;
 mod reaching_definition;
 pub mod runtime_report;
@@ -199,7 +201,9 @@ pub struct ConnectSpecification {
     pub declares_module: bool,
 }
 
+pub use connection_artifact::ConnectionLibraryArtifact;
 pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
+pub use prepared_virtual_source::PreparedVirtualSource;
 
 /// Result of compiling a Verilog-A source file from disk.
 ///
@@ -587,77 +591,23 @@ impl VerilogACompiler {
         bundle: &VirtualSourceBundle,
         limits: VirtualCompileLimits,
     ) -> Result<VirtualModuleDiscovery, VirtualRuntimeCompileFailure> {
-        let input_bytes = bundle.files().iter().fold(0_usize, |total, file| {
-            total.saturating_add(file.source.len())
-        });
-        let mut measurements =
-            metrics::MetricsRecorder::new(input_bytes, self.options.performance_budget.clone());
-        let limits = virtual_source::validate_bundle_request(bundle, limits)
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
-        let mut preprocessor = self.configured_in_memory_preprocessor();
-        measurements
-            .checkpoint(PipelinePhase::Preprocess)
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        let phase_started = web_time::Instant::now();
-        let preprocessed = preprocessor
-            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
-            .map_err(|error| {
-                VirtualRuntimeCompileFailure::from_preprocessor(
-                    error,
-                    preprocessor.dependency_documents(),
-                )
-            })?;
-        measurements
-            .record(PipelinePhase::Preprocess, phase_started.elapsed())
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        measurements.metrics_mut().preprocessed_bytes =
-            metrics::usize_to_u64(preprocessed.source.len());
-        let dependency_closure = virtual_source::dependencies_from_preprocessor(
-            preprocessor.take_dependency_documents(),
-        );
-        let include_graph =
-            virtual_source::includes_from_preprocessor(preprocessor.take_include_graph());
-        measurements.metrics_mut().dependency_count =
-            metrics::usize_to_u64(dependency_closure.len());
-        let analyzed = self
-            .analyze_preprocessed(bundle.root_path(), &preprocessed.source, &mut measurements)
-            .map_err(|error| {
-                VirtualRuntimeCompileFailure::from_compiler(
-                    error,
-                    &preprocessed,
-                    &dependency_closure,
-                )
-            })?;
-        let module_names = analyzed
-            .source
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                ast::Item::Module(module) => Some(module.name.to_string()),
-                _ => None,
-            })
+        let prepared = self.prepare_virtual_runtime_source(bundle, limits)?;
+        let module_names = prepared
+            .module_names()
+            .map(str::to_owned)
             .collect::<Vec<_>>();
         if module_names.is_empty() {
-            return Err(VirtualRuntimeCompileFailure::from_compiler(
-                CompileError::ModuleSelection(format!(
-                    "no executable modules found in virtual root '{}'",
-                    bundle.root_path()
-                )),
-                &preprocessed,
-                &dependency_closure,
-            ));
+            return Err(prepared.diagnose(CompileError::ModuleSelection(format!(
+                "no executable modules found in virtual root '{}'",
+                bundle.root_path()
+            ))));
         }
         Ok(VirtualModuleDiscovery {
             module_names,
-            dependency_closure,
-            include_graph,
+            dependency_closure: prepared.dependency_closure().to_vec(),
+            include_graph: prepared.include_graph().to_vec(),
         })
     }
-
     /// Compile one explicitly selected module from a sealed virtual source
     /// bundle without consulting the file system.
     ///
@@ -721,86 +671,16 @@ impl VerilogACompiler {
         limits: VirtualCompileLimits,
         qualifications: RuntimeQualificationOptions,
     ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
-        let input_bytes = bundle.files().iter().fold(0_usize, |total, file| {
-            total.saturating_add(file.source.len())
-        });
-        let mut measurements =
-            metrics::MetricsRecorder::new(input_bytes, self.options.performance_budget.clone());
-        let limits = virtual_source::validate_compile_request(bundle, module_name, limits)
+        virtual_source::validate_compile_request(bundle, module_name, limits)
             .map_err(CompileError::from)
             .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        let provider = virtual_source::VirtualBundleProvider::new(bundle, limits);
-        let mut preprocessor = self.configured_in_memory_preprocessor();
-        measurements
-            .checkpoint(PipelinePhase::Preprocess)
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        let phase_started = web_time::Instant::now();
-        let preprocessed = preprocessor
-            .preprocess_provider_root_mapped(&provider, std::path::Path::new(bundle.root_path()))
-            .map_err(|error| {
-                VirtualRuntimeCompileFailure::from_preprocessor(
-                    error,
-                    preprocessor.dependency_documents(),
-                )
-            })?;
-        measurements
-            .record(PipelinePhase::Preprocess, phase_started.elapsed())
-            .map_err(CompileError::from)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        measurements.metrics_mut().preprocessed_bytes =
-            metrics::usize_to_u64(preprocessed.source.len());
-        let dependency_closure = virtual_source::dependencies_from_preprocessor(
-            preprocessor.take_dependency_documents(),
-        );
-        let include_graph =
-            virtual_source::includes_from_preprocessor(preprocessor.take_include_graph());
-        measurements.metrics_mut().dependency_count =
-            metrics::usize_to_u64(dependency_closure.len());
-        let source_bundle_identity = virtual_source::source_bundle_identity(bundle);
-        let dependency_closure_identity =
-            virtual_source::dependency_closure_identity(&dependency_closure, &include_graph);
-        let compiler_contract_identity = virtual_source::compiler_contract_identity(
-            &self.options,
-            bundle.root_path(),
-            module_name,
-            &dependency_closure_identity,
-        );
-        let runtime = self
-            .compile_runtime_preprocessed_measured(
-                bundle.root_path(),
-                &preprocessed.source,
-                Some(module_name),
+        self.prepare_virtual_runtime_source(bundle, limits)?
+            .compile_runtime_with_qualifications_and_control(
+                module_name,
                 qualifications,
-                &mut measurements,
+                &NoPipelineControl,
             )
-            .map_err(|error| {
-                VirtualRuntimeCompileFailure::from_compiler(
-                    error,
-                    &preprocessed,
-                    &dependency_closure,
-                )
-            })?;
-        let runtime_contract_identity =
-            virtual_source::runtime_contract_identity(&compiler_contract_identity, &runtime);
-        let compilation = VirtualRuntimeCompilation {
-            runtime,
-            root_path: bundle.root_path().to_owned(),
-            selected_module: module_name.to_owned(),
-            dependency_closure,
-            include_graph,
-            source_bundle_identity,
-            dependency_closure_identity,
-            compiler_contract_identity,
-            runtime_contract_identity,
-            source_bundle: bundle.clone(),
-            compiler_options: self.options.clone(),
-        };
-        virtual_source::validate_compilation(&compilation)
-            .map_err(VirtualRuntimeCompileFailure::unmapped)?;
-        Ok(compilation)
     }
-
     fn compile_runtime_preprocessed_measured(
         &self,
         source_package: &str,
@@ -869,6 +749,26 @@ impl VerilogACompiler {
             parameters,
             measurements,
         )?;
+        self.compile_runtime_analyzed_measured(
+            source_package,
+            preprocessed,
+            &analyzed,
+            module_name,
+            qualifications,
+            measurements,
+        )
+    }
+
+    fn compile_runtime_analyzed_measured(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        analyzed: &semantic::AnalyzedFile,
+        module_name: Option<&str>,
+        qualifications: RuntimeQualificationOptions,
+        measurements: &mut metrics::MetricsRecorder,
+    ) -> CompileResult<RuntimeCompileReport> {
+        measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&preprocessed).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
@@ -1380,11 +1280,12 @@ impl VerilogACompiler {
         let source_id = SourceId::new(0);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
         let source_file = Parser::new(&tokens).parse()?;
-        if !source_file
-            .items
-            .iter()
-            .any(|item| matches!(item, ast::Item::ConnectRules(_)))
-        {
+        if !source_file.items.iter().any(|item| {
+            matches!(
+                item,
+                ast::Item::ConnectModule(_) | ast::Item::ConnectRules(_)
+            )
+        }) {
             return Ok(ConnectSpecification {
                 source_identity: canonical_ir::source_identity(source),
                 declares_module: source_file
