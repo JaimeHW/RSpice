@@ -2,6 +2,27 @@
 //! Only wires are collapsed here. Variable ports first receive the linker's
 //! explicit continuous connection process, preserving HDL scheduling semantics.
 use super::*;
+use crate::xspice::event_scheduler::EventTarget;
+use crate::xspice::{DigitalState, DigitalValue};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExternalBitDriverId(pub(super) usize);
+
+impl ExternalBitDriverId {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+/// One resolved-net change. The first change of each atomic publication is
+/// marked so an event participant can reconstruct simultaneous vector updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DigitalBitChange {
+    pub net: usize,
+    pub previous: DigitalValue,
+    pub value: DigitalValue,
+    pub starts_publication: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct DigitalBitConnection {
@@ -15,15 +36,22 @@ struct BitNet {
     contributions: Vec<(usize, u32)>,
 }
 
+#[derive(Clone)]
 struct BitTopology {
     nets: Vec<BitNet>,
     by_signal: Vec<Vec<usize>>,
+    external_sources: Vec<(usize, EventTarget)>,
+    external_by_net: Vec<Vec<usize>>,
+    observed: Vec<bool>,
+    external_attached: bool,
 }
 
 #[derive(Clone)]
 pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
-    resolved: Vec<FourStateBit>,
+    resolved: Vec<DigitalValue>,
+    external_values: Vec<DigitalValue>,
+    changes: Vec<DigitalBitChange>,
     pending: Vec<Option<FourStateValue>>,
     touched: Vec<DigitalSignalId>,
 }
@@ -31,7 +59,9 @@ pub(super) struct ConnectedBits {
 impl ConnectedBits {
     fn fresh(topology: Arc<BitTopology>) -> Self {
         Self {
-            resolved: vec![FourStateBit::HighImpedance; topology.nets.len()],
+            resolved: vec![DigitalValue::high_z(); topology.nets.len()],
+            external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
+            changes: Vec::new(),
             pending: vec![None; topology.by_signal.len()],
             touched: Vec::new(),
             topology,
@@ -65,6 +95,10 @@ impl DigitalSignalStore {
         let mut topology = BitTopology {
             nets: Vec::new(),
             by_signal: vec![Vec::new(); self.values.len()],
+            external_sources: Vec::new(),
+            external_by_net: vec![Vec::new(); nets.len()],
+            observed: vec![false; nets.len()],
+            external_attached: false,
         };
         let mut claimed = BTreeSet::new();
         for (net_index, offered) in nets.iter().enumerate() {
@@ -122,7 +156,118 @@ impl DigitalSignalStore {
     }
 
     pub(crate) fn connected_bit(&self, net: usize) -> Option<FourStateBit> {
+        self.connected_value(net).map(hdl_bit)
+    }
+
+    pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
         self.connected.as_ref()?.resolved.get(net).copied()
+    }
+
+    /// Validate the complete external topology before assigning any identity.
+    pub(crate) fn attach_external_bits(
+        &mut self,
+        observed: &[usize],
+        drivers: &[(usize, EventTarget)],
+    ) -> Result<Vec<ExternalBitDriverId>, String> {
+        let connected = self.connected.as_mut().ok_or("no connected bit topology")?;
+        if connected.topology.external_attached {
+            return Err("external bit participants are already attached".into());
+        }
+        let count = connected.topology.nets.len();
+        if let Some(net) = observed
+            .iter()
+            .copied()
+            .chain(drivers.iter().map(|(net, _)| *net))
+            .find(|net| *net >= count)
+        {
+            return Err(format!(
+                "external participant refers to unknown event net {net}"
+            ));
+        }
+        let mut identities = std::collections::HashSet::new();
+        for (_, target) in drivers {
+            if !identities.insert(target.clone()) {
+                return Err(format!(
+                    "external output driver {}.{}[{}] is declared twice",
+                    target.instance, target.port_name, target.driver_index
+                ));
+            }
+        }
+        let topology = Arc::make_mut(&mut connected.topology);
+        topology.external_attached = true;
+        topology.external_sources.extend_from_slice(drivers);
+        for &net in observed {
+            topology.observed[net] = true;
+        }
+        for (index, (net, _)) in drivers.iter().enumerate() {
+            topology.external_by_net[*net].push(index);
+            topology.observed[*net] = true;
+        }
+        let sources = &topology.external_sources;
+        for slots in &mut topology.external_by_net {
+            slots.sort_unstable_by(|left, right| sources[*left].1.cmp(&sources[*right].1));
+        }
+        connected
+            .external_values
+            .resize(drivers.len(), DigitalValue::high_z());
+        Ok((0..drivers.len()).map(ExternalBitDriverId).collect())
+    }
+
+    pub(crate) fn has_external_participants(&self) -> bool {
+        self.connected
+            .as_ref()
+            .is_some_and(|bits| bits.topology.external_attached)
+    }
+
+    pub(crate) fn external_sources(&self) -> &[(usize, EventTarget)] {
+        self.connected
+            .as_ref()
+            .map_or(&[], |bits| bits.topology.external_sources.as_slice())
+    }
+
+    pub(crate) fn take_external_bit_changes(&mut self) -> Vec<DigitalBitChange> {
+        self.connected
+            .as_mut()
+            .map_or_else(Vec::new, |bits| std::mem::take(&mut bits.changes))
+    }
+
+    pub(crate) fn check_external_drives(
+        &self,
+        drives: &[(ExternalBitDriverId, DigitalValue)],
+    ) -> Result<(), String> {
+        let count = self
+            .connected
+            .as_ref()
+            .map_or(0, |bits| bits.external_values.len());
+        for (driver, _) in drives {
+            if driver.0 >= count {
+                return Err(format!("unknown external bit driver {}", driver.0));
+            }
+        }
+        Ok(())
+    }
+
+    /// The caller has checked every identity. Driver values enter as one bank;
+    /// no resolved alias is ever copied back into a contribution slot.
+    pub(crate) fn publish_external_drives(
+        &mut self,
+        drives: &[(ExternalBitDriverId, DigitalValue)],
+    ) {
+        if drives.is_empty() {
+            return;
+        }
+        let mut connected = self.connected.take().expect("validated external drives");
+        let mut nets = BTreeSet::new();
+        for (driver, value) in drives {
+            connected.external_values[driver.0] = *value;
+            nets.insert(connected.topology.external_sources[driver.0].0);
+        }
+        let publication_start = connected.changes.len();
+        for net in nets {
+            self.resolve_connected_net(&mut connected, net, publication_start);
+        }
+        self.flush_connected_values(&mut connected);
+        self.connected = Some(connected);
     }
 
     /// Project one driver's update into all aliases before observing any
@@ -141,28 +286,65 @@ impl DigitalSignalStore {
             .edit(signal, &self.values[usize::from(signal)])
             .clone_from(&value);
         let topology = Arc::clone(&connected.topology);
+        let publication_start = connected.changes.len();
         for &net_index in &topology.by_signal[usize::from(signal)] {
-            let net = &topology.nets[net_index];
-            let resolved = net.contributions.iter().fold(
-                FourStateBit::HighImpedance,
-                |resolved, &(slot, offset)| {
-                    let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
-                    else {
-                        return resolved;
-                    };
-                    if offset >= value.width() {
-                        return resolved;
-                    }
-                    resolve_bit(resolved, value.bit(offset))
-                },
-            );
-            connected.resolved[net_index] = resolved;
-            for member in &net.members {
-                connected
-                    .edit(member.signal, &self.values[usize::from(member.signal)])
-                    .set_bit(member.bit, resolved);
+            self.resolve_connected_net(&mut connected, net_index, publication_start);
+        }
+        self.flush_connected_values(&mut connected);
+        self.connected = Some(connected);
+    }
+
+    fn resolve_connected_net(
+        &mut self,
+        connected: &mut ConnectedBits,
+        net_index: usize,
+        publication_start: usize,
+    ) {
+        let topology = Arc::clone(&connected.topology);
+        let net = &topology.nets[net_index];
+        let hdl = net.contributions.iter().fold(
+            FourStateBit::HighImpedance,
+            |resolved, &(slot, offset)| {
+                let ContributionValue::FourState(Some(value)) = &self.contributions[slot].value
+                else {
+                    return resolved;
+                };
+                if offset >= value.width() {
+                    return resolved;
+                }
+                resolve_bit(resolved, value.bit(offset))
+            },
+        );
+        let mut resolved = match hdl {
+            FourStateBit::Zero => Some(DigitalValue::zero()),
+            FourStateBit::One => Some(DigitalValue::one()),
+            FourStateBit::Unknown => Some(DigitalValue::unknown()),
+            FourStateBit::HighImpedance => None,
+        };
+        for &slot in &topology.external_by_net[net_index] {
+            let value = connected.external_values[slot];
+            if value.state != DigitalState::HighZ {
+                resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
             }
         }
+        let resolved = resolved.unwrap_or_else(DigitalValue::high_z);
+        let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
+        if previous != resolved && topology.observed[net_index] {
+            connected.changes.push(DigitalBitChange {
+                net: net_index,
+                previous,
+                value: resolved,
+                starts_publication: connected.changes.len() == publication_start,
+            });
+        }
+        for member in &net.members {
+            connected
+                .edit(member.signal, &self.values[usize::from(member.signal)])
+                .set_bit(member.bit, hdl_bit(resolved));
+        }
+    }
+
+    fn flush_connected_values(&mut self, connected: &mut ConnectedBits) {
         // A whole-vector write changes every connected bit as one publication.
         // Install the complete bank before computed sensitivity can read it.
         for &member in &connected.touched {
@@ -178,7 +360,6 @@ impl DigitalSignalStore {
             }
         }
         connected.touched.clear();
-        self.connected = Some(connected);
     }
 
     pub(super) fn force_changes_connected_bit(
@@ -197,5 +378,16 @@ impl DigitalSignalStore {
                         && value.bit(member.bit) != self.values[usize::from(signal)].bit(member.bit)
                 })
             })
+    }
+}
+
+fn hdl_bit(value: DigitalValue) -> FourStateBit {
+    match value.state {
+        DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => FourStateBit::Zero,
+        DigitalState::One | DigitalState::OneR | DigitalState::OneZ => FourStateBit::One,
+        DigitalState::HighZ => FourStateBit::HighImpedance,
+        DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => {
+            FourStateBit::Unknown
+        }
     }
 }

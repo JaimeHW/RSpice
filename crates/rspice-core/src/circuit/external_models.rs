@@ -7,6 +7,10 @@
 //! only where the device actually has entries, and timestep acceptance that
 //! propagates the device's own breakpoint requests back to the integrator.
 
+#[cfg(all(test, feature = "veriloga"))]
+#[path = "external_models/coupled_tests.rs"]
+mod coupled_tests;
+
 use super::*;
 use crate::xspice::{
     EventInputKind, ResourceTransaction, XspiceEventInputs, XspiceInstanceCheckpoint,
@@ -14,6 +18,22 @@ use crate::xspice::{
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+
+/// A resumable XSPICE Active settle at one physical candidate. Pending
+/// dispatch flags stay with the circuit; transition observations and source
+/// samples remain here across yields to another event participant.
+#[derive(Clone)]
+pub(crate) struct XspiceActiveWave {
+    time: Value,
+    timestep: Value,
+    analysis: crate::xspice::AnalysisType,
+    phase: crate::xspice::EvaluationPhase,
+    coefficients: crate::numerics::integration::CompanionCoefficients,
+    xyce_one_step_order2: bool,
+    current_source_values: Vec<Value>,
+    analog_transitions: HashMap<(NodeId, NodeId), crate::xspice::AnalogTransition>,
+    pass: usize,
+}
 
 /// Copy-on-write event/model state staged by the circuit acceptance barrier.
 /// Dispatch topology is immutable, and per-evaluation scratch is recomputed.
@@ -608,6 +628,19 @@ impl CircuitData {
         companion: XspiceCompanionPolicy<'_>,
         resources: Option<&ResourceTransaction>,
     ) -> crate::xspice::CmResult<()> {
+        let mut wave = self.begin_xspice_active_wave(time, timestep, analysis, phase, companion)?;
+        while self.step_xspice_active_wave(&mut wave, solution, resources)? {}
+        Ok(())
+    }
+
+    pub(crate) fn begin_xspice_active_wave(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        analysis: crate::xspice::AnalysisType,
+        phase: crate::xspice::EvaluationPhase,
+        companion: XspiceCompanionPolicy<'_>,
+    ) -> crate::xspice::CmResult<XspiceActiveWave> {
         if let Some(error) = self
             .xspice_resource_failure
             .as_ref()
@@ -615,57 +648,228 @@ impl CircuitData {
         {
             return Err(crate::xspice::CmError::EvaluationError(error.clone()));
         }
-        let XspiceCompanionPolicy {
-            coefficients,
-            xyce_one_step_order2,
-        } = companion;
-        let companion_coefficients = *coefficients;
-        let current_source_values = self.current_sources.values_at_time(time);
-        let num_nodes = self.num_nodes;
-        let mut analog_transitions =
-            HashMap::<(NodeId, NodeId), crate::xspice::AnalogTransition>::new();
-
-        // The sensitivity map is built here rather than inside the loop so the
-        // rest of the body can hold it by shared reference while the instances
-        // are borrowed mutably.
         self.ensure_xspice_event_dispatch();
-        let instance_count = self.xspice_instances.len();
+        let count = self.xspice_instances.len();
         self.xspice_dispatch_pending.clear();
-        self.xspice_dispatch_pending.resize(instance_count, false);
+        self.xspice_dispatch_pending.resize(count, false);
         self.xspice_dispatch_next_pending.clear();
-        self.xspice_dispatch_next_pending
-            .resize(instance_count, false);
+        self.xspice_dispatch_next_pending.resize(count, false);
+        Ok(XspiceActiveWave {
+            time,
+            timestep,
+            analysis,
+            phase,
+            coefficients: *companion.coefficients,
+            xyce_one_step_order2: companion.xyce_one_step_order2,
+            current_source_values: self.current_sources.values_at_time(time),
+            analog_transitions: HashMap::new(),
+            pass: 0,
+        })
+    }
 
+    /// Publish an already-resolved shared-net observation bank. These values
+    /// are not XSPICE output contributions. Mark both the persistent input
+    /// signature and this active wave's pending fanout before resuming it.
+    pub(crate) fn observe_xspice_shared_digital_inputs(
+        &mut self,
+        wave: &XspiceActiveWave,
+        values: &[(NodeId, crate::xspice::DigitalValue)],
+    ) {
+        self.xspice_touched_digital_nodes.clear();
+        for &(node, value) in values {
+            if node == 0 {
+                continue;
+            }
+            if self.xspice_event_values.digital_values.get(&node) == Some(&value)
+                && self.xspice_event_values.digital_event_times.get(&node) == Some(&wave.time)
+            {
+                continue;
+            }
+            let observed = self.xspice_event_values.make_mut();
+            observed.digital_values.insert(node, value);
+            observed.digital_event_times.insert(node, wave.time);
+            self.xspice_touched_digital_nodes.push(node);
+        }
+        let dispatch = self
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("prepared event wave");
+        dispatch.mark_fanout_dirty(
+            &mut self.xspice_instances,
+            EventInputKind::Digital,
+            &self.xspice_touched_digital_nodes,
+        );
+        dispatch.record_fanout_pending(
+            &mut self.xspice_dispatch_pending,
+            EventInputKind::Digital,
+            &self.xspice_touched_digital_nodes,
+        );
+    }
+
+    /// Execute one due-event/dirty-fanout wave, then yield to the circuit.
+    /// True requests another Active wave; only false permits later HDL regions.
+    pub(crate) fn step_xspice_active_wave(
+        &mut self,
+        wave: &mut XspiceActiveWave,
+        solution: &[Value],
+        resources: Option<&ResourceTransaction>,
+    ) -> crate::xspice::CmResult<bool> {
+        let time = wave.time;
+        let timestep = wave.timestep;
+        let analysis = wave.analysis;
+        let phase = wave.phase;
+        let companion_coefficients = wave.coefficients;
+        let xyce_one_step_order2 = wave.xyce_one_step_order2;
+        let current_source_values = &wave.current_source_values;
+        let analog_transitions = &mut wave.analog_transitions;
+        let pass = wave.pass;
+        let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
         let dispatch = self
             .xspice_event_dispatch
             .as_ref()
-            .expect("ensure_xspice_event_dispatch built the map");
-        // The skip is sound only where `XspiceInstance::evaluate` would have
-        // taken its signature early return, and that return is gated on the
-        // analysis. Outside transient the model body runs on every call, so
-        // the whole pass runs as it always did — the flags a transient pass
-        // left behind say nothing about a DC or AC one.
+            .expect("prepared event wave");
+        // Non-transient evaluations run every model body, as before. Only
+        // transient event-only models can use dirty-input dispatch.
         let dirty_dispatch_applies = analysis == crate::xspice::AnalysisType::Transient;
+        // Shared handles, not mutable views of their contents: a pass that
+        // drains nothing and schedules nothing must leave the event world
+        // still shared with the rollback snapshot.
+        let event_values = &mut self.xspice_event_values;
+        let event_queue = &mut self.xspice_event_queue;
+        let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
+        let touched_real_nodes = &mut self.xspice_touched_real_nodes;
+        let instances = &mut self.xspice_instances;
+        let pending = &mut self.xspice_dispatch_pending;
+        let next_pending = &mut self.xspice_dispatch_next_pending;
+        next_pending.fill(false);
+        let mut changed = match apply_xspice_events_at_or_before(
+            event_values,
+            event_queue,
+            touched_digital_nodes,
+            touched_real_nodes,
+            time,
+        ) {
+            Ok(changed) => changed,
+            Err(error) => {
+                // A drain that fails mid-slot has already applied the
+                // events it executed, so the flags are owed before the
+                // error leaves. Only the diagnostic path continues from
+                // here, and it must not read a stale flag.
+                mark_drained_fanout_dirty(
+                    dispatch,
+                    instances,
+                    touched_digital_nodes,
+                    touched_real_nodes,
+                );
+                let message = xspice_event_settling_message(time, &error);
+                if self.xspice_evaluation_error.is_none() {
+                    self.xspice_evaluation_error = Some(message.clone());
+                }
+                return Err(crate::xspice::CmError::EvaluationError(message));
+            }
+        };
+        // What the drain just touched is owed an evaluation in *this*
+        // pass, which is what the node-list dispatch this replaced did.
+        mark_drained_fanout_dirty(
+            dispatch,
+            instances,
+            touched_digital_nodes,
+            touched_real_nodes,
+        );
+        dispatch.record_fanout_pending(pending, EventInputKind::Digital, touched_digital_nodes);
+        dispatch.record_fanout_pending(pending, EventInputKind::Real, touched_real_nodes);
+        if pass == 0 {
+            // The opening pass dispatches every instance, exactly as it
+            // always has. Narrowing it is the quiet-input check below, and
+            // only that check: an instance with no input ports at all —
+            // `d_pullup`, `d_pulldown` — is reached by no net's fan-out
+            // and would otherwise never run even once.
+            pending.fill(true);
+        }
 
-        // Delta cycles, not a bounded relaxation. A settling network leaves at
-        // the `!changed` exit below, in the same iteration it always did; one
-        // that will not settle is the scheduler's to diagnose, and it names
-        // the drivers that would not quiet rather than a pass count.
-        let mut pass = 0usize;
-        loop {
-            // Shared handles, not mutable views of their contents: a pass that
-            // drains nothing and schedules nothing must leave the event world
-            // still shared with the rollback snapshot.
-            let event_values = &mut self.xspice_event_values;
-            let event_queue = &mut self.xspice_event_queue;
-            let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
-            let touched_real_nodes = &mut self.xspice_touched_real_nodes;
-            let instances = &mut self.xspice_instances;
-            let pending = &mut self.xspice_dispatch_pending;
-            let next_pending = &mut self.xspice_dispatch_next_pending;
-            next_pending.fill(false);
-            let mut changed = match apply_xspice_events_at_or_before(
+        for index in 0..instances.len() {
+            if !pending[index] {
+                continue;
+            }
+            pending[index] = false;
+            // Read-only until the skip check has had its say: an instance
+            // the dispatch skips must stay shared with the rollback
+            // snapshot, or the copy this whole arrangement defers happens
+            // anyway.
+            let instance = &instances[index];
+            if dirty_dispatch_applies
+                && dispatch.is_dirty_dispatched(index)
+                && !instance.event_inputs_dirty()
+            {
+                #[cfg(debug_assertions)]
+                instance.debug_assert_event_inputs_quiet(
+                    solution,
+                    num_nodes,
+                    XspiceEventInputs {
+                        digital_values: &event_values.digital_values,
+                        digital_event_times: &event_values.digital_event_times,
+                        event_total_loads: event_loads,
+                        real_values: &event_values.real_values,
+                        real_event_times: &event_values.real_event_times,
+                    },
+                    &current_source_values,
+                    &analog_transitions,
+                    analysis,
+                );
+                continue;
+            }
+
+            // Past the skip check, so this instance is one the dispatch
+            // did not avoid. Counted here rather than at `evaluate` so the
+            // tally is of settle-loop work, not of every path that happens
+            // to call a model.
+            crate::xspice::settle_cost::note_instance_evaluation();
+            let instance = instances[index].make_mut();
+            instance.set_transient_companion_coefficients(companion_coefficients);
+            instance.set_xyce_one_step_order2(xyce_one_step_order2);
+            if let Err(e) = instance.update_inputs_with_analog_transitions(
+                solution,
+                num_nodes,
+                XspiceEventInputs {
+                    digital_values: &event_values.digital_values,
+                    digital_event_times: &event_values.digital_event_times,
+                    event_total_loads: event_loads,
+                    real_values: &event_values.real_values,
+                    real_event_times: &event_values.real_event_times,
+                },
+                &current_source_values,
+                &analog_transitions,
+            ) {
+                let message = format!("{}: {}", instance.name, e);
+                if self.xspice_evaluation_error.is_none() {
+                    self.xspice_evaluation_error = Some(message.clone());
+                }
+                return Err(crate::xspice::CmError::EvaluationError(message));
+            }
+
+            if let Err(e) = instance.evaluate_with_resource_transaction(
+                time, timestep, analysis, phase, resources, index,
+            ) {
+                let message = format!("{}: {}", instance.name, e);
+                if self.xspice_evaluation_error.is_none() {
+                    self.xspice_evaluation_error = Some(message.clone());
+                }
+                return Err(crate::xspice::CmError::EvaluationError(message));
+            }
+            for (key, transition) in instance.analog_output_transitions() {
+                analog_transitions.insert(key, transition);
+            }
+
+            // Asking first keeps the sweep off the copy-on-write path for
+            // every instance whose evaluation queued no output, which on a
+            // settling gate-level design is nearly all of them. The drain
+            // this replaces would have moved an empty pending list into
+            // the scheduler and copied it to do so.
+            if instance.has_pending_events() {
+                instance.schedule_events(event_queue.make_mut(), time);
+            }
+            let instance_changed = match apply_xspice_events_at_or_before(
                 event_values,
                 event_queue,
                 touched_digital_nodes,
@@ -674,10 +878,6 @@ impl CircuitData {
             ) {
                 Ok(changed) => changed,
                 Err(error) => {
-                    // A drain that fails mid-slot has already applied the
-                    // events it executed, so the flags are owed before the
-                    // error leaves. Only the diagnostic path continues from
-                    // here, and it must not read a stale flag.
                     mark_drained_fanout_dirty(
                         dispatch,
                         instances,
@@ -691,179 +891,58 @@ impl CircuitData {
                     return Err(crate::xspice::CmError::EvaluationError(message));
                 }
             };
-            // What the drain just touched is owed an evaluation in *this*
-            // pass, which is what the node-list dispatch this replaced did.
+            // A driver reached these nets whether or not the resolved
+            // value moved, so the persistent flags are owed either way.
             mark_drained_fanout_dirty(
                 dispatch,
                 instances,
                 touched_digital_nodes,
                 touched_real_nodes,
             );
-            dispatch.record_fanout_pending(pending, EventInputKind::Digital, touched_digital_nodes);
-            dispatch.record_fanout_pending(pending, EventInputKind::Real, touched_real_nodes);
-            if pass == 0 {
-                // The opening pass dispatches every instance, exactly as it
-                // always has. Narrowing it is the quiet-input check below, and
-                // only that check: an instance with no input ports at all —
-                // `d_pullup`, `d_pulldown` — is reached by no net's fan-out
-                // and would otherwise never run even once.
-                pending.fill(true);
-            }
-
-            for index in 0..instances.len() {
-                if !pending[index] {
-                    continue;
-                }
-                // Read-only until the skip check has had its say: an instance
-                // the dispatch skips must stay shared with the rollback
-                // snapshot, or the copy this whole arrangement defers happens
-                // anyway.
-                let instance = &instances[index];
-                if dirty_dispatch_applies
-                    && dispatch.is_dirty_dispatched(index)
-                    && !instance.event_inputs_dirty()
-                {
-                    #[cfg(debug_assertions)]
-                    instance.debug_assert_event_inputs_quiet(
-                        solution,
-                        num_nodes,
-                        XspiceEventInputs {
-                            digital_values: &event_values.digital_values,
-                            digital_event_times: &event_values.digital_event_times,
-                            event_total_loads: event_loads,
-                            real_values: &event_values.real_values,
-                            real_event_times: &event_values.real_event_times,
-                        },
-                        &current_source_values,
-                        &analog_transitions,
-                        analysis,
-                    );
-                    continue;
-                }
-
-                // Past the skip check, so this instance is one the dispatch
-                // did not avoid. Counted here rather than at `evaluate` so the
-                // tally is of settle-loop work, not of every path that happens
-                // to call a model.
-                crate::xspice::settle_cost::note_instance_evaluation();
-                let instance = instances[index].make_mut();
-                instance.set_transient_companion_coefficients(companion_coefficients);
-                instance.set_xyce_one_step_order2(xyce_one_step_order2);
-                if let Err(e) = instance.update_inputs_with_analog_transitions(
-                    solution,
-                    num_nodes,
-                    XspiceEventInputs {
-                        digital_values: &event_values.digital_values,
-                        digital_event_times: &event_values.digital_event_times,
-                        event_total_loads: event_loads,
-                        real_values: &event_values.real_values,
-                        real_event_times: &event_values.real_event_times,
-                    },
-                    &current_source_values,
-                    &analog_transitions,
-                ) {
-                    let message = format!("{}: {}", instance.name, e);
-                    if self.xspice_evaluation_error.is_none() {
-                        self.xspice_evaluation_error = Some(message.clone());
-                    }
-                    return Err(crate::xspice::CmError::EvaluationError(message));
-                }
-
-                if let Err(e) = instance.evaluate_with_resource_transaction(
-                    time, timestep, analysis, phase, resources, index,
-                ) {
-                    let message = format!("{}: {}", instance.name, e);
-                    if self.xspice_evaluation_error.is_none() {
-                        self.xspice_evaluation_error = Some(message.clone());
-                    }
-                    return Err(crate::xspice::CmError::EvaluationError(message));
-                }
-                for (key, transition) in instance.analog_output_transitions() {
-                    analog_transitions.insert(key, transition);
-                }
-
-                // Asking first keeps the sweep off the copy-on-write path for
-                // every instance whose evaluation queued no output, which on a
-                // settling gate-level design is nearly all of them. The drain
-                // this replaces would have moved an empty pending list into
-                // the scheduler and copied it to do so.
-                if instance.has_pending_events() {
-                    instance.schedule_events(event_queue.make_mut(), time);
-                }
-                let instance_changed = match apply_xspice_events_at_or_before(
-                    event_values,
-                    event_queue,
+            if instance_changed {
+                changed = true;
+                // Owed to the *next* pass, not this one: an instance
+                // already walked past keeps its place in registration
+                // order rather than being revisited out of turn. Gating
+                // this on `instance_changed` is what the node-list
+                // dispatch it replaces did.
+                dispatch.record_fanout_pending(
+                    next_pending,
+                    EventInputKind::Digital,
                     touched_digital_nodes,
-                    touched_real_nodes,
-                    time,
-                ) {
-                    Ok(changed) => changed,
-                    Err(error) => {
-                        mark_drained_fanout_dirty(
-                            dispatch,
-                            instances,
-                            touched_digital_nodes,
-                            touched_real_nodes,
-                        );
-                        let message = xspice_event_settling_message(time, &error);
-                        if self.xspice_evaluation_error.is_none() {
-                            self.xspice_evaluation_error = Some(message.clone());
-                        }
-                        return Err(crate::xspice::CmError::EvaluationError(message));
-                    }
-                };
-                // A driver reached these nets whether or not the resolved
-                // value moved, so the persistent flags are owed either way.
-                mark_drained_fanout_dirty(
-                    dispatch,
-                    instances,
-                    touched_digital_nodes,
+                );
+                dispatch.record_fanout_pending(
+                    next_pending,
+                    EventInputKind::Real,
                     touched_real_nodes,
                 );
-                if instance_changed {
-                    changed = true;
-                    // Owed to the *next* pass, not this one: an instance
-                    // already walked past keeps its place in registration
-                    // order rather than being revisited out of turn. Gating
-                    // this on `instance_changed` is what the node-list
-                    // dispatch it replaces did.
-                    dispatch.record_fanout_pending(
-                        next_pending,
-                        EventInputKind::Digital,
-                        touched_digital_nodes,
-                    );
-                    dispatch.record_fanout_pending(
-                        next_pending,
-                        EventInputKind::Real,
-                        touched_real_nodes,
-                    );
-                }
             }
-
-            if !changed {
-                return Ok(());
-            }
-
-            // Something moved, so another delta cycle is owed. The scheduler
-            // is what decides the network has stopped converging.
-            //
-            // Unguarded on purpose: reaching here means a drain returned
-            // `true`, which it can only do past its emptiness check, so the
-            // scheduler is already unshared and this mutable view copies
-            // nothing.
-            if let Err(error) = event_queue.make_mut().note_delta_cycle(time) {
-                let message = xspice_event_settling_message(time, &error);
-                if self.xspice_evaluation_error.is_none() {
-                    self.xspice_evaluation_error = Some(message.clone());
-                }
-                return Err(crate::xspice::CmError::EvaluationError(message));
-            }
-            std::mem::swap(
-                &mut self.xspice_dispatch_pending,
-                &mut self.xspice_dispatch_next_pending,
-            );
-            pass += 1;
         }
+
+        wave.pass += 1;
+        if !changed {
+            return Ok(false);
+        }
+
+        // Something moved, so another delta cycle is owed. The scheduler
+        // is what decides the network has stopped converging.
+        //
+        // Unguarded on purpose: reaching here means a drain returned
+        // `true`, which it can only do past its emptiness check, so the
+        // scheduler is already unshared and this mutable view copies
+        // nothing.
+        if let Err(error) = event_queue.make_mut().note_delta_cycle(time) {
+            let message = xspice_event_settling_message(time, &error);
+            if self.xspice_evaluation_error.is_none() {
+                self.xspice_evaluation_error = Some(message.clone());
+            }
+            return Err(crate::xspice::CmError::EvaluationError(message));
+        }
+        std::mem::swap(
+            &mut self.xspice_dispatch_pending,
+            &mut self.xspice_dispatch_next_pending,
+        );
+        Ok(true)
     }
 
     /// Return a permanent resource failure, or consume the first recoverable

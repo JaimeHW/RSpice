@@ -1176,6 +1176,61 @@ XSPICE / loaded-SPICE / off-grid / rejected-trial slice. No compiler or generato
 inputs were changed by this increment. Reference, full-suite, backend, platform,
 capacity and commercial qualification remain open.
 
+## Cooperative event regions and external driver contributions
+
+The HDL host now has a restricted Active-participant interface. An enrolled
+participant can consume resolved-net changes and publish its declared drivers;
+it cannot advance HDL time or promote an HDL region. The host dispatches that
+work and its HDL consequences before advancing inactive or nonblocking work.
+External activations count against the existing scheduler limits, retain their
+own diagnostic identities, and can use the physical causal lane without
+consuming an unrelated future timer at the same rounded reporting tick.
+
+Connected-bit topology now retains each external output contribution, its
+stable identity, and original HDL contributions separately. It resolves the
+existing XSPICE state/strength values in deterministic driver order and projects
+the resulting logic level into HDL wire views. A compact change journal retains
+intermediate resolved values, strength-only changes and boundaries between
+atomic vector publications. Fresh runs preserve immutable connections and
+reset drivers, observations and process state. A missing participant or late
+topology edit is refused before a standalone call can write inputs or execute.
+
+The production XSPICE evaluator now uses a resumable Active-wave step. Its
+ordinary entry points call the same step until quiet. Current-source samples,
+analog transition observations, analysis phase and companion coefficients
+survive a yield; consumed pending work is cleared. Shared-net observations
+update input views and dirty/pending fanout without becoming additional output
+drivers. This supplies the two scheduling sides needed by the circuit adapter.
+
+Focused validation on d51a5042d plus this increment passed six unit cases and
+three existing mixed-route cases. The unit cases include a real XSPICE inverter
+returning its time-zero response before HDL inactive/NBA work, explicit failure
+and clone/replay of both runtimes, strong contention/weak-pull release, fresh
+state, atomic vector publication without a computed-sensitivity glitch, and an
+off-grid activation that leaves its future timer pending. Existing XSPICE
+model-error and oscillation checks also passed. The selected deck cases retain
+direct HDL vector resolution, partly electrical input variables and replay
+through actual rejected analog steps. The final run took 0.74 seconds in test
+bodies after a 78 second build; log: hdl-xspice-active-waves-final.log in the
+owned target directory.
+
+Fixture corrections did not change model policy: the inverter still imposes
+its ngspice-compatible minimum propagation delay after startup, and its
+zero-time response is what the regional test exercises. Module-level integer
+ownership remains an MS06 gap; the atomic-bank fixture uses a packed register.
+Earlier compiler/fixture failures and focused reruns are retained in the
+hdl-xspice-active*.log files. No full-suite, vendor, platform, generator or
+capacity qualification was performed.
+
+The production circuit adapter is still required: builder enrollment of actual
+XSPICE ports, shared resolution during XSPICE event drains, a common speculative
+and accepted trial across both families, queue breakpoints and one accepted
+snapshot per shared node. Direct HDL/XSPICE deck connections therefore remain
+refused. The private attachment APIs currently produce unused-code warnings in
+a non-test build; circuit integration must make them live rather than suppress
+those warnings. This increment is scheduling/driver infrastructure with runtime
+execution evidence, not the completed whole-circuit slice or Spectre parity.
+
 ## Next implementation work
 
 Attach HDL and XSPICE drivers to resolved event nets under the circuit execution

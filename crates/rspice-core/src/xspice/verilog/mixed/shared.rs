@@ -455,6 +455,9 @@ impl MixedDigitalCoordinator {
     fn execution_error(&self, mut error: DigitalRunError) -> MixedSignalError {
         if let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &mut error {
             for (target, _) in &mut diagnostic.entities {
+                if self.digital.is_external_target(target) {
+                    continue;
+                }
                 if let Some(owner) = self.maps.iter().find(|map| {
                     map.processes
                         .iter()

@@ -81,7 +81,7 @@
 
 mod bindings;
 use bindings::ConnectedBits;
-pub(crate) use bindings::DigitalBitConnection;
+pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{

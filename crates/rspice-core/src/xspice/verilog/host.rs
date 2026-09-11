@@ -56,6 +56,10 @@
 //! classification is a semantic rule of the standard rather than a scheduling
 //! policy, and a second copy of it here could disagree with the interpreter's.
 
+mod coupled;
+use coupled::NoActiveParticipant;
+pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
+
 use rspice_veriloga::canonical_ir::digital_value::DigitalEventCount;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -94,6 +98,11 @@ use crate::xspice::event_scheduler::{
 /// produces a plausible waveform and no way to tell it is wrong.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DigitalRunError {
+    /// An enrolled event participant could not complete shared execution.
+    ExternalExecution {
+        /// The participant's concrete failure or a connection protocol error.
+        detail: String,
+    },
     /// The front end could not compile the source.
     Compile {
         /// What the compiler reported.
@@ -223,6 +232,9 @@ pub enum DigitalRunError {
 impl fmt::Display for DigitalRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ExternalExecution { detail } => {
+                write!(f, "shared digital execution failed: {detail}")
+            }
             Self::Compile { detail } => write!(f, "the digital source did not compile: {detail}"),
             Self::NoDigitalContent { module } => write!(
                 f,
@@ -396,6 +408,8 @@ pub(crate) struct DigitalHost {
     /// One stable wakeup identity, with captured payloads owned by their due tick.
     /// No process slot or driver identity is allocated per delayed assignment.
     nba_target: TargetId,
+    external_targets: Vec<TargetId>,
+    elaboration_closed: bool,
     delayed_updates: BTreeMap<u64, Vec<DigitalDeferredUpdate>>,
     event_updates: BTreeMap<u64, EventCapture>,
     expression_updates: BTreeMap<u64, DigitalDeferredUpdate>,
@@ -494,6 +508,8 @@ impl DigitalHost {
         });
         Self {
             nba_target,
+            external_targets: Vec::new(),
+            elaboration_closed: false,
             delayed_updates: BTreeMap::new(),
             event_updates: BTreeMap::new(),
             expression_updates: BTreeMap::new(),
@@ -532,6 +548,11 @@ impl DigitalHost {
         &mut self,
         nets: &[Vec<super::store::DigitalBitConnection>],
     ) -> Result<(), DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
         self.store
             .connect_bits(nets)
             .map_err(|detail| DigitalRunError::Compile { detail })
@@ -556,6 +577,11 @@ impl DigitalHost {
             self.scheduler.limits(),
         );
         fresh.store.inherit_bit_connections(&self.store);
+        for (_, target) in fresh.store.external_sources() {
+            fresh
+                .external_targets
+                .push(fresh.scheduler.intern_target(target.clone()));
+        }
         fresh
     }
 
@@ -616,11 +642,13 @@ impl DigitalHost {
     /// the suspension after it. All three kinds therefore start the same way,
     /// and the host does not consult the kind to decide.
     pub(crate) fn start(&mut self) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
         self.prepare_start()?;
         self.settle(0)
     }
 
     pub(crate) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
+        self.elaboration_closed = true;
         for index in 0..self.slots.len() {
             self.queue(index, 0)?;
         }
@@ -656,6 +684,7 @@ impl DigitalHost {
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
     ) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
         }
@@ -676,6 +705,17 @@ impl DigitalHost {
         tick: u64,
         physical_seconds: f64,
     ) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
+        self.force_many_from_analog_with(drives, tick, physical_seconds, &mut NoActiveParticipant)
+    }
+
+    pub(crate) fn force_many_from_analog_with(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+        physical_seconds: f64,
+        participant: &mut impl DigitalActiveParticipant,
+    ) -> Result<(), DigitalRunError> {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
         }
@@ -685,7 +725,9 @@ impl DigitalHost {
         }
         self.analog_ready = Some(Vec::new());
         self.analog_activation_seconds = Some(physical_seconds);
-        let result = self.dispatch(tick).and_then(|()| self.settle(tick));
+        let result = self
+            .dispatch(tick)
+            .and_then(|()| self.settle_with(tick, participant));
         self.analog_ready = None;
         self.analog_activation_seconds = None;
         result
@@ -709,6 +751,7 @@ impl DigitalHost {
         value: f64,
         tick: u64,
     ) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
         self.store.check_force_real(signal, &self.plan)?;
         self.set_event_clock(tick, None)?;
         self.store.force_real(signal, value, &self.plan)?;
@@ -721,28 +764,51 @@ impl DigitalHost {
     /// Ticks with nothing scheduled cost nothing: the kernel jumps to the next
     /// tick that has an event rather than stepping through empty ones.
     pub(crate) fn advance_to(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
+        self.advance_to_with(tick, &mut NoActiveParticipant)
+    }
+
+    pub(crate) fn advance_to_with(
+        &mut self,
+        tick: u64,
+        participant: &mut impl DigitalActiveParticipant,
+    ) -> Result<(), DigitalRunError> {
         while let Some(next) = self.scheduler.next_tick() {
             if next > tick {
                 break;
             }
-            self.settle(next)?;
+            self.settle_with(next, participant)?;
         }
         Ok(())
     }
 
     /// Iterate one tick's slot until it is quiet.
     fn settle(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        self.settle_with(tick, &mut NoActiveParticipant)
+    }
+
+    pub(crate) fn settle_with(
+        &mut self,
+        tick: u64,
+        participant: &mut impl DigitalActiveParticipant,
+    ) -> Result<(), DigitalRunError> {
+        self.elaboration_closed = true;
         // Taken out of `self` so that running a process — which needs the
         // whole host — cannot hold a borrow of the drain buffer, and put back
         // on the way out so the next tick reuses its capacity.
         let mut fired = std::mem::take(&mut self.fired);
-        let outcome = self.settle_into(tick, &mut fired);
+        let outcome = self.settle_into(tick, &mut fired, participant);
         fired.clear();
         self.fired = fired;
         outcome
     }
 
-    fn settle_into(&mut self, tick: u64, fired: &mut Vec<TargetId>) -> Result<(), DigitalRunError> {
+    fn settle_into(
+        &mut self,
+        tick: u64,
+        fired: &mut Vec<TargetId>,
+        participant: &mut impl DigitalActiveParticipant,
+    ) -> Result<(), DigitalRunError> {
         loop {
             fired.clear();
             if let Some(ready) = self.analog_ready.as_mut() {
@@ -754,11 +820,7 @@ impl DigitalHost {
                 self.scheduler.run_due_event_targets(tick, fired)?;
             }
 
-            if fired.is_empty() {
-                if !self.promote_region(tick)? {
-                    return Ok(());
-                }
-            } else {
+            if !fired.is_empty() {
                 // Read rather than drained: the buffer belongs to the caller,
                 // which is what lets it be reused across delta cycles, and it
                 // is reachable from neither `self` nor the kernel while a
@@ -781,6 +843,27 @@ impl DigitalHost {
                     self.run_process(index, tick)?;
                     self.dispatch(tick)?;
                 }
+            }
+
+            // External Active work and its HDL consequences must quiet before
+            // inactive or nonblocking work may advance. A participant returns
+            // after one wave, so feedback through HDL can interrupt its settle.
+            self.set_event_clock(tick, None)?;
+            let physical_seconds = self
+                .analog_activation_seconds
+                .unwrap_or(self.scheduler.resolution().ticks_to_seconds(tick)?);
+            let more = participant.settle_active(&mut DigitalActiveExchange {
+                host: self,
+                tick,
+                physical_seconds,
+            })?;
+            self.dispatch(tick)?;
+            let active = match &self.analog_ready {
+                Some(ready) => !ready.is_empty(),
+                None => self.scheduler.next_tick().is_some_and(|next| next <= tick),
+            };
+            if fired.is_empty() && !more && !active && !self.promote_region(tick)? {
+                return Ok(());
             }
 
             // One call per settle iteration, which is the reading
