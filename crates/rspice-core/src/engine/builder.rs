@@ -9939,6 +9939,113 @@ mod tests {
     }
 
     #[test]
+    fn scalar_initial_condition_aliases_reach_the_physical_device() {
+        for (expression_dialect, spice_dialect) in [
+            (
+                crate::config::ExpressionDialect::Ngspice,
+                SpiceDialect::Ngspice,
+            ),
+            (crate::config::ExpressionDialect::Xyce, SpiceDialect::Xyce),
+        ] {
+            let engine = Engine::new(SimulationConfig::default().with_spice_dialect(spice_dialect));
+            for nested in [false, true] {
+                for (device, model_type, first, second) in [
+                    ("Q1 c b 0 dm", "npn", "VBE", "VCE"),
+                    ("M1 d g 0 0 dm", "nmos", "VDS", "VGS"),
+                    ("J1 d g 0 dm", "njf", "VDS", "VGS"),
+                    ("Z1 d g 0 dm", "nmf", "VDS", "VGS"),
+                ] {
+                    let fields = [
+                        "IC1={q},IC2=- q".to_owned(),
+                        format!("IC{first}={{q}} IC{second}=-q"),
+                        format!("IC-{first}={{q}} IC-{second}=-q"),
+                        format!("IC_{first}={{q}} IC_{second}=-q"),
+                        "IC=1,2 IC1={q} IC2=- q".to_owned(),
+                        "IC1=1 IC2=2 IC={q},-q".to_owned(),
+                        format!("IC{first}=1 IC_{first}={{q}} IC2=2 IC-{second}=- q"),
+                        "IC={q},-q IC1=0.125".to_owned(),
+                    ];
+                    for field in fields {
+                        let third = if model_type == "nmos" {
+                            "IC3=1 IC_VBS=2 ICVBS={q/2}"
+                        } else {
+                            ""
+                        };
+                        let body = format!("{device} {field} {third}\n.model dm {model_type}");
+                        let source = if nested {
+                            format!(
+                                "Scoped IC aliases\nX1 cell q=0.25\nX2 cell q=0.75\n\
+                                 .subckt cell q=9\n{body}\n.ends\n.end"
+                            )
+                        } else {
+                            format!("Root IC aliases\n.param q=0.25\n{body}\n.end")
+                        };
+                        let netlist = Netlist::parse_with_options(
+                            &source,
+                            crate::netlist::NetlistParseOptions {
+                                expression_dialect,
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap_or_else(|error| panic!("{source}: {error}"));
+                        let circuit = engine
+                            .build_circuit(&netlist)
+                            .unwrap_or_else(|error| panic!("{source}: {error}"));
+                        let qs: &[f64] = if nested { &[0.25, 0.75] } else { &[0.25] };
+                        for (index, q) in qs.iter().enumerate() {
+                            let actual = match model_type {
+                                "npn" => circuit.bjts.devices[index].transient_initial_condition(),
+                                "nmos" => circuit.mosfets.devices[index]
+                                    .transient_initial_condition()
+                                    .map(|(vds, vgs, vbs)| {
+                                        assert_eq!(vbs, Some(q / 2.0), "{source}");
+                                        (vds, vgs)
+                                    }),
+                                _ => circuit.jfets[index].transient_initial_condition(),
+                            };
+                            let first = if field.ends_with("IC1=0.125") {
+                                0.125
+                            } else {
+                                *q
+                            };
+                            assert_eq!(
+                                actual,
+                                Some((Some(first), Some(-q))),
+                                "{spice_dialect:?}: {source}"
+                            );
+                        }
+                    }
+                }
+            }
+            // SOI's extra scalar components share the vector's substrate/body
+            // labels. Check their scope binding without selecting a model family.
+            let netlist = Netlist::parse_with_options(
+                "SOI IC aliases\nX1 cell q=0.75\n.subckt cell q=9\n\
+                 M1 d g s e p b t dm IC4={q} IC5=-q\n.model dm nmos\n.ends\n.end",
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let flattened = crate::netlist::flatten_netlist(&netlist).unwrap();
+            let ElementKind::Mosfet {
+                instance_params,
+                deferred_params,
+                ..
+            } = &flattened[0].kind
+            else {
+                panic!("expected MOSFET");
+            };
+            assert!(deferred_params.is_empty());
+            assert_eq!(
+                instance_params,
+                &[("IC_VES".into(), 0.75), ("IC_VPS".into(), -0.75)]
+            );
+        }
+    }
+
+    #[test]
     fn statistical_passive_initial_conditions_reach_the_physical_device() {
         let plan = crate::netlist::SpectreStatisticsPlan {
             variations: vec![crate::netlist::SpectreVariation {

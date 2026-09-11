@@ -4450,6 +4450,9 @@ pub(super) fn parse_bjt(
     }
     let mut model = expect_model_name(stream, line_num)?;
     loop {
+        if initial_condition_assignment(stream, BJT_IC_VECTOR).is_some() {
+            break;
+        }
         match &stream.peek().kind {
             TokenKind::Ident(next) if !bjt_token_starts_numeric_field(&stream.peek().kind) => {
                 let next_upper = next.to_ascii_uppercase();
@@ -4568,6 +4571,9 @@ pub(super) fn parse_mosfet(
         if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
+        if initial_condition_assignment(stream, MOSFET_IC_VECTOR).is_some() {
+            break;
+        }
         if matches!(&stream.peek().kind, TokenKind::Ident(_))
             && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
         {
@@ -4652,6 +4658,21 @@ pub(super) fn parse_mosfet(
             break;
         }
 
+        if parse_initial_condition_assignment(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            MOSFET_IC_VECTOR,
+            "MOSFET",
+            ElementParamSink {
+                instance_params: &mut instance_params,
+                deferred_params: &mut deferred_params,
+            },
+        )? {
+            continue;
+        }
+
         match &stream.peek().kind {
             TokenKind::Ident(raw_name) => {
                 let raw_name = raw_name.clone();
@@ -4671,22 +4692,6 @@ pub(super) fn parse_mosfet(
                 }
 
                 if stream.consume(&TokenKind::Equals) {
-                    if name_upper == "IC" {
-                        parse_ic_vector(
-                            stream,
-                            line_num,
-                            params,
-                            defer_simple_param_refs,
-                            MOSFET_IC_VECTOR,
-                            "MOSFET",
-                            ElementParamSink {
-                                instance_params: &mut instance_params,
-                                deferred_params: &mut deferred_params,
-                            },
-                        )?;
-                        continue;
-                    }
-
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
                         Some(value) => upsert_instance_param(
                             ElementParamSink {
@@ -4767,6 +4772,88 @@ const MOSFET_IC_VECTOR: &[&str] = &["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_
 const BJT_IC_VECTOR: &[&str] = &["IC_VBE", "IC_VCE"];
 /// `IC=VDS,VGS`, shared by every J- and Z-line family.
 const FET_IC_VECTOR: &[&str] = &["IC_VDS", "IC_VGS"];
+
+// Scalar IC names write the same physical fields as their vector components:
+// Xyce IC1..IC5, ngspice ICVDS/ICVBE, and JFET IC-VDS/IC-VGS. Keep this
+// lookup free of evaluation so optional-node parsing cannot consume a draw.
+fn initial_condition_assignment<'a>(
+    stream: &TokenStream,
+    labels: &'a [&'a str],
+) -> Option<(&'a [&'a str], usize)> {
+    if labels.is_empty() {
+        return None;
+    }
+    let TokenKind::Ident(name) = &stream.peek().kind else {
+        return None;
+    };
+    let (suffix, equals_offset) = if name == "IC"
+        && matches!(stream.peek_n(1).kind, TokenKind::Minus)
+        && stream.peek().span.end == stream.peek_n(1).span.start
+        && stream.peek_n(1).span.end == stream.peek_n(2).span.start
+    {
+        let TokenKind::Ident(suffix) = &stream.peek_n(2).kind else {
+            return None;
+        };
+        (suffix.as_str(), 3)
+    } else {
+        let suffix = name.strip_prefix("IC")?;
+        (suffix.strip_prefix('_').unwrap_or(suffix), 1)
+    };
+    if !matches!(stream.peek_n(equals_offset).kind, TokenKind::Equals) {
+        return None;
+    }
+    if suffix.is_empty() && name == "IC" {
+        return Some((labels, equals_offset + 1));
+    }
+    let index = if suffix.len() == 1 && suffix.as_bytes()[0].is_ascii_digit() {
+        usize::from(suffix.as_bytes()[0] - b'0').checked_sub(1)?
+    } else {
+        labels
+            .iter()
+            .position(|label| label.strip_prefix("IC_") == Some(suffix))?
+    };
+    Some((labels.get(index..index + 1)?, equals_offset + 1))
+}
+
+fn parse_initial_condition_assignment(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    labels: &[&str],
+    element_label: &str,
+    sink: ElementParamSink<'_>,
+) -> Result<bool, ParseError> {
+    let Some((labels, consumed)) = initial_condition_assignment(stream, labels) else {
+        return Ok(false);
+    };
+    for _ in 0..consumed {
+        stream.advance();
+    }
+    if let [label] = labels {
+        // A scalar component leaves commas for the ordinary tail separator;
+        // only IC= itself owns a vector of comma-separated values.
+        let value = take_ic_value(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            element_label,
+        )?;
+        upsert_instance_param(sink, *label, value);
+    } else {
+        parse_ic_vector(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            labels,
+            element_label,
+            sink,
+        )?;
+    }
+    Ok(true)
+}
 
 /// Consume the comma-separated components of an instance `IC=` vector.
 ///
@@ -5028,27 +5115,27 @@ fn parse_area_device_instance_params(
             break;
         }
 
+        if parse_initial_condition_assignment(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            ic_vector,
+            element_label,
+            ElementParamSink {
+                instance_params: &mut instance_params,
+                deferred_params: &mut deferred_params,
+            },
+        )? {
+            continue;
+        }
+
         if let TokenKind::Ident(raw_name) = &stream.peek().kind {
             let raw_name = raw_name.clone();
             let name_upper = raw_name.to_ascii_uppercase();
             if matches!(stream.peek_n(1).kind, TokenKind::Equals) {
                 stream.advance();
                 stream.advance();
-                if name_upper == "IC" && !ic_vector.is_empty() {
-                    parse_ic_vector(
-                        stream,
-                        line_num,
-                        params,
-                        defer_simple_param_refs,
-                        ic_vector,
-                        element_label,
-                        ElementParamSink {
-                            instance_params: &mut instance_params,
-                            deferred_params: &mut deferred_params,
-                        },
-                    )?;
-                    continue;
-                }
                 let value = take_deferrable_value(stream, params, defer_simple_param_refs)
                     .ok_or_else(|| ParseError::Syntax {
                         line: line_num,
