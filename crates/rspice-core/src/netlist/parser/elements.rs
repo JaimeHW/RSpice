@@ -7322,6 +7322,26 @@ fn parse_source_multiplicity_tail(
     element_label: &str,
     supported: bool,
 ) -> Result<SourceMultiplicity, ParseError> {
+    parse_source_multiplicity_tail_with_direction(
+        stream,
+        line_num,
+        params,
+        defer_simple_param_refs,
+        element_label,
+        supported,
+        None,
+    )
+}
+
+fn parse_source_multiplicity_tail_with_direction(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    element_label: &str,
+    supported: bool,
+    mut direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+) -> Result<SourceMultiplicity, ParseError> {
     let mut multiplicity = SourceMultiplicity::default();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -7345,13 +7365,16 @@ fn parse_source_multiplicity_tail(
             });
         }
 
-        let parsed =
-            take_deferrable_value(stream, params, defer_simple_param_refs).ok_or_else(|| {
-                ParseError::Syntax {
-                    line: line_num,
-                    message: format!("{element_label} M requires a numeric value or expression"),
-                }
-            })?;
+        let parsed = take_deferrable_value_with_direction(
+            stream,
+            params,
+            defer_simple_param_refs,
+            direction.as_deref_mut(),
+        )
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("{element_label} M requires a numeric value or expression"),
+        })?;
         multiplicity = match parsed {
             DeferrableValue::Resolved(value) => SourceMultiplicity {
                 value,
@@ -7937,21 +7960,31 @@ fn parse_voltage_controlled_source(
                 element_label,
                 parameter_direction.as_ref().map(|_| &mut gain_direction),
             )?;
-            let multiplicity = parse_source_multiplicity_tail(
+            let mut multiplicity_direction = Ok(0.0.into());
+            let multiplicity = parse_source_multiplicity_tail_with_direction(
                 stream,
                 line_num,
                 params,
                 defer_simple_param_refs,
                 element_label,
                 !is_voltage_output,
+                parameter_direction
+                    .as_ref()
+                    .map(|_| &mut multiplicity_direction),
             )?;
             if !defer_simple_param_refs
-                && !multiplicity.given
+                && gain_expr.is_none()
+                && multiplicity.value_expr.is_none()
                 && let Some(capture) = parameter_direction
             {
                 capture.elements.insert(
                     name.clone(),
-                    ElementParameterDirection::Gain(gain_direction),
+                    ElementParameterDirection::Gain(
+                        gain_direction * multiplicity.value
+                            + multiplicity_direction
+                                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                                * gain,
+                    ),
                 );
             }
             let kind = if is_voltage_output {

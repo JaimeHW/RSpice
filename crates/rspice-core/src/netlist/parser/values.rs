@@ -1863,17 +1863,32 @@ fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String>
     Some(name.to_string())
 }
 
+fn evaluate_value_capturing_direction(
+    expression: &str,
+    params: &ParamContext,
+    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+) -> Result<Value, crate::netlist::expr::ExprError> {
+    if let Some(direction) = direction {
+        let (value, tangent) = params.evaluate_parameter_binding(expression)?;
+        *direction = tangent
+            .unwrap_or_else(|| Ok(crate::netlist::expr::ComplexDirection::zero()))
+            .map(|tangent| tangent.re);
+        Ok(value.re)
+    } else {
+        eval_expression(expression, params)
+    }
+}
+
 pub(super) fn evaluate_value_with_direction(
     expression: &str,
     params: &ParamContext,
     direction: Option<&mut Derivative>,
 ) -> Result<Value, crate::netlist::expr::ExprError> {
     if let Some(direction) = direction {
-        let (value, tangent) = params.evaluate_parameter_binding(expression)?;
-        *direction = tangent
-            .transpose()?
-            .map_or_else(|| 0.0.into(), |tangent| tangent.re);
-        Ok(value.re)
+        let mut captured = Ok(0.0.into());
+        let value = evaluate_value_capturing_direction(expression, params, Some(&mut captured))?;
+        *direction = captured?;
+        Ok(value)
     } else {
         eval_expression(expression, params)
     }
@@ -2175,10 +2190,24 @@ pub(super) fn take_deferrable_value(
     params: &ParamContext,
     defer: bool,
 ) -> Option<DeferrableValue> {
+    take_deferrable_value_with_direction(stream, params, defer, None)
+}
+
+pub(super) fn take_deferrable_value_with_direction(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer: bool,
+    mut direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+) -> Option<DeferrableValue> {
+    if let Some(direction) = direction.as_deref_mut() {
+        *direction = Ok(0.0.into());
+    }
     skip_commas(stream);
     // Determine the complete expression before evaluating it: an evaluation
     // used only to classify a token would consume and discard a random draw.
-    if let Some(value) = take_contiguous_instance_expression(stream, params, defer) {
+    if let Some(value) =
+        take_contiguous_instance_expression(stream, params, defer, direction.as_deref_mut())
+    {
         return Some(value);
     }
     if !defer
@@ -2187,17 +2216,26 @@ pub(super) fn take_deferrable_value(
                 && matches!(stream.peek_n(1).kind, TokenKind::Expression(_)))
     {
         let expression = take_value_expression_string(stream, params)?;
-        return Some(match eval_expression(&expression, params) {
-            Ok(value) => DeferrableValue::Resolved(value),
-            Err(_) => {
-                let prepared =
-                    super::super::expr::prepare_behavioral_expression(&expression, params).ok()?;
-                match eval_expression(&prepared, params) {
-                    Ok(value) => DeferrableValue::Resolved(value),
-                    Err(_) => DeferrableValue::Deferred(expression),
+        return Some(
+            match evaluate_value_capturing_direction(&expression, params, direction.as_deref_mut())
+            {
+                Ok(value) => DeferrableValue::Resolved(value),
+                Err(_) => {
+                    if let Some(direction) = direction {
+                        *direction = Err(crate::netlist::expr::ExprError::InvalidArgument(
+                            "Parameter derivative is unavailable after behavioral expansion".into(),
+                        ));
+                    }
+                    let prepared =
+                        super::super::expr::prepare_behavioral_expression(&expression, params)
+                            .ok()?;
+                    match eval_expression(&prepared, params) {
+                        Ok(value) => DeferrableValue::Resolved(value),
+                        Err(_) => DeferrableValue::Deferred(expression),
+                    }
                 }
-            }
-        });
+            },
+        );
     }
     if defer {
         match &stream.peek().kind {
@@ -2223,6 +2261,15 @@ pub(super) fn take_deferrable_value(
             _ => {}
         }
     }
+    if let TokenKind::Ident(name) = &stream.peek().kind
+        && let Some(value) = params.get(name)
+    {
+        if let Some(direction) = direction {
+            *direction = params.parameter_direction(name).map(|tangent| tangent.re);
+        }
+        stream.advance();
+        return Some(DeferrableValue::Resolved(value));
+    }
     try_value(stream, params).map(DeferrableValue::Resolved)
 }
 
@@ -2242,6 +2289,7 @@ fn take_contiguous_instance_expression(
     stream: &mut TokenStream,
     params: &ParamContext,
     defer: bool,
+    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
 ) -> Option<DeferrableValue> {
     let first = stream.peek().clone();
     if !model_scalar_expression_token_can_start(&first.kind) {
@@ -2266,10 +2314,12 @@ fn take_contiguous_instance_expression(
     if defer {
         return Some(DeferrableValue::Deferred(expr));
     }
-    Some(match eval_expression(&expr, params) {
-        Ok(value) => DeferrableValue::Resolved(value),
-        Err(_) => DeferrableValue::Deferred(expr),
-    })
+    Some(
+        match evaluate_value_capturing_direction(&expr, params, direction) {
+            Ok(value) => DeferrableValue::Resolved(value),
+            Err(_) => DeferrableValue::Deferred(expr),
+        },
+    )
 }
 
 pub(super) fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {

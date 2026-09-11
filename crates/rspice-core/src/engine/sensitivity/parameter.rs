@@ -54,7 +54,11 @@ fn linear_element(kind: &ElementKind) -> bool {
             transconductance_expr,
             multiplicity,
             ..
-        } => transconductance_expr.is_none() && !multiplicity.given,
+        } => {
+            transconductance_expr.is_none()
+                && multiplicity.value_expr.is_none()
+                && multiplicity.value.is_finite()
+        }
         ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
             matches!(
                 spec,
@@ -541,6 +545,126 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn vccs_sensitivity_includes_multiplicity_without_resampling() {
+        let engine = Engine::default();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for nested in [false, true] {
+                for (gain, multiplicity, relative_direction) in [
+                    ("2", "M={1+1e-8*p}", 1e-8),
+                    ("{1+1e-8*p}", "M=3", 1e-8),
+                    ("{2*(1+3e-8*p)}", "M={4*(1+5e-8*p)}", 8e-8),
+                    ("2", "M=1+1e-8*p", 1e-8),
+                    ("2", "M=m", 1e-8),
+                    ("1", "M={1+1e-8*p} M=2", 0.0),
+                    ("1", "M=2 M={1+1e-8*p}", 1e-8),
+                    ("1", "M={1+abs(p)} M=1", 0.0),
+                    ("1e-200", "M={1e200*(1+1e200*p)}", 1e200),
+                    (
+                        "{aunif(2,0.25)*(1+3e-8*p)}",
+                        "M={aunif(4,0.5)*(1+5e-8*p)}",
+                        8e-8,
+                    ),
+                ] {
+                    let body =
+                        format!(".param m={{1+1e-8*p}}\nG1 out 0 in 0 {gain} {multiplicity}");
+                    let body = if nested {
+                        format!("X1 in out cell p={{p}}\n.subckt cell in out p=99\n{body}\n.ends")
+                    } else {
+                        body
+                    };
+                    let netlist = Netlist::parse_with_options(
+                        &format!("VCCS multiplicity sensitivity\n.param p=0\nV1 in 0 DC 1 AC 1\nR1 out 0 1\n{body}\n.end"),
+                        crate::netlist::NetlistParseOptions {
+                            expression_dialect: dialect,
+                            statistical_seed: Some(632),
+                            ..Default::default()
+                        },
+                    ).unwrap();
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    let expected = circuit.vccs.transconductances[0] * relative_direction;
+                    let next_draw = netlist.params.random().next_uniform();
+                    let output = AcSensitivityOutput::Voltage {
+                        positive: circuit.get_node_by_name("out").unwrap(),
+                        negative: None,
+                    };
+                    let mut runs = 0;
+                    let dc = engine
+                        .run_output_sensitivity_with_abort(
+                            &netlist,
+                            output.clone(),
+                            "p",
+                            0.0,
+                            None,
+                            &mut runs,
+                            &NoAbort,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        runs, 1,
+                        "{dialect:?} nested={nested}: {gain} {multiplicity}"
+                    );
+                    assert!(
+                        (dc + expected).abs() <= expected.abs() * 2e-12,
+                        "DC {dc:e} != {:e}",
+                        -expected
+                    );
+                    runs = 0;
+                    let ac = engine
+                        .run_output_sensitivity_ac_with_abort(
+                            &netlist,
+                            output,
+                            "p",
+                            0.0,
+                            &[1.0],
+                            None,
+                            &mut runs,
+                            &NoAbort,
+                        )
+                        .unwrap()[0];
+                    assert_eq!(runs, 1);
+                    assert!(
+                        (ac - expected).abs() <= expected.abs() * 2e-12,
+                        "AC {ac:e} != {expected:e}"
+                    );
+                    let (directed, _) = Engine::replay_parameter_overrides(
+                        &netlist,
+                        &[("P".into(), 0.0)],
+                        Some("p"),
+                        engine.config.resource_limits,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                    let directed_circuit = engine.build_circuit(&directed).unwrap();
+                    assert_eq!(
+                        directed_circuit.vccs.transconductances,
+                        circuit.vccs.transconductances
+                    );
+                    assert_eq!(directed.params.random().next_uniform(), next_draw);
+                }
+            }
+            let netlist = parse(
+                "Nonsmooth multiplicity\n.param p=0\nV1 in 0 DC 1 AC 1\nG1 out 0 in 0 1 M={1+abs(p)}\nR1 out 0 1\n.end",
+                dialect,
+            );
+            assert!(
+                engine
+                    .run_sensitivity(&netlist, 2, "p", 0.0, None)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("derivative")
+            );
+        }
+        let zero_m = parse(
+            "Zero multiplicity\n.param p=0\nV1 in 0 1\nG1 out 0 in 0 1 M={p}\nR1 out 0 1\n.end",
+            ExpressionDialect::Ngspice,
+        );
+        assert_eq!(
+            engine.run_sensitivity(&zero_m, 2, "p", 0.0, None).unwrap(),
+            -1.0
+        );
     }
 
     #[test]
@@ -1320,7 +1444,6 @@ R1 in out {aunif(2,0.25)*(1+1e-8*q)}
         // Missing field coverage and structural selectors cannot produce an analytic zero.
         for body in [
             "V1 out 0 1\nR1 out 0 1 M={1+p}",
-            "V1 in 0 1\nG1 out 0 in 0 1 M={1+p}\nR1 out 0 1",
             "V1 out 0 1\n.if (p == 0)\nR1 out 0 1\n.endif",
             ".subckt cell a\nR1 a 0 1\n.ends\nV1 out 0 1\nX1 out cell M={1+p}",
         ] {

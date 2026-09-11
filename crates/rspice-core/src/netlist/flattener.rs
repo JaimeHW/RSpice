@@ -613,6 +613,7 @@ impl<'a> Flattener<'a> {
                     multiplicity,
                     scope,
                     &self.qualify_hierarchy_name(prefix, &element.name),
+                    None,
                 )?;
                 let mut synthesized = super::parser::synthesize_chebyshev(
                     &element.name,
@@ -1739,6 +1740,7 @@ impl<'a> Flattener<'a> {
         let capture_fields =
             self.parameter_direction.is_some() && !scope.has_retained_parameter_expressions();
         let mut scalar_direction = capture_fields.then(|| Derivative::from(0.0));
+        let mut multiplicity_direction = scalar_direction;
         let source_directions =
             capture_fields.then(|| std::cell::RefCell::new([Derivative::from(0.0); 3]));
         let mut new_kind = match &element.kind {
@@ -2063,6 +2065,7 @@ impl<'a> Flattener<'a> {
                     multiplicity,
                     scope,
                     element_path,
+                    None,
                 )?,
             },
             ElementKind::BehavioralCurrent {
@@ -2082,6 +2085,7 @@ impl<'a> Flattener<'a> {
                     multiplicity,
                     scope,
                     element_path,
+                    None,
                 )?,
             },
 
@@ -2117,6 +2121,7 @@ impl<'a> Flattener<'a> {
                     multiplicity,
                     scope,
                     element_path,
+                    Some(&mut multiplicity_direction),
                 )?,
                 control_nodes: control_nodes.clone(),
             },
@@ -2254,10 +2259,20 @@ impl<'a> Flattener<'a> {
                         direction,
                     })
                 }
-                ElementKind::Vcvs { .. }
-                | ElementKind::Vccs { .. }
-                | ElementKind::Cccs { .. }
-                | ElementKind::Ccvs { .. } => scalar_direction.map(ElementParameterDirection::Gain),
+                ElementKind::Vcvs { .. } | ElementKind::Cccs { .. } | ElementKind::Ccvs { .. } => {
+                    scalar_direction.map(ElementParameterDirection::Gain)
+                }
+                ElementKind::Vccs {
+                    transconductance,
+                    multiplicity,
+                    ..
+                } => scalar_direction
+                    .zip(multiplicity_direction)
+                    .map(|(gain, mult)| {
+                        ElementParameterDirection::Gain(
+                            gain * multiplicity.value + mult * *transconductance,
+                        )
+                    }),
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)
                     if matches!(
                         spec,
@@ -2571,12 +2586,13 @@ impl<'a> Flattener<'a> {
         multiplicity: &SourceMultiplicity,
         scope: &ParamContext,
         element_path: &str,
+        direction: Option<&mut Option<Derivative>>,
     ) -> Result<SourceMultiplicity, ParseError> {
         let value = self.resolve_optional_value_expr(
             multiplicity.value,
             &multiplicity.value_expr,
             scope,
-            None,
+            direction,
         )?;
         if !value.is_finite()
             || scope.expression_dialect() == ExpressionDialect::Xyce && value <= 0.0
