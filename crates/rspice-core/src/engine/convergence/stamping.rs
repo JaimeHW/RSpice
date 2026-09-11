@@ -185,7 +185,7 @@ impl Engine {
             circuit.stamp_behavioral(matrix, rhs, solution, time, analysis)
         }
         .map_err(SimulationError::Circuit)?;
-        if circuit.has_xspice_devices() {
+        if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);
         }
@@ -241,7 +241,7 @@ impl Engine {
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
-        if circuit.has_xspice_devices() {
+        if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
         }
     }
@@ -261,7 +261,7 @@ impl Engine {
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.prime_nonlinear_operating_point(solution);
-        if circuit.has_xspice_devices() {
+        if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
         }
     }

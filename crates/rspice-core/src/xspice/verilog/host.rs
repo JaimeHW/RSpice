@@ -714,7 +714,7 @@ impl DigitalHost {
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
         physical_seconds: f64,
-        participant: &mut impl DigitalActiveParticipant,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
@@ -771,7 +771,7 @@ impl DigitalHost {
     pub(crate) fn advance_to_with(
         &mut self,
         tick: u64,
-        participant: &mut impl DigitalActiveParticipant,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
         while let Some(next) = self.scheduler.next_tick() {
             if next > tick {
@@ -790,7 +790,7 @@ impl DigitalHost {
     pub(crate) fn settle_with(
         &mut self,
         tick: u64,
-        participant: &mut impl DigitalActiveParticipant,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
         // Taken out of `self` so that running a process — which needs the
@@ -807,7 +807,7 @@ impl DigitalHost {
         &mut self,
         tick: u64,
         fired: &mut Vec<TargetId>,
-        participant: &mut impl DigitalActiveParticipant,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
         loop {
             fired.clear();

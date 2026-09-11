@@ -14,10 +14,20 @@
 //! an individual model checkpoint cannot represent the shared process state.
 //!
 //! The shared runtime's next event joins the transient breakpoint list. Analog
-//! electrical boundaries remain physical loads; direct XSPICE event bindings
-//! still require event-driver enrollment and are explicitly refused.
+//! electrical boundaries remain physical loads. Enrolled XSPICE event drivers
+//! participate in the same numerical probe; the deck route remains refused
+//! until shared acceptance and candidate-control inspection are integrated.
 
+#[cfg(test)]
+#[path = "mixed_signal/coupled_tests.rs"]
+mod coupled_tests;
+
+use super::external_models::{
+    XspiceAcceptanceRollback, XspiceCompanionPolicy, XspiceDigitalBindings,
+    XspiceDigitalParticipant,
+};
 use crate::circuit::CircuitData;
+use crate::xspice::verilog::host::DigitalActiveParticipant;
 use crate::{SimulationError, Value};
 
 use crate::xspice::verilog::{BoundaryBus, MixedSignalError, MixedSignalHost};
@@ -128,9 +138,22 @@ impl<'a> MixedHostTrialGroup<'a> {
         digital: &mut crate::xspice::verilog::SharedDigitalTrial<'_>,
         voltages: &[Value],
     ) -> Result<(), SimulationError> {
-        digital
-            .advance(self.hosts, voltages)
-            .map_err(shared_error)?;
+        self.settle_with(digital, voltages, None)
+    }
+
+    fn settle_with(
+        &mut self,
+        digital: &mut crate::xspice::verilog::SharedDigitalTrial<'_>,
+        voltages: &[Value],
+        mut participant: Option<&mut dyn DigitalActiveParticipant>,
+    ) -> Result<(), SimulationError> {
+        match &mut participant {
+            Some(participant) => {
+                digital.advance_with(self.hosts, voltages, Some(&mut **participant))
+            }
+            None => digital.advance(self.hosts, voltages),
+        }
+        .map_err(shared_error)?;
         digital.synchronize(self.hosts).map_err(shared_error)?;
         for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
             let mut moved = false;
@@ -140,7 +163,11 @@ impl<'a> MixedHostTrialGroup<'a> {
             }
             // All A/D decisions are published before any dependent HDL process
             // runs. Analog equations read the resulting bank only after quiet.
-            moved |= digital.publish_adc(self.hosts).map_err(shared_error)?;
+            moved |= match &mut participant {
+                Some(participant) => digital.publish_adc_with(self.hosts, Some(&mut **participant)),
+                None => digital.publish_adc(self.hosts),
+            }
+            .map_err(shared_error)?;
             moved |= digital.synchronize(self.hosts).map_err(shared_error)?;
             if !moved {
                 return Ok(());
@@ -185,7 +212,82 @@ fn shared_error(error: MixedSignalError) -> SimulationError {
     SimulationError::Circuit(format!("mixed circuit digital execution: {error}"))
 }
 
+/// Temporarily split the circuit's digital owner/views from its code-model
+/// storage. All exits put the owners back. XSPICE probes retain state across
+/// Active waves and restore their COW model/queue images and external resources
+/// only after the entire mixed evaluation, including stamps, has finished.
+struct MixedCircuitProbe<'a> {
+    circuit: &'a mut CircuitData,
+    coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
+    hosts: Vec<MixedSignalHost>,
+    xspice: Option<XspiceAcceptanceRollback>,
+}
+impl<'a> MixedCircuitProbe<'a> {
+    fn begin(circuit: &'a mut CircuitData) -> Result<Self, SimulationError> {
+        let coordinator = circuit.mixed_digital_coordinator.take().ok_or_else(|| {
+            SimulationError::Circuit(
+                "mixed circuit digital execution has not been elaborated".into(),
+            )
+        })?;
+        let hosts = std::mem::take(&mut circuit.mixed_signal_hosts);
+        let xspice = circuit
+            .mixed_xspice_bindings
+            .is_some()
+            .then(|| circuit.capture_xspice_acceptance());
+        Ok(Self {
+            circuit,
+            coordinator: Some(coordinator),
+            hosts,
+            xspice,
+        })
+    }
+    fn restore_xspice(&mut self) -> Result<(), SimulationError> {
+        if let Some(snapshot) = self.xspice.take() {
+            self.circuit
+                .restore_xspice_acceptance(snapshot)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        }
+        Ok(())
+    }
+}
+impl Drop for MixedCircuitProbe<'_> {
+    fn drop(&mut self) {
+        // An explicit finish reports restoration errors. Unwinding still
+        // restores every context/queue; a resource failure latches the circuit.
+        if let Err(error) = self.restore_xspice() {
+            log::error!("{error}");
+        }
+        self.circuit.mixed_digital_coordinator = self.coordinator.take();
+        self.circuit.mixed_signal_hosts = std::mem::take(&mut self.hosts);
+    }
+}
+
 impl CircuitData {
+    fn with_mixed_probe<T>(
+        &mut self,
+        evaluate: impl FnOnce(
+            &mut CircuitData,
+            &mut crate::xspice::verilog::MixedDigitalCoordinator,
+            &mut [MixedSignalHost],
+            Option<&crate::xspice::ResourceTransaction>,
+        ) -> Result<T, SimulationError>,
+    ) -> Result<T, SimulationError> {
+        let mut probe = MixedCircuitProbe::begin(self)?;
+        let result = evaluate(
+            probe.circuit,
+            probe.coordinator.as_mut().expect("owned coordinator"),
+            &mut probe.hosts,
+            probe.xspice.as_ref().map(|snapshot| snapshot.resources()),
+        );
+        match (result, probe.restore_xspice()) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+            (Err(error), Err(restore)) => {
+                Err(SimulationError::Circuit(format!("{error}; {restore}")))
+            }
+        }
+    }
+
     /// Enrich a terminal solver failure without changing convergence recovery
     /// or accepting any speculative boundary state.
     pub(crate) fn annotate_mixed_convergence_failure(
@@ -242,14 +344,30 @@ impl CircuitData {
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<(), SimulationError> {
         if !self.mixed_signal_hosts.is_empty() && self.mixed_digital_coordinator.is_none() {
-            self.mixed_digital_coordinator = Some(
-                crate::xspice::verilog::MixedDigitalCoordinator::enroll(
+            // Elaboration can refuse a connection after creating the linked
+            // runtime. Preserve the previous owners until every attachment has
+            // validated; a partial link must not leave standalone models as views.
+            let rollback = self.mixed_signal_hosts.clone();
+            let linked = (|| {
+                let mut coordinator = crate::xspice::verilog::MixedDigitalCoordinator::enroll(
                     &mut self.mixed_signal_hosts,
                     event_nodes,
                     control,
                 )
-                .map_err(shared_error)?,
-            );
+                .map_err(shared_error)?;
+                let bindings = XspiceDigitalBindings::enroll_circuit(self, &mut coordinator)
+                    .map_err(|error| shared_error(error.into()))?;
+                Ok::<_, SimulationError>((coordinator, bindings))
+            })();
+            let (coordinator, bindings) = match linked {
+                Ok(linked) => linked,
+                Err(error) => {
+                    self.mixed_signal_hosts = rollback;
+                    return Err(error);
+                }
+            };
+            self.mixed_digital_coordinator = Some(coordinator);
+            self.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
             for &node in event_nodes {
                 self.net_kinds.register(node, super::NetKind::Digital);
             }
@@ -361,7 +479,7 @@ impl CircuitData {
         time: Value,
         dt: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        companion: XspiceCompanionPolicy<'_>,
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), SimulationError> {
@@ -371,7 +489,7 @@ impl CircuitData {
             time,
             dt,
             voltages,
-            coefficients,
+            companion,
             Some((initial_step, final_step)),
         )
     }
@@ -384,53 +502,41 @@ impl CircuitData {
         time: Value,
         dt: Value,
         voltages: &[Value],
-        coefficients: &crate::numerics::integration::CompanionCoefficients,
+        companion: XspiceCompanionPolicy<'_>,
         analysis_step: Option<(bool, bool)>,
     ) -> Result<(), SimulationError> {
         if self.mixed_signal_hosts.is_empty() {
             return Ok(());
         }
-        let integration = mixed_integration_coefficients(time, dt, coefficients)?;
-        let mut digital = self
-            .mixed_digital_coordinator
-            .as_mut()
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "mixed circuit digital execution has not been elaborated".into(),
-                )
-            })?
-            .begin_trial(time, true)
-            .map_err(shared_error)?;
-        let mut group = MixedHostTrialGroup::begin(
-            &mut self.mixed_signal_hosts,
-            time,
-            dt,
-            integration,
-            analysis_step,
-            true,
-        )?;
-        group.settle(&mut digital, voltages)?;
-        for host in group.hosts.iter_mut() {
-            let stamped = host.stamp(
-                voltages,
-                |row, col, value| {
-                    if matrix.get_index(row, col).is_some() {
-                        matrix.add(row, col, value);
-                    } else {
-                        log::debug!(
-                            "mixed Verilog-AMS stamp ({row}, {col}) missing from matrix topology"
-                        );
-                    }
-                },
-                |row, value| {
-                    if let Some(slot) = rhs.get_mut(row) {
-                        *slot += value;
-                    }
-                },
-            );
-            named(host, stamped)?;
-        }
-        Ok(())
+        let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
+        let bindings = self.mixed_xspice_bindings.clone();
+        self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
+            let mut digital = coordinator.begin_trial(time, true).map_err(shared_error)?;
+            let mut group = MixedHostTrialGroup::begin(hosts, time, dt, integration, analysis_step, true)?;
+            if let Some(bindings) = &bindings {
+                let mut participant = XspiceDigitalParticipant::new(circuit, bindings, voltages, time, dt,
+                    if analysis_step.is_some() { crate::xspice::AnalysisType::Transient }
+                    else { crate::xspice::AnalysisType::DcOp },
+                    crate::xspice::EvaluationPhase::CircuitTrial, companion, resources);
+                group.settle_with(&mut digital, voltages, Some(&mut participant))?;
+                // The same settled code-model candidate supplies its stamps.
+                // Dropping the participant ends its borrow, not the trial.
+                drop(participant);
+                circuit.stamp_xspice(matrix, rhs);
+            } else {
+                group.settle(&mut digital, voltages)?;
+            }
+            for host in group.hosts.iter_mut() {
+                let stamped = host.stamp(voltages, |row, col, value| {
+                    if matrix.get_index(row, col).is_some() { matrix.add(row, col, value); }
+                    else { log::debug!("mixed Verilog-AMS stamp ({row}, {col}) missing from matrix topology"); }
+                }, |row, value| {
+                    if let Some(slot) = rhs.get_mut(row) { *slot += value; }
+                });
+                named(host, stamped)?;
+            }
+            Ok(())
+        })
     }
 
     /// Stamp every mixed module into an operating-point assembly.
@@ -455,7 +561,11 @@ impl CircuitData {
             time,
             0.0,
             solution,
-            &crate::numerics::integration::CompanionCoefficients::backward_euler(),
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
             None,
         )
     }

@@ -660,6 +660,9 @@ pub struct CircuitData {
     /// One process, driver and event-queue authority for every mixed HDL instance.
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_digital_coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
+    /// Original XSPICE drivers attached to the coordinator's event-bit groups.
+    #[cfg(feature = "veriloga")]
+    mixed_xspice_bindings: Option<Arc<external_models::XspiceDigitalBindings>>,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not

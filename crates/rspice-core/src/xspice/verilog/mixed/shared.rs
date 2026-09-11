@@ -1,6 +1,8 @@
 //! Circuit ownership of digital execution and per-model observation banks.
-use super::super::store::StoreError;
+use super::super::host::DigitalActiveParticipant;
+use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
+use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
 use rspice_veriloga::canonical_ir::digital_link::{
@@ -482,8 +484,26 @@ impl MixedDigitalCoordinator {
         Ok(())
     }
 
+    pub(crate) fn event_bindings(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.event_nodes
+            .iter()
+            .enumerate()
+            .map(|(net, &node)| (node, net))
+    }
+
+    pub(crate) fn attach_external_bits(
+        &mut self,
+        observed: &[usize],
+        drivers: &[(usize, EventTarget)],
+    ) -> Result<Vec<ExternalBitDriverId>, DigitalRunError> {
+        self.digital
+            .make_mut()
+            .attach_external_bits(observed, drivers)
+    }
+
     pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize) {
         debug_assert!(!self.enabled);
+        self.digital.make_mut().remap_external_nodes(&remap);
         // Retain group indices: the digital bit topology refers to these slots.
         for node in &mut self.event_nodes {
             *node = remap(*node);
@@ -574,6 +594,15 @@ impl SharedDigitalTrial<'_> {
         hosts: &[MixedSignalHost],
         solution: &[f64],
     ) -> Result<(), MixedSignalError> {
+        self.advance_with(hosts, solution, None)
+    }
+
+    pub(crate) fn advance_with(
+        &mut self,
+        hosts: &[MixedSignalHost],
+        solution: &[f64],
+        mut participant: Option<&mut dyn DigitalActiveParticipant>,
+    ) -> Result<(), MixedSignalError> {
         let coordinator = &mut self.coordinator;
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
             host.validate_solution(solution)?;
@@ -589,7 +618,23 @@ impl SharedDigitalTrial<'_> {
         {
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_potentials(&coordinator.probes);
-            let advanced = digital.advance_to(self.tick);
+            let advanced = match &mut participant {
+                Some(participant) => digital.advance_to_with(self.tick, *participant),
+                None => digital.advance_to(self.tick),
+            };
+            advanced.map_err(|error| coordinator.execution_error(error))?;
+        }
+        if let Some(participant) = participant {
+            // An XSPICE event or analog input can be due without an HDL timer.
+            // Run that physical boundary through the causal lane so rounding
+            // its reporting tick cannot consume an unrelated future timer.
+            let tick = coordinator
+                .resolution
+                .seconds_to_ticks(self.time)
+                .map_err(DigitalRunError::from)?;
+            let digital = coordinator.digital.make_mut();
+            digital.sample_analog_potentials(&coordinator.probes);
+            let advanced = digital.force_many_from_analog_with(&[], tick, self.time, participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
@@ -599,6 +644,14 @@ impl SharedDigitalTrial<'_> {
     pub(crate) fn publish_adc(
         &mut self,
         hosts: &[MixedSignalHost],
+    ) -> Result<bool, MixedSignalError> {
+        self.publish_adc_with(hosts, None)
+    }
+
+    pub(crate) fn publish_adc_with(
+        &mut self,
+        hosts: &[MixedSignalHost],
+        participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
         let coordinator = &mut self.coordinator;
         coordinator.drives.clear();
@@ -646,7 +699,15 @@ impl SharedDigitalTrial<'_> {
         }
         let digital = coordinator.digital.make_mut();
         digital.sample_analog_potentials(&coordinator.probes);
-        let published = digital.force_many_from_analog(&coordinator.drives, tick, self.time);
+        let published = match participant {
+            Some(participant) => digital.force_many_from_analog_with(
+                &coordinator.drives,
+                tick,
+                self.time,
+                participant,
+            ),
+            None => digital.force_many_from_analog(&coordinator.drives, tick, self.time),
+        };
         published.map_err(|error| coordinator.execution_error(error))?;
         Ok(true)
     }

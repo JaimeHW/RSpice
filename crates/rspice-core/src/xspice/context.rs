@@ -68,6 +68,11 @@ pub enum EvaluationPhase {
     DirectEvaluation,
     /// A rollbackable trial evaluation used for residual/Jacobian probing.
     RollbackableProbe,
+    /// A circuit-owned speculative candidate. Context state, output events and
+    /// input signatures persist across its Active waves. The circuit holds a
+    /// complete model/queue/resource rollback image and always restores probes.
+    /// External effects remain speculative; this is not an accepted timepoint.
+    CircuitTrial,
     /// Evaluation for an accepted transient timepoint.
     AcceptedStep,
 }

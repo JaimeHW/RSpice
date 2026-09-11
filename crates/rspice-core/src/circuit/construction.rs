@@ -101,6 +101,8 @@ impl CircuitData {
             mixed_signal_hosts: Vec::new(),
             #[cfg(feature = "veriloga")]
             mixed_digital_coordinator: None,
+            #[cfg(feature = "veriloga")]
+            mixed_xspice_bindings: None,
             #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices:
                 crate::device::veriloga_builtins::BuiltinVerilogADevices::new(),
@@ -571,6 +573,9 @@ impl CircuitData {
             }
             if let Some(digital) = &mut self.mixed_digital_coordinator {
                 digital.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
+            }
+            if let Some(bindings) = &mut self.mixed_xspice_bindings {
+                Arc::make_mut(bindings).remap_nodes(|node| Self::remap_node_id(node, old_node_id));
             }
         }
         // All participants now carry renumbered connections. Replay their

@@ -23,6 +23,7 @@ pub(crate) struct DigitalActiveExchange<'a> {
 }
 
 impl DigitalActiveExchange<'_> {
+    #[cfg(test)]
     pub(crate) fn tick(&self) -> u64 {
         self.tick
     }
@@ -84,6 +85,20 @@ impl DigitalHost {
             .external_sources()
             .iter()
             .any(|(_, external)| external == target)
+    }
+
+    pub(crate) fn remap_external_nodes(&mut self, remap: impl Fn(usize) -> usize) {
+        assert!(
+            !self.elaboration_closed,
+            "external nodes can only remap during elaboration"
+        );
+        self.store.remap_external_nodes(remap);
+        self.external_targets = self
+            .store
+            .external_sources()
+            .iter()
+            .map(|(_, target)| self.scheduler.intern_target(target.clone()))
+            .collect();
     }
 
     /// Enroll external driver identities at elaboration, before process execution.

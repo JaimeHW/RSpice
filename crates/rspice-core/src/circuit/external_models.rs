@@ -40,7 +40,7 @@ pub(crate) struct XspiceActiveWave {
     pass: usize,
 }
 
-/// Copy-on-write event/model state staged by the circuit acceptance barrier.
+/// Copy-on-write event/model state staged by circuit probe/acceptance transactions.
 /// Dispatch topology is immutable, and per-evaluation scratch is recomputed.
 pub(crate) struct XspiceAcceptanceRollback {
     instances: Vec<SharedXspiceInstance>,
@@ -388,6 +388,15 @@ impl CircuitData {
     #[inline]
     pub fn has_xspice_devices(&self) -> bool {
         !self.xspice_instances.is_empty()
+    }
+
+    /// Coupled event nets are evaluated with the mixed circuit trial.
+    pub(crate) fn has_independent_xspice_evaluation(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        if self.mixed_xspice_bindings.is_some() {
+            return false;
+        }
+        self.has_xspice_devices()
     }
 
     /// Add an XSPICE code model instance and update derived circuit metadata.
@@ -1165,6 +1174,9 @@ impl CircuitData {
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
     ) {
+        if !self.has_independent_xspice_evaluation() {
+            return;
+        }
         let XspiceCompanionPolicy {
             coefficients,
             xyce_one_step_order2,

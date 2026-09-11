@@ -568,9 +568,19 @@ impl CodeModel for DigitalCosim {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let evaluation_phase = ctx.evaluation_phase();
+        if evaluation_phase == EvaluationPhase::CircuitTrial && !ctx.has_resource_transaction() {
+            return Err(d_cosim_error(
+                "circuit trial requires an owning resource transaction",
+            ));
+        }
         let runtime_resource = ctx
             .transactional_resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)?
             .ok_or_else(|| d_cosim_error("runtime is not initialized"))?;
+        if evaluation_phase == EvaluationPhase::CircuitTrial && !runtime_resource.reversible {
+            return Err(d_cosim_error(
+                "external runtime has no rollback protocol for a circuit trial",
+            ));
+        }
         if evaluation_phase == EvaluationPhase::RollbackableProbe && !runtime_resource.reversible {
             return Ok(());
         }
@@ -610,7 +620,8 @@ impl CodeModel for DigitalCosim {
                 .lock()
                 .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
 
-            // The outer barrier captures once across all settle passes. Probes
+            // The outer barrier captures once across all Active waves of a
+            // CircuitTrial or accepted candidate. Legacy single-call probes
             // still restore immediately; standalone calls retain a local image.
             let local_rollback = runtime_resource.reversible
                 && (!ctx.has_resource_transaction()
@@ -893,6 +904,52 @@ mod tests {
             accepted.int_state(STATE_TIME_ZERO_INITIALIZED),
             COSIM_STARTUP_STEP_DONE
         );
+    }
+
+    #[test]
+    fn reversible_d_cosim_retains_circuit_candidate_until_outer_rollback() {
+        for fail_step in [false, true] {
+            let state = Arc::new(Mutex::new(0));
+            let mut ctx = rollback_test_context(Arc::clone(&state), fail_step).unwrap();
+            let accepted = ctx.clone();
+            let transaction = crate::xspice::ResourceTransaction::default();
+            ctx.set_resource_transaction(Some(crate::xspice::ResourceTransactionScope {
+                transaction: transaction.clone(),
+                owner: 0,
+            }));
+            ctx.set_evaluation_phase(EvaluationPhase::CircuitTrial);
+            let result = DigitalCosim.evaluate(&mut ctx);
+            if fail_step {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("injected step failure")
+                );
+                assert_eq!(
+                    *state.lock().unwrap(),
+                    2,
+                    "the outer transaction owns failure restoration too"
+                );
+            } else {
+                result.unwrap();
+                assert_eq!(*state.lock().unwrap(), 2);
+                DigitalCosim.evaluate(&mut ctx).unwrap();
+                assert_eq!(
+                    *state.lock().unwrap(),
+                    3,
+                    "the next Active wave continues candidate state without replaying startup"
+                );
+            }
+            assert!(transaction.rollback().is_empty());
+            ctx = accepted;
+            assert_eq!(*state.lock().unwrap(), 0);
+            assert_eq!(
+                ctx.int_state(STATE_TIME_ZERO_INITIALIZED),
+                COSIM_INPUTS_INITIALIZED
+            );
+            assert!(!ctx.has_resource_transaction());
+        }
     }
 
     #[test]

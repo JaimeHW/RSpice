@@ -1279,13 +1279,76 @@ The private adapter APIs remain unused in a non-test build until those circuit
 paths are connected. No full-suite, vendor, platform, generator or capacity
 qualification is claimed by this increment.
 
+## Joint HDL/XSPICE numerical candidates
+
+Circuit numerical probes now retain the XSPICE candidate through shared HDL
+settlement and through both families' matrix/RHS stamps. A circuit-owned probe
+guard temporarily separates the HDL coordinator and model views from code-model
+storage, restores each owner on exit, and rolls back the XSPICE COW model/event
+images and registered external resources after the whole evaluation. A later
+analog stamping refusal therefore cannot leave an earlier event participant or
+registered provider advanced.
+
+The new CircuitTrial evaluation phase preserves candidate-local code-model
+memory, output events and dirty-input signatures across Active waves. Existing
+RollbackableProbe behavior stays intact for standalone single-call probes;
+CircuitTrial requires an owning resource transaction. Reversible d_cosim
+providers continue within that outer transaction. External d_process and
+irreversible d_cosim providers cannot execute a circuit trial without a rollback
+protocol; silently skipping their feedback or treating a probe as accepted would
+not implement the coupled contract. Their full effect/protocol support remains
+part of MS05.
+
+Circuit digital finalization now enrolls actual XSPICE endpoints in its shared
+bit groups, with failure restoration of the previous HDL owners. Ground-driven
+node renumbering updates the binding table and diagnostic driver identities;
+fresh HDL analyses retain immutable attachment identities. A shared candidate
+also invokes the external Active participant when no HDL timer is due, using
+physical time and the causal lane. The companion policy, including Xyce
+OneStep weighting, is passed explicitly into the joint numerical stamp.
+Independent XSPICE stamping and OP/UIC seed evaluation are bypassed for a
+coordinated event circuit so they cannot separately advance or double-stamp its
+candidate. Actual deck connections are still refused until acceptance and
+candidate-control inspection are integrated.
+
+Focused evidence uses two circuit-enrolled HDL instances, the built-in XSPICE
+ADC and inverter, native SPICE resistors, a retained 20 ohm D/A output and a
+registered mutable provider. ADC-triggered feedback settles before an HDL
+inactive read and returns through an NBA update. Alternating numerical
+candidates and a late analog sqrt-domain refusal restore both runtimes, views,
+queues and provider state. One provider undo image covers every Active wave.
+The loaded output retains the analytic 1000/1020 voltage ratio. This exercises
+the production circuit probe and native stamping APIs at startup; it is not
+an end-to-end accepted transient trajectory or the completed off-grid/rejected-
+timestep deck slice.
+
+After correcting a stale enrollment call site and constructing the fixture
+through the builder's unstarted compiled-host entry, the joint case passed in
+0.02 seconds. The two existing direct-HDL/rejected-timestep deck cases passed
+in 0.65 seconds after the same 31 second build. Three earlier routed-adapter
+cases had also passed. Three legacy gate/ADC/d_process probe cases passed with
+no rebuild in 0.00 seconds. The reversible d_cosim candidate now has focused
+success/failure evidence: successive Active calls retain provider state until
+outer rollback, including a failed call, and legacy single-call probe behavior
+still restores immediately. Both provider cases passed in 0.00 seconds after a
+35 second build. Logs: hdl-xspice-joint-probe.log,
+hdl-xspice-joint-probe-checked.log, hdl-xspice-joint-probe-fixture.log,
+hdl-xspice-joint-probe-legacy.log and hdl-xspice-joint-probe-cosim.log in the
+owned target directory. No blanket unused-code suppression was added; the
+reporting-tick inspection helper is now test-only. No compiler or generator
+inputs were changed by this increment. Full-suite, vendor, platform, capacity
+and commercial qualification remain open.
+
 ## Next implementation work
 
-Attach HDL and XSPICE drivers to resolved event nets under the circuit execution
-authority, preserving explicit electrical loads and converters while removing
-unnecessary analog unknowns from digital chains. The first whole-circuit slice
-must include two HDL instances, an XSPICE participant, a loaded SPICE boundary,
-off-grid timing and a rejected trial. Extend the root handshake to XSPICE
+Extend the joint numerical probe into accepted-candidate preparation and
+candidate-control inspection before enabling direct HDL/XSPICE decks. Settle
+all event participants before native projection/history preparation, promote
+once, include both queues' breakpoints and emit one accepted snapshot per
+shared node. The first whole-circuit deck slice must include two HDL instances,
+an XSPICE participant, a loaded SPICE boundary, off-grid timing and a rejected
+trial. Preserve physical loads and converters while removing unnecessary
+analog unknowns from digital chains. Extend the root handshake to XSPICE
 boundaries and complete flow/analog-owned-variable dependencies and feedback
 convergence.
 

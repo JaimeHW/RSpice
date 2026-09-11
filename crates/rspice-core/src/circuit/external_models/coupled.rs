@@ -5,8 +5,10 @@
 use super::*;
 use crate::xspice::DigitalValue;
 use crate::xspice::event_scheduler::EventTarget;
+#[cfg(test)]
+use crate::xspice::verilog::host::DigitalHost;
 use crate::xspice::verilog::host::{
-    DigitalActiveExchange, DigitalActiveParticipant, DigitalHost, DigitalRunError,
+    DigitalActiveExchange, DigitalActiveParticipant, DigitalRunError,
 };
 use crate::xspice::verilog::store::{DigitalBitChange, ExternalBitDriverId};
 use std::collections::{BTreeSet, VecDeque};
@@ -21,10 +23,34 @@ pub(crate) struct XspiceDigitalBindings {
 }
 
 impl XspiceDigitalBindings {
+    pub(crate) fn enroll_circuit(
+        circuit: &CircuitData,
+        coordinator: &mut crate::xspice::verilog::MixedDigitalCoordinator,
+    ) -> Result<Option<Self>, DigitalRunError> {
+        let nets: Vec<_> = coordinator.event_bindings().collect();
+        Self::enroll_with(circuit, &nets, |observed, drivers| {
+            coordinator.attach_external_bits(observed, drivers)
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn enroll(
         circuit: &CircuitData,
         digital: &mut DigitalHost,
         nets: &[(NodeId, usize)],
+    ) -> Result<Option<Self>, DigitalRunError> {
+        Self::enroll_with(circuit, nets, |observed, drivers| {
+            digital.attach_external_bits(observed, drivers)
+        })
+    }
+
+    fn enroll_with(
+        circuit: &CircuitData,
+        nets: &[(NodeId, usize)],
+        attach: impl FnOnce(
+            &[usize],
+            &[(usize, EventTarget)],
+        ) -> Result<Vec<ExternalBitDriverId>, DigitalRunError>,
     ) -> Result<Option<Self>, DigitalRunError> {
         let mut offered = BTreeMap::new();
         let mut net_ids = BTreeSet::new();
@@ -63,8 +89,7 @@ impl XspiceDigitalBindings {
             .into_iter()
             .map(|target| (by_node[&target.node_id], target))
             .collect();
-        let ids = digital
-            .attach_external_bits(&by_node.values().copied().collect::<Vec<_>>(), &targets)?;
+        let ids = attach(&by_node.values().copied().collect::<Vec<_>>(), &targets)?;
         Ok(Some(Self {
             by_node,
             by_net,
@@ -74,6 +99,22 @@ impl XspiceDigitalBindings {
                 .zip(ids)
                 .collect(),
         }))
+    }
+    pub(crate) fn remap_nodes(&mut self, remap: impl Fn(usize) -> usize) {
+        self.by_node = std::mem::take(&mut self.by_node)
+            .into_iter()
+            .map(|(node, net)| (remap(node), net))
+            .collect();
+        for node in self.by_net.values_mut() {
+            *node = remap(*node);
+        }
+        self.drivers = std::mem::take(&mut self.drivers)
+            .into_iter()
+            .map(|(mut target, id)| {
+                target.node_id = remap(target.node_id);
+                (target, id)
+            })
+            .collect();
     }
 }
 

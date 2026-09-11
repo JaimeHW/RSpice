@@ -1752,7 +1752,10 @@ impl Engine {
                 time,
                 dt,
                 solution,
-                &companion_coeff,
+                XspiceCompanionPolicy {
+                    coefficients: &companion_coeff,
+                    xyce_one_step_order2: ctx.xyce_one_step_order2,
+                },
                 ctx.analysis_initial_step,
                 ctx.analysis_final_step,
             )?;

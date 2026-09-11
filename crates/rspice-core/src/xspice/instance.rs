@@ -1817,6 +1817,11 @@ impl XspiceInstance {
         transaction: Option<&super::ResourceTransaction>,
         owner: usize,
     ) -> CmResult<()> {
+        if phase == EvaluationPhase::CircuitTrial && transaction.is_none() {
+            return Err(CmError::EvaluationError(
+                "a circuit trial requires its owning rollback/resource transaction".into(),
+            ));
+        }
         self.context
             .set_resource_transaction(transaction.map(|transaction| {
                 super::ResourceTransactionScope {
@@ -1843,6 +1848,11 @@ impl XspiceInstance {
         analysis: AnalysisType,
         phase: EvaluationPhase,
     ) -> CmResult<()> {
+        if phase == EvaluationPhase::CircuitTrial && !self.context.has_resource_transaction() {
+            return Err(CmError::EvaluationError(
+                "a circuit trial must be evaluated through its owning transaction".into(),
+            ));
+        }
         self.context.clear_stamps();
         self.refresh_port_context_bindings();
         self.context.time = time;

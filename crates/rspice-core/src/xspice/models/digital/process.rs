@@ -277,6 +277,11 @@ impl CodeModel for DigitalProcess {
         let output_width = ctx.port_width("out");
         validate_shape(input_width, output_width)?;
 
+        if ctx.evaluation_phase() == EvaluationPhase::CircuitTrial {
+            return Err(CmError::EvaluationError(
+                "d_process cannot participate in a circuit trial: its external process has no rollback protocol".into(),
+            ));
+        }
         if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
             return Ok(());
         }

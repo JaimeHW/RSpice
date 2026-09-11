@@ -225,6 +225,14 @@ impl DigitalSignalStore {
             .map_or(&[], |bits| bits.topology.external_sources.as_slice())
     }
 
+    pub(crate) fn remap_external_nodes(&mut self, remap: impl Fn(usize) -> usize) {
+        if let Some(bits) = &mut self.connected {
+            for (_, target) in &mut Arc::make_mut(&mut bits.topology).external_sources {
+                target.node_id = remap(target.node_id);
+            }
+        }
+    }
+
     pub(crate) fn take_external_bit_changes(&mut self) -> Vec<DigitalBitChange> {
         self.connected
             .as_mut()

@@ -3932,7 +3932,7 @@ impl Engine {
         //
         // It runs after the `.IC`/element-IC writes above so bridges see the
         // same analog node voltages the first accepted point reports.
-        if resume.is_none() && uic_requested && circuit.has_xspice_devices() {
+        if resume.is_none() && uic_requested && circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(
                 0.0,
                 0.0,
