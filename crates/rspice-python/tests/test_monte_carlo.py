@@ -8,6 +8,27 @@ import rspice
 
 
 class TestMonteCarlo:
+    def test_indirect_and_complex_parameters(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Indirect variation\n.param base=2 derived={3*base}\n"
+            "V1 in 0 1\nE1 out 0 in 0 {derived}\n.end\n"
+        )
+        result = engine.run_monte_carlo(
+            netlist, 8, seed=7, distribution="uniform", spread=0.1, params=["base"]
+        )
+        stats = result.get_variable("V(OUT)")
+        assert 5.4 <= stats.min < stats.max <= 6.6
+        netlist = rspice.Netlist.parse_spice(
+            "Complex parameter\n.param cplx={1+sqrt(-1)} rval=1k\n"
+            "V1 in 0 1\nE1 out 0 in 0 {abs(img(cplx))}\nR1 out 0 {rval}\n.end\n"
+        )
+        result = engine.run_monte_carlo(netlist, 8, seed=7)
+        assert result.get_variable("V(OUT)").samples == pytest.approx(
+            [1.0] * 8, abs=1e-10
+        )
+        with pytest.raises(rspice.SimulationError):
+            engine.run_monte_carlo(netlist, 8, seed=7, params=["cplx"])
+
     def test_engine_run_executes_mc_directive(self, engine):
         netlist = rspice.Netlist.parse(
             """* MC directive

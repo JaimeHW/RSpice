@@ -65,6 +65,73 @@ fn monte_carlo_with_zero_spread_matches_the_nominal_solution() {
 }
 
 #[test]
+fn monte_carlo_accepts_indirect_and_unused_defined_parameters() {
+    let netlist = Netlist::parse("Declared parameters\n.param base=2 derived={3*base} unused=42\nV1 in 0 1\nE1 out 0 in 0 {derived}\n.end\n").unwrap();
+    let engine = Engine::default();
+    let varied = engine
+        .run_monte_carlo_with_options(
+            &netlist,
+            8,
+            7,
+            Distribution::Uniform { tolerance: 0.1 },
+            Some(&["base".into()]),
+        )
+        .unwrap();
+    let samples = &varied.variables["V(OUT)"].samples;
+    assert_eq!(samples.len(), 8);
+    assert!(samples.iter().all(|value| (5.4..=6.6).contains(value)));
+    assert!(samples.windows(2).any(|pair| pair[0] != pair[1]));
+    let unused = engine
+        .run_monte_carlo_with_options(
+            &netlist,
+            8,
+            7,
+            Distribution::Uniform { tolerance: 0.1 },
+            Some(&["unused".into()]),
+        )
+        .unwrap();
+    assert!(
+        unused.variables["V(OUT)"]
+            .samples
+            .iter()
+            .all(|value| (*value - 6.0).abs() < 1e-10)
+    );
+}
+
+#[test]
+fn monte_carlo_does_not_replace_complex_parameters_with_their_real_projection() {
+    let netlist = Netlist::parse("Complex parameter\n.param cplx={1+sqrt(-1)} rval=1k\nV1 in 0 1\nE1 out 0 in 0 {abs(img(cplx))}\nR1 out 0 {rval}\n.end\n").unwrap();
+    assert_eq!(netlist.params.get_complex("cplx").unwrap().im.abs(), 1.0);
+    let engine = Engine::default();
+    let result = engine
+        .run_monte_carlo_with_options(
+            &netlist,
+            8,
+            7,
+            Distribution::Uniform { tolerance: 0.1 },
+            None,
+        )
+        .unwrap();
+    assert_eq!(result.variables["V(OUT)"].samples.len(), 8);
+    assert!(
+        result.variables["V(OUT)"]
+            .samples
+            .iter()
+            .all(|value| (*value - 1.0).abs() < 1e-10)
+    );
+    let error = engine
+        .run_monte_carlo_with_options(
+            &netlist,
+            8,
+            7,
+            Distribution::Uniform { tolerance: 0.1 },
+            Some(&["cplx".into()]),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("not defined or not eligible"));
+}
+
+#[test]
 fn authored_numeric_node_names_take_precedence_over_internal_indices() {
     let netlist = Netlist::parse("numeric nodes\nVfirst 2 0 2\nVsecond out 0 5\n.end\n")
         .expect("fixture parses");

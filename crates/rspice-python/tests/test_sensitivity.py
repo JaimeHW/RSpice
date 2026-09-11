@@ -9,6 +9,28 @@ import rspice
 
 
 class TestSensitivity:
+    def test_indirect_and_unused_parameters(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Defined parameters\n.param base=2 derived={3*base} unused=42\n"
+            "V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {derived}\n.end\n"
+        )
+        for name, nominal, expected in [("base", 2.0, 3.0), ("unused", 42.0, 0.0)]:
+            assert engine.run_sensitivity(netlist, "out", name, nominal) == pytest.approx(
+                expected, rel=1e-8, abs=0.0
+            )
+            assert engine.run_sensitivity_ac(
+                netlist, "out", name, nominal, [1.0]
+            ) == pytest.approx([expected], rel=1e-8, abs=0.0)
+
+    def test_node_name_is_not_a_parameter_definition(self, engine):
+        netlist = rspice.Netlist.parse_spice(
+            "Node collision\nV1 base 0 DC 1 AC 1\nE1 out 0 base 0 7\n.end\n"
+        )
+        with pytest.raises(rspice.SimulationError):
+            engine.run_sensitivity(netlist, "out", "base", 2.0)
+        with pytest.raises(rspice.SimulationError):
+            engine.run_sensitivity_ac(netlist, "out", "base", 2.0, [1.0])
+
     def test_parameter_sensitivity_replays_same_card_dependencies(self, engine):
         netlist = rspice.Netlist.parse_spice(
             "Same-card dependencies\n.param base=2 derived={3*base}\n"

@@ -1516,7 +1516,7 @@ impl PyEngine {
     /// Run Monte Carlo analysis
     ///
     /// Runs repeated simulations with random variations applied to every
-    /// `.param` value referenced by the netlist (or to `params` when given),
+    /// eligible real, nonzero parameter (or to `params` when given),
     /// and reports statistics for all node voltages.
     ///
     /// Args:
@@ -1533,7 +1533,7 @@ impl PyEngine {
     ///
     /// Raises:
     ///     ValueError: For invalid num_runs, distribution, or spread
-    ///     SimulationError: If parameters are unbound or runs fail to build
+    ///     SimulationError: If parameters are undefined/ineligible or runs fail to build
     ///
     /// Example:
     ///     >>> mc = engine.run_monte_carlo(netlist, 1000, seed=42,
@@ -1576,8 +1576,8 @@ impl PyEngine {
     ///
     /// Raises:
     ///     ValueError: For non-finite param_value or non-positive delta
-    ///     SimulationError: If the parameter is not bound to any netlist
-    ///                      expression, or no consistent derivative can be resolved
+    ///     SimulationError: If the parameter is undefined, or no consistent
+    ///                      derivative can be resolved. Defined parameters may have zero influence.
     ///
     /// Example:
     ///     >>> # netlist: .param rval=1k / R1 in out {rval} / ...

@@ -154,11 +154,14 @@ fn sensitivity_replays_same_card_and_included_parameter_dependencies() {
     let inline = Netlist::parse(&format!("Same-card dependencies\n{parameters}{circuit}")).unwrap();
     let root = directory.join("sealed.cir");
     let child = directory.join("sealed.inc");
-    let source = format!("Sealed dependencies\n.include sealed.inc\n{circuit}");
+    let source = "Sealed dependencies\n.include sealed.inc\n.end\n".to_owned();
     let bundle = SealedSourceBundle::try_new_with_edges(
         [
             (root.clone(), source.clone()),
-            (child.clone(), parameters.to_owned()),
+            (
+                child.clone(),
+                format!("{parameters}{}", circuit.trim_end_matches(".end\n")),
+            ),
         ],
         [SealedSourceEdge {
             owner: root.clone(),

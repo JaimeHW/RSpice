@@ -506,14 +506,15 @@ impl Engine {
             abort,
         )?;
 
-        let Some(source) = &netlist.source_text else {
-            return Ok((perturbed, applied_device_overrides));
-        };
-
-        let referenced = param_overrides
+        // Identity comes from the resolved environment. Source occurrences
+        // cannot distinguish dependencies, included definitions or zero influence.
+        let defined_parameters = param_overrides
             .iter()
-            .filter(|(name, _)| Self::source_references_param(source, name))
+            .filter(|(name, _)| netlist.params.has_any_parameter_binding(name))
             .count();
+        let Some(source) = &netlist.source_text else {
+            return Ok((perturbed, defined_parameters + applied_device_overrides));
+        };
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
             statistical_seed: Some(netlist.params.random().seed()),
@@ -551,7 +552,7 @@ impl Engine {
             abort,
         )?;
 
-        Ok((reparsed, referenced + applied_device_overrides))
+        Ok((reparsed, defined_parameters + applied_device_overrides))
     }
 
     fn split_device_parameter_override(name: &str) -> Option<(String, String)> {
@@ -624,107 +625,6 @@ impl Engine {
         Ok(())
     }
 
-    pub(in crate::engine) fn logical_lines_after_title(source: &str) -> Vec<String> {
-        let mut lines = Vec::new();
-        let mut continuation = String::new();
-
-        for raw in source.lines().skip(1) {
-            let line = raw.split(';').next().unwrap_or("").trim();
-            if line.is_empty() || line.starts_with('*') || line.starts_with('$') {
-                continue;
-            }
-
-            if line.starts_with('+') {
-                if !continuation.is_empty() {
-                    continuation.push(' ');
-                    continuation.push_str(line.trim_start_matches('+').trim());
-                }
-                continue;
-            }
-
-            if !continuation.is_empty() {
-                lines.push(std::mem::take(&mut continuation));
-                continuation.clear();
-            }
-            continuation.push_str(line);
-        }
-
-        if !continuation.is_empty() {
-            lines.push(continuation);
-        }
-
-        lines
-    }
-
-    pub(in crate::engine) fn contains_identifier(haystack_upper: &str, needle_upper: &str) -> bool {
-        if needle_upper.is_empty() {
-            return false;
-        }
-        let haystack_bytes = haystack_upper.as_bytes();
-        let needle_len = needle_upper.len();
-
-        for (idx, _) in haystack_upper.match_indices(needle_upper) {
-            let before_ok = idx == 0 || !Self::is_identifier_byte(haystack_bytes[idx - 1]);
-            let after_idx = idx + needle_len;
-            let after_ok = after_idx >= haystack_bytes.len()
-                || !Self::is_identifier_byte(haystack_bytes[after_idx]);
-
-            if before_ok && after_ok {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub(in crate::engine) fn is_identifier_byte(b: u8) -> bool {
-        b.is_ascii_alphanumeric() || b == b'_'
-    }
-
-    fn is_parameter_assignment_command(upper_trimmed_line: &str) -> bool {
-        matches!(
-            upper_trimmed_line
-                .split_whitespace()
-                .next()
-                .unwrap_or_default(),
-            ".PARAM" | ".PARAMS" | ".CSPARAM" | ".GLOBAL_PARAM"
-        )
-    }
-
-    pub(in crate::engine) fn source_references_param(source: &str, param_name: &str) -> bool {
-        let param_upper = param_name.to_ascii_uppercase();
-
-        Self::logical_lines_after_title(source).iter().any(|line| {
-            let upper = line.to_ascii_uppercase();
-            if Self::is_parameter_assignment_command(upper.trim_start())
-                || upper.starts_with(".DATA")
-                || upper.starts_with(".ENDDATA")
-                || upper.starts_with(".IC")
-                || upper.starts_with(".NODESET")
-            {
-                return false;
-            }
-            Self::contains_identifier(Self::binding_search_span(&upper), &param_upper)
-        })
-    }
-
-    /// The slice of a logical line in which an identifier occurrence can bind
-    /// a parameter.
-    ///
-    /// On an element line the leading token is the device's own name
-    /// (`R1 1 2 {rval}`), so a match there is a device-name collision rather
-    /// than a parameter reference — searching it made `run_sensitivity` and
-    /// `.STEP` silently no-op when handed an element name. Dot commands have
-    /// no such token and are searched whole.
-    pub(in crate::engine) fn binding_search_span(line_upper: &str) -> &str {
-        let trimmed = line_upper.trim_start();
-        if trimmed.starts_with('.') {
-            return trimmed;
-        }
-        trimmed
-            .find(|c: char| c.is_ascii_whitespace() || c == ',')
-            .map_or("", |idx| &trimmed[idx..])
-    }
-
     fn sensitivity_step(
         param_value: Value,
         delta: Option<Value>,
@@ -773,6 +673,7 @@ impl Engine {
     ///
     /// Computes dVout/dparam using finite differences.
     /// Useful for design optimization and tolerance analysis.
+    /// A defined parameter may have zero influence on the selected output.
     /// `delta` is an initial step; calibration may enlarge it to resolve probe changes.
     pub fn run_sensitivity(
         &self,
@@ -847,7 +748,7 @@ impl Engine {
                 self.config.resource_limits,
                 abort,
             )?;
-            if netlist.source_text.is_some() && references == 0 {
+            if references == 0 {
                 return Err(SimulationError::Circuit(format!(
                     "Parameter '{param_name}' is not bound to any netlist expression"
                 )));
@@ -951,7 +852,7 @@ impl Engine {
                 self.config.resource_limits,
                 abort,
             )?;
-            if netlist.source_text.is_some() && references == 0 {
+            if references == 0 {
                 return Err(SimulationError::Circuit(format!(
                     "Parameter '{param_name}' is not bound to any netlist expression"
                 )));
@@ -3254,6 +3155,74 @@ mod tests {
     }
 
     #[test]
+    fn parameter_studies_use_defined_parameters_including_indirect_and_zero_influence() {
+        let engine = Engine::default();
+        for (source, expected) in [
+            (
+                "Aliases\n.param base=2 derived={3*base}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {derived}\n.end\n",
+                3.0_f64,
+            ),
+            (
+                "Deferred aliases\n.param base=2 derived={3*base}\nV1 in 0 DC 1 AC 1\nR1 in out {derived}\nR2 out 0 6\n.end\n",
+                -0.125,
+            ),
+            (
+                "Function dependency\n.param base=2 derived={3*base}\n.func gain(x) {derived*x}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {gain(2)}\n.end\n",
+                6.0,
+            ),
+            (
+                "Behavioral dependency\n.param base=2 derived={3*base}\nV1 in 0 DC 1 AC 1\nB1 out 0 V=derived*V(in)\n.end\n",
+                3.0,
+            ),
+            (
+                "Local shadow\n.param base=2 derived={3*base}\nV1 in 0 DC 1 AC 1\nX1 in out buffer\n.subckt buffer a b\n.param derived=7\nE1 b 0 a 0 {derived}\n.ends\n.end\n",
+                0.0,
+            ),
+            (
+                "Deferred replaced alias\n.param base=2 derived={3*base}\nV1 in 0 DC 1 AC 1\nB1 out 0 V={derived*V(in)}\n.param derived=7\n.end\n",
+                0.0,
+            ),
+        ] {
+            let netlist = Netlist::parse(source).unwrap();
+            let dc = engine
+                .run_sensitivity(&netlist, 2, "base", 2.0, None)
+                .unwrap_or_else(|error| panic!("{source}: {error}"));
+            let ac = engine
+                .run_sensitivity_ac(&netlist, 2, "base", 2.0, &[1.0], None)
+                .unwrap_or_else(|error| panic!("{source}: {error}"));
+            let tolerance = expected.abs() * 1e-8;
+            assert!((dc - expected).abs() <= tolerance, "{source}: {dc}");
+            assert!((ac[0] - expected).abs() <= tolerance, "{source}: {ac:?}");
+        }
+    }
+
+    #[test]
+    fn parameter_studies_reject_undefined_node_and_function_argument_names() {
+        let engine = Engine::default();
+        for source in [
+            "Node collision\nV1 base 0 DC 1 AC 1\nE1 out 0 base 0 7\n.end\n",
+            "Formal collision\n.func gain(base) {3*base}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {gain(7)}\n.end\n",
+        ] {
+            for retain_source in [true, false] {
+                let mut netlist = Netlist::parse(source).unwrap();
+                if !retain_source {
+                    netlist.source_text = None;
+                }
+                for error in [
+                    engine
+                        .run_sensitivity(&netlist, 2, "base", 2.0, None)
+                        .unwrap_err(),
+                    engine
+                        .run_sensitivity_ac(&netlist, 2, "base", 2.0, &[1.0], None)
+                        .unwrap_err(),
+                ] {
+                    assert!(error.to_string().contains("not bound"), "{source}: {error}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn parameter_replay_enforces_retained_input_limits_and_finite_values() {
         use crate::resource::{ResourceKind, ResourceLimits};
         use crate::{NoAbort, Value};
@@ -3373,7 +3342,7 @@ R2 2 0 1k
 Divider with an unreferenced parameter
 .param rval=1k
 .param orphan=42
-V1 1 0 10
+V1 1 0 DC 10 AC 1
 R1 1 2 {rval}
 R2 2 0 1k
 .end
@@ -3717,16 +3686,16 @@ R2 out 0 1k\n\
     }
 
     #[test]
-    fn sensitivity_rejects_param_defined_but_never_referenced() {
+    fn sensitivity_accepts_defined_parameters_without_output_dependence() {
         let netlist = Netlist::parse(ORPHAN_PARAM_DIVIDER).expect("deck parses");
-        let err = Engine::default()
+        let dc = Engine::default()
             .run_sensitivity(&netlist, 2, "orphan", 42.0, None)
-            .expect_err("a .param defined but never referenced must raise");
-        assert!(
-            err.to_string()
-                .contains("is not bound to any netlist expression"),
-            "unexpected error: {err}"
-        );
+            .expect("a defined but unused parameter has zero derivative");
+        let ac = Engine::default()
+            .run_sensitivity_ac(&netlist, 2, "orphan", 42.0, &[1.0], None)
+            .expect("a defined but unused parameter has zero AC derivative");
+        assert_eq!(dc, 0.0);
+        assert_eq!(ac, vec![0.0]);
     }
 
     #[test]

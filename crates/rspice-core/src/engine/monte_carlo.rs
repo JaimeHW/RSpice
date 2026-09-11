@@ -136,6 +136,10 @@ impl Engine {
     }
 
     /// Run Monte Carlo analysis with configurable distribution and parameter filter.
+    ///
+    /// Generic variations select defined, finite, real, nonzero parameters.
+    /// Without a filter, every eligible parameter is varied independently.
+    /// A selected parameter may have no influence on the circuit output.
     pub fn run_monte_carlo_with_options(
         &self,
         netlist: &Netlist,
@@ -232,7 +236,14 @@ impl Engine {
                 .params
                 .all_params()
                 .into_iter()
-                .filter(|(_, value)| value.is_finite() && value.abs() > 0.0)
+                .filter(|(name, value)| {
+                    value.is_finite()
+                        && value.abs() > 0.0
+                        && netlist
+                            .params
+                            .get_complex(name)
+                            .is_some_and(|value| value.im == 0.0)
+                })
                 .collect()
         };
         all_eligible_params.sort_by(|a, b| a.0.cmp(&b.0));
@@ -256,7 +267,7 @@ impl Engine {
             }
         }
 
-        let mut monte_params: Vec<(String, Value)> = all_eligible_params
+        let monte_params: Vec<(String, Value)> = all_eligible_params
             .into_iter()
             .filter(|(name, _)| {
                 normalized_filter
@@ -270,33 +281,6 @@ impl Engine {
             return Err(SimulationError::Circuit(
                 "Monte Carlo parameter filter did not match any eligible parameters".to_string(),
             ));
-        }
-
-        if let Some(source) = &netlist.source_text {
-            let mut bound_params = Vec::new();
-            let mut unbound_params = Vec::new();
-            for (name, nominal) in std::mem::take(&mut monte_params) {
-                if Self::source_references_param(source, &name) {
-                    bound_params.push((name, nominal));
-                } else {
-                    unbound_params.push(name);
-                }
-            }
-
-            if normalized_filter.is_some() && !unbound_params.is_empty() {
-                unbound_params.sort();
-                return Err(SimulationError::Circuit(format!(
-                    "Monte Carlo parameter(s) are not bound to any netlist expression: {}",
-                    unbound_params.join(", ")
-                )));
-            }
-            if !bound_params.is_empty() {
-                monte_params = bound_params;
-            } else if !unbound_params.is_empty() {
-                return Err(SimulationError::Circuit(
-                    "Monte Carlo parameter set is not bound to any netlist expression".to_string(),
-                ));
-            }
         }
 
         // Phase 1 (serial): draw every run's compact variation vector from

@@ -425,6 +425,37 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
+    fn sensitivity_uses_parameter_definitions_in_wasm() {
+        use rspice_core::abort_signal::NoAbort;
+        let netlist = rspice_core::Netlist::parse(
+            "Defined parameters\n.param base=2 derived={3*base} unused=42\n\
+             V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {derived}\n.end\n",
+        )
+        .unwrap();
+        let engine = rspice_core::Engine::default();
+        for (name, nominal, expected) in [("base", 2.0, 3.0), ("unused", 42.0, 0.0)] {
+            let dc = engine
+                .run_sensitivity_with_abort(&netlist, 2, name, nominal, None, &NoAbort)
+                .unwrap();
+            let ac = engine
+                .run_sensitivity_ac_with_abort(&netlist, 2, name, nominal, &[1.0], None, &NoAbort)
+                .unwrap();
+            assert!((dc - expected).abs() <= expected.abs() * 1e-8);
+            assert!((ac[0] - expected).abs() <= expected.abs() * 1e-8);
+        }
+        assert!(
+            engine
+                .run_sensitivity_with_abort(&netlist, 2, "in", 1.0, None, &NoAbort)
+                .is_err()
+        );
+        assert!(
+            engine
+                .run_sensitivity_ac_with_abort(&netlist, 2, "in", 1.0, &[1.0], None, &NoAbort)
+                .is_err()
+        );
+    }
+
+    #[wasm_bindgen_test]
     fn sensitivity_resolves_zero_model_parameter_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         use rspice_core::analysis::AcSensitivityOutput;
