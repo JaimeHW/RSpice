@@ -317,6 +317,7 @@ pub(super) fn check_delegable(
 pub(super) struct DesignConnectRules {
     declared_in: Option<std::path::PathBuf>,
     requested: Option<String>,
+    requested_source: Option<(String, std::path::PathBuf)>,
     registered_sources: std::collections::HashSet<String>,
     available: Vec<(String, std::path::PathBuf, rspice_veriloga::source::Span)>,
     matches: usize,
@@ -325,11 +326,53 @@ pub(super) struct DesignConnectRules {
 }
 
 impl DesignConnectRules {
-    pub(super) fn new(requested: Option<&str>) -> Self {
-        Self {
-            requested: requested.map(str::to_owned),
+    pub(super) fn for_netlist(netlist: &crate::Netlist) -> Result<Self, SimulationError> {
+        let mut selected = Self {
+            requested: netlist.options.connect_rules.clone(),
             ..Default::default()
+        };
+        if let Some(alias) = netlist.options.connect_rules_source.as_deref() {
+            let mut paths = std::collections::BTreeSet::new();
+            for include in &netlist.veriloga_includes {
+                if include
+                    .model_name
+                    .as_deref()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(alias))
+                {
+                    paths.insert(super::veriloga_cache::canonicalize_for_cache(
+                        &include.file_path,
+                    ));
+                }
+            }
+            if paths.len() != 1 {
+                let available = netlist
+                    .veriloga_includes
+                    .iter()
+                    .filter_map(|include| {
+                        include
+                            .model_name
+                            .as_deref()
+                            .map(|name| format!("'{name}' from '{}'", include.file_path.display()))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(SimulationError::Netlist(format!(
+                    "CONNECTRULES_SOURCE '{alias}' must identify exactly one explicitly aliased .VERILOGA source; found {} sources. Available imports: {available}",
+                    paths.len()
+                )));
+            }
+            selected.requested_source = Some((
+                alias.to_owned(),
+                paths.into_iter().next().expect("one source"),
+            ));
         }
+        Ok(selected)
+    }
+
+    fn source_is_selected(&self, path: &std::path::Path) -> bool {
+        self.requested_source.as_ref().is_none_or(|(_, selected)| {
+            *selected == super::veriloga_cache::canonicalize_for_cache(path)
+        })
     }
 
     pub(super) fn register(
@@ -337,6 +380,12 @@ impl DesignConnectRules {
         path: &std::path::Path,
         specification: rspice_veriloga::ConnectSpecification,
     ) -> Result<(), SimulationError> {
+        // Filter by source before deduplicating a content identity. Two imports
+        // may have identical bytes; an earlier unselected import must not hide
+        // the explicitly selected source from the design.
+        if !self.source_is_selected(path) {
+            return Ok(());
+        }
         if !self
             .registered_sources
             .insert(specification.source_identity)
@@ -372,7 +421,9 @@ impl DesignConnectRules {
     }
 
     pub(super) fn finish_selection(&self) -> Result<(), SimulationError> {
-        if self.matches == 1 || (self.matches == 0 && self.requested.is_none()) {
+        if self.matches == 1
+            || (self.matches == 0 && self.requested.is_none() && self.requested_source.is_none())
+        {
             return Ok(());
         }
         let available = self
@@ -388,17 +439,26 @@ impl DesignConnectRules {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let message = match self.requested.as_deref() {
+        let mut message = match self.requested.as_deref() {
             Some(name) if self.matches == 0 => {
                 format!("Unknown connectrules '{name}'; available configurations: {available}")
             }
             Some(name) => format!(
                 "Connectrules '{name}' is ambiguous across distinct source closures: {available}"
             ),
+            None if self.matches == 0 => {
+                "The selected Verilog-A source declares no connectrules configuration".to_owned()
+            }
             None => format!(
                 "Multiple connectrules configurations are available; select one with .options connectrules=NAME: {available}"
             ),
         };
+        if let Some((alias, path)) = &self.requested_source {
+            message.push_str(&format!(
+                "; CONNECTRULES_SOURCE '{alias}' selects '{}'",
+                path.display()
+            ));
+        }
         Err(SimulationError::Netlist(message))
     }
 
@@ -407,6 +467,9 @@ impl DesignConnectRules {
         path: &std::path::Path,
         artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
     ) -> Result<(), SimulationError> {
+        if !self.source_is_selected(path) {
+            return Ok(());
+        }
         let Some(source) = artifact.connections.source() else {
             return Ok(());
         };

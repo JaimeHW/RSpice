@@ -1983,6 +1983,13 @@ pub(super) fn parse_options_command(
                     "CONNECTRULES",
                 )?);
             }
+            (None, "CONNECTRULES_SOURCE") => {
+                options.connect_rules_source = Some(parse_restart_string_option(
+                    stream,
+                    line_num,
+                    "CONNECTRULES_SOURCE",
+                )?);
+            }
             (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
             | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
                 let (enabled, show_generated) =

@@ -4426,6 +4426,11 @@ pub struct SimulationOptions {
     /// Without a selection, exactly one declared configuration is implicit;
     /// multiple alternatives require an explicit choice.
     pub connect_rules: Option<String>,
+    /// RSpice `.options connectrules_source=ALIAS`: restrict connection-rule
+    /// selection to the source imported with this explicit `.VERILOGA` alias.
+    /// Aliases are case-insensitive SPICE names; rule identifiers remain
+    /// case-sensitive. The alias survives remapping to a sealed source key.
+    pub connect_rules_source: Option<String>,
     /// Ngspice-compatible XSPICE automatic analog/digital bridge insertion.
     /// Enabled by default; set `.options auto_bridge=0` to disable.
     pub auto_bridge: Option<bool>,
@@ -4685,6 +4690,9 @@ impl SimulationOptions {
         }
         if other.connect_rules.is_some() {
             self.connect_rules = other.connect_rules.clone();
+        }
+        if other.connect_rules_source.is_some() {
+            self.connect_rules_source = other.connect_rules_source.clone();
         }
         if other.auto_bridge.is_some() {
             self.auto_bridge = other.auto_bridge;

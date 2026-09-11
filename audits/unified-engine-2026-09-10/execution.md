@@ -123,6 +123,7 @@ invented throughput numbers do not qualify parity.
 | Cross-root source consistency | Core target `veriloga_connect_source_closure`, filtered to `snapshot`, portable Verilog feature | 2 passed: same-root frozen compilation and cross-root conflict/retry |
 | Named connection configurations | Compiler target `prepared_source`, filtered to `named_connection`, no default features | Passed: independent 1 V/5 V alternatives, empty block, exact-case selection, duplicate module/block rejection |
 | Circuit configuration selection | Core target `veriloga_connect_source_closure`, filtered to `named_configuration`, portable Verilog feature | 2 passed: file/cached/serialized-virtual 1 V/5 V choices with parameter specialization; include-order independence, unknown/ambiguous names and explicit empty rules |
+| Source-qualified configuration selection | Core target `veriloga_connect_source_closure`, filtered to `source_qualified`, portable Verilog feature | Passed: duplicate Shared configurations select 1 V/5 V by import alias across file and transported virtual roots; unknown and multiply bound aliases reject |
 
 The source-transport increment advances canonical schema to 33. The subsequent
 prepared-source integration advances core disk cache format to 70, so records
@@ -164,7 +165,15 @@ The named option participates in the existing semantic netlist fingerprint;
 unchanged model code remains cacheable because selection happens at elaboration.
 The two new circuit cases retain the 1e-9 V budget. No broad suite was run.
 
-Remaining MS01 items include source-qualified and hierarchical library/view
+`.options connectrules_source=ALIAS` now restricts selection to one explicitly
+aliased `.VERILOGA` import. The SPICE alias is case-insensitive; the rule name
+remains case-sensitive. Selection uses the import's existing resolved source
+identity and remains stable when a file path becomes a sealed virtual key.
+Content deduplication occurs after source filtering, so an earlier identical
+unselected closure cannot hide the requested import. Both options participate
+in the netlist configuration fingerprint.
+
+Remaining MS01 items include hierarchical library/view
 binding, connect-only virtual artifacts/registration, and explicit propagation
 through all product adapters. The current named selector is design-wide and
 does not claim those broader configuration capabilities.

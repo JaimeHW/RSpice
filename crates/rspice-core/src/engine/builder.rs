@@ -5035,10 +5035,10 @@ impl Engine {
         // Device connection rules come from the compiled active source closure;
         // a standalone connect library contributes its discovered specification.
         #[cfg(feature = "veriloga")]
-        let mut design_connect_rules =
-            connect_modules::DesignConnectRules::new(netlist.options.connect_rules.as_deref());
+        let mut design_connect_rules = connect_modules::DesignConnectRules::for_netlist(netlist)?;
         #[cfg(not(feature = "veriloga"))]
-        if netlist.options.connect_rules.is_some() {
+        if netlist.options.connect_rules.is_some() || netlist.options.connect_rules_source.is_some()
+        {
             return Err(SimulationError::Netlist(
                 "Selecting Verilog-AMS connectrules requires the veriloga feature".to_owned(),
             ));

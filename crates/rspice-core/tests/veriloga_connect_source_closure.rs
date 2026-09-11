@@ -344,3 +344,98 @@ fn named_configuration_selects_across_roots_independently_of_include_order() {
         }
     }
 }
+
+#[test]
+fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remapping() {
+    let tree = SourceTree::new();
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let mut file_keys = Vec::new();
+    let mut virtual_keys = Vec::new();
+    let mut registrations = Vec::new();
+    for (name, supply) in [("LOWLIB", 1.0), ("HIGHLIB", 5.0)] {
+        let bodies = rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES
+            .iter()
+            .map(|(_, body)| *body)
+            .collect::<String>();
+        let source = format!(
+            "{bodies}\nconnectrules Shared; connect d2a #(.vsup({supply})); endconnectrules\nmodule {name}(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule\n"
+        );
+        file_keys.push(tree.write(&format!("{name}.vams"), &source));
+        let bundle =
+            VirtualSourceBundle::new("root.vams", [VirtualSourceFile::new("root.vams", source)])
+                .unwrap();
+        let compiled = compiler
+            .compile_virtual_runtime(&bundle, name, VirtualCompileLimits::default())
+            .unwrap();
+        let source_key = PathBuf::from(format!(
+            "__rspice_project__/qualified-configuration-{}/{name}.vams",
+            std::process::id()
+        ));
+        let canonical_ir =
+            serde_json::from_slice(&serde_json::to_vec(&compiled.runtime.canonical_ir).unwrap())
+                .unwrap();
+        registrations.push(ProjectVerilogARuntimeRegistration {
+            source_key: source_key.clone(),
+            aliases: vec![name.to_owned()],
+            model: compiled.runtime.model,
+            canonical_ir,
+        });
+        virtual_keys.push(source_key);
+    }
+    register_project_veriloga_runtimes_for_session(registrations).unwrap();
+    for sources in [&file_keys, &virtual_keys] {
+        let deck_text = format!(
+            "* qualified connections\nV1 p 0 1\nX1 p q LOWLIB\n.va \"{}\" LOWLIB\n.va \"{}\" HIGHLIB\n.options connectrules=Shared\n",
+            sources[0].to_string_lossy().replace('\\', "/"),
+            sources[1].to_string_lossy().replace('\\', "/")
+        );
+        let mut deck = Netlist::parse(&format!("{deck_text}.end\n")).unwrap();
+        let error = Engine::default()
+            .build_circuit(&deck)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("ambiguous"), "{error}");
+        // SPICE aliases ignore case; the Shared identifier retains Verilog case.
+        // HIGH follows LOW in traversal, so selecting it must exclude LOW.
+        for (alias, expected) in [("highlib", 5.0), ("lowlib", 1.0)] {
+            deck = Netlist::parse(&format!(
+                "{deck_text}.options connectrules_source=\"{alias}\"\n.end\n"
+            ))
+            .unwrap();
+            let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
+            let output = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("q"))
+                .unwrap();
+            assert!(
+                result.voltages[output]
+                    .iter()
+                    .all(|v| (v - expected).abs() < 1e-9),
+                "{alias}: {:?}",
+                result.voltages[output]
+            );
+        }
+        deck.options.connect_rules_source = Some("missing".to_owned());
+        let error = Engine::default()
+            .build_circuit(&deck)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("found 0 sources")
+                && error.contains("LOWLIB")
+                && error.contains("HIGHLIB"),
+            "{error}"
+        );
+        deck.options.connect_rules_source = Some("lowlib".to_owned());
+        deck.veriloga_includes[1].model_name = Some("LOWLIB".to_owned());
+        let error = Engine::default()
+            .build_circuit(&deck)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("found 2 sources"), "{error}");
+    }
+}
