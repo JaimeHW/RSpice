@@ -25,6 +25,7 @@ mod compatibility_catalog;
 mod event_control;
 pub mod integer;
 mod integration;
+mod integration_state;
 mod noise_frequency;
 pub mod polynomial;
 mod simparam;
@@ -56,6 +57,7 @@ pub use integration::{
     evaluate_generated_idtmod_candidate, evaluate_generated_idtmod_derivative,
     idtmod_wrapped_value, rspice_eval_idt,
 };
+pub use integration_state::{GeneratedIdtModPersistentState, GeneratedIdtModState};
 
 pub use event_control::{
     GeneratedCheckpointLaneDescriptor, GeneratedCheckpointLaneType, GeneratedCrossEvaluation,
