@@ -506,7 +506,7 @@ mod tests {
             .unwrap(),
         );
         let mut host = MixedSignalHost::compile(
-            "module mixed_history(p); inout p; electrical p; reg q;
+            "module mixed_history(p,q); inout p; electrical p; output q; reg q;
              initial begin q=0; #1 q=1; #1 q=0; end
              analog I(p)<+2*(q+1)*V(p)+ddt(3e-9*V(p))+idt(1e9*V(p),4); endmodule",
             None,

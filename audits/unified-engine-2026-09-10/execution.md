@@ -1879,6 +1879,42 @@ and integral companion coefficients, runtime/mixed F/Q capability proof and the
 remaining MS08 analysis work are still open; the OneStep guard remains in place.
 The wider MS00–MS15 plan, shipping-platform and reference qualification remain open.
 
+## Digital ports can supply typed analog state inputs
+
+The valid output q; reg q; declaration discovered by the static-history
+fixture was rejected when an analog equation read q. Port discovery had already
+reserved the symbol, and discrete-to-analog binding attempted a second variable
+declaration. Binding now reuses that port symbol as a typed state input. The
+port's direction/topology identity remains in its separate analyzed port and
+digital signal records; analog expressions resolve its sampled numeric value.
+An internal discrete variable continues through its existing declaration path.
+
+A focused semantic case passes for separate and combined reg output
+declarations, a wire input and a real output. Each has one correctly typed
+analog state-input slot. Analog writes to a digital-owned port still fail.
+The core acceptance/history fixture now uses the originally refused output
+port declaration instead of the interim internal-variable spelling.
+Semantic check: one test passed in 0.00 seconds after a 31.53-second build.
+Log: target/unified-mixed-fixes/shared-port-state-input.log.
+
+The original output-port circuit now compiles and passes the complete
+acceptance/static-history and checkpoint-replay check in 0.01 seconds after
+a 1m32s build. Log: target/unified-mixed-fixes/shared-port-state-circuit.log.
+
+The authoritative generator regenerated all 43 built-ins; only the manifest
+generator digest changed to
+dd011931089cee29b6192c5ab76852f21c218d6dcb12ebde0b3d762173ebfe7f.
+The increment incorporates main through 8ccf07aec. A second regeneration after
+that merge confirmed the same digest and no generated source changes: those
+native/Wasm CFG changes do not alter the built-in generator's declared inputs.
+Logs: target/unified-mixed-fixes/shared-port-state-generator.log and
+shared-port-state-generator-merged.log. No broad suite was run.
+
+This fixes the newly reproduced port binding defect. Wider packed values,
+arrays, two-domain state ownership and the remaining MS06/MS04 requirements
+retain their existing open status. No Spectre or production qualification is
+inferred from this correction.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

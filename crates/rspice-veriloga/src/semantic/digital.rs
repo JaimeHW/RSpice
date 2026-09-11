@@ -709,7 +709,16 @@ impl SemanticAnalyzer {
                     value_type,
                     is_state: true,
                 });
-                if let Err(error) = self.define_symbol(Symbol {
+                // A digital port already has its header identity in the
+                // symbol table. Its numeric analog read is a state input,
+                // not a second declaration or an electrical node access.
+                if let Some(symbol) = self.symbols.lookup_mut(&signal.name)
+                    && symbol.kind == SymbolKind::Port
+                {
+                    symbol.kind = SymbolKind::Variable;
+                    symbol.value_type = value_type;
+                    symbol.attrs.is_state = true;
+                } else if let Err(error) = self.define_symbol(Symbol {
                     name: signal.name.clone(),
                     kind: SymbolKind::Variable,
                     value_type,

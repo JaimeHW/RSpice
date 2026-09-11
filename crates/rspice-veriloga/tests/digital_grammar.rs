@@ -2286,6 +2286,58 @@ fn a_module_level_real_the_analog_body_reads_uses_a_state_input() {
     );
 }
 
+/// Port direction and a discrete variable declaration describe one symbol;
+/// its analog read uses the same state-input bank as an internal variable.
+#[test]
+fn discrete_ports_read_by_analog_equations_use_typed_state_inputs() {
+    for (declaration, process, real) in [
+        ("output q; reg q;", "initial q=1;", false),
+        ("output reg q;", "initial q=1;", false),
+        ("input q; wire q;", "", false),
+        ("output real q;", "initial q=1.5;", true),
+    ] {
+        let source = format!(
+            "module dut(p,q); inout p; electrical p; {declaration}
+            {process} analog I(p)<+q*V(p); endmodule"
+        );
+        let analyzed = analyze(&source);
+        let module = only_module(&analyzed);
+        let slot = module
+            .variables
+            .iter()
+            .position(|variable| variable.name == "q")
+            .unwrap();
+        assert_eq!(
+            module
+                .variables
+                .iter()
+                .filter(|variable| variable.name == "q")
+                .count(),
+            1
+        );
+        assert!(module.event_state_variables.contains(&slot));
+        let symbol = module.symbol_table.lookup("q").unwrap();
+        assert_eq!(symbol.kind, rspice_veriloga::semantic::SymbolKind::Variable);
+        assert_eq!(
+            symbol.value_type,
+            if real {
+                rspice_veriloga::types::ValueType::Real
+            } else {
+                rspice_veriloga::types::ValueType::Integer
+            }
+        );
+        assert!(symbol.attrs.is_state);
+    }
+    let error = analyze_error(
+        "module dut(p,q); inout p; electrical p; output q; reg q;
+        initial q=1; analog begin q=0; I(p)<+V(p); end endmodule",
+    );
+    assert!(
+        error.contains("cannot be written by the analog body"),
+        "{error}"
+    );
+}
+
 /// A `real` **both** halves write is a different refusal, and a permanent one.
 ///
 /// Section 7.3: "Write operations of nets and variables are only allowed from
