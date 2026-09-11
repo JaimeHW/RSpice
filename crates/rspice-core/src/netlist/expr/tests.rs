@@ -1421,6 +1421,84 @@ fn power_operator_matches_ngspice_numparam() {
 }
 
 #[test]
+fn complex_division_retains_finite_range_and_cancellation() {
+    let mut ctx = ParamContext::new();
+    let minimum = Value::from_bits(1);
+    for divisor in [minimum, Value::MIN_POSITIVE, 1e-200, 1.0, 1e200, Value::MAX] {
+        for sign in [1.0, -1.0] {
+            ctx.set("a", divisor * sign);
+            ctx.set("b", divisor);
+            assert_eq!(eval_with(&ctx, "a/b"), sign);
+            ctx.set_complex("b", ComplexValue::new(0.0, divisor));
+            assert_eq!(
+                eval_expression_complex("a/b", &ctx).unwrap(),
+                ComplexValue::new(0.0, -sign)
+            );
+        }
+    }
+    // Expected bits are rounded from exact rational operations on the input
+    // binary64 values, including a nonzero residual below rounded products.
+    let cases = [
+        (
+            [1.0, 2.0],
+            [3.0, 4.0],
+            [0x3fdc28f5c28f5c29, 0x3fb47ae147ae147b],
+        ),
+        (
+            [1.0 + Value::EPSILON, 1.0],
+            [1.0, 1.0 - Value::EPSILON],
+            [0x3ff0000000000001, 0x3960000000000001],
+        ),
+        ([1e308, 1e308], [1e308, 1e308], [0x3ff0000000000000, 0]),
+        ([1e-300, 1e-300], [1e-300, 1e-300], [0x3ff0000000000000, 0]),
+        (
+            [1.0, 1.0],
+            [Value::MAX, Value::MAX],
+            [0x0004000000000000, 0],
+        ),
+        (
+            [Value::MAX, -Value::MAX],
+            [1.0, 1.0],
+            [0, 0xffefffffffffffff],
+        ),
+        (
+            [minimum, minimum],
+            [1e-200, 1e-200],
+            [0x2654e718d7d7625a, 0],
+        ),
+        (
+            [minimum, -minimum],
+            [Value::MAX, Value::MAX],
+            [0, 0x8000000000000000],
+        ),
+        (
+            [1e308, -1e308],
+            [1e-300, 1e-300],
+            [0, Value::NEG_INFINITY.to_bits()],
+        ),
+    ];
+    for (left, right, expected) in cases {
+        ctx.set_complex("a", ComplexValue::new(left[0], left[1]));
+        ctx.set_complex("b", ComplexValue::new(right[0], right[1]));
+        let actual = eval_expression_complex("a/b", &ctx).unwrap();
+        assert_eq!(
+            [actual.re.to_bits(), actual.im.to_bits()],
+            expected,
+            "{left:?}/{right:?}: {actual:?}"
+        );
+    }
+    for real in [0.0, -0.0] {
+        for imaginary in [0.0, -0.0] {
+            ctx.set_complex("b", ComplexValue::new(real, imaginary));
+            assert!(matches!(
+                eval_expression_complex("a/b", &ctx),
+                Err(ExprError::DivisionByZero)
+            ));
+        }
+    }
+}
+
+#[test]
 fn xyce_complex_log10_negative_param_projects_components() {
     let mut ctx = ParamContext::new();
     let value = eval_expression_complex("log10(-1)", &ctx)

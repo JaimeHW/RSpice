@@ -516,6 +516,60 @@ mod tests {
     }
 
     #[test]
+    fn root_sensitivity_accepts_extreme_nonzero_parameter_divisors() {
+        let engine = Engine::default();
+        for expression in [
+            "(1e-200+1e-208*p)/1e-200",
+            "(1e200+1e192*p)/1e200",
+            // sqrt(-1) is non-real; both components of the quotient matter.
+            "abs((1e-200+sqrt(-1)*1e-200+1e-208*p)/(1e-200+sqrt(-1)*1e-200))",
+        ] {
+            let netlist = parse(
+                &format!(
+                    "Extreme quotient parameter\n.param p=0 gain={{{expression}}}\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 gain\n.end"
+                ),
+                ExpressionDialect::Ngspice,
+            );
+            let output = AcSensitivityOutput::Voltage {
+                positive: engine
+                    .build_circuit(&netlist)
+                    .unwrap()
+                    .get_node_by_name("out")
+                    .unwrap(),
+                negative: None,
+            };
+            let expected = if expression.starts_with("abs") {
+                0.5e-8
+            } else {
+                1e-8
+            };
+            for frequencies in [None, Some([1.0].as_slice())] {
+                let mut runs = 0;
+                let (nominal, derivative) = engine
+                    .linear_parameter_sensitivity(
+                        &netlist,
+                        &output,
+                        "p",
+                        0.0,
+                        frequencies,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(runs, 1);
+                assert_eq!(nominal[0], Complex64::new(1.0, 0.0));
+                assert!(
+                    (derivative[0].re / expected - 1.0).abs() < 2e-14,
+                    "{expression}: {:?}",
+                    derivative
+                );
+                assert_eq!(derivative[0].im, 0.0);
+            }
+        }
+    }
+
+    #[test]
     fn deferred_resistor_sensitivity_preserves_binding_values_and_directions() {
         let cases = [
             ("", "1+1e-8*p", "", 1.0, 1e-8),

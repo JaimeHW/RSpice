@@ -1253,13 +1253,48 @@ fn complex_mul(left: ComplexValue, right: ComplexValue) -> ComplexValue {
 
 #[inline]
 fn complex_div(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, ExprError> {
-    let denom = right.re.mul_add(right.re, right.im * right.im);
-    if denom < 1e-300 {
+    if right.re == 0.0 && right.im == 0.0 {
         return Err(ExprError::DivisionByZero);
     }
+    // Real parameter arithmetic needs neither squares nor cross products.
+    // These axis cases also preserve subnormal values and signed zero.
+    if right.im == 0.0 {
+        return Ok(ComplexValue::new(left.re / right.re, left.im / right.re));
+    }
+    if right.re == 0.0 {
+        return Ok(ComplexValue::new(left.im / right.im, -left.re / right.im));
+    }
+    if [left.re, left.im, right.re, right.im]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        use rspice_veriloga_runtime::arithmetic::{ArithmeticError, sum_products_ratio};
+        // Retain both sums until the quotient boundary. Scaling only the
+        // denominator can still overflow the numerator or erase cancellation.
+        let denominator = [(right.re, right.re), (right.im, right.im)];
+        let component = |numerator: [(Value, Value); 2]| match sum_products_ratio(
+            numerator.into_iter(),
+            denominator.into_iter(),
+        ) {
+            Ok(value) => Ok(value),
+            Err(ArithmeticError::Overflow { negative }) => Ok(if negative {
+                Value::NEG_INFINITY
+            } else {
+                Value::INFINITY
+            }),
+            Err(error) => Err(ExprError::InvalidArgument(format!(
+                "complex division could not be resolved: {error:?}"
+            ))),
+        };
+        return Ok(ComplexValue::new(
+            component([(left.re, right.re), (left.im, right.im)])?,
+            component([(left.im, right.re), (-left.re, right.im)])?,
+        ));
+    }
+    let denominator = right.re.mul_add(right.re, right.im * right.im);
     Ok(ComplexValue::new(
-        (left.re * right.re + left.im * right.im) / denom,
-        (left.im * right.re - left.re * right.im) / denom,
+        (left.re * right.re + left.im * right.im) / denominator,
+        (left.im * right.re - left.re * right.im) / denominator,
     ))
 }
 
