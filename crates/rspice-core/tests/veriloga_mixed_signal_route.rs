@@ -539,7 +539,9 @@ fn rejected_timepoints_leave_the_digital_half_exactly_where_they_found_it() {
     // work. The coarse ceiling makes the controller propose steps it then has
     // to throw away; the fine one leaves it little to reject. Neither changes
     // the circuit or the module.
-    let (coarse, coarse_rejections) = run_divider_with_rejection_count(&deck, 1.0e-9);
+    // Ideal D/A jumps restart integration directly. A 1 ns ceiling can now
+    // accept every point; the larger ceiling makes RC curvature force retries.
+    let (coarse, coarse_rejections) = run_divider_with_rejection_count(&deck, 4.0e-9);
     let (fine, fine_rejections) = run_divider_with_rejection_count(&deck, 2.0e-11);
 
     assert!(
