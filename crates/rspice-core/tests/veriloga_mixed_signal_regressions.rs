@@ -26,6 +26,100 @@ impl Drop for ModelFile {
     }
 }
 
+/// An authored conductance must have the same transient weighting as a native
+/// resistor. Include both native and authored charge, plus an initialized idt,
+/// so a model route cannot silently receive only part of the integrator rule.
+#[test]
+fn mixed_rc_and_integrator_follow_the_native_trapezoidal_equations() {
+    use rspice_core::SimulationConfig;
+    use rspice_core::engine::SpiceDialect;
+    use rspice_core::numerics::integration::{IntegrationMethod, TransientErrorControl};
+    use std::sync::Arc;
+
+    let model = ModelFile::new(
+        r#"
+module mixed_rc(r, rc, integrated, drive);
+    inout r, rc, integrated, drive;
+    electrical r, rc, integrated, drive;
+    reg enabled;
+    initial enabled=1;
+    analog begin
+        I(r)<+enabled*1e-3*V(r);
+        I(rc)<+enabled*1e-3*V(rc)+ddt(1e-9*V(rc));
+        V(integrated)<+idt(1e6*V(drive),0.0);
+    end
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* identical native and mixed transient equations\n\
+         Inative 0 native PWL(0 0 4u 4m)\n\
+         Rnative native 0 1k\nCnative native 0 1n\n\
+         Ir 0 r PWL(0 0 4u 4m)\nCr r 0 1n\n\
+         Irc 0 rc PWL(0 0 4u 4m)\n\
+         Vdrive drive 0 PWL(0 0 4u 4)\n\
+         Iintegral 0 native_integral PWL(0 0 4u 4)\n\
+         Cintegral native_integral 0 1u\n\
+         X1 r rc integrated drive mixed_rc\n\
+         .va \"{}\" mixed_rc\n.end\n",
+        model.path()
+    ))
+    .unwrap();
+    let grid: Arc<Vec<f64>> = Arc::new((0..=200).map(|i| i as f64 * 1e-8).collect());
+    for spice_dialect in [SpiceDialect::Xyce, SpiceDialect::Ngspice] {
+        let result = Engine::new(SimulationConfig {
+            spice_dialect,
+            integration_method: IntegrationMethod::Trapezoidal,
+            // On this fixed grid, make order promotion independent of the
+            // voltage LTE estimate so this check actually reaches order two.
+            transient_error_control: TransientErrorControl::NonlinearIterations,
+            locked_time_grid: Some(grid.clone()),
+            ..Default::default()
+        })
+        .run_tran(&deck, 2e-6, 1e-8)
+        .unwrap_or_else(|error| panic!("{spice_dialect:?}: {error}"));
+        assert_eq!(result.time, *grid);
+        let values = |name: &str| {
+            &result.voltages[result
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case(name))
+                .unwrap()]
+        };
+        for (actual, reference) in [
+            ("r", "native"),
+            ("rc", "native"),
+            ("integrated", "native_integral"),
+        ] {
+            let worst = values(actual)
+                .iter()
+                .zip(values(reference))
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f64, f64::max);
+            assert!(
+                worst < 1e-8,
+                "{spice_dialect:?}: {actual} differs from {reference} by {worst:e}"
+            );
+        }
+        // Independent closed forms: the current ramps at 1000 A/s through
+        // R=1 kohm, C=1 nF; the ideal integrator's input ramps at 1e12 V/s^2.
+        // Allow the first-order startup intervals on this 10 ns grid.
+        let t = *result.time.last().unwrap();
+        let rc_expected = 1e6 * (t - 1e-6 * (1.0 - (-t / 1e-6).exp()));
+        let rc = *values("rc").last().unwrap();
+        let integrated = *values("integrated").last().unwrap();
+        let integral_expected = 0.5e12 * t * t;
+        assert!(
+            (rc - rc_expected).abs() < 3e-4,
+            "{spice_dialect:?}: RC final {rc} versus analytic {rc_expected}"
+        );
+        assert!(
+            (integrated - integral_expected).abs() < 3e-4,
+            "{spice_dialect:?}: integral final {integrated} versus analytic {integral_expected}"
+        );
+    }
+}
+
 #[test]
 fn initial_digital_read_uses_the_solved_time_zero_voltage() {
     let model = ModelFile::new(

@@ -561,13 +561,16 @@ impl CircuitData {
     /// Whether every Verilog-A instance can participate in Xyce OneStep's
     /// order-two F/Q split without changing its model equations.
     ///
-    /// Runtime-loaded models currently expose a combined transient stamp, so
-    /// they conservatively remain at order one. Generated models carry a
-    /// compiler-proven capability bit that excludes `idt`, nonlinear `ddt`,
-    /// and `ddt`-dependent control flow.
+    /// Runtime-loaded analog-only and mixed models currently expose a combined
+    /// transient stamp. Both must retain the ordinary companion formulation:
+    /// mixed static contributions are not part of OneStep's accepted F history,
+    /// and their state operators consume the complete companion rule. This does
+    /// not restrict the ordinary trapezoidal/Gear integration order. Generated
+    /// models carry a compiler-proven capability bit that excludes `idt`,
+    /// nonlinear `ddt`, and `ddt`-dependent control flow.
     pub(crate) fn veriloga_one_step_dae_split_safe(&self) -> bool {
         #[cfg(feature = "veriloga")]
-        if !self.veriloga_devices.is_empty() {
+        if !self.veriloga_devices.is_empty() || !self.mixed_signal_hosts.is_empty() {
             return false;
         }
 

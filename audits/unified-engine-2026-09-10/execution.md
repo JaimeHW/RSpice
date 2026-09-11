@@ -1586,6 +1586,43 @@ static-history capture. Actual AArch64, browser-worker and tablet execution
 remain platform qualifications; this native-host evidence does not replace them.
 No licensed reference installation is available and Spectre parity is unproven.
 
+## Mixed models retain the complete transient companion rule
+
+The production OneStep eligibility guard excluded runtime analog-only models,
+but omitted mixed hosts. With a mixed conductance, the solver therefore weighted
+native static terms by one half and added their accepted history, while stamping
+the mixed conductance in full without its accepted static history. The same
+route handed mixed integration operators the OneStep backward-Euler rule.
+An actual deck reproduced a 2.9590614 mV discrepancy between otherwise identical
+native and mixed RC branches on a 10 ns locked grid.
+
+The guard now includes mixed hosts. Runtime analog-only and mixed models both
+use the ordinary complete companion formulation until the full static/dynamic
+split is implemented for them. This preserves ordinary second-order trapezoidal
+and Gear integration; it does not force all their steps to first order. Generated
+models retain their existing compiler-proven split eligibility.
+
+One focused deck compares a mixed conductance with native capacitance, a mixed
+conductance plus ddt capacitance, and an initialized mixed idt against equivalent
+native branches at every accepted point. All three agree within 1e-8 V in Xyce
+and Ngspice modes. Independent RC-ramp and integral closed forms pass a 3e-4 V
+bound that allows first-order startup. The final fixture uses iteration-based
+order control on its fixed grid to guarantee promotion to order two; the initial
+post-fix run already passed all native-equivalence comparisons, but its default
+LTE order selection did not satisfy the analytic integrator bound. The final
+focused test passed in 0.05 seconds after a 1.26-second build. The existing shared
+HDL/XSPICE off-grid event and rejected-step deck passed in 2.70 seconds after a
+1.81-second build. No broad suite was run. Evidence logs are
+mixed-transient-weighting-before.log, mixed-transient-weighting-after.log,
+mixed-transient-weighting-final.log and mixed-transient-weighting-shared.log,
+under target/unified-mixed-fixes.
+
+This fixes the reachable inconsistent weighting route. Complete runtime/mixed
+F/Q observation and OneStep eligibility, including retained filter state and
+shared accepted static-history assembly, remain MS08 implementation work. The
+absence of a licensed Spectre installation remains recorded; these analytic and
+native-equivalence checks do not establish vendor parity or production readiness.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
