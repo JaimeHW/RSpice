@@ -1,6 +1,7 @@
 //! Circuit ownership of digital execution and per-model observation banks.
 use super::super::store::StoreError;
 use super::*;
+use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
 use rspice_veriloga::canonical_ir::digital_link::{
     DigitalLinkInstance, DigitalLinkedInstance, link_digital_plans,
@@ -312,6 +313,27 @@ impl MixedDigitalCoordinator {
         }
     }
 
+    /// Resolve scheduler process identities back to their circuit instances.
+    /// This runs only on failure and leaves the structured diagnostic intact.
+    fn execution_error(&self, mut error: DigitalRunError) -> MixedSignalError {
+        if let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &mut error {
+            for (target, _) in &mut diagnostic.entities {
+                if let Some(owner) = self.maps.iter().find(|map| {
+                    map.processes
+                        .iter()
+                        .chain(&map.connection_processes)
+                        .any(|process| usize::from(*process) == target.node_id)
+                }) {
+                    target.instance = format!(
+                        "mixed Verilog-AMS instance '{}' process {}",
+                        owner.name, target.instance
+                    );
+                }
+            }
+        }
+        error.into()
+    }
+
     pub(crate) fn start(&mut self) -> Result<(), MixedSignalError> {
         if !self.enabled {
             self.digital.make_mut().prepare_start()?;
@@ -404,7 +426,8 @@ impl SharedDigitalTrial<'_> {
         {
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_potentials(&coordinator.probes);
-            digital.advance_to(self.tick)?;
+            let advanced = digital.advance_to(self.tick);
+            advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
     }
@@ -447,7 +470,8 @@ impl SharedDigitalTrial<'_> {
         }
         let digital = coordinator.digital.make_mut();
         digital.sample_analog_potentials(&coordinator.probes);
-        digital.force_many_from_analog(&coordinator.drives, tick, self.time)?;
+        let published = digital.force_many_from_analog(&coordinator.drives, tick, self.time);
+        published.map_err(|error| coordinator.execution_error(error))?;
         Ok(true)
     }
 

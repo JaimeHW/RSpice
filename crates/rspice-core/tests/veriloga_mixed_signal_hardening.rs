@@ -1026,8 +1026,12 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
         "* a zero-delay loop between two registers of one module\n\
          vclk clk 0 pulse(0 3.3 2n 0.1n 0.1n 5n 10n)\n\
          x1 p 0 clk yout same_tick_loop\n\
+         vquiet clkquiet 0 0\n\
+         x0 pquiet 0 clkquiet yquiet same_tick_loop\n\
          rp p 0 1meg\n\
          ry yout 0 10k\n\
+         rpquiet pquiet 0 1meg\n\
+         ryquiet yquiet 0 10k\n\
          .va \"{}\" same_tick_loop\n\
          .tran 0.2n 20n\n\
          .end\n",
@@ -1038,6 +1042,10 @@ fn a_same_tick_zero_delay_loop_surfaces_with_the_instance_that_owns_it() {
     assert!(
         lowered.contains("mixed verilog-ams instance 'x1'"),
         "the deck-level context must be the instance: {error}"
+    );
+    assert!(
+        !lowered.contains("mixed verilog-ams instance 'x0'"),
+        "the quiet instance sorts first but does not own the looping processes: {error}"
     );
     assert!(
         lowered.contains("event network did not settle at tick"),
