@@ -9,6 +9,7 @@
 
 mod ast;
 mod compiler;
+mod derivative;
 mod file_table;
 mod parser;
 mod power;
@@ -21,6 +22,7 @@ pub use compiler::compile;
 pub(crate) use compiler::{
     compile_time_expression, constant_over_time, constant_value, function_uses_implicit_time,
 };
+pub(crate) use derivative::{Derivative, derivative_pair};
 pub use file_table::{resolve_file_lookup_functions, resolve_file_lookup_functions_with_limits};
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
 pub(crate) use parser::{ParseExpressionWithAbortError, parse_expression_strict_with_abort};

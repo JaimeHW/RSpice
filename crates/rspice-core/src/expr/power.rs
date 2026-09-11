@@ -6,6 +6,7 @@
 //! than producing `NaN`.  Keeping the value and its Newton derivative here
 //! prevents the bytecode and analytic evaluators from drifting apart.
 
+use super::{Derivative, derivative_pair};
 use crate::Value;
 use crate::config::ExpressionDialect;
 
@@ -125,65 +126,65 @@ pub(crate) fn ordered_limit(
 /// finite slope.
 pub(crate) fn real_pow_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
+    d_exponent: Derivative,
     dialect: ExpressionDialect,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if dialect != ExpressionDialect::Xyce {
         return legacy_real_pow_with_derivative(base, d_base, exponent, d_exponent);
     }
 
     let value = real_pow(base, exponent, dialect);
     if !base.is_finite() || !exponent.is_finite() {
-        return Some((value, Value::NAN));
+        return derivative_pair(value, Value::NAN);
     }
 
     if base > 0.0 {
-        let mut derivative = 0.0;
+        let mut derivative = Derivative::from(0.0);
         if d_base != 0.0 {
-            derivative += exponent * base.powf(exponent - 1.0) * d_base;
+            derivative += d_base * exponent * base.powf(exponent - 1.0);
         }
         if d_exponent != 0.0 {
-            derivative += value * base.ln() * d_exponent;
+            derivative += d_exponent * value * base.ln();
         }
-        return Some((value, derivative));
+        return derivative_pair(value, derivative);
     }
 
     if base < 0.0 {
         let magnitude = base.abs().powf(exponent);
         let (sin_pi_exponent, cos_pi_exponent) = sin_cos_pi(exponent);
-        let base_partial = exponent * magnitude * cos_pi_exponent / base;
-        let exponent_partial = magnitude
+        let base_partial = Derivative::from(exponent) * magnitude * cos_pi_exponent / base;
+        let exponent_partial = Derivative::from(magnitude)
             * (base.abs().ln() * cos_pi_exponent - std::f64::consts::PI * sin_pi_exponent);
         // Do not manufacture NaN from an absent direction (`inf * 0`).  This
         // matters for high-magnitude constant bases/exponents where one
         // partial is singular but the requested Newton direction is exactly
         // independent of it.
-        let mut derivative = 0.0;
+        let mut derivative = Derivative::from(0.0);
         if d_base != 0.0 {
             derivative += base_partial * d_base;
         }
         if d_exponent != 0.0 {
             derivative += exponent_partial * d_exponent;
         }
-        return Some((value, derivative));
+        return derivative_pair(value, derivative);
     }
 
     // Xyce 7.10's powOp::dx2 leaves every derivative slot at exactly zero
     // whenever the base is zero, independent of exponent and direction.  The
     // value retains ordinary pow semantics and is normalized only at the
     // completed expression boundary.
-    Some((value, 0.0))
+    derivative_pair(value, 0.0)
 }
 
 pub(crate) fn real_function_pow_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
+    d_exponent: Derivative,
     dialect: ExpressionDialect,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if dialect == ExpressionDialect::Xyce {
         return real_pow_with_derivative(base, d_base, exponent, d_exponent, dialect);
     }
@@ -192,11 +193,11 @@ pub(crate) fn real_function_pow_with_derivative(
 
 pub(crate) fn real_function_pwr_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
+    d_exponent: Derivative,
     dialect: ExpressionDialect,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if dialect == ExpressionDialect::Xyce {
         return real_pow_with_derivative(base, d_base, exponent, d_exponent, dialect);
     }
@@ -205,54 +206,54 @@ pub(crate) fn real_function_pwr_with_derivative(
 
 pub(crate) fn real_function_pwrs_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
+    d_exponent: Derivative,
     dialect: ExpressionDialect,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if dialect == ExpressionDialect::Xyce && base == 0.0 {
-        return Some((real_function_pwrs(base, exponent), 0.0));
+        return derivative_pair(real_function_pwrs(base, exponent), 0.0);
     }
     magnitude_power_with_derivative(base, d_base, exponent, d_exponent, true)
 }
 
 fn magnitude_power_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
+    d_exponent: Derivative,
     preserve_sign: bool,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     let magnitude = base.abs();
     let branch_sign = if base < 0.0 { -1.0 } else { 1.0 };
     let polarity = if preserve_sign { branch_sign } else { 1.0 };
     let value = polarity * magnitude.powf(exponent);
-    let mut derivative = 0.0;
+    let mut derivative = Derivative::from(0.0);
     if d_base != 0.0 {
         let base_polarity = if preserve_sign { 1.0 } else { branch_sign };
-        derivative += base_polarity * exponent * magnitude.powf(exponent - 1.0) * d_base;
+        derivative += d_base * base_polarity * exponent * magnitude.powf(exponent - 1.0);
     }
     if d_exponent != 0.0 {
-        derivative += value * magnitude.ln() * d_exponent;
+        derivative += d_exponent * value * magnitude.ln();
     }
-    Some((value, derivative))
+    derivative_pair(value, derivative)
 }
 
 fn legacy_real_pow_with_derivative(
     base: Value,
-    d_base: Value,
+    d_base: Derivative,
     exponent: Value,
-    d_exponent: Value,
-) -> Option<(Value, Value)> {
+    d_exponent: Derivative,
+) -> Option<(Value, Derivative)> {
     let value = base.powf(exponent);
     if d_exponent == 0.0 {
-        return Some((value, exponent * base.powf(exponent - 1.0) * d_base));
+        return derivative_pair(value, d_base * exponent * base.powf(exponent - 1.0));
     }
     if base > 0.0 {
-        Some((
+        derivative_pair(
             value,
             value * (d_exponent * base.ln() + exponent * d_base / base),
-        ))
+        )
     } else {
         None
     }
@@ -296,19 +297,19 @@ mod tests {
         assert!(real_pow(0.0, -1.0, ExpressionDialect::Xyce).is_infinite());
 
         assert_eq!(
-            real_pow_with_derivative(0.0, 1.0, 2.0, 0.0, ExpressionDialect::Xyce),
-            Some((0.0, 0.0))
+            real_pow_with_derivative(0.0, 1.0.into(), 2.0, 0.0.into(), ExpressionDialect::Xyce),
+            derivative_pair(0.0, 0.0)
         );
         assert_eq!(
-            real_pow_with_derivative(0.0, 1.0, 1.0, 0.0, ExpressionDialect::Xyce),
-            Some((0.0, 0.0))
+            real_pow_with_derivative(0.0, 1.0.into(), 1.0, 0.0.into(), ExpressionDialect::Xyce),
+            derivative_pair(0.0, 0.0)
         );
         assert_eq!(
-            real_pow_with_derivative(0.0, 1.0, 0.5, 0.0, ExpressionDialect::Xyce),
-            Some((0.0, 0.0))
+            real_pow_with_derivative(0.0, 1.0.into(), 0.5, 0.0.into(), ExpressionDialect::Xyce),
+            derivative_pair(0.0, 0.0)
         );
         let (negative_power, derivative) =
-            real_pow_with_derivative(0.0, 1.0, -1.0, 0.0, ExpressionDialect::Xyce)
+            real_pow_with_derivative(0.0, 1.0.into(), -1.0, 0.0.into(), ExpressionDialect::Xyce)
                 .expect("Xyce zero-base pow derivative is defined as zero");
         assert!(negative_power.is_infinite());
         assert_eq!(derivative, 0.0);
@@ -316,9 +317,14 @@ mod tests {
 
     #[test]
     fn inactive_derivative_directions_do_not_create_nan() {
-        let (value, derivative) =
-            real_pow_with_derivative(-1.0e308, 0.0, 2.0, 0.0, ExpressionDialect::Xyce)
-                .expect("a constant overflowing power still has zero directional derivative");
+        let (value, derivative) = real_pow_with_derivative(
+            -1.0e308,
+            0.0.into(),
+            2.0,
+            0.0.into(),
+            ExpressionDialect::Xyce,
+        )
+        .expect("a constant overflowing power still has zero directional derivative");
         assert!(value.is_infinite());
         assert_eq!(derivative, 0.0);
     }
@@ -390,12 +396,12 @@ mod tests {
         assert!(real_function_pwr(0.0, -1.0, ExpressionDialect::Ngspice).is_infinite());
 
         assert_eq!(
-            magnitude_power_with_derivative(0.0, 0.0, 0.0, 0.0, false),
-            Some((1.0, 0.0))
+            magnitude_power_with_derivative(0.0, 0.0.into(), 0.0, 0.0.into(), false),
+            derivative_pair(1.0, 0.0)
         );
         assert_eq!(
-            magnitude_power_with_derivative(Value::MAX, 0.0, 2.0, 0.0, false),
-            Some((Value::INFINITY, 0.0))
+            magnitude_power_with_derivative(Value::MAX, 0.0.into(), 2.0, 0.0.into(), false),
+            derivative_pair(Value::INFINITY, 0.0)
         );
     }
 }

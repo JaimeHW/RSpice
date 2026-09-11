@@ -41,6 +41,23 @@ fn behavioral_ac_transfer_preserves_finite_analytic_ratios() {
     }
 }
 
+#[test]
+fn behavioral_ac_transfer_retains_derivatives_through_nested_scales() {
+    for (expression, expected) in [
+        ("1e-200*(1e200*(1e200*V(in)))", 1e200_f64),
+        ("1e200*(1e-200*(1e-200*V(in)))", 1e-200),
+    ] {
+        let point = solve_one(&format!(
+            "Nested derivative\nV1 in 0 DC 0 AC 1\nB1 out 0 V={{{expression}}}\n.end\n"
+        ));
+        let actual = voltage(&point, "out");
+        assert!(
+            (actual.re / expected - 1.0).abs() < 1e-12 && actual.im == 0.0,
+            "{expression}: {actual}, expected {expected}"
+        );
+    }
+}
+
 fn voltage(point: &AcResult, node: &str) -> Complex64 {
     let index = point
         .node_names

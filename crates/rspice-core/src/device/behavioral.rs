@@ -13,6 +13,7 @@ use crate::expr::{
     real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
     real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
 };
+use crate::expr::{Derivative, derivative_pair};
 use crate::solver::StaticMatrix;
 use std::path::Path;
 use thiserror::Error;
@@ -270,6 +271,7 @@ impl BehavioralVoltageSource {
             target: DerivativeTarget::Time,
         };
         let (outgoing, derivative) = eval_behavioral_expr_with_derivative(&self.ast, &context)?;
+        let derivative = derivative.binary64();
         let point = Vm::new().execute(
             &self.program,
             &Context::transient(&[], &[], time)
@@ -1275,14 +1277,14 @@ fn eval_behavioral_expr_with_derivative_at_boundary(
     let (value, derivative) = eval_behavioral_expr_with_derivative(expr, context)?;
     Some((
         normalize_expression_boundary(value, context.expression_dialect),
-        normalize_expression_boundary(derivative, context.expression_dialect),
+        normalize_expression_boundary(derivative.binary64(), context.expression_dialect),
     ))
 }
 
 fn eval_behavioral_expr_with_derivative(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if matches!(context.target, DerivativeTarget::Time) && !crate::expr::constant_over_time(expr) {
         // Newton's regularized slopes and pointwise Boolean/table derivatives
         // are not necessarily outgoing time derivatives. Only use the rules
@@ -1342,21 +1344,21 @@ fn eval_behavioral_expr_with_derivative(
         }
     }
     match expr {
-        Expr::Const(value) => Some((*value, 0.0)),
-        Expr::Time => Some((
+        Expr::Const(value) => derivative_pair(*value, 0.0),
+        Expr::Time => derivative_pair(
             context.time,
             Value::from(matches!(context.target, DerivativeTarget::Time)),
-        )),
-        Expr::Frequency => Some((context.frequency, 0.0)),
-        Expr::Temperature => Some((context.temperature, 0.0)),
-        Expr::ThermalVoltage => Some((
+        ),
+        Expr::Frequency => derivative_pair(context.frequency, 0.0),
+        Expr::Temperature => derivative_pair(context.temperature, 0.0),
+        Expr::ThermalVoltage => derivative_pair(
             crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
                 context.temperature,
             )),
             0.0,
-        )),
-        Expr::Gmin => Some((context.gmin, 0.0)),
-        Expr::StringLiteral(_) => Some((0.0, 0.0)),
+        ),
+        Expr::Gmin => derivative_pair(context.gmin, 0.0),
+        Expr::StringLiteral(_) => derivative_pair(0.0, 0.0),
         Expr::LookupTable { input, table } => {
             let (input_value, input_derivative) =
                 eval_behavioral_expr_with_derivative(input, context)?;
@@ -1365,14 +1367,14 @@ fn eval_behavioral_expr_with_derivative(
                 table,
                 context.expression_dialect,
             );
-            Some((
+            derivative_pair(
                 value,
                 if input_derivative == 0.0 {
-                    0.0
+                    0.0.into()
                 } else {
                     derivative * input_derivative
                 },
-            ))
+            )
         }
         Expr::NodeVoltage(name) => {
             let idx = *context.program.node_map.get(name)?;
@@ -1381,7 +1383,7 @@ fn eval_behavioral_expr_with_derivative(
                 DerivativeTarget::Node(target_idx) if target_idx == idx => 1.0,
                 _ => 0.0,
             };
-            Some((value, derivative))
+            derivative_pair(value, derivative)
         }
         Expr::BranchCurrent(name) => {
             let idx = *context.program.branch_map.get(name)?;
@@ -1390,13 +1392,13 @@ fn eval_behavioral_expr_with_derivative(
                 DerivativeTarget::Branch(target_idx) if target_idx == idx => 1.0,
                 _ => 0.0,
             };
-            Some((value, derivative))
+            derivative_pair(value, derivative)
         }
         Expr::Unary { op, operand } => {
             let (value, derivative) = eval_behavioral_expr_with_derivative(operand, context)?;
             match op {
-                UnaryOp::Neg => Some((-value, -derivative)),
-                UnaryOp::Not => Some((if value == 0.0 { 1.0 } else { 0.0 }, 0.0)),
+                UnaryOp::Neg => derivative_pair(-value, -derivative),
+                UnaryOp::Not => derivative_pair(if value == 0.0 { 1.0 } else { 0.0 }, 0.0),
             }
         }
         Expr::Binary { op, left, right } => {
@@ -1421,19 +1423,19 @@ fn eval_behavioral_expr_with_derivative(
                     BinaryOp::Gt | BinaryOp::Ge => positive,
                     _ => !positive,
                 };
-                return Some((bool_value(truth), 0.0));
+                return derivative_pair(bool_value(truth), 0.0);
             }
             if matches!(context.target, DerivativeTarget::Time) && *op == BinaryOp::Pow {
                 // The time rule uses the polynomial derivative at zero too;
                 // Xyce's Newton rule deliberately zeroes that derivative.
-                return Some((
+                return derivative_pair(
                     left_value.powf(right_value),
                     if right_value == 0.0 {
-                        0.0
+                        0.0.into()
                     } else {
-                        right_value * left_value.powf(right_value - 1.0) * left_derivative
+                        left_derivative * right_value * left_value.powf(right_value - 1.0)
                     },
-                ));
+                );
             }
             eval_binary_with_derivative(
                 *op,
@@ -1451,26 +1453,26 @@ fn eval_behavioral_expr_with_derivative(
 fn eval_binary_with_derivative(
     op: BinaryOp,
     left: Value,
-    d_left: Value,
+    d_left: Derivative,
     right: Value,
-    d_right: Value,
+    d_right: Derivative,
     expression_dialect: ExpressionDialect,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     match op {
-        BinaryOp::Add => Some((left + right, d_left + d_right)),
-        BinaryOp::Sub => Some((left - right, d_left - d_right)),
-        BinaryOp::Mul => Some((left * right, d_left * right + left * d_right)),
+        BinaryOp::Add => derivative_pair(left + right, d_left + d_right),
+        BinaryOp::Sub => derivative_pair(left - right, d_left - d_right),
+        BinaryOp::Mul => derivative_pair(left * right, d_left * right + left * d_right),
         BinaryOp::Div => {
             if right == 0.0 {
                 None
             } else {
-                Some((
+                derivative_pair(
                     left / right,
-                    derivative_product_ratio(
-                        [(d_left, right), (-left, d_right)],
+                    Derivative::product_ratio(
+                        [(d_left, right), (-d_right, left)],
                         [(right, right), (0.0, 0.0)],
                     ),
-                ))
+                )
             }
         }
         BinaryOp::Mod => {
@@ -1478,58 +1480,22 @@ fn eval_binary_with_derivative(
                 None
             } else {
                 let quotient = (left / right).trunc();
-                Some((left % right, d_left - quotient * d_right))
+                derivative_pair(left % right, d_left - quotient * d_right)
             }
         }
         BinaryOp::Pow => real_pow_with_derivative(left, d_left, right, d_right, expression_dialect),
-        BinaryOp::Lt => Some((bool_value(left < right), 0.0)),
-        BinaryOp::Le => Some((bool_value(left <= right), 0.0)),
-        BinaryOp::Gt => Some((bool_value(left > right), 0.0)),
-        BinaryOp::Ge => Some((bool_value(left >= right), 0.0)),
-        BinaryOp::Eq => Some((bool_value((left - right).abs() < EXPR_ZERO_TOLERANCE), 0.0)),
-        BinaryOp::Ne => Some((bool_value((left - right).abs() >= EXPR_ZERO_TOLERANCE), 0.0)),
-        BinaryOp::And => Some((bool_value(left != 0.0 && right != 0.0), 0.0)),
-        BinaryOp::Or => Some((bool_value(left != 0.0 || right != 0.0), 0.0)),
-    }
-}
-
-/// Keep the ordinary Jacobian arithmetic for normal denominators. Recover the
-/// complete ratio when a squared denominator overflows or becomes subnormal;
-/// the derivative can still be finite even if both numerator and denominator
-/// overflow, or both round to zero. The shared numerator routine also rescues
-/// overflowing or subnormal products on the normal-denominator path.
-fn derivative_product_ratio(
-    numerator: [(Value, Value); 2],
-    denominator: [(Value, Value); 2],
-) -> Value {
-    use rspice_veriloga_runtime::arithmetic::{
-        ArithmeticError, product_sum_div, sum_products_ratio,
-    };
-    let divisor = denominator[0].0 * denominator[0].1 + denominator[1].0 * denominator[1].1;
-    if divisor.is_normal()
-        || numerator
-            .iter()
-            .chain(&denominator)
-            .any(|(a, b)| !a.is_finite() || !b.is_finite())
-    {
-        return product_sum_div(
-            numerator[0].0,
-            numerator[0].1,
-            numerator[1].0,
-            numerator[1].1,
-            divisor,
-        );
-    }
-    match sum_products_ratio(numerator.into_iter(), denominator.into_iter()) {
-        Ok(value) => value,
-        Err(ArithmeticError::Overflow { negative }) => {
-            if negative {
-                Value::NEG_INFINITY
-            } else {
-                Value::INFINITY
-            }
+        BinaryOp::Lt => derivative_pair(bool_value(left < right), 0.0),
+        BinaryOp::Le => derivative_pair(bool_value(left <= right), 0.0),
+        BinaryOp::Gt => derivative_pair(bool_value(left > right), 0.0),
+        BinaryOp::Ge => derivative_pair(bool_value(left >= right), 0.0),
+        BinaryOp::Eq => {
+            derivative_pair(bool_value((left - right).abs() < EXPR_ZERO_TOLERANCE), 0.0)
         }
-        Err(_) => Value::NAN,
+        BinaryOp::Ne => {
+            derivative_pair(bool_value((left - right).abs() >= EXPR_ZERO_TOLERANCE), 0.0)
+        }
+        BinaryOp::And => derivative_pair(bool_value(left != 0.0 && right != 0.0), 0.0),
+        BinaryOp::Or => derivative_pair(bool_value(left != 0.0 || right != 0.0), 0.0),
     }
 }
 
@@ -1537,7 +1503,7 @@ fn eval_function_with_derivative(
     func: Function,
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     let eval_arg = |index: usize| {
         args.get(index)
             .and_then(|arg| eval_behavioral_expr_with_derivative(arg, context))
@@ -1547,17 +1513,17 @@ fn eval_function_with_derivative(
         Function::Abs => {
             let (x, dx) = eval_arg(0)?;
             if x == 0.0 && matches!(context.target, DerivativeTarget::Time) {
-                return Some((0.0, dx.abs()));
+                return derivative_pair(0.0, dx.abs());
             }
-            Some((x.abs(), x.signum() * dx))
+            derivative_pair(x.abs(), x.signum() * dx)
         }
         Function::Sqrt => {
             let (x, dx) = eval_arg(0)?;
             let value = x.max(0.0).sqrt();
             if value == 0.0 {
-                Some((value, 0.0))
+                derivative_pair(value, 0.0)
             } else {
-                Some((value, 0.5 * dx / value))
+                derivative_pair(value, 0.5 * dx / value)
             }
         }
         Function::Exp => unary_derivative(eval_arg(0)?, |x| x.exp(), |x| x.exp()),
@@ -1565,20 +1531,20 @@ fn eval_function_with_derivative(
             let (x, dx) = eval_arg(0)?;
             let clamped = x.max(1.0e-38);
             if context.expression_dialect == ExpressionDialect::Xyce {
-                Some((clamped.log10(), dx / (std::f64::consts::LN_10 * clamped)))
+                derivative_pair(clamped.log10(), dx / (std::f64::consts::LN_10 * clamped))
             } else {
-                Some((clamped.ln(), dx / clamped))
+                derivative_pair(clamped.ln(), dx / clamped)
             }
         }
         Function::Ln => {
             let (x, dx) = eval_arg(0)?;
             let clamped = x.max(1.0e-38);
-            Some((clamped.ln(), dx / clamped))
+            derivative_pair(clamped.ln(), dx / clamped)
         }
         Function::Log10 => {
             let (x, dx) = eval_arg(0)?;
             let clamped = x.max(1.0e-38);
-            Some((clamped.log10(), dx / (std::f64::consts::LN_10 * clamped)))
+            derivative_pair(clamped.log10(), dx / (std::f64::consts::LN_10 * clamped))
         }
         Function::Sin => unary_derivative(eval_arg(0)?, |x| x.sin(), |x| x.cos()),
         Function::Cos => unary_derivative(eval_arg(0)?, |x| x.cos(), |x| -x.sin()),
@@ -1602,10 +1568,10 @@ fn eval_function_with_derivative(
         ),
         Function::Atan => {
             let (x, dx) = eval_arg(0)?;
-            Some((
+            derivative_pair(
                 x.atan(),
-                derivative_product_ratio([(dx, 1.0), (0.0, 0.0)], [(1.0, 1.0), (x, x)]),
-            ))
+                Derivative::product_ratio([(dx, 1.0), (0.0.into(), 0.0)], [(1.0, 1.0), (x, x)]),
+            )
         }
         Function::Atan2 => {
             let (y, dy) = eval_arg(0)?;
@@ -1613,10 +1579,10 @@ fn eval_function_with_derivative(
             if x == 0.0 && y == 0.0 {
                 None
             } else {
-                Some((
+                derivative_pair(
                     y.atan2(x),
-                    derivative_product_ratio([(x, dy), (-y, dx)], [(x, x), (y, y)]),
-                ))
+                    Derivative::product_ratio([(dy, x), (-dx, y)], [(x, x), (y, y)]),
+                )
             }
         }
         Function::Sinh => unary_derivative(eval_arg(0)?, |x| x.sinh(), |x| x.cosh()),
@@ -1632,12 +1598,12 @@ fn eval_function_with_derivative(
                     let cosh_x = x.cosh();
                     dx / (cosh_x * cosh_x)
                 } else {
-                    0.0
+                    0.0.into()
                 };
-                Some((value, derivative))
+                derivative_pair(value, derivative)
             } else {
                 let value = x.tanh();
-                Some((value, dx * (1.0 - value * value)))
+                derivative_pair(value, dx * (1.0 - value * value))
             }
         }
         Function::Asinh => {
@@ -1657,32 +1623,32 @@ fn eval_function_with_derivative(
                 let derivative = if x >= lower && x <= upper {
                     dx / (1.0 - x * x)
                 } else {
-                    0.0
+                    0.0.into()
                 };
-                Some((clamped.atanh(), derivative))
+                derivative_pair(clamped.atanh(), derivative)
             } else {
-                Some((x.atanh(), dx / (1.0 - x * x)))
+                derivative_pair(x.atanh(), dx / (1.0 - x * x))
             }
         }
         Function::Trunc => {
             let (x, _) = eval_arg(0)?;
-            Some((x.trunc(), 0.0))
+            derivative_pair(x.trunc(), 0.0)
         }
         Function::Floor => {
             let (x, _) = eval_arg(0)?;
-            Some((x.floor(), 0.0))
+            derivative_pair(x.floor(), 0.0)
         }
         Function::Ceil => {
             let (x, _) = eval_arg(0)?;
-            Some((x.ceil(), 0.0))
+            derivative_pair(x.ceil(), 0.0)
         }
         Function::Round => {
             let (x, _) = eval_arg(0)?;
-            Some((x.round_ties_even(), 0.0))
+            derivative_pair(x.round_ties_even(), 0.0)
         }
         Function::Sqr => {
             let (x, dx) = eval_arg(0)?;
-            Some((x * x, 2.0 * x * dx))
+            derivative_pair(x * x, dx * 2.0 * x)
         }
         Function::Pwr => {
             let (base, d_base) = eval_arg(0)?;
@@ -1709,7 +1675,7 @@ fn eval_function_with_derivative(
         Function::Limit => match args.len() {
             2 => {
                 let (nom, d_nom) = eval_arg(0)?;
-                Some((nom, d_nom))
+                derivative_pair(nom, d_nom)
             }
             3 => {
                 let (x, dx) = eval_arg(0)?;
@@ -1717,7 +1683,14 @@ fn eval_function_with_derivative(
                 let (max, _) = eval_arg(2)?;
                 let (value, retains_input_derivative) =
                     ordered_limit(x, min, max, context.expression_dialect);
-                Some((value, if retains_input_derivative { dx } else { 0.0 }))
+                derivative_pair(
+                    value,
+                    if retains_input_derivative {
+                        dx
+                    } else {
+                        0.0.into()
+                    },
+                )
             }
             _ => None,
         },
@@ -1751,7 +1724,7 @@ fn eval_function_with_derivative(
         }
         Function::Sign => {
             let (x, _) = eval_arg(0)?;
-            Some((ordered_sign(x), 0.0))
+            derivative_pair(ordered_sign(x), 0.0)
         }
         Function::HspiceSign => {
             let (magnitude, d_magnitude) = eval_arg(0)?;
@@ -1762,22 +1735,22 @@ fn eval_function_with_derivative(
             } else {
                 -d_magnitude
             };
-            Some((magnitude.abs() * sign, magnitude_derivative * sign))
+            derivative_pair(magnitude.abs() * sign, magnitude_derivative * sign)
         }
         Function::Uramp => {
             let (x, dx) = eval_arg(0)?;
             if x == 0.0 && matches!(context.target, DerivativeTarget::Time) {
-                return Some((0.0, dx.max(0.0)));
+                return derivative_pair(0.0, dx.max(0.0));
             }
-            Some((x.max(0.0), if x > 0.0 { dx } else { 0.0 }))
+            derivative_pair(x.max(0.0), if x > 0.0 { dx } else { 0.0.into() })
         }
         Function::Stp => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x > EXPR_ZERO_TOLERANCE), 0.0))
+            derivative_pair(bool_value(x > EXPR_ZERO_TOLERANCE), 0.0)
         }
         Function::Ustep => {
             let (x, _) = eval_arg(0)?;
-            Some((
+            derivative_pair(
                 if x > 0.0 {
                     1.0
                 } else if x < 0.0 {
@@ -1786,35 +1759,38 @@ fn eval_function_with_derivative(
                     0.5
                 },
                 0.0,
-            ))
+            )
         }
         Function::U2 => {
             let (x, dx) = eval_arg(0)?;
-            Some((x.clamp(0.0, 1.0), if x > 0.0 && x < 1.0 { dx } else { 0.0 }))
+            derivative_pair(
+                x.clamp(0.0, 1.0),
+                if x > 0.0 && x < 1.0 { dx } else { 0.0.into() },
+            )
         }
         Function::Eq0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x.abs() < EXPR_ZERO_TOLERANCE), 0.0))
+            derivative_pair(bool_value(x.abs() < EXPR_ZERO_TOLERANCE), 0.0)
         }
         Function::Ne0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x.abs() >= EXPR_ZERO_TOLERANCE), 0.0))
+            derivative_pair(bool_value(x.abs() >= EXPR_ZERO_TOLERANCE), 0.0)
         }
         Function::Gt0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x > 0.0), 0.0))
+            derivative_pair(bool_value(x > 0.0), 0.0)
         }
         Function::Lt0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x < 0.0), 0.0))
+            derivative_pair(bool_value(x < 0.0), 0.0)
         }
         Function::Ge0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x >= 0.0), 0.0))
+            derivative_pair(bool_value(x >= 0.0), 0.0)
         }
         Function::Le0 => {
             let (x, _) = eval_arg(0)?;
-            Some((bool_value(x <= 0.0), 0.0))
+            derivative_pair(bool_value(x <= 0.0), 0.0)
         }
         Function::Pow => {
             let (left, d_left) = eval_arg(0)?;
@@ -1834,7 +1810,7 @@ fn eval_function_with_derivative(
                 None
             } else {
                 let quotient = (left / right).trunc();
-                Some((left % right, d_left - quotient * d_right))
+                derivative_pair(left % right, d_left - quotient * d_right)
             }
         }
         Function::Table => eval_table_function_with_derivative(args, context),
@@ -1849,7 +1825,7 @@ fn eval_function_with_derivative(
         | Function::Wodicka
         | Function::WodickaFile
         | Function::Barycentric
-        | Function::BarycentricFile => Some((0.0, 0.0)),
+        | Function::BarycentricFile => derivative_pair(0.0, 0.0),
         Function::Sdt => None,
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             if !matches!(context.target, DerivativeTarget::Time) {
@@ -1864,6 +1840,7 @@ fn eval_function_with_derivative(
                 values.push(value);
             }
             crate::expr::spice_waveform_value_and_time_derivative(func, &values, context.time)
+                .and_then(|(value, derivative)| derivative_pair(value, derivative))
         }
         Function::If => {
             let (condition, derivative) = eval_arg(0)?;
@@ -1900,25 +1877,25 @@ fn eval_function_with_derivative(
 }
 
 fn unary_derivative(
-    input: (Value, Value),
+    input: (Value, Derivative),
     value_fn: impl FnOnce(Value) -> Value,
     derivative_fn: impl FnOnce(Value) -> Value,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     let (x, dx) = input;
-    Some((value_fn(x), derivative_fn(x) * dx))
+    derivative_pair(value_fn(x), derivative_fn(x) * dx)
 }
 
 fn eval_table_function_with_derivative(
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     eval_piecewise_function_with_derivative(args, context, eval_table_points_with_derivative)
 }
 
 fn eval_pwl_function_with_derivative(
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     eval_piecewise_function_with_derivative(args, context, eval_pwl_points_with_derivative)
 }
 
@@ -1926,13 +1903,14 @@ fn eval_pwl_function_with_derivative(
 ///
 /// Takes the point to interpolate at, that point's derivative with respect to
 /// the differentiation variable, and the `(x, y)` breakpoints.
-type PiecewiseDerivativeEvaluator = fn(Value, Value, &[(Value, Value)]) -> Option<(Value, Value)>;
+type PiecewiseDerivativeEvaluator =
+    fn(Value, Derivative, &[(Value, Value)]) -> Option<(Value, Derivative)>;
 
 fn eval_piecewise_function_with_derivative(
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
     evaluator: PiecewiseDerivativeEvaluator,
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if args.len() < 3 {
         return None;
     }
@@ -1950,21 +1928,21 @@ fn eval_piecewise_function_with_derivative(
 
 fn eval_table_points_with_derivative(
     x: Value,
-    dx: Value,
+    dx: Derivative,
     points: &[(Value, Value)],
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if points.is_empty() {
-        return Some((0.0, 0.0));
+        return derivative_pair(0.0, 0.0);
     }
     if points.len() == 1 {
-        return Some((points[0].1, 0.0));
+        return derivative_pair(points[0].1, 0.0);
     }
     if x <= points[0].0 {
-        return Some((points[0].1, 0.0));
+        return derivative_pair(points[0].1, 0.0);
     }
     let last = points.len() - 1;
     if x >= points[last].0 {
-        return Some((points[last].1, 0.0));
+        return derivative_pair(points[last].1, 0.0);
     }
     let mut segment = (points[0], points[1]);
     if x > points[0].0 {
@@ -1982,14 +1960,14 @@ fn eval_table_points_with_derivative(
 
 fn eval_pwl_points_with_derivative(
     x: Value,
-    dx: Value,
+    dx: Derivative,
     points: &[(Value, Value)],
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     if points.is_empty() {
-        return Some((0.0, 0.0));
+        return derivative_pair(0.0, 0.0);
     }
     if points.len() == 1 {
-        return Some((points[0].1, 0.0));
+        return derivative_pair(points[0].1, 0.0);
     }
 
     let last = points.len() - 1;
@@ -2023,15 +2001,15 @@ fn eval_pwl_points_with_derivative(
 
 fn eval_linear_piecewise_segment_with_derivative(
     x: Value,
-    dx: Value,
+    dx: Derivative,
     ((x0, y0), (x1, y1)): ((Value, Value), (Value, Value)),
-) -> Option<(Value, Value)> {
+) -> Option<(Value, Derivative)> {
     let span = x1 - x0;
     if !span.is_finite() || span == 0.0 {
-        return Some((y0, 0.0));
+        return derivative_pair(y0, 0.0);
     }
     let slope = (y1 - y0) / span;
-    Some((y0 + (x - x0) * slope, slope * dx))
+    derivative_pair(y0 + (x - x0) * slope, slope * dx)
 }
 
 fn xyce_tanh_behavioral(value: Value) -> Value {
@@ -3368,6 +3346,7 @@ mod tests {
             target: DerivativeTarget::Node(0),
         };
         eval_behavioral_expr_with_derivative(&ast, &context)
+            .map(|(value, derivative)| (value, derivative.binary64()))
             .unwrap_or_else(|| panic!("analytic derivative for `{expression}` failed"))
     }
 
@@ -3444,6 +3423,36 @@ mod tests {
                     BehavioralVoltageSource::new("B1".to_owned(), 1, 0, 1, expression).unwrap();
                 source.expression_dialect = dialect;
                 assert_eq!(source.explicit_time_derivative(0.0), None);
+            }
+        }
+    }
+
+    #[test]
+    fn analytic_derivatives_retain_intermediate_exponents() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (expression, point, expected) in [
+                ("1e-200*(1e200*(1e200*v(in)))", 0.0, 1e200),
+                ("1e200*(1e-200*(1e-200*v(in)))", 0.0, 1e-200),
+                ("(1e308*v(in)+1e308*v(in))*1e-308", 0.0, 2.0),
+                ("((1e200*v(in))/1e-200)*1e-200", 0.0, 1e200),
+                ("atan(1e200*(1e200*v(in)))*1e-200", 0.0, 1e200),
+                ("pow(1e200*v(in),2)*1e-200", 1e-50, 2e150),
+                (
+                    "exp(709*v(in))*1e-307",
+                    1.0,
+                    (709.0_f64.exp() * 1e-307) * 709.0,
+                ),
+                (
+                    "sqrt(5e-324*v(in))*1e162",
+                    1.0,
+                    Value::from_bits(1).sqrt() * 1e162 * 0.5,
+                ),
+            ] {
+                let (_, actual) = eval_node_derivative_with_dialect(expression, point, dialect);
+                assert!(
+                    (actual / expected - 1.0).abs() < 3e-15,
+                    "{dialect:?} {expression}: {actual:e}, expected {expected:e}"
+                );
             }
         }
     }
