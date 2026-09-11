@@ -61,7 +61,16 @@ pub(super) fn parse_resistor(
                 }
             }
             TokenKind::Plus | TokenKind::Minus => {
-                if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) {
+                if defer_simple_param_refs && let TokenKind::Ident(ident) = &stream.peek_n(1).kind {
+                    let sign = if matches!(stream.peek().kind, TokenKind::Minus) {
+                        "-"
+                    } else {
+                        "+"
+                    };
+                    value_expr = Some(format!("{sign}({ident})"));
+                    stream.advance();
+                    stream.advance();
+                } else if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) {
                     if let Some(expr) = take_value_expression_string(stream, params) {
                         if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
                             value = Some(resolved);

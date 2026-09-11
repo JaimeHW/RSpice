@@ -553,6 +553,43 @@ mod tests {
     }
 
     #[test]
+    fn signed_resistor_parameters_use_the_instantiated_scope() {
+        let engine = Engine::default();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (sign, actual) in [("+", "1+1e-8*p"), ("-", "-1-1e-8*p")] {
+                for gap in ["", " "] {
+                    let netlist = parse(
+                        &format!(
+                            "Signed scoped resistor\n.param p=0\nI1 0 out 1\nR0 out 0 1\nX1 out cell q={{{actual}}}\n.subckt cell out q=99\nR1 out 0 {sign}{gap}q\n.ends\n.end"
+                        ),
+                        dialect,
+                    );
+                    let circuit = engine.build_circuit(&netlist).unwrap();
+                    assert_eq!(
+                        circuit.resistors.reported_resistances[1], 1.0,
+                        "{dialect:?}: {sign}{gap}q"
+                    );
+                    let output = AcSensitivityOutput::Voltage {
+                        positive: circuit.get_node_by_name("out").unwrap(),
+                        negative: None,
+                    };
+                    let mut runs = 0;
+                    let derivative = engine
+                        .run_output_sensitivity_with_abort(
+                            &netlist, output, "p", 0.0, None, &mut runs, &NoAbort,
+                        )
+                        .unwrap();
+                    assert_eq!(runs, 1);
+                    assert!(
+                        (derivative / 2.5e-9 - 1.0).abs() < 2e-12,
+                        "{dialect:?}: {sign}{gap}q: {derivative:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn passive_sensitivity_tracks_the_accepted_primary_assignment() {
         let engine = Engine::default();
         for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
