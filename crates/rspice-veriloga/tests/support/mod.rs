@@ -62,6 +62,25 @@ impl DeviceFixture {
             nodes,
         )
     }
+
+    /// The device the *bytecode* lowering produces from the same compilation.
+    ///
+    /// [`Self::try_device`] pairs the canonical artifact, so it is the CFG
+    /// lowering; this one hands the backend only the `CompiledModel`, which is
+    /// the lowering the interpreter executes. A route-parity test needs both
+    /// out of one `compile_runtime`, because separately compiled artifacts
+    /// renumber state and could not be compared step for step.
+    ///
+    /// Reachable only where the bytecode backend is: a non-`native` build, or
+    /// `native-bytecode-contract-tests`. Elsewhere native construction refuses
+    /// an absent artifact, and that refusal is what this returns.
+    pub fn try_bytecode_device(
+        &self,
+        name: &str,
+        nodes: &[usize],
+    ) -> Result<VerilogADevice, rspice_veriloga::vm::VmError> {
+        VerilogADevice::try_new(name, self.model.clone(), nodes)
+    }
 }
 
 impl Deref for DeviceFixture {
