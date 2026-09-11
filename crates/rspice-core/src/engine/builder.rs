@@ -22,7 +22,7 @@ use crate::netlist::{
     Element, ElementKind, FlattenerConfig, ParseError, ParseWithAbortError, SourceSpec,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspiceAutoBridgeNodeHint, XspiceAutoBridgeTemplate,
     XspicePort, flatten_netlist_with_models, flatten_netlist_with_models_config_with_abort,
-    reduce_supernode_topology,
+    flatten_netlist_with_parameter_direction, reduce_supernode_topology,
 };
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use crate::{CircuitData, Netlist, Value};
@@ -4801,7 +4801,6 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
-        circuit.parameter_direction = netlist.parameter_direction.clone();
         if netlist
             .options
             .device_pnjmaxi
@@ -4840,8 +4839,8 @@ impl Engine {
             1.0
         };
 
-        // Flatten subcircuit instances into top-level elements
-        let flattened = flatten_netlist_with_models_config_with_abort(
+        // Flatten subcircuit instances into top-level elements.
+        let (flattened, parameter_direction) = flatten_netlist_with_parameter_direction(
             netlist,
             FlattenerConfig {
                 max_depth: self.config.resource_limits.max_hierarchy_depth,
@@ -4851,6 +4850,7 @@ impl Engine {
             abort,
         )
         .map_err(|error| map_build_parse_error("subcircuit flattening", error))?;
+        circuit.parameter_direction = parameter_direction;
         let mut flat_elements = flattened.elements;
         let requires_statistical_materialization =
             !netlist.spectre_statistics.variations.is_empty();
@@ -4919,6 +4919,9 @@ impl Engine {
             .map(|element| element.name.to_ascii_uppercase())
             .collect::<HashSet<_>>();
         if netlist.options.topology_supernode.unwrap_or(false) {
+            if let Some(capture) = &mut circuit.parameter_direction {
+                capture.has_uncaptured_dependencies = true;
+            }
             let reduction = reduce_supernode_topology(
                 flat_elements,
                 netlist
@@ -9064,6 +9067,9 @@ impl Engine {
         }
 
         check_build_abort(abort)?;
+        if let Some(capture) = &mut circuit.parameter_direction {
+            capture.owners = flat_elements;
+        }
         Ok((circuit, rf_ports))
     }
 }

@@ -78,8 +78,8 @@ use laplace_synthesis::*;
 use line::*;
 use pspice_stim::*;
 use scoping::*;
-pub(super) use source_specs::map_source_spec_values;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
+pub(super) use source_specs::{map_source_spec_values, parse_source_spec_text_with_direction};
 use state::*;
 use tlines::*;
 use values::*;
@@ -4379,7 +4379,7 @@ fn process_line_gated(
 ) -> Result<(), ParseError> {
     if let Some(directive) = parse_conditional_directive(line) {
         if let Some(capture) = &mut state.parameter_direction {
-            capture.has_conditionals = true;
+            capture.has_uncaptured_dependencies = true;
         }
         return state.apply_conditional_directive(directive, line_num);
     }

@@ -72,14 +72,6 @@ fn expect_value(
 /// Like ngspice, the DC level, AC small-signal terms, and the transient
 /// function may appear in any order on the card, including AC after the
 /// transient function ("DC 1 SIN(...) AC 1").
-pub(super) fn parse_source_spec(
-    stream: &mut TokenStream,
-    line_num: usize,
-    params: &ParamContext,
-) -> Result<SourceSpec, ParseError> {
-    parse_source_spec_with_direction(stream, line_num, params, None)
-}
-
 pub(super) fn parse_source_spec_with_direction(
     stream: &mut TokenStream,
     line_num: usize,
@@ -402,9 +394,18 @@ pub fn parse_source_spec_text(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
+    parse_source_spec_text_with_direction(raw, line_num, params, None)
+}
+
+pub(in crate::netlist) fn parse_source_spec_text_with_direction(
+    raw: &str,
+    line_num: usize,
+    params: &ParamContext,
+    direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
+) -> Result<SourceSpec, ParseError> {
     let tokens = tokenize(raw).map_err(|err| lex_to_parse_error(err, line_num))?;
     let mut stream = TokenStream::new(tokens);
-    parse_source_spec(&mut stream, line_num, params)
+    parse_source_spec_with_direction(&mut stream, line_num, params, direction)
 }
 
 /// Resolve a source once in its lexical scope and retain mapped scalar values

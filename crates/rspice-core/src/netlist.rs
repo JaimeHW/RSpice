@@ -46,10 +46,12 @@ pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,
 };
-pub(crate) use flattener::flatten_netlist_with_models_config_with_abort;
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
     flatten_netlist, flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
+};
+pub(crate) use flattener::{
+    flatten_netlist_with_models_config_with_abort, flatten_netlist_with_parameter_direction,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
@@ -735,7 +737,9 @@ pub(crate) enum NetlistReplayContext {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ParameterDirectionCapture {
     pub(crate) elements: std::collections::BTreeMap<String, ElementParameterDirection>,
-    pub(crate) has_conditionals: bool,
+    /// Flat electrical owners, moved from the builder after instantiation.
+    pub(crate) owners: Vec<Element>,
+    pub(crate) has_uncaptured_dependencies: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

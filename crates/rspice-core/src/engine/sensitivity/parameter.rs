@@ -245,10 +245,10 @@ impl Engine {
             || !netlist.params.has_any_parameter_binding(parameter)
             || !netlist.ast_overlay.device_parameters.is_empty()
             || !netlist.spectre_statistics.variations.is_empty()
-            || !netlist
-                .elements
-                .iter()
-                .all(|element| linear_element(&element.kind))
+            || !netlist.elements.iter().all(|element| {
+                linear_element(&element.kind)
+                    || matches!(element.kind, ElementKind::Subcircuit { .. })
+            })
         {
             return Ok(None);
         }
@@ -262,7 +262,7 @@ impl Engine {
         let Some(capture) = &directed.parameter_direction else {
             return Ok(None);
         };
-        if capture.has_conditionals {
+        if capture.has_uncaptured_dependencies {
             return Ok(None);
         }
         let engine = self.resolved_for_netlist(&directed);
@@ -273,9 +273,11 @@ impl Engine {
         let Some(capture) = circuit.parameter_direction.take() else {
             return Ok(None);
         };
-        if !directed.elements.iter().all(|element| {
-            linear_element(&element.kind) && capture.elements.contains_key(&element.name)
-        }) {
+        if capture.has_uncaptured_dependencies
+            || !capture.owners.iter().all(|element| {
+                linear_element(&element.kind) && capture.elements.contains_key(&element.name)
+            })
+        {
             return Ok(None);
         }
         *runs = runs.saturating_add(1);
@@ -339,7 +341,7 @@ impl Engine {
                 .solve_transpose_into(&observation, &mut adjoint)
                 .map_err(SimulationError::Solver)?;
             rhs.fill(ComplexDirection::zero());
-            for (index, element) in directed.elements.iter().enumerate() {
+            for (index, element) in capture.owners.iter().enumerate() {
                 if index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
@@ -512,6 +514,192 @@ mod tests {
                     "{dialect:?}: {body}: AC {ac:e} != {expected_ac:e}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn hierarchical_root_sensitivity_uses_flattened_physical_owners() {
+        let slope = 1e-8;
+        let frequency = 1.0 / (2.0 * std::f64::consts::PI);
+        let cases = [
+            ("E1 out 0 in 0 {gain(q)}", slope, slope),
+            ("G1 out 0 in 0 {gain(q)}\nR1 out 0 1", -slope, slope),
+            (
+                "Vsense in n 0\nR0 n 0 1\nF1 out 0 Vsense {gain(q)}\nR1 out 0 1",
+                -slope,
+                slope,
+            ),
+            (
+                "Vsense in n 0\nR0 n 0 1\nH1 out 0 Vsense {gain(q)}",
+                slope,
+                slope,
+            ),
+            (
+                "R1 in out {gain(q)}\nR2 out 0 1",
+                -0.25 * slope,
+                -0.25 * slope,
+            ),
+            (
+                "R1 in out 1\nC1 out 0 {gain(q)}",
+                0.0,
+                -slope / (2.0 * 2.0_f64.sqrt()),
+            ),
+            (
+                "R1 in out 1\nL1 out 0 {gain(q)}",
+                0.0,
+                slope / (2.0 * 2.0_f64.sqrt()),
+            ),
+            ("V1 out 0 DC {gain(q)} AC {gain(q)} 30", slope, slope),
+            (
+                "I1 0 out DC {gain(q)} AC {gain(q)} 30\nR1 out 0 1",
+                slope,
+                slope,
+            ),
+            (
+                "V1 n 0 AC 1 {1e-8*q}\nV2 out n AC 1 90",
+                0.0,
+                slope * std::f64::consts::PI / 180.0 / 2.0_f64.sqrt(),
+            ),
+            (
+                ".param z={1+q*1j}\nE1 out 0 in 0 {1+1e-8*img(z)}",
+                slope,
+                slope,
+            ),
+        ];
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for (body, expected_dc, expected_ac) in cases {
+                let netlist = parse(
+                    &format!(
+                        "Hierarchical parameter sensitivity\n.param p=13\nVdrive in 0 DC 1 AC 1\nXtop in out wrapper q={{p}}\n.subckt wrapper in out q=99\nXleaf in out cell q={{q}}\n.ends\n.subckt cell in out q=99\n.func gain(x) {{1+1e-8*x}}\n{body}\n.ends\n.end"
+                    ),
+                    dialect,
+                );
+                let engine = Engine::default();
+                let output = AcSensitivityOutput::Voltage {
+                    positive: engine
+                        .build_circuit(&netlist)
+                        .unwrap()
+                        .get_node_by_name("out")
+                        .unwrap(),
+                    negative: None,
+                };
+                let mut runs = 0;
+                let dc = engine
+                    .run_output_sensitivity_with_abort(
+                        &netlist,
+                        output.clone(),
+                        "p",
+                        0.0,
+                        None,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap();
+                assert_eq!(runs, 1, "{dialect:?} DC {body}");
+                assert!(
+                    (dc - expected_dc).abs() <= expected_dc.abs() * 2e-12,
+                    "{dialect:?} {body}: DC {dc:e} != {expected_dc:e}"
+                );
+                runs = 0;
+                let ac = engine
+                    .run_output_sensitivity_ac_with_abort(
+                        &netlist,
+                        output,
+                        "p",
+                        0.0,
+                        &[frequency],
+                        None,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap()[0];
+                assert_eq!(runs, 1, "{dialect:?} AC {body}");
+                assert!(
+                    (ac - expected_ac).abs() <= expected_ac.abs() * 2e-12,
+                    "{dialect:?} {body}: AC {ac:e} != {expected_ac:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hierarchical_sensitivity_preserves_instance_directions_and_random_draws() {
+        let engine = Engine::default();
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let netlist = Netlist::parse_with_options(
+                "Scoped sample direction
+.param p=0
+Vdrive in 0 DC 1 AC 1
+Xleft in mid cell q={2*p}
+Xright mid out cell q={3*p}
+Rload out 0 1
+.subckt cell in out q=99
+R1 in out {aunif(2,0.25)*(1+1e-8*q)}
+.ends
+.end",
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect: dialect,
+                    statistical_seed: Some(351),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let next_draw = netlist.params.random().next_uniform();
+            let resistance = |name: &str| {
+                let index = circuit
+                    .resistors
+                    .names
+                    .iter()
+                    .position(|actual| actual.eq_ignore_ascii_case(name))
+                    .unwrap();
+                circuit.resistors.reported_resistances[index]
+            };
+            let (left, right) = (resistance("Xleft.R1"), resistance("Xright.R1"));
+            let expected = -(2.0 * left + 3.0 * right) * 1e-8 / (1.0 + left + right).powi(2);
+            for frequencies in [None, Some([1.0].as_slice())] {
+                let mut runs = 0;
+                let (nominal, derivative) = engine
+                    .linear_parameter_sensitivity(
+                        &netlist,
+                        &AcSensitivityOutput::Voltage {
+                            positive: circuit.get_node_by_name("out").unwrap(),
+                            negative: None,
+                        },
+                        "p",
+                        0.0,
+                        frequencies,
+                        &mut runs,
+                        &NoAbort,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(runs, 1);
+                assert!((nominal[0].re * (1.0 + left + right) - 1.0).abs() < 1e-14);
+                assert!((derivative[0].re / expected - 1.0).abs() < 2e-12);
+            }
+            // Capture performs exactly the normal two instance draws.
+            let (directed, _) = Engine::replay_parameter_overrides(
+                &netlist,
+                &[("P".into(), 0.0)],
+                Some("p"),
+                engine.config.resource_limits,
+                &NoAbort,
+            )
+            .unwrap();
+            let directed_circuit = engine.build_circuit(&directed).unwrap();
+            assert_eq!(
+                directed_circuit.resistors.reported_resistances,
+                circuit.resistors.reported_resistances
+            );
+            assert_eq!(directed.params.random().next_uniform(), next_draw);
+            let current = AcSensitivityOutput::BranchCurrent("Vdrive".into());
+            let dc = engine
+                .run_output_sensitivity_with_abort(
+                    &netlist, current, "p", 0.0, None, &mut 0, &NoAbort,
+                )
+                .unwrap();
+            assert!((dc / -expected - 1.0).abs() < 2e-12);
         }
     }
 
@@ -822,7 +1010,7 @@ mod tests {
             "V1 out 0 1\nR1 out 0 1 M={1+p}",
             "V1 in 0 1\nG1 out 0 in 0 1 M={1+p}\nR1 out 0 1",
             "V1 out 0 1\n.if (p == 0)\nR1 out 0 1\n.endif",
-            ".subckt cell a\nR1 a 0 1\n.ends\nV1 out 0 1\nX1 out cell",
+            ".subckt cell a\nR1 a 0 1\n.ends\nV1 out 0 1\nX1 out cell M={1+p}",
         ] {
             let netlist = parse(
                 &format!("Qualification\n.param p=0\n{body}\n.end"),
