@@ -3412,6 +3412,16 @@ fn build_subcircuit_param_scope(
     let body_is_authoritative =
         |name: &str| !use_first || !formal_names.contains(&name.to_ascii_uppercase());
 
+    // Defaults, body definitions and instance arguments introduce local
+    // bindings. Re-mark symbolic dependencies as they are resolved below.
+    for name in formal_names
+        .iter()
+        .chain(&body_names)
+        .chain(&instance_names)
+    {
+        scope.shadow_spectre_statistical_parameter(name);
+    }
+
     for (name, value) in &subckt.params {
         scope.set(name, *value);
     }
@@ -3656,6 +3666,7 @@ fn resolve_subcircuit_instance_params(
             if subcircuit_instance_param_is_string(subckt, &name, &value) {
                 match resolve_string_parametric_value(&value, &instance_scope) {
                     Ok(resolved) => {
+                        instance_scope.shadow_spectre_statistical_parameter(&name);
                         instance_scope.set_string(&name, resolved.clone());
                         upsert_string_param_value(&mut strings, name, resolved);
                         progress = true;
@@ -3700,6 +3711,7 @@ fn resolve_subcircuit_instance_params(
                                 Ok(None) => {}
                             }
                             if behavioral_expression_references_runtime_quantity(&prepared) {
+                                instance_scope.shadow_spectre_statistical_parameter(&name);
                                 instance_scope.define_parameter_expression(
                                     &name,
                                     prepared.clone(),
@@ -3724,6 +3736,7 @@ fn resolve_subcircuit_instance_params(
                 }
                 match resolve_parametric_value(&value, &instance_scope, random) {
                     Ok(resolved) => {
+                        instance_scope.shadow_spectre_statistical_parameter(&name);
                         instance_scope.set(&name, resolved);
                         upsert_numeric_param_value(&mut numeric, name, resolved);
                         progress = true;
@@ -4425,7 +4438,14 @@ mod tests {
                  .model RSTAT R(R={{hidden(2)}})\nR5 a b 1 RSTAT\n\
                  R6 a b {{bare_alias}}\nR7 a b {{root_nested}}\nR8 a b {{top_alias}}\n\
                  R9 a b {{captured_alias}}\nR10 a b {{noise_capture}}\n.ends\n\
-                 X1 in 0 unit\nV1 in 0 1\n.end\n",
+                 .subckt shadow a b rv=50\n.param local={{2*rv}}\n\
+                 R1 a b {{rv}}\nR2 a b {{local}}\nR3 a b {{bare_alias}}\n\
+                 R4 a b {{rv+bare_alias}}\n.model LOCAL R(R={{rv}})\nR5 a b 1 LOCAL\n.ends\n\
+                 .subckt body_shadow a b\n.param rv=60\n\
+                 R1 a b {{rv}}\nR2 a b {{bare_alias}}\n\
+                 XCH a b shadow rv=80\n.ends\n\
+                 X1 in 0 unit\nX2 in 0 shadow\nX3 in 0 shadow rv=70\n\
+                 X4 in 0 body_shadow\nV1 in 0 1\n.end\n",
                 plan.encode_internal()
             ))
             .expect("statistical deck parses");
@@ -4464,6 +4484,23 @@ mod tests {
                 ("X1.R8", 123.0),
                 ("X1.R9", 2.0 * sample + 4.0),
                 ("X1.R10", sample + captured_noise),
+                ("X2.R1", 50.0),
+                ("X2.R2", 100.0),
+                ("X2.R3", 2.0 * sample_for("X2")),
+                ("X2.R4", 50.0 + 2.0 * sample_for("X2")),
+                ("X2.R5", 50.0),
+                ("X3.R1", 70.0),
+                ("X3.R2", 140.0),
+                ("X3.R3", 2.0 * sample_for("X3")),
+                ("X3.R4", 70.0 + 2.0 * sample_for("X3")),
+                ("X3.R5", 70.0),
+                ("X4.R1", 60.0),
+                ("X4.R2", 2.0 * sample_for("X4")),
+                ("X4.XCH.R1", 80.0),
+                ("X4.XCH.R2", 160.0),
+                ("X4.XCH.R3", 2.0 * sample_for("X4.XCH")),
+                ("X4.XCH.R4", 80.0 + 2.0 * sample_for("X4.XCH")),
+                ("X4.XCH.R5", 80.0),
             ] {
                 let index = circuit
                     .resistors

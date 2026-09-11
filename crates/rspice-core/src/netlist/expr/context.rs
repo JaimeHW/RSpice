@@ -691,6 +691,13 @@ impl ParamContext {
             .insert(parameter.to_ascii_uppercase());
     }
 
+    /// A local definition replaces the inherited binding, including its
+    /// statistical identity. Captured aliases keep their own dependencies.
+    pub(crate) fn shadow_spectre_statistical_parameter(&mut self, parameter: &str) {
+        self.spectre_statistical_parameters
+            .remove(&parameter.to_ascii_uppercase());
+    }
+
     pub(crate) fn spectre_statistical_parameter_names(&self) -> Vec<String> {
         self.spectre_statistical_parameters
             .iter()
@@ -702,10 +709,11 @@ impl ParamContext {
     }
 
     pub(crate) fn expression_references_spectre_statistics(&self, expression: &str) -> bool {
-        !self.spectre_statistical_parameters.is_empty()
+        (!self.spectre_statistical_parameters.is_empty() || !self.statistical_captures.is_empty())
             && self.expression_references_parameters(expression, |identifier| {
-                self.spectre_statistical_parameters
-                    .contains(&identifier.to_ascii_uppercase())
+                let identifier = identifier.to_ascii_uppercase();
+                self.spectre_statistical_parameters.contains(&identifier)
+                    || self.statistical_captures.contains_key(&identifier)
             })
     }
 
