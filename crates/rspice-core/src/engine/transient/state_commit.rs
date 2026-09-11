@@ -564,7 +564,7 @@ impl Engine {
         })
     }
 
-    #[inline]
+    #[cfg(test)]
     pub(super) fn update_reactive_history(
         &self,
         circuit: &mut crate::circuit::CircuitData,

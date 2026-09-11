@@ -852,6 +852,51 @@ no longer eligible. It passed in the four-case joint-acceptance check on the
 `db76aceff` baseline. This verifies dispatch eligibility, not numerical
 qualification of every mixed Core feedback circuit.
 
+## MS05 increment: one acceptance barrier for native, XSPICE and HDL history
+
+Ordinary and forced transient acceptance now call the same model barrier with
+borrowed native history storage. XSPICE evaluates and projects its candidate;
+thermal material and native BJT/behavioral/parallel-MOS work prepare without
+accepted-history promotion; every HDL participant validates before the native,
+thermal and XSPICE histories advance. Reversible external-resource images are
+released only after those promotions finish. The previous production tails that
+committed native reactive state before HDL validation have been removed. The
+standalone external/native wrappers now exist only as test adapters.
+
+When XSPICE projection changes the solution, the barrier invalidates the supplied
+VBIC, capacitor, MOS capacitance and gate-companion caches and refreshes native
+trial bias. The accepted histories therefore use the projected solution rather
+than cached quantities from the previous voltage. Xyce static F-B capture also
+belongs inside this barrier for both native and mixed paths. Its direct Core Q/F
+capture remains before the barrier on the narrowly qualified native-only path,
+which now explicitly excludes all HDL hosts. Diagnostic timing labels this whole
+phase as acceptance and counts it in ordinary and forced paths.
+
+Four focused checks passed together on the `db76aceff` baseline. The new joint
+case runs with two mixed hosts, an analog effect observer, two resource-backed
+XSPICE models, a native BJT, capacitor, inductor and SDT behavioral source. A later
+HDL refusal, a later XSPICE refusal, and a native behavioral refusal preserve
+native accepted histories, resource state, projected voltages and pending effects.
+A retry commits the 0.75 V projected capacitor/inductor state and the corresponding
+SDT area once, despite a valid capacitor cache supplied for the original 1 V
+candidate. The existing thermal constant-power check covers native-only and
+XSPICE engine routes, and the native BJT regression covers Trap/Gear lead-current
+and KCL behavior. The fourth check covers the specialized-loader correction above.
+The loader correction was pushed separately; the tested combined implementation
+is unchanged between these two commits. No additional broad test run was made.
+
+This closes the premature native-history promotion in the two accepted-interval
+tails. It is not a complete circuit transaction: solver-controller time/grid and
+breakpoint consumption, initial-state orchestration, evaluated native cache
+rollback, result-retention failures and effect publication remain outside this
+barrier. Irreversible providers still need coordinated effect handling. The new
+joint fixture supplies candidates and is not the required full feedback solve
+with a shared HDL/XSPICE event net. Typed connectivity, one event/precision
+coordinator and root/retry coordination, plus every remaining MS00–MS15 milestone,
+remain in scope. No compiler/schema changes, generator refresh, platform or
+performance qualification, full release suite, or vendor-reference execution
+was performed. Production readiness and Spectre parity remain unproven.
+
 ## Next implementation work
 
 Carry standalone library entries through project-editor and signed-PDK bindings;

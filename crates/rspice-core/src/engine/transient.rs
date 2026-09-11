@@ -5171,7 +5171,7 @@ impl Engine {
         let mut total_solve_nanos: u128 = 0;
         let mut total_trunc_nanos: u128 = 0;
         let mut total_trap_trial_nanos: u128 = 0;
-        let mut total_history_nanos: u128 = 0;
+        let mut total_acceptance_nanos: u128 = 0;
         let mut total_merit_nanos: u128 = 0;
         let mut total_postsolve_nanos: u128 = 0;
         let mut total_postsolve_update_nanos: u128 = 0;
@@ -8620,15 +8620,6 @@ impl Engine {
                         && !uses_direct_xyce_dae
                         && (xyce_one_step_order2 || xyce_promotes_order_two);
                     let mut xyce_static_history_candidate = None;
-                    if capture_xyce_static_history && !circuit.has_xspice_devices() {
-                        xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
-                            &mut circuit,
-                            &mut matrix,
-                            &new_solution,
-                            t,
-                            transient_baseline_diag_gmin,
-                        )?);
-                    }
                     if uses_direct_xyce_dae {
                         capture_direct_xyce_histories(
                             &circuit,
@@ -8646,72 +8637,60 @@ impl Engine {
                         )
                         .map_err(SimulationError::Circuit)?;
                     }
-                    self.update_reactive_history(
-                        &mut circuit,
-                        AcceptedReactiveStep {
-                            accepted_solution: &new_solution,
-                            accepted_time: t,
-                            dt,
-                            coeff: &coeff,
-                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
-                        },
-                        TransientDeviceHistories {
-                            bjt: &mut bjt_history,
-                            jfet: &mut jfet_history,
-                            diode: &mut diode_history,
-                            mosfet: &mut mosfet_history,
-                            vdmos: &mut vdmos_history,
-                            b3soi: &mut b3soi_history,
-                            bsim3: &mut bsim3_history,
-                            bsim4: &mut bsim4_history,
-                            ekv26: &mut ekv26_history,
-                        },
-                        AcceptedReactiveSnapshots {
-                            xyce_one_step_order2,
-                            vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
-                            capacitor_accepted_states: None,
-                            mosfet_caps: None,
-                            mosfet_gate_companion_charges: None,
-                            suppress_gate_charge_history: suppress_gate_charge,
-                            tline_dc_refs: &tline_dc_refs,
-                            coupled_tline_refs: &coupled_tline_refs,
-                        },
-                        ReactiveBreakpointScheduling {
-                            breakpoints: &mut breakpoints,
-                            tstop,
-                            voltage_reltol: self.voltage_reltol(),
-                            voltage_abstol: self.voltage_abstol(),
-                            current_abstol: self.current_abstol(),
-                        },
-                        DynamicBreakpointSink {
-                            dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
-                            warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
-                            pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
-                        },
-                    )?;
+                    let acceptance_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                     let has_external_models =
                         circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
-                    let (veriloga_discontinuity, static_history) = if has_external_models {
-                        self.accept_external_transient_models(
-                            &mut circuit,
-                            &mut matrix,
-                            &mut new_solution,
-                            t,
-                            dt,
-                            &coeff,
-                            xyce_one_step_order2,
-                            capture_xyce_static_history,
-                            transient_baseline_diag_gmin,
-                            analysis_initial_step,
-                            analysis_final_step,
-                        )?
-                    } else {
-                        circuit
-                            .resistors
-                            .advance_thermal_states(&new_solution, dt)
-                            .map_err(SimulationError::Circuit)?;
-                        (false, None)
-                    };
+                    let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+                        &mut circuit,
+                        &mut matrix,
+                        &mut new_solution,
+                        t,
+                        dt,
+                        &coeff,
+                        xyce_one_step_order2,
+                        capture_xyce_static_history,
+                        transient_baseline_diag_gmin,
+                        analysis_initial_step,
+                        analysis_final_step,
+                        Some(acceptance::NativeHistoryAcceptance {
+                            histories: TransientDeviceHistories {
+                                bjt: &mut bjt_history,
+                                jfet: &mut jfet_history,
+                                diode: &mut diode_history,
+                                mosfet: &mut mosfet_history,
+                                vdmos: &mut vdmos_history,
+                                b3soi: &mut b3soi_history,
+                                bsim3: &mut bsim3_history,
+                                bsim4: &mut bsim4_history,
+                                ekv26: &mut ekv26_history,
+                            },
+                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                            snapshots: AcceptedReactiveSnapshots {
+                                xyce_one_step_order2,
+                                vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                                capacitor_accepted_states: None,
+                                mosfet_caps: None,
+                                mosfet_gate_companion_charges: None,
+                                suppress_gate_charge_history: suppress_gate_charge,
+                                tline_dc_refs: &tline_dc_refs,
+                                coupled_tline_refs: &coupled_tline_refs,
+                            },
+                            scheduling: ReactiveBreakpointScheduling {
+                                breakpoints: &mut breakpoints,
+                                tstop,
+                                voltage_reltol: self.voltage_reltol(),
+                                voltage_abstol: self.voltage_abstol(),
+                                current_abstol: self.current_abstol(),
+                            },
+                            sink: DynamicBreakpointSink {
+                                dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                                warned_dynamic_breakpoint_cap:
+                                    &mut warned_dynamic_tline_breakpoint_cap,
+                                pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                            },
+                        }),
+                    )?;
+                    total_acceptance_nanos += acceptance_phase_start.elapsed().as_nanos();
                     if let Some(history) = static_history {
                         xyce_static_history_candidate = Some(history);
                     }
@@ -9090,15 +9069,6 @@ impl Engine {
                 && !uses_direct_xyce_dae
                 && (xyce_one_step_order2 || xyce_promotes_order_two);
             let mut xyce_static_history_candidate = None;
-            if capture_xyce_static_history && !circuit.has_xspice_devices() {
-                xyce_static_history_candidate = Some(self.capture_xyce_static_residual(
-                    &mut circuit,
-                    &mut matrix,
-                    &new_solution,
-                    t,
-                    transient_baseline_diag_gmin,
-                )?);
-            }
             if uses_direct_xyce_dae {
                 capture_direct_xyce_histories(
                     &circuit,
@@ -9116,80 +9086,64 @@ impl Engine {
                 )
                 .map_err(SimulationError::Circuit)?;
             }
-            let history_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+            let acceptance_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             let cached_mosfet_gate_companion_charges = (mosfet_companion_terms_valid
                 && mosfet_companion_charges_scratch.len() == circuit.mosfets.devices.len())
             .then_some(mosfet_companion_charges_scratch.as_slice());
-            self.update_reactive_history(
-                &mut circuit,
-                AcceptedReactiveStep {
-                    accepted_solution: &new_solution,
-                    accepted_time: t,
-                    dt,
-                    coeff: &coeff,
-                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
-                },
-                TransientDeviceHistories {
-                    bjt: &mut bjt_history,
-                    jfet: &mut jfet_history,
-                    diode: &mut diode_history,
-                    mosfet: &mut mosfet_history,
-                    vdmos: &mut vdmos_history,
-                    b3soi: &mut b3soi_history,
-                    bsim3: &mut bsim3_history,
-                    bsim4: &mut bsim4_history,
-                    ekv26: &mut ekv26_history,
-                },
-                AcceptedReactiveSnapshots {
-                    xyce_one_step_order2,
-                    vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
-                    capacitor_accepted_states: capacitor_accepted_states_valid
-                        .then_some(capacitor_accepted_states_scratch.as_slice()),
-                    mosfet_caps: mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
-                    mosfet_gate_companion_charges: cached_mosfet_gate_companion_charges,
-                    suppress_gate_charge_history: suppress_gate_charge,
-                    tline_dc_refs: &tline_dc_refs,
-                    coupled_tline_refs: &coupled_tline_refs,
-                },
-                ReactiveBreakpointScheduling {
-                    breakpoints: &mut breakpoints,
-                    tstop,
-                    voltage_reltol: self.voltage_reltol(),
-                    voltage_abstol: self.voltage_abstol(),
-                    current_abstol: self.current_abstol(),
-                },
-                DynamicBreakpointSink {
-                    dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
-                    warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
-                    pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
-                },
-            )?;
-            total_history_nanos += history_phase_start.elapsed().as_nanos();
-            let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-            // All external participants validate before their accepted state advances.
             let has_external_models =
                 circuit.has_xspice_devices() || circuit.has_any_veriloga_devices();
-            let (veriloga_discontinuity, static_history) = if has_external_models {
-                self.accept_external_transient_models(
-                    &mut circuit,
-                    &mut matrix,
-                    &mut new_solution,
-                    t,
-                    dt,
-                    &coeff,
-                    xyce_one_step_order2,
-                    capture_xyce_static_history,
-                    transient_baseline_diag_gmin,
-                    analysis_initial_step,
-                    analysis_final_step,
-                )?
-            } else {
-                circuit
-                    .resistors
-                    .advance_thermal_states(&new_solution, dt)
-                    .map_err(SimulationError::Circuit)?;
-                (false, None)
-            };
+            let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+                &mut circuit,
+                &mut matrix,
+                &mut new_solution,
+                t,
+                dt,
+                &coeff,
+                xyce_one_step_order2,
+                capture_xyce_static_history,
+                transient_baseline_diag_gmin,
+                analysis_initial_step,
+                analysis_final_step,
+                Some(acceptance::NativeHistoryAcceptance {
+                    histories: TransientDeviceHistories {
+                        bjt: &mut bjt_history,
+                        jfet: &mut jfet_history,
+                        diode: &mut diode_history,
+                        mosfet: &mut mosfet_history,
+                        vdmos: &mut vdmos_history,
+                        b3soi: &mut b3soi_history,
+                        bsim3: &mut bsim3_history,
+                        bsim4: &mut bsim4_history,
+                        ekv26: &mut ekv26_history,
+                    },
+                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
+                    snapshots: AcceptedReactiveSnapshots {
+                        xyce_one_step_order2,
+                        vbic_snapshots: Some(vbic_snapshot_cache.as_slice()),
+                        capacitor_accepted_states: capacitor_accepted_states_valid
+                            .then_some(capacitor_accepted_states_scratch.as_slice()),
+                        mosfet_caps: mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
+                        mosfet_gate_companion_charges: cached_mosfet_gate_companion_charges,
+                        suppress_gate_charge_history: suppress_gate_charge,
+                        tline_dc_refs: &tline_dc_refs,
+                        coupled_tline_refs: &coupled_tline_refs,
+                    },
+                    scheduling: ReactiveBreakpointScheduling {
+                        breakpoints: &mut breakpoints,
+                        tstop,
+                        voltage_reltol: self.voltage_reltol(),
+                        voltage_abstol: self.voltage_abstol(),
+                        current_abstol: self.current_abstol(),
+                    },
+                    sink: DynamicBreakpointSink {
+                        dynamic_breakpoints_added: &mut dynamic_tline_breakpoints_added,
+                        warned_dynamic_breakpoint_cap: &mut warned_dynamic_tline_breakpoint_cap,
+                        pending_dynamic_breakpoints: &mut pending_dynamic_tline_breakpoints,
+                    },
+                }),
+            )?;
+            total_acceptance_nanos += acceptance_phase_start.elapsed().as_nanos();
+            let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if let Some(history) = static_history {
                 xyce_static_history_candidate = Some(history);
             }
@@ -9576,7 +9530,7 @@ impl Engine {
         }
         let transient_wall = transient_wall_start.elapsed();
         log::debug!(
-            "Transient Newton phases: {} step attempts, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            "Transient Newton phases: {} step attempts, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, acceptance {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
             total_step_attempts,
             total_merit_trials,
             total_failed_attempts,
@@ -9592,7 +9546,7 @@ impl Engine {
             total_postloop_nanos as f64 * 1e-9,
             total_trunc_nanos as f64 * 1e-9,
             total_trap_trial_nanos as f64 * 1e-9,
-            total_history_nanos as f64 * 1e-9,
+            total_acceptance_nanos as f64 * 1e-9,
             total_tail_nanos as f64 * 1e-9,
             total_middle_nanos as f64 * 1e-9,
             (transient_wall.as_nanos().saturating_sub(
@@ -9605,7 +9559,7 @@ impl Engine {
                     + total_postloop_nanos
                     + total_trunc_nanos
                     + total_trap_trial_nanos
-                    + total_history_nanos
+                    + total_acceptance_nanos
                     + total_tail_nanos
                     + total_middle_nanos
             )) as f64

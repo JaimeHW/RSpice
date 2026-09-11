@@ -1,11 +1,21 @@
-//! The acceptance barrier for XSPICE, HDL and thermal resistor participants.
-//! Other native SPICE history and solver-controller acceptance remain in the parent
-//! stepper, along with observation and analog-task publication. External
-//! reversible resources join this barrier through registered undo images.
+//! The model acceptance barrier for native SPICE, XSPICE and HDL participants.
+//! Solver-controller acceptance, observation and task publication remain in the
+//! parent stepper. Reversible external resources join through registered undo images.
 
 use super::*;
 
+/// Borrowed native state carried through the same validation barrier as HDL.
+/// Preparation owns only new values; accepted history storage stays in place.
+pub(super) struct NativeHistoryAcceptance<'state, 'inputs> {
+    pub histories: TransientDeviceHistories<'state>,
+    pub bsim4_trnqs_coeff: &'inputs CompanionCoefficients,
+    pub snapshots: AcceptedReactiveSnapshots<'inputs>,
+    pub scheduling: ReactiveBreakpointScheduling<'state>,
+    pub sink: DynamicBreakpointSink<'state>,
+}
+
 impl Engine {
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn accept_external_transient_models(
         &self,
@@ -20,6 +30,38 @@ impl Engine {
         baseline_diag_gmin: Value,
         initial_step: bool,
         final_step: bool,
+    ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+        self.accept_transient_models(
+            circuit,
+            matrix,
+            solution,
+            time,
+            dt,
+            coefficients,
+            xyce_one_step_order2,
+            capture_static_history,
+            baseline_diag_gmin,
+            initial_step,
+            final_step,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn accept_transient_models(
+        &self,
+        circuit: &mut crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &mut [Value],
+        time: Value,
+        dt: Value,
+        coefficients: &CompanionCoefficients,
+        xyce_one_step_order2: bool,
+        capture_static_history: bool,
+        baseline_diag_gmin: Value,
+        initial_step: bool,
+        final_step: bool,
+        mut native: Option<NativeHistoryAcceptance<'_, '_>>,
     ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
         if let Some(error) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(error));
@@ -49,7 +91,20 @@ impl Engine {
                 // accepted model histories need not advance to project them.
                 projected = circuit.project_xspice_voltage_outputs(solution, circuit.num_nodes());
             }
-            let static_history = if has_xspice && capture_static_history {
+            if !projected.is_empty() {
+                if let Some(native) = native.as_mut() {
+                    native.snapshots.vbic_snapshots = None;
+                    native.snapshots.capacitor_accepted_states = None;
+                    native.snapshots.mosfet_caps = None;
+                    native.snapshots.mosfet_gate_companion_charges = None;
+                }
+                // Static-history capture performs this refresh itself. Other
+                // paths must update native trial bias after an output projection.
+                if !capture_static_history && circuit.has_nonlinear_devices() {
+                    self.update_transient_nonlinear_devices(circuit, solution)?;
+                }
+            }
+            let static_history = if capture_static_history {
                 Some(self.capture_xyce_static_residual(
                     circuit,
                     matrix,
@@ -78,6 +133,23 @@ impl Engine {
                 .resistors
                 .prepare_thermal_step(solution, dt)
                 .map_err(SimulationError::Circuit)?;
+            let prepared_native = native
+                .as_ref()
+                .map(|native| {
+                    self.prepare_reactive_history(
+                        circuit,
+                        AcceptedReactiveStep {
+                            accepted_solution: solution,
+                            accepted_time: time,
+                            dt,
+                            coeff: coefficients,
+                            bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
+                        },
+                        &native.histories,
+                        native.snapshots,
+                    )
+                })
+                .transpose()?;
             let discontinuity = circuit.accept_model_transient_timestep(
                 time,
                 dt,
@@ -86,6 +158,23 @@ impl Engine {
                 initial_step,
                 final_step,
             )?;
+            if let (Some(native), Some(prepared)) = (native, prepared_native) {
+                self.commit_reactive_history(
+                    circuit,
+                    AcceptedReactiveStep {
+                        accepted_solution: solution,
+                        accepted_time: time,
+                        dt,
+                        coeff: coefficients,
+                        bsim4_trnqs_coeff: native.bsim4_trnqs_coeff,
+                    },
+                    native.histories,
+                    native.snapshots,
+                    native.scheduling,
+                    native.sink,
+                    prepared,
+                );
+            }
             circuit.resistors.commit_thermal_step(thermal);
             // The joint HDL barrier has completed all fallible operations.
             // XSPICE promotion only swaps/copies already evaluated histories.
@@ -217,9 +306,24 @@ mod tests {
         Vec<Value>,
         Vec<Arc<ProbeResource>>,
     ) {
+        fixture_with_deck(fail_xspice, "")
+    }
+
+    fn fixture_with_deck(
+        fail_xspice: bool,
+        extra_deck: &str,
+    ) -> (
+        Engine,
+        crate::CircuitData,
+        crate::solver::StaticMatrix,
+        Vec<Value>,
+        Vec<Arc<ProbeResource>>,
+    ) {
         let engine = Engine::new(crate::SimulationConfig::default());
-        let deck =
-            Netlist::parse("barrier\nRload p 0 1k\nRadc adc 0 1k\nRbad bad 0 1k\n.end\n").unwrap();
+        let deck = Netlist::parse(&format!(
+            "barrier\nRload p 0 1k\nRadc adc 0 1k\nRbad bad 0 1k\n{extra_deck}\n.end\n"
+        ))
+        .unwrap();
         let mut circuit = engine.build_circuit(&deck).unwrap();
         let p = circuit.get_node_by_name("p").unwrap();
         let adc = circuit.get_node_by_name("adc").unwrap();
@@ -735,6 +839,208 @@ mod tests {
                     "{source}: thermal state at {time:e} is {temperature}, expected {expected}"
                 );
             }
+        }
+    }
+    fn joint_native_step(
+        engine: &Engine,
+        circuit: &mut crate::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &mut [Value],
+        bjt: &mut BjtTransientHistory,
+        time: Value,
+    ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+        let dt = time;
+        let coefficients = CompanionCoefficients::backward_euler();
+        circuit
+            .prepare_veriloga_timepoint(time, dt, &coefficients, false, false)
+            .unwrap();
+        // A legitimate capacitor cache from the pre-projection 1 V candidate.
+        let capacitor_candidate = [CapacitorAcceptedState {
+            voltage: 1.0,
+            current: 1e-9 / dt,
+        }];
+        engine.accept_transient_models(
+            circuit,
+            matrix,
+            solution,
+            time,
+            dt,
+            &coefficients,
+            false,
+            false,
+            0.0,
+            false,
+            false,
+            Some(NativeHistoryAcceptance {
+                histories: TransientDeviceHistories {
+                    bjt,
+                    jfet: &mut JfetTransientHistory::default(),
+                    diode: &mut DiodeTransientHistory::default(),
+                    mosfet: &mut MosfetTransientHistory::default(),
+                    vdmos: &mut VdmosTransientHistory::default(),
+                    b3soi: &mut B3SoiTransientHistory::default(),
+                    bsim3: &mut Bsim3TransientHistory::default(),
+                    bsim4: &mut Bsim4TransientHistory::default(),
+                    ekv26: &mut Ekv26TransientHistory::default(),
+                },
+                bsim4_trnqs_coeff: &coefficients,
+                snapshots: AcceptedReactiveSnapshots {
+                    xyce_one_step_order2: false,
+                    vbic_snapshots: None,
+                    capacitor_accepted_states: Some(&capacitor_candidate),
+                    mosfet_caps: None,
+                    mosfet_gate_companion_charges: None,
+                    suppress_gate_charge_history: false,
+                    tline_dc_refs: &[],
+                    coupled_tline_refs: &[],
+                },
+                scheduling: ReactiveBreakpointScheduling {
+                    breakpoints: &mut BreakpointManager::new(),
+                    tstop: 3e-9,
+                    voltage_reltol: 1e-3,
+                    voltage_abstol: 1e-6,
+                    current_abstol: 1e-12,
+                },
+                sink: DynamicBreakpointSink {
+                    dynamic_breakpoints_added: &mut 0,
+                    warned_dynamic_breakpoint_cap: &mut false,
+                    pending_dynamic_breakpoints: &mut Vec::new(),
+                },
+            }),
+        )
+    }
+
+    #[test]
+    fn joint_native_acceptance_preserves_histories_across_external_and_native_refusals() {
+        for fail_xspice in [false, true] {
+            let (engine, mut circuit, mut matrix, mut solution, resources) = fixture_with_deck(
+                fail_xspice,
+                "Cmemory p 0 1n\nLmemory p 0 1u\nQmemory p qb 0 qm\nRbase qb 0 1k\n.model qm NPN(IS=1e-14 CJE=1p CJC=2p TF=1n)\nBmemory integral 0 V=sdt(V(p))\nRintegral integral 0 1k\nBcheck checked 0 I={exp(1000*V(failnative))}\nRchecked checked 0 1k\nRfailnative failnative 0 1k",
+            );
+            let coeff = CompanionCoefficients::backward_euler();
+            circuit
+                .behavioral_sources
+                .accept_transient_step(&solution, 0.0)
+                .unwrap();
+            let mut bjt = Engine::initialize_bjt_history(
+                &circuit,
+                &solution,
+                ReactiveHistorySeed::SolvedBias,
+            );
+            circuit
+                .prepare_veriloga_timepoint(0.0, 0.0, &coeff, true, false)
+                .unwrap();
+            engine
+                .accept_transient_models(
+                    &mut circuit,
+                    &mut matrix,
+                    &mut solution,
+                    0.0,
+                    0.0,
+                    &coeff,
+                    false,
+                    false,
+                    0.0,
+                    true,
+                    false,
+                    None,
+                )
+                .unwrap();
+            let before = bjt.clone();
+            let capacitors = format!("{:?}", circuit.capacitors);
+            let inductors = format!("{:?}", circuit.inductors);
+            let p = circuit.get_node_by_name("p").unwrap() - 1;
+            let bad = circuit.get_node_by_name("bad").unwrap() - 1;
+            let adc = circuit.get_node_by_name("adc").unwrap() - 1;
+            let failnative = circuit.get_node_by_name("failnative").unwrap() - 1;
+            let qb = circuit.bjts.devices[0].node_base - 1;
+            let branch = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
+            solution[p] = 1.0;
+            solution[bad] = 2.0;
+            solution[adc] = 0.6;
+            solution[qb] = 0.6;
+            solution[branch] = 2e-3;
+            let time = 0.65e-9;
+            for native_failure in [false, true] {
+                if native_failure {
+                    solution[bad] = 0.0;
+                    solution[failnative] = 1.0;
+                }
+                let error = joint_native_step(
+                    &engine,
+                    &mut circuit,
+                    &mut matrix,
+                    &mut solution,
+                    &mut bjt,
+                    time,
+                )
+                .unwrap_err();
+                let expected = if native_failure {
+                    "bcheck"
+                } else if fail_xspice {
+                    "a1"
+                } else {
+                    "second"
+                };
+                assert!(
+                    error.to_string().to_ascii_lowercase().contains(expected),
+                    "{error}"
+                );
+                assert_eq!(bjt, before);
+                assert_eq!(format!("{:?}", circuit.capacitors), capacitors);
+                assert_eq!(format!("{:?}", circuit.inductors), inductors);
+                assert_eq!(solution[p], 1.0);
+                assert!(
+                    resources
+                        .iter()
+                        .all(|resource| *resource.value.lock().unwrap() == 1)
+                );
+                assert!(
+                    circuit
+                        .mixed_signal_hosts
+                        .iter()
+                        .all(|host| host.read_digital("q").unwrap() == "0")
+                );
+                let mut effects = 0;
+                circuit
+                    .visit_accepted_analog_tasks(&mut |_| effects += 1)
+                    .unwrap();
+                assert_eq!(effects, 0);
+            }
+            solution[failnative] = 0.0;
+            joint_native_step(
+                &engine,
+                &mut circuit,
+                &mut matrix,
+                &mut solution,
+                &mut bjt,
+                time,
+            )
+            .unwrap();
+            assert_ne!(bjt, before);
+            assert_eq!(
+                circuit.capacitors.v_prev,
+                [0.75],
+                "the pre-projection capacitor cache must be invalidated"
+            );
+            assert!((circuit.capacitors.i_prev[0] - 1e-9 * 0.75 / time).abs() < 1e-12);
+            assert_eq!(circuit.inductors.i_prev, [2e-3]);
+            assert_eq!(circuit.inductors.v_prev, [0.75]);
+            let integral = circuit.behavioral_sources.voltage_sources[0]
+                .evaluate(&solution, time)
+                .unwrap();
+            assert!((integral - 0.5 * 0.75 * time).abs() < 1e-24);
+            assert!(
+                resources
+                    .iter()
+                    .all(|resource| *resource.value.lock().unwrap() == 2)
+            );
+            assert!(
+                circuit
+                    .mixed_signal_hosts
+                    .iter()
+                    .all(|host| host.read_digital("q").unwrap() == "1")
+            );
         }
     }
 }
