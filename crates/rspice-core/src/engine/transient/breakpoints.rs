@@ -111,7 +111,12 @@ pub(super) fn fit_model_interval(
     if time + requested <= time {
         return Err(refuse());
     }
-    let min_count = (gap / persistent_maximum).ceil().max(1.0);
+    let mut min_count = (gap / persistent_maximum).ceil().max(1.0);
+    // Division can round down to an integer although that many maximum steps
+    // fall just short of the event. Count the remaining interval exactly.
+    if persistent_maximum.mul_add(-min_count, gap) > 0.0 {
+        min_count += 1.0;
+    }
     let max_count = (gap / minimum).floor();
     if min_count > max_count {
         return Err(refuse());
@@ -1269,6 +1274,12 @@ impl Engine {
 mod tests {
     #[test]
     fn model_interval_preserves_both_bounds_and_a_representable_event_gap() {
+        // The quotient rounds to 249 although 249 maximum steps fall short.
+        assert_eq!(
+            fit_model_interval(2e-11_f64.next_up(), 5e-9, 2e-11, 1e-20, 2e-11, 2e-11, false)
+                .unwrap(),
+            2e-11,
+        );
         let time = 2.010059999998316589e-8;
         let target = 2.010060000000000067e-8;
         let dt = fit_model_interval(
