@@ -2523,6 +2523,182 @@ fn legacy_junction_exponentials_preserve_tiny_and_large_finite_currents() {
 }
 
 #[test]
+fn cryogenic_bjt_coefficients_reach_terminal_currents_and_diffusion_charge() {
+    use rspice_core::Complex64;
+    for (dialect, split) in [
+        (SpiceDialect::Ngspice, false),
+        (SpiceDialect::Ngspice, true),
+        (SpiceDialect::Xyce, false),
+    ] {
+        let temperature = 10.0;
+        let vt = if dialect == SpiceDialect::Xyce {
+            rspice_core::constants::XYCE_K_BOLTZMANN * temperature
+                / rspice_core::constants::XYCE_Q_ELECTRON
+        } else {
+            rspice_core::constants::thermal_voltage(temperature)
+        };
+        let ratio = temperature / 300.15;
+        let thermal = (ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln();
+        let beta = ratio.powf(-0.7);
+        let bf = 100.0 * beta;
+        let br = 2.0 * beta;
+        let bc_area = if dialect == SpiceDialect::Xyce {
+            2.0
+        } else {
+            3.0
+        };
+        // Direct log-domain equations, independently anchored by 65-digit
+        // Decimal evaluations below; no stored f64 saturation coefficient.
+        let branches = |vb: f64| {
+            [
+                (if split { 2e-14 } else { 1e-14 }, 2.0, 1.0, vb, false),
+                (
+                    if split { 7e-14 } else { 1e-14 },
+                    if split {
+                        bc_area
+                    } else if dialect == SpiceDialect::Xyce {
+                        2.0
+                    } else {
+                        2.0 * bc_area
+                    },
+                    1.0,
+                    vb - 0.003,
+                    false,
+                ),
+                (1e-16, 2.0, 1.2, vb, true),
+                (2e-17, bc_area, 1.0, vb - 0.003, true),
+                (3e-16, bc_area, 1.4, vb - 0.003, true),
+                (5e-15, if split { 5.0 } else { 2.0 }, 1.0, 1.1, false),
+            ]
+            .map(
+                |(nominal, area, n, voltage, leakage): (f64, f64, f64, f64, bool)| {
+                    let log_is = (nominal * area * 3.0).ln() + thermal / n
+                        - if leakage { beta.ln() } else { 0.0 };
+                    let exponential = (log_is + voltage / (n * vt)).exp();
+                    (exponential - log_is.exp(), exponential / (n * vt))
+                },
+            )
+        };
+        if dialect == SpiceDialect::Ngspice {
+            let golden = if split {
+                [
+                    0.00017589292587624807,
+                    2.8410195418056978e-5,
+                    2.4121464932853505e-9,
+                    7.503594100408108e-10,
+                    7.319227689842334e-11,
+                    0.00010993307867265505,
+                ]
+            } else {
+                [
+                    8.794646293812403e-5,
+                    8.117198690873422e-6,
+                    2.4121464932853505e-9,
+                    7.503594100408108e-10,
+                    7.319227689842334e-11,
+                    4.397323146906202e-5,
+                ]
+            };
+            for ((current, _), expected) in branches(1.1).into_iter().zip(golden) {
+                assert!((current / expected - 1.0).abs() < 2e-12);
+            }
+        }
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            temperature,
+            convergence_config: ConvergenceConfig {
+                gmin_target: 0.0,
+                junction_gmin_target: 0.0,
+                voltage_reltol: 1e-10,
+                current_abstol: 1e-18,
+                ..Default::default()
+            },
+            integration_method:
+                rspice_core::numerics::integration::IntegrationMethod::BackwardEuler,
+            locked_time_grid: Some(std::sync::Arc::new(
+                (0..=4).map(|i| f64::from(i) * 1e-8).collect(),
+            )),
+            ..Default::default()
+        });
+        for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let ng = dialect == SpiceDialect::Ngspice;
+            let response = |vb| {
+                let [
+                    (f, gf),
+                    (r, gr),
+                    (be, gbe),
+                    (bci, gbci),
+                    (bcn, gbcn),
+                    (sub, _),
+                ] = branches(vb);
+                let sub = if ng { sub } else { 0.0 };
+                let dc = [
+                    p * (-f + r * (1.0 + 1.0 / br) + bci + bcn + sub),
+                    -p * (f / bf + r / br + be + bci + bcn),
+                    -p * sub,
+                ];
+                let omega = core::f64::consts::TAU * 1e6;
+                let ac = [
+                    Complex64::new(-gf + gr * (1.0 + 1.0 / br) + gbci + gbcn, omega * 2e-9 * gr),
+                    Complex64::new(
+                        -gf / bf - gr / br - gbe - gbci - gbcn,
+                        -omega * (1e-9 * gf + 2e-9 * gr),
+                    ),
+                    Complex64::new(0.0, 0.0),
+                ];
+                (dc, ac, [p * 1e-9 * f, p * 2e-9 * r])
+            };
+            let geometry = if ng { "AREAB=3 AREAC=5" } else { "" };
+            let substrate = if ng { "ISS=5e-15 NS=1 SUBS=1" } else { "" };
+            let split_fields = if split { "IBE=2e-14 IBC=7e-14" } else { "" };
+            let deck=Netlist::parse(&format!("Cryogenic junction range\nVC c 0 {}\nVB b 0 PWL(0 {} 40n {}) DC {} AC 1\nVS s 0 {}\nQ1 c b 0 s qm AREA=2 M=3 {geometry}\n.model qm {kind}(IS=1e-14 BF=100 BR=2 XTB=-0.7 ISE=1e-16 NE=1.2 IBCI=2e-17 ISC=3e-16 NC=1.4 TF=1n TR=2n {substrate} {split_fields})\n.end",p*0.003,p*1.1,p*1.1005,p*1.1,p*1.103)).unwrap();
+            let dc = engine.run_dc_op(&deck).unwrap();
+            let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+            let (expected_dc, expected_ac, _) = response(1.1);
+            for (i, name) in ["VC", "VB", "VS"].iter().enumerate() {
+                let current = dc.branch_current_named(name).unwrap();
+                assert!(
+                    (current - expected_dc[i]).abs() < expected_dc[i].abs() * 1e-9 + 1e-18,
+                    "{dialect:?} split={split} {kind} {name}: {current:e} != {:e}",
+                    expected_dc[i]
+                );
+                let branch = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|key| key.eq_ignore_ascii_case(name))
+                    .unwrap();
+                assert!(
+                    (ac[0].currents[branch] - expected_ac[i]).norm()
+                        < expected_ac[i].norm() * 1e-9 + 1e-18,
+                    "{dialect:?} split={split} {kind} {name} AC: {:?} != {:?}",
+                    ac[0].currents[branch],
+                    expected_ac[i]
+                );
+            }
+            if split && p == 1.0 {
+                let result = engine.run_tran(&deck, 40e-9, 10e-9).unwrap();
+                let voltage = result.try_voltage_waveform_named("b").unwrap();
+                let currents = ["VC", "VB"]
+                    .map(|name| result.try_branch_current_waveform_named(name).unwrap());
+                for i in 1..result.time.len() {
+                    let (mut expected, _, q) = response(voltage[i]);
+                    let (_, _, previous) = response(voltage[i - 1]);
+                    let dt = result.time[i] - result.time[i - 1];
+                    expected[0] += (q[1] - previous[1]) / dt;
+                    expected[1] -= (q[0] - previous[0] + q[1] - previous[1]) / dt;
+                    for terminal in 0..2 {
+                        assert!(
+                            (currents[terminal][i] - expected[terminal]).abs()
+                                < expected[terminal].abs() * 1e-9 + 1e-18
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn legacy_split_currents_reach_dc_ac_and_transient() {
     use rspice_core::Complex64;
     // Independent ngspice 46 DC measurements. AC is checked against the

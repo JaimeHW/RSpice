@@ -422,7 +422,8 @@ impl Bjt {
                 branch.d_internal[index] = -gmin;
                 if let Some(junctions) = &self.legacy_junction_params {
                     let polarity = self.polarity() * self.substrate_topology.ngspice_sign();
-                    let (current, conductance) = self.diode_iv_with_is(
+                    let (current, conductance) = self.legacy_junction_iv(
+                        LegacyCurrent::Substrate,
                         junctions.substrate_current,
                         polarity * (vsi - connection),
                         junctions.substrate_emission.unwrap_or(1.0),

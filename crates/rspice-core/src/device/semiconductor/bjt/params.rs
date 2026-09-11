@@ -644,6 +644,129 @@ impl Bjt {
             .unwrap_or(self.is * self.isrr.max(0.0))
     }
 
+    fn refresh_legacy_current_scales(
+        &mut self,
+        factlog: Value,
+        log_beta_scale: Value,
+        reverse_ratio: Value,
+        bc_area: Value,
+        substrate_area: Value,
+    ) {
+        let retain = |mapped: Value, factors: &[Value], exponent: Value| {
+            if mapped.is_normal() || factors.iter().any(|value| *value <= 0.0) {
+                return None;
+            }
+            let (mantissa, binary_exponent) = if factors.iter().all(|v| v.is_finite()) {
+                crate::numerics::product_binary_normalization(factors, &[])
+            } else {
+                (Value::NAN, 0)
+            };
+            Some(LegacyCurrentScale {
+                mantissa,
+                binary_exponent,
+                thermal_exponent: exponent,
+            })
+        };
+        let mut scales = [None; 6];
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            let junctions = self.legacy_junction_params.as_deref();
+            let split = junctions
+                .and_then(|j| j.split_saturation)
+                .filter(|_| !self.xyce_compatibility);
+            let (forward, forward_exponent) = split
+                .map_or((self.is_nominal, factlog), |(be, _)| {
+                    (be, factlog / self.nf_nominal)
+                });
+            scales[LegacyCurrent::Forward as usize] =
+                retain(self.is, &[forward, self.area, self.m], forward_exponent);
+            scales[LegacyCurrent::Reverse as usize] = if let Some((_, bc)) = split {
+                retain(
+                    self.legacy_reverse_saturation_current(),
+                    &[bc, bc_area, self.m],
+                    factlog / self.nr_nominal,
+                )
+            } else {
+                // Even a normal final product may have lost precision in the
+                // intermediate IS or reverse geometry multiplication.
+                let mapped = if self.is.is_normal() && self.isrr.is_normal() {
+                    self.legacy_reverse_saturation_current()
+                } else {
+                    0.0
+                };
+                retain(
+                    mapped,
+                    &[
+                        self.is_nominal,
+                        self.area,
+                        self.m,
+                        reverse_ratio,
+                        if self.xyce_compatibility {
+                            1.0
+                        } else {
+                            bc_area
+                        },
+                    ],
+                    factlog,
+                )
+            };
+            for (kind, mapped, nominal, area, emission) in [
+                (
+                    LegacyCurrent::BaseLeakage,
+                    self.iben,
+                    self.iben_nominal,
+                    self.area,
+                    self.nen,
+                ),
+                (
+                    LegacyCurrent::CollectorIdealLeakage,
+                    self.ibci,
+                    self.ibci_nominal,
+                    bc_area,
+                    self.nci,
+                ),
+                (
+                    LegacyCurrent::CollectorLeakage,
+                    self.ibcn,
+                    self.ibcn_nominal,
+                    bc_area,
+                    self.ncn,
+                ),
+            ] {
+                scales[kind as usize] = retain(
+                    mapped,
+                    &[nominal, area, self.m],
+                    factlog / emission.max(1e-12) - log_beta_scale,
+                );
+            }
+            if !self.xyce_compatibility {
+                if let Some(junctions) = junctions {
+                    let (area, exponent) = if split.is_some() {
+                        (substrate_area, factlog / self.nr_nominal)
+                    } else {
+                        (self.area, factlog)
+                    };
+                    scales[LegacyCurrent::Substrate as usize] = retain(
+                        junctions.substrate_current,
+                        &[junctions.substrate_saturation, area, self.m],
+                        exponent,
+                    );
+                }
+            }
+        }
+        if scales.iter().any(Option::is_some) {
+            let junctions = self
+                .legacy_junction_params
+                .get_or_insert_with(Default::default);
+            if let Some(stored) = &mut junctions.current_scales {
+                **stored = scales;
+            } else {
+                junctions.current_scales = Some(Box::new(scales));
+            }
+        } else if let Some(junctions) = &mut self.legacy_junction_params {
+            junctions.current_scales = None;
+        }
+    }
+
     pub(super) fn refresh_operating_scaling_for(&mut self, temp: Value) {
         let temp = self.mapped_temperature(temp).0;
         self.clear_thermal_variant_cache();
@@ -1006,6 +1129,13 @@ impl Bjt {
         self.iben = (iben_temp * current_scale).max(0.0);
         self.ibci = (ibci_temp * current_scale).max(0.0);
         self.ibcn = (ibcn_temp * current_scale).max(0.0);
+        self.refresh_legacy_current_scales(
+            legacy_factlog,
+            log_beta_scale,
+            isrr_temp,
+            bc_area,
+            substrate_area,
+        );
         self.vbbe = if vbbe_temp.is_finite() {
             vbbe_temp
         } else {
@@ -2153,6 +2283,55 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn legacy_current_range_survives_temperature_refresh_and_overflow() {
+        let mut model = model_with(&[("IS", 1e-14)]);
+        for temperature in [10.0, 300.15, 17.5, 300.15] {
+            model.set_temperature(temperature);
+            let ratio = temperature / 300.15;
+            let log_is = 1e-14_f64.ln() + (ratio - 1.0) * 1.11 / model.vt + 3.0 * ratio.ln();
+            let expected = (log_is + 1.1 / model.vt).exp() - log_is.exp();
+            let (current, slope) =
+                model.legacy_junction_iv(LegacyCurrent::Forward, model.is, 1.1, 1.0);
+            assert!((current / expected - 1.0).abs() < 1e-11);
+            assert!((slope / ((log_is + 1.1 / model.vt).exp() / model.vt) - 1.0).abs() < 1e-11);
+            let (_, critical, _) = model.legacy_limiting_parameters(0.0);
+            let expected_critical =
+                model.vt * (model.vt.ln() - 0.5 * core::f64::consts::LN_2 - log_is);
+            assert!((critical - expected_critical).abs() < 1e-12);
+            assert_eq!(
+                model.legacy_current_scale(LegacyCurrent::Forward).is_some(),
+                temperature != 300.15
+            );
+        }
+        model.set_temperature(10.0);
+        model = model.with_params(&[("IS".to_string(), 0.0)].into_iter().collect());
+        assert_eq!(
+            model.legacy_junction_iv(LegacyCurrent::Forward, model.is, 1.1, 1.0),
+            (0.0, 0.0)
+        );
+        assert!(model.legacy_current_scale(LegacyCurrent::Forward).is_none());
+
+        // AREA*IS overflows, but tiny signed bias and a large emission
+        // coefficient give finite current AND differential conductance.
+        for area in [1.0, 4.0] {
+            let large = model_with(&[("IS", 1e308), ("NF", 1e6)])
+                .with_instance_params(&[("AREA".to_string(), area)]);
+            assert_eq!(large.is.is_infinite(), area == 4.0);
+            let nvt = large.nf * large.vt;
+            for voltage in [-1e-10, -1e-320, 0.0, 1e-320, 1e-10] {
+                let (current, slope) =
+                    large.legacy_junction_iv(LegacyCurrent::Forward, large.is, voltage, large.nf);
+                // All biases are below 4e-15 nVT, where the linear term
+                // differs from exp_m1 by less than 2e-15 relatively.
+                let expected = (1e308 * voltage / nvt) * area;
+                assert!((current - expected).abs() <= expected.abs() * 1e-13);
+                assert!((slope / ((1e308 / nvt) * area) - 1.0).abs() < 1e-13);
+            }
+            assert_eq!(large.legacy_limiting_parameters(0.0).1, 0.0);
         }
     }
 

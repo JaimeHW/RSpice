@@ -17,10 +17,11 @@ impl Bjt {
             0.0
         };
         let reverse_is = self.legacy_reverse_saturation_current();
-        let ifi = self.diode_current(vbe_eff, self.nf) + gmin * vbe_eff;
-        let iri = self.diode_current_with_is(reverse_is, vbc_eff, self.nr) + gmin * vbc_eff;
-        let gfi = self.diode_conductance(vbe_eff, self.nf) + gmin;
-        let gri = self.diode_conductance_with_is(reverse_is, vbc_eff, self.nr) + gmin;
+        let (ifi, gfi) = self.legacy_junction_iv(LegacyCurrent::Forward, self.is, vbe_eff, self.nf);
+        let (iri, gri) =
+            self.legacy_junction_iv(LegacyCurrent::Reverse, reverse_is, vbc_eff, self.nr);
+        let (ifi, gfi) = (ifi + gmin * vbe_eff, gfi + gmin);
+        let (iri, gri) = (iri + gmin * vbc_eff, gri + gmin);
 
         let raw_q1_inv =
             1.0 - if self.var.is_finite() && self.var > 0.0 {
@@ -388,10 +389,28 @@ impl Bjt {
         transport: TransportChargeState,
         vbc_eff: Value,
     ) -> BaseCollectorCurrentState {
-        let (ibci, gbci) =
-            self.vbic_diode_iv(self.ibci, vbc_eff, self.nci, self.vbic_junction_limits.ibci);
-        let (ibcn, gbcn) =
-            self.vbic_diode_iv(self.ibcn, vbc_eff, self.ncn, self.vbic_junction_limits.ibcn);
+        let ((ibci, gbci), (ibcn, gbcn)) = if self.charge_model == BjtChargeModel::LegacyGummelPoon
+        {
+            (
+                self.legacy_junction_iv(
+                    LegacyCurrent::CollectorIdealLeakage,
+                    self.ibci,
+                    vbc_eff,
+                    self.nci,
+                ),
+                self.legacy_junction_iv(
+                    LegacyCurrent::CollectorLeakage,
+                    self.ibcn,
+                    vbc_eff,
+                    self.ncn,
+                ),
+            )
+        } else {
+            (
+                self.vbic_diode_iv(self.ibci, vbc_eff, self.nci, self.vbic_junction_limits.ibci),
+                self.vbic_diode_iv(self.ibcn, vbc_eff, self.ncn, self.vbic_junction_limits.ibcn),
+            )
+        };
         let ibcj = ibci + ibcn;
         let dibcj_dvbc_eff = gbci + gbcn;
 
@@ -518,11 +537,11 @@ impl Bjt {
         let legacy_model = self.charge_model == BjtChargeModel::LegacyGummelPoon;
         let (ibe_normal, dibe_normal_dvbe) = if legacy_model {
             let ideal_scale = 1.0 / self.bf.max(1e-18);
+            let (iben, gben) =
+                self.legacy_junction_iv(LegacyCurrent::BaseLeakage, self.iben, vbe_eff, self.nen);
             (
-                transport.ifi * ideal_scale
-                    + self.diode_current_with_is(self.iben, vbe_eff, self.nen),
-                transport.gfi * ideal_scale
-                    + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen),
+                transport.ifi * ideal_scale + iben,
+                transport.gfi * ideal_scale + gben,
             )
         } else {
             let (ibei, gbei) =

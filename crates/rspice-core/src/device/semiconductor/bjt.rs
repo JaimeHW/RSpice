@@ -611,6 +611,25 @@ const EXT_B: usize = 1;
 const EXT_E: usize = 2;
 const EXT_S: usize = 3;
 
+#[derive(Debug, Clone, Copy)]
+enum LegacyCurrent {
+    Forward,
+    Reverse,
+    BaseLeakage,
+    CollectorIdealLeakage,
+    CollectorLeakage,
+    Substrate,
+}
+
+/// Retain the coefficient before thermal mapping when its operating value
+/// cannot be represented accurately until the junction exponential is applied.
+#[derive(Debug, Clone, Copy)]
+struct LegacyCurrentScale {
+    mantissa: Value,
+    binary_exponent: i32,
+    thermal_exponent: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 struct LegacyJunctionParameters {
     base: Option<Value>,
@@ -621,6 +640,7 @@ struct LegacyJunctionParameters {
     // Operating values are independent: IBE may be zero while IBC is not.
     bc_saturation: Option<Value>,
     substrate_current: Value,
+    current_scales: Option<Box<[Option<LegacyCurrentScale>; 6]>>,
 }
 
 /// BJT device using the Ebers-Moll model

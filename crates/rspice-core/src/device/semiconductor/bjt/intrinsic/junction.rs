@@ -74,7 +74,11 @@ impl Bjt {
             // at ordinary currents. A numerical cap changes their physics;
             // combine the saturation current with exp before range checks.
             let exponential = crate::numerics::scaled_exp_product(&[isat], &[], argument);
-            let current = if argument.abs() < 0.5 {
+            let current = if argument.abs() < Value::MIN_POSITIVE {
+                // v/nVT can lose range before a large IS restores a finite
+                // current. Here exp_m1(argument)/argument rounds to one.
+                crate::numerics::scaled_exp_product(&[isat, v], &[nvt], 0.0)
+            } else if argument.abs() < 0.5 {
                 isat * argument.exp_m1()
             } else {
                 exponential - isat
@@ -110,38 +114,66 @@ impl Bjt {
         (-isat * (1.0 + arg3), isat * 3.0 * arg3 / v)
     }
 
-    /// Diode current with the selected model's reverse-bias law.
-    pub(in crate::device::semiconductor::bjt) fn diode_current_with_is(
+    #[inline]
+    pub(in crate::device::semiconductor::bjt) fn legacy_current_scale(
         &self,
+        kind: LegacyCurrent,
+    ) -> Option<LegacyCurrentScale> {
+        self.legacy_junction_params
+            .as_ref()?
+            .current_scales
+            .as_ref()?[kind as usize]
+    }
+
+    pub(in crate::device::semiconductor::bjt) fn legacy_junction_iv(
+        &self,
+        kind: LegacyCurrent,
         isat: Value,
         v: Value,
         n: Value,
-    ) -> Value {
-        self.diode_iv_with_is(isat, v, n).0
-    }
-
-    #[inline]
-    pub(in crate::device::semiconductor::bjt) fn diode_current(&self, v: Value, n: Value) -> Value {
-        self.diode_current_with_is(self.is, v, n)
-    }
-
-    /// Diode conductance using the exact derivative of `diode_current_with_is`.
-    pub(in crate::device::semiconductor::bjt) fn diode_conductance_with_is(
-        &self,
-        isat: Value,
-        v: Value,
-        n: Value,
-    ) -> Value {
-        self.diode_iv_with_is(isat, v, n).1
-    }
-
-    #[inline]
-    pub(in crate::device::semiconductor::bjt) fn diode_conductance(
-        &self,
-        v: Value,
-        n: Value,
-    ) -> Value {
-        self.diode_conductance_with_is(self.is, v, n)
+    ) -> (Value, Value) {
+        let Some(scale) = self.legacy_current_scale(kind) else {
+            return self.diode_iv_with_is(isat, v, n);
+        };
+        let nvt = n * self.vt;
+        if !v.is_finite() || !nvt.is_finite() || nvt <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let evaluate = |factor, divisors: &[Value], exponent| {
+            crate::numerics::scaled_exp_product_with_binary_scale(
+                &[scale.mantissa, factor],
+                divisors,
+                exponent,
+                scale.binary_exponent,
+            )
+        };
+        if v >= -3.0 * nvt {
+            let argument = v / nvt;
+            // exp_m1 preserves tiny signed bias even for an overflowing IS.
+            // At large positive bias combine exponents before rounding.
+            if argument.abs() < Value::MIN_POSITIVE {
+                return (
+                    evaluate(v, &[nvt], scale.thermal_exponent),
+                    evaluate(1.0, &[nvt], scale.thermal_exponent + argument),
+                );
+            }
+            let (factor, exponent) = if argument <= 40.0 {
+                (argument.exp_m1(), scale.thermal_exponent)
+            } else {
+                (1.0 - (-argument).exp(), scale.thermal_exponent + argument)
+            };
+            (
+                evaluate(factor, &[], exponent),
+                evaluate(1.0, &[nvt], scale.thermal_exponent + argument),
+            )
+        } else {
+            let a = 3.0 * nvt / (v * std::f64::consts::E);
+            let a3 = a * a * a;
+            (
+                evaluate(-(1.0 + a3), &[], scale.thermal_exponent),
+                evaluate(3.0 * a3, &[v], scale.thermal_exponent),
+            )
+        }
     }
 
     #[inline]

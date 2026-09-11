@@ -88,6 +88,17 @@ impl Bjt {
         }
     }
 
+    fn legacy_critical_voltage(&self, kind: LegacyCurrent, isat: Value) -> Value {
+        if let Some(scale) = self.legacy_current_scale(kind) {
+            let log_is = scale.mantissa.ln()
+                + Value::from(scale.binary_exponent) * core::f64::consts::LN_2
+                + scale.thermal_exponent;
+            (self.vt * (self.vt.ln() - core::f64::consts::SQRT_2.ln() - log_is)).max(0.0)
+        } else {
+            Self::junction_critical_voltage(self.vt, isat)
+        }
+    }
+
     #[inline]
     pub(in crate::device::semiconductor::bjt) fn legacy_limiting_parameters(
         &self,
@@ -95,16 +106,26 @@ impl Bjt {
     ) -> (Value, Value, Value) {
         self.with_temperature_variant(previous_vrth, |model| {
             let vt = model.vt.max(1e-18);
-            let vcrit = Self::junction_critical_voltage(
-                vt,
-                model.is.max(model.legacy_reverse_saturation_current()),
-            );
+            let vcrit = model
+                .legacy_critical_voltage(LegacyCurrent::Forward, model.is)
+                .min(model.legacy_critical_voltage(
+                    LegacyCurrent::Reverse,
+                    model.legacy_reverse_saturation_current(),
+                ));
             let sub_vcrit = model
                 .legacy_junction_params
                 .as_ref()
-                .filter(|junctions| junctions.substrate_current > 0.0)
+                .filter(|junctions| {
+                    junctions.substrate_current > 0.0
+                        || model
+                            .legacy_current_scale(LegacyCurrent::Substrate)
+                            .is_some()
+                })
                 .map_or(50.0, |junctions| {
-                    Self::junction_critical_voltage(vt, junctions.substrate_current)
+                    model.legacy_critical_voltage(
+                        LegacyCurrent::Substrate,
+                        junctions.substrate_current,
+                    )
                 });
             (vt, vcrit, sub_vcrit)
         })
