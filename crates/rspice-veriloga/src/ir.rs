@@ -4294,13 +4294,7 @@ pub mod autodiff {
                 let pos = unpack_index(pos);
                 let neg = unpack_index(neg);
                 if let DerivativeWrt::Voltage(v) = wrt {
-                    if *v == pos {
-                        constant!(1.0)
-                    } else if *v == neg {
-                        constant!(-1.0)
-                    } else {
-                        constant!(0.0)
-                    }
+                    constant!(f64::from(i8::from(*v == pos) - i8::from(*v == neg)))
                 } else {
                     constant!(0.0)
                 }

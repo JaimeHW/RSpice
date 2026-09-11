@@ -7,7 +7,7 @@
 
 use super::*;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum BranchKey {
@@ -94,6 +94,132 @@ impl BranchResolver<'_> {
     }
 }
 
+/// Local branch keys must be resolved before hierarchy node bindings merge
+/// otherwise distinct module ports onto the same parent node.
+pub(super) fn canonical_node_pair(
+    pos: &str,
+    neg: &str,
+    grounds: &[SmolStr],
+) -> (SmolStr, SmolStr, f64) {
+    let (_, pos, neg, sign) = BranchResolver {
+        declared: &[],
+        grounds,
+    }
+    .nodes(pos, neg);
+    (pos, neg, sign)
+}
+
+#[derive(Default)]
+pub(super) struct HierarchyBranches {
+    pub unnamed: BTreeMap<(SmolStr, SmolStr), Span>,
+    pub port_flows: BTreeMap<SmolStr, Span>,
+    pub conducting_named: BTreeSet<SmolStr>,
+    pub conducting_unnamed: BTreeSet<(SmolStr, SmolStr)>,
+}
+
+pub(super) fn hierarchy_branches(module: &AnalyzedModule) -> HierarchyBranches {
+    let resolver = BranchResolver {
+        declared: &module.branches,
+        grounds: &module.ground_nodes,
+    };
+    let mut inventory = HierarchyBranches::default();
+    let mut inspect = |expression: &Expression| {
+        visit_expression(expression, &mut |expression| {
+            let Expression::BranchAccess(access) = expression else {
+                return;
+            };
+            if let BranchAccess::Branch {
+                name,
+                kind: Some(AccessKind::Flow),
+                span,
+                ..
+            } = access
+                && resolver.named(name).is_none()
+                && module.ports.iter().any(|port| port.name == *name)
+            {
+                inventory.port_flows.entry(name.clone()).or_insert(*span);
+            }
+            if let Some((key, ..)) = resolver.resolve(access) {
+                if let BranchKey::Nodes(pos, neg) = &key {
+                    inventory
+                        .unnamed
+                        .entry((pos.clone(), neg.clone()))
+                        .or_insert(access.span());
+                }
+                if access.kind() == Some(AccessKind::Flow) {
+                    match key {
+                        BranchKey::Named(name) => {
+                            inventory.conducting_named.insert(name);
+                        }
+                        BranchKey::Nodes(pos, neg) => {
+                            inventory.conducting_unnamed.insert((pos, neg));
+                        }
+                    }
+                }
+            }
+        });
+    };
+    for contribution in &module.contributions {
+        inspect(&contribution.expression);
+    }
+    visit_statements(&module.statements, &mut inspect);
+    for contribution in &module.contributions {
+        match resolver.contribution(contribution).0 {
+            BranchKey::Named(name) => {
+                inventory.conducting_named.insert(name);
+            }
+            BranchKey::Nodes(pos, neg) => {
+                inventory
+                    .unnamed
+                    .entry((pos.clone(), neg.clone()))
+                    .or_insert(contribution.span);
+                inventory.conducting_unnamed.insert((pos, neg));
+            }
+        }
+    }
+    inventory
+}
+
+pub(super) fn sum_expressions(mut terms: Vec<Expression>, span: Span) -> Expression {
+    // Keep port sums logarithmic in depth even for a large instance tree.
+    while terms.len() > 1 {
+        let mut inputs = terms.into_iter();
+        let mut next = Vec::with_capacity(inputs.len().div_ceil(2));
+        while let Some(left) = inputs.next() {
+            next.push(if let Some(right) = inputs.next() {
+                SemanticAnalyzer::binary_expr(BinaryOp::Add, left, right)
+            } else {
+                left
+            });
+        }
+        terms = next;
+    }
+    terms
+        .pop()
+        .unwrap_or_else(|| SemanticAnalyzer::number_expr(0.0, span))
+}
+
+pub(super) fn expand_port_flows(
+    module: &mut AnalyzedModule,
+    ports: &BTreeMap<SmolStr, Expression>,
+) {
+    if ports.is_empty() {
+        return;
+    }
+    let branches = BTreeMap::new();
+    let resolver = BranchResolver {
+        declared: &[],
+        grounds: &[],
+    };
+    let rewrite =
+        |expression: &mut Expression| rewrite_expression(expression, &branches, &resolver, ports);
+    rewrite_statements(&mut module.statements, &rewrite);
+    rewrite_regions(&mut module.body, &rewrite, &branches, &HashMap::new());
+    for contribution in &mut module.contributions {
+        rewrite(&mut contribution.expression);
+    }
+}
+
 #[derive(Clone)]
 struct FlowBranch {
     pos: SmolStr,
@@ -152,24 +278,29 @@ pub(crate) fn lower<'a>(
     let mut incident = branches.clone();
     for contribution in &module.contributions {
         let (key, pos, neg, _) = resolver.contribution(contribution);
-        incident
-            .entry(key.clone())
-            .or_insert(FlowBranch {
-                pos,
-                neg,
-                state: SmolStr::default(),
-                span: contribution.span,
-                source: false,
-            })
-            .source |= contribution.is_current;
+        let branch = incident.entry(key.clone()).or_insert(FlowBranch {
+            pos,
+            neg,
+            state: SmolStr::default(),
+            span: contribution.span,
+            source: false,
+        });
+        branch.source |= contribution.is_current;
         if !contribution.is_current || contribution.indirect {
             existing_unknowns.insert(key);
+        } else if branch.pos == branch.neg {
+            // Coincident bound ports have no physical injection. Retain
+            // evaluation (including state and validation) in a private
+            // equation even when nobody probes the cancelled source.
+            branches.entry(key).or_insert_with(|| branch.clone()).source = true;
         } else if let Some(branch) = branches.get_mut(&key) {
             branch.source = true;
         }
     }
     for (key, branch) in &incident {
-        if port_reads.contains(&branch.pos) || port_reads.contains(&branch.neg) {
+        if branch.pos != branch.neg
+            && (port_reads.contains(&branch.pos) || port_reads.contains(&branch.neg))
+        {
             branches
                 .entry(key.clone())
                 .or_insert_with(|| branch.clone());
@@ -240,15 +371,12 @@ pub(crate) fn lower<'a>(
     let port_values: BTreeMap<_, _> = port_reads
         .into_iter()
         .map(|port| {
-            let mut value = SemanticAnalyzer::number_expr(0.0, Span::dummy());
+            let mut terms = Vec::new();
             for (key, branch) in &incident {
-                let sign = if branch.pos == port {
-                    1.0
-                } else if branch.neg == port {
-                    -1.0
-                } else {
+                let sign = i8::from(branch.pos == port) - i8::from(branch.neg == port);
+                if sign == 0 {
                     continue;
-                };
+                }
                 let term = if let Some(lowered) = branches.get(key) {
                     potential(&lowered.state, "0", branch.span)
                 } else {
@@ -269,9 +397,9 @@ pub(crate) fn lower<'a>(
                         },
                     })
                 };
-                value = SemanticAnalyzer::binary_expr(BinaryOp::Add, value, signed(term, sign));
+                terms.push(signed(term, f64::from(sign)));
             }
-            (port, value)
+            (port, sum_expressions(terms, Span::dummy()))
         })
         .collect();
     let resolver = BranchResolver {
@@ -294,7 +422,7 @@ pub(crate) fn lower<'a>(
         } else {
             potential(&branch.pos, &branch.neg, branch.span)
         };
-        for (label, declared_branch, expression) in [
+        for (index, (label, declared_branch, expression)) in [
             (
                 format!("{},{}", branch.pos, branch.neg).into(),
                 match key {
@@ -304,7 +432,15 @@ pub(crate) fn lower<'a>(
                 state,
             ),
             (branch.state.clone(), None, balance),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index == 0 && branch.pos == branch.neg {
+                // Bound ports can coincide. The source's internal equation
+                // remains observable, but its physical injection is zero.
+                continue;
+            }
             let site = AnalogSiteId(target.analog_site_count);
             target.analog_site_count =
                 target.analog_site_count.checked_add(1).ok_or_else(|| {
@@ -345,7 +481,7 @@ fn potential(pos: &str, neg: &str, span: Span) -> Expression {
     })
 }
 
-fn signed(expression: Expression, sign: f64) -> Expression {
+pub(super) fn signed(expression: Expression, sign: f64) -> Expression {
     if sign > 0.0 {
         expression
     } else {
@@ -368,22 +504,33 @@ fn redirect_contribution(
     };
     contribution.branch = branches[key].state.clone();
     contribution.declared_branch = None;
-    // Keep the recorded guard path aligned with the structured expression.
+    if *sign > 0.0 {
+        negate_contribution(contribution, true);
+    }
+}
+
+pub(super) fn negate_contribution(contribution: &mut AnalyzedContribution, flat: bool) {
+    // Flat expressions carry the recorded select wrapper; structured ones
+    // are already inside their guard region and must be negated as a whole.
     let negate = |expression: &mut Expression| {
         *expression = signed(
             std::mem::replace(
                 expression,
                 SemanticAnalyzer::number_expr(0.0, contribution.span),
             ),
-            -*sign,
+            -1.0,
         );
     };
-    match (&contribution.expression_guard, &mut contribution.expression) {
-        (AnalogSiteGuard::Select, Expression::Conditional(conditional)) => {
+    match (
+        flat,
+        contribution.expression_guard,
+        &mut contribution.expression,
+    ) {
+        (true, AnalogSiteGuard::Select, Expression::Conditional(conditional)) => {
             negate(&mut conditional.then_expr);
             negate(&mut conditional.else_expr);
         }
-        (_, expression) => negate(expression),
+        (_, _, expression) => negate(expression),
     }
 }
 

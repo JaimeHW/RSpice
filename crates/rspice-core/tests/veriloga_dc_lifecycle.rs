@@ -35,6 +35,50 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
 }
 
 #[test]
+fn hierarchy_port_currents_preserve_dc_ac_and_independent_noise() {
+    let model = write_model(
+        "hierarchical_port_currents",
+        "module leaf(p,n); inout p,n; electrical p,n; parameter real gain=1;
+         analog I(p,n)<+gain*V(p,n)+white_noise(1,\"shot\"); endmodule
+         module child(p,n,q); inout p,n,q; electrical p,n,q; parameter real gain=1;
+         leaf #(.gain(gain)) inner(p,n); analog I(q,n)<+3*I(<p>); endmodule
+         module top(p,n,q); inout p,n,q; electrical p,n,q;
+         child #(.gain(1)) a(p,n,q); child #(.gain(2)) b(p,n,q); endmodule",
+    );
+    for (options, resistance) in [("", 1.0), (".options rshunt=2\n", 2.0 / 3.0)] {
+        let netlist = Netlist::parse_validated(&format!(
+            "* hierarchical branch currents\n{options}V1 in 0 DC 1 AC 1\nR1 out 0 1\nX1 in 0 out top\n.va \"{}\" top module=top\n.end\n", deck_path(&model)
+        )).unwrap();
+        let engine = Engine::default();
+        let expected = -9.0 * resistance;
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        assert!((node_voltage(&dc, "out") - expected).abs() < 1e-8);
+        for point in engine.run_ac(&netlist, &[0.0, 1.0, 1e6]).unwrap() {
+            let output = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let value = point.voltages[output];
+            assert!((value.re - expected).abs() < 1e-8 && value.im.abs() < 1e-12);
+        }
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        let output = circuit.get_node_by_name("out").unwrap();
+        let expected_noise = 18.0 * resistance * resistance;
+        for point in engine
+            .run_noise(&netlist, output, &[1.0, 1e6], 300.15)
+            .unwrap()
+        {
+            assert!(
+                (point.output_noise_density / expected_noise - 1.0).abs() < 1e-8,
+                "{point:?}"
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn flow_probe_feedback_preserves_dc_ac_noise_and_private_state_equations() {
     for feedback in [0.0, 0.1] {
         let model = write_model(

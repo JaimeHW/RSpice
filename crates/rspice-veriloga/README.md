@@ -391,9 +391,9 @@ correction while retaining physical contribution values for current probes.
 The correction follows assignments, arrays, loops, `ddx`, and transient
 companions. Executable limiter models currently use the postfix scalar stamp
 driver; publishing the correction lane through CFG and fused stamp drivers
-remains outstanding. Compiled-model cache version 67, canonical IR version 31,
-WebAssembly emitter version 32, and generated semantics version 20 invalidate
-artifacts that predate simultaneous flow-probe equations.
+remains outstanding. Compiled-model cache version 71, canonical IR version 34,
+WebAssembly emitter version 33, and generated semantics version 21 invalidate
+artifacts that predate instance-local flow-probe equations.
 
 Probed flow sources use private current unknowns with simultaneous equations.
 Forward reads, self and mutual feedback, named parallel flow branches, reverse
@@ -402,9 +402,14 @@ in DC, AC, noise, and transient analysis. Source-free flow probes impose zero
 potential; probing both flow and potential on the same source-free branch is
 rejected. Each probed flow branch adds one mathematical unknown; source
 expressions and stateful operators stay at their original execution sites.
-Private equations are excluded from electrical shunts. Mixed potential/flow
-switch branches, parallel potential-branch identity, and branch ownership
-through hierarchy flattening still require further work.
+Private equations are excluded from electrical shunts. Hierarchy flattening
+preserves each instance's unnamed branches and explicit port-current boundaries,
+including nested instances and distinct ports bound to the same circuit node
+or ground. Cancelled sources retain evaluation and state through private
+equations. Mixed potential/flow switch branches and parallel potential-branch
+identity still require further work.
+Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
+compatibility; authored sources and flow probes require distinct nets.
 
 Automatic differentiation keeps exact sparse lane shapes. Its fixed point uses
 a bounded compact bit matrix for ordinary compact models and falls back to

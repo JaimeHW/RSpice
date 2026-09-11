@@ -117,7 +117,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 29 to 30 protects quotient numerators against intermediate range loss in scalar and packed AD.
 /// 30 to 31 publishes limiter affine residual correction entries.
 /// 31 to 32 resolves flow probes through simultaneous current equations.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 32;
+/// 32 to 33 preserves instance branch ownership and nested port-flow equations.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 33;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2231,6 +2232,94 @@ endmodule
                     "postfix={postfix}, degree={degree}, voltage={voltage}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn wasm_hierarchy_port_currents_keep_instance_jacobians_in_both_plans() {
+        use super::abi::{
+            FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
+            FRAME_RESULT_OFFSET,
+        };
+        use crate::codegen::{ColumnAxis, StampIndex};
+        let source = "module child(p,q); inout p,q; electrical p,q; parameter real gain=1;
+            analog begin if(gain>0) I(p)<+gain*V(p); I(q)<+3*I(<p>); end endmodule
+            module top(p,q); inout p,q; electrical p,q;
+            child #(.gain(1)) a(p,q); child #(.gain(2)) b(p,q); endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, Some("top"))
+            .unwrap();
+        assert_eq!(report.model.internal_state_nodes.len(), 2);
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "top", postfix);
+            harness.reset();
+            let internal = FusedKernelHarness::VOLTAGES + 64;
+            harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_PTR_OFFSET, internal);
+            harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, 2);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 1.0);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+            harness.write_f64(internal as usize, 0.0);
+            harness.write_f64(internal as usize + 8, 0.0);
+            // The host supplies resolved instance overrides, just as the
+            // browser worker does after its parameter-default pass.
+            assert_eq!(report.model.parameters.len(), 2);
+            for (index, value) in [1.0, 2.0].into_iter().enumerate() {
+                harness.write_f64(FusedKernelHarness::PARAMETERS as usize + 8 * index, value);
+            }
+            harness.call_assignments();
+            harness.call_prelude();
+            let mut matrix = [[0.0; 4]; 4];
+            let mut residual = [0.0; 4];
+            for (stamp, program) in report.model.stamp_programs.iter().enumerate() {
+                let export = harness.stamp_value_export(stamp);
+                assert_eq!(harness.call(&export), 0);
+                let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                let rows = program
+                    .stamp_locations
+                    .iter()
+                    .filter_map(|location| {
+                        let row = match location.row {
+                            StampIndex::Terminal(row) => row,
+                            StampIndex::Internal(row) => row + 2,
+                            StampIndex::Ground => return None,
+                            StampIndex::Branch(_) => panic!("unexpected potential source"),
+                        };
+                        Some((row, -location.sign))
+                    })
+                    .collect::<Vec<_>>();
+                for &(row, sign) in &rows {
+                    residual[row] += sign * value;
+                }
+                for (entry, derivative) in program.jacobian_programs.iter().enumerate() {
+                    let ColumnAxis::Node(col) = derivative.col_axis else {
+                        panic!("unexpected branch axis")
+                    };
+                    let export = harness.jacobian_export(stamp, entry);
+                    assert_eq!(harness.call(&export), 0);
+                    let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    let row = match derivative.row {
+                        StampIndex::Terminal(row) => row,
+                        StampIndex::Internal(row) => row + 2,
+                        StampIndex::Ground => continue,
+                        StampIndex::Branch(_) => panic!("unexpected potential source"),
+                    };
+                    matrix[row][col] += derivative.sign * value;
+                }
+            }
+            for row in 0..4 {
+                assert!((matrix[row][0] - residual[row]).abs() < 1e-12);
+            }
+            for pivot in (2..4).rev() {
+                assert!((matrix[pivot][pivot] - 1.0).abs() < 1e-12, "{matrix:?}");
+                for row in 0..pivot {
+                    for col in 0..pivot {
+                        matrix[row][col] -=
+                            matrix[row][pivot] * matrix[pivot][col] / matrix[pivot][pivot];
+                    }
+                }
+            }
+            assert!((matrix[0][0] - 3.0).abs() < 1e-12, "{matrix:?}");
+            assert!((matrix[1][0] - 9.0).abs() < 1e-12, "{matrix:?}");
         }
     }
 

@@ -1551,8 +1551,8 @@ impl Instance {
 		let DJG=0f64;
 		let DJH=1f64;
 		let DJI=1f64;
-		let DKI=1e9f64;
-		let DKN=staged[82];
+		let DKF=1e9f64;
+		let DKK=staged[82];
 		let C=A- B;
 		let D=L2([0.0,1f64])- L2([1f64,0.0]);
 		let F=E* C;
@@ -5784,74 +5784,74 @@ impl Instance {
 		let DKC;
 		if DIX{
 		let DIY=AEH> AN;
-		let DKJ;
-		let DKK;
+		let DKG;
+		let DKH;
 		if DIY{
-		let DKG=BCC/ AEH;
-		let DKH=(BCD).product_sum_div(JQ,L4([AEI[0],0.0,AEI[1],AEI[2]]),(-DKG),AEH);
-		DKJ=DKG;
-		DKK=DKH;
+		let DKD=BCC/ AEH;
+		let DKE=(BCD).product_sum_div(JQ,L4([AEI[0],0.0,AEI[1],AEI[2]]),(-DKD),AEH);
+		DKG=DKD;
+		DKH=DKE;
 		}else{
-		DKJ=DKI;
-		DKK=ASX;
+		DKG=DKF;
+		DKH=ASX;
 		}
-		let DKL=BBV* CYL;
-		let DKM=BCB* CYL;
-		let DKO=DKJ* DKN;
-		let DKP=DKK* DKN;
-		let DKQ=DKO> AN;
-		let DKU;
-		let DKV;
-		if DKQ{
-		let DKR=DKO.sqrt();
-		let DKS=BBV* DKR;
-		let DKT=(BCB* DKR)+ ((DKP* (JQ/ (KV* DKR)))* BBV);
-		DKU=DKS;
-		DKV=DKT;
+		let DKI=BBV* CYL;
+		let DKJ=BCB* CYL;
+		let DKL=DKG* DKK;
+		let DKM=DKH* DKK;
+		let DKN=DKL> AN;
+		let DKR;
+		let DKS;
+		if DKN{
+		let DKO=DKL.sqrt();
+		let DKP=BBV* DKO;
+		let DKQ=(BCB* DKO)+ ((DKM* (JQ/ (KV* DKO)))* BBV);
+		DKR=DKP;
+		DKS=DKQ;
 		}else{
-		DKU=AN;
-		DKV=ASX;
+		DKR=AN;
+		DKS=ASX;
 		}
-		let DKW=DJH* KJ;
-		let DKX=AN+ (-DIZ);
-		let DKY=AN+ DIZ;
-		let DKZ=ddt(18, DIZ);
-		let DLA=DKV* DKZ;
-		let DLB=L5([DLA[0],DLA[1],DLA[2],DLA[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DJH* DAG)* DKU)]);
-		let DLC=DKU;
-		let DLD=DLC* DIZ;
-		let DLE=DJH* DLC;
-		let DLF=AN+ (DKU* DKZ);
-		let DLG=ddt(19, DJB);
-		let DLH=DKM* DLG;
-		let DLI=L5([DLH[0],DLH[1],DLH[2],DLH[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DJI* DAG)* DKL)]);
-		let DLJ=DKL;
-		let DLK=DLJ* DJB;
-		let DLL=DJI* DLJ;
-		let DLM=AN+ (DKL* DLG);
-		let DLN=DJI* KJ;
-		let DLO=AN+ (-DJB);
-		let DLP=AN+ DJB;
-		DJJ=DKX;
-		DJK=DKY;
-		DJL=DLF;
-		DJM=DLM;
-		DJN=DLO;
-		DJO=DLP;
+		let DKT=DJH* KJ;
+		let DKU=AN+ (-DIZ);
+		let DKV=AN+ DIZ;
+		let DKW=ddt(18, DIZ);
+		let DKX=DKS* DKW;
+		let DKY=L5([DKX[0],DKX[1],DKX[2],DKX[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DJH* DAG)* DKR)]);
+		let DKZ=DKR;
+		let DLA=DKZ* DIZ;
+		let DLB=DJH* DKZ;
+		let DLC=AN+ (DKR* DKW);
+		let DLD=ddt(19, DJB);
+		let DLE=DKJ* DLD;
+		let DLF=L5([DLE[0],DLE[1],DLE[2],DLE[3],0.0])+ L5([0.0,0.0,0.0,0.0,((DJI* DAG)* DKI)]);
+		let DLG=DKI;
+		let DLH=DLG* DJB;
+		let DLI=DJI* DLG;
+		let DLJ=AN+ (DKI* DLD);
+		let DLK=DJI* KJ;
+		let DLL=AN+ (-DJB);
+		let DLM=AN+ DJB;
+		DJJ=DKU;
+		DJK=DKV;
+		DJL=DLC;
+		DJM=DLJ;
+		DJN=DLL;
+		DJO=DLM;
 		DJP=AN;
 		DJQ=AN;
-		DJR=DLD;
-		DJS=DLK;
-		DJT=DKW;
+		DJR=DLA;
+		DJS=DLH;
+		DJT=DKT;
 		DJU=DJH;
-		DJV=DLB;
-		DJW=DLI;
-		DJX=DLN;
+		DJV=DKY;
+		DJW=DLF;
+		DJX=DLK;
 		DJY=DJI;
 		DJZ=DJD;
 		DKA=DJG;
-		DKB=DLE;
-		DKC=DLL;
+		DKB=DLB;
+		DKC=DLI;
 		}else{
 		let DJA=AN+ DIZ;
 		let DJC=AN+ DJB;
@@ -5876,12 +5876,12 @@ impl Instance {
 		DKB=DJD;
 		DKC=DJG;
 		}
-		let DKD=AN+ node_potentials[15];
-		let DKE=AN+ node_potentials[18];
-		let DKF=AN+ node_potentials[20];
-		let DLQ=AN+ node_potentials[16];
-		let DLR=AN+ node_potentials[17];
-		let DLS=AN+ node_potentials[19];
+		let DLN=AN+ node_potentials[15];
+		let DLO=AN+ node_potentials[16];
+		let DLP=AN+ node_potentials[17];
+		let DLQ=AN+ node_potentials[18];
+		let DLR=AN+ node_potentials[19];
+		let DLS=AN+ node_potentials[20];
 		let DLT=AN+ node_potentials[21];
 		let DLU=DAB[0];
 		let DLV=DAB[1];
@@ -6861,7 +6861,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(7),
-            multiplicity * (DKD),
+            multiplicity * (DLN),
             [15],
             [DRP],
             [],
@@ -6871,7 +6871,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(15),
             None,
-            multiplicity * (DKD),
+            multiplicity * (DLN),
             [15],
             [DRP],
             [],
@@ -6881,7 +6881,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(5),
-            multiplicity * (DLQ),
+            multiplicity * (DLO),
             [16],
             [DRQ],
             [],
@@ -6891,7 +6891,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(16),
             None,
-            multiplicity * (DLQ),
+            multiplicity * (DLO),
             [16],
             [DRQ],
             [],
@@ -6901,7 +6901,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(2),
-            multiplicity * (DLR),
+            multiplicity * (DLP),
             [17],
             [DRR],
             [],
@@ -6911,7 +6911,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(17),
             None,
-            multiplicity * (DLR),
+            multiplicity * (DLP),
             [17],
             [DRR],
             [],
@@ -6921,7 +6921,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(0),
             Some(2),
-            multiplicity * (DKE),
+            multiplicity * (DLQ),
             [18],
             [DRS],
             [],
@@ -6931,7 +6931,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(18),
             None,
-            multiplicity * (DKE),
+            multiplicity * (DLQ),
             [18],
             [DRS],
             [],
@@ -6941,7 +6941,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(0),
-            multiplicity * (DLS),
+            multiplicity * (DLR),
             [19],
             [DRT],
             [],
@@ -6951,7 +6951,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(19),
             None,
-            multiplicity * (DLS),
+            multiplicity * (DLR),
             [19],
             [DRT],
             [],
@@ -6961,7 +6961,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(3),
             Some(0),
-            multiplicity * (DKF),
+            multiplicity * (DLS),
             [20],
             [DRU],
             [],
@@ -6971,7 +6971,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(20),
             None,
-            multiplicity * (DKF),
+            multiplicity * (DLS),
             [20],
             [DRU],
             [],
@@ -7119,18 +7119,18 @@ impl Instance {
         self.canonical_reactive[118] = staged[234];
         self.canonical_reactive[119] = DJP;
         self.canonical_reactive[120] = DJQ;
-        self.canonical_reactive[121] = DKD;
-        self.canonical_reactive[122] = DKD;
-        self.canonical_reactive[123] = DLQ;
-        self.canonical_reactive[124] = DLQ;
-        self.canonical_reactive[125] = DLR;
-        self.canonical_reactive[126] = DLR;
-        self.canonical_reactive[127] = DKE;
-        self.canonical_reactive[128] = DKE;
-        self.canonical_reactive[129] = DLS;
-        self.canonical_reactive[130] = DLS;
-        self.canonical_reactive[131] = DKF;
-        self.canonical_reactive[132] = DKF;
+        self.canonical_reactive[121] = DLN;
+        self.canonical_reactive[122] = DLN;
+        self.canonical_reactive[123] = DLO;
+        self.canonical_reactive[124] = DLO;
+        self.canonical_reactive[125] = DLP;
+        self.canonical_reactive[126] = DLP;
+        self.canonical_reactive[127] = DLQ;
+        self.canonical_reactive[128] = DLQ;
+        self.canonical_reactive[129] = DLR;
+        self.canonical_reactive[130] = DLR;
+        self.canonical_reactive[131] = DLS;
+        self.canonical_reactive[132] = DLS;
         self.canonical_reactive[133] = DLT;
         self.canonical_reactive[134] = DLT;
     }

@@ -943,6 +943,7 @@ impl SemanticAnalyzer {
             if !branch.neg.is_empty() {
                 self.validate_node(&branch.neg, branch.span)?;
             }
+            self.validate_distinct_branch_nodes(&branch.pos, &branch.neg, branch.span)?;
             let discipline = self
                 .symbols
                 .lookup(&branch.pos)
@@ -4416,6 +4417,7 @@ impl SemanticAnalyzer {
                     if let Some(n) = neg {
                         self.validate_node(n, span)?;
                     }
+                    self.validate_distinct_branch_nodes(pos, neg.as_deref().unwrap_or("0"), span)?;
                     // Format as "pos,neg" for IR parser compatibility
                     let branch = if neg.is_some() {
                         format!("{},{}", pos, neg.as_deref().unwrap())
@@ -4448,6 +4450,29 @@ impl SemanticAnalyzer {
         }
     }
 
+    fn validate_distinct_branch_nodes(
+        &self,
+        pos: &str,
+        neg: &str,
+        span: Span,
+    ) -> CompileResult<()> {
+        let ground = |name: &str| {
+            name.is_empty()
+                || is_global_ground_name(name)
+                || self
+                    .symbols
+                    .lookup(name)
+                    .is_some_and(|symbol| symbol.attrs.is_ground)
+        };
+        if pos == neg || (ground(pos) && ground(neg)) {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidBranch("branch endpoints must name distinct nets".into()),
+                span,
+            )));
+        }
+        Ok(())
+    }
+
     fn resolve_branch_access_kind(
         &self,
         access_expr: &BranchAccess,
@@ -4474,7 +4499,7 @@ impl SemanticAnalyzer {
                 span,
             )));
         }
-        pos_kind
+        let kind = pos_kind
             .or(neg_kind)
             .or_else(|| self.disciplines.access_kind("electrical", access))
             .ok_or_else(|| {
@@ -4484,7 +4509,20 @@ impl SemanticAnalyzer {
                     )),
                     span,
                 ))
-            })
+            })?;
+        // Existing compact models use V(n,n) as a zero-valued read. Retain
+        // that compatibility without accepting undefined self-flow probes.
+        if kind == AccessKind::Flow
+            && matches!(access_expr, BranchAccess::Nodes { .. })
+            && (neg.is_some()
+                || !self
+                    .symbols
+                    .lookup(pos)
+                    .is_some_and(|symbol| symbol.kind == SymbolKind::Branch))
+        {
+            self.validate_distinct_branch_nodes(pos, neg.unwrap_or("0"), span)?;
+        }
+        Ok(kind)
     }
 
     fn resolve_access_with_symbol(

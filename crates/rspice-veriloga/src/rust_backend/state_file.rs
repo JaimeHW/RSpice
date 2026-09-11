@@ -1575,7 +1575,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 18 applies typed custom-limiter polarity to values, state, and derivatives.
 // Version 19 supports default limiters and rejects invalid candidates before publication.
 // Version 20 solves flow-source probes through private current unknowns.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 20;
+// Version 21 preserves branch ownership and port-current boundaries in hierarchy.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 21;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

@@ -607,15 +607,9 @@ fn validate_branches(
             ));
         }
 
-        if branch.pos_node.is_none() && branch.neg_node.is_none() {
-            diagnostics.push(IrDiagnostic::global_error(
-                CompilerPhase::MirValidation,
-                format!(
-                    "MIR branch '{}' must have at least one concrete endpoint",
-                    branch.name
-                ),
-            ));
-        }
+        // Distinct module ports can both bind to global ground. Keep the
+        // declaration for zero-valued potential probes; physical equations
+        // still require a concrete endpoint in validate_branch_ref.
 
         if let Some(pos_node) = branch.pos_node {
             if usize::from(pos_node) >= nodes.len() {

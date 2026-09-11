@@ -3047,8 +3047,8 @@ impl Instance {
 		let BOP=ddt(8, BJZ);
 		let BOQ=BKF* BLR;
 		let BOR=QV+ BOP;
-		let BOS=QV+ node_potentials[10];
-		let BOT=BKX[2];
+		let BOS=BKX[2];
+		let BOT=QV+ node_potentials[10];
 		let BOU=QV+ node_potentials[11];
 		let BOV=QV+ node_potentials[12];
 		let BOW=QV+ node_potentials[13];
@@ -3336,7 +3336,7 @@ impl Instance {
             Some(7),
             multiplicity * (BNK),
             [4, 6, 7],
-            [BQN, BQO, BOT],
+            [BQN, BQO, BOS],
             [],
             [],
             multiplicity,
@@ -3494,7 +3494,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(6),
-            multiplicity * (BOS),
+            multiplicity * (BOT),
             [10],
             [BRQ],
             [],
@@ -3504,7 +3504,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(10),
             None,
-            multiplicity * (BOS),
+            multiplicity * (BOT),
             [10],
             [BRQ],
             [],
@@ -3665,8 +3665,8 @@ impl Instance {
         self.canonical_reactive[51] = staged[95];
         self.canonical_reactive[52] = staged[96];
         self.canonical_reactive[53] = staged[97];
-        self.canonical_reactive[54] = BOS;
-        self.canonical_reactive[55] = BOS;
+        self.canonical_reactive[54] = BOT;
+        self.canonical_reactive[55] = BOT;
         self.canonical_reactive[56] = BOU;
         self.canonical_reactive[57] = BOU;
         self.canonical_reactive[58] = BOV;

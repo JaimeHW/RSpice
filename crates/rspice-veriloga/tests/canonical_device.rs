@@ -22,6 +22,51 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[test]
+fn generated_hierarchy_preserves_instance_port_currents() {
+    let (state, stamp, noise) = generated_parts_selected(
+        "module child(p,q); inout p,q; electrical p,q; parameter real gain=1;
+         analog begin if(gain>0) I(p)<+gain*V(p); I(q)<+3*I(<p>); end endmodule
+         module top(p,q); inout p,q; electrical p,q;
+         child #(.gain(1)) a(p,q); child #(.gain(2)) b(p,q); endmodule",
+        "hierarchical port currents",
+        Some("top"),
+    );
+    run_generated_main(
+        "hierarchical port currents",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+assert_eq!(device::state::Instance::INTERNAL_STATE_NODES.len(), 2);
+let mut instance=device::state::Instance::new(&[0,1,2,3]);
+instance.finalize_parameters().unwrap();
+let bias=[1.0,0.0,0.0,0.0];
+let ctx=runtime::GeneratedEvalContext { voltages:&bias, temperature:300.15 };
+let mut sink=[0.0;32];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper { sink:Some(&mut sink) });
+let mut matrix=[[0.0;4];4];
+for row in 0..4 {
+    for col in 0..4 { matrix[row][col]=sink[12+4*row+col]; }
+    let rhs=(0..4).map(|col| matrix[row][col]*bias[col]).sum::<f64>()-sink[28+row];
+    assert!(rhs.abs()<1e-12,"{row}: {rhs}");
+}
+for pivot in (2..4).rev() {
+    assert!((matrix[pivot][pivot]-1.0).abs()<1e-12);
+    for row in 0..pivot {
+        for col in 0..pivot {
+            matrix[row][col]-=matrix[row][pivot]*matrix[pivot][col]/matrix[pivot][pivot];
+        }
+    }
+}
+assert!((matrix[0][0]-3.0).abs()<1e-12,"{matrix:?}");
+assert!((matrix[1][0]-9.0).abs()<1e-12,"{matrix:?}");
+assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_flow_probes_preserve_simultaneous_jacobians() {
     let (state, stamp, noise) = generated_parts(
         "module flow(p,q); inout p,q; electrical p,q; analog begin I(q)<+3*I(p); I(p)<+2*V(p)+0.1*I(p); end endmodule",

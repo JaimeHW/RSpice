@@ -21,6 +21,35 @@ fn compile_selected(source: &str, module: &str) -> DeviceFixture {
     }
 }
 
+fn first_port_currents(
+    model: &DeviceFixture,
+    device: &mut rspice_veriloga::device::VerilogADevice,
+) -> Vec<f64> {
+    // Contribution values use each lowered branch's orientation. Compare
+    // physical current into the module, which is independent of that choice.
+    let values = device.try_evaluate().expect("hierarchy evaluates");
+    assert_eq!(values.len(), model.stamp_programs.len());
+    model
+        .stamp_programs
+        .iter()
+        .zip(values)
+        .map(|(program, value)| {
+            assert!(program.branch_ordinal.is_none());
+            program
+                .stamp_locations
+                .iter()
+                .filter(|location| {
+                    matches!(
+                        location.row,
+                        rspice_veriloga::codegen::StampIndex::Terminal(0)
+                    )
+                })
+                .map(|location| -location.sign * value)
+                .sum::<f64>()
+        })
+        .collect()
+}
+
 fn parameter_array_hierarchy(overrides: &str) -> String {
     [
         r#"
@@ -113,18 +142,12 @@ endmodule
         "flattened child parameters must not be externally settable"
     );
     device.update_voltages(&[2.0]);
-    assert_eq!(
-        device.try_evaluate().expect("hierarchy evaluates"),
-        vec![12.0]
-    );
+    assert_eq!(first_port_currents(&model, &mut device), vec![12.0]);
     assert!(device.set_parameter("scale", 4.0));
     device
         .try_resolve_parameter_defaults()
         .expect("public changes must refresh dependent child defaults");
-    assert_eq!(
-        device.try_evaluate().expect("updated hierarchy evaluates"),
-        vec![16.0]
-    );
+    assert_eq!(first_port_currents(&model, &mut device), vec![16.0]);
 
     let report = VerilogACompiler::new(CompilerOptions::default())
         .compile_runtime_with_qualifications(
@@ -177,10 +200,7 @@ endmodule
     );
     let mut device = model.device("X1", &[1, 0]);
     device.update_voltages(&[2.0]);
-    assert_eq!(
-        device.try_evaluate().expect("hierarchy evaluates"),
-        vec![14.0]
-    );
+    assert_eq!(first_port_currents(&model, &mut device), vec![14.0]);
 }
 
 #[test]
@@ -204,12 +224,12 @@ endmodule
     );
     let mut device = model.device("X1", &[1, 0]);
     device.update_voltages(&[2.0]);
-    let total: f64 = device
-        .try_evaluate()
-        .expect("both child instances evaluate")
-        .into_iter()
-        .sum();
-    assert_eq!(total, 22.0);
+    assert_eq!(
+        first_port_currents(&model, &mut device)
+            .into_iter()
+            .sum::<f64>(),
+        22.0
+    );
 }
 
 #[test]
@@ -285,10 +305,7 @@ endmodule
     assert!(model.num_variables >= 4);
     let mut device = model.device("X1", &[1, 0]);
     device.update_voltages(&[3.0]);
-    assert_eq!(
-        device.try_evaluate().expect("indexed children evaluate"),
-        vec![3.0, 3.0]
-    );
+    assert_eq!(first_port_currents(&model, &mut device), vec![3.0, 3.0]);
 }
 
 #[test]

@@ -13,15 +13,15 @@ use super::{
     MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer, ValueType,
 };
 use crate::ast::{
-    AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr, BinaryOp,
-    BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, Module,
-    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, VarType,
+    AccessKind, AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
+    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item,
+    Module, ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
 use smol_str::SmolStr;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Return the selected module itself when it is structural-leaf, otherwise a
 /// faithfully flattened owned module.  Unsupported or ambiguous structure is
@@ -97,8 +97,15 @@ fn source_modules<'a>(analyzed: &'a AnalyzedFile) -> CompileResult<HashMap<SmolS
 
 #[derive(Clone)]
 struct NodeBinding {
+    /// Probed module boundaries traversed by this connection.
+    port_boundaries: Vec<SmolStr>,
     name: SmolStr,
     discipline: Option<SmolStr>,
+}
+
+struct PortFlow {
+    span: Span,
+    terms: BTreeMap<SmolStr, i8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +124,9 @@ struct ScopeMap {
     variables: HashMap<SmolStr, SmolStr>,
     arrays: HashMap<SmolStr, SmolStr>,
     branches: HashMap<SmolStr, SmolStr>,
+    unnamed_branches: HashMap<(SmolStr, SmolStr), AnalyzedBranch>,
+    ground_nodes: Vec<SmolStr>,
+    port_flows: HashMap<SmolStr, SmolStr>,
     port_connected: HashMap<SmolStr, bool>,
     instance_path: Option<SmolStr>,
     /// `(global base, local count)` for this concrete module occurrence.
@@ -125,12 +135,21 @@ struct ScopeMap {
 }
 
 impl ScopeMap {
+    fn unnamed_branch(&self, pos: &str, neg: &str) -> Option<(&AnalyzedBranch, f64)> {
+        let (pos, neg, sign) =
+            super::flow_probes::canonical_node_pair(pos, neg, &self.ground_nodes);
+        self.unnamed_branches
+            .get(&(pos, neg))
+            .map(|branch| (branch, sign))
+    }
+
     fn for_root(module: &AnalyzedModule) -> Self {
         let mut scope = Self::default();
         for port in &module.ports {
             scope.nodes.insert(
                 port.name.clone(),
                 NodeBinding {
+                    port_boundaries: Vec::new(),
                     name: port.name.clone(),
                     discipline: Some(port.discipline.clone()),
                 },
@@ -140,6 +159,7 @@ impl ScopeMap {
             scope.nodes.insert(
                 node.name.clone(),
                 NodeBinding {
+                    port_boundaries: Vec::new(),
                     name: node.name.clone(),
                     discipline: Some(node.discipline.clone()),
                 },
@@ -149,6 +169,7 @@ impl ScopeMap {
             scope.nodes.insert(
                 ground.clone(),
                 NodeBinding {
+                    port_boundaries: Vec::new(),
                     name: ground.clone(),
                     discipline: None,
                 },
@@ -157,6 +178,7 @@ impl ScopeMap {
         scope.nodes.insert(
             "0".into(),
             NodeBinding {
+                port_boundaries: Vec::new(),
                 name: "0".into(),
                 discipline: None,
             },
@@ -191,6 +213,7 @@ struct HierarchyElaborator<'a> {
     next_name: usize,
     next_noise_process: u32,
     child_control_variables: [Vec<SmolStr>; 2],
+    port_flows: BTreeMap<SmolStr, PortFlow>,
 }
 
 impl<'a> HierarchyElaborator<'a> {
@@ -221,6 +244,7 @@ impl<'a> HierarchyElaborator<'a> {
             next_name: 0,
             next_noise_process,
             child_control_variables: Default::default(),
+            port_flows: BTreeMap::new(),
         }
     }
 
@@ -306,7 +330,49 @@ impl<'a> HierarchyElaborator<'a> {
                 .statements
                 .push(AnalyzedStatement::Assignment(assignment));
         }
+        let ports = self
+            .port_flows
+            .into_iter()
+            .map(|(name, port)| {
+                let terms = port
+                    .terms
+                    .into_iter()
+                    .map(|(branch, sign)| {
+                        super::flow_probes::signed(
+                            Expression::BranchAccess(BranchAccess::Nodes {
+                                access: "I".into(),
+                                kind: Some(AccessKind::Flow),
+                                pos: branch,
+                                neg: None,
+                                span: port.span,
+                            }),
+                            f64::from(sign),
+                        )
+                    })
+                    .collect();
+                (name, super::flow_probes::sum_expressions(terms, port.span))
+            })
+            .collect();
+        super::flow_probes::expand_port_flows(&mut self.flattened, &ports);
         Ok(self.flattened)
+    }
+
+    fn record_port_flow(&mut self, scope: &ScopeMap, pos: &str, neg: &str, branch: &SmolStr) {
+        for (endpoint, sign) in [(pos, 1), (neg, -1)] {
+            let Some(binding) = scope.nodes.get(endpoint) else {
+                continue;
+            };
+            for boundary in &binding.port_boundaries {
+                let Some(port) = self.port_flows.get_mut(boundary) else {
+                    continue;
+                };
+                let coefficient = port.terms.entry(branch.clone()).or_default();
+                *coefficient += sign;
+                if *coefficient == 0 {
+                    port.terms.remove(branch);
+                }
+            }
+        }
     }
 
     /// Flatten one module's instances.
@@ -394,6 +460,7 @@ impl<'a> HierarchyElaborator<'a> {
             ));
         }
 
+        let branch_inventory = super::flow_probes::hierarchy_branches(child);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let overrides = bind_parameter_overrides(instance, child, path)?;
         self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
@@ -407,19 +474,32 @@ impl<'a> HierarchyElaborator<'a> {
                 ))
             })?;
         let mut scope = ScopeMap {
+            ground_nodes: child.ground_nodes.clone(),
             instance_path: Some(path.into()),
             noise_process_range: Some((noise_process_base, child.noise_process_count)),
             ..ScopeMap::default()
         };
+        for (port, span) in &branch_inventory.port_flows {
+            let token = self.fresh_name("port_flow");
+            scope.port_flows.insert(port.clone(), token.clone());
+            self.port_flows.insert(
+                token,
+                PortFlow {
+                    span: *span,
+                    terms: BTreeMap::new(),
+                },
+            );
+        }
         scope.nodes.insert(
             "0".into(),
             NodeBinding {
+                port_boundaries: Vec::new(),
                 name: "0".into(),
                 discipline: None,
             },
         );
         for (port, connection) in child.ports.iter().zip(connections) {
-            let (binding, connected) = match connection {
+            let (mut binding, connected) = match connection {
                 Some(binding) => (binding, true),
                 None => {
                     let name = self.fresh_name(&port.name);
@@ -432,6 +512,7 @@ impl<'a> HierarchyElaborator<'a> {
                     });
                     (
                         NodeBinding {
+                            port_boundaries: Vec::new(),
                             name,
                             discipline: Some(port.discipline.clone()),
                         },
@@ -439,6 +520,9 @@ impl<'a> HierarchyElaborator<'a> {
                     )
                 }
             };
+            if let Some(boundary) = scope.port_flows.get(&port.name) {
+                binding.port_boundaries.push(boundary.clone());
+            }
             scope.nodes.insert(port.name.clone(), binding);
             scope.port_connected.insert(port.name.clone(), connected);
         }
@@ -446,6 +530,7 @@ impl<'a> HierarchyElaborator<'a> {
             scope.nodes.insert(
                 ground.clone(),
                 NodeBinding {
+                    port_boundaries: Vec::new(),
                     name: "0".into(),
                     discipline: None,
                 },
@@ -463,6 +548,7 @@ impl<'a> HierarchyElaborator<'a> {
             scope.nodes.insert(
                 node.name.clone(),
                 NodeBinding {
+                    port_boundaries: Vec::new(),
                     name,
                     discipline: Some(node.discipline.clone()),
                 },
@@ -591,6 +677,18 @@ impl<'a> HierarchyElaborator<'a> {
             scope
                 .branches
                 .insert(branch.name.clone(), mapped_name.clone());
+            if branch_inventory.conducting_named.contains(&branch.name) {
+                self.record_port_flow(
+                    &scope,
+                    &branch.pos_node,
+                    if branch.neg_node.is_empty() {
+                        "0"
+                    } else {
+                        &branch.neg_node
+                    },
+                    &mapped_name,
+                );
+            }
             self.flattened.branches.push(AnalyzedBranch {
                 name: mapped_name,
                 pos_node: mapped_node_name(&scope, &branch.pos_node, instance.span)?,
@@ -601,6 +699,36 @@ impl<'a> HierarchyElaborator<'a> {
                 },
                 discipline: branch.discipline.clone(),
             });
+        }
+
+        // A module owns its unnamed branches even when another instance
+        // binds its ports to the same nets. Give those branches private names
+        // before endpoint substitution can erase that ownership.
+        for ((pos, neg), span) in branch_inventory.unnamed {
+            let branch = AnalyzedBranch {
+                name: self.fresh_name("branch"),
+                pos_node: mapped_node_name(&scope, &pos, span)?,
+                neg_node: mapped_node_name(&scope, &neg, span)?,
+                discipline: scope
+                    .nodes
+                    .get(&pos)
+                    .and_then(|node| node.discipline.clone())
+                    .or_else(|| {
+                        scope
+                            .nodes
+                            .get(&neg)
+                            .and_then(|node| node.discipline.clone())
+                    })
+                    .unwrap_or_else(|| "electrical".into()),
+            };
+            if branch_inventory
+                .conducting_unnamed
+                .contains(&(pos.clone(), neg.clone()))
+            {
+                self.record_port_flow(&scope, &pos, &neg, &branch.name);
+            }
+            scope.unnamed_branches.insert((pos, neg), branch.clone());
+            self.flattened.branches.push(branch);
         }
 
         // One base for both spaces, taken before anything is appended, so the
@@ -642,7 +770,7 @@ impl<'a> HierarchyElaborator<'a> {
             child
                 .contributions
                 .iter()
-                .map(|contribution| rewrite_contribution(contribution, &scope, base))
+                .map(|contribution| rewrite_contribution(contribution, &scope, base, true))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
         module_stack.push(instance.module.clone());
@@ -1190,7 +1318,7 @@ fn rewrite_region(
             AnalyzedRegion::Assignment(rewrite_assignment(assignment, scope, base)?)
         }
         AnalyzedRegion::Contribution(contribution) => {
-            AnalyzedRegion::Contribution(rewrite_contribution(contribution, scope, base)?)
+            AnalyzedRegion::Contribution(rewrite_contribution(contribution, scope, base, false)?)
         }
         AnalyzedRegion::Conditional {
             condition,
@@ -1271,6 +1399,7 @@ fn rewrite_contribution(
     contribution: &AnalyzedContribution,
     scope: &ScopeMap,
     base: InstanceBase,
+    flat: bool,
 ) -> CompileResult<AnalyzedContribution> {
     let mut endpoints = contribution.branch.split(',');
     let pos = endpoints.next().unwrap_or_default();
@@ -1281,6 +1410,11 @@ fn rewrite_contribution(
             contribution.branch
         )));
     }
+    let scoped_branch = if contribution.declared_branch.is_none() {
+        scope.unnamed_branch(pos, neg.unwrap_or("0"))
+    } else {
+        None
+    };
     let pos = mapped_node_name(scope, pos, contribution.span)?;
     let branch = if let Some(neg) = neg {
         let neg = mapped_node_name(scope, neg, contribution.span)?;
@@ -1288,7 +1422,7 @@ fn rewrite_contribution(
     } else {
         pos
     };
-    Ok(AnalyzedContribution {
+    let mut rewritten = AnalyzedContribution {
         branch,
         declared_branch: contribution
             .declared_branch
@@ -1309,7 +1443,15 @@ fn rewrite_contribution(
         expression_guard: contribution.expression_guard,
         expr_type: contribution.expr_type,
         span: contribution.span,
-    })
+    };
+    if let Some((branch, sign)) = scoped_branch {
+        rewritten.branch = format!("{},{}", branch.pos_node, branch.neg_node).into();
+        rewritten.declared_branch = Some(branch.name.clone());
+        if sign < 0.0 {
+            super::flow_probes::negate_contribution(&mut rewritten, flat);
+        }
+    }
+    Ok(rewritten)
 }
 
 fn mapped_node_name(scope: &ScopeMap, name: &str, span: Span) -> CompileResult<SmolStr> {
@@ -1343,7 +1485,7 @@ fn mapped_optional_parameter(
 }
 
 fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResult<Expression> {
-    Ok(match expression {
+    let mut rewritten = match expression {
         Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
             expression.clone()
         }
@@ -1418,7 +1560,30 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             }
         }
         Expression::BranchAccess(access) => {
-            Expression::BranchAccess(rewrite_branch_access(access, scope)?)
+            if let BranchAccess::Nodes {
+                access: name,
+                kind,
+                pos,
+                neg,
+                span,
+            } = access
+                && !(neg.is_none() && scope.branches.contains_key(pos))
+                && let Some((branch, sign)) =
+                    scope.unnamed_branch(pos, neg.as_deref().unwrap_or("0"))
+            {
+                super::flow_probes::signed(
+                    Expression::BranchAccess(BranchAccess::Nodes {
+                        access: name.clone(),
+                        kind: *kind,
+                        pos: branch.name.clone(),
+                        neg: None,
+                        span: *span,
+                    }),
+                    sign,
+                )
+            } else {
+                Expression::BranchAccess(rewrite_branch_access(access, scope)?)
+            }
         }
         Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
             array: scope
@@ -1460,7 +1625,23 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         Expression::NoiseSource(noise) => {
             Expression::NoiseSource(rewrite_noise_source(noise, scope)?)
         }
-    })
+    };
+    // A reversed probe becomes -access(private_branch). Keep ddx's axis a
+    // branch probe by moving that sign onto the derivative result.
+    let args = match &mut rewritten {
+        Expression::Call(call) if call.name == "ddx" => Some(&mut call.args),
+        Expression::SystemFunction(call) if call.name == "ddx" => Some(&mut call.args),
+        _ => None,
+    };
+    if let Some(args) = args
+        && args.len() == 2
+        && matches!(&args[1], Expression::Unary(unary) if unary.op == UnaryOp::Neg)
+        && let Expression::Unary(unary) = args.remove(1)
+    {
+        args.push(*unary.operand);
+        rewritten = super::flow_probes::signed(rewritten, -1.0);
+    }
+    Ok(rewritten)
 }
 
 fn qualify_noise_call_name(name: &str, arguments: &mut [Expression], scope: &ScopeMap) {
@@ -1547,12 +1728,17 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
         } => BranchAccess::Branch {
             access: access.clone(),
             kind: *kind,
-            name: scope.branches.get(name).cloned().ok_or_else(|| {
-                semantic_error(
-                    SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
-                    *span,
-                )
-            })?,
+            name: scope
+                .branches
+                .get(name)
+                .or_else(|| scope.port_flows.get(name))
+                .cloned()
+                .ok_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                        *span,
+                    )
+                })?,
             span: *span,
         },
     })
