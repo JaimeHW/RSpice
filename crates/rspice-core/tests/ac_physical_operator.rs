@@ -65,6 +65,12 @@ fn behavioral_ac_transfer_preserves_primitive_derivative_coefficients() {
         ("asinh(1e200*(1+V(in)))", 1.0_f64),
         ("log10(1e308*(1+V(in)))", 1.0 / std::f64::consts::LN_10),
         ("pow(1e-300*(1+V(in)),-0.03)*1e-9", -0.03),
+        ("tanh(20+1e15*V(in))", 1e15 / 20.0_f64.cosh().powi(2)),
+        ("tanh(-20+1e15*V(in))", 1e15 / 20.0_f64.cosh().powi(2)),
+        (
+            "tanh(400+1e300*V(in))",
+            (1e300 / 400.0_f64.cosh()) / 400.0_f64.cosh(),
+        ),
     ] {
         let point = solve_one(&format!(
             "Primitive derivative\nV1 in 0 DC 0 AC 1\nB1 out 0 V={{{expression}}}\n.end\n"

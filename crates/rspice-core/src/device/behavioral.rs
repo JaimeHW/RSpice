@@ -1603,7 +1603,14 @@ fn eval_function_with_derivative(
                 derivative_pair(value, derivative)
             } else {
                 let value = x.tanh();
-                derivative_pair(value, dx * (1.0 - value * value))
+                // 1-tanh(x)^2 cancels near saturation. Keep the decaying
+                // exponential separate from its incoming tangent as well.
+                let argument = -2.0 * x.abs();
+                let denominator = 1.0 + argument.exp();
+                derivative_pair(
+                    value,
+                    (dx * 4.0 / denominator / denominator).multiply_exp(argument),
+                )
             }
         }
         Function::Asinh => {
@@ -3449,6 +3456,48 @@ mod tests {
                     (actual / expected - 1.0).abs() < 3e-15,
                     "{dialect:?} {expression}: {actual:e}, expected {expected:e}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn tanh_analytic_derivative_preserves_saturation_tails() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            for point in [
+                0.0_f64, 1.0, -1.0, 19.0, -19.0, 20.0, -20.0, 21.0, -21.0, 400.0, -400.0,
+            ] {
+                let expression = format!("tanh({point}+1e300*v(in))");
+                let (_, actual) = eval_node_derivative_with_dialect(&expression, 0.0, dialect);
+                let expected = if dialect == ExpressionDialect::Xyce && point.abs() > 20.0 {
+                    0.0
+                } else {
+                    (1e300 / point.cosh()) / point.cosh()
+                };
+                if expected == 0.0 {
+                    assert_eq!(actual, 0.0, "{dialect:?} {expression}");
+                } else {
+                    assert!(
+                        (actual / expected - 1.0).abs() < 5e-15,
+                        "{dialect:?} {expression}: {actual:e}, expected {expected:e}"
+                    );
+                }
+            }
+            for point in [-1000.0, 1000.0] {
+                let expression =
+                    format!("tanh({point}+1e200*(1e200*(1e200*(1e200*(1e200*v(in))))))");
+                let (_, actual) = eval_node_derivative_with_dialect(&expression, 0.0, dialect);
+                if dialect == ExpressionDialect::Xyce {
+                    assert_eq!(actual, 0.0);
+                } else {
+                    // cosh(1000) = 2*cosh(500)^2-1; the -1 is negligible
+                    // here. This reference keeps every intermediate finite.
+                    let ratio = 1e250 / 500.0_f64.cosh();
+                    let expected = (ratio * ratio).powi(2) / 4.0;
+                    assert!(
+                        (actual / expected - 1.0).abs() < 5e-15,
+                        "{expression}: {actual:e}, expected {expected:e}"
+                    );
+                }
             }
         }
     }

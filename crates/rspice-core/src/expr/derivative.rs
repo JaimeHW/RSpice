@@ -33,6 +33,38 @@ impl Derivative {
         }
     }
 
+    /// Apply an exponential without rounding its coefficient to zero or
+    /// infinity before it reaches the retained incoming derivative.
+    pub(crate) fn multiply_exp(self, argument: Value) -> Self {
+        let ordinary = argument.exp();
+        if ordinary.is_normal() || !argument.is_finite() {
+            return self * ordinary;
+        }
+        let exponent = (argument / std::f64::consts::LN_2).floor();
+        if exponent.abs() >= i64::MAX as Value {
+            return self * ordinary;
+        }
+        // The low part of ln(2) prevents reduction error from growing with
+        // the exponent. mul_add preserves the cancellation in the high part.
+        const LN_2_LOW: Value = 2.319_046_813_846_299_6e-17;
+        let remainder = (-exponent).mul_add(std::f64::consts::LN_2, argument) - exponent * LN_2_LOW;
+        let magnitude = exponent.abs() as u64;
+        let mut scale = ScaledValue::new(2.0).powu(magnitude as u32);
+        if magnitude >> 32 != 0 {
+            let high = ScaledValue::new(2.0)
+                .powu(1 << 31)
+                .powu(2)
+                .powu((magnitude >> 32) as u32);
+            scale = scale.multiply(high);
+        }
+        let incoming = if exponent < 0.0 {
+            self.0.divide(scale)
+        } else {
+            self.0.multiply(scale)
+        };
+        Self(incoming.multiply(ScaledValue::new(remainder.exp())))
+    }
+
     pub(crate) fn product_ratio(
         numerator: [(Self, Value); 2],
         denominator: [(Value, Value); 2],
