@@ -2941,7 +2941,17 @@ impl CircuitData {
     /// pinning tiny steps forever.
     pub(crate) fn accept_all_veriloga_timestep(&mut self) -> Result<bool, String> {
         self.validate_nonmixed_model_acceptance()?;
+        let discontinuity = self.veriloga_discontinuity_rising();
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices.apply_validated_timestep_acceptance();
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .apply_validated_state_acceptance();
+        Ok(discontinuity)
+    }
 
+    /// Candidate discontinuities must reach LTE control before acceptance.
+    pub(crate) fn veriloga_discontinuity_rising(&self) -> bool {
         #[cfg(feature = "veriloga")]
         let discontinuity = self
             .veriloga_devices
@@ -2952,12 +2962,7 @@ impl CircuitData {
         #[cfg(feature = "veriloga-builtins-base")]
         let discontinuity = discontinuity || self.generated_veriloga_devices.discontinuity_rising();
 
-        #[cfg(feature = "veriloga")]
-        self.veriloga_devices.apply_validated_timestep_acceptance();
-        #[cfg(feature = "veriloga-builtins-base")]
-        self.generated_veriloga_devices
-            .apply_validated_state_acceptance();
-        Ok(discontinuity)
+        discontinuity
     }
 
     /// Tightest `$bound_step` request across Verilog-A devices at the

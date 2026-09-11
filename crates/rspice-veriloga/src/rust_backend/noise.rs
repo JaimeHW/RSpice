@@ -624,6 +624,21 @@ pub(super) fn grouped_noise_extension(
         writeln!(out, "        use {}::integer;", options.runtime_path)
             .expect("write grouped integer import");
     }
+    // The source-wise evaluator may import the same lane types at module
+    // scope. Keep the independently planned grouped evaluator's imports local.
+    let lane_types = lane_runtime_types(&plan.function)
+        .into_iter()
+        .filter(|name| body.contains(&format!("{name}(")))
+        .collect::<Vec<_>>();
+    if !lane_types.is_empty() {
+        writeln!(
+            out,
+            "        use {}::{{{}}};",
+            options.runtime_path,
+            lane_types.join(", ")
+        )
+        .expect("write grouped lane imports");
+    }
     emit_lines(
         &mut out,
         &body.lines().map(str::to_owned).collect::<Vec<_>>(),
@@ -780,19 +795,6 @@ pub(super) fn grouped_noise_extension(
         .expect("write grouped visitor");
     }
     out.push_str("        Ok(())\n    }\n}\n");
-    let lane_types = lane_runtime_types(&plan.function)
-        .into_iter()
-        .filter(|name| body.contains(&format!("{name}(")))
-        .collect::<Vec<_>>();
-    if !lane_types.is_empty() {
-        writeln!(
-            out,
-            "\nuse {}::{{{}}};",
-            options.runtime_path,
-            lane_types.join(", ")
-        )
-        .expect("write grouped lane imports");
-    }
     Ok(out)
 }
 

@@ -23,6 +23,64 @@ fn stamp_once(device: &mut VerilogADevice, voltages: &[f64]) {
     device.stamp(voltages, |_, _, _| {}, |_, _| {});
 }
 
+#[test]
+fn switch_branch_discontinuity_follows_acceptance_and_checkpoint_restore() {
+    let report = VerilogACompiler::default()
+        .compile_runtime(
+            "module switched(p,n); inout p,n; electrical p,n;
+        analog if(V(p,n)>0) V(p,n)<+2*I(p,n); else I(p,n)<+3*V(p,n); endmodule",
+            None,
+        )
+        .unwrap();
+    let kind_slot = report.model.switch_branch_variables[0];
+    let mut device = VerilogADevice::try_new_with_canonical_ir(
+        "SWITCH",
+        report.model,
+        &report.canonical_ir,
+        &[1, 0],
+    )
+    .unwrap();
+    device.set_internal_node_indices(&[2]);
+    stamp_once(&mut device, &[-1.0, 0.0]);
+    assert!(!device.discontinuity_rising());
+    device.advance_state();
+    for _ in 0..3 {
+        stamp_once(&mut device, &[1.0, 0.0]);
+        assert!(
+            device.discontinuity_rising(),
+            "Newton retries must retain the hint"
+        );
+    }
+    stamp_once(&mut device, &[-1.0, 0.0]);
+    assert!(
+        !device.discontinuity_rising(),
+        "an unaccepted mode must not replace accepted state"
+    );
+    stamp_once(&mut device, &[1.0, 0.0]);
+    device.advance_state();
+    assert!(!device.discontinuity_rising());
+    let checkpoint = device.checkpoint_state().unwrap();
+    stamp_once(&mut device, &[-1.0, 0.0]);
+    assert!(
+        device.discontinuity_rising(),
+        "consecutive mode changes each require a hint"
+    );
+    device.advance_state();
+    device.validate_checkpoint_state(&checkpoint).unwrap();
+    device.apply_validated_checkpoint_state(&checkpoint);
+    stamp_once(&mut device, &[1.0, 0.0]);
+    assert!(!device.discontinuity_rising());
+    let mut invalid = checkpoint.clone();
+    invalid.accepted.variables[kind_slot] = 2.0;
+    assert!(
+        device
+            .validate_checkpoint_state(&invalid)
+            .unwrap_err()
+            .to_string()
+            .contains("switch-branch")
+    );
+}
+
 const BOUNDED: &str = r#"
 `include "disciplines.vams"
 module bounded(p, n);

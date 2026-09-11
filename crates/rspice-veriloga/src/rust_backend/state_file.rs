@@ -1579,7 +1579,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 22 retains independent potential branches and normalizes source direction.
 // Version 23 resolves declared grounds before allocating solver nodes.
 // Version 24 removes duplicate potential-current unknowns from generated devices.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 24;
+// Version 25 retains switched source kinds and their accepted-mode discontinuities.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 25;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();

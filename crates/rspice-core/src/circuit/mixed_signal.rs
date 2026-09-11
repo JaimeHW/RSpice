@@ -370,6 +370,7 @@ impl CircuitData {
     /// After all roots are resolved, `validate_acceptance` checks every host
     /// on a copy before final-step equations replace a finishing candidate.
     /// Ordinary numerical candidates require no copies here.
+    /// Returns the earliest refinement time and any candidate discontinuity.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_mixed_transient_candidate_task(
         &mut self,
@@ -382,15 +383,17 @@ impl CircuitData {
         kind: rspice_veriloga_runtime::AnalogTaskKind,
         validate_acceptance: bool,
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
-    ) -> Result<Option<Value>, SimulationError> {
+    ) -> Result<(Option<Value>, bool), SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, coefficients)?;
         let mut refinement: Option<Value> = None;
+        let mut discontinuity = false;
         for host in &mut self.mixed_signal_hosts {
             let started = host.begin_trial(time, dt, integration, initial_step, final_step);
             named(host, started)?;
             let inspected = (|| {
                 settle_to_quiet(host, voltages)?;
                 host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
+                discontinuity |= host.analog_device().discontinuity_rising();
                 let target = host
                     .analog_device()
                     .try_transient_event_refinement_time()
@@ -416,7 +419,7 @@ impl CircuitData {
             named(host, inspected)?;
             named(host, rolled_back)?;
         }
-        Ok(refinement)
+        Ok((refinement, discontinuity))
     }
 
     /// Earliest scheduled digital activation across every mixed module.

@@ -207,11 +207,147 @@ for (row,expected) in [(0,2.0/0.9),(1,6.0/0.9)] {
     let reduced=matrix(row,0)-matrix(row,2)*matrix(2,0)/pivot;
     assert!((reduced-expected).abs()<1e-12,"{row}: {reduced}");
 }
+
 for row in 0..3 {
     let rhs=(0..3).map(|col| matrix(row,col)*bias[col]).sum::<f64>()-sink[28+row];
     assert!(rhs.abs()<1e-12,"{row}: {rhs}");
 }
 assert!(!ctx.evaluation_failed());
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_switch_sources_preserve_current_and_parameter_restaging() {
+    let (state, stamp, noise) = generated_parts(
+        "module switched(p,q); inout p,q; electrical p,q; parameter integer mode=0; analog begin I(q)<+I(p); if(mode==0) I(p)<+3*V(p); else V(p)<+2*I(p); if(mode==2) begin I(p)<+5*V(p); V(p)<+3*I(p); V(p)<+4*I(p); end end endmodule",
+        "switched source retention",
+    );
+    run_generated_main(
+        "switched source retention",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+assert_eq!(device::state::Instance::INTERNAL_STATE_NODES,&[0]);
+assert_eq!(device::state::Instance::BRANCH_COUNT,0);
+let mut instance=device::state::Instance::new(&[0,1,2]);
+for (mode,gain) in [(0.0,3.0),(1.0,0.5),(2.0,1.0/7.0),(0.0,3.0)] {
+    instance.set_parameter("mode",mode).unwrap();
+    instance.finalize_parameters().unwrap();
+    let bias=[1.0,0.0,-gain];
+    let ctx=runtime::GeneratedEvalContext{voltages:&bias,temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper{sink:Some(&mut sink)});
+    let matrix=|row:usize,col:usize|sink[12+4*row+col];
+    let pivot=matrix(2,2);
+    assert!(pivot.abs()>0.1,"mode={mode}: {sink:?}");
+    for row in [0,1] {
+        let reduced=matrix(row,0)-matrix(row,2)*matrix(2,0)/pivot;
+        assert!((reduced-gain).abs()<1e-12,"mode={mode},row={row}: {sink:?}");
+    }
+    assert!(!ctx.evaluation_failed());
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_switch_discontinuities_follow_acceptance_and_rollback() {
+    let (state, stamp, noise) = generated_parts(
+        "module switched(p); inout p; electrical p; analog if(V(p)>0) V(p)<+2*I(p); else I(p)<+3*V(p); endmodule",
+        "switch discontinuity lifecycle",
+    );
+    run_generated_main(
+        "switch discontinuity lifecycle",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let evaluate=|instance:&mut device::state::Instance,voltage:f64| {
+    let ctx=runtime::GeneratedEvalContext {voltages:&[voltage,0.0],temperature:300.0};
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+    assert!(!ctx.evaluation_failed());
+};
+evaluate(&mut instance,-1.0);
+assert!(!instance.discontinuity_rising());
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let rollback=instance.capture_rollback_state();
+for _ in 0..3 {
+    evaluate(&mut instance,1.0);
+    assert!(instance.discontinuity_rising());
+}
+instance.restore_rollback_state(&rollback);
+evaluate(&mut instance,-1.0);
+assert!(!instance.discontinuity_rising());
+evaluate(&mut instance,1.0);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let checkpoint=instance.capture_persistent_state();
+assert!(!instance.discontinuity_rising());
+evaluate(&mut instance,-1.0);
+assert!(instance.discontinuity_rising());
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+instance.restore_persistent_state(&checkpoint).unwrap();
+evaluate(&mut instance,1.0);
+assert!(!instance.discontinuity_rising());
+let mut invalid=checkpoint;
+invalid.event_variables[0]=2.0;
+assert!(instance.restore_persistent_state(&invalid).unwrap_err().contains("switch-branch"));
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_switch_sources_preserve_noise_and_discarded_rhs_validation() {
+    let (state, stamp, noise) = generated_parts(
+        "module switched(p); inout p; electrical p; real process;
+        analog begin process=white_noise(1,\"shared\"); V(p)<+2*process; I(p)<+5*process; V(p)<+3*process; V(p)<+4*process; end endmodule",
+        "switch noise retention",
+    );
+    run_generated_main("switch noise retention", &state, &stamp, &noise, r#"
+struct Capture(usize);
+impl runtime::GeneratedNoiseProcessVisitor for Capture {
+    fn visit_process(&mut self,_:usize,process:runtime::GeneratedNoiseProcessEvaluationRef<'_>)->bool {
+        assert!(process.active);
+        assert_eq!(process.psd,1.0);
+        assert_eq!(process.injections.len(),1);
+        assert_eq!(process.injections[0].gain.re,-7.0);
+        assert_eq!(process.injections[0].gain.im,0.0);
+        self.0+=1;
+        true
+    }
+}
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext{voltages:&[0.0,0.0],temperature:300.0};
+let mut capture=Capture(0);
+instance.evaluate_noise_processes_at_frequency(&ctx,1.0,&mut capture).unwrap();
+assert_eq!(capture.0,1);
+assert!(!ctx.evaluation_failed());
+"#).unwrap_or_else(|report|panic!("{report}"));
+    let (state, stamp, noise) = generated_parts(
+        "module switched(p); inout p; electrical p; analog begin I(p)<+ln(V(p)); V(p)<+I(p); end endmodule",
+        "switch discarded RHS validation",
+    );
+    run_generated_main(
+        "switch discarded RHS validation",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let ctx=runtime::GeneratedEvalContext{voltages:&[-1.0,0.0],temperature:300.0};
+instance.stamp(&ctx,&mut runtime::GeneratedStamper::default());
+assert!(ctx.evaluation_failed());
 "#,
     )
     .unwrap_or_else(|report| panic!("{report}"));

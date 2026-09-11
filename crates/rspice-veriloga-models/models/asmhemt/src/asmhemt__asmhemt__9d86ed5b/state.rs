@@ -521,8 +521,8 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 }
 
 pub struct Instance {
-	pub nodes: [usize; 24],
-	pub branches: [usize; 27],
+	pub nodes: [usize; 45],
+	pub branches: [usize; 6],
 	pub params: Box<Parameters>,
 	model_params: Box<Parameters>,
 	pub(crate) param_given: Box<[bool; 287]>,
@@ -532,7 +532,9 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) canonical_reactive: Box<[f64; 1051]>,
+	pub(crate) event_state_accepted: Box<[f64; 21]>,
+	pub(crate) event_state_candidate: Box<[f64; 21]>,
+	pub(crate) canonical_reactive: Box<[f64; 781]>,
 }
 
 impl Clone for Instance {
@@ -550,6 +552,8 @@ impl Clone for Instance {
 			time: self.time,
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
+			event_state_accepted: self.event_state_accepted.clone(),
+			event_state_candidate: self.event_state_candidate.clone(),
 			canonical_reactive: self.canonical_reactive.clone(),
 		}
 	}
@@ -847,21 +851,21 @@ impl Instance {
 		P::model("ktvbisb", Some(0.0)),
 		P::model("ktvbidb", Some(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 19;
-	pub const NODE_COUNT: usize = 24;
-	pub const INTERNAL_NODE_NAMES: [&str; 19] = ["trap1", "trap2", "di", "si", "gi", "gin", "n1", "nt", "n2", "ntg", "fp1", "fp2", "fp3", "fp4", "fp1s", "fp2s", "fp3s", "fp4s", "__flow_state0"];
+	pub const INTERNAL_NODE_COUNT: usize = 40;
+	pub const NODE_COUNT: usize = 45;
+	pub const INTERNAL_NODE_NAMES: [&str; 40] = ["trap1", "trap2", "di", "si", "gi", "gin", "n1", "nt", "n2", "ntg", "fp1", "fp2", "fp3", "fp4", "fp1s", "fp2s", "fp3s", "fp4s", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6", "__flow_state7", "__flow_state8", "__flow_state9", "__flow_state10", "__flow_state11", "__flow_state12", "__flow_state13", "__flow_state14", "__flow_state15", "__flow_state16", "__flow_state17", "__flow_state18", "__flow_state19", "__flow_state20", "__flow_state21"];
 
-	pub const INTERNAL_STATE_NODES: &[usize] = &[18];
-	pub const BRANCH_COUNT: usize = 27;
+	pub const INTERNAL_STATE_NODES: &[usize] = &[18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39];
+	pub const BRANCH_COUNT: usize = 6;
 	pub const PARAMETER_COUNT: usize = 287;
-	pub const VARIABLE_COUNT: usize = 1158;
+	pub const VARIABLE_COUNT: usize = 1200;
 	pub const DDT_STATE_COUNT: usize = 121;
 	pub const IDT_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([60, 110, 210, 144, 236, 66, 24, 126, 185, 182, 183, 141, 177, 225, 13, 235, 155, 250, 107, 151, 6, 240, 96, 118, 161, 0, 147, 80, 249, 0, 182, 215]);
-	pub const EVENT_STATE_COUNT: usize = 0;
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([38, 219, 100, 238, 78, 228, 178, 158, 209, 165, 142, 79, 160, 36, 234, 221, 150, 243, 42, 204, 89, 101, 110, 76, 229, 24, 77, 108, 180, 134, 146, 15]);
+	pub const EVENT_STATE_COUNT: usize = 21;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "2e19cb139a7a8f25a0b7cb28d2b9f43360d862074d4d8e0f3d4001310e669734";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "ed9dc895b789188dacc3fc290ae858dfc2a87bdd4c368793888a76727f31b8bf";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -892,6 +896,8 @@ impl Instance {
 			time: 0.0,
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+			event_state_accepted: boxed_zero_f64_array(),
+			event_state_candidate: boxed_zero_f64_array(),
 			canonical_reactive: boxed_zero_f64_array(),
 		};
 		instance.apply_parameters(assignments)?;
@@ -900,7 +906,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(605);
+		let mut values = Vec::with_capacity(647);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -912,6 +918,8 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.idt_previous);
 		values.extend_from_slice(&self.stamp_state.idt_older);
 		values.extend_from_slice(&self.stamp_state.idt_input_previous);
+		values.extend_from_slice(&*self.event_state_accepted);
+		values.extend_from_slice(&*self.event_state_candidate);
 		let mut flags = Vec::with_capacity(242);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
@@ -922,7 +930,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 605);
+		debug_assert_eq!(state.values.len(), 647);
 		debug_assert_eq!(state.flags.len(), 242);
 		let mut rollback_values = state.values.as_slice();
 		let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
@@ -957,6 +965,12 @@ impl Instance {
 		rollback_values = remaining;
 		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_input_previous.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::EVENT_STATE_COUNT);
+		self.event_state_accepted.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::EVENT_STATE_COUNT);
+		self.event_state_candidate.copy_from_slice(field);
 		rollback_values = remaining;
 		let mut rollback_flags = state.flags.as_slice();
 		let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);
@@ -1002,6 +1016,8 @@ impl Instance {
 		self.stamp_state.ddt_derivative_previous.fill(0.0);
 		self.stamp_state.ddt_initialized.fill(false);
 		self.stamp_state.ddt_candidate_valid.fill(false);
+		self.event_state_accepted.fill(0.0);
+		self.event_state_candidate.fill(0.0);
 		self.reset_analog_tasks();
 		self.time = 0.0;
 		self.timestep = 0.0;
@@ -1011,7 +1027,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {
-		let event_variables = Vec::new();
+		let event_variables = self.event_state_accepted.to_vec();
 		GeneratedVerilogAPersistentState {
 			ddt_previous: self.stamp_state.ddt_previous.to_vec(),
 			ddt_older: self.stamp_state.ddt_older.to_vec(),
@@ -1035,8 +1051,8 @@ impl Instance {
 		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
 			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));
 		}
-		if state.event_variables.len() != 0 {
-			return Err(format!("generated event-state checkpoint shape mismatch: expected 0, found {}", state.event_variables.len()));
+		if state.event_variables.len() != 21 {
+			return Err(format!("generated event-state checkpoint shape mismatch: expected 21, found {}", state.event_variables.len()));
 		}
 		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
 			return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
@@ -1044,6 +1060,27 @@ impl Instance {
 		if state.event_variables.iter().any(|value| value.is_nan()) {
 			return Err("generated Verilog-A checkpoint event state contains NaN".to_string());
 		}
+		if !matches!(state.event_variables[0], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[1], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[2], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[3], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[4], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[5], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[6], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[7], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[8], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[9], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[10], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[11], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[12], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[13], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[14], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[15], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[16], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[17], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[18], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[19], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[20], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		Ok(())
 	}
 
@@ -1063,6 +1100,8 @@ impl Instance {
 		self.stamp_state.idt_input_previous.copy_from_slice(&state.idt_input_previous);
 		self.stamp_state.idt_input_current.copy_from_slice(&state.idt_input_previous);
 		self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
+		self.event_state_accepted.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);
+		self.event_state_candidate.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);
 		self.stamp_state.ddt_candidate_valid.fill(false);
 		self.stamp_state.idt_candidate_valid.fill(false);
 		self.reset_analog_tasks();
@@ -1254,6 +1293,7 @@ impl Instance {
 
 	#[inline]
 	pub fn begin_event_state_evaluation(&mut self) {
+		self.event_state_candidate.copy_from_slice(&*self.event_state_accepted);
 	}
 
 	#[inline]
@@ -1263,6 +1303,9 @@ impl Instance {
 	}
 
 	pub fn validate_advance_state(&self) -> Result<(), String> {
+		if self.event_state_accepted.iter().chain(&*self.event_state_candidate).any(|value| value.is_nan()) {
+			return Err("generated event-state accepted/candidate storage contains NaN".to_string());
+		}
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
 			for (lane, value) in [("previous", self.stamp_state.ddt_previous[index]), ("older", self.stamp_state.ddt_older[index]), ("derivative_previous", self.stamp_state.ddt_derivative_previous[index])] {
@@ -1287,11 +1330,33 @@ impl Instance {
 			}
 			index += 1;
 		}
+		if !matches!(self.event_state_candidate[0], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[1], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[2], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[3], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[4], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[5], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[6], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[7], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[8], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[9], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[10], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[11], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[12], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[13], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[14], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[15], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[16], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[17], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[18], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[19], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[20], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		Ok(())
 	}
 
 	pub fn apply_validated_advance_state(&mut self) {
 		debug_assert!(self.validate_advance_state().is_ok());
+		self.event_state_accepted.copy_from_slice(&*self.event_state_candidate);
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
 			if self.stamp_state.ddt_candidate_valid[index] {
@@ -1372,7 +1437,7 @@ impl Instance {
 	#[inline]
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
-	pub fn discontinuity_rising(&self) -> bool { false }
+	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[0] != self.event_state_accepted[0] || self.event_state_candidate[1] != self.event_state_accepted[1] || self.event_state_candidate[2] != self.event_state_accepted[2] || self.event_state_candidate[3] != self.event_state_accepted[3] || self.event_state_candidate[4] != self.event_state_accepted[4] || self.event_state_candidate[5] != self.event_state_accepted[5] || self.event_state_candidate[6] != self.event_state_accepted[6] || self.event_state_candidate[7] != self.event_state_accepted[7] || self.event_state_candidate[8] != self.event_state_accepted[8] || self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] || self.event_state_candidate[11] != self.event_state_accepted[11] || self.event_state_candidate[12] != self.event_state_accepted[12] || self.event_state_candidate[13] != self.event_state_accepted[13] || self.event_state_candidate[14] != self.event_state_accepted[14] || self.event_state_candidate[15] != self.event_state_accepted[15] || self.event_state_candidate[16] != self.event_state_accepted[16] || self.event_state_candidate[17] != self.event_state_accepted[17] || self.event_state_candidate[18] != self.event_state_accepted[18] || self.event_state_candidate[19] != self.event_state_accepted[19] || self.event_state_candidate[20] != self.event_state_accepted[20] }
 	#[inline]
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]

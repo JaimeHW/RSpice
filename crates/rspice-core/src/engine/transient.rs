@@ -6069,6 +6069,7 @@ impl Engine {
             let mut candidate_model_finish = None;
             macro_rules! reject_for_veriloga_event_refinement {
                 ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
+                    let mut discontinuity = false;
                     if circuit.has_any_veriloga_devices() {
                         Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
                         let model_candidate = Self::inspect_transient_model_candidate(
@@ -6121,7 +6122,9 @@ impl Engine {
                         // `None`) after it commits the Verilog-A state.
                         veriloga_event_refinement_count = 0;
                         candidate_model_finish = model_candidate.finish;
+                        discontinuity = model_candidate.discontinuity;
                     }
+                    discontinuity
                 }};
             }
             macro_rules! finalize_model_finish_candidate {
@@ -7951,7 +7954,14 @@ impl Engine {
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
             let middle_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
 
+            // Resolve model events and discontinuities at the converged candidate
+            // before estimating its error against smooth accepted history. A
+            // finite source jump cannot satisfy that estimate at any smaller dt.
+            let candidate_model_discontinuity =
+                reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
+
             if !xyce_iteration_error_control
+                && !candidate_model_discontinuity
                 && locked_grid.is_none()
                 && let Some(limit) = candidate_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
@@ -8042,6 +8052,7 @@ impl Engine {
                 && xyce_lte_restart_first_step
                 && !self.config.transient_new_bp_stepping;
             let device_or_startup_controls_lte = first_accepted_transient_step
+                || candidate_model_discontinuity
                 || legacy_xyce_breakpoint_restart_controls_lte
                 || (!lte_estimator.uses_accepted_solution_reference()
                     && (linearized_startup_recovery_points
@@ -8097,6 +8108,7 @@ impl Engine {
                 && accept
                 && !first_accepted_transient_step
                 && !xyce_lte_restart_first_step
+                && !candidate_model_discontinuity
                 && !at_breakpoint
                 && step_trap_order == 1
                 && matches!(
@@ -9019,7 +9031,6 @@ impl Engine {
             // sources. Source-to-solution amplitude ratios are not a residual
             // test (and current/voltage source magnitudes have different units).
             stale_accept_count = 0;
-            reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
             finalize_model_finish_candidate!();
 
             // Success - reset retry counter only after event-root refinement

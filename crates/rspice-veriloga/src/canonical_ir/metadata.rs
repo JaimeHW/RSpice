@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 44 retains ordered switch-branch source kinds and accepted mode state.
 /// Version 43 retains event-controlled nonblocking capture subscriptions.
 /// Version 42 captures delayed nonblocking writes independently of their process.
 /// Version 41 evaluates procedural delay expressions in their activation.
@@ -45,7 +46,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 43;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 44;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

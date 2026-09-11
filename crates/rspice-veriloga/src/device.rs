@@ -146,6 +146,10 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     for slot in &model.event_state_variables {
         usize_field(&mut hasher, *slot);
     }
+    usize_field(&mut hasher, model.switch_branch_variables.len());
+    for &slot in &model.switch_branch_variables {
+        usize_field(&mut hasher, slot);
+    }
     usize_field(&mut hasher, model.initialization_prologue_variables.len());
     for &slot in &model.initialization_prologue_variables {
         usize_field(&mut hasher, slot);
@@ -2669,6 +2673,19 @@ impl VerilogADevice {
         context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
         context.configure_event_state_variables(&model.event_state_variables)?;
+        if model
+            .switch_branch_variables
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+            || model
+                .switch_branch_variables
+                .iter()
+                .any(|slot| model.event_state_variables.binary_search(slot).is_err())
+        {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "switch-branch variables must be sorted, unique event-state slots".into(),
+            ));
+        }
         // Stateful runtime data referenced by the bytecode lives in the
         // per-instance context (the model stays immutable and shared)
         context.lookup_tables = model.lookup_tables.clone();
@@ -3282,6 +3299,13 @@ impl VerilogADevice {
     }
 
     fn validate_discontinuity_state(&self) -> Result<(), VmError> {
+        for &slot in &self.model.switch_branch_variables {
+            if !matches!(self.context.variables.get(slot), Some(0.0 | 1.0)) {
+                return Err(VmError::InvalidNumericResult(
+                    "invalid switch-branch source kind".into(),
+                ));
+            }
+        }
         if matches!(
             self.discontinuity_flags(),
             None | Some(0.0 | 1.0 | 2.0 | 3.0)
@@ -4244,6 +4268,17 @@ impl VerilogADevice {
             .iter()
             .position(|name| name == "$bound_step");
         for (index, value) in checkpoint.accepted.variables.iter().copied().enumerate() {
+            if self
+                .model
+                .switch_branch_variables
+                .binary_search(&index)
+                .is_ok()
+                && !matches!(value, 0.0 | 1.0)
+            {
+                return Err(invalid(
+                    "checkpoint switch-branch source kind is invalid".into(),
+                ));
+            }
             if Some(index) == self.discontinuity_slot && !matches!(value, 0.0 | 1.0 | 2.0 | 3.0) {
                 return Err(invalid(
                     "checkpoint $discontinuity flags are invalid".into(),
@@ -4345,7 +4380,15 @@ impl VerilogADevice {
 
     /// Whether `$discontinuity` newly fired since the last accepted step
     pub fn discontinuity_rising(&self) -> bool {
-        self.discontinuity_pending() && !self.prev_discontinuity
+        (self.discontinuity_pending() && !self.prev_discontinuity)
+            || self.model.switch_branch_variables.iter().any(|&index| {
+                self.discrete_state_value(index).is_some_and(|accepted| {
+                    self.context
+                        .variables
+                        .get(index)
+                        .is_some_and(|candidate| *candidate != accepted)
+                })
+            })
     }
 
     /// Set the circuit node indices for internal nodes

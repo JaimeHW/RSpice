@@ -338,7 +338,7 @@ pub(super) fn canonical_instance_preprocess(
 	DE=K;
 	DF=K;
 	}
-    [E, F, G, H, oAL as u8 as f64, oAS as u8 as f64, oAW as u8 as f64, BA, BG, BJ, oBP, BO, BU as u8 as f64, BZ as u8 as f64, oCC, CF, CG, CJ, CK, CP as u8 as f64, CQ as u8 as f64, oCS, oCT, oBS, CU as u8 as f64, CV as u8 as f64, CE, BY, CX as u8 as f64, CB, CZ as u8 as f64, DC, DD, DE, DF, CY, DA]
+    [E, F, G, H, oAL as u8 as f64, oAS as u8 as f64, oAW as u8 as f64, BA, BG, BJ, oBP, BO, BU as u8 as f64, BZ as u8 as f64, oCC, CF, CG, CJ, CK, CP as u8 as f64, CQ as u8 as f64, oCS, oCT, oBS, CU as u8 as f64, CV as u8 as f64, CE, BY, CX as u8 as f64, CB, CZ as u8 as f64, CY, DA, DC, DD, DE, DF]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -667,8 +667,7 @@ impl Instance {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
-        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5])];
-        let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1])];
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7])];
         let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
@@ -795,8 +794,8 @@ impl Instance {
 		let XM=L3([0f64;3]);
 		let AAC=parameters[84];
 		let AAI=L3([0f64;3]);
-		let AAT=branch_unknown_flows[0];
-		let AAZ=branch_unknown_flows[1];
+		let AAT=node_potentials[6];
+		let AAZ=node_potentials[7];
 		let ABE=staged[89]!=0.0;
 		let ADX=staged[90]!=0.0;
 		let AEA=L8([0f64;8]);
@@ -820,17 +819,15 @@ impl Instance {
 		let ALM=staged[59];
 		let ALP=staged[60];
 		let ALX=staged[95]!=0.0;
-		let ARN=staged[61];
-		let ARR=L3([0f64;3]);
-		let ARW=L2([0f64;2]);
-		let ASB=staged[96]!=0.0;
-		let ASC=staged[62];
-		let ASG=L3([0f64;3]);
-		let ASL=L2([0f64;2]);
-		let ASR=ddt_scale();
-		let ATA=parameters[13];
-		let ATD=0f64;
-		let ATG=0f64;
+		let ARP=staged[96]!=0.0;
+		let ARQ=staged[61];
+		let ASD=ddt_scale();
+		let ASM=parameters[13];
+		let ASN=staged[62];
+		let ASZ=0f64;
+		let ATC=0f64;
+		let ATI=staged[98];
+		let ATQ=staged[99];
 		let A=ctx.has_simparam("gmin");
 		let D=if A{
 		let B=ctx.simparam_required("gmin");
@@ -2425,139 +2422,151 @@ impl Instance {
 		let ALU=C+ AEM;
 		let ALV=C+ AEB;
 		let ALW=C+ AEC;
-		let ARX;
-		let ARY;
-		let ARZ;
-		let ASA;
+		let ARN;
+		let ARO;
 		if ALX{
-		let ARO=AAT* ARN;
-		let ARP=L2([0.0,((1f64* ARN)* BY)])+ L2([(BZ* ARO),0.0]);
-		let ARQ=C+ (ARO* BY);
-		ARX=ARQ;
-		ARY=C;
-		ARZ=ARP;
-		ASA=ARR;
+		let ARR=AAT* ARQ;
+		let ARS=L2([0.0,((1f64* ARQ)* BY)])+ L2([(BZ* ARR),0.0]);
+		let ART=0f64+ (ARR* BY);
+		let ARU=L4([0.0,ARS[0],0.0,ARS[1]]);
+		ARN=ART;
+		ARO=ARU;
 		}else{
-		let ARS=ARN* BY;
-		let ART=AAR/ ARS;
-		let ARU=(L3([AAS[0],0.0,AAS[1]])).product_sum_div(CI,L3([0.0,(BZ* ARN),0.0]),(-ART),ARS);
-		let ARV=C+ ART;
-		ARX=C;
-		ARY=ARV;
-		ARZ=ARW;
-		ASA=ARU;
+		let ARV=ARQ* BY;
+		let ARW=AAR/ ARV;
+		let ARX=(L3([AAS[0],0.0,AAS[1]])).product_sum_div(CI,L3([0.0,(BZ* ARQ),0.0]),(-ARW),ARV);
+		let ARY=0f64+ ARW;
+		let ARZ=L4([ARX[0],ARX[1],ARX[2],0.0]);
+		ARN=ARY;
+		ARO=ARZ;
 		}
-		let ASM;
-		let ASN;
-		let ASO;
-		let ASP;
-		if ASB{
-		let ASD=AAZ* ASC;
-		let ASE=L2([0.0,((1f64* ASC)* BY)])+ L2([(BZ* ASD),0.0]);
-		let ASF=C+ (ASD* BY);
-		ASM=ASF;
-		ASN=C;
-		ASO=ASE;
-		ASP=ASG;
+		let ASA;
+		let ASB;
+		if ARP{
+		let ASO=AAZ* ASN;
+		let ASP=L2([0.0,((1f64* ASN)* BY)])+ L2([(BZ* ASO),0.0]);
+		let ASQ=0f64+ (ASO* BY);
+		let ASR=L4([0.0,ASP[0],0.0,ASP[1]]);
+		ASA=ASQ;
+		ASB=ASR;
 		}else{
-		let ASH=ASC* BY;
-		let ASI=AAX/ ASH;
-		let ASJ=(L3([AAY[0],0.0,AAY[1]])).product_sum_div(CI,L3([0.0,(BZ* ASC),0.0]),(-ASI),ASH);
-		let ASK=C+ ASI;
-		ASM=C;
-		ASN=ASK;
-		ASO=ASL;
-		ASP=ASJ;
+		let ASS=ASN* BY;
+		let AST=AAX/ ASS;
+		let ASU=(L3([AAY[0],0.0,AAY[1]])).product_sum_div(CI,L3([0.0,(BZ* ASN),0.0]),(-AST),ASS);
+		let ASV=0f64+ AST;
+		let ASW=L4([ASU[0],ASU[1],ASU[2],0.0]);
+		ASA=ASV;
+		ASB=ASW;
 		}
-		let ASQ=ddt(0, ALK);
-		let ASS=ALL* ASR;
-		let AST=C+ ASQ;
-		let ASU=ddt(1, ALN);
-		let ASV=ALO* ASR;
-		let ASW=C+ ASU;
-		let ASX=ddt(2, ALQ);
-		let ASY=ALR* ASR;
-		let ASZ=C+ ASX;
-		let ATB;
-		let ATC;
-		if ATA!=0.0{
-		let ATF=if XK{
-		let ATE=C+ ATD;
-		ATE
+		let ASC=ddt(0, ALK);
+		let ASE=ALL* ASD;
+		let ASF=C+ ASC;
+		let ASG=ddt(1, ALN);
+		let ASH=ALO* ASD;
+		let ASI=C+ ASG;
+		let ASJ=ddt(2, ALQ);
+		let ASK=ALR* ASD;
+		let ASL=C+ ASJ;
+		let ASX;
+		let ASY;
+		if ASM!=0.0{
+		let ATB=if XK{
+		let ATA=C+ ASZ;
+		ATA
 		}else{
 		C
 		};
-		let ATI=if XP{
-		let ATH=C+ ATG;
-		ATH
+		let ATE=if XP{
+		let ATD=C+ ATC;
+		ATD
 		}else{
 		C
 		};
-		ATB=ATF;
-		ATC=ATI;
+		ASX=ATB;
+		ASY=ATE;
 		}else{
-		ATB=C;
-		ATC=C;
+		ASX=C;
+		ASY=C;
 		}
-		let ATJ=AEH[3];
-		let ATK=AEH[1];
-		let ATL=AEH[0];
-		let ATM=AEH[2];
-		let ATN=AEK[0];
-		let ATO=AEK[1];
-		let ATP=AEK[2];
-		let ATQ=AEN[0];
-		let ATR=AEN[1];
-		let ATS=AEN[2];
-		let ATT=AED;
-		let ATU=AEE[0];
-		let ATV=AEE[1];
-		let ATW=AEE[2];
-		let ATX=AEE[3];
-		let ATY=AEE[4];
-		let ATZ=AEE[5];
-		let AUA=AEE[6];
-		let AUB=AEE[7];
-		let AUC=ARZ[0];
-		let AUD=ARZ[1];
-		let AUE=ASA[0];
-		let AUF=ASA[1];
-		let AUG=ASA[2];
-		let AUH=ASO[0];
-		let AUI=ASO[1];
-		let AUJ=ASP[0];
-		let AUK=ASP[1];
-		let AUL=ASP[2];
-		let AUM=ASS[0];
-		let AUN=ASS[1];
-		let AUO=ASS[2];
-		let AUP=ASV[0];
-		let AUQ=ASV[1];
-		let AUR=ASV[2];
-		let AUS=ASY;
-		let AUT=ALL[0];
-		let AUU=ALL[1];
-		let AUV=ALL[2];
-		let AUW=ALO[0];
-		let AUX=ALO[1];
-		let AUY=ALO[2];
-		let AUZ=ALR;
-        if (staged[102] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(0), Some(4), 0, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(0);
-        }
-        if (staged[103] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(2), Some(5), 1, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(1);
-        }
+		let ATF=AEH[3];
+		let ATG=AEH[1];
+		let ATH=C+ AAT;
+		let ATL;
+		let ATM;
+		if ATI!=0.0{
+		let ATJ=L3([AAS[0],AAS[1],0.0]);
+		ATL=AAR;
+		ATM=ATJ;
+		}else{
+		let ATK=L3([0.0,0.0,1f64]);
+		ATL=AAT;
+		ATM=ATK;
+		}
+		let ATN=L4([ATM[0],0.0,ATM[1],ATM[2]])- ARO;
+		let ATO=C+ (ATL- ARN);
+		let ATP=C+ AAZ;
+		let ATT;
+		let ATU;
+		if ATQ!=0.0{
+		let ATR=L3([AAY[0],AAY[1],0.0]);
+		ATT=AAX;
+		ATU=ATR;
+		}else{
+		let ATS=L3([0.0,0.0,1f64]);
+		ATT=AAZ;
+		ATU=ATS;
+		}
+		let ATV=L4([ATU[0],0.0,ATU[1],ATU[2]])- ASB;
+		let ATW=C+ (ATT- ASA);
+		let ATX=AEH[0];
+		let ATY=AEH[2];
+		let ATZ=AEK[0];
+		let AUA=AEK[1];
+		let AUB=AEK[2];
+		let AUC=AEN[0];
+		let AUD=AEN[1];
+		let AUE=AEN[2];
+		let AUF=AED;
+		let AUG=AEE[0];
+		let AUH=AEE[1];
+		let AUI=AEE[2];
+		let AUJ=AEE[3];
+		let AUK=AEE[4];
+		let AUL=AEE[5];
+		let AUM=AEE[6];
+		let AUN=AEE[7];
+		let AUO=ASE[0];
+		let AUP=ASE[1];
+		let AUQ=ASE[2];
+		let AUR=ASH[0];
+		let AUS=ASH[1];
+		let AUT=ASH[2];
+		let AUU=ASK;
+		let AUV=1f64;
+		let AUW=ATN[0];
+		let AUX=ATN[1];
+		let AUY=ATN[2];
+		let AUZ=ATN[3];
+		let AVA=1f64;
+		let AVB=ATV[0];
+		let AVC=ATV[1];
+		let AVD=ATV[2];
+		let AVE=ATV[3];
+		let AVF=ALL[0];
+		let AVG=ALL[1];
+		let AVH=ALL[2];
+		let AVI=ALO[0];
+		let AVJ=ALO[1];
+		let AVK=ALO[2];
+		let AVL=ALR;
+        self.event_state_candidate[0] = staged[98];
+        self.event_state_candidate[1] = staged[99];
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(5),
             Some(4),
             multiplicity * (ALS),
             [1, 3, 4, 5],
-            [ATL, ATK, ATM, ATJ],
+            [ATX, ATG, ATY, ATF],
             [],
             [],
             multiplicity,
@@ -2567,7 +2576,7 @@ impl Instance {
             Some(4),
             multiplicity * (ALT),
             [1, 3, 4],
-            [ATN, ATO, ATP],
+            [ATZ, AUA, AUB],
             [],
             [],
             multiplicity,
@@ -2577,7 +2586,7 @@ impl Instance {
             Some(5),
             multiplicity * (ALU),
             [1, 3, 5],
-            [ATQ, ATR, ATS],
+            [AUC, AUD, AUE],
             [],
             [],
             multiplicity,
@@ -2587,57 +2596,17 @@ impl Instance {
             None,
             multiplicity * (ALV),
             [3],
-            [ATT],
+            [AUF],
             [],
             [],
             multiplicity,
         );
-        stamper.stamp_current_sparse_local::<6, 2>(
+        stamper.stamp_current_sparse_local::<8, 0>(
             Some(3),
             None,
             multiplicity * (ALW),
-            [0, 1, 2, 3, 4, 5],
-            [ATU, ATV, ATW, ATX, ATY, ATZ],
-            [0, 1],
-            [AUA, AUB],
-            multiplicity,
-        );
-        if staged[102] != 0.0 {
-        stamper.stamp_potential_sparse_local::<1, 1>(
-            0,
-            ARX,
-            [3],
-            [AUC],
-            [0],
-            [AUD],
-        );
-        }
-        stamper.stamp_current_sparse_local::<3, 0>(
-            Some(0),
-            Some(4),
-            multiplicity * (ARY),
-            [0, 3, 4],
-            [AUE, AUF, AUG],
-            [],
-            [],
-            multiplicity,
-        );
-        if staged[103] != 0.0 {
-        stamper.stamp_potential_sparse_local::<1, 1>(
-            1,
-            ASM,
-            [3],
-            [AUH],
-            [1],
-            [AUI],
-        );
-        }
-        stamper.stamp_current_sparse_local::<3, 0>(
-            Some(2),
-            Some(5),
-            multiplicity * (ASN),
-            [2, 3, 5],
-            [AUJ, AUK, AUL],
+            [0, 1, 2, 3, 4, 5, 6, 7],
+            [AUG, AUH, AUI, AUJ, AUK, AUL, AUM, AUN],
             [],
             [],
             multiplicity,
@@ -2645,9 +2614,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(4),
-            multiplicity * (AST),
+            multiplicity * (ASF),
             [1, 3, 4],
-            [AUM, AUN, AUO],
+            [AUO, AUP, AUQ],
             [],
             [],
             multiplicity,
@@ -2655,9 +2624,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<3, 0>(
             Some(1),
             Some(5),
-            multiplicity * (ASW),
+            multiplicity * (ASI),
             [1, 3, 5],
-            [AUP, AUQ, AUR],
+            [AUR, AUS, AUT],
             [],
             [],
             multiplicity,
@@ -2665,35 +2634,15 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(3),
             None,
-            multiplicity * (ASZ),
+            multiplicity * (ASL),
             [3],
-            [AUS],
+            [AUU],
             [],
             [],
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
-            Some(4),
-            multiplicity * (staged[98]),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(5),
-            Some(4),
-            multiplicity * (staged[99]),
-            [],
-            [],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<0, 0>(
-            Some(0),
             Some(4),
             multiplicity * (staged[100]),
             [],
@@ -2703,9 +2652,29 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_sparse_local::<0, 0>(
+            Some(5),
+            Some(4),
+            multiplicity * (staged[101]),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
+            Some(0),
+            Some(4),
+            multiplicity * (staged[102]),
+            [],
+            [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<0, 0>(
             Some(2),
             Some(5),
-            multiplicity * (staged[101]),
+            multiplicity * (staged[103]),
             [],
             [],
             [],
@@ -2715,7 +2684,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(4),
-            multiplicity * (ATB),
+            multiplicity * (ASX),
             [],
             [],
             [],
@@ -2725,9 +2694,49 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(1),
             Some(5),
-            multiplicity * (ATC),
+            multiplicity * (ASY),
             [],
             [],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(0),
+            Some(4),
+            multiplicity * (ATH),
+            [6],
+            [AUV],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<4, 0>(
+            Some(6),
+            None,
+            multiplicity * (ATO),
+            [0, 3, 4, 6],
+            [AUW, AUX, AUY, AUZ],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(2),
+            Some(5),
+            multiplicity * (ATP),
+            [7],
+            [AVA],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<4, 0>(
+            Some(7),
+            None,
+            multiplicity * (ATW),
+            [2, 3, 5, 7],
+            [AVB, AVC, AVD, AVE],
             [],
             [],
             multiplicity,
@@ -2737,26 +2746,26 @@ impl Instance {
         self.canonical_reactive[2] = ALU;
         self.canonical_reactive[3] = ALV;
         self.canonical_reactive[4] = ALW;
-        self.canonical_reactive[5] = ARX;
-        self.canonical_reactive[6] = ARY;
-        self.canonical_reactive[7] = ASM;
-        self.canonical_reactive[8] = ASN;
-        self.canonical_reactive[9] = ALK;
-        self.canonical_reactive[10] = AUT;
-        self.canonical_reactive[11] = AUU;
-        self.canonical_reactive[12] = AUV;
-        self.canonical_reactive[13] = ALN;
-        self.canonical_reactive[14] = AUW;
-        self.canonical_reactive[15] = AUX;
-        self.canonical_reactive[16] = AUY;
-        self.canonical_reactive[17] = ALQ;
-        self.canonical_reactive[18] = AUZ;
-        self.canonical_reactive[19] = staged[98];
-        self.canonical_reactive[20] = staged[99];
-        self.canonical_reactive[21] = staged[100];
-        self.canonical_reactive[22] = staged[101];
-        self.canonical_reactive[23] = ATB;
-        self.canonical_reactive[24] = ATC;
+        self.canonical_reactive[5] = ALK;
+        self.canonical_reactive[6] = AVF;
+        self.canonical_reactive[7] = AVG;
+        self.canonical_reactive[8] = AVH;
+        self.canonical_reactive[9] = ALN;
+        self.canonical_reactive[10] = AVI;
+        self.canonical_reactive[11] = AVJ;
+        self.canonical_reactive[12] = AVK;
+        self.canonical_reactive[13] = ALQ;
+        self.canonical_reactive[14] = AVL;
+        self.canonical_reactive[15] = staged[100];
+        self.canonical_reactive[16] = staged[101];
+        self.canonical_reactive[17] = staged[102];
+        self.canonical_reactive[18] = staged[103];
+        self.canonical_reactive[19] = ASX;
+        self.canonical_reactive[20] = ASY;
+        self.canonical_reactive[21] = ATH;
+        self.canonical_reactive[22] = ATO;
+        self.canonical_reactive[23] = ATP;
+        self.canonical_reactive[24] = ATW;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -2766,7 +2775,7 @@ impl Instance {
             Some(1),
             Some(4),
             &[1, 3, 4],
-            &[cached[10], cached[11], cached[12]],
+            &[cached[6], cached[7], cached[8]],
             &[],
             &[],
             multiplicity,
@@ -2775,7 +2784,7 @@ impl Instance {
             Some(1),
             Some(5),
             &[1, 3, 5],
-            &[cached[14], cached[15], cached[16]],
+            &[cached[10], cached[11], cached[12]],
             &[],
             &[],
             multiplicity,
@@ -2784,7 +2793,7 @@ impl Instance {
             Some(3),
             None,
             &[3],
-            &[cached[18]],
+            &[cached[14]],
             &[],
             &[],
             multiplicity,

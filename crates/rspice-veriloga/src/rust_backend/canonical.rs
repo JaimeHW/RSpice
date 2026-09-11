@@ -1714,6 +1714,14 @@ impl ModelPlan {
             shape.field(canonical_value_type_tag(variable.value_type).as_bytes());
             shape.field(b"accepted:f64:nan-forbidden");
         }
+        shape.section(
+            "switch_branch_variables",
+            artifact.hir.switch_branch_variables.len(),
+        );
+        for variable in &artifact.hir.switch_branch_variables {
+            shape.u64(u64::from(variable.index()));
+            shape.field(b"accepted:f64:zero-or-one");
+        }
 
         let has_timer_bound = !self.timer_slots.is_empty();
         shape.section("timer_bound", usize::from(has_timer_bound));
@@ -4063,7 +4071,7 @@ impl ModelPlan {
         }
         self.push_limit_state_fields(&mut extensions);
         self.push_timestep_bound_state_fields(&mut extensions);
-        self.push_discontinuity_state_fields(&mut extensions);
+        self.push_discontinuity_state_fields(artifact, &mut extensions);
         self.push_event_control_state_fields(&mut extensions);
         if !self.initialization.is_empty() {
             extensions
@@ -4383,11 +4391,55 @@ impl ModelPlan {
         );
     }
 
-    fn push_discontinuity_state_fields(&self, extensions: &mut state_file::StateFileExtensions) {
-        if self.discontinuity_position.is_none() {
-            extensions.impl_methods.push_str(
-                "    #[inline]\n    pub fn discontinuity_rising(&self) -> bool { false }\n",
+    fn push_discontinuity_state_fields(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        extensions: &mut state_file::StateFileExtensions,
+    ) {
+        let mut conditions = Vec::new();
+        for (slot, variable) in artifact
+            .hir
+            .variables
+            .iter()
+            .filter(|variable| variable.is_state)
+            .enumerate()
+        {
+            if artifact
+                .hir
+                .switch_branch_variables
+                .binary_search(&variable.id)
+                .is_err()
+            {
+                continue;
+            }
+            conditions.push(format!(
+                "self.event_state_candidate[{slot}] != self.event_state_accepted[{slot}]"
+            ));
+            let _ = writeln!(
+                extensions.validate_advance_state,
+                "        if !matches!(self.event_state_candidate[{slot}], 0.0 | 1.0) {{ return Err(\"invalid switch-branch source kind\".to_string()); }}"
             );
+            let _ = writeln!(
+                extensions.checkpoint_event_validate,
+                "        if !matches!(state.event_variables[{slot}], 0.0 | 1.0) {{ return Err(\"invalid checkpoint switch-branch source kind\".to_string()); }}"
+            );
+        }
+        if self.discontinuity_position.is_some() {
+            conditions.push(
+                "matches!(self.discontinuity_candidate, 1.0 | 3.0) && !self.discontinuity_previous"
+                    .into(),
+            );
+        }
+        let condition = if conditions.is_empty() {
+            "false".into()
+        } else {
+            conditions.join(" || ")
+        };
+        let _ = writeln!(
+            extensions.impl_methods,
+            "    #[inline]\n    pub fn discontinuity_rising(&self) -> bool {{ {condition} }}"
+        );
+        if self.discontinuity_position.is_none() {
             return;
         }
         extensions.instance_fields.push_str("    pub(crate) discontinuity_candidate: f64,\n    pub(crate) discontinuity_previous: bool,\n");
@@ -4402,7 +4454,6 @@ impl ModelPlan {
         } else {
             format!("({}) && {converged}", extensions.limiter_converged_expr)
         };
-        extensions.impl_methods.push_str("    #[inline]\n    pub fn discontinuity_rising(&self) -> bool { matches!(self.discontinuity_candidate, 1.0 | 3.0) && !self.discontinuity_previous }\n");
         extensions.rollback_value_count += 1;
         extensions.rollback_flag_count += 1;
         extensions

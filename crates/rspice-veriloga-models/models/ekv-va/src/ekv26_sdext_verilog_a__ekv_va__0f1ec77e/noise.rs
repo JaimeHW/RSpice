@@ -375,6 +375,7 @@ impl Instance {
 		let node_potentials: [f64; 4] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3])];
 		let branch_flows: [f64; 0] = [];
 		let branch_unknown_flows: [f64; 0] = [];
+		use rspice_veriloga_runtime::{L2};
 		let A=0f64;
 		let B=1.0359399871014713e-10f64;
 		let C=parameters[13];
@@ -768,5 +769,3 @@ impl Instance {
 		Ok(())
 	}
 }
-
-use rspice_veriloga_runtime::{L2};

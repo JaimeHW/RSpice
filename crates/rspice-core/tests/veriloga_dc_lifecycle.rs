@@ -35,6 +35,69 @@ fn node_voltage(result: &rspice_core::solver::SimulationResult, name: &str) -> f
 }
 
 #[test]
+fn switch_branches_preserve_dc_ac_noise_and_multiplicity() {
+    let model = write_model("switched_source", "module switched(p,q); inout p,q; electrical p,q;
+        parameter integer mode=0; real process;
+        analog begin
+            process=white_noise(1,\"shared\");
+            I(q)<+I(p);
+            if(mode==0) I(p)<+3*V(p)+ddt(2*V(p))+process;
+            else V(p)<+2*I(p)+ddt(4*I(p))+process;
+            if(mode==2) begin I(p)<+5*V(p)+2*process; V(p)<+3*I(p)+3*process; V(p)<+4*I(p)+4*process; end
+        end endmodule");
+    for mode in 0..3 {
+        for multiplicity in [1.0, 4.0] {
+            let netlist=Netlist::parse_validated(&format!("* switched source\nI1 0 out DC 1 AC 1\nR1 probe 0 1\nX1 out probe switched mode={mode} m={multiplicity}\n.va \"{}\" switched\n.end\n",deck_path(&model))).unwrap();
+            let engine = Engine::default();
+            let resistance = match mode {
+                0 => 1.0 / 3.0,
+                1 => 2.0,
+                _ => 7.0,
+            };
+            let dc = engine.run_dc_op(&netlist).unwrap();
+            assert!(
+                (node_voltage(&dc, "out") - resistance / multiplicity).abs() < 1e-8,
+                "mode={mode}, m={multiplicity}: {dc:?}"
+            );
+            assert!((node_voltage(&dc, "probe") + 1.0).abs() < 1e-8);
+            let frequency = 1.0 / std::f64::consts::TAU;
+            let ac = engine.run_ac(&netlist, &[frequency]).unwrap();
+            let out = ac[0]
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let expected = match mode {
+                0 => num_complex::Complex64::new(3.0, 2.0).inv(),
+                1 => num_complex::Complex64::new(2.0, 4.0),
+                _ => num_complex::Complex64::new(7.0, 0.0),
+            } / multiplicity;
+            assert!(
+                (ac[0].voltages[out] - expected).norm() < 1e-8,
+                "mode={mode}, m={multiplicity}: {:?}, expected {expected}",
+                ac[0].voltages[out]
+            );
+            let circuit = engine.build_circuit(&netlist).unwrap();
+            let output = circuit.get_node_by_name("out").unwrap();
+            let noise = engine
+                .run_noise(&netlist, output, &[frequency], 300.15)
+                .unwrap();
+            let expected = match mode {
+                0 => 1.0 / 13.0,
+                1 => 1.0,
+                _ => 49.0,
+            } / multiplicity;
+            assert!(
+                (noise[0].output_noise_density / expected - 1.0).abs() < 1e-8,
+                "mode={mode}, m={multiplicity}: {:?}, expected {expected}",
+                noise[0]
+            );
+        }
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn parallel_potential_branches_preserve_dc_ac_and_independent_noise() {
     for (name, source, resistance, noise) in [
         (

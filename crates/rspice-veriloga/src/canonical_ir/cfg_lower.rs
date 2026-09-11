@@ -1125,7 +1125,16 @@ impl<'a> CfgLowerer<'a> {
             );
             self.builder
                 .write_variable(CfgVariable::Local(variable), entry, accepted);
-            if self.frozen_event_state {
+            // Switch kinds are reset and assigned at ordinary source sites.
+            // Their reaching definitions select which earlier source values
+            // survive; substituting the final candidate would change that order.
+            if self.frozen_event_state
+                && self
+                    .hir
+                    .switch_branch_variables
+                    .binary_search(&variable)
+                    .is_err()
+            {
                 self.frozen_event_states.insert(variable, accepted);
             }
         }
@@ -3887,6 +3896,7 @@ fn binary_op(op: &str) -> Option<CfgBinaryOp> {
         "Ge" => CfgBinaryOp::Ge,
         "And" => CfgBinaryOp::And,
         "Or" => CfgBinaryOp::Or,
+        "CheckedValue" => CfgBinaryOp::CheckedValue,
         _ => return None,
     })
 }

@@ -376,6 +376,7 @@ mod elaboration;
 mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
+mod switch_branches;
 mod symbols;
 
 pub use analyzed::*;
@@ -784,6 +785,7 @@ impl SemanticAnalyzer {
             param_aliases: Vec::new(),
             variables: Vec::new(),
             event_state_variables: Vec::new(),
+            switch_branch_variables: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),

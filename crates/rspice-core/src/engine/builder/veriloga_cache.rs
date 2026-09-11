@@ -287,7 +287,8 @@ use super::*;
 // Version 79 carries independent delayed nonblocking updates.
 // Version 78 evaluates typed runtime procedural delays.
 // Version 77 carries digital clock queries and exact wide digital expressions.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 80;
+// Version 81 retains switch-branch source order and accepted-mode discontinuities.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 81;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

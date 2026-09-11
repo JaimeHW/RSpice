@@ -224,6 +224,7 @@ struct FlowBranch {
     state: SmolStr,
     span: Span,
     source: bool,
+    switch: Option<super::switch_branches::SwitchState>,
 }
 
 pub(crate) fn lower<'a>(
@@ -264,6 +265,7 @@ pub(crate) fn lower<'a>(
                     state: SmolStr::default(),
                     span: access.span(),
                     source: false,
+                    switch: None,
                 });
             }
         });
@@ -273,6 +275,7 @@ pub(crate) fn lower<'a>(
     }
     visit_statements(&module.statements, &mut inspect);
     let mut existing_unknowns = HashSet::new();
+    let mut source_kinds = HashMap::<_, u8>::new();
     let mut incident = branches.clone();
     for contribution in &module.contributions {
         let (key, pos, neg, _) = resolver.contribution(contribution);
@@ -282,7 +285,15 @@ pub(crate) fn lower<'a>(
             state: SmolStr::default(),
             span: contribution.span,
             source: false,
+            switch: None,
         });
+        *source_kinds.entry(key.clone()).or_default() |= if contribution.indirect {
+            4
+        } else if contribution.is_current {
+            1
+        } else {
+            2
+        };
         branch.source |= contribution.is_current;
         if !contribution.is_current || contribution.indirect {
             existing_unknowns.insert(key);
@@ -305,6 +316,17 @@ pub(crate) fn lower<'a>(
         }
     }
     // Potential and indirect branches already carry solver-owned currents.
+    // A switched source needs its current even while the potential arm is off.
+    let switches: BTreeSet<_> = source_kinds
+        .into_iter()
+        .filter_map(|(key, kinds)| (kinds == 3).then_some(key))
+        .collect();
+    for key in &switches {
+        existing_unknowns.remove(key);
+        branches
+            .entry(key.clone())
+            .or_insert_with(|| incident[key].clone());
+    }
     branches.retain(|key, _| !existing_unknowns.contains(key));
     for (key, branch) in &branches {
         if !branch.source && potential_reads.contains(key) {
@@ -335,7 +357,7 @@ pub(crate) fn lower<'a>(
     let declared = module.branches.clone();
     let ground_nodes = module.ground_nodes.clone();
     let target = module.to_mut();
-    for (ordinal, branch) in branches.values_mut().enumerate() {
+    for (ordinal, (key, branch)) in branches.iter_mut().enumerate() {
         let mut suffix = ordinal;
         loop {
             let name: SmolStr = format!("__flow_state{suffix}").into();
@@ -364,6 +386,13 @@ pub(crate) fn lower<'a>(
             discipline: "electrical".into(),
             index,
         });
+        if switches.contains(key) {
+            branch.switch = Some(super::switch_branches::SwitchState::allocate(
+                target,
+                &branch.state,
+                branch.span,
+            ));
+        }
     }
 
     let port_values: BTreeMap<_, _> = port_reads
@@ -413,9 +442,24 @@ pub(crate) fn lower<'a>(
         rewrite(&mut contribution.expression);
         redirect_contribution(contribution, &branches, &rewrites);
     }
+    let switch_sites = rewrites
+        .iter()
+        .filter_map(|(&site, (key, sign))| {
+            branches[key]
+                .switch
+                .as_ref()
+                .map(|state| (site, (state, *sign)))
+        })
+        .collect();
+    super::switch_branches::lower(target, &switch_sites)?;
     for (key, branch) in &branches {
         let state = potential(&branch.state, "0", branch.span);
-        let balance = if branch.source {
+        let balance = if let Some(switch) = &branch.switch {
+            switch.balance(
+                state.clone(),
+                potential(&branch.pos, &branch.neg, branch.span),
+            )
+        } else if branch.source {
             state.clone()
         } else {
             potential(&branch.pos, &branch.neg, branch.span)
@@ -557,6 +601,9 @@ fn redirect_contribution(
     let Some((key, sign)) = rewrites.get(&contribution.site) else {
         return;
     };
+    if branches[key].switch.is_some() {
+        return;
+    }
     contribution.branch = branches[key].state.clone();
     contribution.declared_branch = None;
     if *sign > 0.0 {

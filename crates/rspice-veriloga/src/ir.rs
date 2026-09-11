@@ -257,6 +257,9 @@ pub struct DeviceIR {
     /// Sorted, duplicate-free variable slots written from event-controlled
     /// procedural bodies.
     pub event_state_variables: Vec<usize>,
+    /// Sorted event-state slots holding the retained kind of each switch branch.
+    /// A change from the accepted kind implies an order-zero discontinuity.
+    pub switch_branch_variables: Vec<usize>,
     /// Pure localparam slots evaluated before either initialization phase.
     pub initialization_prologue_variables: Vec<usize>,
     /// Variable assignments and runtime loops (in execution order)
@@ -600,6 +603,14 @@ impl DeviceIR {
                 .event_state_variables
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
+            || module
+                .switch_branch_variables
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || module
+                .switch_branch_variables
+                .iter()
+                .any(|slot| module.event_state_variables.binary_search(slot).is_err())
         {
             return Err(crate::error::CompileError::CodeGen(
                 crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::Internal(
@@ -633,6 +644,7 @@ impl DeviceIR {
             parameters: Vec::new(),
             variables: Vec::new(),
             event_state_variables: module.event_state_variables.clone(),
+            switch_branch_variables: module.switch_branch_variables.clone(),
             initialization_prologue_variables: module
                 .prologue_statements
                 .iter()

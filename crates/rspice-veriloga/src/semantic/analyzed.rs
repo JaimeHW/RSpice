@@ -75,6 +75,9 @@ pub struct AnalyzedModule {
     /// handling at runtime; ordinary procedural variables deliberately remain
     /// outside that transaction set.
     pub event_state_variables: Vec<usize>,
+    /// Sorted event-state slots holding the retained kind of each switch branch.
+    /// A change from the accepted kind implies an order-zero discontinuity.
+    pub switch_branch_variables: Vec<usize>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
     /// Ordered evaluation statements (assignments and runtime loops),

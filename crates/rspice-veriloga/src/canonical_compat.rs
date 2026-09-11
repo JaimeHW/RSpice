@@ -60,6 +60,15 @@ pub(crate) fn validate_canonical_artifact_identity_for_model(
         return Err("canonical internal state layout does not match compiled model".into());
     }
     validate_source_digest(model, artifact)?;
+    if !artifact
+        .hir
+        .switch_branch_variables
+        .iter()
+        .map(|id| id.index() as usize)
+        .eq(model.switch_branch_variables.iter().copied())
+    {
+        return Err("canonical switch-branch state layout does not match compiled model".into());
+    }
     validate_parameters(model, &artifact.mir)?;
     for (index, (equation, stamp)) in artifact
         .mir

@@ -6880,6 +6880,7 @@ endmodule
             num_variables,
             variable_names: Vec::new(),
             event_state_variables: Vec::new(),
+            switch_branch_variables: Vec::new(),
             initialization_prologue_variables: Vec::new(),
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),

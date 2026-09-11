@@ -24,6 +24,38 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn switch_branch_metadata_rejects_invalid_state_slots() {
+    let source = "module switched(p); inout p; electrical p; analog begin I(p)<+3*V(p); V(p)<+2*I(p); end endmodule";
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .unwrap();
+    assert_eq!(artifact.hir.switch_branch_variables.len(), 1);
+    let kind = artifact.hir.switch_branch_variables[0];
+    for slots in [
+        vec![kind, kind],
+        vec![VariableId::new(u32::MAX)],
+        vec![VariableId::new(0)],
+    ] {
+        let mut hir = artifact.hir.clone();
+        hir.switch_branch_variables = slots;
+        assert!(
+            hir.validate()
+                .unwrap_err()
+                .iter()
+                .any(|d| d.message.contains("switch-branch"))
+        );
+    }
+    let mut hir = artifact.hir;
+    hir.variables[usize::from(kind)].is_state = false;
+    assert!(
+        hir.validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.message.contains("switch-branch"))
+    );
+}
+
+#[test]
 fn hir_rejects_misplaced_initialization_and_task_phase_metadata() {
     use rspice_veriloga::canonical_ir::hir::HirRegion;
     use rspice_veriloga_runtime::AnalogEvaluationPhase;

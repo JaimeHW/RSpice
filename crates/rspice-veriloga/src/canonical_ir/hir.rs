@@ -760,6 +760,8 @@ pub struct HirModel {
     pub ports: Vec<HirPort>,
     pub parameters: Vec<HirParameter>,
     pub variables: Vec<HirVariable>,
+    /// Sorted state variables holding switch-branch source kinds.
+    pub switch_branch_variables: Vec<VariableId>,
     pub arrays: Vec<HirArray>,
     pub branches: Vec<HirBranch>,
     pub contributions: Vec<HirContribution>,
@@ -962,6 +964,12 @@ impl HirModel {
                 })
                 .collect(),
             parameters,
+            switch_branch_variables: module
+                .switch_branch_variables
+                .iter()
+                .copied()
+                .map(VariableId::from)
+                .collect(),
             variables: module
                 .variables
                 .iter()
@@ -1044,6 +1052,23 @@ impl HirModel {
         validate_dense_port_ids(&mut diagnostics, &self.ports);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
+        if self
+            .switch_branch_variables
+            .windows(2)
+            .any(|ids| ids[0] >= ids[1])
+            || self.switch_branch_variables.iter().any(|id| {
+                self.variables
+                    .get(id.index() as usize)
+                    .is_none_or(|variable| {
+                        !variable.is_state || variable.value_type != CanonicalValueType::Real
+                    })
+            })
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "switch-branch variables must be sorted, unique real event-state slots",
+            ));
+        }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);
         validate_dense_branch_ids(&mut diagnostics, &self.branches);
         validate_dense_contribution_ids(&mut diagnostics, &self.contributions);

@@ -5,7 +5,7 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 60] = [0, 2, 8, 16, 3, 9, 17, 11, 12, 22, 1, 4, 5, 6, 7, 10, 25, 26, 13, 27, 14, 15, 28, 29, 69, 70, 19, 71, 72, 73, 74, 20, 21, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 95, 96, 97, 88, 89, 90, 91, 92, 93, 94, 98, 99, 100, 101];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 59] = [0, 2, 8, 16, 3, 9, 17, 11, 12, 22, 1, 4, 5, 6, 7, 10, 25, 26, 13, 27, 14, 15, 28, 29, 69, 70, 19, 71, 72, 73, 74, 20, 21, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 95, 96, 97, 88, 89, 90, 91, 92, 93, 94, 98, 99, 100];
 pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 42] = [18, 23, 24, 34, 33, 41, 40, 42, 44, 43, 45, 55, 56, 32, 31, 57, 50, 49, 38, 39, 48, 53, 60, 35, 30, 65, 64, 63, 62, 46, 47, 52, 51, 67, 61, 66, 68, 36, 37, 54, 58, 59];
 
 pub(super) fn canonical_model_preprocess(
@@ -15,7 +15,7 @@ pub(super) fn canonical_model_preprocess(
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
-) -> [f64; 60] {
+) -> [f64; 59] {
 	let B=1.3806226e-23f64;
 	let C=1.602176462e-19f64;
 	let F=parameters[76];
@@ -33,13 +33,12 @@ pub(super) fn canonical_model_preprocess(
 	let BO=0f64;
 	let BS=0f64;
 	let BW=0f64;
-	let CC=0f64;
-	let CF=0f64;
-	let CI=0f64;
-	let CL=0f64;
+	let CD=0f64;
+	let CG=0f64;
+	let CJ=0f64;
+	let CM=0f64;
 	let CO=0f64;
 	let CQ=0f64;
-	let CS=0f64;
 	let mut oBC=false;
 	let A=parameters[108]+ 273.15f64;
 	let D=(B* A)/ C;
@@ -136,37 +135,33 @@ pub(super) fn canonical_model_preprocess(
 	let BZ=AP== T;
 	let CA=BZ|| (parameters[107]== T);
 	let CB=BZ|| (AQ< AR);
-	let CD;
-	let CE;
-	if CB{
-	CD=CC;
-	CE=N;
-	}else{
-	CD=T;
-	CE=T;
-	}
-	let CH=if BV{
-	let CG=T+ (-CF);
-	CG
+	let CC=if CB{
+	N
 	}else{
 	T
 	};
-	let CK=if BR{
-	let CJ=T+ (-CI);
-	CJ
+	let CF=if BV{
+	let CE=T+ (-CD);
+	CE
 	}else{
 	T
 	};
-	let CN=if BN{
-	let CM=T+ CL;
-	CM
+	let CI=if BR{
+	let CH=T+ (-CG);
+	CH
 	}else{
 	T
 	};
+	let CL=if BN{
+	let CK=T+ CJ;
+	CK
+	}else{
+	T
+	};
+	let CN=T+ CM;
 	let CP=T+ CO;
 	let CR=T+ CQ;
-	let CT=T+ CS;
-    [A, I, K, L, M, P, Q, R, S, U as u8 as f64, Y, AA, AB, AC, AE, AF, AG as u8 as f64, AH as u8 as f64, AI, AJ as u8 as f64, AL, AN, AO as u8 as f64, AT as u8 as f64, AU as u8 as f64, AX as u8 as f64, AW, AZ as u8 as f64, BA as u8 as f64, BB as u8 as f64, oBC as u8 as f64, BD, BE, BF as u8 as f64, BG as u8 as f64, BH as u8 as f64, BI as u8 as f64, BJ as u8 as f64, BK as u8 as f64, BL as u8 as f64, BM as u8 as f64, BN as u8 as f64, BR as u8 as f64, BV as u8 as f64, CA as u8 as f64, CB as u8 as f64, CP, CR, CT, BP, BT, BX, CD, CH, CK, CN, BQ, BU, BY, CE]
+    [A, I, K, L, M, P, Q, R, S, U as u8 as f64, Y, AA, AB, AC, AE, AF, AG as u8 as f64, AH as u8 as f64, AI, AJ as u8 as f64, AL, AN, AO as u8 as f64, AT as u8 as f64, AU as u8 as f64, AX as u8 as f64, AW, AZ as u8 as f64, BA as u8 as f64, BB as u8 as f64, oBC as u8 as f64, BD, BE, BF as u8 as f64, BG as u8 as f64, BH as u8 as f64, BI as u8 as f64, BJ as u8 as f64, BK as u8 as f64, BL as u8 as f64, BM as u8 as f64, BN as u8 as f64, BR as u8 as f64, BV as u8 as f64, CA as u8 as f64, CB as u8 as f64, CN, CP, CR, CC, BP, BT, BX, CF, CI, CL, BQ, BU, BY]
 }
 
 pub(super) fn canonical_temperature_preprocess(
@@ -424,7 +419,7 @@ impl Instance {
         let parameters = &self.params.values;
         let multiplicity = self.multiplicity;
         let staged = &*self.canonical_staged;
-        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15])];
+        let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16])];
         let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
@@ -672,6 +667,10 @@ impl Instance {
 		let BNP=staged[86]!=0.0;
 		let BNQ=parameters[107];
 		let BNZ=staged[87]!=0.0;
+		let BOM=0f64;
+		let BOQ=true;
+		let BPC=node_potentials[16];
+		let BPE=staged[88];
 		let D=C* (A- B);
 		let E=(L2([1f64,0.0])- L2([0.0,1f64]))* C;
 		let G=F- B;
@@ -3014,143 +3013,164 @@ impl Instance {
 		BNX=BNU;
 		BNY=BNS;
 		}
-		let BOE;
-		let BOF;
-		let BOG;
-		let BOH;
-		let BOI;
-		let BOJ;
+		let BOA;
+		let BOB;
+		let BOC;
+		let BOD;
 		if BNZ{
-		BOE=QV;
-		BOF=QV;
-		BOG=QV;
-		BOH=APD;
-		BOI=BX;
-		BOJ=BX;
+		BOA=BOM;
+		BOB=QV;
+		BOC=APD;
+		BOD=BX;
 		}else{
-		let BOA=AH/ DK;
-		let BOB=L4([(product_sum_div(KM,FP,EX,(-BOA),DK)),0.0,0.0,0.0])- BIY;
-		let BOC=QV+ (BOA- BIX);
-		let BOD=QV+ BNV;
-		BOE=BOC;
-		BOF=BOD;
-		BOG=BNW;
-		BOH=BOB;
-		BOI=BNX;
-		BOJ=BNY;
+		let BON=AH/ DK;
+		let BOO=L4([(product_sum_div(KM,FP,EX,(-BON),DK)),0.0,0.0,0.0])- BIY;
+		let BOP=0f64+ (BON- BIX);
+		let BOR;
+		let BOS;
+		if BOQ{
+		BOR=BOP;
+		BOS=BOO;
+		}else{
+		BOR=QV;
+		BOS=APD;
 		}
-		let BOK=QV+ BJW;
-		let BOL=ddt(7, BJX);
-		let BOM=BKD* BLR;
-		let BON=QV+ BOL;
-		let BOO=QV+ BJY;
-		let BOP=ddt(8, BJZ);
-		let BOQ=BKF* BLR;
-		let BOR=QV+ BOP;
-		let BOS=BKX[2];
-		let BOT=QV+ node_potentials[10];
-		let BOU=QV+ node_potentials[11];
-		let BOV=QV+ node_potentials[12];
-		let BOW=QV+ node_potentials[13];
-		let BOX=QV+ node_potentials[14];
-		let BOY=QV+ node_potentials[15];
-		let BOZ=BLF[0];
-		let BPA=BLF[1];
-		let BPB=BLK[0];
-		let BPC=BLK[1];
-		let BPD=BLM[0];
-		let BPE=BLM[1];
-		let BPF=BLM[2];
-		let BPG=BLM[3];
-		let BPH=BLO[0];
-		let BPI=BLO[1];
-		let BPJ=BLO[2];
-		let BPK=BLS[0];
-		let BPL=BLS[1];
-		let BPM=BLS[2];
-		let BPN=BLX[0];
-		let BPO=BLX[1];
-		let BPP=BLX[2];
-		let BPQ=BMC[0];
-		let BPR=BMC[1];
-		let BPS=BMH[0];
-		let BPT=BMH[1];
-		let BPU=BMR[0];
-		let BPV=BMR[1];
-		let BPW=BMR[2];
-		let BPX=BMY[0];
-		let BPY=BMY[1];
-		let BPZ=BMY[2];
-		let BQA=BNF[0];
-		let BQB=BNF[1];
-		let BQC=BNF[2];
-		let BQD=BNF[3];
-		let BQE=BNF[4];
-		let BQF=BKT[0];
-		let BQG=BKT[1];
-		let BQH=BKT[2];
-		let BQI=BKT[3];
-		let BQJ=BNI[0];
-		let BQK=BNI[1];
-		let BQL=BNI[2];
-		let BQM=BNI[3];
-		let BQN=BKX[0];
-		let BQO=BKX[1];
-		let BQP=BNM[0];
-		let BQQ=BNM[1];
-		let BQR=BNM[2];
-		let BQS=BNM[3];
-		let BQT=BNM[4];
-		let BQU=BLB[0];
-		let BQV=BLB[1];
-		let BQW=BLB[2];
-		let BQX=BLB[3];
-		let BQY=BLB[4];
-		let BQZ=BOH[0];
-		let BRA=BOH[1];
-		let BRB=BOH[2];
-		let BRC=BOH[3];
-		let BRD=BOI;
-		let BRE=BKC[0];
-		let BRF=BKC[1];
-		let BRG=BKC[2];
-		let BRH=BKC[3];
-		let BRI=BKC[4];
-		let BRJ=BOM;
-		let BRK=BKE[0];
-		let BRL=BKE[1];
-		let BRM=BKE[2];
-		let BRN=BKE[3];
-		let BRO=BKE[4];
-		let BRP=BOQ;
-		let BRQ=1f64;
-		let BRR=1f64;
-		let BRS=1f64;
-		let BRT=1f64;
-		let BRU=1f64;
-		let BRV=1f64;
-		let BRW=BLU[0];
-		let BRX=BLU[1];
-		let BRY=BLU[2];
-		let BRZ=BLZ[0];
-		let BSA=BLZ[1];
-		let BSB=BLZ[2];
-		let BSC=BME[0];
-		let BSD=BME[1];
-		let BSE=BMJ[0];
-		let BSF=BMJ[1];
-		let BSG=BKV[0];
-		let BSH=BKV[1];
-		let BSI=BKV[2];
-		let BSJ=BKV[3];
-		let BSK=BKZ[0];
-		let BSL=BKZ[1];
-		let BSM=BKZ[2];
-		let BSN=BKZ[3];
-		let BSO=BKZ[4];
-		let BSP=BOJ;
-		let BSQ=BKD;
-		let BSR=BKF;
+		let BOT=(ctx.checked_derivative_value(BOP, BOR))+ BNV;
+		let BOU=BOS+ L4([BNX,0.0,0.0,0.0]);
+		BOA=BOT;
+		BOB=BNW;
+		BOC=BOU;
+		BOD=BNY;
+		}
+		let BOE=QV+ BJW;
+		let BOF=ddt(7, BJX);
+		let BOG=BKD* BLR;
+		let BOH=QV+ BOF;
+		let BOI=QV+ BJY;
+		let BOJ=ddt(8, BJZ);
+		let BOK=BKF* BLR;
+		let BOL=QV+ BOJ;
+		let BOV=BKX[2];
+		let BOW=QV+ node_potentials[10];
+		let BOX=QV+ node_potentials[11];
+		let BOY=QV+ node_potentials[12];
+		let BOZ=QV+ node_potentials[13];
+		let BPA=QV+ node_potentials[14];
+		let BPB=QV+ node_potentials[15];
+		let BPD=QV+ BPC;
+		let BPH;
+		let BPI;
+		if BPE!=0.0{
+		let BPF=L2([KM,0.0]);
+		BPH=AH;
+		BPI=BPF;
+		}else{
+		let BPG=L2([0.0,1f64]);
+		BPH=BPC;
+		BPI=BPG;
+		}
+		let BPJ=L5([BPI[0],0.0,0.0,0.0,BPI[1]])- L5([BOC[0],BOC[1],BOC[2],BOC[3],0.0]);
+		let BPK=-BOB;
+		let BPL=QV+ (BPH- BOA);
+		let BPM=BLF[0];
+		let BPN=BLF[1];
+		let BPO=BLK[0];
+		let BPP=BLK[1];
+		let BPQ=BLM[0];
+		let BPR=BLM[1];
+		let BPS=BLM[2];
+		let BPT=BLM[3];
+		let BPU=BLO[0];
+		let BPV=BLO[1];
+		let BPW=BLO[2];
+		let BPX=BLS[0];
+		let BPY=BLS[1];
+		let BPZ=BLS[2];
+		let BQA=BLX[0];
+		let BQB=BLX[1];
+		let BQC=BLX[2];
+		let BQD=BMC[0];
+		let BQE=BMC[1];
+		let BQF=BMH[0];
+		let BQG=BMH[1];
+		let BQH=BMR[0];
+		let BQI=BMR[1];
+		let BQJ=BMR[2];
+		let BQK=BMY[0];
+		let BQL=BMY[1];
+		let BQM=BMY[2];
+		let BQN=BNF[0];
+		let BQO=BNF[1];
+		let BQP=BNF[2];
+		let BQQ=BNF[3];
+		let BQR=BNF[4];
+		let BQS=BKT[0];
+		let BQT=BKT[1];
+		let BQU=BKT[2];
+		let BQV=BKT[3];
+		let BQW=BNI[0];
+		let BQX=BNI[1];
+		let BQY=BNI[2];
+		let BQZ=BNI[3];
+		let BRA=BKX[0];
+		let BRB=BKX[1];
+		let BRC=BNM[0];
+		let BRD=BNM[1];
+		let BRE=BNM[2];
+		let BRF=BNM[3];
+		let BRG=BNM[4];
+		let BRH=BLB[0];
+		let BRI=BLB[1];
+		let BRJ=BLB[2];
+		let BRK=BLB[3];
+		let BRL=BLB[4];
+		let BRM=BKC[0];
+		let BRN=BKC[1];
+		let BRO=BKC[2];
+		let BRP=BKC[3];
+		let BRQ=BKC[4];
+		let BRR=BOG;
+		let BRS=BKE[0];
+		let BRT=BKE[1];
+		let BRU=BKE[2];
+		let BRV=BKE[3];
+		let BRW=BKE[4];
+		let BRX=BOK;
+		let BRY=1f64;
+		let BRZ=1f64;
+		let BSA=1f64;
+		let BSB=1f64;
+		let BSC=1f64;
+		let BSD=1f64;
+		let BSE=1f64;
+		let BSF=BPJ[0];
+		let BSG=BPJ[1];
+		let BSH=BPJ[2];
+		let BSI=BPJ[3];
+		let BSJ=BPJ[4];
+		let BSK=BLU[0];
+		let BSL=BLU[1];
+		let BSM=BLU[2];
+		let BSN=BLZ[0];
+		let BSO=BLZ[1];
+		let BSP=BLZ[2];
+		let BSQ=BME[0];
+		let BSR=BME[1];
+		let BSS=BMJ[0];
+		let BST=BMJ[1];
+		let BSU=BKV[0];
+		let BSV=BKV[1];
+		let BSW=BKV[2];
+		let BSX=BKV[3];
+		let BSY=BKZ[0];
+		let BSZ=BKZ[1];
+		let BTA=BKZ[2];
+		let BTB=BKZ[3];
+		let BTC=BKZ[4];
+		let BTD=BKD;
+		let BTE=BKF;
+		let BTF=(BOD* FW);
+        self.event_state_candidate[0] = staged[88];
         if (staged[98] != 0.0) {
             stamper.stamp_potential_branch_local(Some(7), Some(2), 0, multiplicity);
         } else {
@@ -3166,17 +3186,12 @@ impl Instance {
         } else {
             stamper.stamp_inactive_potential_branch_local(2);
         }
-        if (staged[101] != 0.0) {
-            stamper.stamp_potential_branch_local(Some(4), None, 3, multiplicity);
-        } else {
-            stamper.stamp_inactive_potential_branch_local(3);
-        }
         stamper.stamp_current_sparse_local::<2, 0>(
             Some(6),
             Some(7),
             multiplicity * (BLG),
             [6, 7],
-            [BOZ, BPA],
+            [BPM, BPN],
             [],
             [],
             multiplicity,
@@ -3186,7 +3201,7 @@ impl Instance {
             Some(5),
             multiplicity * (BLL),
             [5, 6],
-            [BPB, BPC],
+            [BPO, BPP],
             [],
             [],
             multiplicity,
@@ -3196,7 +3211,7 @@ impl Instance {
             None,
             multiplicity * (BLN),
             [1, 3, 4, 5],
-            [BPD, BPE, BPF, BPG],
+            [BPQ, BPR, BPS, BPT],
             [],
             [],
             multiplicity,
@@ -3206,7 +3221,7 @@ impl Instance {
             None,
             multiplicity * (BLP),
             [3, 4, 5],
-            [BPH, BPI, BPJ],
+            [BPU, BPV, BPW],
             [],
             [],
             multiplicity,
@@ -3216,7 +3231,7 @@ impl Instance {
             None,
             multiplicity * (BLV),
             [3, 4, 5],
-            [BPK, BPL, BPM],
+            [BPX, BPY, BPZ],
             [],
             [],
             multiplicity,
@@ -3226,7 +3241,7 @@ impl Instance {
             None,
             multiplicity * (BMA),
             [1, 4, 5],
-            [BPN, BPO, BPP],
+            [BQA, BQB, BQC],
             [],
             [],
             multiplicity,
@@ -3236,7 +3251,7 @@ impl Instance {
             None,
             multiplicity * (BMF),
             [1, 5],
-            [BPQ, BPR],
+            [BQD, BQE],
             [],
             [],
             multiplicity,
@@ -3246,7 +3261,7 @@ impl Instance {
             None,
             multiplicity * (BMK),
             [1, 2],
-            [BPS, BPT],
+            [BQF, BQG],
             [],
             [],
             multiplicity,
@@ -3256,7 +3271,7 @@ impl Instance {
             Some(2),
             multiplicity * (BMQ),
             [2, 4, 7],
-            [BPU, BPV, BPW],
+            [BQH, BQI, BQJ],
             [],
             [],
             multiplicity,
@@ -3264,7 +3279,7 @@ impl Instance {
         if staged[98] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
-            staged[88],
+            staged[89],
             [],
             [],
             [],
@@ -3276,7 +3291,7 @@ impl Instance {
             None,
             multiplicity * (BMX),
             [0, 4, 5],
-            [BPX, BPY, BPZ],
+            [BQK, BQL, BQM],
             [],
             [],
             multiplicity,
@@ -3284,7 +3299,7 @@ impl Instance {
         if staged[99] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             1,
-            staged[89],
+            staged[90],
             [],
             [],
             [],
@@ -3296,7 +3311,7 @@ impl Instance {
             None,
             multiplicity * (BNE),
             [1, 4, 5, 6, 7],
-            [BQA, BQB, BQC, BQD, BQE],
+            [BQN, BQO, BQP, BQQ, BQR],
             [],
             [],
             multiplicity,
@@ -3304,7 +3319,7 @@ impl Instance {
         if staged[100] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             2,
-            staged[90],
+            staged[91],
             [],
             [],
             [],
@@ -3316,7 +3331,7 @@ impl Instance {
             Some(5),
             multiplicity * (BNG),
             [4, 5, 6, 7],
-            [BQF, BQG, BQH, BQI],
+            [BQS, BQT, BQU, BQV],
             [],
             [],
             multiplicity,
@@ -3326,7 +3341,7 @@ impl Instance {
             Some(5),
             multiplicity * (BNJ),
             [4, 5, 6, 7],
-            [BQJ, BQK, BQL, BQM],
+            [BQW, BQX, BQY, BQZ],
             [],
             [],
             multiplicity,
@@ -3336,7 +3351,7 @@ impl Instance {
             Some(7),
             multiplicity * (BNK),
             [4, 6, 7],
-            [BQN, BQO, BOS],
+            [BRA, BRB, BOV],
             [],
             [],
             multiplicity,
@@ -3346,7 +3361,7 @@ impl Instance {
             Some(7),
             multiplicity * (BNN),
             [4, 5, 6, 7, 8],
-            [BQP, BQQ, BQR, BQS, BQT],
+            [BRC, BRD, BRE, BRF, BRG],
             [],
             [],
             multiplicity,
@@ -3356,47 +3371,17 @@ impl Instance {
             Some(7),
             multiplicity * (BNO),
             [4, 5, 6, 7, 9],
-            [BQU, BQV, BQW, BQX, BQY],
+            [BRH, BRI, BRJ, BRK, BRL],
             [],
             [],
             multiplicity,
         );
-        if staged[101] != 0.0 {
-        stamper.stamp_potential_sparse_local::<0, 0>(
-            3,
-            staged[91],
-            [],
-            [],
-            [],
-            [],
-        );
-        }
-        stamper.stamp_current_sparse_local::<4, 0>(
-            Some(4),
+        stamper.stamp_current_sparse_local::<5, 0>(
+            Some(8),
             None,
             multiplicity * (BOE),
-            [4, 5, 6, 7],
-            [BQZ, BRA, BRB, BRC],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<1, 0>(
-            Some(4),
-            None,
-            multiplicity * (BOF),
-            [4],
-            [BRD],
-            [],
-            [],
-            multiplicity,
-        );
-        stamper.stamp_current_sparse_local::<5, 0>(
-            Some(8),
-            None,
-            multiplicity * (BOK),
             [4, 5, 6, 7, 8],
-            [BRE, BRF, BRG, BRH, BRI],
+            [BRM, BRN, BRO, BRP, BRQ],
             [],
             [],
             multiplicity,
@@ -3404,9 +3389,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(8),
             None,
-            multiplicity * (BON),
+            multiplicity * (BOH),
             [8],
-            [BRJ],
+            [BRR],
             [],
             [],
             multiplicity,
@@ -3414,9 +3399,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(9),
             None,
-            multiplicity * (BOO),
+            multiplicity * (BOI),
             [4, 5, 6, 7, 9],
-            [BRK, BRL, BRM, BRN, BRO],
+            [BRS, BRT, BRU, BRV, BRW],
             [],
             [],
             multiplicity,
@@ -3424,9 +3409,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(9),
             None,
-            multiplicity * (BOR),
+            multiplicity * (BOL),
             [9],
-            [BRP],
+            [BRX],
             [],
             [],
             multiplicity,
@@ -3494,9 +3479,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(6),
-            multiplicity * (BOT),
+            multiplicity * (BOW),
             [10],
-            [BRQ],
+            [BRY],
             [],
             [],
             multiplicity,
@@ -3504,9 +3489,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(10),
             None,
-            multiplicity * (BOT),
+            multiplicity * (BOW),
             [10],
-            [BRQ],
+            [BRY],
             [],
             [],
             multiplicity,
@@ -3514,9 +3499,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(5),
-            multiplicity * (BOU),
+            multiplicity * (BOX),
             [11],
-            [BRR],
+            [BRZ],
             [],
             [],
             multiplicity,
@@ -3524,9 +3509,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(11),
             None,
-            multiplicity * (BOU),
+            multiplicity * (BOX),
             [11],
-            [BRR],
+            [BRZ],
             [],
             [],
             multiplicity,
@@ -3534,9 +3519,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(2),
-            multiplicity * (BOV),
+            multiplicity * (BOY),
             [12],
-            [BRS],
+            [BSA],
             [],
             [],
             multiplicity,
@@ -3544,9 +3529,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(12),
             None,
-            multiplicity * (BOV),
+            multiplicity * (BOY),
             [12],
-            [BRS],
+            [BSA],
             [],
             [],
             multiplicity,
@@ -3554,9 +3539,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(1),
             Some(3),
-            multiplicity * (BOW),
+            multiplicity * (BOZ),
             [13],
-            [BRT],
+            [BSB],
             [],
             [],
             multiplicity,
@@ -3564,9 +3549,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(13),
             None,
-            multiplicity * (BOW),
+            multiplicity * (BOZ),
             [13],
-            [BRT],
+            [BSB],
             [],
             [],
             multiplicity,
@@ -3574,9 +3559,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(5),
             Some(0),
-            multiplicity * (BOX),
+            multiplicity * (BPA),
             [14],
-            [BRU],
+            [BSC],
             [],
             [],
             multiplicity,
@@ -3584,9 +3569,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(14),
             None,
-            multiplicity * (BOX),
+            multiplicity * (BPA),
             [14],
-            [BRU],
+            [BSC],
             [],
             [],
             multiplicity,
@@ -3594,9 +3579,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(3),
             Some(5),
-            multiplicity * (BOY),
+            multiplicity * (BPB),
             [15],
-            [BRV],
+            [BSD],
             [],
             [],
             multiplicity,
@@ -3604,9 +3589,29 @@ impl Instance {
         stamper.stamp_current_sparse_local::<1, 0>(
             Some(15),
             None,
-            multiplicity * (BOY),
+            multiplicity * (BPB),
             [15],
-            [BRV],
+            [BSD],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(4),
+            None,
+            multiplicity * (BPD),
+            [16],
+            [BSE],
+            [],
+            [],
+            multiplicity,
+        );
+        stamper.stamp_current_sparse_local::<5, 0>(
+            Some(16),
+            None,
+            multiplicity * (BPL),
+            [4, 5, 6, 7, 16],
+            [BSF, BSG, BSH, BSI, BSJ],
             [],
             [],
             multiplicity,
@@ -3616,67 +3621,66 @@ impl Instance {
         self.canonical_reactive[2] = BLN;
         self.canonical_reactive[3] = BLP;
         self.canonical_reactive[4] = BLT;
-        self.canonical_reactive[5] = BRW;
-        self.canonical_reactive[6] = BRX;
-        self.canonical_reactive[7] = BRY;
+        self.canonical_reactive[5] = BSK;
+        self.canonical_reactive[6] = BSL;
+        self.canonical_reactive[7] = BSM;
         self.canonical_reactive[8] = BLY;
-        self.canonical_reactive[9] = BRZ;
-        self.canonical_reactive[10] = BSA;
-        self.canonical_reactive[11] = BSB;
+        self.canonical_reactive[9] = BSN;
+        self.canonical_reactive[10] = BSO;
+        self.canonical_reactive[11] = BSP;
         self.canonical_reactive[12] = BMD;
-        self.canonical_reactive[13] = BSC;
-        self.canonical_reactive[14] = BSD;
+        self.canonical_reactive[13] = BSQ;
+        self.canonical_reactive[14] = BSR;
         self.canonical_reactive[15] = BMI;
-        self.canonical_reactive[16] = BSE;
-        self.canonical_reactive[17] = BSF;
+        self.canonical_reactive[16] = BSS;
+        self.canonical_reactive[17] = BST;
         self.canonical_reactive[18] = BMQ;
-        self.canonical_reactive[19] = staged[88];
+        self.canonical_reactive[19] = staged[89];
         self.canonical_reactive[20] = BMX;
-        self.canonical_reactive[21] = staged[89];
+        self.canonical_reactive[21] = staged[90];
         self.canonical_reactive[22] = BNE;
-        self.canonical_reactive[23] = staged[90];
+        self.canonical_reactive[23] = staged[91];
         self.canonical_reactive[24] = BNG;
         self.canonical_reactive[25] = BKU;
-        self.canonical_reactive[26] = BSG;
-        self.canonical_reactive[27] = BSH;
-        self.canonical_reactive[28] = BSI;
-        self.canonical_reactive[29] = BSJ;
+        self.canonical_reactive[26] = BSU;
+        self.canonical_reactive[27] = BSV;
+        self.canonical_reactive[28] = BSW;
+        self.canonical_reactive[29] = BSX;
         self.canonical_reactive[30] = BNK;
         self.canonical_reactive[31] = BKY;
-        self.canonical_reactive[32] = BSK;
-        self.canonical_reactive[33] = BSL;
-        self.canonical_reactive[34] = BSM;
-        self.canonical_reactive[35] = BSN;
-        self.canonical_reactive[36] = BSO;
+        self.canonical_reactive[32] = BSY;
+        self.canonical_reactive[33] = BSZ;
+        self.canonical_reactive[34] = BTA;
+        self.canonical_reactive[35] = BTB;
+        self.canonical_reactive[36] = BTC;
         self.canonical_reactive[37] = BNO;
-        self.canonical_reactive[38] = staged[91];
-        self.canonical_reactive[39] = BOE;
-        self.canonical_reactive[40] = BOG;
-        self.canonical_reactive[41] = BSP;
-        self.canonical_reactive[42] = BOK;
-        self.canonical_reactive[43] = BJX;
-        self.canonical_reactive[44] = BSQ;
-        self.canonical_reactive[45] = BOO;
-        self.canonical_reactive[46] = BJZ;
-        self.canonical_reactive[47] = BSR;
-        self.canonical_reactive[48] = staged[92];
-        self.canonical_reactive[49] = staged[93];
-        self.canonical_reactive[50] = staged[94];
-        self.canonical_reactive[51] = staged[95];
-        self.canonical_reactive[52] = staged[96];
-        self.canonical_reactive[53] = staged[97];
-        self.canonical_reactive[54] = BOT;
-        self.canonical_reactive[55] = BOT;
-        self.canonical_reactive[56] = BOU;
-        self.canonical_reactive[57] = BOU;
-        self.canonical_reactive[58] = BOV;
-        self.canonical_reactive[59] = BOV;
-        self.canonical_reactive[60] = BOW;
-        self.canonical_reactive[61] = BOW;
-        self.canonical_reactive[62] = BOX;
-        self.canonical_reactive[63] = BOX;
-        self.canonical_reactive[64] = BOY;
-        self.canonical_reactive[65] = BOY;
+        self.canonical_reactive[38] = BOE;
+        self.canonical_reactive[39] = BJX;
+        self.canonical_reactive[40] = BTD;
+        self.canonical_reactive[41] = BOI;
+        self.canonical_reactive[42] = BJZ;
+        self.canonical_reactive[43] = BTE;
+        self.canonical_reactive[44] = staged[92];
+        self.canonical_reactive[45] = staged[93];
+        self.canonical_reactive[46] = staged[94];
+        self.canonical_reactive[47] = staged[95];
+        self.canonical_reactive[48] = staged[96];
+        self.canonical_reactive[49] = staged[97];
+        self.canonical_reactive[50] = BOW;
+        self.canonical_reactive[51] = BOW;
+        self.canonical_reactive[52] = BOX;
+        self.canonical_reactive[53] = BOX;
+        self.canonical_reactive[54] = BOY;
+        self.canonical_reactive[55] = BOY;
+        self.canonical_reactive[56] = BOZ;
+        self.canonical_reactive[57] = BOZ;
+        self.canonical_reactive[58] = BPA;
+        self.canonical_reactive[59] = BPA;
+        self.canonical_reactive[60] = BPB;
+        self.canonical_reactive[61] = BPB;
+        self.canonical_reactive[62] = BPD;
+        self.canonical_reactive[63] = BPK;
+        self.canonical_reactive[64] = BTF;
     }
 
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
@@ -3737,19 +3741,10 @@ impl Instance {
             multiplicity,
         );
         stamper.stamp_current_reactive_indexed_dense_local(
-            Some(4),
-            None,
-            &[4],
-            &[cached[41]],
-            &[],
-            &[],
-            multiplicity,
-        );
-        stamper.stamp_current_reactive_indexed_dense_local(
             Some(8),
             None,
             &[8],
-            &[cached[44]],
+            &[cached[40]],
             &[],
             &[],
             multiplicity,
@@ -3758,7 +3753,16 @@ impl Instance {
             Some(9),
             None,
             &[9],
-            &[cached[47]],
+            &[cached[43]],
+            &[],
+            &[],
+            multiplicity,
+        );
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(16),
+            None,
+            &[4],
+            &[cached[64]],
             &[],
             &[],
             multiplicity,

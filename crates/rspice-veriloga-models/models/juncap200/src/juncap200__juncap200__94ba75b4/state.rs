@@ -472,11 +472,11 @@ impl Instance {
 	pub const VARIABLE_COUNT: usize = 668;
 	pub const DDT_STATE_COUNT: usize = 1;
 	pub const IDT_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([128, 70, 183, 191, 11, 141, 249, 89, 81, 98, 146, 248, 62, 43, 231, 24, 175, 52, 220, 169, 87, 73, 94, 135, 157, 76, 97, 238, 37, 2, 149, 152]);
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([142, 110, 215, 45, 168, 190, 149, 51, 30, 131, 10, 223, 102, 226, 96, 79, 14, 97, 68, 95, 218, 142, 139, 124, 97, 28, 238, 110, 220, 149, 84, 124]);
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "f13bf7603bfbdda068dde8ce0efce683f2d71d9783699de03ffc57a22b585b80";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "be26aac7423d16db9603a0bf17c0acec21225eb9f53cef639d3b952676e84b75";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {

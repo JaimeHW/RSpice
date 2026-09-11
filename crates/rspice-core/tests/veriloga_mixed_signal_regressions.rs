@@ -124,6 +124,49 @@ endmodule
 }
 
 #[test]
+fn digital_switch_branches_preserve_both_source_modes() {
+    let model = ModelFile::new(
+        "`timescale 1ns/1ps
+        module switched(p); inout p; electrical p; reg state;
+        initial begin state=0; #1 state=1; #1 state=0; end
+        analog if(state) V(p)<+2*I(p); else I(p)<+3*V(p); endmodule",
+    );
+    let deck = Netlist::parse(&format!(
+        "* digital switch modes\nI1 0 out DC 1\nX1 out switched\n.va \"{}\" switched\n.end",
+        model.path()
+    ))
+    .unwrap();
+    for spice_dialect in [
+        rspice_core::engine::SpiceDialect::Ngspice,
+        rspice_core::engine::SpiceDialect::Xyce,
+    ] {
+        let engine = Engine::new(rspice_core::SimulationConfig {
+            spice_dialect,
+            ..Default::default()
+        });
+        let result = engine
+            .run_tran(&deck, 3e-9, 0.1e-9)
+            .unwrap_or_else(|error| panic!("{spice_dialect:?}: {error}"));
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        for (time, voltage) in result.time.iter().zip(&result.voltages[out]) {
+            let expected = if *time >= 1e-9 - 1e-18 && *time < 2e-9 - 1e-18 {
+                2.0
+            } else {
+                1.0 / 3.0
+            };
+            assert!(
+                (voltage - expected).abs() < 1e-8,
+                "{spice_dialect:?}: t={time}, V={voltage}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
 fn digital_state_controls_analog_conductance_and_its_jacobian() {
     let model = ModelFile::new(
         "module switched(p); inout p; electrical p; reg state; initial begin state=0; #1 state=1; end analog if(state) I(p)<+V(p)/1000; endmodule",

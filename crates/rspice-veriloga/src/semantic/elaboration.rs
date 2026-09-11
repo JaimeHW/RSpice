@@ -654,6 +654,20 @@ impl<'a> HierarchyElaborator<'a> {
         }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
+        for &slot in &child.switch_branch_variables {
+            if child.event_state_variables.binary_search(&slot).is_err() {
+                return Err(internal_error(
+                    "switch-branch variable is not an event-state slot".into(),
+                ));
+            }
+            self.flattened.switch_branch_variables.push(
+                variable_base.checked_add(slot).ok_or_else(|| {
+                    internal_error("hierarchy switch-branch index overflow".into())
+                })?,
+            );
+        }
+        self.flattened.switch_branch_variables.sort_unstable();
+        self.flattened.switch_branch_variables.dedup();
         // By name, because `fresh_name` draws from one counter shared by every
         // renamed item: walking the child's array map would hand a different
         // hoisted name to each array — and to everything renamed after it —

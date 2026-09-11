@@ -8,6 +8,7 @@ use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskEvent, AnalogTaskKin
 pub(super) struct TransientModelCandidate {
     pub finish: Option<ModelFinish>,
     pub refinement_time: Option<f64>,
+    pub discontinuity: bool,
 }
 
 pub(super) struct FrequencyModelPoint {
@@ -312,19 +313,20 @@ impl Engine {
             consume(event);
         }
         #[cfg(feature = "veriloga")]
-        let mixed_refinement_time = circuit.visit_mixed_transient_candidate_task(
-            time,
-            dt,
-            solution,
-            coefficients,
-            initial_step,
-            final_step,
-            AnalogTaskKind::Finish,
-            false,
-            &mut consume,
-        )?;
+        let (mixed_refinement_time, mixed_discontinuity) = circuit
+            .visit_mixed_transient_candidate_task(
+                time,
+                dt,
+                solution,
+                coefficients,
+                initial_step,
+                final_step,
+                AnalogTaskKind::Finish,
+                false,
+                &mut consume,
+            )?;
         #[cfg(not(feature = "veriloga"))]
-        let mixed_refinement_time = None;
+        let (mixed_refinement_time, mixed_discontinuity) = (None, false);
         let _ = (dt, solution, coefficients, initial_step, final_step);
         if let Some(error) = invalid {
             return Err(SimulationError::Circuit(error.into()));
@@ -353,6 +355,7 @@ impl Engine {
         Ok(TransientModelCandidate {
             finish: candidate,
             refinement_time,
+            discontinuity: circuit.veriloga_discontinuity_rising() || mixed_discontinuity,
         })
     }
 

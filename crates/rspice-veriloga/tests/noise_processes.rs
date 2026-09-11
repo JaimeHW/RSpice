@@ -970,7 +970,7 @@ endmodule
     }
 
     #[test]
-    fn mixed_current_and_potential_injections_keep_rhs_phase() {
+    fn switch_branch_noise_discards_the_overwritten_source_kind() {
         let mut device = device(
             r#"
 module mixed_rhs_noise(p, n);
@@ -984,18 +984,12 @@ module mixed_rhs_noise(p, n);
 endmodule
 "#,
         );
-        device.set_branch_current_indices(&[2]);
+        device.set_internal_node_indices(&[2]);
         let processes = device
             .try_noise_processes_at_frequency(&[0.0, 0.0, 0.0], 1.0e3)
             .expect("mixed RHS process evaluates");
-        assert_eq!(processes[0].injections.len(), 2);
-        let mut gains = processes[0]
-            .injections
-            .iter()
-            .map(|injection| injection.gain.re)
-            .collect::<Vec<_>>();
-        gains.sort_by(f64::total_cmp);
-        assert_eq!(gains, vec![-1.0, 1.0]);
+        assert_eq!(processes[0].injections.len(), 1);
+        assert_eq!(processes[0].injections[0].gain.re, -1.0);
     }
 
     #[test]
@@ -1398,11 +1392,12 @@ endmodule
 module mixed_mfactor(p, n);
     inout p, n;
     electrical p, n;
+    branch(p,n) current_source, voltage_source;
     real process;
     analog begin
         process = white_noise(1.0, "shared");
-        I(p, n) <+ process;
-        V(p, n) <+ process;
+        I(current_source) <+ process;
+        V(voltage_source) <+ process;
     end
 endmodule
 "#,

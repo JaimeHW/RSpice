@@ -494,6 +494,7 @@ impl CodeGenerator {
             num_variables: ir.variables.len(),
             variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
             event_state_variables: ir.event_state_variables.clone(),
+            switch_branch_variables: ir.switch_branch_variables.clone(),
             initialization_prologue_variables: ir.initialization_prologue_variables.clone(),
             assignment_steps: Vec::new(),
             noise_assignment_steps: Vec::new(),

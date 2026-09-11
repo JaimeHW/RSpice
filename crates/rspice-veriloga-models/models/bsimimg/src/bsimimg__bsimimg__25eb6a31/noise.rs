@@ -7,18 +7,15 @@ pub use rspice_veriloga_runtime::{GeneratedNoiseComplex, GeneratedNoiseDescripto
 
 use super::stamp::{canonical_model_preprocess, CANONICAL_MODEL_STAGE_SLOTS, canonical_instance_preprocess, CANONICAL_INSTANCE_STAGE_SLOTS, canonical_temperature_preprocess, CANONICAL_TEMPERATURE_STAGE_SLOTS};
 use rspice_veriloga_runtime::{install_generated_stage_values, rspice_limited_exp};
-pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 11] = [
-	GeneratedNoiseDescriptor { mechanism: "WHITE_D_DI_RD", label: Some("Rd"), kind: GeneratedNoiseKind::White, equation: 23, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_S_SI_RS", label: Some("Rs"), kind: GeneratedNoiseKind::White, equation: 24, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_FG_GE_RG", label: Some("Rg"), kind: GeneratedNoiseKind::White, equation: 29, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "fg", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "ge", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "FLICKER_DI_SI_1OVERF", label: Some("1overf"), kind: GeneratedNoiseKind::Flicker, equation: 30, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_DI_SI_ID", label: Some("Id"), kind: GeneratedNoiseKind::White, equation: 31, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGS", label: Some("Igs"), kind: GeneratedNoiseKind::White, equation: 32, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGD", label: Some("Igd"), kind: GeneratedNoiseKind::White, equation: 33, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGD", label: Some("Igd"), kind: GeneratedNoiseKind::White, equation: 34, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGS", label: Some("Igs"), kind: GeneratedNoiseKind::White, equation: 35, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGB", label: Some("Igb"), kind: GeneratedNoiseKind::White, equation: 36, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
-	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGB", label: Some("Igb"), kind: GeneratedNoiseKind::White, equation: 37, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
+pub static NOISE_SOURCES: [GeneratedNoiseDescriptor; 8] = [
+	GeneratedNoiseDescriptor { mechanism: "FLICKER_DI_SI_1OVERF", label: Some("1overf"), kind: GeneratedNoiseKind::Flicker, equation: 19, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_DI_SI_ID", label: Some("Id"), kind: GeneratedNoiseKind::White, equation: 20, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGS", label: Some("Igs"), kind: GeneratedNoiseKind::White, equation: 21, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGD", label: Some("Igd"), kind: GeneratedNoiseKind::White, equation: 22, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGD", label: Some("Igd"), kind: GeneratedNoiseKind::White, equation: 23, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGS", label: Some("Igs"), kind: GeneratedNoiseKind::White, equation: 24, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_SI_IGB", label: Some("Igb"), kind: GeneratedNoiseKind::White, equation: 25, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true }, table_len: 0, table_log_interp: false },
+	GeneratedNoiseDescriptor { mechanism: "WHITE_GI_DI_IGB", label: Some("Igb"), kind: GeneratedNoiseKind::White, equation: 26, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, table_len: 0, table_log_interp: false },
 ];
 
 impl Instance {
@@ -26,7 +23,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 341];
+		let mut prepared = [0.0; 334];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -59,7 +56,7 @@ impl Instance {
 		let parameters = &self.params.values;
 		let temperature = ctx.temperature();
 		let staged = &prepared[..];
-		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8])];
+		let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12])];
 		let A=0f64;
 		let B=1f64;
 		let C=parameters[2];
@@ -67,1395 +64,1347 @@ impl Instance {
 		let E=staged[144];
 		let F=staged[148];
 		let G=1e-6f64;
-		let K=staged[171];
-		let L=staged[21];
-		let M=staged[300];
-		let R=staged[132];
-		let S=staged[170];
-		let T=staged[72];
-		let U=staged[73];
-		let V=staged[167];
-		let W=staged[194];
-		let X=staged[200];
-		let AC=3.9f64;
-		let AD=staged[103];
-		let AE=parameters[47];
-		let AG=staged[7];
-		let AH=parameters[49];
-		let AI=staged[122];
-		let AK=staged[264]!=0.0;
-		let AL=parameters[60];
-		let AN=staged[129];
-		let AO=staged[134];
-		let AP=staged[133];
-		let AQ=staged[137];
-		let AR=staged[136];
-		let AS=staged[135];
-		let AT=staged[267]!=0.0;
-		let AU=1e-38f64;
-		let AV=0.5f64;
-		let AW=staged[125];
-		let AX=staged[142];
-		let AY=staged[235];
-		let AZ=staged[127];
-		let BA=parameters[296];
-		let BB=staged[285]!=0.0;
-		let BC=staged[286]!=0.0;
-		let BD=1e-3f64;
-		let BE=1e3f64;
-		let BG=staged[297];
-		let BH=staged[12];
-		let BK=0.25f64;
-		let BL=0.01f64;
-		let BN=staged[13];
-		let BZ=1e-4f64;
-		let CB=staged[302]!=0.0;
-		let CC=staged[298]!=0.0;
-		let CD=staged[299]!=0.0;
-		let CI=staged[22];
-		let CQ=0.9f64;
-		let DQ=staged[46];
-		let EA=node_potentials[8];
-		let EB=node_potentials[6];
-		let ED=node_potentials[5];
-		let EG=node_potentials[3];
-		let EL=-1f64;
-		let EO=0.02f64;
-		let EY=40f64;
-		let FG=parameters[83];
-		let FO=staged[301]!=0.0;
-		let GC=staged[80];
-		let GF=1.60219e-19f64;
-		let GG=staged[157];
-		let GH=staged[83];
-		let GL=staged[84];
-		let GY=staged[124];
-		let HC=parameters[10];
-		let HF=staged[112];
-		let HG=staged[109];
-		let HI=39.47841f64;
-		let HK=staged[108];
-		let HL=staged[111];
-		let HS=staged[110];
-		let HV=staged[113];
-		let HY=staged[114];
-		let IH=78.95683f64;
-		let JA=staged[115];
-		let JC=10f64;
-		let KQ=staged[117];
-		let QG=staged[123];
-		let QI=staged[126];
-		let QK=staged[128];
-		let QM=staged[130];
-		let QP=staged[131];
-		let QQ=parameters[11];
-		let QT=staged[138];
-		let QY=staged[303]!=0.0;
-		let QZ=staged[139];
-		let RB=staged[141];
-		let RC=staged[140];
-		let AAJ=staged[304]!=0.0;
-		let AAM=staged[305]!=0.0;
-		let ABP=staged[306]!=0.0;
-		let ABY=staged[307]!=0.0;
-		let ABZ=parameters[213];
-		let ACA=staged[308]!=0.0;
-		let ACI=staged[309]!=0.0;
-		let ADB=staged[310]!=0.0;
-		let ADK=staged[311]!=0.0;
-		let ADR=staged[314]!=0.0;
-		let AEK=staged[315]!=0.0;
-		let AEV=staged[217];
-		let AEZ=parameters[234];
-		let AFF=parameters[235];
-		let AFJ=parameters[288];
-		let AFK=parameters[289];
-		let AFL=parameters[290];
-		let AFM=staged[317]!=0.0;
-		let AFQ=staged[318]!=0.0;
-		let AFT=staged[319]!=0.0;
-		let AFW=parameters[292];
-		let AFY=1e10f64;
-		let AHM=staged[321]!=0.0;
-		let AHO=staged[312];
-		let AHQ=staged[313];
-		let AHT=staged[322]!=0.0;
-		let AHX=parameters[286];
+		let K=staged[21];
+		let L=staged[300];
+		let Q=staged[132];
+		let R=staged[170];
+		let S=staged[72];
+		let T=staged[73];
+		let U=staged[167];
+		let V=staged[194];
+		let W=staged[200];
+		let AB=3.9f64;
+		let AC=staged[103];
+		let AD=parameters[47];
+		let AF=staged[7];
+		let AG=parameters[49];
+		let AH=staged[122];
+		let AJ=staged[264]!=0.0;
+		let AK=parameters[60];
+		let AM=staged[129];
+		let AN=staged[134];
+		let AO=staged[133];
+		let AP=staged[137];
+		let AQ=staged[136];
+		let AR=staged[135];
+		let AS=staged[267]!=0.0;
+		let AT=1e-38f64;
+		let AU=0.5f64;
+		let AV=staged[125];
+		let AW=staged[142];
+		let AX=staged[235];
+		let AY=staged[127];
+		let AZ=parameters[296];
+		let BA=staged[285]!=0.0;
+		let BB=staged[286]!=0.0;
+		let BC=1e-3f64;
+		let BD=1e3f64;
+		let BF=staged[297];
+		let BG=staged[12];
+		let BJ=0.25f64;
+		let BK=0.01f64;
+		let BM=staged[13];
+		let BY=1e-4f64;
+		let CA=staged[302]!=0.0;
+		let CB=staged[298]!=0.0;
+		let CC=staged[299]!=0.0;
+		let CH=staged[22];
+		let CP=0.9f64;
+		let DP=staged[46];
+		let DZ=node_potentials[8];
+		let EA=node_potentials[6];
+		let EC=node_potentials[5];
+		let EF=node_potentials[3];
+		let EK=-1f64;
+		let EN=0.02f64;
+		let EX=40f64;
+		let FF=parameters[83];
+		let FN=staged[301]!=0.0;
+		let GB=staged[80];
+		let GE=1.60219e-19f64;
+		let GF=staged[157];
+		let GG=staged[83];
+		let GK=staged[84];
+		let GX=staged[124];
+		let HB=parameters[10];
+		let HE=staged[112];
+		let HF=staged[109];
+		let HH=39.47841f64;
+		let HJ=staged[108];
+		let HK=staged[111];
+		let HR=staged[110];
+		let HU=staged[113];
+		let HX=staged[114];
+		let IG=78.95683f64;
+		let IZ=staged[115];
+		let JB=10f64;
+		let KP=staged[117];
+		let QF=staged[123];
+		let QH=staged[126];
+		let QJ=staged[128];
+		let QL=staged[130];
+		let QO=staged[131];
+		let QP=parameters[11];
+		let QS=staged[138];
+		let QX=staged[303]!=0.0;
+		let QY=staged[139];
+		let RA=staged[141];
+		let RB=staged[140];
+		let AAI=staged[304]!=0.0;
+		let AAL=staged[305]!=0.0;
+		let ABO=staged[306]!=0.0;
+		let ABX=staged[307]!=0.0;
+		let ABY=parameters[213];
+		let ABZ=staged[308]!=0.0;
+		let ACH=staged[309]!=0.0;
+		let ACU=staged[310]!=0.0;
+		let ADD=staged[311]!=0.0;
+		let ADK=staged[314]!=0.0;
+		let AED=staged[315]!=0.0;
+		let AEO=staged[217];
+		let AES=parameters[234];
+		let AEY=parameters[235];
+		let AFC=parameters[288];
+		let AFD=parameters[289];
+		let AFE=parameters[290];
+		let AFF=staged[317]!=0.0;
+		let AFJ=staged[318]!=0.0;
+		let AFM=staged[319]!=0.0;
+		let AFP=parameters[292];
+		let AFR=1e10f64;
+		let AHG=parameters[286];
 		let H=G/ E;
 		let I=G/ F;
 		let J=H* I;
-		let N=((parameters[63]+ (parameters[349]* H))+ (parameters[350]* I))+ (parameters[351]* J);
-		let O=((parameters[291]+ (parameters[751]* H))+ (parameters[752]* I))+ (parameters[753]* J);
-		let P=((parameters[294]+ (parameters[757]* H))+ (parameters[758]* I))+ (parameters[759]* J);
-		let Q=((parameters[293]+ (parameters[754]* H))+ (parameters[755]* I))+ (parameters[756]* J);
-		let Y=((parameters[95]+ (parameters[739]* H))+ (parameters[740]* I))+ (parameters[741]* J);
-		let Z=((parameters[96]+ (parameters[742]* H))+ (parameters[743]* I))+ (parameters[744]* J);
-		let AA=((parameters[97]+ (parameters[745]* H))+ (parameters[746]* I))+ (parameters[747]* J);
-		let AB=((parameters[98]+ (parameters[748]* H))+ (parameters[749]* I))+ (parameters[750]* J);
-		let AF=3.4531302e-11f64/ AE;
-		let AJ=parameters[59]/ AC;
-		let ADL=if AK{
-		let AM=((parameters[45]* AL)/ AC)- parameters[48];
-		AM
+		let M=((parameters[63]+ (parameters[349]* H))+ (parameters[350]* I))+ (parameters[351]* J);
+		let N=((parameters[291]+ (parameters[751]* H))+ (parameters[752]* I))+ (parameters[753]* J);
+		let O=((parameters[294]+ (parameters[757]* H))+ (parameters[758]* I))+ (parameters[759]* J);
+		let P=((parameters[293]+ (parameters[754]* H))+ (parameters[755]* I))+ (parameters[756]* J);
+		let X=((parameters[95]+ (parameters[739]* H))+ (parameters[740]* I))+ (parameters[741]* J);
+		let Y=((parameters[96]+ (parameters[742]* H))+ (parameters[743]* I))+ (parameters[744]* J);
+		let Z=((parameters[97]+ (parameters[745]* H))+ (parameters[746]* I))+ (parameters[747]* J);
+		let AA=((parameters[98]+ (parameters[748]* H))+ (parameters[749]* I))+ (parameters[750]* J);
+		let AE=3.4531302e-11f64/ AD;
+		let AI=parameters[59]/ AB;
+		let ADE=if AJ{
+		let AL=((parameters[45]* AK)/ AB)- parameters[48];
+		AL
+		}else{
+		AD
+		};
+		let AFG=if BA{
+		A
+		}else{
+		AZ
+		};
+		let BH=if BB{
+		let BE=(temperature+ node_potentials[4])+ parameters[9];
+		BE
+		}else{
+		BF
+		};
+		let BI=BH- BG;
+		let BL=AU* ((BH+ BG)- (((BI* BI)+ 2.5e-5f64).sqrt()));
+		let BN=BL/ BM;
+		let BO=BL- BM;
+		let BP=8.61708e-5f64* BL;
+		let BQ=parameters[55]- (((parameters[299]* BL)* BL)/ (BL+ parameters[300]));
+		let BR=BL/ 300.15f64;
+		let BS=D* BP;
+		let BT=(parameters[54]* (BR* (BR.sqrt())))* (rspice_limited_exp((staged[14]- (BQ/ BS))));
+		let BU=BP* ((if !((staged[15]/ (BT* BT))).is_nan()&&((staged[15]/ (BT* BT))>=AT||(AT).is_nan()){(staged[15]/ (BT* BT))}else{AT}).ln());
+		let BV=BP* ((if !((staged[16]/ BT)).is_nan()&&((staged[16]/ BT)>=AT||(AT).is_nan()){(staged[16]/ BT)}else{AT}).ln());
+		let BW=AU* BQ;
+		let BX=BW- (BP* ((if !((parameters[52]/ BT)).is_nan()&&((parameters[52]/ BT)>=AT||(AT).is_nan()){(parameters[52]/ BT)}else{AT}).ln()));
+		let BZ=BW- (AU* (BX+ (((BX* BX)+ 4e-8f64).sqrt())));
+		let CJ;
+		if CB{
+		let CK=if CC{
+		let CD=staged[18]+ BZ;
+		CD
+		}else{
+		let CE=staged[20]- BZ;
+		CE
+		};
+		CJ=CK;
+		}else{
+		CJ=L;
+		}
+		let CF=BQ/ D;
+		let CG=parameters[53]+ CF;
+		let CI=CH* (K- CG);
+		let CL=CH* (CJ- CG);
+		let CM=CG- (CH* (if !(CF).is_nan()&&(CF<=(BP* ((if !((staged[23]/ BT)).is_nan()&&((staged[23]/ BT)>=AT||(AT).is_nan()){(staged[23]/ BT)}else{AT}).ln()))||((BP* ((if !((staged[23]/ BT)).is_nan()&&((staged[23]/ BT)>=AT||(AT).is_nan()){(staged[23]/ BT)}else{AT}).ln()))).is_nan()){CF}else{(BP* ((if !((staged[23]/ BT)).is_nan()&&((staged[23]/ BT)>=AT||(AT).is_nan()){(staged[23]/ BT)}else{AT}).ln()))}));
+		let CN=CH* (K- CM);
+		let CO=CH* (CJ- CM);
+		let CQ=CP+ (staged[26]* BO);
+		let CR=(staged[25]* (BN.powf(staged[24])))* ((B+ (AU* (CQ+ (((CQ* CQ)+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
+		let CS=(B+ (parameters[159]* BO))- G;
+		let CT=staged[27]* (AU* (CS+ (((CS* CS)+ 4e-6f64).sqrt())));
+		let CU=(B+ (staged[28]* BO))- G;
+		let CV=staged[29]* (AU* (CU+ (((CU* CU)+ 4e-6f64).sqrt())));
+		let CW=staged[31]* (BN.powf(staged[30]));
+		let CX=staged[33]* (BN.powf(staged[32]));
+		let CY=(B+ (staged[34]* BO))- G;
+		let CZ=AU* (CY+ (((CY* CY)+ 4e-6f64).sqrt()));
+		let DA=CP- (staged[35]* BO);
+		let DB=DA* DA;
+		let DC=staged[36]* ((B+ (AU* (DA+ ((DB+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
+		let DD=DC< BD;
+		let RF=if DD{
+		BD
+		}else{
+		DC
+		};
+		let DE=staged[37]* ((B+ (AU* (DA+ ((DB+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
+		let DF=DE< BD;
+		let ABG=if DF{
+		BD
+		}else{
+		DE
+		};
+		let DG=staged[38]* ((B+ (AU* (DA+ ((DB+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
+		let DH=DG< BD;
+		let ABM=if DH{
+		BD
+		}else{
+		DG
+		};
+		let DI=parameters[309]* BO;
+		let DJ=staged[39]* (B+ (-0.9f64+ (AU* (((DI- -0.9f64)- BY)+ (((((DI- -0.9f64)- BY)* ((DI- -0.9f64)- BY))- -3.6e-4f64).sqrt())))));
+		let DK=CP- (staged[40]* BO);
+		let DL=staged[41]* ((B+ (AU* (DK+ (((DK* DK)+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
+		let DM=(staged[42]* (B+ (parameters[121]* BO)))- D;
+		let DN=(AU* (DM+ (((DM* DM)+ 4e-6f64).sqrt())))+ D;
+		let DO=staged[44]+ (staged[43]* BO);
+		let DQ=((staged[45]* BO)- DP)- G;
+		let DR=staged[48]+ (DP+ (AU* (DQ+ (((DQ* DQ)- staged[47]).sqrt()))));
+		let DS=staged[50]+ (staged[49]* BO);
+		let DT=(B- (staged[51]* BO))- G;
+		let DU=staged[52]* (AU* (DT+ (((DT* DT)+ 4e-6f64).sqrt())));
+		let DV=BN- B;
+		let DW=staged[53]* DV;
+		let DX=rspice_limited_exp((staged[60]* ((if !(BN).is_nan()&&(BN>=AT||(AT).is_nan()){BN}else{AT}).ln())));
+		let DY=staged[61]* DX;
+		let EB=CH* (DZ- EA);
+		let ED=CH* (EC- EA);
+		let EE=CH* (DZ- EC);
+		let EG=CH* (EF- EA);
+		let EH=CH* (EF- EC);
+		let EI=CH* (DZ- EF);
+		let EJ=ED< A;
+		let EM;
+		let EQ;
+		let ES;
+		let ACO;
+		let AEQ;
+		if EJ{
+		let EL=-ED;
+		EM=EL;
+		EQ=EH;
+		ES=EE;
+		ACO=EG;
+		AEQ=EK;
+		}else{
+		EM=ED;
+		EQ=EG;
+		ES=EB;
+		ACO=EH;
+		AEQ=B;
+		}
+		let EO=(((EM* EM)+ 4e-4f64).sqrt())- EN;
+		let EP=AU* (EO- EM);
+		let ER=EQ+ EP;
+		let ET=ES- CI;
+		let EU=EQ- CL;
+		let EV=staged[68]+ (((((staged[66]+ (staged[65]* ((((ET* staged[62])+ (EU* staged[63]))/ staged[64])+ EP))).atan())/ 3.141592653589793f64)+ AU)* staged[67]);
+		let EW=(staged[69]/ EV)+ G;
+		let EY=EW< EX;
+		let GR=if EY{
+		let EZ=AU/ ((EW.cosh())- B);
+		EZ
+		}else{
+		let FA=rspice_limited_exp((-EW));
+		FA
+		};
+		let FB=(staged[70]/ EV)+ G;
+		let FC=FB< EX;
+		let GS=if FC{
+		let FD=AU/ ((FB.cosh())- B);
+		FD
+		}else{
+		let FE=rspice_limited_exp((-FB));
+		FE
+		};
+		let GU=if FC{
+		let FG=B/ (if !((B+ (FF* ((FB.cosh())- D)))).is_nan()&&((B+ (FF* ((FB.cosh())- D)))>=G||(G).is_nan()){(B+ (FF* ((FB.cosh())- D)))}else{G});
+		FG
+		}else{
+		let FH=rspice_limited_exp((-FB));
+		let FI=FH/ (if !((FH+ FF)).is_nan()&&((FH+ FF)>=G||(G).is_nan()){(FH+ FF)}else{G});
+		FI
+		};
+		let FJ=(staged[71]/ EV)+ G;
+		let FK=FJ< EX;
+		let ABT=if FK{
+		let FL=((AU* S)/ ((FJ.cosh())- B))+ T;
+		FL
+		}else{
+		let FM=(S* (rspice_limited_exp((-FJ))))+ T;
+		FM
+		};
+		let GA;
+		if FN{
+		let FO=staged[74]/ EV;
+		let FP=FO> EX;
+		let FS=if FP{
+		let FQ=(rspice_limited_exp(FO))/ D;
+		FQ
+		}else{
+		let FR=(FO.cosh())- B;
+		FR
+		};
+		let FT=staged[76]- (staged[75]/ FS);
+		GA=FT;
+		}else{
+		let FU=staged[77]/ EV;
+		let FV=FU> EX;
+		let FY=if FV{
+		let FW=(rspice_limited_exp(FU))/ D;
+		FW
+		}else{
+		let FX=(FU.cosh())- B;
+		FX
+		};
+		let FZ=staged[79]- (staged[78]/ FY);
+		GA=FZ;
+		}
+		let GC=GA- GB;
+		let GD=GB+ (AU* (GC+ (((GC* GC)+ BY).sqrt())));
+		let GJ=if CA{
+		let GH=staged[82]* ((CH* ER)- staged[81]);
+		let GI=((B+ ((AU* (GH+ (((GH* GH)+ 4e-4f64).sqrt())))/ GG)).sqrt())- B;
+		GI
+		}else{
+		A
+		};
+		let GL=((-((GG* GJ)* GJ))- GK)- BK;
+		let GM=(staged[86]* GD)* ((EU- (staged[88]* (-(GK+ (AU* (GL+ (((GL* GL)- staged[85]).sqrt())))))))- (-1.2f64- EP));
+		let GN=AU* (ER+ (((ER* ER)+ 4e-6f64).sqrt()));
+		let GO=(0.4f64+ BV)+ staged[89];
+		let GP=GO< A;
+		let GY=if GP{
+		A
+		}else{
+		let GQ=(staged[90]* staged[91])* (GO.sqrt());
+		GQ
+		};
+		let GT=EO+ BK;
+		let GV=staged[102]+ (((parameters[66]* ER)+ ((parameters[67]* ER)* ER))+ (GR* (((staged[100]+ (staged[99]* ER))+ ((parameters[69]* ER)* ER))+ ((staged[98]+ (parameters[70]* GN))* EO))));
+		let GW=(BP* GV)/ staged[101];
+		let GZ=(((staged[92]* GR)* (BU- GO))+ ((((-(DJ+ (staged[93]* ER)))* GS)* (EO+ (staged[94]* (GT.sqrt()))))+ ((staged[95]* GU)* (GT.powf(staged[96])))))+ GY;
+		let HA=(((GZ+ (staged[97]* EO))+ staged[106])+ (DW+ ((staged[105]* ER)* DV)))+ GM;
+		let HC=(ET- HA)+ HB;
+		let HD=(((3.20438e-19f64* BT)* AG)* AG)/ (staged[107]* BP);
+		let HG=HD.ln();
+		let HI=3.675753940198048f64- HG;
+		let HL=HC/ GW;
+		let HM=EU- HA;
+		let HN=HM+ HB;
+		let HO=HN/ GW;
+		let HP=HL- HI;
+		let HQ=((((HJ* HP)* HP)+ HH).ln())- HG;
+		let HS=(HQ+ (HF* HO))/ HR;
+		let HT=if !((if !((HO+ (HK* (HL- HO)))).is_nan()&&((HO+ (HK* (HL- HO)))<=HQ||(HQ).is_nan()){(HO+ (HK* (HL- HO)))}else{HQ})).is_nan()&&((if !((HO+ (HK* (HL- HO)))).is_nan()&&((HO+ (HK* (HL- HO)))<=HQ||(HQ).is_nan()){(HO+ (HK* (HL- HO)))}else{HQ})<=HI||(HI).is_nan()){(if !((HO+ (HK* (HL- HO)))).is_nan()&&((HO+ (HK* (HL- HO)))<=HQ||(HQ).is_nan()){(HO+ (HK* (HL- HO)))}else{HQ})}else{HI};
+		let HV=(HT+ (HE* HL))/ HU;
+		let HW=HO- HS;
+		let HY=((HX* HW)* HW)- (HD* (HS.exp()));
+		let HZ=HY< A;
+		let IS=if HZ{
+		let IA=(HO- HT)* HF;
+		let IB=EX* HE;
+		let IC=IB+ IA;
+		let ID=IB* IA;
+		let IE=(0.06534f64* IC)+ B;
+		let IF=((IC* 8.57973f64)+ ID)+ HH;
+		let IH=(((-IF)+ ((((-4f64* IE)* ((IG* IC)+ (HH* ID)))+ (IF* IF)).sqrt()))/ (D* IE))* (B- (((-((HL- (((HI* HU)- HT)/ HE))+ D))/ 2.8985507246376816f64).exp()));
+		let II=if !(IH).is_nan()&&(IH<=50f64||(50f64).is_nan()){IH}else{50f64};
+		II
+		}else{
+		HY
+		};
+		let IJ=if !(HL).is_nan()&&(HL>=HI||(HI).is_nan()){HL}else{HI};
+		let IK=IJ- HI;
+		let IL=HI* HU;
+		let IM=((IL- HT)/ HE)- HI;
+		let IN=(((((HJ* IK)* IK)+ HH).ln())- HG)- ((((((HJ* IM)* IM)+ HH).ln())- HG)- HI);
+		let IO=IJ- IN;
+		let IP=-HD;
+		let IQ=IP* (IN.exp());
+		let IR=HJ* IO;
+		let IT=IN+ ((-(((IR* IO)+ IQ)- IS))/ ((-2f64* IR)+ IQ));
+		let IU=IJ- IT;
+		let IV=HJ* IU;
+		let IW=(IV* IU)- IS;
+		let IX=B/ IW;
+		let IY=B/ (((-2f64* IV)* IX)- B);
+		let JA=((((IW.abs()).ln())- HG)- IT)* IY;
+		let JC=IT+ (if !((if !(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))).is_nan()&&(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))>=-10f64||(-10f64).is_nan()){((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))}else{-10f64})).is_nan()&&((if !(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))).is_nan()&&(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))>=-10f64||(-10f64).is_nan()){((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))).is_nan()&&(((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))>=-10f64||(-10f64).is_nan()){((-JA)- ((((AU* JA)* JA)* (((((-4f64* IV)* IV)* IX)* IX)+ (IZ* IX)))* IY))}else{-10f64})}else{JB});
+		let JD=IJ- JC;
+		let JE=HJ* JD;
+		let JF=(JE* JD)- IS;
+		let JG=B/ JF;
+		let JH=B/ (((-2f64* JE)* JG)- B);
+		let JI=((((JF.abs()).ln())- HG)- JC)* JH;
+		let JJ=HI- 4f64;
+		let JK=if !((JC+ (if !((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})).is_nan()&&((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})}else{JB}))).is_nan()&&((JC+ (if !((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})).is_nan()&&((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})}else{JB}))>=JJ||(JJ).is_nan()){(JC+ (if !((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})).is_nan()&&((if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))).is_nan()&&(((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))>=-10f64||(-10f64).is_nan()){((-JI)- ((((AU* JI)* JI)* (((((-4f64* JE)* JE)* JG)* JG)+ (IZ* JG)))* JH))}else{-10f64})}else{JB}))}else{JJ};
+		let JL=if !((HV- ((B+ ((HV- (1.05f64* JK)).exp())).ln()))).is_nan()&&((HV- ((B+ ((HV- (1.05f64* JK)).exp())).ln()))<=JK||(JK).is_nan()){(HV- ((B+ ((HV- (1.05f64* JK)).exp())).ln()))}else{JK};
+		let JM=HL- JL;
+		let JN=HE* JM;
+		let JO=IP* (JL.exp());
+		let JP=(JN* JN)+ JO;
+		let JQ=JP< A;
+		let KE;
+		let KF;
+		let KJ;
+		let KL;
+		let KN;
+		if JQ{
+		let JR=(-JP).sqrt();
+		let JS=AU* JR;
+		let JT=B/ (JS.sin());
+		let JU=JT* JT;
+		let JV=(JS.cos())* JT;
+		let JW=(-0.5f64* JV)/ JR;
+		let JX=(BJ* JU)+ JW;
+		KE=JR;
+		KF=JV;
+		KJ=JU;
+		KL=JW;
+		KN=JX;
+		}else{
+		let JY=JP.sqrt();
+		let JZ=B/ ((AU* JY).sinh());
+		let KA=JZ* JZ;
+		let KB=(B+ KA).sqrt();
+		let KC=(AU* KB)/ JY;
+		let KD=(-0.25f64* KA)+ KC;
+		KE=JY;
+		KF=KB;
+		KJ=KA;
+		KL=KC;
+		KN=KD;
+		}
+		let KG=JN+ (KE* KF);
+		let KH=B/ KG;
+		let KI=HO- HL;
+		let KK=(KI+ JM)- (((((JP* KJ)* KH)* KH).abs()).ln());
+		let KM=(staged[116]* JN)+ JO;
+		let KO=KN* KM;
+		let KQ=((JO- (HE* (JN+ KG)))+ (JN* KO))+ (HF* ((((-1f64+ (D* ((KP+ KO)* KH)))- (((B/ JP)- KL)* KM))* KG)+ (KK* (KO- HE))));
+		let KR=JL+ ((-(JO+ (KG* ((HF* KK)+ JN))))/ KQ);
+		let KS=HL- KR;
+		let KT=HE* KS;
+		let KU=IP* (KR.exp());
+		let KV=(KT* KT)+ KU;
+		let KW=KV< A;
+		let LK;
+		let LL;
+		let LO;
+		let LQ;
+		let LS;
+		if KW{
+		let KX=(-KV).sqrt();
+		let KY=AU* KX;
+		let KZ=B/ (KY.sin());
+		let LA=KZ* KZ;
+		let LB=(KY.cos())* KZ;
+		let LC=(-0.5f64* LB)/ KX;
+		let LD=(BJ* LA)+ LC;
+		LK=KX;
+		LL=LB;
+		LO=LA;
+		LQ=LC;
+		LS=LD;
+		}else{
+		let LE=KV.sqrt();
+		let LF=B/ ((AU* LE).sinh());
+		let LG=LF* LF;
+		let LH=(B+ LG).sqrt();
+		let LI=(AU* LH)/ LE;
+		let LJ=(-0.25f64* LG)+ LI;
+		LK=LE;
+		LL=LH;
+		LO=LG;
+		LQ=LI;
+		LS=LJ;
+		}
+		let LM=KT+ (LK* LL);
+		let LN=B/ LM;
+		let LP=(KI+ KS)- (((((KV* LO)* LN)* LN).abs()).ln());
+		let LR=(staged[118]* KT)+ KU;
+		let LT=LS* LR;
+		let LU=((KU- (HE* (KT+ LM)))+ (KT* LT))+ (HF* ((((-1f64+ (D* ((KP+ LT)* LN)))- (((B/ KV)- LQ)* LR))* LM)+ (LP* (LT- HE))));
+		let LV=KR+ ((-(KU+ (LM* ((HF* LP)+ KT))))/ LU);
+		let LW=HL- LV;
+		let LX=HE* LW;
+		let LY=IP* (LV.exp());
+		let LZ=(LX* LX)+ LY;
+		let MA=LZ< A;
+		let MO;
+		let MP;
+		let MS;
+		let MU;
+		let MW;
+		if MA{
+		let MB=(-LZ).sqrt();
+		let MC=AU* MB;
+		let MD=B/ (MC.sin());
+		let ME=MD* MD;
+		let MF=(MC.cos())* MD;
+		let MG=(-0.5f64* MF)/ MB;
+		let MH=(BJ* ME)+ MG;
+		MO=MB;
+		MP=MF;
+		MS=ME;
+		MU=MG;
+		MW=MH;
+		}else{
+		let MI=LZ.sqrt();
+		let MJ=B/ ((AU* MI).sinh());
+		let MK=MJ* MJ;
+		let ML=(B+ MK).sqrt();
+		let MM=(AU* ML)/ MI;
+		let MN=(-0.25f64* MK)+ MM;
+		MO=MI;
+		MP=ML;
+		MS=MK;
+		MU=MM;
+		MW=MN;
+		}
+		let MQ=LX+ (MO* MP);
+		let MR=B/ MQ;
+		let MT=(KI+ LW)- (((((LZ* MS)* MR)* MR).abs()).ln());
+		let MV=(staged[119]* LX)+ LY;
+		let MX=MW* MV;
+		let MY=((LY- (HE* (LX+ MQ)))+ (LX* MX))+ (HF* ((((-1f64+ (D* ((KP+ MX)* MR)))- (((B/ LZ)- MU)* MV))* MQ)+ (MT* (MX- HE))));
+		let MZ=LV+ ((-(LY+ (MQ* ((HF* MT)+ LX))))/ MY);
+		let NA=HL- MZ;
+		let NB=HE* NA;
+		let NC=IP* (MZ.exp());
+		let ND=(NB* NB)+ NC;
+		let NE=ND< A;
+		let NS;
+		let NT;
+		let NW;
+		let NY;
+		let OA;
+		if NE{
+		let NF=(-ND).sqrt();
+		let NG=AU* NF;
+		let NH=B/ (NG.sin());
+		let NI=NH* NH;
+		let NJ=(NG.cos())* NH;
+		let NK=(-0.5f64* NJ)/ NF;
+		let NL=(BJ* NI)+ NK;
+		NS=NF;
+		NT=NJ;
+		NW=NI;
+		NY=NK;
+		OA=NL;
+		}else{
+		let NM=ND.sqrt();
+		let NN=B/ ((AU* NM).sinh());
+		let NO=NN* NN;
+		let NP=(B+ NO).sqrt();
+		let NQ=(AU* NP)/ NM;
+		let NR=(-0.25f64* NO)+ NQ;
+		NS=NM;
+		NT=NP;
+		NW=NO;
+		NY=NQ;
+		OA=NR;
+		}
+		let NU=NB+ (NS* NT);
+		let NV=B/ NU;
+		let NX=(KI+ NA)- (((((ND* NW)* NV)* NV).abs()).ln());
+		let NZ=(staged[120]* NB)+ NC;
+		let OB=OA* NZ;
+		let OC=((NC- (HE* (NB+ NU)))+ (NB* OB))+ (HF* ((((-1f64+ (D* ((KP+ OB)* NV)))- (((B/ ND)- NY)* NZ))* NU)+ (NX* (OB- HE))));
+		let OD=MZ+ ((-(NC+ (NU* ((HF* NX)+ NB))))/ OC);
+		let OE=HL- OD;
+		let OF=HE* OE;
+		let OG=IP* (OD.exp());
+		let OH=(OF* OF)+ OG;
+		let OI=OH< A;
+		let OW;
+		let OX;
+		let PA;
+		let PC;
+		let PE;
+		if OI{
+		let OJ=(-OH).sqrt();
+		let OK=AU* OJ;
+		let OL=B/ (OK.sin());
+		let OM=OL* OL;
+		let ON=(OK.cos())* OL;
+		let OO=(-0.5f64* ON)/ OJ;
+		let OP=(BJ* OM)+ OO;
+		OW=OJ;
+		OX=ON;
+		PA=OM;
+		PC=OO;
+		PE=OP;
+		}else{
+		let OQ=OH.sqrt();
+		let OR=B/ ((AU* OQ).sinh());
+		let OS=OR* OR;
+		let OT=(B+ OS).sqrt();
+		let OU=(AU* OT)/ OQ;
+		let OV=(-0.25f64* OS)+ OU;
+		OW=OQ;
+		OX=OT;
+		PA=OS;
+		PC=OU;
+		PE=OV;
+		}
+		let OY=OF+ (OW* OX);
+		let OZ=B/ OY;
+		let PB=(KI+ OE)- (((((OH* PA)* OZ)* OZ).abs()).ln());
+		let PD=(staged[121]* OF)+ OG;
+		let PF=PE* PD;
+		let PG=((OG- (HE* (OF+ OY)))+ (OF* PF))+ (HF* ((((-1f64+ (D* ((KP+ PF)* OZ)))- (((B/ OH)- PC)* PD))* OY)+ (PB* (PF- HE))));
+		let PH=OD+ ((-(OG+ (OY* ((HF* PB)+ OF))))/ PG);
+		let PI=HL- PH;
+		let PJ=HD* (PH.exp());
+		let PK=((HJ* PI)* PI)- PJ;
+		let PL=PK< A;
+		let PW;
+		let PX;
+		if PL{
+		let PM=(-PK).sqrt();
+		let PN=AU* PM;
+		let PO=PM/ (PN.tan());
+		let PP=PN.sin();
+		let PQ=(-PP)* PP;
+		PW=PO;
+		PX=PQ;
+		}else{
+		let PR=PK.sqrt();
+		let PS=AU* PR;
+		let PT=PS.sinh();
+		let PU=PT* PT;
+		let PV=PR/ (PS.tanh());
+		PW=PV;
+		PX=PU;
+		}
+		let PY=((HE* PI)- PW)/ (B- (PK/ (PX* PJ)));
+		let PZ=(PI* AC)* GW;
+		let QA=(PY* AH)* GW;
+		let QB=QA- PZ;
+		let QC=HO- (QB/ (AF* GW));
+		let QD=((PH+ QC)* GW)/ D;
+		let QE=QA/ AC;
+		let QG=((QF* PZ)/ AC)+ GX;
+		let QI=((QH* QB)/ AF)+ GX;
+		let QK=AU* (B+ ((QE/ QJ).abs()));
+		let QM=B+ (((CV+ (EQ* CT))* (((AV* (AU* (QG+ (((QG* QG)+ BC).sqrt())))).abs()).powf((QL+ (AM* EQ)))))+ (CW/ (QK.powf(CX))));
+		let QN=QM- B;
+		let QQ=B+ (((AN+ (EQ* AO))* (((AY* (AU* (QI+ (((QI* QI)+ BC).sqrt())))).abs()).powf((AQ+ (AR* EQ)))))+ (AP/ (QK.powf(Q))));
+		let QR=QQ- B;
+		let QT=((HC- (PZ/ AC))/ GW).exp();
+		let QU=((HM- (QB/ AF))/ GW).exp();
+		let QV=QT+ QU;
+		let QW=((QT/ QV)* (CR/ ((AU* ((QM+ B)+ (((QN* QN)+ QO).sqrt())))/ QP)))+ ((QU/ QV)* (QS/ ((AU* ((QQ+ B)+ (((QR* QR)+ QO).sqrt())))/ QP)));
+		let RJ;
+		if AS{
+		RJ=A;
+		}else{
+		let RK=if QX{
+		let QZ=B/ (B+ (QY* QE));
+		let RC=(((RA+ (RB* (AU* (QZ+ (((QZ* QZ)+ BK).sqrt())))))* AW)* C)* CZ;
+		RC
+		}else{
+		let RD=B/ (B+ (QY* QE));
+		let RE=(((staged[143]+ (RB* (AU* (RD+ (((RD* RD)+ BK).sqrt())))))* AW)* C)* CZ;
+		RE
+		};
+		RJ=RK;
+		}
+		let RG=D* RF;
+		let RH=(RG/ QW)* E;
+		let RI=staged[147]* ((QE+ (staged[145]* GN))+ (BS* staged[146]));
+		let RL=RJ== A;
+		let RR=if RL{
+		let RM=(RH* RI)/ (RH+ RI);
+		RM
+		}else{
+		let RN=((F* RF)* AC)* RJ;
+		let RO=D* RN;
+		let RP=(RI+ RH)+ ((3f64* RI)* RN);
+		let RQ=(RP- (((RP* RP)- ((D* RO)* (RI* (RH+ ((D* RI)* RN))))).sqrt()))/ RO;
+		RQ
+		};
+		let RS=RR- BC;
+		let RT=(AU* (RS+ (((RS* RS)+ 4.0000000000000007e-10f64).sqrt())))+ BC;
+		let RU=EM/ ((B+ ((EM/ RT).powf(DN))).powf(staged[149]));
+		let RV=RU> EM;
+		let RW=if RV{
+		EM
+		}else{
+		RU
+		};
+		let RX=(HC- RW)/ GW;
+		let RY=(HN- RW)/ GW;
+		let RZ=RX- HI;
+		let SA=((((HJ* RZ)* RZ)+ HH).ln())- HG;
+		let SB=((IL- QC)/ HE)- HI;
+		let SC=((SA- ((((((HJ* SB)* SB)+ HH).ln())- HG)- HI))+ (HF* RY))/ HR;
+		let SD=if !((if !((RY+ (HK* (RX- RY)))).is_nan()&&((RY+ (HK* (RX- RY)))<=SA||(SA).is_nan()){(RY+ (HK* (RX- RY)))}else{SA})).is_nan()&&((if !((RY+ (HK* (RX- RY)))).is_nan()&&((RY+ (HK* (RX- RY)))<=SA||(SA).is_nan()){(RY+ (HK* (RX- RY)))}else{SA})<=HI||(HI).is_nan()){(if !((RY+ (HK* (RX- RY)))).is_nan()&&((RY+ (HK* (RX- RY)))<=SA||(SA).is_nan()){(RY+ (HK* (RX- RY)))}else{SA})}else{HI};
+		let SE=(SD+ (HE* RX))/ HU;
+		let SF=RY- SC;
+		let SG=((HX* SF)* SF)- (HD* (SC.exp()));
+		let SH=SG< A;
+		let SX=if SH{
+		let SI=(RY- SD)* HF;
+		let SJ=EX* HE;
+		let SK=SJ+ SI;
+		let SL=SJ* SI;
+		let SM=(0.06534f64* SK)+ B;
+		let SN=((SK* 8.57973f64)+ SL)+ HH;
+		let SO=(((-SN)+ ((((-4f64* SM)* ((IG* SK)+ (HH* SL)))+ (SN* SN)).sqrt()))/ (D* SM))* (B- (((-((RX- ((IL- SD)/ HE))+ D))/ 2.8985507246376816f64).exp()));
+		let SP=if !(SO).is_nan()&&(SO<=50f64||(50f64).is_nan()){SO}else{50f64};
+		SP
+		}else{
+		SG
+		};
+		let SQ=if !(RX).is_nan()&&(RX>=HI||(HI).is_nan()){RX}else{HI};
+		let SR=SQ- HI;
+		let SS=((IL- SD)/ HE)- HI;
+		let ST=(((((HJ* SR)* SR)+ HH).ln())- HG)- ((((((HJ* SS)* SS)+ HH).ln())- HG)- HI);
+		let SU=SQ- ST;
+		let SV=IP* (ST.exp());
+		let SW=HJ* SU;
+		let SY=ST+ ((-(((SW* SU)+ SV)- SX))/ ((-2f64* SW)+ SV));
+		let SZ=SQ- SY;
+		let TA=HJ* SZ;
+		let TB=(TA* SZ)- SX;
+		let TC=B/ TB;
+		let TD=B/ (((-2f64* TA)* TC)- B);
+		let TE=((((TB.abs()).ln())- HG)- SY)* TD;
+		let TF=SY+ (if !((if !(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))).is_nan()&&(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))>=-10f64||(-10f64).is_nan()){((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))}else{-10f64})).is_nan()&&((if !(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))).is_nan()&&(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))>=-10f64||(-10f64).is_nan()){((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))).is_nan()&&(((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))>=-10f64||(-10f64).is_nan()){((-TE)- ((((AU* TE)* TE)* (((((-4f64* TA)* TA)* TC)* TC)+ (IZ* TC)))* TD))}else{-10f64})}else{JB});
+		let TG=SQ- TF;
+		let TH=HJ* TG;
+		let TI=(TH* TG)- SX;
+		let TJ=B/ TI;
+		let TK=B/ (((-2f64* TH)* TJ)- B);
+		let TL=((((TI.abs()).ln())- HG)- TF)* TK;
+		let TM=if !((TF+ (if !((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})).is_nan()&&((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})}else{JB}))).is_nan()&&((TF+ (if !((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})).is_nan()&&((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})}else{JB}))>=JJ||(JJ).is_nan()){(TF+ (if !((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})).is_nan()&&((if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})<=JB||(JB).is_nan()){(if !(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))).is_nan()&&(((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))>=-10f64||(-10f64).is_nan()){((-TL)- ((((AU* TL)* TL)* (((((-4f64* TH)* TH)* TJ)* TJ)+ (IZ* TJ)))* TK))}else{-10f64})}else{JB}))}else{JJ};
+		let TN=if !((SE- ((B+ ((SE- (1.05f64* TM)).exp())).ln()))).is_nan()&&((SE- ((B+ ((SE- (1.05f64* TM)).exp())).ln()))<=TM||(TM).is_nan()){(SE- ((B+ ((SE- (1.05f64* TM)).exp())).ln()))}else{TM};
+		let TO=RX- TN;
+		let TP=HE* TO;
+		let TQ=IP* (TN.exp());
+		let TR=(TP* TP)+ TQ;
+		let TS=TR< A;
+		let UG;
+		let UH;
+		let UL;
+		let UN;
+		let UP;
+		if TS{
+		let TT=(-TR).sqrt();
+		let TU=AU* TT;
+		let TV=B/ (TU.sin());
+		let TW=TV* TV;
+		let TX=(TU.cos())* TV;
+		let TY=(-0.5f64* TX)/ TT;
+		let TZ=(BJ* TW)+ TY;
+		UG=TT;
+		UH=TX;
+		UL=TW;
+		UN=TY;
+		UP=TZ;
+		}else{
+		let UA=TR.sqrt();
+		let UB=B/ ((AU* UA).sinh());
+		let UC=UB* UB;
+		let UD=(B+ UC).sqrt();
+		let UE=(AU* UD)/ UA;
+		let UF=(-0.25f64* UC)+ UE;
+		UG=UA;
+		UH=UD;
+		UL=UC;
+		UN=UE;
+		UP=UF;
+		}
+		let UI=TP+ (UG* UH);
+		let UJ=B/ UI;
+		let UK=RY- RX;
+		let UM=(UK+ TO)- (((((TR* UL)* UJ)* UJ).abs()).ln());
+		let UO=(staged[150]* TP)+ TQ;
+		let UQ=UP* UO;
+		let UR=((TQ- (HE* (TP+ UI)))+ (TP* UQ))+ (HF* ((((-1f64+ (D* ((KP+ UQ)* UJ)))- (((B/ TR)- UN)* UO))* UI)+ (UM* (UQ- HE))));
+		let US=TN+ ((-(TQ+ (UI* ((HF* UM)+ TP))))/ UR);
+		let UT=RX- US;
+		let UU=HE* UT;
+		let UV=IP* (US.exp());
+		let UW=(UU* UU)+ UV;
+		let UX=UW< A;
+		let VL;
+		let VM;
+		let VP;
+		let VR;
+		let VT;
+		if UX{
+		let UY=(-UW).sqrt();
+		let UZ=AU* UY;
+		let VA=B/ (UZ.sin());
+		let VB=VA* VA;
+		let VC=(UZ.cos())* VA;
+		let VD=(-0.5f64* VC)/ UY;
+		let VE=(BJ* VB)+ VD;
+		VL=UY;
+		VM=VC;
+		VP=VB;
+		VR=VD;
+		VT=VE;
+		}else{
+		let VF=UW.sqrt();
+		let VG=B/ ((AU* VF).sinh());
+		let VH=VG* VG;
+		let VI=(B+ VH).sqrt();
+		let VJ=(AU* VI)/ VF;
+		let VK=(-0.25f64* VH)+ VJ;
+		VL=VF;
+		VM=VI;
+		VP=VH;
+		VR=VJ;
+		VT=VK;
+		}
+		let VN=UU+ (VL* VM);
+		let VO=B/ VN;
+		let VQ=(UK+ UT)- (((((UW* VP)* VO)* VO).abs()).ln());
+		let VS=(staged[151]* UU)+ UV;
+		let VU=VT* VS;
+		let VV=((UV- (HE* (UU+ VN)))+ (UU* VU))+ (HF* ((((-1f64+ (D* ((KP+ VU)* VO)))- (((B/ UW)- VR)* VS))* VN)+ (VQ* (VU- HE))));
+		let VW=US+ ((-(UV+ (VN* ((HF* VQ)+ UU))))/ VV);
+		let VX=RX- VW;
+		let VY=HE* VX;
+		let VZ=IP* (VW.exp());
+		let WA=(VY* VY)+ VZ;
+		let WB=WA< A;
+		let WP;
+		let WQ;
+		let WT;
+		let WV;
+		let WX;
+		if WB{
+		let WC=(-WA).sqrt();
+		let WD=AU* WC;
+		let WE=B/ (WD.sin());
+		let WF=WE* WE;
+		let WG=(WD.cos())* WE;
+		let WH=(-0.5f64* WG)/ WC;
+		let WI=(BJ* WF)+ WH;
+		WP=WC;
+		WQ=WG;
+		WT=WF;
+		WV=WH;
+		WX=WI;
+		}else{
+		let WJ=WA.sqrt();
+		let WK=B/ ((AU* WJ).sinh());
+		let WL=WK* WK;
+		let WM=(B+ WL).sqrt();
+		let WN=(AU* WM)/ WJ;
+		let WO=(-0.25f64* WL)+ WN;
+		WP=WJ;
+		WQ=WM;
+		WT=WL;
+		WV=WN;
+		WX=WO;
+		}
+		let WR=VY+ (WP* WQ);
+		let WS=B/ WR;
+		let WU=(UK+ VX)- (((((WA* WT)* WS)* WS).abs()).ln());
+		let WW=(staged[152]* VY)+ VZ;
+		let WY=WX* WW;
+		let WZ=((VZ- (HE* (VY+ WR)))+ (VY* WY))+ (HF* ((((-1f64+ (D* ((KP+ WY)* WS)))- (((B/ WA)- WV)* WW))* WR)+ (WU* (WY- HE))));
+		let XA=VW+ ((-(VZ+ (WR* ((HF* WU)+ VY))))/ WZ);
+		let XB=RX- XA;
+		let XC=HE* XB;
+		let XD=IP* (XA.exp());
+		let XE=(XC* XC)+ XD;
+		let XF=XE< A;
+		let XT;
+		let XU;
+		let XX;
+		let XZ;
+		let YB;
+		if XF{
+		let XG=(-XE).sqrt();
+		let XH=AU* XG;
+		let XI=B/ (XH.sin());
+		let XJ=XI* XI;
+		let XK=(XH.cos())* XI;
+		let XL=(-0.5f64* XK)/ XG;
+		let XM=(BJ* XJ)+ XL;
+		XT=XG;
+		XU=XK;
+		XX=XJ;
+		XZ=XL;
+		YB=XM;
+		}else{
+		let XN=XE.sqrt();
+		let XO=B/ ((AU* XN).sinh());
+		let XP=XO* XO;
+		let XQ=(B+ XP).sqrt();
+		let XR=(AU* XQ)/ XN;
+		let XS=(-0.25f64* XP)+ XR;
+		XT=XN;
+		XU=XQ;
+		XX=XP;
+		XZ=XR;
+		YB=XS;
+		}
+		let XV=XC+ (XT* XU);
+		let XW=B/ XV;
+		let XY=(UK+ XB)- (((((XE* XX)* XW)* XW).abs()).ln());
+		let YA=(staged[153]* XC)+ XD;
+		let YC=YB* YA;
+		let YD=((XD- (HE* (XC+ XV)))+ (XC* YC))+ (HF* ((((-1f64+ (D* ((KP+ YC)* XW)))- (((B/ XE)- XZ)* YA))* XV)+ (XY* (YC- HE))));
+		let YE=XA+ ((-(XD+ (XV* ((HF* XY)+ XC))))/ YD);
+		let YF=RX- YE;
+		let YG=HE* YF;
+		let YH=IP* (YE.exp());
+		let YI=(YG* YG)+ YH;
+		let YJ=YI< A;
+		let YX;
+		let YY;
+		let ZB;
+		let ZD;
+		let ZF;
+		if YJ{
+		let YK=(-YI).sqrt();
+		let YL=AU* YK;
+		let YM=B/ (YL.sin());
+		let YN=YM* YM;
+		let YO=(YL.cos())* YM;
+		let YP=(-0.5f64* YO)/ YK;
+		let YQ=(BJ* YN)+ YP;
+		YX=YK;
+		YY=YO;
+		ZB=YN;
+		ZD=YP;
+		ZF=YQ;
+		}else{
+		let YR=YI.sqrt();
+		let YS=B/ ((AU* YR).sinh());
+		let YT=YS* YS;
+		let YU=(B+ YT).sqrt();
+		let YV=(AU* YU)/ YR;
+		let YW=(-0.25f64* YT)+ YV;
+		YX=YR;
+		YY=YU;
+		ZB=YT;
+		ZD=YV;
+		ZF=YW;
+		}
+		let YZ=YG+ (YX* YY);
+		let ZA=B/ YZ;
+		let ZC=(UK+ YF)- (((((YI* ZB)* ZA)* ZA).abs()).ln());
+		let ZE=(staged[154]* YG)+ YH;
+		let ZG=ZF* ZE;
+		let ZH=((YH- (HE* (YG+ YZ)))+ (YG* ZG))+ (HF* ((((-1f64+ (D* ((KP+ ZG)* ZA)))- (((B/ YI)- ZD)* ZE))* YZ)+ (ZC* (ZG- HE))));
+		let ZI=YE+ ((-(YH+ (YZ* ((HF* ZC)+ YG))))/ ZH);
+		let ZJ=RX- ZI;
+		let ZK=HD* (ZI.exp());
+		let ZL=((HJ* ZJ)* ZJ)- ZK;
+		let ZM=ZL< A;
+		let ZX;
+		let ZY;
+		if ZM{
+		let ZN=(-ZL).sqrt();
+		let ZO=AU* ZN;
+		let ZP=ZN/ (ZO.tan());
+		let ZQ=ZO.sin();
+		let ZR=(-ZQ)* ZQ;
+		ZX=ZP;
+		ZY=ZR;
+		}else{
+		let ZS=ZL.sqrt();
+		let ZT=AU* ZS;
+		let ZU=ZT.sinh();
+		let ZV=ZU* ZU;
+		let ZW=ZS/ (ZT.tanh());
+		ZX=ZW;
+		ZY=ZV;
+		}
+		let ZZ=((HE* ZJ)- ZX)/ (B- (ZL/ (ZY* ZK)));
+		let AAA=(ZJ* AC)* GW;
+		let AAB=(ZZ* AH)* GW;
+		let AAC=AAB- AAA;
+		let AAD=AAB/ AC;
+		let AAE=AU* (QE+ AAD);
+		let AAF=QE- AAD;
+		let AAG=RW* RW;
+		let AAH=AAG/ 6.25e-4f64;
+		let AAO=if AAI{
+		let AAJ=((PZ+ AAA)/ staged[155])+ ((((parameters[162]* (B- (rspice_limited_exp((-AAH)))))* AU)* (PZ- AAA))/ AC);
+		AAJ
+		}else{
+		let AAK=(PZ+ AAA)/ staged[156];
+		AAK
+		};
+		let AAQ=if AAL{
+		let AAM=((QB+ AAC)/ GF)+ ((((parameters[189]* (B- (rspice_limited_exp((-AAH)))))* AU)* (QB- AAC))/ AF);
+		AAM
+		}else{
+		let AAN=(QB+ AAC)/ GF;
+		AAN
+		};
+		let AAP=(QF* AAO)+ GX;
+		let AAR=(QH* AAQ)+ GX;
+		let AAS=AU* (B+ ((AAE/ QJ).abs()));
+		let AAT=((CV+ (ER* CT))* (((AV* (AU* (AAP+ (((AAP* AAP)+ BC).sqrt())))).abs()).powf((QL+ (AM* ER)))))+ ((CW+ (ER* staged[158]))/ (AAS.powf(CX)));
+		let AAU=B+ AAT;
+		let AAV=AAU- B;
+		let AAW=((AN+ (ER* AO))* (((AY* (AU* (AAR+ (((AAR* AAR)+ BC).sqrt())))).abs()).powf((AQ+ (AR* ER)))))+ ((AP+ (ER* staged[159]))/ (AAS.powf(Q)));
+		let AAX=B+ AAW;
+		let AAY=AAX- B;
+		let AAZ=((HC- ((PZ+ AAA)/ staged[160]))/ GW).exp();
+		let ABA=((HM- ((QB+ AAC)/ GF))/ GW).exp();
+		let ABB=AAZ+ ABA;
+		let ABC=((AAZ/ ABB)* (CR/ ((AU* ((AAU+ B)+ (((AAV* AAV)+ QO).sqrt())))/ QP)))+ ((ABA/ ABB)* (QS/ ((AU* ((AAX+ B)+ (((AAY* AAY)+ QO).sqrt())))/ QP)));
+		let ABD=((ABC* AC)* F)/ E;
+		let ABE=B+ (CV* (((AV* (GX+ (staged[161]* AAE))).abs()).powf(QL)));
+		let ABF=ABE- B;
+		let ABH=0.8f64+ (DL* ER);
+		let ABI=(AAF/ (((D* ABG)/ ABC)* E))* (0.2f64+ (AU* (ABH+ (((ABH* ABH)+ BK).sqrt()))));
+		let ABJ=((B+ ((parameters[109]+ (ABI* ABI)).sqrt()))/ staged[162])+ ((((AU* ((DU- (staged[163]* GN))- (staged[164]* ER)))* AAE)* AAF)* AAF);
+		let ABK=ABJ- B;
+		let ABL=AU* ((ABJ+ B)+ (((ABK* ABK)+ staged[165]).sqrt()));
+		let ABN=(((D* ABM)* ((AU* ((ABE+ B)+ (((ABF* ABF)+ QO).sqrt())))/ QP))/ CR)* staged[166];
+		let ABV=if ABO{
+		let ABP=B+ ((U* AAE)/ RH);
+		ABP
+		}else{
+		let ABQ=B/ (B- ((U* AAE)/ RH));
+		ABQ
+		};
+		let ABR=EM- RW;
+		let ABS=AAE+ BS;
+		let ABU=ABT> A;
+		let ACE=if ABU{
+		let ABW=B+ (ABR/ (((ABS/ ABT)* (ABS/ (RT+ ABS)))* ABV));
+		ABW
+		}else{
+		B
+		};
+		let ACF;
+		if ABX{
+		let ACC=if ABZ{
+		let ACA=B/ (staged[168]- (ABY* AAE));
+		ACA
+		}else{
+		let ACB=staged[169]* (B+ (ABY* AAE));
+		ACB
+		};
+		let ACD=B+ (ACC* ((if !((B+ ((ABR/ ACC)/ (RT+ RH)))).is_nan()&&((B+ ((ABR/ ACC)/ (RT+ RH)))>=AT||(AT).is_nan()){(B+ ((ABR/ ACC)/ (RT+ RH)))}else{AT}).ln()));
+		ACF=ACD;
+		}else{
+		ACF=B;
+		}
+		let ACG=ACE* ACF;
+		let ADG=if ACH{
+		let ACI=B+ (R* ((if !((B+ ((ABR/ R)/ (RT+ ABN)))).is_nan()&&((B+ ((ABR/ R)/ (RT+ ABN)))>=AT||(AT).is_nan()){(B+ ((ABR/ R)/ (RT+ ABN)))}else{AT}).ln()));
+		ACI
+		}else{
+		B
+		};
+		let ACJ=DO!= A;
+		let ACX=if ACJ{
+		let ACK=rspice_limited_exp((-(DO/ (((if !(A).is_nan()&&(A>=(DR+ ((DS* AAF)* AAF))||((DR+ ((DS* AAF)* AAF))).is_nan()){A}else{(DR+ ((DS* AAF)* AAF))})* AAE)+ (D* GW)))));
+		ACK
+		}else{
+		B
+		};
+		let ACL=AH* GW;
+		let ACM=(((ACL* D)* BP)* (PY- ZZ))+ (((((ACL* AH)* GW)* AU)* ((PY* PY)- (ZZ* ZZ)))/ AC);
+		let ACN=AAE+ BP;
+		let ACY;
+		let AGP;
+		if AS{
+		ACY=B;
+		AGP=A;
+		}else{
+		let ACP=(B/ (B+ (QY* AAE)))- ((AU* (ACO+ EQ))* staged[171]);
+		let ACQ=RB* (AU* (ACP+ (((ACP* ACP)+ BK).sqrt())));
+		let ACR=CZ* ((RA+ ACQ)* AW);
+		let ACS=((C* ABD)* ACN)/ ABL;
+		let ACT=B+ (ACS* ACR);
+		let ACZ;
+		let AGQ;
+		if ACU{
+		let ACV=(CZ* (staged[178]+ ACQ))* AW;
+		let ACW=B+ (ACS* ACV);
+		ACZ=ACW;
+		AGQ=ACV;
+		}else{
+		ACZ=ACT;
+		AGQ=ACR;
+		}
+		ACY=ACZ;
+		AGP=AGQ;
+		}
+		let ADA=C* (((((ABD/ AC)* ACM)* ACG)* ACX)/ (ABL* ACY));
+		let ADB=0.16666666666666666f64* (QA+ (D* AAB));
+		let ADC=0.16666666666666666f64* ((D* QA)+ AAB);
+		let AFS=if ADD{
+		let ADF=3.4531302e-11f64/ (((ADE* AB)/ AK)+ (((AG/ (B+ (((AAE+ (Y* GX))/ Z).powf(AA))))* X)/ AI));
+		ADF
 		}else{
 		AE
 		};
-		let AFN=if BB{
-		A
+		let ADH=staged[179]/ ADG;
+		let ADI=(-ADB)* ADH;
+		let ADJ=(-ADC)* ADH;
+		let ADY;
+		let ADZ;
+		if ADK{
+		let ADL=((staged[199]* EI)* ((V* BP)* ((if !((B+ (rspice_limited_exp((((AAE- staged[193])/ V)/ BP))))).is_nan()&&((B+ (rspice_limited_exp((((AAE- staged[193])/ V)/ BP))))>=AT||(AT).is_nan()){(B+ (rspice_limited_exp((((AAE- staged[193])/ V)/ BP))))}else{AT}).ln())))* (rspice_limited_exp(((staged[198]* (staged[196]- (staged[195]* AAE)))* (B+ (staged[197]* AAE)))));
+		let ADM=ADL* DX;
+		let ADN=CI- BV;
+		let ADO=ADN- EI;
+		let ADP=(W* BP)* ((if !((B+ (rspice_limited_exp(((ADO/ W)/ BP))))).is_nan()&&((B+ (rspice_limited_exp(((ADO/ W)/ BP))))>=AT||(AT).is_nan()){(B+ (rspice_limited_exp(((ADO/ W)/ BP))))}else{AT}).ln());
+		let ADQ=ADN<= A;
+		let ADV=if ADQ{
+		let ADR=ADO- EN;
+		let ADS=AU* (ADR+ (((ADR* ADR)- (0.08f64* ADN)).sqrt()));
+		ADS
 		}else{
-		BA
+		let ADT=ADO- EN;
+		let ADU=AU* (ADT+ (((ADT* ADT)+ (0.08f64* ADN)).sqrt()));
+		ADU
 		};
-		let BI=if BC{
-		let BF=(temperature+ node_potentials[4])+ parameters[9];
-		BF
+		let ADW=(((staged[205]* EI)* ADP)* (rspice_limited_exp(((staged[204]* (staged[202]- (staged[201]* ADV)))* (B+ (staged[203]* ADV))))))* DX;
+		ADY=ADM;
+		ADZ=ADW;
 		}else{
-		BG
-		};
-		let BJ=BI- BH;
-		let BM=AV* ((BI+ BH)- (((BJ* BJ)+ 2.5e-5f64).sqrt()));
-		let BO=BM/ BN;
-		let BP=BM- BN;
-		let BQ=8.61708e-5f64* BM;
-		let BR=parameters[55]- (((parameters[299]* BM)* BM)/ (BM+ parameters[300]));
-		let BS=BM/ 300.15f64;
-		let BT=D* BQ;
-		let BU=(parameters[54]* (BS* (BS.sqrt())))* (rspice_limited_exp((staged[14]- (BR/ BT))));
-		let BV=BQ* ((if !((staged[15]/ (BU* BU))).is_nan()&&((staged[15]/ (BU* BU))>=AU||(AU).is_nan()){(staged[15]/ (BU* BU))}else{AU}).ln());
-		let BW=BQ* ((if !((staged[16]/ BU)).is_nan()&&((staged[16]/ BU)>=AU||(AU).is_nan()){(staged[16]/ BU)}else{AU}).ln());
-		let BX=AV* BR;
-		let BY=BX- (BQ* ((if !((parameters[52]/ BU)).is_nan()&&((parameters[52]/ BU)>=AU||(AU).is_nan()){(parameters[52]/ BU)}else{AU}).ln()));
-		let CA=BX- (AV* (BY+ (((BY* BY)+ 4e-8f64).sqrt())));
-		let CK;
-		if CC{
-		let CL=if CD{
-		let CE=staged[18]+ CA;
-		CE
-		}else{
-		let CF=staged[20]- CA;
-		CF
-		};
-		CK=CL;
-		}else{
-		CK=M;
+		ADY=A;
+		ADZ=A;
 		}
-		let CG=BR/ D;
-		let CH=parameters[53]+ CG;
-		let CJ=CI* (L- CH);
-		let CM=CI* (CK- CH);
-		let CN=CH- (CI* (if !(CG).is_nan()&&(CG<=(BQ* ((if !((staged[23]/ BU)).is_nan()&&((staged[23]/ BU)>=AU||(AU).is_nan()){(staged[23]/ BU)}else{AU}).ln()))||((BQ* ((if !((staged[23]/ BU)).is_nan()&&((staged[23]/ BU)>=AU||(AU).is_nan()){(staged[23]/ BU)}else{AU}).ln()))).is_nan()){CG}else{(BQ* ((if !((staged[23]/ BU)).is_nan()&&((staged[23]/ BU)>=AU||(AU).is_nan()){(staged[23]/ BU)}else{AU}).ln()))}));
-		let CO=CI* (L- CN);
-		let CP=CI* (CK- CN);
-		let CR=CQ+ (staged[26]* BP);
-		let CS=(staged[25]* (BO.powf(staged[24])))* ((B+ (AV* (CR+ (((CR* CR)+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
-		let CT=(B+ (parameters[159]* BP))- G;
-		let CU=staged[27]* (AV* (CT+ (((CT* CT)+ 4e-6f64).sqrt())));
-		let CV=(B+ (staged[28]* BP))- G;
-		let CW=staged[29]* (AV* (CV+ (((CV* CV)+ 4e-6f64).sqrt())));
-		let CX=staged[31]* (BO.powf(staged[30]));
-		let CY=staged[33]* (BO.powf(staged[32]));
-		let CZ=(B+ (staged[34]* BP))- G;
-		let DA=AV* (CZ+ (((CZ* CZ)+ 4e-6f64).sqrt()));
-		let DB=CQ- (staged[35]* BP);
-		let DC=DB* DB;
-		let DD=staged[36]* ((B+ (AV* (DB+ ((DC+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
-		let DE=DD< BE;
-		let RG=if DE{
-		BE
-		}else{
-		DD
-		};
-		let DF=staged[37]* ((B+ (AV* (DB+ ((DC+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
-		let DG=DF< BE;
-		let ABH=if DG{
-		BE
-		}else{
-		DF
-		};
-		let DH=staged[38]* ((B+ (AV* (DB+ ((DC+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
-		let DI=DH< BE;
-		let ABN=if DI{
-		BE
-		}else{
-		DH
-		};
-		let DJ=parameters[309]* BP;
-		let DK=staged[39]* (B+ (-0.9f64+ (AV* (((DJ- -0.9f64)- BZ)+ (((((DJ- -0.9f64)- BZ)* ((DJ- -0.9f64)- BZ))- -3.6e-4f64).sqrt())))));
-		let DL=CQ- (staged[40]* BP);
-		let DM=staged[41]* ((B+ (AV* (DL+ (((DL* DL)+ 4e-6f64).sqrt()))))- 0.9000011111097395f64);
-		let DN=(staged[42]* (B+ (parameters[121]* BP)))- D;
-		let DO=(AV* (DN+ (((DN* DN)+ 4e-6f64).sqrt())))+ D;
-		let DP=staged[44]+ (staged[43]* BP);
-		let DR=((staged[45]* BP)- DQ)- G;
-		let DS=staged[48]+ (DQ+ (AV* (DR+ (((DR* DR)- staged[47]).sqrt()))));
-		let DT=staged[50]+ (staged[49]* BP);
-		let DU=(B- (staged[51]* BP))- G;
-		let DV=staged[52]* (AV* (DU+ (((DU* DU)+ 4e-6f64).sqrt())));
-		let DW=BO- B;
-		let DX=staged[53]* DW;
-		let DY=rspice_limited_exp((staged[60]* ((if !(BO).is_nan()&&(BO>=AU||(AU).is_nan()){BO}else{AU}).ln())));
-		let DZ=staged[61]* DY;
-		let EC=CI* (EA- EB);
-		let EE=CI* (ED- EB);
-		let EF=CI* (EA- ED);
-		let EH=CI* (EG- EB);
-		let EI=CI* (EG- ED);
-		let EJ=CI* (EA- EG);
-		let EK=EE< A;
-		let EN;
-		let ER;
-		let ET;
-		let ACV;
-		let AEX;
-		if EK{
-		let EM=-EE;
-		EN=EM;
-		ER=EI;
-		ET=EF;
-		ACV=EH;
-		AEX=EL;
-		}else{
-		EN=EE;
-		ER=EH;
-		ET=EC;
-		ACV=EI;
-		AEX=B;
-		}
-		let EP=(((EN* EN)+ 4e-4f64).sqrt())- EO;
-		let EQ=AV* (EP- EN);
-		let ES=ER+ EQ;
-		let EU=ET- CJ;
-		let EV=ER- CM;
-		let EW=staged[68]+ (((((staged[66]+ (staged[65]* ((((EU* staged[62])+ (EV* staged[63]))/ staged[64])+ EQ))).atan())/ 3.141592653589793f64)+ AV)* staged[67]);
-		let EX=(staged[69]/ EW)+ G;
-		let EZ=EX< EY;
-		let GS=if EZ{
-		let FA=AV/ ((EX.cosh())- B);
-		FA
-		}else{
-		let FB=rspice_limited_exp((-EX));
-		FB
-		};
-		let FC=(staged[70]/ EW)+ G;
-		let FD=FC< EY;
-		let GT=if FD{
-		let FE=AV/ ((FC.cosh())- B);
-		FE
-		}else{
-		let FF=rspice_limited_exp((-FC));
-		FF
-		};
-		let GV=if FD{
-		let FH=B/ (if !((B+ (FG* ((FC.cosh())- D)))).is_nan()&&((B+ (FG* ((FC.cosh())- D)))>=G||(G).is_nan()){(B+ (FG* ((FC.cosh())- D)))}else{G});
-		FH
-		}else{
-		let FI=rspice_limited_exp((-FC));
-		let FJ=FI/ (if !((FI+ FG)).is_nan()&&((FI+ FG)>=G||(G).is_nan()){(FI+ FG)}else{G});
-		FJ
-		};
-		let FK=(staged[71]/ EW)+ G;
-		let FL=FK< EY;
-		let ABU=if FL{
-		let FM=((AV* T)/ ((FK.cosh())- B))+ U;
-		FM
-		}else{
-		let FN=(T* (rspice_limited_exp((-FK))))+ U;
-		FN
-		};
-		let GB;
-		if FO{
-		let FP=staged[74]/ EW;
-		let FQ=FP> EY;
-		let FT=if FQ{
-		let FR=(rspice_limited_exp(FP))/ D;
-		FR
-		}else{
-		let FS=(FP.cosh())- B;
-		FS
-		};
-		let FU=staged[76]- (staged[75]/ FT);
-		GB=FU;
-		}else{
-		let FV=staged[77]/ EW;
-		let FW=FV> EY;
-		let FZ=if FW{
-		let FX=(rspice_limited_exp(FV))/ D;
-		FX
-		}else{
-		let FY=(FV.cosh())- B;
-		FY
-		};
-		let GA=staged[79]- (staged[78]/ FZ);
-		GB=GA;
-		}
-		let GD=GB- GC;
-		let GE=GC+ (AV* (GD+ (((GD* GD)+ BZ).sqrt())));
-		let GK=if CB{
-		let GI=staged[82]* ((CI* ES)- staged[81]);
-		let GJ=((B+ ((AV* (GI+ (((GI* GI)+ 4e-4f64).sqrt())))/ GH)).sqrt())- B;
-		GJ
-		}else{
-		A
-		};
-		let GM=((-((GH* GK)* GK))- GL)- BL;
-		let GN=(staged[86]* GE)* ((EV- (staged[88]* (-(GL+ (AV* (GM+ (((GM* GM)- staged[85]).sqrt())))))))- (-1.2f64- EQ));
-		let GO=AV* (ES+ (((ES* ES)+ 4e-6f64).sqrt()));
-		let GP=(0.4f64+ BW)+ staged[89];
-		let GQ=GP< A;
-		let GZ=if GQ{
-		A
-		}else{
-		let GR=(staged[90]* staged[91])* (GP.sqrt());
-		GR
-		};
-		let GU=EP+ BL;
-		let GW=staged[102]+ (((parameters[66]* ES)+ ((parameters[67]* ES)* ES))+ (GS* (((staged[100]+ (staged[99]* ES))+ ((parameters[69]* ES)* ES))+ ((staged[98]+ (parameters[70]* GO))* EP))));
-		let GX=(BQ* GW)/ staged[101];
-		let HA=(((staged[92]* GS)* (BV- GP))+ ((((-(DK+ (staged[93]* ES)))* GT)* (EP+ (staged[94]* (GU.sqrt()))))+ ((staged[95]* GV)* (GU.powf(staged[96])))))+ GZ;
-		let HB=(((HA+ (staged[97]* EP))+ staged[106])+ (DX+ ((staged[105]* ES)* DW)))+ GN;
-		let HD=(EU- HB)+ HC;
-		let HE=(((3.20438e-19f64* BU)* AH)* AH)/ (staged[107]* BQ);
-		let HH=HE.ln();
-		let HJ=3.675753940198048f64- HH;
-		let HM=HD/ GX;
-		let HN=EV- HB;
-		let HO=HN+ HC;
-		let HP=HO/ GX;
-		let HQ=HM- HJ;
-		let HR=((((HK* HQ)* HQ)+ HI).ln())- HH;
-		let HT=(HR+ (HG* HP))/ HS;
-		let HU=if !((if !((HP+ (HL* (HM- HP)))).is_nan()&&((HP+ (HL* (HM- HP)))<=HR||(HR).is_nan()){(HP+ (HL* (HM- HP)))}else{HR})).is_nan()&&((if !((HP+ (HL* (HM- HP)))).is_nan()&&((HP+ (HL* (HM- HP)))<=HR||(HR).is_nan()){(HP+ (HL* (HM- HP)))}else{HR})<=HJ||(HJ).is_nan()){(if !((HP+ (HL* (HM- HP)))).is_nan()&&((HP+ (HL* (HM- HP)))<=HR||(HR).is_nan()){(HP+ (HL* (HM- HP)))}else{HR})}else{HJ};
-		let HW=(HU+ (HF* HM))/ HV;
-		let HX=HP- HT;
-		let HZ=((HY* HX)* HX)- (HE* (HT.exp()));
-		let IA=HZ< A;
-		let IT=if IA{
-		let IB=(HP- HU)* HG;
-		let IC=EY* HF;
-		let ID=IC+ IB;
-		let IE=IC* IB;
-		let IF=(0.06534f64* ID)+ B;
-		let IG=((ID* 8.57973f64)+ IE)+ HI;
-		let II=(((-IG)+ ((((-4f64* IF)* ((IH* ID)+ (HI* IE)))+ (IG* IG)).sqrt()))/ (D* IF))* (B- (((-((HM- (((HJ* HV)- HU)/ HF))+ D))/ 2.8985507246376816f64).exp()));
-		let IJ=if !(II).is_nan()&&(II<=50f64||(50f64).is_nan()){II}else{50f64};
-		IJ
-		}else{
-		HZ
-		};
-		let IK=if !(HM).is_nan()&&(HM>=HJ||(HJ).is_nan()){HM}else{HJ};
-		let IL=IK- HJ;
-		let IM=HJ* HV;
-		let IN=((IM- HU)/ HF)- HJ;
-		let IO=(((((HK* IL)* IL)+ HI).ln())- HH)- ((((((HK* IN)* IN)+ HI).ln())- HH)- HJ);
-		let IP=IK- IO;
-		let IQ=-HE;
-		let IR=IQ* (IO.exp());
-		let IS=HK* IP;
-		let IU=IO+ ((-(((IS* IP)+ IR)- IT))/ ((-2f64* IS)+ IR));
-		let IV=IK- IU;
-		let IW=HK* IV;
-		let IX=(IW* IV)- IT;
-		let IY=B/ IX;
-		let IZ=B/ (((-2f64* IW)* IY)- B);
-		let JB=((((IX.abs()).ln())- HH)- IU)* IZ;
-		let JD=IU+ (if !((if !(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))).is_nan()&&(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))>=-10f64||(-10f64).is_nan()){((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))}else{-10f64})).is_nan()&&((if !(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))).is_nan()&&(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))>=-10f64||(-10f64).is_nan()){((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))).is_nan()&&(((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))>=-10f64||(-10f64).is_nan()){((-JB)- ((((AV* JB)* JB)* (((((-4f64* IW)* IW)* IY)* IY)+ (JA* IY)))* IZ))}else{-10f64})}else{JC});
-		let JE=IK- JD;
-		let JF=HK* JE;
-		let JG=(JF* JE)- IT;
-		let JH=B/ JG;
-		let JI=B/ (((-2f64* JF)* JH)- B);
-		let JJ=((((JG.abs()).ln())- HH)- JD)* JI;
-		let JK=HJ- 4f64;
-		let JL=if !((JD+ (if !((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})).is_nan()&&((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})}else{JC}))).is_nan()&&((JD+ (if !((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})).is_nan()&&((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})}else{JC}))>=JK||(JK).is_nan()){(JD+ (if !((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})).is_nan()&&((if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))).is_nan()&&(((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))>=-10f64||(-10f64).is_nan()){((-JJ)- ((((AV* JJ)* JJ)* (((((-4f64* JF)* JF)* JH)* JH)+ (JA* JH)))* JI))}else{-10f64})}else{JC}))}else{JK};
-		let JM=if !((HW- ((B+ ((HW- (1.05f64* JL)).exp())).ln()))).is_nan()&&((HW- ((B+ ((HW- (1.05f64* JL)).exp())).ln()))<=JL||(JL).is_nan()){(HW- ((B+ ((HW- (1.05f64* JL)).exp())).ln()))}else{JL};
-		let JN=HM- JM;
-		let JO=HF* JN;
-		let JP=IQ* (JM.exp());
-		let JQ=(JO* JO)+ JP;
-		let JR=JQ< A;
-		let KF;
-		let KG;
-		let KK;
-		let KM;
-		let KO;
-		if JR{
-		let JS=(-JQ).sqrt();
-		let JT=AV* JS;
-		let JU=B/ (JT.sin());
-		let JV=JU* JU;
-		let JW=(JT.cos())* JU;
-		let JX=(-0.5f64* JW)/ JS;
-		let JY=(BK* JV)+ JX;
-		KF=JS;
-		KG=JW;
-		KK=JV;
-		KM=JX;
-		KO=JY;
-		}else{
-		let JZ=JQ.sqrt();
-		let KA=B/ ((AV* JZ).sinh());
-		let KB=KA* KA;
-		let KC=(B+ KB).sqrt();
-		let KD=(AV* KC)/ JZ;
-		let KE=(-0.25f64* KB)+ KD;
-		KF=JZ;
-		KG=KC;
-		KK=KB;
-		KM=KD;
-		KO=KE;
-		}
-		let KH=JO+ (KF* KG);
-		let KI=B/ KH;
-		let KJ=HP- HM;
-		let KL=(KJ+ JN)- (((((JQ* KK)* KI)* KI).abs()).ln());
-		let KN=(staged[116]* JO)+ JP;
-		let KP=KO* KN;
-		let KR=((JP- (HF* (JO+ KH)))+ (JO* KP))+ (HG* ((((-1f64+ (D* ((KQ+ KP)* KI)))- (((B/ JQ)- KM)* KN))* KH)+ (KL* (KP- HF))));
-		let KS=JM+ ((-(JP+ (KH* ((HG* KL)+ JO))))/ KR);
-		let KT=HM- KS;
-		let KU=HF* KT;
-		let KV=IQ* (KS.exp());
-		let KW=(KU* KU)+ KV;
-		let KX=KW< A;
-		let LL;
-		let LM;
-		let LP;
-		let LR;
-		let LT;
-		if KX{
-		let KY=(-KW).sqrt();
-		let KZ=AV* KY;
-		let LA=B/ (KZ.sin());
-		let LB=LA* LA;
-		let LC=(KZ.cos())* LA;
-		let LD=(-0.5f64* LC)/ KY;
-		let LE=(BK* LB)+ LD;
-		LL=KY;
-		LM=LC;
-		LP=LB;
-		LR=LD;
-		LT=LE;
-		}else{
-		let LF=KW.sqrt();
-		let LG=B/ ((AV* LF).sinh());
-		let LH=LG* LG;
-		let LI=(B+ LH).sqrt();
-		let LJ=(AV* LI)/ LF;
-		let LK=(-0.25f64* LH)+ LJ;
-		LL=LF;
-		LM=LI;
-		LP=LH;
-		LR=LJ;
-		LT=LK;
-		}
-		let LN=KU+ (LL* LM);
-		let LO=B/ LN;
-		let LQ=(KJ+ KT)- (((((KW* LP)* LO)* LO).abs()).ln());
-		let LS=(staged[118]* KU)+ KV;
-		let LU=LT* LS;
-		let LV=((KV- (HF* (KU+ LN)))+ (KU* LU))+ (HG* ((((-1f64+ (D* ((KQ+ LU)* LO)))- (((B/ KW)- LR)* LS))* LN)+ (LQ* (LU- HF))));
-		let LW=KS+ ((-(KV+ (LN* ((HG* LQ)+ KU))))/ LV);
-		let LX=HM- LW;
-		let LY=HF* LX;
-		let LZ=IQ* (LW.exp());
-		let MA=(LY* LY)+ LZ;
-		let MB=MA< A;
-		let MP;
-		let MQ;
-		let MT;
-		let MV;
-		let MX;
-		if MB{
-		let MC=(-MA).sqrt();
-		let MD=AV* MC;
-		let ME=B/ (MD.sin());
-		let MF=ME* ME;
-		let MG=(MD.cos())* ME;
-		let MH=(-0.5f64* MG)/ MC;
-		let MI=(BK* MF)+ MH;
-		MP=MC;
-		MQ=MG;
-		MT=MF;
-		MV=MH;
-		MX=MI;
-		}else{
-		let MJ=MA.sqrt();
-		let MK=B/ ((AV* MJ).sinh());
-		let ML=MK* MK;
-		let MM=(B+ ML).sqrt();
-		let MN=(AV* MM)/ MJ;
-		let MO=(-0.25f64* ML)+ MN;
-		MP=MJ;
-		MQ=MM;
-		MT=ML;
-		MV=MN;
-		MX=MO;
-		}
-		let MR=LY+ (MP* MQ);
-		let MS=B/ MR;
-		let MU=(KJ+ LX)- (((((MA* MT)* MS)* MS).abs()).ln());
-		let MW=(staged[119]* LY)+ LZ;
-		let MY=MX* MW;
-		let MZ=((LZ- (HF* (LY+ MR)))+ (LY* MY))+ (HG* ((((-1f64+ (D* ((KQ+ MY)* MS)))- (((B/ MA)- MV)* MW))* MR)+ (MU* (MY- HF))));
-		let NA=LW+ ((-(LZ+ (MR* ((HG* MU)+ LY))))/ MZ);
-		let NB=HM- NA;
-		let NC=HF* NB;
-		let ND=IQ* (NA.exp());
-		let NE=(NC* NC)+ ND;
-		let NF=NE< A;
-		let NT;
-		let NU;
-		let NX;
-		let NZ;
-		let OB;
-		if NF{
-		let NG=(-NE).sqrt();
-		let NH=AV* NG;
-		let NI=B/ (NH.sin());
-		let NJ=NI* NI;
-		let NK=(NH.cos())* NI;
-		let NL=(-0.5f64* NK)/ NG;
-		let NM=(BK* NJ)+ NL;
-		NT=NG;
-		NU=NK;
-		NX=NJ;
-		NZ=NL;
-		OB=NM;
-		}else{
-		let NN=NE.sqrt();
-		let NO=B/ ((AV* NN).sinh());
-		let NP=NO* NO;
-		let NQ=(B+ NP).sqrt();
-		let NR=(AV* NQ)/ NN;
-		let NS=(-0.25f64* NP)+ NR;
-		NT=NN;
-		NU=NQ;
-		NX=NP;
-		NZ=NR;
-		OB=NS;
-		}
-		let NV=NC+ (NT* NU);
-		let NW=B/ NV;
-		let NY=(KJ+ NB)- (((((NE* NX)* NW)* NW).abs()).ln());
-		let OA=(staged[120]* NC)+ ND;
-		let OC=OB* OA;
-		let OD=((ND- (HF* (NC+ NV)))+ (NC* OC))+ (HG* ((((-1f64+ (D* ((KQ+ OC)* NW)))- (((B/ NE)- NZ)* OA))* NV)+ (NY* (OC- HF))));
-		let OE=NA+ ((-(ND+ (NV* ((HG* NY)+ NC))))/ OD);
-		let OF=HM- OE;
-		let OG=HF* OF;
-		let OH=IQ* (OE.exp());
-		let OI=(OG* OG)+ OH;
-		let OJ=OI< A;
-		let OX;
-		let OY;
-		let PB;
-		let PD;
-		let PF;
-		if OJ{
-		let OK=(-OI).sqrt();
-		let OL=AV* OK;
-		let OM=B/ (OL.sin());
-		let ON=OM* OM;
-		let OO=(OL.cos())* OM;
-		let OP=(-0.5f64* OO)/ OK;
-		let OQ=(BK* ON)+ OP;
-		OX=OK;
-		OY=OO;
-		PB=ON;
-		PD=OP;
-		PF=OQ;
-		}else{
-		let OR=OI.sqrt();
-		let OS=B/ ((AV* OR).sinh());
-		let OT=OS* OS;
-		let OU=(B+ OT).sqrt();
-		let OV=(AV* OU)/ OR;
-		let OW=(-0.25f64* OT)+ OV;
-		OX=OR;
-		OY=OU;
-		PB=OT;
-		PD=OV;
-		PF=OW;
-		}
-		let OZ=OG+ (OX* OY);
-		let PA=B/ OZ;
-		let PC=(KJ+ OF)- (((((OI* PB)* PA)* PA).abs()).ln());
-		let PE=(staged[121]* OG)+ OH;
-		let PG=PF* PE;
-		let PH=((OH- (HF* (OG+ OZ)))+ (OG* PG))+ (HG* ((((-1f64+ (D* ((KQ+ PG)* PA)))- (((B/ OI)- PD)* PE))* OZ)+ (PC* (PG- HF))));
-		let PI=OE+ ((-(OH+ (OZ* ((HG* PC)+ OG))))/ PH);
-		let PJ=HM- PI;
-		let PK=HE* (PI.exp());
-		let PL=((HK* PJ)* PJ)- PK;
-		let PM=PL< A;
-		let PX;
-		let PY;
-		if PM{
-		let PN=(-PL).sqrt();
-		let PO=AV* PN;
-		let PP=PN/ (PO.tan());
-		let PQ=PO.sin();
-		let PR=(-PQ)* PQ;
-		PX=PP;
-		PY=PR;
-		}else{
-		let PS=PL.sqrt();
-		let PT=AV* PS;
-		let PU=PT.sinh();
-		let PV=PU* PU;
-		let PW=PS/ (PT.tanh());
-		PX=PW;
-		PY=PV;
-		}
-		let PZ=((HF* PJ)- PX)/ (B- (PL/ (PY* PK)));
-		let QA=(PJ* AD)* GX;
-		let QB=(PZ* AI)* GX;
-		let QC=QB- QA;
-		let QD=HP- (QC/ (AG* GX));
-		let QE=((PI+ QD)* GX)/ D;
-		let QF=QB/ AD;
-		let QH=((QG* QA)/ AD)+ GY;
-		let QJ=((QI* QC)/ AG)+ GY;
-		let QL=AV* (B+ ((QF/ QK).abs()));
-		let QN=B+ (((CW+ (ER* CU))* (((AW* (AV* (QH+ (((QH* QH)+ BD).sqrt())))).abs()).powf((QM+ (AN* ER)))))+ (CX/ (QL.powf(CY))));
-		let QO=QN- B;
-		let QR=B+ (((AO+ (ER* AP))* (((AZ* (AV* (QJ+ (((QJ* QJ)+ BD).sqrt())))).abs()).powf((AR+ (AS* ER)))))+ (AQ/ (QL.powf(R))));
-		let QS=QR- B;
-		let QU=((HD- (QA/ AD))/ GX).exp();
-		let QV=((HN- (QC/ AG))/ GX).exp();
-		let QW=QU+ QV;
-		let QX=((QU/ QW)* (CS/ ((AV* ((QN+ B)+ (((QO* QO)+ QP).sqrt())))/ QQ)))+ ((QV/ QW)* (QT/ ((AV* ((QR+ B)+ (((QS* QS)+ QP).sqrt())))/ QQ)));
-		let RK;
-		if AT{
-		RK=A;
-		}else{
-		let RL=if QY{
-		let RA=B/ (B+ (QZ* QF));
-		let RD=(((RB+ (RC* (AV* (RA+ (((RA* RA)+ BL).sqrt())))))* AX)* C)* DA;
-		RD
-		}else{
-		let RE=B/ (B+ (QZ* QF));
-		let RF=(((staged[143]+ (RC* (AV* (RE+ (((RE* RE)+ BL).sqrt())))))* AX)* C)* DA;
-		RF
-		};
-		RK=RL;
-		}
-		let RH=D* RG;
-		let RI=(RH/ QX)* E;
-		let RJ=staged[147]* ((QF+ (staged[145]* GO))+ (BT* staged[146]));
-		let RM=RK== A;
-		let RS=if RM{
-		let RN=(RI* RJ)/ (RI+ RJ);
-		RN
-		}else{
-		let RO=((F* RG)* AD)* RK;
-		let RP=D* RO;
-		let RQ=(RJ+ RI)+ ((3f64* RJ)* RO);
-		let RR=(RQ- (((RQ* RQ)- ((D* RP)* (RJ* (RI+ ((D* RJ)* RO))))).sqrt()))/ RP;
-		RR
-		};
-		let RT=RS- BD;
-		let RU=(AV* (RT+ (((RT* RT)+ 4.0000000000000007e-10f64).sqrt())))+ BD;
-		let RV=EN/ ((B+ ((EN/ RU).powf(DO))).powf(staged[149]));
-		let RW=RV> EN;
-		let RX=if RW{
-		EN
-		}else{
-		RV
-		};
-		let RY=(HD- RX)/ GX;
-		let RZ=(HO- RX)/ GX;
-		let SA=RY- HJ;
-		let SB=((((HK* SA)* SA)+ HI).ln())- HH;
-		let SC=((IM- QD)/ HF)- HJ;
-		let SD=((SB- ((((((HK* SC)* SC)+ HI).ln())- HH)- HJ))+ (HG* RZ))/ HS;
-		let SE=if !((if !((RZ+ (HL* (RY- RZ)))).is_nan()&&((RZ+ (HL* (RY- RZ)))<=SB||(SB).is_nan()){(RZ+ (HL* (RY- RZ)))}else{SB})).is_nan()&&((if !((RZ+ (HL* (RY- RZ)))).is_nan()&&((RZ+ (HL* (RY- RZ)))<=SB||(SB).is_nan()){(RZ+ (HL* (RY- RZ)))}else{SB})<=HJ||(HJ).is_nan()){(if !((RZ+ (HL* (RY- RZ)))).is_nan()&&((RZ+ (HL* (RY- RZ)))<=SB||(SB).is_nan()){(RZ+ (HL* (RY- RZ)))}else{SB})}else{HJ};
-		let SF=(SE+ (HF* RY))/ HV;
-		let SG=RZ- SD;
-		let SH=((HY* SG)* SG)- (HE* (SD.exp()));
-		let SI=SH< A;
-		let SY=if SI{
-		let SJ=(RZ- SE)* HG;
-		let SK=EY* HF;
-		let SL=SK+ SJ;
-		let SM=SK* SJ;
-		let SN=(0.06534f64* SL)+ B;
-		let SO=((SL* 8.57973f64)+ SM)+ HI;
-		let SP=(((-SO)+ ((((-4f64* SN)* ((IH* SL)+ (HI* SM)))+ (SO* SO)).sqrt()))/ (D* SN))* (B- (((-((RY- ((IM- SE)/ HF))+ D))/ 2.8985507246376816f64).exp()));
-		let SQ=if !(SP).is_nan()&&(SP<=50f64||(50f64).is_nan()){SP}else{50f64};
-		SQ
-		}else{
-		SH
-		};
-		let SR=if !(RY).is_nan()&&(RY>=HJ||(HJ).is_nan()){RY}else{HJ};
-		let SS=SR- HJ;
-		let ST=((IM- SE)/ HF)- HJ;
-		let SU=(((((HK* SS)* SS)+ HI).ln())- HH)- ((((((HK* ST)* ST)+ HI).ln())- HH)- HJ);
-		let SV=SR- SU;
-		let SW=IQ* (SU.exp());
-		let SX=HK* SV;
-		let SZ=SU+ ((-(((SX* SV)+ SW)- SY))/ ((-2f64* SX)+ SW));
-		let TA=SR- SZ;
-		let TB=HK* TA;
-		let TC=(TB* TA)- SY;
-		let TD=B/ TC;
-		let TE=B/ (((-2f64* TB)* TD)- B);
-		let TF=((((TC.abs()).ln())- HH)- SZ)* TE;
-		let TG=SZ+ (if !((if !(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))).is_nan()&&(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))>=-10f64||(-10f64).is_nan()){((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))}else{-10f64})).is_nan()&&((if !(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))).is_nan()&&(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))>=-10f64||(-10f64).is_nan()){((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))).is_nan()&&(((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))>=-10f64||(-10f64).is_nan()){((-TF)- ((((AV* TF)* TF)* (((((-4f64* TB)* TB)* TD)* TD)+ (JA* TD)))* TE))}else{-10f64})}else{JC});
-		let TH=SR- TG;
-		let TI=HK* TH;
-		let TJ=(TI* TH)- SY;
-		let TK=B/ TJ;
-		let TL=B/ (((-2f64* TI)* TK)- B);
-		let TM=((((TJ.abs()).ln())- HH)- TG)* TL;
-		let TN=if !((TG+ (if !((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})).is_nan()&&((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})}else{JC}))).is_nan()&&((TG+ (if !((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})).is_nan()&&((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})}else{JC}))>=JK||(JK).is_nan()){(TG+ (if !((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})).is_nan()&&((if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})<=JC||(JC).is_nan()){(if !(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))).is_nan()&&(((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))>=-10f64||(-10f64).is_nan()){((-TM)- ((((AV* TM)* TM)* (((((-4f64* TI)* TI)* TK)* TK)+ (JA* TK)))* TL))}else{-10f64})}else{JC}))}else{JK};
-		let TO=if !((SF- ((B+ ((SF- (1.05f64* TN)).exp())).ln()))).is_nan()&&((SF- ((B+ ((SF- (1.05f64* TN)).exp())).ln()))<=TN||(TN).is_nan()){(SF- ((B+ ((SF- (1.05f64* TN)).exp())).ln()))}else{TN};
-		let TP=RY- TO;
-		let TQ=HF* TP;
-		let TR=IQ* (TO.exp());
-		let TS=(TQ* TQ)+ TR;
-		let TT=TS< A;
-		let UH;
-		let UI;
-		let UM;
-		let UO;
-		let UQ;
-		if TT{
-		let TU=(-TS).sqrt();
-		let TV=AV* TU;
-		let TW=B/ (TV.sin());
-		let TX=TW* TW;
-		let TY=(TV.cos())* TW;
-		let TZ=(-0.5f64* TY)/ TU;
-		let UA=(BK* TX)+ TZ;
-		UH=TU;
-		UI=TY;
-		UM=TX;
-		UO=TZ;
-		UQ=UA;
-		}else{
-		let UB=TS.sqrt();
-		let UC=B/ ((AV* UB).sinh());
-		let UD=UC* UC;
-		let UE=(B+ UD).sqrt();
-		let UF=(AV* UE)/ UB;
-		let UG=(-0.25f64* UD)+ UF;
-		UH=UB;
-		UI=UE;
-		UM=UD;
-		UO=UF;
-		UQ=UG;
-		}
-		let UJ=TQ+ (UH* UI);
-		let UK=B/ UJ;
-		let UL=RZ- RY;
-		let UN=(UL+ TP)- (((((TS* UM)* UK)* UK).abs()).ln());
-		let UP=(staged[150]* TQ)+ TR;
-		let UR=UQ* UP;
-		let US=((TR- (HF* (TQ+ UJ)))+ (TQ* UR))+ (HG* ((((-1f64+ (D* ((KQ+ UR)* UK)))- (((B/ TS)- UO)* UP))* UJ)+ (UN* (UR- HF))));
-		let UT=TO+ ((-(TR+ (UJ* ((HG* UN)+ TQ))))/ US);
-		let UU=RY- UT;
-		let UV=HF* UU;
-		let UW=IQ* (UT.exp());
-		let UX=(UV* UV)+ UW;
-		let UY=UX< A;
-		let VM;
-		let VN;
-		let VQ;
-		let VS;
-		let VU;
-		if UY{
-		let UZ=(-UX).sqrt();
-		let VA=AV* UZ;
-		let VB=B/ (VA.sin());
-		let VC=VB* VB;
-		let VD=(VA.cos())* VB;
-		let VE=(-0.5f64* VD)/ UZ;
-		let VF=(BK* VC)+ VE;
-		VM=UZ;
-		VN=VD;
-		VQ=VC;
-		VS=VE;
-		VU=VF;
-		}else{
-		let VG=UX.sqrt();
-		let VH=B/ ((AV* VG).sinh());
-		let VI=VH* VH;
-		let VJ=(B+ VI).sqrt();
-		let VK=(AV* VJ)/ VG;
-		let VL=(-0.25f64* VI)+ VK;
-		VM=VG;
-		VN=VJ;
-		VQ=VI;
-		VS=VK;
-		VU=VL;
-		}
-		let VO=UV+ (VM* VN);
-		let VP=B/ VO;
-		let VR=(UL+ UU)- (((((UX* VQ)* VP)* VP).abs()).ln());
-		let VT=(staged[151]* UV)+ UW;
-		let VV=VU* VT;
-		let VW=((UW- (HF* (UV+ VO)))+ (UV* VV))+ (HG* ((((-1f64+ (D* ((KQ+ VV)* VP)))- (((B/ UX)- VS)* VT))* VO)+ (VR* (VV- HF))));
-		let VX=UT+ ((-(UW+ (VO* ((HG* VR)+ UV))))/ VW);
-		let VY=RY- VX;
-		let VZ=HF* VY;
-		let WA=IQ* (VX.exp());
-		let WB=(VZ* VZ)+ WA;
-		let WC=WB< A;
-		let WQ;
-		let WR;
-		let WU;
-		let WW;
-		let WY;
-		if WC{
-		let WD=(-WB).sqrt();
-		let WE=AV* WD;
-		let WF=B/ (WE.sin());
-		let WG=WF* WF;
-		let WH=(WE.cos())* WF;
-		let WI=(-0.5f64* WH)/ WD;
-		let WJ=(BK* WG)+ WI;
-		WQ=WD;
-		WR=WH;
-		WU=WG;
-		WW=WI;
-		WY=WJ;
-		}else{
-		let WK=WB.sqrt();
-		let WL=B/ ((AV* WK).sinh());
-		let WM=WL* WL;
-		let WN=(B+ WM).sqrt();
-		let WO=(AV* WN)/ WK;
-		let WP=(-0.25f64* WM)+ WO;
-		WQ=WK;
-		WR=WN;
-		WU=WM;
-		WW=WO;
-		WY=WP;
-		}
-		let WS=VZ+ (WQ* WR);
-		let WT=B/ WS;
-		let WV=(UL+ VY)- (((((WB* WU)* WT)* WT).abs()).ln());
-		let WX=(staged[152]* VZ)+ WA;
-		let WZ=WY* WX;
-		let XA=((WA- (HF* (VZ+ WS)))+ (VZ* WZ))+ (HG* ((((-1f64+ (D* ((KQ+ WZ)* WT)))- (((B/ WB)- WW)* WX))* WS)+ (WV* (WZ- HF))));
-		let XB=VX+ ((-(WA+ (WS* ((HG* WV)+ VZ))))/ XA);
-		let XC=RY- XB;
-		let XD=HF* XC;
-		let XE=IQ* (XB.exp());
-		let XF=(XD* XD)+ XE;
-		let XG=XF< A;
-		let XU;
-		let XV;
-		let XY;
-		let YA;
-		let YC;
-		if XG{
-		let XH=(-XF).sqrt();
-		let XI=AV* XH;
-		let XJ=B/ (XI.sin());
-		let XK=XJ* XJ;
-		let XL=(XI.cos())* XJ;
-		let XM=(-0.5f64* XL)/ XH;
-		let XN=(BK* XK)+ XM;
-		XU=XH;
-		XV=XL;
-		XY=XK;
-		YA=XM;
-		YC=XN;
-		}else{
-		let XO=XF.sqrt();
-		let XP=B/ ((AV* XO).sinh());
-		let XQ=XP* XP;
-		let XR=(B+ XQ).sqrt();
-		let XS=(AV* XR)/ XO;
-		let XT=(-0.25f64* XQ)+ XS;
-		XU=XO;
-		XV=XR;
-		XY=XQ;
-		YA=XS;
-		YC=XT;
-		}
-		let XW=XD+ (XU* XV);
-		let XX=B/ XW;
-		let XZ=(UL+ XC)- (((((XF* XY)* XX)* XX).abs()).ln());
-		let YB=(staged[153]* XD)+ XE;
-		let YD=YC* YB;
-		let YE=((XE- (HF* (XD+ XW)))+ (XD* YD))+ (HG* ((((-1f64+ (D* ((KQ+ YD)* XX)))- (((B/ XF)- YA)* YB))* XW)+ (XZ* (YD- HF))));
-		let YF=XB+ ((-(XE+ (XW* ((HG* XZ)+ XD))))/ YE);
-		let YG=RY- YF;
-		let YH=HF* YG;
-		let YI=IQ* (YF.exp());
-		let YJ=(YH* YH)+ YI;
-		let YK=YJ< A;
-		let YY;
-		let YZ;
-		let ZC;
-		let ZE;
-		let ZG;
-		if YK{
-		let YL=(-YJ).sqrt();
-		let YM=AV* YL;
-		let YN=B/ (YM.sin());
-		let YO=YN* YN;
-		let YP=(YM.cos())* YN;
-		let YQ=(-0.5f64* YP)/ YL;
-		let YR=(BK* YO)+ YQ;
-		YY=YL;
-		YZ=YP;
-		ZC=YO;
-		ZE=YQ;
-		ZG=YR;
-		}else{
-		let YS=YJ.sqrt();
-		let YT=B/ ((AV* YS).sinh());
-		let YU=YT* YT;
-		let YV=(B+ YU).sqrt();
-		let YW=(AV* YV)/ YS;
-		let YX=(-0.25f64* YU)+ YW;
-		YY=YS;
-		YZ=YV;
-		ZC=YU;
-		ZE=YW;
-		ZG=YX;
-		}
-		let ZA=YH+ (YY* YZ);
-		let ZB=B/ ZA;
-		let ZD=(UL+ YG)- (((((YJ* ZC)* ZB)* ZB).abs()).ln());
-		let ZF=(staged[154]* YH)+ YI;
-		let ZH=ZG* ZF;
-		let ZI=((YI- (HF* (YH+ ZA)))+ (YH* ZH))+ (HG* ((((-1f64+ (D* ((KQ+ ZH)* ZB)))- (((B/ YJ)- ZE)* ZF))* ZA)+ (ZD* (ZH- HF))));
-		let ZJ=YF+ ((-(YI+ (ZA* ((HG* ZD)+ YH))))/ ZI);
-		let ZK=RY- ZJ;
-		let ZL=HE* (ZJ.exp());
-		let ZM=((HK* ZK)* ZK)- ZL;
-		let ZN=ZM< A;
-		let ZY;
-		let ZZ;
-		if ZN{
-		let ZO=(-ZM).sqrt();
-		let ZP=AV* ZO;
-		let ZQ=ZO/ (ZP.tan());
-		let ZR=ZP.sin();
-		let ZS=(-ZR)* ZR;
-		ZY=ZQ;
-		ZZ=ZS;
-		}else{
-		let ZT=ZM.sqrt();
-		let ZU=AV* ZT;
-		let ZV=ZU.sinh();
-		let ZW=ZV* ZV;
-		let ZX=ZT/ (ZU.tanh());
-		ZY=ZX;
-		ZZ=ZW;
-		}
-		let AAA=((HF* ZK)- ZY)/ (B- (ZM/ (ZZ* ZL)));
-		let AAB=(ZK* AD)* GX;
-		let AAC=(AAA* AI)* GX;
-		let AAD=AAC- AAB;
-		let AAE=AAC/ AD;
-		let AAF=AV* (QF+ AAE);
-		let AAG=QF- AAE;
-		let AAH=RX* RX;
-		let AAI=AAH/ 6.25e-4f64;
-		let AAP=if AAJ{
-		let AAK=((QA+ AAB)/ staged[155])+ ((((parameters[162]* (B- (rspice_limited_exp((-AAI)))))* AV)* (QA- AAB))/ AD);
-		AAK
-		}else{
-		let AAL=(QA+ AAB)/ staged[156];
-		AAL
-		};
-		let AAR=if AAM{
-		let AAN=((QC+ AAD)/ GG)+ ((((parameters[189]* (B- (rspice_limited_exp((-AAI)))))* AV)* (QC- AAD))/ AG);
-		AAN
-		}else{
-		let AAO=(QC+ AAD)/ GG;
-		AAO
-		};
-		let AAQ=(QG* AAP)+ GY;
-		let AAS=(QI* AAR)+ GY;
-		let AAT=AV* (B+ ((AAF/ QK).abs()));
-		let AAU=((CW+ (ES* CU))* (((AW* (AV* (AAQ+ (((AAQ* AAQ)+ BD).sqrt())))).abs()).powf((QM+ (AN* ES)))))+ ((CX+ (ES* staged[158]))/ (AAT.powf(CY)));
-		let AAV=B+ AAU;
-		let AAW=AAV- B;
-		let AAX=((AO+ (ES* AP))* (((AZ* (AV* (AAS+ (((AAS* AAS)+ BD).sqrt())))).abs()).powf((AR+ (AS* ES)))))+ ((AQ+ (ES* staged[159]))/ (AAT.powf(R)));
-		let AAY=B+ AAX;
-		let AAZ=AAY- B;
-		let ABA=((HD- ((QA+ AAB)/ staged[160]))/ GX).exp();
-		let ABB=((HN- ((QC+ AAD)/ GG))/ GX).exp();
-		let ABC=ABA+ ABB;
-		let ABD=((ABA/ ABC)* (CS/ ((AV* ((AAV+ B)+ (((AAW* AAW)+ QP).sqrt())))/ QQ)))+ ((ABB/ ABC)* (QT/ ((AV* ((AAY+ B)+ (((AAZ* AAZ)+ QP).sqrt())))/ QQ)));
-		let ABE=((ABD* AD)* F)/ E;
-		let ABF=B+ (CW* (((AW* (GY+ (staged[161]* AAF))).abs()).powf(QM)));
-		let ABG=ABF- B;
-		let ABI=0.8f64+ (DM* ES);
-		let ABJ=(AAG/ (((D* ABH)/ ABD)* E))* (0.2f64+ (AV* (ABI+ (((ABI* ABI)+ BL).sqrt()))));
-		let ABK=((B+ ((parameters[109]+ (ABJ* ABJ)).sqrt()))/ staged[162])+ ((((AV* ((DV- (staged[163]* GO))- (staged[164]* ES)))* AAF)* AAG)* AAG);
-		let ABL=ABK- B;
-		let ABM=AV* ((ABK+ B)+ (((ABL* ABL)+ staged[165]).sqrt()));
-		let ABO=(((D* ABN)* ((AV* ((ABF+ B)+ (((ABG* ABG)+ QP).sqrt())))/ QQ))/ CS)* staged[166];
-		let ABW=if ABP{
-		let ABQ=B+ ((V* AAF)/ RI);
-		ABQ
-		}else{
-		let ABR=B/ (B- ((V* AAF)/ RI));
-		ABR
-		};
-		let ABS=EN- RX;
-		let ABT=AAF+ BT;
-		let ABV=ABU> A;
-		let ACF=if ABV{
-		let ABX=B+ (ABS/ (((ABT/ ABU)* (ABT/ (RU+ ABT)))* ABW));
-		ABX
-		}else{
-		B
-		};
-		let ACG;
-		if ABY{
-		let ACD=if ACA{
-		let ACB=B/ (staged[168]- (ABZ* AAF));
-		ACB
-		}else{
-		let ACC=staged[169]* (B+ (ABZ* AAF));
-		ACC
-		};
-		let ACE=B+ (ACD* ((if !((B+ ((ABS/ ACD)/ (RU+ RI)))).is_nan()&&((B+ ((ABS/ ACD)/ (RU+ RI)))>=AU||(AU).is_nan()){(B+ ((ABS/ ACD)/ (RU+ RI)))}else{AU}).ln()));
-		ACG=ACE;
-		}else{
-		ACG=B;
-		}
-		let ACH=ACF* ACG;
-		let ADN=if ACI{
-		let ACJ=B+ (S* ((if !((B+ ((ABS/ S)/ (RU+ ABO)))).is_nan()&&((B+ ((ABS/ S)/ (RU+ ABO)))>=AU||(AU).is_nan()){(B+ ((ABS/ S)/ (RU+ ABO)))}else{AU}).ln()));
-		ACJ
-		}else{
-		B
-		};
-		let ACK=DP!= A;
-		let ADE=if ACK{
-		let ACL=rspice_limited_exp((-(DP/ (((if !(A).is_nan()&&(A>=(DS+ ((DT* AAG)* AAG))||((DS+ ((DT* AAG)* AAG))).is_nan()){A}else{(DS+ ((DT* AAG)* AAG))})* AAF)+ (D* GX)))));
-		ACL
-		}else{
-		B
-		};
-		let ACM=AI* GX;
-		let ACN=(((ACM* D)* BQ)* (PZ- AAA))+ (((((ACM* AI)* GX)* AV)* ((PZ* PZ)- (AAA* AAA)))/ AD);
-		let ACO=AAF+ BQ;
-		let ADF;
+		let ADX=AU+ (AU* (((0.6f64* ED)/ BP).tanh()));
+		let AEA=ADY+ ADZ;
+		let AEB=ADX* AEA;
+		let AEC=(B- ADX)* AEA;
+		let AGS;
+		let AGU;
 		let AGW;
+		let AHA;
+		if AED{
+		let AEE=ET- (staged[206]* QD);
+		let AEF=((staged[211]* (AAE* (rspice_limited_exp(((staged[210]* (staged[208]- (staged[207]* AEE)))* (B+ (staged[209]* AEE)))))))* ((EI+ (AU* EO))+ (AU* (EG+ EH))))* DX;
+		let AEG=staged[212]* (((AAG+ BK).sqrt())- 0.1f64);
+		let AEH=rspice_limited_exp((-AEG));
+		let AEI=(AEG* AEG)+ 2e-4f64;
+		let AEJ=(AEF* ((B- ((AEG+ B)* AEH))+ BY))/ AEI;
+		let AEK=(AEF* (((AEG+ AEH)- B)+ BY))/ AEI;
+		let AEL=EQ- CO;
+		let AEM=(EB- CN)+ (staged[213]* AEL);
+		let AEN=((AEM* AEM)+ BY).sqrt();
+		let AEP=rspice_limited_exp(((AEO* (staged[215]- (staged[214]* AEN)))* (B+ (staged[216]* AEN))));
+		let AER=AEQ> A;
+		let AGY;
+		let AHC;
+		if AER{
+		let AET=(((DY* AES)* EB)* AEN)* AEP;
+		AGY=AET;
+		AHC=A;
+		}else{
+		let AEU=(((DY* AES)* EB)* AEN)* AEP;
+		AGY=A;
+		AHC=AEU;
+		}
+		let AEV=(EE- CN)+ (staged[218]* AEL);
+		let AEW=((AEV* AEV)+ BY).sqrt();
+		let AEX=rspice_limited_exp(((AEO* (staged[220]- (staged[219]* AEW)))* (B+ (staged[221]* AEW))));
+		let AGX;
+		let AHB;
+		if AER{
+		let AEZ=(((DY* AEY)* EE)* AEW)* AEX;
+		AGX=AGY;
+		AHB=AEZ;
+		}else{
+		let AFA=(((DY* AEY)* EE)* AEW)* AEX;
+		AGX=AFA;
+		AHB=AHC;
+		}
+		AGS=AEJ;
+		AGU=AEK;
+		AGW=AGX;
+		AHA=AHB;
+		}else{
+		AGS=A;
+		AGU=A;
+		AGW=A;
+		AHA=A;
+		}
+		let AFB=RG/ ABC;
+		let AHE;
+		if AFF{
+		let AFH=E- (D* AFG);
+		let AFI=AFH* AFH;
+		let AFZ;
+		if AFJ{
+		AFZ=A;
+		}else{
+		let AFK=AX* ((if !((((ABR/ AX)+ parameters[287])/ AFB)).is_nan()&&((((ABR/ AX)+ parameters[287])/ AFB)>=AT||(AT).is_nan()){(((ABR/ AX)+ parameters[287])/ AFB)}else{AT}).ln());
+		let AFL=AFK< A;
+		let AGA=if AFL{
+		A
+		}else{
+		AFK
+		};
+		AFZ=AGA;
+		}
+		let AFW=if AFM{
+		let AFN=(N/ (B+ ((AAO/ O).powf(P))))/ AFC;
+		let AFO=AFN- B;
+		let AFQ=AFC* (AU* ((AFN+ B)+ (((AFO* AFO)+ ((BJ* AFP)* AFP)).sqrt())));
+		AFQ
+		}else{
+		AFC
+		};
+		let AFT=(AFS* QE)/ GE;
+		let AFU=(AFS* AAD)/ GE;
+		let AFV=(BP/ GE)* (AFS+ M);
+		let AFX=AFU+ AFV;
+		let AFY=((((4.112842231783458e-57f64* BP)* (ADA.abs()))* ABC)/ ((AFR* AFS)* AFI))* (((AFW* ((if !(((AFT+ AFV)/ AFX)).is_nan()&&(((AFT+ AFV)/ AFX)>=AT||(AT).is_nan()){((AFT+ AFV)/ AFX)}else{AT}).ln()))+ (AFD* (AFT- AFU)))+ ((AU* AFE)* ((AFT* AFT)- (AFU* AFU))));
+		let AGB=((((((GE* BP)* ADA)* ADA)/ (((AFR* AFI)* F)* C))* AFZ)* ((AFW+ (AFD* AFU))+ ((AFE* AFU)* AFU)))/ (AFX* AFX);
+		let AGC=AFY+ AGB;
+		let AGD=((((AFW* GE)* BP)/ (((((F* C)* AFH)* AFR)* AFV)* AFV))* ADA)* ADA;
+		let AGE=AGD+ AGC;
+		let AGF=AGE> A;
+		let AHF=if AGF{
+		let AGG=(AGC* AGD)/ AGE;
+		AGG
+		}else{
+		A
+		};
+		AHE=AHF;
+		}else{
+		AHE=A;
+		}
+		let AGH=AEQ> A;
+		let AGM;
+		let AGN;
+		if AGH{
+		let AGI=C* ADJ;
+		let AGJ=C* ADI;
+		AGM=AGI;
+		AGN=AGJ;
+		}else{
+		let AGK=C* ADI;
+		let AGL=C* ADJ;
+		AGM=AGK;
+		AGN=AGL;
+		}
+		let AGO=ABC* (-(AGM+ AGN));
+		let AGR=((4f64* BP)* GE)* ((AGO/ ((AGO* AGP)+ (E* E)))* parameters[295]);
+		let AGT=C* AGS;
+		let AGV=C* AGU;
+		let AGZ=C* AGW;
+		let AHD=C* AHA;
 		let AHN;
 		let AHP;
-		if AT{
-		let ACP=EC- CO;
-		let ACQ=(B/ (B+ (QZ* (AV* (ACP+ (((ACP* ACP)+ BZ).sqrt()))))))- ((AV* EH)* K);
-		let ACR=DA* (staged[174]+ ((staged[173]+ (staged[172]* (AV* (ACQ+ (((ACQ* ACQ)+ BL).sqrt())))))* AX));
-		let ACS=EF- CO;
-		let ACT=(B/ (B+ (QZ* (AV* (ACS+ (((ACS* ACS)+ BZ).sqrt()))))))- ((AV* EI)* K);
-		let ACU=DA* (staged[177]+ ((staged[176]+ (staged[175]* (AV* (ACT+ (((ACT* ACT)+ BL).sqrt())))))* AX));
-		ADF=B;
-		AGW=A;
-		AHN=ACU;
-		AHP=ACR;
+		let AHR;
+		let AHT;
+		let AHV;
+		let AHX;
+		let AHZ;
+		let AIB;
+		if AED{
+		let AHO;
+		let AHQ;
+		let AHS;
+		let AHU;
+		let AHW;
+		let AHY;
+		let AIA;
+		let AIC;
+		if AGH{
+		let AHH=3.20438e-19f64* ((AGV+ AGZ).abs());
+		let AHI=3.20438e-19f64* ((AGT+ AHD).abs());
+		AHO=B;
+		AHQ=AHH;
+		AHS=B;
+		AHU=AHI;
+		AHW=A;
+		AHY=A;
+		AIA=A;
+		AIC=A;
 		}else{
-		let ACW=(B/ (B+ (QZ* AAF)))- ((AV* (ACV+ ER))* K);
-		let ACX=RC* (AV* (ACW+ (((ACW* ACW)+ BL).sqrt())));
-		let ACY=DA* ((RB+ ACX)* AX);
-		let ACZ=((C* ABE)* ACO)/ ABM;
-		let ADA=B+ (ACZ* ACY);
-		let ADG;
-		let AGX;
-		if ADB{
-		let ADC=(DA* (staged[178]+ ACX))* AX;
-		let ADD=B+ (ACZ* ADC);
-		ADG=ADD;
-		AGX=ADC;
-		}else{
-		ADG=ADA;
-		AGX=ACY;
+		let AHJ=3.20438e-19f64* ((AGV+ AGZ).abs());
+		let AHK=3.20438e-19f64* ((AGT+ AHD).abs());
+		AHO=A;
+		AHQ=A;
+		AHS=A;
+		AHU=A;
+		AHW=B;
+		AHY=AHJ;
+		AIA=B;
+		AIC=AHK;
 		}
-		ADF=ADG;
-		AGW=AGX;
 		AHN=AHO;
 		AHP=AHQ;
-		}
-		let ADH=C* (((((ABE/ AD)* ACN)* ACH)* ADE)/ (ABM* ADF));
-		let ADI=0.16666666666666666f64* (QB+ (D* AAC));
-		let ADJ=0.16666666666666666f64* ((D* QB)+ AAC);
-		let AFZ=if ADK{
-		let ADM=3.4531302e-11f64/ (((ADL* AC)/ AL)+ (((AH/ (B+ (((AAF+ (Z* GY))/ AA).powf(AB))))* Y)/ AJ));
-		ADM
-		}else{
-		AF
-		};
-		let ADO=staged[179]/ ADN;
-		let ADP=(-ADI)* ADO;
-		let ADQ=(-ADJ)* ADO;
-		let AEF;
-		let AEG;
-		if ADR{
-		let ADS=((staged[199]* EJ)* ((W* BQ)* ((if !((B+ (rspice_limited_exp((((AAF- staged[193])/ W)/ BQ))))).is_nan()&&((B+ (rspice_limited_exp((((AAF- staged[193])/ W)/ BQ))))>=AU||(AU).is_nan()){(B+ (rspice_limited_exp((((AAF- staged[193])/ W)/ BQ))))}else{AU}).ln())))* (rspice_limited_exp(((staged[198]* (staged[196]- (staged[195]* AAF)))* (B+ (staged[197]* AAF)))));
-		let ADT=ADS* DY;
-		let ADU=CJ- BW;
-		let ADV=ADU- EJ;
-		let ADW=(X* BQ)* ((if !((B+ (rspice_limited_exp(((ADV/ X)/ BQ))))).is_nan()&&((B+ (rspice_limited_exp(((ADV/ X)/ BQ))))>=AU||(AU).is_nan()){(B+ (rspice_limited_exp(((ADV/ X)/ BQ))))}else{AU}).ln());
-		let ADX=ADU<= A;
-		let AEC=if ADX{
-		let ADY=ADV- EO;
-		let ADZ=AV* (ADY+ (((ADY* ADY)- (0.08f64* ADU)).sqrt()));
-		ADZ
-		}else{
-		let AEA=ADV- EO;
-		let AEB=AV* (AEA+ (((AEA* AEA)+ (0.08f64* ADU)).sqrt()));
-		AEB
-		};
-		let AED=(((staged[205]* EJ)* ADW)* (rspice_limited_exp(((staged[204]* (staged[202]- (staged[201]* AEC)))* (B+ (staged[203]* AEC))))))* DY;
-		AEF=ADT;
-		AEG=AED;
-		}else{
-		AEF=A;
-		AEG=A;
-		}
-		let AEE=AV+ (AV* (((0.6f64* EE)/ BQ).tanh()));
-		let AEH=AEF+ AEG;
-		let AEI=AEE* AEH;
-		let AEJ=(B- AEE)* AEH;
-		let AHA;
-		let AHC;
-		let AHE;
-		let AHI;
-		if AEK{
-		let AEL=EU- (staged[206]* QE);
-		let AEM=((staged[211]* (AAF* (rspice_limited_exp(((staged[210]* (staged[208]- (staged[207]* AEL)))* (B+ (staged[209]* AEL)))))))* ((EJ+ (AV* EP))+ (AV* (EH+ EI))))* DY;
-		let AEN=staged[212]* (((AAH+ BL).sqrt())- 0.1f64);
-		let AEO=rspice_limited_exp((-AEN));
-		let AEP=(AEN* AEN)+ 2e-4f64;
-		let AEQ=(AEM* ((B- ((AEN+ B)* AEO))+ BZ))/ AEP;
-		let AER=(AEM* (((AEN+ AEO)- B)+ BZ))/ AEP;
-		let AES=ER- CP;
-		let AET=(EC- CO)+ (staged[213]* AES);
-		let AEU=((AET* AET)+ BZ).sqrt();
-		let AEW=rspice_limited_exp(((AEV* (staged[215]- (staged[214]* AEU)))* (B+ (staged[216]* AEU))));
-		let AEY=AEX> A;
-		let AHG;
-		let AHK;
-		if AEY{
-		let AFA=(((DZ* AEZ)* EC)* AEU)* AEW;
-		AHG=AFA;
-		AHK=A;
-		}else{
-		let AFB=(((DZ* AEZ)* EC)* AEU)* AEW;
-		AHG=A;
-		AHK=AFB;
-		}
-		let AFC=(EF- CO)+ (staged[218]* AES);
-		let AFD=((AFC* AFC)+ BZ).sqrt();
-		let AFE=rspice_limited_exp(((AEV* (staged[220]- (staged[219]* AFD)))* (B+ (staged[221]* AFD))));
-		let AHF;
-		let AHJ;
-		if AEY{
-		let AFG=(((DZ* AFF)* EF)* AFD)* AFE;
-		AHF=AHG;
-		AHJ=AFG;
-		}else{
-		let AFH=(((DZ* AFF)* EF)* AFD)* AFE;
-		AHF=AFH;
-		AHJ=AHK;
-		}
-		AHA=AEQ;
-		AHC=AER;
-		AHE=AHF;
-		AHI=AHJ;
-		}else{
-		AHA=A;
-		AHC=A;
-		AHE=A;
-		AHI=A;
-		}
-		let AFI=RH/ ABD;
-		let AHV;
-		if AFM{
-		let AFO=E- (D* AFN);
-		let AFP=AFO* AFO;
-		let AGG;
-		if AFQ{
-		AGG=A;
-		}else{
-		let AFR=AY* ((if !((((ABS/ AY)+ parameters[287])/ AFI)).is_nan()&&((((ABS/ AY)+ parameters[287])/ AFI)>=AU||(AU).is_nan()){(((ABS/ AY)+ parameters[287])/ AFI)}else{AU}).ln());
-		let AFS=AFR< A;
-		let AGH=if AFS{
-		A
-		}else{
-		AFR
-		};
-		AGG=AGH;
-		}
-		let AGD=if AFT{
-		let AFU=(O/ (B+ ((AAP/ P).powf(Q))))/ AFJ;
-		let AFV=AFU- B;
-		let AFX=AFJ* (AV* ((AFU+ B)+ (((AFV* AFV)+ ((BK* AFW)* AFW)).sqrt())));
-		AFX
-		}else{
-		AFJ
-		};
-		let AGA=(AFZ* QF)/ GF;
-		let AGB=(AFZ* AAE)/ GF;
-		let AGC=(BQ/ GF)* (AFZ+ N);
-		let AGE=AGB+ AGC;
-		let AGF=((((4.112842231783458e-57f64* BQ)* (ADH.abs()))* ABD)/ ((AFY* AFZ)* AFP))* (((AGD* ((if !(((AGA+ AGC)/ AGE)).is_nan()&&(((AGA+ AGC)/ AGE)>=AU||(AU).is_nan()){((AGA+ AGC)/ AGE)}else{AU}).ln()))+ (AFK* (AGA- AGB)))+ ((AV* AFL)* ((AGA* AGA)- (AGB* AGB))));
-		let AGI=((((((GF* BQ)* ADH)* ADH)/ (((AFY* AFP)* F)* C))* AGG)* ((AGD+ (AFK* AGB))+ ((AFL* AGB)* AGB)))/ (AGE* AGE);
-		let AGJ=AGF+ AGI;
-		let AGK=((((AGD* GF)* BQ)/ (((((F* C)* AFO)* AFY)* AGC)* AGC))* ADH)* ADH;
-		let AGL=AGK+ AGJ;
-		let AGM=AGL> A;
-		let AHW=if AGM{
-		let AGN=(AGJ* AGK)/ AGL;
-		AGN
-		}else{
-		A
-		};
+		AHR=AHS;
+		AHT=AHU;
 		AHV=AHW;
+		AHX=AHY;
+		AHZ=AIA;
+		AIB=AIC;
 		}else{
+		AHN=A;
+		AHP=A;
+		AHR=A;
+		AHT=A;
 		AHV=A;
+		AHX=A;
+		AHZ=A;
+		AIB=A;
 		}
-		let AGO=AEX> A;
-		let AGT;
-		let AGU;
-		if AGO{
-		let AGP=C* ADQ;
-		let AGQ=C* ADP;
-		AGT=AGP;
-		AGU=AGQ;
-		}else{
-		let AGR=C* ADP;
-		let AGS=C* ADQ;
-		AGT=AGR;
-		AGU=AGS;
-		}
-		let AGV=ABD* (-(AGT+ AGU));
-		let AGY=(4f64* BQ)* GF;
-		let AGZ=AGY* ((AGV/ ((AGV* AGW)+ (E* E)))* parameters[295]);
-		let AHB=C* AHA;
-		let AHD=C* AHC;
-		let AHH=C* AHE;
-		let AHL=C* AHI;
+		let AID;
 		let AIE;
 		let AIF;
 		let AIG;
-		let AIH;
-		if AHM{
+		if ADK{
+		let AHL=3.20438e-19f64* (AEB.abs());
+		let AHM=3.20438e-19f64* (AEC.abs());
+		AID=B;
+		AIE=AHL;
+		AIF=B;
+		AIG=AHM;
+		}else{
+		AID=A;
 		AIE=A;
 		AIF=A;
 		AIG=A;
-		AIH=A;
-		}else{
-		let AHR=AGY* (B/ AHN);
-		let AHS=AGY* (B/ AHP);
-		AIE=B;
-		AIF=AHR;
-		AIG=B;
-		AIH=AHS;
-		}
-		let AII;
-		let AIJ;
-		if AHT{
-		AII=A;
-		AIJ=A;
-		}else{
-		let AHU=AGY* staged[240];
-		AII=B;
-		AIJ=AHU;
-		}
-		let AIK;
-		let AIM;
-		let AIO;
-		let AIQ;
-		let AIS;
-		let AIU;
-		let AIW;
-		let AIY;
-		if AEK{
-		let AIL;
-		let AIN;
-		let AIP;
-		let AIR;
-		let AIT;
-		let AIV;
-		let AIX;
-		let AIZ;
-		if AGO{
-		let AHY=3.20438e-19f64* ((AHD+ AHH).abs());
-		let AHZ=3.20438e-19f64* ((AHB+ AHL).abs());
-		AIL=B;
-		AIN=AHY;
-		AIP=B;
-		AIR=AHZ;
-		AIT=A;
-		AIV=A;
-		AIX=A;
-		AIZ=A;
-		}else{
-		let AIA=3.20438e-19f64* ((AHD+ AHH).abs());
-		let AIB=3.20438e-19f64* ((AHB+ AHL).abs());
-		AIL=A;
-		AIN=A;
-		AIP=A;
-		AIR=A;
-		AIT=B;
-		AIV=AIA;
-		AIX=B;
-		AIZ=AIB;
-		}
-		AIK=AIL;
-		AIM=AIN;
-		AIO=AIP;
-		AIQ=AIR;
-		AIS=AIT;
-		AIU=AIV;
-		AIW=AIX;
-		AIY=AIZ;
-		}else{
-		AIK=A;
-		AIM=A;
-		AIO=A;
-		AIQ=A;
-		AIS=A;
-		AIU=A;
-		AIW=A;
-		AIY=A;
-		}
-		let AJA;
-		let AJB;
-		let AJC;
-		let AJD;
-		if ADR{
-		let AIC=3.20438e-19f64* (AEI.abs());
-		let AID=3.20438e-19f64* (AEJ.abs());
-		AJA=B;
-		AJB=AIC;
-		AJC=B;
-		AJD=AID;
-		}else{
-		AJA=A;
-		AJB=A;
-		AJC=A;
-		AJD=A;
 		}
 		ctx.check_noise_evaluation()?;
-		if !(AIE != 0.0) {
-			if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-		} else {
-			let psd = AIF;
+		{
+			let psd = AHE;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
-			let exponent: Option<f64> = None;
+			let exponent: Option<f64> = Some(AHG);
+			if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
 			let table_operands = [];
 			let psd = psd * self.multiplicity;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(0, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		if !(AIG != 0.0) {
-			if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-		} else {
-			let psd = AIH;
+		{
+			let psd = AGR;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1464,10 +1413,10 @@ impl Instance {
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(1, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		if !(AII != 0.0) {
+		if !(AHN != 0.0) {
 			if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
 		} else {
-			let psd = AIJ;
+			let psd = AHP;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1476,19 +1425,22 @@ impl Instance {
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(2, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		{
-			let psd = AHV;
+		if !(AHR != 0.0) {
+			if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
+		} else {
+			let psd = AHT;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
-			let exponent: Option<f64> = Some(AHX);
-			if let Some(value) = exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
+			let exponent: Option<f64> = None;
 			let table_operands = [];
 			let psd = psd * self.multiplicity;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(3, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		{
-			let psd = AGZ;
+		if !(AHV != 0.0) {
+			if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
+		} else {
+			let psd = AHX;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1497,10 +1449,10 @@ impl Instance {
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(4, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		if !(AIK != 0.0) {
+		if !(AHZ != 0.0) {
 			if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
 		} else {
-			let psd = AIM;
+			let psd = AIB;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1509,10 +1461,10 @@ impl Instance {
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(5, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		if !(AIO != 0.0) {
+		if !(AID != 0.0) {
 			if !visitor.visit(6, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
 		} else {
-			let psd = AIQ;
+			let psd = AIE;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1521,10 +1473,10 @@ impl Instance {
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(6, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
-		if !(AIS != 0.0) {
+		if !(AIF != 0.0) {
 			if !visitor.visit(7, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
 		} else {
-			let psd = AIU;
+			let psd = AIG;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "psd", value: psd }); }
 			let psd = psd.abs();
 			let exponent: Option<f64> = None;
@@ -1532,42 +1484,6 @@ impl Instance {
 			let psd = psd * self.multiplicity;
 			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "scaled psd", value: psd }); }
 			if !visitor.visit(7, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
-		}
-		if !(AIW != 0.0) {
-			if !visitor.visit(8, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-		} else {
-			let psd = AIY;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "psd", value: psd }); }
-			let psd = psd.abs();
-			let exponent: Option<f64> = None;
-			let table_operands = [];
-			let psd = psd * self.multiplicity;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "scaled psd", value: psd }); }
-			if !visitor.visit(8, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
-		}
-		if !(AJA != 0.0) {
-			if !visitor.visit(9, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-		} else {
-			let psd = AJB;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "psd", value: psd }); }
-			let psd = psd.abs();
-			let exponent: Option<f64> = None;
-			let table_operands = [];
-			let psd = psd * self.multiplicity;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "scaled psd", value: psd }); }
-			if !visitor.visit(9, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
-		}
-		if !(AJC != 0.0) {
-			if !visitor.visit(10, GeneratedNoiseEvaluationRef { active: false, psd: 0.0, exponent: None, table_operands: &[] }) { return Ok(()); }
-		} else {
-			let psd = AJD;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 10, quantity: "psd", value: psd }); }
-			let psd = psd.abs();
-			let exponent: Option<f64> = None;
-			let table_operands = [];
-			let psd = psd * self.multiplicity;
-			if !(psd).is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 10, quantity: "scaled psd", value: psd }); }
-			if !visitor.visit(10, GeneratedNoiseEvaluationRef { active: true, psd, exponent, table_operands: &table_operands }) { return Ok(()); }
 		}
 		Ok(())
 	}
@@ -1587,17 +1503,17 @@ pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 11] = [
 	GeneratedNoiseProcessDescriptor { process_id: 10, label: Some("Igb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];
 pub static GROUPED_NOISE_INJECTIONS: [GeneratedNoiseInjectionDescriptor; 11] = [
-	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 23, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(0), name: "d", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 1, equation: 24, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(2), name: "s", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 29, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(1), name: "fg", is_internal: false }, neg: GeneratedNoiseEndpoint { local_node: Some(7), name: "ge", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 3, equation: 30, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 4, equation: 31, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 5, equation: 32, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 6, equation: 33, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 7, equation: 34, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 8, equation: 35, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 9, equation: 36, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
-	GeneratedNoiseInjectionDescriptor { process_id: 10, equation: 37, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 0, equation: 33, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(9), name: "__flow_state0", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
+	GeneratedNoiseInjectionDescriptor { process_id: 1, equation: 39, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(12), name: "__flow_state3", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
+	GeneratedNoiseInjectionDescriptor { process_id: 2, equation: 35, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(10), name: "__flow_state1", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: None, name: "0", is_internal: false } },
+	GeneratedNoiseInjectionDescriptor { process_id: 3, equation: 19, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 4, equation: 20, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 5, equation: 21, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 6, equation: 22, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 7, equation: 23, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 8, equation: 24, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 9, equation: 25, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(6), name: "si", is_internal: true } },
+	GeneratedNoiseInjectionDescriptor { process_id: 10, equation: 26, is_current: true, branch_ordinal: None, pos: GeneratedNoiseEndpoint { local_node: Some(8), name: "gi", is_internal: true }, neg: GeneratedNoiseEndpoint { local_node: Some(5), name: "di", is_internal: true } },
 ];
 
 impl Instance {
@@ -1614,9 +1530,9 @@ impl Instance {
 		let thermal_voltage = ctx.thermal_voltage();
 		let multiplicity = self.multiplicity;
 		let time = self.time;
-		let node_potentials: [f64; 9] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8])];
+		let node_potentials: [f64; 13] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12])];
 		let branch_flows: [f64; 0] = [];
-		let branch_unknown_flows: [f64; 5] = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4])];
+		let branch_unknown_flows: [f64; 1] = [ctx.branch_current(self.branches[0])];
 		use rspice_veriloga_runtime::integer;
 		let A=0f64;
 		let B=1f64;
@@ -1692,9 +1608,7 @@ impl Instance {
 		let AQG=parameters[287];
 		let AQN=parameters[292];
 		let AQP=1e10f64;
-		let ASP=parameters[286];
-		let ATW=1f64;
-		let ATX=1f64;
+		let ASR=parameters[286];
 		let ATY=1f64;
 		let ATZ=1f64;
 		let AUA=1f64;
@@ -1702,8 +1616,8 @@ impl Instance {
 		let AUC=1f64;
 		let AUD=1f64;
 		let AUE=1f64;
-		let AUS=0f64;
-		let AUT=0f64;
+		let AUF=1f64;
+		let AUG=1f64;
 		let AUU=0f64;
 		let AUV=0f64;
 		let AUW=0f64;
@@ -1711,6 +1625,8 @@ impl Instance {
 		let AUY=0f64;
 		let AUZ=0f64;
 		let AVA=0f64;
+		let AVB=0f64;
+		let AVC=0f64;
 		let D=C== B;
 		let LK=if D{
 		B
@@ -2175,12 +2091,12 @@ impl Instance {
 		let JX=(Z* JW)* ((rspice_limited_exp((EP* ((if !((JU/ JT)).is_nan()&&((JU/ JT)>=IC||(IC).is_nan()){(JU/ JT)}else{IC}).ln()))))/ (JT* JT));
 		let JZ=(parameters[316]* (parameters[313]+ ((Z/ 3f64)/ JY)))/ ((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, JY, L)))* (N- parameters[314]));
 		let KA=JZ> IV;
-		let ASL;
+		let ASN;
 		if KA{
 		let KB=B/ JZ;
-		ASL=KB;
+		ASN=KB;
 		}else{
-		ASL=KC;
+		ASN=KC;
 		}
 		let KI=if IS{
 		let KF=(KD+ node_potentials[4])+ KE;
@@ -3166,7 +3082,7 @@ impl Instance {
 		let ANR;
 		let ARN;
 		let ASE;
-		let ASG;
+		let ASH;
 		if GN{
 		let AMT=NJ- LQ;
 		let AMU=(B/ (B+ (AAU* (ID* (AMT+ (((AMT* AMT)+ LB).sqrt()))))))- ((ID* NO)* AL);
@@ -3177,7 +3093,7 @@ impl Instance {
 		ANR=B;
 		ARN=A;
 		ASE=ANG;
-		ASG=AMZ;
+		ASH=AMZ;
 		}else{
 		let ANI=(B/ (B+ (AAU* AKE)))- ((ID* (ANH+ NY))* AL);
 		let ANJ=ANI+ (((ANI* ANI)+ KL).sqrt());
@@ -3188,24 +3104,24 @@ impl Instance {
 		let ANS;
 		let ARO;
 		let ASF;
-		let ASH;
+		let ASI;
 		if ANN{
 		let ANO=(MG* (((ABC+ ABD)+ AAW)+ (AAY* (ID* ANJ))))* IM;
 		let ANP=B+ (ANL* ANO);
 		ANS=ANP;
 		ARO=ANO;
 		ASF=A;
-		ASH=A;
+		ASI=A;
 		}else{
 		ANS=ANM;
 		ARO=ANK;
 		ASF=ABD;
-		ASH=ABC;
+		ASI=ABC;
 		}
 		ANR=ANS;
 		ARN=ARO;
 		ASE=ASF;
-		ASG=ASH;
+		ASH=ASI;
 		}
 		let ANT=L* (((((ALF/ FG)* AMR)* AML)* ANQ)/ (ALQ* ANR));
 		let ANU=0.16666666666666666f64* (ZV+ (X* AKB));
@@ -3309,7 +3225,7 @@ impl Instance {
 		}
 		let APY=ABG/ ALE;
 		let AQC=((APZ> A)|| (AQA> A))|| (AQB> A);
-		let ASN;
+		let ASP;
 		if AQC{
 		let AQE=Y- (X* AQD);
 		let AQF=AQE* AQE;
@@ -3346,15 +3262,15 @@ impl Instance {
 		let ARB=((((AQU* PR)* KQ)/ (((((Z* L)* AQE)* AQP)* AQT)* AQT))* ANT)* ANT;
 		let ARC=ARB+ ARA;
 		let ARD=ARC> A;
-		let ASO=if ARD{
+		let ASQ=if ARD{
 		let ARE=(ARA* ARB)/ ARC;
 		ARE
 		}else{
 		A
 		};
-		ASN=ASO;
+		ASP=ASQ;
 		}else{
-		ASN=A;
+		ASP=A;
 		}
 		let ARF=APN> A;
 		let ARK;
@@ -3378,44 +3294,45 @@ impl Instance {
 		let ARY=L* ARV;
 		let ASC=L* ARZ;
 		let ASD=GM== X;
-		let ASW;
-		let ASX;
 		let ASY;
 		let ASZ;
-		let AUF;
-		let AUG;
-		if ASD{
-		ASW=A;
-		ASX=A;
-		ASY=A;
-		ASZ=A;
-		AUF=AUS;
-		AUG=AUT;
-		}else{
-		let ASI=ARP* (B/ ASE);
-		let ASJ=ARP* (B/ ASG);
-		ASW=B;
-		ASX=ASI;
-		ASY=B;
-		ASZ=ASJ;
-		AUF=ATW;
-		AUG=ATX;
-		}
-		let ASK=parameters[19]== A;
 		let ATA;
 		let ATB;
 		let AUH;
-		if ASK{
+		let AUI;
+		if ASD{
+		ASY=A;
+		ASZ=A;
 		ATA=A;
 		ATB=A;
 		AUH=AUU;
+		AUI=AUV;
 		}else{
-		let ASM=ARP* ASL;
+		let ASG=B/ ASE;
+		let ASJ=B/ ASH;
+		let ASK=ARP* ASG;
+		let ASL=ARP* ASJ;
+		ASY=B;
+		ASZ=ASK;
 		ATA=B;
-		ATB=ASM;
+		ATB=ASL;
 		AUH=ATY;
+		AUI=ATZ;
 		}
+		let ASM=parameters[19]== A;
 		let ATC;
+		let ATD;
+		let AUJ;
+		if ASM{
+		ATC=A;
+		ATD=A;
+		AUJ=AUW;
+		}else{
+		let ASO=ARP* ASN;
+		ATC=B;
+		ATD=ASO;
+		AUJ=AUA;
+		}
 		let ATE;
 		let ATG;
 		let ATI;
@@ -3423,12 +3340,12 @@ impl Instance {
 		let ATM;
 		let ATO;
 		let ATQ;
-		let AUI;
-		let AUJ;
+		let ATS;
 		let AUK;
 		let AUL;
+		let AUM;
+		let AUN;
 		if AOX{
-		let ATD;
 		let ATF;
 		let ATH;
 		let ATJ;
@@ -3436,42 +3353,42 @@ impl Instance {
 		let ATN;
 		let ATP;
 		let ATR;
-		let AUM;
-		let AUN;
+		let ATT;
 		let AUO;
 		let AUP;
+		let AUQ;
+		let AUR;
 		if ARF{
-		let ASQ=3.20438e-19f64* ((ARU+ ARY).abs());
-		let ASR=3.20438e-19f64* ((ARS+ ASC).abs());
-		ATD=B;
-		ATF=ASQ;
-		ATH=B;
-		ATJ=ASR;
-		ATL=A;
+		let ASS=3.20438e-19f64* ((ARU+ ARY).abs());
+		let AST=3.20438e-19f64* ((ARS+ ASC).abs());
+		ATF=B;
+		ATH=ASS;
+		ATJ=B;
+		ATL=AST;
 		ATN=A;
 		ATP=A;
 		ATR=A;
-		AUM=ATZ;
-		AUN=AUA;
-		AUO=AUX;
-		AUP=AUY;
+		ATT=A;
+		AUO=AUB;
+		AUP=AUC;
+		AUQ=AUZ;
+		AUR=AVA;
 		}else{
-		let ASS=3.20438e-19f64* ((ARU+ ARY).abs());
-		let AST=3.20438e-19f64* ((ARS+ ASC).abs());
-		ATD=A;
+		let ASU=3.20438e-19f64* ((ARU+ ARY).abs());
+		let ASV=3.20438e-19f64* ((ARS+ ASC).abs());
 		ATF=A;
 		ATH=A;
 		ATJ=A;
-		ATL=B;
-		ATN=ASS;
-		ATP=B;
-		ATR=AST;
-		AUM=AUV;
-		AUN=AUW;
-		AUO=AUB;
-		AUP=AUC;
+		ATL=A;
+		ATN=B;
+		ATP=ASU;
+		ATR=B;
+		ATT=ASV;
+		AUO=AUX;
+		AUP=AUY;
+		AUQ=AUD;
+		AUR=AUE;
 		}
-		ATC=ATD;
 		ATE=ATF;
 		ATG=ATH;
 		ATI=ATJ;
@@ -3479,12 +3396,12 @@ impl Instance {
 		ATM=ATN;
 		ATO=ATP;
 		ATQ=ATR;
-		AUI=AUM;
-		AUJ=AUN;
+		ATS=ATT;
 		AUK=AUO;
 		AUL=AUP;
+		AUM=AUQ;
+		AUN=AUR;
 		}else{
-		ATC=A;
 		ATE=A;
 		ATG=A;
 		ATI=A;
@@ -3492,83 +3409,86 @@ impl Instance {
 		ATM=A;
 		ATO=A;
 		ATQ=A;
-		AUI=AUV;
-		AUJ=AUW;
+		ATS=A;
 		AUK=AUX;
 		AUL=AUY;
+		AUM=AUZ;
+		AUN=AVA;
 		}
-		let ATS;
-		let ATT;
 		let ATU;
 		let ATV;
-		let AUQ;
-		let AUR;
+		let ATW;
+		let ATX;
+		let AUS;
+		let AUT;
 		if AOD{
-		let ASU=3.20438e-19f64* (AOV.abs());
-		let ASV=3.20438e-19f64* (AOW.abs());
-		ATS=B;
-		ATT=ASU;
+		let ASW=3.20438e-19f64* (AOV.abs());
+		let ASX=3.20438e-19f64* (AOW.abs());
 		ATU=B;
-		ATV=ASV;
-		AUQ=AUD;
-		AUR=AUE;
+		ATV=ASW;
+		ATW=B;
+		ATX=ASX;
+		AUS=AUF;
+		AUT=AUG;
 		}else{
-		ATS=A;
-		ATT=A;
 		ATU=A;
 		ATV=A;
-		AUQ=AUZ;
-		AUR=AVA;
+		ATW=A;
+		ATX=A;
+		AUS=AVB;
+		AUT=AVC;
 		}
-		let AVB=AUF;
-		let AVC=AUG;
-		let AVD=AUH;
-		let AVE=1f64;
+		let AVD=AUH* -1f64;
+		let AVE=AUJ* -1f64;
 		let AVF=1f64;
-		let AVG=AUI;
-		let AVH=AUJ;
-		let AVI=AUK;
-		let AVJ=AUL;
-		let AVK=AUQ;
-		let AVL=AUR;
+		let AVG=1f64;
+		let AVH=AUK;
+		let AVI=AUL;
+		let AVJ=AUM;
+		let AVK=AUN;
+		let AVL=AUS;
+		let AVM=AUT;
+		let AVN=AVD;
+		let AVO=AVE;
+		let AVP=(AUI* -1f64);
 		ctx.check_noise_evaluation()?;
-		let process_0_active = ASW != 0.0;
-		let process_0_psd = (ASX).abs();
+		let process_0_active = ASY != 0.0;
+		let process_0_psd = (ASZ).abs();
 		if !process_0_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "psd", value: process_0_psd }); }
 		let process_0_exponent: Option<f64> = None;
 		if let Some(value) = process_0_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 0, quantity: "exponent", value }); } }
 		let process_0_table = [];
-		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVB, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_0_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVN, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_0_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 0, injection: 0, re: process_0_gain_0.re, im: process_0_gain_0.im }); }
 		let process_0_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 0, gain: process_0_gain_0 }];
 		if !visitor.visit_process(0, GeneratedNoiseProcessEvaluationRef { active: process_0_active, psd: process_0_psd, exponent: process_0_exponent, table_operands: &process_0_table, injections: &process_0_injections }) { return Ok(()); }
-		let process_1_active = ASY != 0.0;
-		let process_1_psd = (ASZ).abs();
+		let process_1_active = ATA != 0.0;
+		let process_1_psd = (ATB).abs();
 		if !process_1_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "psd", value: process_1_psd }); }
 		let process_1_exponent: Option<f64> = None;
 		if let Some(value) = process_1_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 1, quantity: "exponent", value }); } }
 		let process_1_table = [];
-		let process_1_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVC, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_1_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVP, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_1_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 1, injection: 0, re: process_1_gain_0.re, im: process_1_gain_0.im }); }
 		let process_1_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 1, gain: process_1_gain_0 }];
 		if !visitor.visit_process(1, GeneratedNoiseProcessEvaluationRef { active: process_1_active, psd: process_1_psd, exponent: process_1_exponent, table_operands: &process_1_table, injections: &process_1_injections }) { return Ok(()); }
-		let process_2_active = ATA != 0.0;
-		let process_2_psd = (ATB).abs();
+		let process_2_active = ATC != 0.0;
+		let process_2_psd = (ATD).abs();
 		if !process_2_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "psd", value: process_2_psd }); }
 		let process_2_exponent: Option<f64> = None;
 		if let Some(value) = process_2_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 2, quantity: "exponent", value }); } }
 		let process_2_table = [];
-		let process_2_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVD, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_2_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVO, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_2_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 2, injection: 0, re: process_2_gain_0.re, im: process_2_gain_0.im }); }
 		let process_2_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 2, gain: process_2_gain_0 }];
 		if !visitor.visit_process(2, GeneratedNoiseProcessEvaluationRef { active: process_2_active, psd: process_2_psd, exponent: process_2_exponent, table_operands: &process_2_table, injections: &process_2_injections }) { return Ok(()); }
 		let process_3_active = B != 0.0;
-		let process_3_psd = (ASN).abs();
+		let process_3_psd = (ASP).abs();
 		if !process_3_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "psd", value: process_3_psd }); }
-		let process_3_exponent: Option<f64> = Some(ASP);
+		let process_3_exponent: Option<f64> = Some(ASR);
 		if let Some(value) = process_3_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 3, quantity: "exponent", value }); } }
 		let process_3_table = [];
-		let process_3_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVE, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_3_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVF, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_3_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 3, injection: 0, re: process_3_gain_0.re, im: process_3_gain_0.im }); }
 		let process_3_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 3, gain: process_3_gain_0 }];
 		if !visitor.visit_process(3, GeneratedNoiseProcessEvaluationRef { active: process_3_active, psd: process_3_psd, exponent: process_3_exponent, table_operands: &process_3_table, injections: &process_3_injections }) { return Ok(()); }
@@ -3578,67 +3498,67 @@ impl Instance {
 		let process_4_exponent: Option<f64> = None;
 		if let Some(value) = process_4_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 4, quantity: "exponent", value }); } }
 		let process_4_table = [];
-		let process_4_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVF, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_4_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVG, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_4_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 4, injection: 0, re: process_4_gain_0.re, im: process_4_gain_0.im }); }
 		let process_4_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 4, gain: process_4_gain_0 }];
 		if !visitor.visit_process(4, GeneratedNoiseProcessEvaluationRef { active: process_4_active, psd: process_4_psd, exponent: process_4_exponent, table_operands: &process_4_table, injections: &process_4_injections }) { return Ok(()); }
-		let process_5_active = ATC != 0.0;
-		let process_5_psd = (ATE).abs();
+		let process_5_active = ATE != 0.0;
+		let process_5_psd = (ATG).abs();
 		if !process_5_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "psd", value: process_5_psd }); }
 		let process_5_exponent: Option<f64> = None;
 		if let Some(value) = process_5_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 5, quantity: "exponent", value }); } }
 		let process_5_table = [];
-		let process_5_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVG, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_5_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVH, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_5_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 5, injection: 0, re: process_5_gain_0.re, im: process_5_gain_0.im }); }
 		let process_5_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 5, gain: process_5_gain_0 }];
 		if !visitor.visit_process(5, GeneratedNoiseProcessEvaluationRef { active: process_5_active, psd: process_5_psd, exponent: process_5_exponent, table_operands: &process_5_table, injections: &process_5_injections }) { return Ok(()); }
-		let process_6_active = ATG != 0.0;
-		let process_6_psd = (ATI).abs();
+		let process_6_active = ATI != 0.0;
+		let process_6_psd = (ATK).abs();
 		if !process_6_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "psd", value: process_6_psd }); }
 		let process_6_exponent: Option<f64> = None;
 		if let Some(value) = process_6_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 6, quantity: "exponent", value }); } }
 		let process_6_table = [];
-		let process_6_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVH, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_6_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVI, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_6_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 6, injection: 0, re: process_6_gain_0.re, im: process_6_gain_0.im }); }
 		let process_6_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 6, gain: process_6_gain_0 }];
 		if !visitor.visit_process(6, GeneratedNoiseProcessEvaluationRef { active: process_6_active, psd: process_6_psd, exponent: process_6_exponent, table_operands: &process_6_table, injections: &process_6_injections }) { return Ok(()); }
-		let process_7_active = ATK != 0.0;
-		let process_7_psd = (ATM).abs();
+		let process_7_active = ATM != 0.0;
+		let process_7_psd = (ATO).abs();
 		if !process_7_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "psd", value: process_7_psd }); }
 		let process_7_exponent: Option<f64> = None;
 		if let Some(value) = process_7_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 7, quantity: "exponent", value }); } }
 		let process_7_table = [];
-		let process_7_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVI, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_7_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVJ, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_7_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 7, injection: 0, re: process_7_gain_0.re, im: process_7_gain_0.im }); }
 		let process_7_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 7, gain: process_7_gain_0 }];
 		if !visitor.visit_process(7, GeneratedNoiseProcessEvaluationRef { active: process_7_active, psd: process_7_psd, exponent: process_7_exponent, table_operands: &process_7_table, injections: &process_7_injections }) { return Ok(()); }
-		let process_8_active = ATO != 0.0;
-		let process_8_psd = (ATQ).abs();
+		let process_8_active = ATQ != 0.0;
+		let process_8_psd = (ATS).abs();
 		if !process_8_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "psd", value: process_8_psd }); }
 		let process_8_exponent: Option<f64> = None;
 		if let Some(value) = process_8_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 8, quantity: "exponent", value }); } }
 		let process_8_table = [];
-		let process_8_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVJ, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_8_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVK, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_8_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 8, injection: 0, re: process_8_gain_0.re, im: process_8_gain_0.im }); }
 		let process_8_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 8, gain: process_8_gain_0 }];
 		if !visitor.visit_process(8, GeneratedNoiseProcessEvaluationRef { active: process_8_active, psd: process_8_psd, exponent: process_8_exponent, table_operands: &process_8_table, injections: &process_8_injections }) { return Ok(()); }
-		let process_9_active = ATS != 0.0;
-		let process_9_psd = (ATT).abs();
+		let process_9_active = ATU != 0.0;
+		let process_9_psd = (ATV).abs();
 		if !process_9_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "psd", value: process_9_psd }); }
 		let process_9_exponent: Option<f64> = None;
 		if let Some(value) = process_9_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 9, quantity: "exponent", value }); } }
 		let process_9_table = [];
-		let process_9_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVK, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_9_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVL, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_9_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 9, injection: 0, re: process_9_gain_0.re, im: process_9_gain_0.im }); }
 		let process_9_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 9, gain: process_9_gain_0 }];
 		if !visitor.visit_process(9, GeneratedNoiseProcessEvaluationRef { active: process_9_active, psd: process_9_psd, exponent: process_9_exponent, table_operands: &process_9_table, injections: &process_9_injections }) { return Ok(()); }
-		let process_10_active = ATU != 0.0;
-		let process_10_psd = (ATV).abs();
+		let process_10_active = ATW != 0.0;
+		let process_10_psd = (ATX).abs();
 		if !process_10_psd.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 10, quantity: "psd", value: process_10_psd }); }
 		let process_10_exponent: Option<f64> = None;
 		if let Some(value) = process_10_exponent { if !value.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFinite { index: 10, quantity: "exponent", value }); } }
 		let process_10_table = [];
-		let process_10_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVL, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
+		let process_10_gain_0 = GeneratedNoiseComplex::scaled_transfer(AVM, 0.0, frequency_hz, -1.0 * self.multiplicity.sqrt());
 		if !process_10_gain_0.is_finite() { return Err(GeneratedNoiseEvaluationError::NonFiniteGain { process: 10, injection: 0, re: process_10_gain_0.re, im: process_10_gain_0.im }); }
 		let process_10_injections = [GeneratedNoiseInjectionEvaluation { descriptor: 10, gain: process_10_gain_0 }];
 		if !visitor.visit_process(10, GeneratedNoiseProcessEvaluationRef { active: process_10_active, psd: process_10_psd, exponent: process_10_exponent, table_operands: &process_10_table, injections: &process_10_injections }) { return Ok(()); }

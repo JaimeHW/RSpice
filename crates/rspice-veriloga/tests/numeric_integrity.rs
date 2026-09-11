@@ -4,6 +4,144 @@ use rspice_veriloga::vm::VmError;
 use support::DeviceFixture;
 
 #[test]
+fn switched_sources_retain_the_last_kind_and_expose_the_solved_current() {
+    for (body, conductance) in [
+        ("if (mode) V(p)<+2*I(p); else I(p)<+3*V(p);", 3.0),
+        ("if (!mode) V(p)<+2*I(p); else I(p)<+3*V(p);", 0.5),
+        ("if (V(p)>0) V(p)<+2*I(p); else I(p)<+3*V(p);", 0.5),
+        ("if (V(p)<0) V(p)<+2*I(p); else I(p)<+3*V(p);", 3.0),
+        (
+            "if (mode>0) V(p)<+2*I(p); else if(mode<0) I(p)<+3*V(p);",
+            0.0,
+        ),
+        (
+            "value=gain; V(p)<+value*I(p); value=5; I(p)<+value*V(p); value=3; V(p)<+value*I(p);",
+            1.0 / 3.0,
+        ),
+        ("I(p)<+5*V(p); for(j=0;j<2;j=j+1) V(p)<+gain*I(p);", 0.25),
+        (
+            "V(p)<+2*I(p); I(p)<+5*V(p); V(p)<+3*I(p); V(p)<+4*I(p);",
+            1.0 / 7.0,
+        ),
+        (
+            "I(p)<+2*V(p); V(p)<+3*I(p); I(p)<+4*V(p); I(p)<+5*V(p);",
+            9.0,
+        ),
+        (
+            "V(0,p)<+2*I(0,p); I(p)<+5*V(p); V(0,p)<+3*I(0,p); V(p)<+4*I(p);",
+            1.0 / 7.0,
+        ),
+    ] {
+        let source = format!(
+            "module switched(p,q); inout p,q; electrical p,q; parameter integer mode=0; localparam real gain=mode+2; real value; integer j; analog begin I(q)<+I(p); {body} end endmodule"
+        );
+        let fixture = DeviceFixture::compile(&source);
+        let internal_end = 2 + fixture.internal_nodes;
+        let dimension = internal_end + fixture.branch_sources.len();
+        let mut device = fixture.device("SWITCHED", &[1, 2]);
+        device.set_internal_node_indices(&(3..=internal_end).collect::<Vec<_>>());
+        device.set_branch_current_indices(&((internal_end + 1)..=dimension).collect::<Vec<_>>());
+        let mut matrix = vec![vec![0.0; dimension]; dimension];
+        let mut rhs = vec![0.0; dimension];
+        let mut bias = vec![0.0; dimension];
+        bias[0] = 1.0;
+        device
+            .try_stamp(&bias, |r, c, v| matrix[r][c] += v, |r, v| rhs[r] += v)
+            .unwrap();
+        for pivot in (2..dimension).rev() {
+            assert!(matrix[pivot][pivot].abs() > 0.1, "{body}: {matrix:?}");
+            let (rows, tail) = matrix.split_at_mut(pivot);
+            for (row, coefficients) in rows.iter_mut().enumerate() {
+                let factor = coefficients[pivot] / tail[0][pivot];
+                for (value, pivot_value) in coefficients[..pivot].iter_mut().zip(&tail[0][..pivot])
+                {
+                    *value -= factor * pivot_value;
+                }
+                rhs[row] -= factor * rhs[pivot];
+            }
+        }
+        for row in [0, 1] {
+            assert!(
+                (matrix[row][0] - conductance).abs() < 1e-12,
+                "{body}: row {row}, expected {conductance}, matrix={matrix:?}"
+            );
+        }
+        assert!(
+            rhs.iter().all(|value| value.abs() < 1e-12),
+            "{body}: {rhs:?}"
+        );
+    }
+}
+
+#[test]
+fn switch_branches_preserve_complex_admittance_after_source_replacement() {
+    use num_complex::Complex64;
+    for potential in [false, true] {
+        let source = if potential {
+            "I(p)<+3*V(p)+ddt(2*V(p)); V(p)<+2*I(p)+ddt(4*I(p));"
+        } else {
+            "V(p)<+2*I(p)+ddt(4*I(p)); I(p)<+3*V(p)+ddt(2*V(p));"
+        };
+        let fixture = DeviceFixture::compile(&format!(
+            "module switched(p); inout p; electrical p; analog begin {source} end endmodule"
+        ));
+        let mut device = fixture.device("AC_SWITCH", &[1]);
+        device.set_internal_node_indices(&[2]);
+        device.try_begin_analysis(1).unwrap();
+        for omega in [0.0, 0.25, 2.0] {
+            let mut matrix = [[Complex64::default(); 2]; 2];
+            device
+                .try_stamp_small_signal_complex(
+                    &[1.0, 0.0],
+                    omega / std::f64::consts::TAU,
+                    |r, c, re, im| matrix[r][c] += Complex64::new(re, im),
+                )
+                .unwrap();
+            let admittance = matrix[0][0] - matrix[0][1] * matrix[1][0] / matrix[1][1];
+            let expected = if potential {
+                Complex64::new(2.0, 4.0 * omega).inv()
+            } else {
+                Complex64::new(3.0, 2.0 * omega)
+            };
+            assert!(
+                (admittance - expected).norm() < 1e-12,
+                "{source}: omega={omega}, Y={admittance}, expected {expected}, matrix={matrix:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn hierarchical_switch_branches_preserve_localparams_and_independent_named_sources() {
+    for (branch, declaration) in [("p,n", ""), ("sense", "branch(p,n) sense;")] {
+        let source=format!("module child(p,n,q); inout p,n,q; electrical p,n,q; parameter real gain=1; localparam real resistance=2*gain; {declaration}
+            analog begin I(q,n)<+I({branch}); I({branch})<+7*V(p,n); V({branch})<+resistance*I({branch}); end endmodule
+            module top(p,n,q,r); inout p,n,q,r; electrical p,n,q,r;
+            child #(.gain(1)) a(p,n,q); child #(.gain(2)) b(p,n,r); endmodule");
+        assert_hierarchy_gains(&source, [0.75, 0.5, 0.25]);
+    }
+}
+
+#[test]
+fn overwritten_switch_contributions_still_validate_their_executed_rhs() {
+    let fixture = DeviceFixture::compile(
+        "module switched(p); inout p; electrical p; analog begin I(p)<+ln(V(p)); V(p)<+I(p); end endmodule",
+    );
+    let dimension = 1 + fixture.internal_nodes + fixture.branch_sources.len();
+    let mut device = fixture.device("SWITCHED", &[1]);
+    device.set_internal_node_indices(&(2..=(1 + fixture.internal_nodes)).collect::<Vec<_>>());
+    device.set_branch_current_indices(
+        &((2 + fixture.internal_nodes)..=dimension).collect::<Vec<_>>(),
+    );
+    let mut bias = vec![0.0; dimension];
+    bias[0] = -1.0;
+    assert!(
+        device.try_stamp(&bias, |_, _, _| {}, |_, _| {}).is_err(),
+        "changing source kind must not erase a domain error in an executed contribution"
+    );
+}
+
+#[test]
 fn declared_ground_preserves_reference_topology_and_conductance() {
     for (declarations, body) in [
         ("electrical p,g; ground g;", "I(p,g)<+0.5*V(p,g);"),

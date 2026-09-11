@@ -34,6 +34,46 @@ endmodule
 "#;
 
 #[test]
+fn switch_branch_currents_follow_both_transient_mode_changes() {
+    let model = write_model(
+        &format!("switch_modes_{}.va", std::process::id()),
+        "module switched(p,c); inout p,c; electrical p,c; analog if(V(c)>0.5) V(p)<+2*I(p); else I(p)<+3*V(p); endmodule",
+    );
+    let netlist=Netlist::parse(&format!("* switched source transient\nI1 0 out DC 1\nVC control 0 PWL(0 0 1n 0 1.01n 1 2n 1 2.01n 0 3n 0)\nX1 out control switched\n.va \"{model}\" switched\n.end\n")).unwrap();
+    for spice_dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let result = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .run_tran(&netlist, 3e-9, 1e-10)
+        .unwrap_or_else(|error| panic!("{spice_dialect:?}: {error}"));
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        let control = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("control"))
+            .unwrap();
+        let mut modes = [false; 2];
+        for (voltage, control) in result.voltages[out].iter().zip(&result.voltages[control]) {
+            let potential = *control > 0.5;
+            modes[usize::from(potential)] = true;
+            let expected = if potential { 2.0 } else { 1.0 / 3.0 };
+            assert!(
+                (voltage - expected).abs() < 1e-8,
+                "{spice_dialect:?}: control={control}, output={voltage}, expected {expected}"
+            );
+        }
+        assert_eq!(modes, [true, true]);
+        assert!((result.voltages[out].last().unwrap() - 1.0 / 3.0).abs() < 1e-8);
+    }
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
 fn nonconvergence_stops_at_the_veriloga_integration_floor() {
     let model = write_model(
         &format!("floor_recovery_{}.va", std::process::id()),

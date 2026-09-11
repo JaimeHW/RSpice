@@ -496,7 +496,13 @@ equations. Potential sources retain independent named and instance-local branche
 repeated contributions to one branch share its current unknown and source direction.
 MIR maps each contribution to that physical unknown, so generated devices need
 no padding rows. Each contribution retains its own evaluation and operator state.
-Mixed potential/flow switch branches still require further work.
+Mixed potential/flow switch branches retain the last executed source kind.
+Changing kind discards the earlier accumulated value; later writes of the same
+kind add to it. Executed RHS validation and operator state survive replacement.
+One private current unknown supports flow probes in either mode. Mode changes
+request an order-zero discontinuity relative to the last accepted timestep,
+including after rollback or checkpoint restore. Explicit `cross` events remain
+necessary when a model requires threshold-crossing time resolution.
 Zero-valued potential reads such as `V(n,n)` remain accepted for compact-model
 compatibility; authored sources and flow probes require distinct nets.
 

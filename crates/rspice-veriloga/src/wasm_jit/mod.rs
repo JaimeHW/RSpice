@@ -121,7 +121,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 14;
 /// 33 to 34 retains distinct potential branches and consistent source directions.
 /// Version 35 resolves declared grounds before allocating solver nodes.
 /// Version 36 uses one canonical unknown per physical potential branch.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 36;
+/// Version 37 preserves ordered source retention on switch branches.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 37;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1924,6 +1925,48 @@ endmodule
                 .expect("Jacobian export")
                 .to_owned()
         }
+    }
+
+    #[test]
+    fn wasm_switch_branches_preserve_ordered_retention_and_jacobians() {
+        use super::abi::{
+            FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
+            FRAME_RESULT_OFFSET,
+        };
+        let source = "module switched(p); inout p; electrical p; analog begin
+            V(p)<+2*I(p); I(p)<+5*V(p); V(p)<+3*I(p); V(p)<+4*I(p); end endmodule";
+        let report = VerilogACompiler::default()
+            .compile_runtime(source, None)
+            .unwrap();
+        let mut harness = FusedKernelHarness::for_source(source, "switched");
+        harness.reset();
+        harness.poke_frame_u32(
+            FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
+            FusedKernelHarness::VOLTAGES + 8,
+        );
+        harness.poke_frame_u32(FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, 1);
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 7.0);
+        harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, -1.0);
+        harness.call_assignments();
+        harness.call_prelude();
+        let stamp = report.model.stamp_programs.len() - 1;
+        for (entry, jacobian) in report.model.stamp_programs[stamp]
+            .jacobian_programs
+            .iter()
+            .enumerate()
+        {
+            let expected = match jacobian.col_axis {
+                crate::codegen::ColumnAxis::Node(0) => -1.0,
+                crate::codegen::ColumnAxis::Node(1) => -7.0,
+                other => panic!("unexpected switch constraint column {other:?}"),
+            };
+            let export = harness.jacobian_export(stamp, entry);
+            assert_eq!(harness.call(&export), 0);
+            assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), expected);
+        }
+        let export = harness.stamp_value_export(stamp);
+        assert_eq!(harness.call(&export), 0);
+        assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
     }
 
     #[test]

@@ -79,6 +79,9 @@ pub struct CompiledModel {
     /// speculative Newton evaluations from accepted-point state.
     #[serde(default)]
     pub event_state_variables: Vec<usize>,
+    /// Sorted event-state slots holding the retained kind of each switch branch.
+    /// A change from the accepted kind implies an order-zero discontinuity.
+    pub switch_branch_variables: Vec<usize>,
     /// Pure localparam slots needed before pre-simulation assignments.
     #[serde(default)]
     pub initialization_prologue_variables: Vec<usize>,

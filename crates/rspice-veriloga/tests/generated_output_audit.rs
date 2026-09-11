@@ -156,7 +156,9 @@ fn generated_veriloga_devices_use_shared_hot_helpers() {
             packed_lane_consumers += 1;
             for required in required_lane_types {
                 let imported = source.lines().any(|line| {
-                    line.starts_with("use rspice_veriloga_runtime::") && line.contains(&required)
+                    line.trim_start()
+                        .starts_with("use rspice_veriloga_runtime::")
+                        && line.contains(&required)
                 });
                 if !imported {
                     missing_lane_imports
