@@ -298,6 +298,7 @@ impl HbSolver {
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
             native_bjts: Vec::new(),
+            non_electrical_nodes: Vec::new(),
             nonlinear_device_names: Vec::new(),
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
@@ -329,6 +330,7 @@ impl HbSolver {
             source_spectra: Vec::new(),
             nonlinear_devices: Vec::new(),
             native_bjts: Vec::new(),
+            non_electrical_nodes: Vec::new(),
             nonlinear_device_names: Vec::new(),
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]

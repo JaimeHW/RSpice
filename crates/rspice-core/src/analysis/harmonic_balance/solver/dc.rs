@@ -447,6 +447,9 @@ impl HbSolver {
 
         // Subtract GMIN: gmin * V_dc (diagonal)
         for (node, &voltage) in v_dc.iter().enumerate().take(n) {
+            if !self.electrical_node(node) {
+                continue;
+            }
             if node < state.residual.len() && !state.residual[node].is_empty() {
                 state.residual[node][0] -= Complex64::new(gmin * voltage, 0.0);
                 state.residual_scale[node][0] += gmin * voltage.abs();
@@ -599,7 +602,9 @@ impl HbSolver {
 
         // GMIN contribution: -gmin on diagonal
         for (i, row) in jacobian.iter_mut().enumerate().take(n) {
-            row[i] -= gmin;
+            if self.electrical_node(i) {
+                row[i] -= gmin;
+            }
         }
 
         // Nonlinear device Jacobians
@@ -724,7 +729,7 @@ impl HbSolver {
         let mut best_merit = f64::INFINITY;
 
         while alpha >= min_alpha {
-            if !Self::apply_dc_trial_update(state, &checkpoint, delta_x, alpha) {
+            if !self.apply_dc_trial_update(state, &checkpoint, delta_x, alpha) {
                 alpha *= 0.5;
                 continue;
             }
@@ -751,7 +756,7 @@ impl HbSolver {
         }
 
         if !best_merit.is_finite()
-            || !Self::apply_dc_trial_update(state, &checkpoint, delta_x, best_alpha)
+            || !self.apply_dc_trial_update(state, &checkpoint, delta_x, best_alpha)
         {
             self.restore_dc_checkpoint(state, &checkpoint)?;
             return Err(HbError::InvalidCircuit(
@@ -1097,6 +1102,7 @@ impl HbSolver {
     }
 
     fn apply_dc_trial_update(
+        &self,
         state: &mut HbSolverState,
         checkpoint: &HbDcCheckpoint,
         delta: &[Value],
@@ -1109,8 +1115,12 @@ impl HbSolver {
             .zip(delta.iter().take(node_count))
             .enumerate()
         {
-            let limited_step = (alpha * update).clamp(-0.5, 0.5);
-            let voltage = (original + limited_step).clamp(-1000.0, 1000.0);
+            let voltage = if self.electrical_node(node) {
+                let limited_step = (alpha * update).clamp(-0.5, 0.5);
+                (original + limited_step).clamp(-1000.0, 1000.0)
+            } else {
+                original + alpha * update
+            };
             if !voltage.is_finite() {
                 return false;
             }
@@ -1327,6 +1337,9 @@ impl HbSolver {
 
         // Apply voltages to state, using small default for any unvisited nodes
         for (node, &estimate) in node_voltage.iter().enumerate().take(n) {
+            if !self.electrical_node(node) {
+                continue;
+            }
             if node < state.x.len() && !state.x[node].is_empty() {
                 let v = if estimate.is_nan() {
                     0.1 // Default for unconnected nodes
@@ -1391,6 +1404,29 @@ mod linear_solve_tests {
 
     fn solver() -> HbSolver {
         HbSolver::new(HbConfig::new(1.0e9), 1)
+    }
+
+    #[test]
+    fn physical_nodes_do_not_receive_dc_voltage_limits_or_gmin() {
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), 3);
+        solver.non_electrical_nodes = vec![1, 2];
+        let mut state = HbSolverState::new(3, 1);
+        let checkpoint = HbDcCheckpoint {
+            node_voltages: vec![0.0; 3],
+            branch_currents: Vec::new(),
+        };
+        assert!(solver.apply_dc_trial_update(&mut state, &checkpoint, &[2.0, 1200.0, 7.0], 1.0));
+        assert_eq!(
+            state.x.iter().map(|s| s[0].re).collect::<Vec<_>>(),
+            [0.5, 1200.0, 7.0]
+        );
+        solver.compute_dc_residual(&mut state, 0.2, 1.0).unwrap();
+        assert_eq!(
+            state.residual.iter().map(|r| r[0].re).collect::<Vec<_>>(),
+            [-0.1, 0.0, 0.0]
+        );
+        let jac = solver.build_dc_jacobian(&state, 0.2).unwrap();
+        assert_eq!([jac[0][0], jac[1][1], jac[2][2]], [-0.2, 0.0, 0.0]);
     }
 
     #[test]

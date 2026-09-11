@@ -38,6 +38,7 @@ struct ExactHbOperator<'a> {
     real_width: usize,
     omega0: Value,
     gmin: Value,
+    non_electrical_nodes: &'a [usize],
     g_matrix: &'a [(usize, usize, Value)],
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
@@ -93,6 +94,19 @@ impl ExactHbOperator<'_> {
             return Err(HbError::InvalidCircuit(
                 "exact HB operator frequency/GMIN is non-finite or outside its valid range"
                     .to_string(),
+            ));
+        }
+        if self
+            .non_electrical_nodes
+            .iter()
+            .any(|&node| node >= self.num_nodes)
+            || self
+                .non_electrical_nodes
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(HbError::InvalidCircuit(
+                "exact HB physical-state node registry is malformed".into(),
             ));
         }
         for (kind, entries) in [
@@ -292,6 +306,9 @@ impl ExactHbOperator<'_> {
                 }
             }
             for node in 0..n {
+                if self.non_electrical_nodes.binary_search(&node).is_ok() {
+                    continue;
+                }
                 self.visit_linear_term(
                     node,
                     k,
@@ -1042,6 +1059,9 @@ impl HbSolver {
 
         // Subtract GMIN contribution: I_gmin = gmin * V (current leaves node via GMIN)
         for node in 0..self.num_nodes {
+            if !self.electrical_node(node) {
+                continue;
+            }
             for k in 0..=self.num_harmonics {
                 if node < state.residual.len() && k < state.residual[node].len() {
                     state.residual[node][k] -= gmin * state.x[node][k];
@@ -1241,6 +1261,9 @@ impl HbSolver {
         let n = self.num_nodes;
         let h = self.num_harmonics + 1;
         for i in 0..n {
+            if !self.electrical_node(i) {
+                continue;
+            }
             for k in 0..h {
                 let idx = i * h + k;
                 if idx < jac.len() {
@@ -1310,7 +1333,7 @@ impl HbSolver {
                         let v_new_raw = v_old + alpha * dx.re;
 
                         // Apply PN voltage limiting to DC component only
-                        let v_new = if k == 0 {
+                        let v_new = if k == 0 && self.electrical_node(node) {
                             limit_pn_voltage(v_old, v_new_raw, vt)
                         } else {
                             v_new_raw
@@ -1364,7 +1387,7 @@ impl HbSolver {
                     let v_old = x_orig[node][k].re;
                     let v_new_raw = v_old + best_alpha * dx.re;
 
-                    let v_new = if k == 0 {
+                    let v_new = if k == 0 && self.electrical_node(node) {
                         limit_pn_voltage(v_old, v_new_raw, vt)
                     } else {
                         v_new_raw
@@ -1767,6 +1790,7 @@ impl HbSolver {
                 Vec::new()
             };
             let operator = ExactHbOperator {
+                non_electrical_nodes: &self.non_electrical_nodes,
                 num_nodes: n,
                 num_components: h,
                 real_width: w,
@@ -2296,6 +2320,7 @@ mod exact_matrix_free_tests {
         c_spectra: &'a [PeriodicSpectrum],
     ) -> ExactHbOperator<'a> {
         ExactHbOperator {
+            non_electrical_nodes: &[],
             num_nodes: 2,
             num_components: 3,
             real_width: 5,
@@ -2319,6 +2344,65 @@ mod exact_matrix_free_tests {
             (actual - expected).norm() <= 3e-12 * scale,
             "actual={actual:?}, expected={expected:?}"
         );
+    }
+
+    #[test]
+    fn physical_nodes_keep_their_units_in_hb_trials_and_both_operators() {
+        let g = [(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0)];
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(2), 3);
+        solver.g_matrix = g.to_vec();
+        solver.non_electrical_nodes = vec![1, 2];
+        solver.source_spectra[0][0].re = 0.01;
+        solver.source_spectra[1][0].re = 1200.0;
+        solver.source_spectra[2][0].re = 7.0;
+        let mut state = HbSolverState::new(3, 2);
+        let delta = HbNewtonStep {
+            node_voltages: solver.source_spectra.clone(),
+            branch_currents: Vec::new(),
+        };
+        solver
+            .compute_full_residual_with_gmin(&mut state, 0.0, 1.0)
+            .unwrap();
+        solver
+            .apply_line_search_with_gmin(
+                &mut state,
+                &delta,
+                HbLineSearchLimits {
+                    gmin: 0.0,
+                    source_scale: 1.0,
+                    reltol: 1e-9,
+                    current_abstol: 1e-14,
+                },
+                &NoAbort,
+            )
+            .unwrap();
+        assert_eq!(
+            state.x.iter().map(|s| s[0].re).collect::<Vec<_>>(),
+            [0.01, 1200.0, 7.0]
+        );
+        solver
+            .compute_full_residual_with_gmin(&mut state, 0.2, 1.0)
+            .unwrap();
+        assert_eq!(
+            state.residual.iter().map(|r| r[0].re).collect::<Vec<_>>(),
+            [-0.002, 0.0, 0.0]
+        );
+        let jac = solver.build_full_jacobian_with_gmin(&state, 0.2).unwrap();
+        assert_eq!(
+            [jac[0][0].re, jac[3][3].re, jac[6][6].re],
+            [-1.2, -1.0, -1.0]
+        );
+        let operator = ExactHbOperator {
+            num_nodes: 3,
+            non_electrical_nodes: &[1, 2],
+            gmin: 0.2,
+            ..fixture(&g, &[], &[], &[])
+        };
+        operator.validate().unwrap();
+        let actual = operator.apply(&[Complex64::new(1.0, 0.0); 15]);
+        for (i, value) in actual.iter().enumerate() {
+            assert_eq!(*value, Complex64::new(if i < 5 { -1.2 } else { -1.0 }, 0.0));
+        }
     }
 
     #[test]

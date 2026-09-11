@@ -987,6 +987,9 @@ pub struct HbSolver {
     nonlinear_devices: Vec<HbNonlinearDevice>,
     /// Native physical BJT models retain every internal MNA state.
     native_bjts: Vec<crate::device::Bjt>,
+    /// Sorted zero-based temperature/current state nodes. Electrical voltage
+    /// limiting and shunt homotopy do not apply to these physical coordinates.
+    non_electrical_nodes: Vec<usize>,
     /// Stable contributor owners aligned exactly with `nonlinear_devices`.
     /// Engine clients retain authored instance names; direct solver clients
     /// receive deterministic type-and-registration-index fallbacks.

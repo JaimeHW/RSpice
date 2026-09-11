@@ -50,6 +50,10 @@ impl MatrixStamper for NativeStamp {
 }
 
 impl HbSolver {
+    pub(super) fn electrical_node(&self, node: usize) -> bool {
+        self.non_electrical_nodes.binary_search(&node).is_err()
+    }
+
     pub(crate) fn add_native_bjt(&mut self, mut bjt: crate::device::Bjt) -> Result<(), HbError> {
         bjt.prepare_periodic_mna(self.num_nodes)
             .map_err(HbError::InvalidCircuit)?;
@@ -70,6 +74,13 @@ impl HbSolver {
                 "BJT '{}' has unregistered periodic MNA coordinates",
                 bjt.name
             )));
+        }
+        for node in [bjt.node_rth, bjt.node_xf1, bjt.node_xf2] {
+            if node != 0
+                && let Err(index) = self.non_electrical_nodes.binary_search(&(node - 1))
+            {
+                self.non_electrical_nodes.insert(index, node - 1);
+            }
         }
         self.native_bjts.push(bjt);
         Ok(())

@@ -420,8 +420,8 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::Bjt => PeriodicCapabilityDescriptor {
             residual_jacobian: Restricted(
-                "native Gummel-Poon and VBIC electrical states; thermal and excess-phase \
-                 HB state qualification is incomplete",
+                "native Gummel-Poon electrical states and complete VBIC physical states; \
+                 legacy GP thermal/excess-phase extensions are not represented",
             ),
             dynamic_state: Complete,
             small_signal: Complete,
@@ -977,11 +977,11 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     }
 
     for bjt in &circuit.bjts.devices {
-        if bjt.node_rth != 0 || bjt.td > 0.0 {
+        if bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0) {
             gaps.push(CapabilityGap::new(
                 F::Bjt,
                 format!(
-                    "BJT '{}' thermal and excess-phase HB state qualification is incomplete",
+                    "BJT '{}' legacy Gummel-Poon thermal and excess-phase HB equations are not represented",
                     bjt.name
                 ),
             ));

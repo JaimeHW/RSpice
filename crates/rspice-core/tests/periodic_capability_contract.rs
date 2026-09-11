@@ -123,7 +123,7 @@ vcc c 0 dc 5
 .model qmod npn (level=1 is=1e-16 bf=100 td=1n)
 .end
 ",
-            "thermal and excess-phase HB state qualification is incomplete",
+            "legacy Gummel-Poon thermal and excess-phase HB equations are not represented",
         ),
         (
             "\

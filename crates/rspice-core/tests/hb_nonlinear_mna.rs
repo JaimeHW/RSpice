@@ -305,7 +305,7 @@ q1 c b 0 qmod
 .model qmod npn (level=1 is=1e-16 bf=100 ikf=1m td=1n)
 .end
 ",
-            "thermal and excess-phase HB state qualification is incomplete",
+            "legacy Gummel-Poon thermal and excess-phase HB equations are not represented",
         ),
         (
             "\
@@ -394,6 +394,60 @@ fn native_gp_hb_base_charge_and_branch_current_match_analytic_rc() {
                     branch.coefficients[1]
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn vbic_physical_hb_thermal_rc_and_retained_pac_match_analytic_heat_balance() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::pac::{PacConfig, PacSweepType};
+    // 3 parallel devices: Gth=M/Rth, Cth=M*CTH. The prescribed thermal
+    // rise exceeds the old electrical 1000-V clamp. SW_ET=0 removes feedback.
+    let gth = 3.0 / 3000.0;
+    let cth = 3.0 * 5e-9;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let netlist = Netlist::parse("VBIC HB heat balance\nQ1 0 0 0 th vm M=3 SW_ET=0\nIheat 0 th SIN(1.2 .12 1meg)\n.model vm NPN(LEVEL=11 IS=0 IBEI=0 IBEN=0 IBCI=0 IBCN=0 ISP=0 IBEIP=0 IBENP=0 IBCIP=0 IBCNP=0 RCI=0 RBI=0 RTH=3000 CTH=5n TD=400n)\n.options GMIN=0\n.end\n").unwrap();
+        let mut simulation = SimulationConfig::default().with_spice_dialect(dialect);
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(simulation);
+        for krylov in [false, true] {
+            let mut config = HbConfig::new(F0).with_harmonics(8).with_tolerance(1e-10);
+            config.abstol = 1e-14;
+            config.use_krylov = krylov;
+            let hb = engine
+                .run_hb(&netlist, config)
+                .unwrap_or_else(|e| panic!("{dialect:?} krylov={krylov}: {e}"));
+            assert!((coefficient(&hb, "th", 0).re - 1.2 / gth).abs() < 1e-6);
+            let expected =
+                Complex64::new(0.0, -0.12) / Complex64::new(gth, std::f64::consts::TAU * F0 * cth);
+            assert!((coefficient(&hb, "th", 1) - expected).norm() < 1e-8);
+            for node in ["Q1.__xf1.internal", "Q1.__xf2.internal"] {
+                assert!(coefficient(&hb, node, 0).norm() < 1e-14);
+                assert!(coefficient(&hb, node, 1).norm() < 1e-14);
+            }
+            let pac = engine
+                .run_pac_from_hb_with_abort(
+                    &netlist,
+                    PacConfig::new()
+                        .with_fundamental(F0)
+                        .with_sweep(1e4, 1e4, 1)
+                        .with_sweep_type(PacSweepType::Linear)
+                        .with_sidebands(0, 0)
+                        .with_input_source("Iheat")
+                        .with_output_node("th"),
+                    &hb.operating_point,
+                    &NoAbort,
+                )
+                .unwrap();
+            let expected =
+                Complex64::new(1.0, 0.0) / Complex64::new(gth, std::f64::consts::TAU * 1e4 * cth);
+            let actual = pac.result.conversion_matrix.get(0, 0, 0).unwrap();
+            assert!(
+                (actual - expected).norm() < 1e-8,
+                "{dialect:?} krylov={krylov}: {actual} vs {expected}"
+            );
         }
     }
 }

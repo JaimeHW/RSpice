@@ -7,76 +7,84 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const F0: f64 = 1.0e6;
 
+// ngspice 46: the NPN deck below, .tran .00625n 20u 19u .00625n, RELTOL=1e-7,
+// ABSTOL=1e-15, CHGTOL=1e-20, GMIN=0, TEMP=TNOM=27. Samples of the
+// settled 19--20 us cycle: [temperature rise K, XF1 A, XF2 A, I(VC), I(VB)].
+// Prior .025-ns mesh: adjacent cycles agree within 1.1 nK / 0.14 pA.
+// Refinement to .00625 ns changes samples by <1.3 uK / 2.3 nA.
+const VBIC_PHYSICAL_PERIODIC_REFERENCE: [[f64; 5]; 8] = [
+    [
+        1.041075569976005e+00,
+        6.148529746246692e-04,
+        5.512146980012821e-04,
+        -5.501029480052405e-04,
+        -4.613058613910093e-05,
+    ],
+    [
+        1.066517966765304e+00,
+        1.030781687499789e-03,
+        9.071911850267481e-04,
+        -9.059719097573484e-04,
+        -6.058156544801507e-05,
+    ],
+    [
+        1.160116913345152e+00,
+        1.525984293125550e-03,
+        1.403160675769665e-03,
+        -1.402444715621389e-03,
+        -3.148194306449638e-05,
+    ],
+    [
+        1.262103901382114e+00,
+        1.666931504525963e-03,
+        1.666944587065960e-03,
+        -1.667458099232046e-03,
+        2.758779477732575e-05,
+    ],
+    [
+        1.289809611401592e+00,
+        1.249363254909620e-03,
+        1.383995190930887e-03,
+        -1.385546378654575e-03,
+        4.088935445331497e-05,
+    ],
+    [
+        1.237623085814133e+00,
+        7.230633244770615e-04,
+        8.502306952125580e-04,
+        -8.514968594782904e-04,
+        1.688881392015541e-05,
+    ],
+    [
+        1.155258758854126e+00,
+        4.552662403430866e-04,
+        5.094134876644744e-04,
+        -5.097122590174820e-04,
+        -2.633663883801036e-06,
+    ],
+    [
+        1.080244740037929e+00,
+        4.295707356929894e-04,
+        4.236695847765118e-04,
+        -4.230871653264675e-04,
+        -2.176034333311161e-05,
+    ],
+];
+
+fn vbic_physical_periodic_oracle(kind: &str, p: f64, level: u32) -> Netlist {
+    let self_heat = if level == 4 { "SELFT=1" } else { "" };
+    Netlist::parse(&format!(
+            "VBIC coupled thermal/delay orbit\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 0 th qm\n.model qm {kind}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=.8 {self_heat} RTH=1000 CTH=1n TD=100n)\n.options GMIN=0\n.temp 27\n.end",
+            1.2*p, 0.65*p, 0.65*p, 0.02*p,
+        )).unwrap()
+}
+
 #[test]
 fn vbic_self_heated_delay_pss_matches_ngspice_and_retains_all_states() {
     use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
-    // ngspice 46: the NPN deck below, .tran .1n 20u 0 .1n, RELTOL=1e-7,
-    // ABSTOL=1e-15, CHGTOL=1e-20, GMIN=0, TEMP=TNOM=27. Samples of the
-    // settled 19--20 us cycle: [temperature rise K, XF1 A, XF2 A, I(VC), I(VB)].
-    // Adjacent settled cycles agree within 1 nK and 0.1 pA.
-    let reference = [
-        [
-            1.041077638037999e+00,
-            6.148510238585312e-04,
-            5.512131439845122e-04,
-            -5.501013932401927e-04,
-            -4.613003510449985e-05,
-        ],
-        [
-            1.066520218984637e+00,
-            1.030782930932765e-03,
-            9.071921254690163e-04,
-            -9.059728453870770e-04,
-            -6.058080549928584e-05,
-        ],
-        [
-            1.160121278249431e+00,
-            1.525986690155254e-03,
-            1.403162865590229e-03,
-            -1.402446905055711e-03,
-            -3.148136311295072e-05,
-        ],
-        [
-            1.262109443709324e+00,
-            1.666932333990812e-03,
-            1.666945997940638e-03,
-            -1.667459518545665e-03,
-            2.758726760902989e-05,
-        ],
-        [
-            1.289814930134844e+00,
-            1.249361845072509e-03,
-            1.383994125368064e-03,
-            -1.385545316522035e-03,
-            4.088852948242942e-05,
-        ],
-        [
-            1.237627277822640e+00,
-            7.230628060154461e-04,
-            8.502299211956250e-04,
-            -8.514960847744414e-04,
-            1.688861056198725e-05,
-        ],
-        [
-            1.155262105342785e+00,
-            4.552662655006599e-04,
-            5.094134103106141e-04,
-            -5.097121812717492e-04,
-            -2.633671005871926e-06,
-        ],
-        [
-            1.080247271555298e+00,
-            4.295708779729699e-04,
-            4.236696989826053e-04,
-            -4.230872781715032e-04,
-            -2.176024389696356e-05,
-        ],
-    ];
+    let reference = VBIC_PHYSICAL_PERIODIC_REFERENCE;
     for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
-        let netlist = Netlist::parse(&format!(
-            "VBIC coupled thermal/delay orbit\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1meg)\nQ1 c b 0 0 th qm\n.model qm {kind}(LEVEL=4 IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=.8 SELFT=1 RTH=1000 CTH=1n TD=100n)\n.options GMIN=0\n.temp 27\n.end",
-            1.2*p, 0.65*p, 0.65*p, 0.02*p,
-        )).unwrap();
+        let netlist = vbic_physical_periodic_oracle(kind, p, 4);
         let mut config = SimulationConfig::default();
         config.convergence_config.gmin_target = 0.0;
         config.convergence_config.junction_gmin_target = 0.0;
@@ -1383,4 +1391,130 @@ fn native_gp_hb_matches_independent_ngspice_current_and_voltage_orbit() {
             }
         }
     }
+}
+
+fn assert_vbic_physical_hb_oracle<const N: usize>(
+    dialect: SpiceDialect,
+    level: u32,
+    observations: [&str; N],
+    reference: &[[f64; N]; 8],
+) {
+    use num_complex::Complex64;
+    use rspice_core::analysis::HbConfig;
+    for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
+        let netlist = vbic_physical_periodic_oracle(kind, p, level);
+        let mut simulation = SimulationConfig::default().with_spice_dialect(dialect);
+        simulation.convergence_config.gmin_target = 0.0;
+        simulation.convergence_config.junction_gmin_target = 0.0;
+        let mut config = HbConfig::new(F0).with_harmonics(15).with_tolerance(1e-9);
+        config.abstol = 1e-14;
+        let hb = Engine::new(simulation)
+            .run_hb(&netlist, config)
+            .unwrap_or_else(|e| panic!("{kind}: {e}"));
+        for (column, name) in observations.iter().enumerate() {
+            let node = hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|s| s.node_name.eq_ignore_ascii_case(name));
+            let (spectrum, sign) = if let Some(node) = node {
+                (&node.coefficients, 1.0)
+            } else {
+                (
+                    &hb.result
+                        .mna_branch_currents
+                        .iter()
+                        .find(|s| s.device_name.eq_ignore_ascii_case(name))
+                        .unwrap()
+                        .coefficients,
+                    p,
+                )
+            };
+            for (phase, expected) in reference.iter().enumerate() {
+                let actual = sign
+                    * spectrum
+                        .iter()
+                        .enumerate()
+                        .map(|(k, c)| {
+                            (*c * Complex64::from_polar(
+                                1.0,
+                                std::f64::consts::TAU * k as f64 * phase as f64 / 8.0,
+                            ))
+                            .re
+                        })
+                        .sum::<f64>();
+                let tolerance = match *name {
+                    "th" => 2e-6,
+                    "VB" => 2e-9,
+                    _ => 2e-8,
+                };
+                assert!(
+                    (actual - expected[column]).abs() < tolerance,
+                    "{dialect:?} LEVEL={level} {kind} {name} phase={phase}: {actual:e} vs {:e}",
+                    expected[column]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn vbic_physical_hb_matches_independent_self_heated_delay_orbit() {
+    assert_vbic_physical_hb_oracle(
+        SpiceDialect::Ngspice,
+        4,
+        ["th", "Q1.__xf1.internal", "Q1.__xf2.internal", "VC", "VB"],
+        &VBIC_PHYSICAL_PERIODIC_REFERENCE,
+    );
+}
+
+#[test]
+fn vbic_physical_hb_xyce13_matches_independent_self_heated_delay_orbit() {
+    // Xyce 7.10 LEVEL=12, same card with native VBIC 1.3 thermal feedback.
+    // .TRAN .1n 20u 0 .1n, TIMEINT RELTOL=1e-8 ABSTOL=1e-15,
+    // NONLIN-TRAN RELTOL=1e-9 ABSTOL=1e-15, GMIN=0, TEMP=TNOM=27.
+    // [temperature rise K, I(VC), I(VB)] at eight phases of 19--20 us.
+    let reference = [
+        [
+            1.069392529702954e+00,
+            -5.519643134799208e-04,
+            -4.606436548402884e-05,
+        ],
+        [
+            1.045455644774869e+00,
+            -9.070534537837068e-04,
+            -6.020360017017696e-05,
+        ],
+        [
+            1.087394423198977e+00,
+            -1.400136633442582e-03,
+            -3.096320682742689e-05,
+        ],
+        [
+            1.182595063657619e+00,
+            -1.660413867976028e-03,
+            2.742766968293816e-05,
+        ],
+        [
+            1.264282969651599e+00,
+            -1.378882317088421e-03,
+            4.039489792341861e-05,
+        ],
+        [
+            1.271957287762373e+00,
+            -8.498082472122414e-04,
+            1.676614576659702e-05,
+        ],
+        [
+            1.214910244525470e+00,
+            -5.108069984331623e-04,
+            -2.668088507606597e-06,
+        ],
+        [
+            1.135720085515649e+00,
+            -4.248294708412784e-04,
+            -2.179043857957657e-05,
+        ],
+    ];
+    assert_vbic_physical_hb_oracle(SpiceDialect::Xyce, 12, ["th", "VC", "VB"], &reference);
 }
