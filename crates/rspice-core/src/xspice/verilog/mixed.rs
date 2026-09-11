@@ -52,7 +52,9 @@
 //! circuit's first node on the other; a bridge referred to ground then stamped
 //! its Thevenin conductance onto whichever node happened to occupy row zero.
 
+mod analog_samples;
 mod shared;
+use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
 pub(crate) use shared::{MixedDigitalCoordinator, SharedDigitalTrial};
 
@@ -61,8 +63,10 @@ use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
-use rspice_veriloga::device::{VerilogADevice, VerilogADeviceCheckpoint};
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
+use rspice_veriloga::device::{
+    VerilogADevice, VerilogADeviceCheckpoint, VerilogAEvaluationSnapshot,
+};
 use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::vm::IntegrationCoefficients;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
@@ -482,15 +486,29 @@ impl DacBridge {
 /// when the module is wired and never touched again — which is why it lives
 /// beside the bridge declarations rather than in the rollback image.
 #[derive(Clone)]
-struct AnalogProbeWiring {
-    positive: usize,
-    negative: usize,
-    scale: f64,
+enum AnalogProbeWiring {
+    Solution {
+        positive: usize,
+        negative: usize,
+        scale: f64,
+    },
+    Variable {
+        name: String,
+    },
 }
 
 impl AnalogProbeWiring {
-    fn sample(&self, solution: &[f64]) -> f64 {
-        self.scale * (node_voltage(solution, self.positive) - node_voltage(solution, self.negative))
+    fn sample(&self, solution: &[f64]) -> Option<f64> {
+        match self {
+            Self::Solution {
+                positive,
+                negative,
+                scale,
+            } => Some(
+                scale * (node_voltage(solution, *positive) - node_voltage(solution, *negative)),
+            ),
+            Self::Variable { .. } => None,
+        }
     }
 }
 
@@ -589,7 +607,7 @@ struct TrialScratch {
     /// Differential voltage each A/D bridge was sampled at.
     sampled: Vec<f64>,
     /// The continuous-net probe bank one settle sampled.
-    probes: Vec<f64>,
+    probes: Vec<Option<f64>>,
     /// The bits one settle found moved, before they are composed into whole
     /// signal values: `(A/D bridge index, new bit)`, in bridge order.
     bit_drives: Vec<(usize, FourStateBit)>,
@@ -615,10 +633,13 @@ struct TrialScratch {
 /// makes an opened trial cost no allocation at all.
 #[derive(Clone, Default)]
 struct TrialVectors {
+    /// Ordinary published variables and reporting scalars need their pre-trial
+    /// image for exact readback and checkpoint rollback.
+    analog_evaluation: VerilogAEvaluationSnapshot,
     discrete_inputs: Vec<f64>,
     transition_times: Vec<Option<f64>>,
     sampled_adc_voltages: Vec<f64>,
-    probe_values: Vec<f64>,
+    probe_values: Vec<Option<f64>>,
     adc_moved: Vec<bool>,
     dac_moved: Vec<bool>,
 }
@@ -643,7 +664,7 @@ struct MixedState {
     /// accepted timepoint, parallel to `MixedSignalHost::analog_probes`.
     /// Scheduled activations sample the trial's candidate solution; this bank
     /// provides accepted history and the initial values of explicit host drives.
-    accepted_probe_values: Vec<f64>,
+    accepted_probe_values: Vec<Option<f64>>,
     /// Recent accepted history of each A/D boundary net, parallel to
     /// `bridges.adc`.
     adc_history: Vec<BoundaryNetHistory>,
@@ -752,6 +773,9 @@ pub struct MixedSignalCheckpoint {
 /// deferred to the first write.
 #[derive(Clone)]
 pub struct MixedSignalHost {
+    /// One normal analog evaluation shared by variable sampling and stamping.
+    /// Candidate-only storage; every trial boundary invalidates its contents.
+    prepared_analog: PreparedAnalogStamp,
     /// The deck's own name for this instance, carried so a refusal can say
     /// which X-card it is about rather than which module.
     instance: String,
@@ -779,6 +803,10 @@ pub struct MixedSignalHost {
     /// next evaluation recomputes from the same accepted record. The small
     /// bank of externally supplied discrete variables is restored separately
     /// from `TrialVectors::discrete_inputs`, alongside scalar solver inputs.
+    /// Ordinary evaluation variables also need their pre-trial scalar image:
+    /// they are observable in readback/checkpoints even when they carry no
+    /// accepted operator history. `TrialVectors::analog_evaluation` restores
+    /// that bank without cloning the device or replaying its equations.
     ///
     /// The plain analog route has always relied on exactly this: a rejected
     /// transient timestep re-runs `prepare_veriloga_timepoint` and re-stamps
@@ -825,6 +853,7 @@ struct DiscreteAnalogInput {
     signal: DigitalSignalId,
     variable: usize,
     signed: bool,
+    real: bool,
     name: String,
 }
 
@@ -1006,7 +1035,7 @@ impl MixedSignalHost {
         }
 
         let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
-        let discrete_inputs = canonical_ir
+        let discrete_inputs: Vec<_> = canonical_ir
             .hir
             .variables
             .iter()
@@ -1021,6 +1050,7 @@ impl MixedSignalHost {
                         signal: signal.id,
                         variable: usize::from(variable.id),
                         signed: signal.signed,
+                        real: signal.kind.is_real(),
                         name: signal.name.to_string(),
                     })
             })
@@ -1031,16 +1061,31 @@ impl MixedSignalHost {
             .map_err(DigitalRunError::from)?;
         let max_bridge_iterations = scheduler_limits.max_delta_cycles_per_tick.max(1);
         let mut digital = DigitalHost::new(&canonical_ir.digital, resolution, scheduler_limits);
-        // Before `start`, because `start` places every process's first
-        // activation at tick zero and an `initial` block that probes a
-        // continuous net runs there. Nothing has been solved yet, so what it
-        // reads is the zero vector — which is not a substitute for a solution,
-        // it *is* the solution state of an unsolved matrix, and the same thing
-        // a node voltage read before the first solve would give.
-        let initial_probe_values = vec![0.0; analog_probes.len()];
+        let dependencies: Vec<_> = analog_probes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, probe)| {
+                matches!(probe, AnalogProbeWiring::Variable { .. }).then(|| {
+                    (
+                        DigitalAnalogProbeId::from(index),
+                        discrete_inputs.iter().map(|input| input.signal).collect(),
+                    )
+                })
+            })
+            .collect();
+        digital.bind_analog_variable_inputs(&dependencies)?;
+        // Physical probes start at the unsolved zero vector; retained variable
+        // samples remain unavailable until normal analog evaluation publishes
+        // them. Candidate-driven activation refreshes this bank before running
+        // any process that reads an analog value.
+        let initial_probe_values = analog_probes
+            .iter()
+            .map(|probe| probe.sample(&[]))
+            .collect::<Vec<_>>();
         digital.sample_analog_probes(&initial_probe_values);
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
+            prepared_analog: PreparedAnalogStamp::default(),
             instance: instance.to_string(),
             source_digest,
             resolution,
@@ -1086,6 +1131,7 @@ impl MixedSignalHost {
         phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     ) -> Result<(), MixedSignalError> {
         self.require_idle("begin an analysis")?;
+        self.prepared_analog.invalidate();
         self.analog
             .make_mut()
             .try_begin_analysis_in_phase(analysis, phase)
@@ -1096,7 +1142,14 @@ impl MixedSignalHost {
         self.state.initial_digital = None;
         self.state.accepted_adc_voltages.fill(0.0);
         self.state.accepted_adc_transition_times.fill(None);
-        self.state.accepted_probe_values.fill(0.0);
+        for (slot, probe) in self
+            .state
+            .accepted_probe_values
+            .iter_mut()
+            .zip(&self.analog_probes)
+        {
+            *slot = probe.sample(&[]);
+        }
         self.state.adc_history.fill(BoundaryNetHistory::default());
         self.state.dac_history.fill(BoundaryNetHistory::default());
         self.state.accepted_tick = 0;
@@ -1109,6 +1162,7 @@ impl MixedSignalHost {
 
     pub(crate) fn set_temperature(&mut self, temperature: f64) -> Result<(), MixedSignalError> {
         self.require_idle("configure temperature")?;
+        self.prepared_analog.invalidate();
         self.analog
             .make_mut()
             .try_set_temperature(temperature)
@@ -1136,6 +1190,7 @@ impl MixedSignalHost {
         phase: rspice_veriloga_runtime::AnalogAnalysisPhase,
     ) -> Result<(), MixedSignalError> {
         self.require_idle("configure analysis phase")?;
+        self.prepared_analog.invalidate();
         self.analog
             .make_mut()
             .try_set_analysis_phase(phase)
@@ -1181,6 +1236,7 @@ impl MixedSignalHost {
         &mut self,
         parameters: rspice_veriloga_runtime::GeneratedSimulationParameters,
     ) {
+        self.prepared_analog.invalidate();
         self.analog.make_mut().set_simulation_parameters(parameters);
     }
 
@@ -1225,6 +1281,7 @@ impl MixedSignalHost {
     ) -> Result<(), MixedSignalError> {
         self.require_idle("configure analysis step")?;
         if self.analysis_step() != (initial, final_step) {
+            self.prepared_analog.invalidate();
             self.analog
                 .make_mut()
                 .try_set_analysis_step(initial, final_step)
@@ -1260,6 +1317,7 @@ impl MixedSignalHost {
     /// final node numbering, before the first analysis begins.
     pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize + Copy) {
         debug_assert!(!self.digital_started && self.trial.is_none());
+        self.prepared_analog.invalidate();
         let branch_nodes: Vec<_> = (0..self.analog.num_branch_unknowns())
             .map(|index| remap(self.analog.branch_current_index(index).unwrap()))
             .collect();
@@ -1278,8 +1336,13 @@ impl MixedSignalHost {
             bridge.negative = remap(bridge.negative);
         }
         for probe in &mut self.analog_probes {
-            probe.positive = remap(probe.positive);
-            probe.negative = remap(probe.negative);
+            if let AnalogProbeWiring::Solution {
+                positive, negative, ..
+            } = probe
+            {
+                *positive = remap(*positive);
+                *negative = remap(*negative);
+            }
         }
         for bus in &mut self.boundary_buses {
             for member in &mut bus.members {
@@ -1684,6 +1747,8 @@ impl MixedSignalHost {
 
         let rollback = self.state.digital.clone();
         let previous_inputs = self.analog_inputs;
+        self.analog
+            .capture_evaluation_state(&mut self.scratch.trial.analog_evaluation);
         let inputs = AnalogSolverInputs {
             analysis: 2,
             phase: self.analog_inputs.phase,
@@ -1719,6 +1784,10 @@ impl MixedSignalHost {
             // the device has become unusable, the refusal worth reporting is
             // the one that made it so rather than a consequence of it.
             let _ = self.apply_analog_inputs(previous_inputs);
+            let _ = self
+                .analog
+                .make_mut()
+                .restore_evaluation_state(&self.scratch.trial.analog_evaluation);
             return Err(error);
         }
         self.analog_inputs = inputs;
@@ -1792,13 +1861,11 @@ impl MixedSignalHost {
                 circuit_voltages,
                 &mut self.scratch.probes,
             );
-            let digital = self.state.digital.make_mut();
-            digital.sample_analog_probes(&self.scratch.probes);
-            if start {
-                digital.start()?;
-                self.trial.as_mut().unwrap().start_digital = false;
-            }
-            digital.advance_to(tick)?;
+            let probes = std::mem::take(&mut self.scratch.probes);
+            let advanced =
+                self.advance_digital_at_candidate(circuit_voltages, &probes, tick, start);
+            self.scratch.probes = probes;
+            advanced?;
         }
         Ok(())
     }
@@ -1823,7 +1890,12 @@ impl MixedSignalHost {
                     ),
                 }
             })?;
-            if self.analog.discrete_state_value(input.variable) != Some(value) {
+            if self
+                .analog
+                .discrete_state_value(input.variable)
+                .map(f64::to_bits)
+                != Some(value.to_bits())
+            {
                 self.analog
                     .make_mut()
                     .sample_discrete_state(input.variable, value)
@@ -1842,6 +1914,7 @@ impl MixedSignalHost {
     /// are handed is the value the device already holds, which is what makes
     /// the undo path cost a handful of comparisons.
     fn apply_analog_inputs(&mut self, inputs: AnalogSolverInputs) -> Result<(), MixedSignalError> {
+        self.prepared_analog.invalidate();
         let analog = self.analog.make_mut();
         analog
             .try_set_analysis_type(inputs.analysis)
@@ -1897,7 +1970,18 @@ impl MixedSignalHost {
             .unwrap_or_default();
         let digital = self.state.digital.make_mut();
         digital.sample_analog_probes(&probes);
-        digital.force_many(&parsed, tick)?;
+        if self
+            .analog_probes
+            .iter()
+            .any(|probe| matches!(probe, AnalogProbeWiring::Variable { .. }))
+        {
+            let MixedDigital::Owned(digital) = digital else {
+                unreachable!("view refused above")
+            };
+            digital.prepare_forces(&parsed, tick)?;
+        } else {
+            digital.force_many(&parsed, tick)?;
+        }
         // A drive published into the slot can move a D/A input, so the
         // boundary is no longer known quiet.
         if let Some(trial) = self.trial.as_mut() {
@@ -1922,10 +2006,23 @@ impl MixedSignalHost {
         self.validate_solution(circuit_voltages)?;
         self.advance_trial_digital(circuit_voltages)?;
         self.sample_discrete_inputs()?;
-        self.analog
-            .make_mut()
-            .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
-            .map_err(analog_error)?;
+        if self
+            .analog_probes
+            .iter()
+            .any(|probe| matches!(probe, AnalogProbeWiring::Variable { .. }))
+        {
+            self.prepared_analog.prepare(
+                self.analog.make_mut(),
+                &self.discrete_inputs,
+                circuit_voltages,
+            )?;
+            self.prepared_analog.stamp(&mut matrix_add, &mut rhs_add);
+        } else {
+            self.analog
+                .make_mut()
+                .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
+                .map_err(analog_error)?;
+        }
         self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
     }
 
@@ -2155,13 +2252,7 @@ impl MixedSignalHost {
                 .next_tick()
                 .is_some_and(|next| next <= tick)
         {
-            let digital = self.state.digital.make_mut();
-            digital.sample_analog_probes(&scratch.probes);
-            if start {
-                digital.start()?;
-                self.trial.as_mut().unwrap().start_digital = false;
-            }
-            digital.advance_to(tick)?;
+            self.advance_digital_at_candidate(circuit_voltages, &scratch.probes, tick, start)?;
         }
         scratch.bit_drives.clear();
         scratch.drives.clear();
@@ -2240,9 +2331,23 @@ impl MixedSignalHost {
         // timepoint and nothing to interpolate between.
         fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
         if !scratch.drives.is_empty() {
-            let digital = self.state.digital.make_mut();
-            digital.sample_analog_probes(&scratch.probes);
-            digital.force_many_from_analog(&scratch.drives, publish_tick, time_seconds)?;
+            if self.state.digital.is_view() {
+                self.state.digital.make_mut().force_many_from_analog(
+                    &scratch.drives,
+                    publish_tick,
+                    time_seconds,
+                )?;
+            } else {
+                self.with_analog_participant(circuit_voltages, |digital, producer| {
+                    digital.sample_analog_probes(&scratch.probes);
+                    digital.force_many_from_analog_with(
+                        &scratch.drives,
+                        publish_tick,
+                        time_seconds,
+                        producer,
+                    )
+                })?;
+            }
             if let Some(trial) = self.trial.as_mut() {
                 for &(index, crossing) in &scratch.crossings {
                     trial.vectors.transition_times[index] = Some(crossing);
@@ -2363,6 +2468,7 @@ impl MixedSignalHost {
     /// Called only with the candidate returned by prepare_trial_acceptance,
     /// while a reservation excludes any mutation of this host.
     fn apply_prepared_acceptance(&mut self, mut trial: ActiveTrial) {
+        self.prepared_analog.invalidate();
         std::mem::swap(&mut self.state.adc_history, &mut self.scratch.adc_history);
         std::mem::swap(&mut self.state.dac_history, &mut self.scratch.dac_history);
         self.analog.make_mut().apply_validated_advance_state();
@@ -2417,18 +2523,22 @@ impl MixedSignalHost {
                 .sample_discrete_state(input.variable, *value);
         }
         let _ = self.undo_analog_inputs(trial.analog_inputs);
+        let _ = self
+            .analog
+            .make_mut()
+            .restore_evaluation_state(&trial.vectors.analog_evaluation);
         self.scratch.trial = trial.vectors;
     }
 
     /// Restore every digital, event and driver bit to the state at
     /// [`begin_trial`](Self::begin_trial).
     ///
-    /// Plus the analog device's five solver inputs, which are scalars. That is
-    /// the whole restore, and the three things it does not name are not
-    /// omissions. The bridge tables cannot have moved, because adding one
-    /// requires an idle host. The accepted bank cannot have moved, because
-    /// [`Self::accept_trial`] is its only writer. And the analog device's
-    /// *state* has nothing to put back: a trial that does not reach
+    /// Also restore scalar solver inputs, externally supplied discrete state
+    /// and the ordinary evaluation-variable image. The bridge tables cannot
+    /// have moved, because adding one requires an idle host. The accepted bank
+    /// cannot have moved, because [`Self::accept_trial`] is its only writer.
+    /// The analog device's accepted operator history remains unchanged: a trial
+    /// that does not reach
     /// `accept_trial` never reaches `apply_validated_advance_state`, which is
     /// the only promotion of a candidate into the device's accepted record, so
     /// what a rejected trial leaves behind is candidate state the next
@@ -2521,6 +2631,7 @@ impl MixedSignalHost {
             .validate_checkpoint_state(&checkpoint.analog_checkpoint)
             .map_err(analog_error)?;
         self.analog = checkpoint.analog.clone();
+        self.prepared_analog.invalidate();
         self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
         self.digital_started = true;
@@ -2984,7 +3095,11 @@ fn read_dac_bits(state: &MixedState, out: &mut Vec<FourStateBit>) -> Result<(), 
 /// `node_voltage` — a probe and a bridge that name one node must agree about
 /// its voltage, and the way to guarantee that is for there to be one function
 /// that answers.
-fn fill_analog_probes(probes: &[AnalogProbeWiring], circuit_voltages: &[f64], out: &mut Vec<f64>) {
+fn fill_analog_probes(
+    probes: &[AnalogProbeWiring],
+    circuit_voltages: &[f64],
+    out: &mut Vec<Option<f64>>,
+) {
     out.clear();
     out.extend(probes.iter().map(|probe| probe.sample(circuit_voltages)));
 }
@@ -3073,8 +3188,15 @@ fn wire_analog_probes(
         .map(|probe| {
             let (positive, negative, declared) = match &probe.target {
                 DigitalAnalogProbeTarget::Variable { name } => {
-                    return Err(MixedSignalError::InvalidBridge {
-                        detail: format!("analog-owned variable `{name}` requires the circuit-wide analog evaluation barrier; this runtime binding is not implemented yet"),
+                    if analog.variable(name).is_none() {
+                        return Err(MixedSignalError::InvalidBridge {
+                            detail: format!(
+                                "analog-owned variable `{name}` has no retained evaluation slot"
+                            ),
+                        });
+                    }
+                    return Ok(AnalogProbeWiring::Variable {
+                        name: name.to_string(),
                     });
                 }
                 DigitalAnalogProbeTarget::Nodes { positive, negative } => {
@@ -3097,7 +3219,7 @@ fn wire_analog_probes(
                 }
             };
             if probe.quantity == AccessKind::Potential {
-                return Ok(AnalogProbeWiring {
+                return Ok(AnalogProbeWiring::Solution {
                     positive: resolve(positive)?,
                     negative: negative.map_or(Ok(0), resolve)?,
                     scale: 1.0,
@@ -3132,7 +3254,7 @@ fn wire_analog_probes(
                         probe.spelling()
                     ),
                 })?;
-            Ok(AnalogProbeWiring {
+            Ok(AnalogProbeWiring::Solution {
                 positive: current,
                 negative: 0,
                 scale: if unknown.pos_node == pos && unknown.neg_node == neg {

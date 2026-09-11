@@ -689,6 +689,17 @@ impl DigitalHost {
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
     ) -> Result<(), DigitalRunError> {
+        self.prepare_forces(drives, tick)?;
+        self.settle(tick)
+    }
+
+    /// Publish a co-timed input bank and enqueue its consequences. A mixed
+    /// trial may need its candidate solution before those processes can run.
+    pub(crate) fn prepare_forces(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+    ) -> Result<(), DigitalRunError> {
         self.require_standalone_execution()?;
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
@@ -698,7 +709,7 @@ impl DigitalHost {
             self.store.force(*signal, value.clone(), &self.plan)?;
         }
         self.dispatch(tick)?;
-        self.settle(tick)
+        Ok(())
     }
 
     /// Settle only the zero-delay causal consequences of an analog crossing.
@@ -745,7 +756,7 @@ impl DigitalHost {
     /// solution — Verilog-AMS LRM 2.4 section 7.3.6.3 fixes a probe's value by
     /// the *time* the expression is evaluated, and a bank refreshed halfway
     /// through a settle would give two processes in one slot two answers.
-    pub(crate) fn sample_analog_probes(&mut self, values: &[f64]) {
+    pub(crate) fn sample_analog_probes(&mut self, values: &[Option<f64>]) {
         self.store.sample_analog_probes(values);
     }
 

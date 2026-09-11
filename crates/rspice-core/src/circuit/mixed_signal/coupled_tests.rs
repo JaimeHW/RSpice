@@ -105,10 +105,12 @@ fn fixture(
         r#"
 module controller(p,trigger,response,command);
  inout p; electrical p; input trigger,response; wire trigger,response;
- output command; reg command,sampled;
+ output command; reg command,sampled; real analog_response;
  initial begin command=0; sampled=1; end
- always @(posedge trigger) begin command=1; #0 sampled=response; command<=0; end
- analog I(p)<+sampled*1e-3;
+ always @(posedge trigger) begin
+   command=1; #0 sampled=(analog_response>0.5); command<=0;
+ end
+ analog begin analog_response=response; I(p)<+sampled*1e-3; end
 endmodule
 "#,
         None,

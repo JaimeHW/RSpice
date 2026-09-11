@@ -37,6 +37,9 @@ pub(crate) struct DigitalActiveExchange<'a> {
 }
 
 impl DigitalActiveExchange<'_> {
+    pub(crate) fn require_standalone_execution(&self) -> Result<(), DigitalRunError> {
+        self.host.require_standalone_execution()
+    }
     pub(crate) fn read_signal(&self, signal: DigitalSignalId) -> Option<&FourStateValue> {
         self.host.read(signal)
     }

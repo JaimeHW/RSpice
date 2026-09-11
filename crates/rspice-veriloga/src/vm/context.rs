@@ -532,6 +532,48 @@ impl VmContext {
         }
     }
 
+    /// Withdraw one rejected evaluation independently of solver-input changes.
+    /// Keep accepted histories and the solver's limiter iteration history. The
+    /// device restores its captured variables and reporting scalars separately.
+    pub(crate) fn discard_trial_candidate(&mut self) {
+        self.numerical_evaluation_valid = false;
+        if let Some(journal) = &mut self.analog_effects {
+            journal.discard_candidate();
+        }
+        for origin in self.idtmod_origins.values_mut() {
+            origin.candidate = None;
+        }
+        for index in 0..self.state_candidate_valid.len() {
+            let status = &mut self.state_candidate_valid[index];
+            if *status <= INTEGRATION_CANDIDATE_IDLE {
+                if *status == INTEGRATION_CANDIDATE_VALID {
+                    *status = INTEGRATION_CANDIDATE_IDLE;
+                }
+                self.state_values[index] = self.state_values_prev[index];
+                self.state_derivatives[index] = self.state_derivatives_prev[index];
+                self.state_older_candidate[index] = 0.0;
+            }
+        }
+        for buffer in &mut self.delay_buffers {
+            buffer.begin_evaluation();
+        }
+        for filter in &mut self.transition_filters {
+            filter.begin_evaluation();
+        }
+        for filter in &mut self.slew_filters {
+            filter.begin_evaluation();
+        }
+        for detector in &mut self.cross_detectors {
+            detector.begin_evaluation();
+        }
+        for filter in &mut self.laplace_filters {
+            filter.begin_evaluation();
+        }
+        for filter in &mut self.zi_filters {
+            filter.begin_evaluation();
+        }
+    }
+
     #[cfg(feature = "native")]
     pub(crate) fn analog_effects_ptr(
         &mut self,

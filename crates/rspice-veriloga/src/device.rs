@@ -1047,6 +1047,18 @@ pub struct VerilogADevice {
 /// Version 11 retains exact circular-integrator origins when the modulus changes.
 pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 11;
 
+/// Reusable, ephemeral image of evaluated scalar variables and reporting state.
+/// The mixed host restores solver/discrete inputs separately. Accepted operator
+/// histories stay in the device; this is not a persistent checkpoint. Limiter
+/// iteration history retains its existing solver-owned Newton lifetime.
+#[derive(Clone, Default)]
+pub struct VerilogAEvaluationSnapshot {
+    model: Option<std::sync::Arc<CompiledModel>>,
+    variables: Vec<f64>,
+    timer_event_bound: f64,
+    limiter_active: u8,
+}
+
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
 #[derive(Debug, Clone, PartialEq)]
@@ -3970,6 +3982,45 @@ impl VerilogADevice {
             .accepted_event_variables()
             .get(position)
             .copied()
+    }
+
+    /// Retain evaluated scalars before a speculative mixed trial. The image
+    /// reuses its allocation and shares the immutable compiled model identity.
+    pub fn capture_evaluation_state(&self, snapshot: &mut VerilogAEvaluationSnapshot) {
+        if snapshot
+            .model
+            .as_ref()
+            .is_none_or(|model| !std::sync::Arc::ptr_eq(model, &self.model))
+        {
+            snapshot.model = Some(self.model.clone());
+        }
+        snapshot.variables.clone_from(&self.context.variables);
+        snapshot.timer_event_bound = self.context.timer_event_bound;
+        snapshot.limiter_active = self.context.limiter_active;
+    }
+
+    /// Withdraw an evaluation's candidates and restore the captured scalars.
+    /// The snapshot must come from this same immutable model. Solver inputs and
+    /// discrete state are restored separately, before calling this method.
+    pub fn restore_evaluation_state(
+        &mut self,
+        snapshot: &VerilogAEvaluationSnapshot,
+    ) -> Result<(), VmError> {
+        if snapshot
+            .model
+            .as_ref()
+            .is_none_or(|model| !std::sync::Arc::ptr_eq(model, &self.model))
+            || snapshot.variables.len() != self.context.variables.len()
+        {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "evaluation snapshot does not match the compiled model".into(),
+            ));
+        }
+        self.context.discard_trial_candidate();
+        self.context.variables.copy_from_slice(&snapshot.variables);
+        self.context.timer_event_bound = snapshot.timer_event_bound;
+        self.context.limiter_active = snapshot.limiter_active;
+        Ok(())
     }
 
     /// Set simulation time

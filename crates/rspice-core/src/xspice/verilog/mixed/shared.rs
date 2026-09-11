@@ -1,5 +1,5 @@
 //! Circuit ownership of digital execution and per-model observation banks.
-use super::super::host::DigitalActiveParticipant;
+use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
 use crate::xspice::event_scheduler::EventTarget;
@@ -147,7 +147,7 @@ impl MixedDigital {
             Self::View(_) => None,
         }
     }
-    pub(super) fn sample_analog_probes(&mut self, values: &[f64]) {
+    pub(super) fn sample_analog_probes(&mut self, values: &[Option<f64>]) {
         if let Self::Owned(host) = self {
             host.sample_analog_probes(values);
         }
@@ -204,7 +204,7 @@ pub(crate) struct MixedDigitalCoordinator {
     resolution: TimeResolution,
     enabled: bool,
     accepted_time: Option<f64>,
-    probes: Vec<f64>,
+    probes: Vec<Option<f64>>,
     drives: Vec<(DigitalSignalId, FourStateValue)>,
 }
 
@@ -393,7 +393,7 @@ impl MixedDigitalCoordinator {
                 ))))
             })
             .collect();
-        let probes = vec![0.0; linked.plan.analog_probes.len()];
+        let probes = vec![None; linked.plan.analog_probes.len()];
         // Global execution honors the strictest participant's configured
         // ceilings; enrolling a model must never silently relax its limits.
         let limits = hosts
@@ -415,6 +415,27 @@ impl MixedDigitalCoordinator {
             })
             .unwrap_or_default();
         let mut digital = DigitalHost::from_plan(Arc::new(linked.plan), resolution, limits);
+        let dependencies: Vec<_> = hosts
+            .iter()
+            .zip(&maps)
+            .flat_map(|(host, map)| {
+                host.analog_probes
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(index, probe)| {
+                        matches!(probe, AnalogProbeWiring::Variable { .. }).then(|| {
+                            (
+                                map.analog_probes[index],
+                                host.discrete_inputs
+                                    .iter()
+                                    .map(|input| map.signals[usize::from(input.signal)])
+                                    .collect(),
+                            )
+                        })
+                    })
+            })
+            .collect();
+        digital.bind_analog_variable_inputs(&dependencies)?;
         if !bit_groups.is_empty() {
             digital.connect_bits(&bit_groups)?;
         }
@@ -447,7 +468,7 @@ impl MixedDigitalCoordinator {
             resolution: self.resolution,
             enabled: false,
             accepted_time: None,
-            probes: vec![0.0; self.probes.len()],
+            probes: vec![None; self.probes.len()],
             drives: Vec::new(),
         }
     }
@@ -593,11 +614,54 @@ pub(crate) struct SharedDigitalTrial<'a> {
     probe: bool,
 }
 
+struct CircuitAnalogParticipant<'a, 'p> {
+    hosts: &'a mut [MixedSignalHost],
+    maps: &'a [DigitalLinkedInstance],
+    solution: &'a [f64],
+    external: Option<&'p mut dyn DigitalActiveParticipant>,
+}
+
+impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
+    fn settle_active(
+        &mut self,
+        exchange: &mut DigitalActiveExchange<'_>,
+    ) -> Result<bool, DigitalRunError> {
+        match &mut self.external {
+            Some(external) => external.settle_active(exchange),
+            None => {
+                exchange.require_standalone_execution()?;
+                Ok(false)
+            }
+        }
+    }
+    fn sample_analog(
+        &mut self,
+        exchange: &mut DigitalActiveExchange<'_>,
+    ) -> Result<(), DigitalRunError> {
+        let requested = exchange.analog_sample_requests();
+        let mut samples = Vec::new();
+        for (host, map) in self.hosts.iter_mut().zip(self.maps) {
+            let mut producer = AnalogModelParticipant {
+                instance: &host.instance,
+                analog: &mut host.analog,
+                inputs: &host.discrete_inputs,
+                probes: &host.analog_probes,
+                prepared: &mut host.prepared_analog,
+                solution: self.solution,
+                signals: Some(&map.signals),
+                probe_ids: Some(&map.analog_probes),
+            };
+            producer.sample_into(exchange, &requested, &mut samples)?;
+        }
+        exchange.publish_analog_variables(&samples)
+    }
+}
+
 impl SharedDigitalTrial<'_> {
     /// Read every process probe before allowing any instance to run.
     pub(crate) fn advance(
         &mut self,
-        hosts: &[MixedSignalHost],
+        hosts: &mut [MixedSignalHost],
         solution: &[f64],
     ) -> Result<(), MixedSignalError> {
         self.advance_with(hosts, solution, None)
@@ -605,9 +669,9 @@ impl SharedDigitalTrial<'_> {
 
     pub(crate) fn advance_with(
         &mut self,
-        hosts: &[MixedSignalHost],
+        hosts: &mut [MixedSignalHost],
         solution: &[f64],
-        mut participant: Option<&mut dyn DigitalActiveParticipant>,
+        participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<(), MixedSignalError> {
         let coordinator = &mut self.coordinator;
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
@@ -616,6 +680,13 @@ impl SharedDigitalTrial<'_> {
                 coordinator.probes[usize::from(*global)] = probe.sample(solution);
             }
         }
+        let has_external = participant.is_some();
+        let mut participant = CircuitAnalogParticipant {
+            hosts,
+            maps: &coordinator.maps,
+            solution,
+            external: participant,
+        };
         if coordinator
             .digital
             .next_tick()
@@ -623,13 +694,10 @@ impl SharedDigitalTrial<'_> {
         {
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
-            let advanced = match &mut participant {
-                Some(participant) => digital.advance_to_with(self.tick, *participant),
-                None => digital.advance_to(self.tick),
-            };
+            let advanced = digital.advance_to_with(self.tick, &mut participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
-        if let Some(participant) = participant {
+        if has_external {
             // An XSPICE event or analog input can be due without an HDL timer.
             // Run that physical boundary through the causal lane so rounding
             // its reporting tick cannot consume an unrelated future timer.
@@ -639,7 +707,8 @@ impl SharedDigitalTrial<'_> {
                 .map_err(DigitalRunError::from)?;
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
-            let advanced = digital.force_many_from_analog_with(&[], tick, self.time, participant);
+            let advanced =
+                digital.force_many_from_analog_with(&[], tick, self.time, &mut participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
@@ -648,14 +717,16 @@ impl SharedDigitalTrial<'_> {
     /// Apply all A/D decisions together, preserving analog activation provenance.
     pub(crate) fn publish_adc(
         &mut self,
-        hosts: &[MixedSignalHost],
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
     ) -> Result<bool, MixedSignalError> {
-        self.publish_adc_with(hosts, None)
+        self.publish_adc_with(hosts, solution, None)
     }
 
     pub(crate) fn publish_adc_with(
         &mut self,
-        hosts: &[MixedSignalHost],
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
         participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
         let coordinator = &mut self.coordinator;
@@ -704,15 +775,18 @@ impl SharedDigitalTrial<'_> {
         }
         let digital = coordinator.digital.make_mut();
         digital.sample_analog_probes(&coordinator.probes);
-        let published = match participant {
-            Some(participant) => digital.force_many_from_analog_with(
-                &coordinator.drives,
-                tick,
-                self.time,
-                participant,
-            ),
-            None => digital.force_many_from_analog(&coordinator.drives, tick, self.time),
+        let mut participant = CircuitAnalogParticipant {
+            hosts,
+            maps: &coordinator.maps,
+            solution,
+            external: participant,
         };
+        let published = digital.force_many_from_analog_with(
+            &coordinator.drives,
+            tick,
+            self.time,
+            &mut participant,
+        );
         published.map_err(|error| coordinator.execution_error(error))?;
         Ok(true)
     }

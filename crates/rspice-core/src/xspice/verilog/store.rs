@@ -595,7 +595,7 @@ impl DigitalSignalStore {
     /// that built the store from one plan and the samples from another, so it
     /// writes nothing rather than a prefix — a partially refreshed bank would
     /// let a process read one net at this timepoint and another at the last.
-    pub(crate) fn sample_analog_probes(&mut self, values: &[f64]) {
+    pub(crate) fn sample_analog_probes(&mut self, values: &[Option<f64>]) {
         if values.len() != self.analog_samples.len() {
             debug_assert!(
                 false,
@@ -606,7 +606,7 @@ impl DigitalSignalStore {
             return;
         }
         for (slot, value) in self.analog_samples.iter_mut().zip(values) {
-            *slot = Some(*value);
+            *slot = *value;
         }
         // Physical solution samples cannot certify an analog evaluation's
         // published variables, even if their buffer slots contain numbers.

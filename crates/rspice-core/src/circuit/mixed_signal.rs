@@ -159,8 +159,10 @@ impl<'a> MixedHostTrialGroup<'a> {
             // All A/D decisions are published before any dependent HDL process
             // runs. Analog equations read the resulting bank only after quiet.
             moved |= match &mut participant {
-                Some(participant) => digital.publish_adc_with(self.hosts, Some(&mut **participant)),
-                None => digital.publish_adc(self.hosts),
+                Some(participant) => {
+                    digital.publish_adc_with(self.hosts, voltages, Some(&mut **participant))
+                }
+                None => digital.publish_adc(self.hosts, voltages),
             }
             .map_err(shared_error)?;
             moved |= digital.synchronize(self.hosts).map_err(shared_error)?;

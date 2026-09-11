@@ -2269,6 +2269,59 @@ fn digital_flow_probes_observe_named_sources_and_parallel_branch_identity() {
 }
 
 #[test]
+fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs() {
+    let model = ModelFile::new(
+        "variable_sampler",
+        r#"
+`timescale 1ns/1ps
+module variable_sampler(p,q);
+ inout p; electrical p; output q; reg q;
+ parameter real LOAD=1000;
+ reg [7:0] gain; reg startup_ok;
+ real measured; integer count;
+ analog begin
+   measured=gain*V(p); count=-3;
+   I(p)<+(V(p)-gain)/1000;
+ end
+ initial begin
+   gain=2; q=0;
+   startup_ok=(measured-4*LOAD/(1000+LOAD)<1e-8)
+     && (measured-4*LOAD/(1000+LOAD)>-1e-8);
+   #1; gain=4;
+   q=startup_ok && (count==-3)
+     && (measured-16*LOAD/(1000+LOAD)<1e-8)
+     && (measured-16*LOAD/(1000+LOAD)>-1e-8);
+ end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* retained variables and coupled discrete inputs\n.param vcc=1\nXa pa qa variable_sampler LOAD=1000\nXb pb qb variable_sampler LOAD=2000\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" variable_sampler\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, expected) in [("pa", 2.0), ("pb", 8.0 / 3.0)] {
+        assert!(
+            (waveform(&result, node).last().unwrap() - expected).abs() < 1e-8,
+            "{node}"
+        );
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+        assert!(
+            (waveform(&result, node).last().unwrap() - 1.0 / 1.02).abs() < 1e-8,
+            "{node}"
+        );
+    }
+}
+
+#[test]
 fn digital_flow_probes_observe_anonymous_sources_and_reversed_direction() {
     sampled_flow_circuit(false);
 }

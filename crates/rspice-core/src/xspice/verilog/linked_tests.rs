@@ -337,9 +337,9 @@ fn linked_digital_analog_probes_and_refusals_preserve_instance_identity() {
         linked.instances[0].source_files,
         linked.instances[1].source_files
     );
-    let mut probes = vec![0.0; linked.plan.analog_probes.len()];
-    probes[usize::from(linked.instances[0].analog_probes[0])] = 0.25;
-    probes[usize::from(linked.instances[1].analog_probes[0])] = 0.75;
+    let mut probes = vec![None; linked.plan.analog_probes.len()];
+    probes[usize::from(linked.instances[0].analog_probes[0])] = Some(0.25);
+    probes[usize::from(linked.instances[1].analog_probes[0])] = Some(0.75);
     let mut host = DigitalHost::new(
         &linked.plan,
         TimeResolution::new(linked.plan.timing.precision_exponent).unwrap(),

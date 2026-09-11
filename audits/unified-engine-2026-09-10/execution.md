@@ -2499,6 +2499,84 @@ licensed reference comparisons were not run.
 This is an interpreter/scheduler increment, not completion of MS03, MS05, MS06,
 the full MS00-MS15 plan, production readiness or vendor parity.
 
+## Normal analog-variable producers and candidate reuse (MS03/MS05/MS06, partial)
+
+The mixed host now admits retained real/integer analog-variable reads through
+normal model evaluation. Local and circuit-linked execution use the same producer
+participant. At an analog-read barrier, it samples the owner's resolved discrete
+inputs, evaluates its analog equations against the circuit candidate, publishes
+its retained variable bank, and lets the waiting processes resume. The shared
+participant also preserves the existing XSPICE Active-wave handshake before
+sampling; it does not create a second solver or evaluate a display-only model.
+
+Physical solution banks now use explicit optional entries. They cannot fabricate
+an analog-variable zero or certify a variable evaluation. Dependency bindings use
+the local or linked signal identities and invalidate samples when that owner's
+analog inputs change. Real input sampling preserves signed zero. Retained signed
+integer results pass through the existing checked integer publication contract.
+
+A candidate stamp buffer retains the actual matrix/RHS contributions from that
+normal evaluation. Assembly reuses them when the referenced solver nodes and
+sampled discrete inputs are bit-identical. Trial boundaries, analysis/phase/step,
+temperature, simulation configuration, remapping and checkpoint restoration
+invalidate the buffer. Models without variable reads retain direct stamping.
+Physical loads, branch unknowns and D/A conductances remain in the same circuit
+matrix. This adds no observation replay and no variable-only electrical unknown.
+
+The new rejection fixture found two defects while exercising this route. First,
+ordinary evaluated variables survived rejection and leaked into readback and
+checkpoints. Second, an unchanged companion rule left a rejected integration
+candidate live, so checkpoint capture failed after consecutive equal-size steps.
+A reusable evaluation snapshot now restores ordinary variables, timer reporting
+and the limiter-active indication, with immutable-model identity validation.
+Rollback explicitly withdraws task, integration, circular-origin, delay, filter
+and detector candidates independently of solver-input changes. Accepted histories
+and accepted task calls are preserved. Limiter iteration history retains its
+existing solver-owned Newton lifetime; broader limiter/controller transaction
+qualification is still open under MS05.
+
+The focused host fixture checks one normal producer evaluation, stamp reuse,
+startup rejection/retry, fresh digital inputs, ddt conductance/history, accepted
+checkpoint restoration, and repeated rejection with unchanged coefficients. The
+loaded-circuit fixture uses two differently loaded instances, integer and real
+samples, native resistors/capacitors and an exactly timed output edge. The two
+existing coupled-owner fixtures now read an analog-owned variable after XSPICE
+feedback and before NBA publication, retaining their late-refusal, retry, shared
+driver and resource-undo assertions. The physical flow fixtures continue to cover
+named/anonymous sources, orientation, parallel branches and pin-flow sampling.
+
+Six focused checks passed before integration (three host checks in 0.02 s after
+a 1m11s build; three circuit checks in 0.08 s after a 42.53 s build). Extending the
+same host fixture exposed the equal-coefficient rejection defect; that one-case
+failure is recorded in analog-variable-producer-equal-step.log. The earlier
+scalar-variable and task-journal failures were corrected before that six-check
+run. Logs are in target/unified-mixed-fixes. After the explicit candidate cleanup and upstream integration, four host checks
+passed in 0.02 s after a 1m15s build, including the extended producer fixture and
+the existing accepted-state rollback regression. Three circuit checks passed in
+0.08 s after a 43.22 s build. Final logs: analog-variable-producer-host-final.log
+and analog-variable-producer-circuit-final.log. Seven unique focused checks cover
+this increment; repetition was limited to changed implementation and integration.
+No broader suite was started.
+
+Main through 8f6a36407 is incorporated, including the other workstream's generated
+circular-integrator state and checkpoint persistence. The only integration
+conflict was the generated manifest; regeneration owns its resolution.
+All 43 built-ins were regenerated. Relative to that incorporated main, only the
+generator digest changed; generated numerical bodies and bundle digest
+7fa6dacfd0b7152a324c267c95a7062ff741d5b0e4ca2a86676c44229ec94504 are unchanged.
+The generator digest is 9886e51391639bc402c3e5c0e77dadb67b2b031c516f09fa35d22aebed616951.
+Artifact schema 56 and persistent runtime checkpoint version 11 are unchanged;
+the evaluation snapshot is ephemeral and is not a new persisted format. Log:
+target/unified-mixed-fixes/analog-variable-producer-integrated-generator.log.
+
+This enables scheduled process reads of supported analog-owned scalar variables
+in actual mixed circuits. Analog-variable and physical-probe event subscriptions,
+module-level integer ownership, the rest of the type/array surface, full all-owner
+startup/effects/controller transactions, mixed analysis qualification, real digital
+code generation, browser/tablet execution and licensed comparisons remain open.
+No full suite or vendor comparison was run, and this increment does not close
+MS03, MS05, MS06, the MS00-MS15 plan, production readiness or vendor parity.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05
@@ -2507,7 +2585,8 @@ and converters while implementing shared loaded conductors, RNM and authored
 conversions, and remove unnecessary analog unknowns from digital chains. Extend
 the root handshake to XSPICE boundaries and complete flow-event/analog-owned-variable
 dependencies and feedback convergence. Scheduled process flow reads now share
-the authoritative solution sample; event subscriptions remain open. Complete the remaining ownership/type/
+the authoritative solution sample, and retained scalar-variable reads use normal
+analog evaluation and prepared stamps; event subscriptions remain open. Complete the remaining ownership/type/
 event requirements under MS06. Both conditional value domains now retain control
 flow, and numeric conversion handles the recorded mixed-clock comparison.
 Extend qualification of the
