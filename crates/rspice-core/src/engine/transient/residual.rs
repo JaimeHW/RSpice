@@ -2332,7 +2332,6 @@ impl Engine {
         time: Value,
         baseline_diag_gmin: Value,
     ) -> Result<Vec<Value>, SimulationError> {
-        self.update_transient_nonlinear_devices(circuit, solution)?;
         circuit.update_bjt_static_linearizations(solution);
         circuit.update_b3soi_static_linearizations(solution);
         circuit.update_jfet_static_linearizations(solution);
@@ -2349,7 +2348,7 @@ impl Engine {
             circuit.stamp_xyce_core_static_residual(probe, solution);
             if circuit.has_nonlinear_devices() {
                 circuit
-                    .try_stamp_static_probe_nonlinear(probe, probe_rhs, solution)
+                    .try_stamp_static_dae_nonlinear(probe, probe_rhs, solution)
                     .map_err(SimulationError::Circuit)?;
                 circuit
                     .stamp_behavioral_static_dae_probe(

@@ -1828,6 +1828,57 @@ for weighted companions, all-owner acceptance integration and analysis dispatch
 remain open. Runtime/mixed models retain the complete ordinary companion path.
 Reference parity and release qualification remain open.
 
+## Static history now includes settled mixed contributions
+
+All mixed hosts now enter the same reserved acceptance barrier before native
+history, thermal state or runtime analog state can be promoted. Shared XSPICE
+participants retain their Active-wave/projection settlement; non-enrolled XSPICE
+is evaluated/projected before the ordinary mixed barrier. Both paths observe
+mixed analog equations and physical D/A conductances/RHS from the settled
+candidate before reserving it. Observation does not advance HDL, sample A/D,
+replace analog state or publish tasks. Out-of-range/nonfinite static actions
+fail before any participant commits.
+
+Runtime analog-only static history now selects StaticDaeProbe, after the final
+ordinary candidate has been evaluated. Native nonlinear bias refresh happens
+before that final evaluation, and the static stamp does not invalidate its
+runtime voltage/state bank. Generated candidate evaluation also precedes its
+static observation. Mixed static residuals are added to the native/runtime/
+generated/XSPICE residual at the same final projected solution. The ordinary
+Newton/physical-residual path retains its complete companion formulation.
+
+A new acceptance fixture checks exact native resistor, runtime analog, mixed
+conductance, ddt, initialized idt and loaded DAC contributions at startup and
+two digital event boundaries. The static vector omits ddt, retains the accepted
+integral outputs 4/6/9, and observes the newly settled digital gain/drive. A
+checkpoint replay produces the same values. Existing mixed failure, thermal
+preparation and native-history refusal/retry checks pass through the revised
+barrier. The existing shared-driver/resource callback-refusal case also passes
+with static capture enabled.
+
+Initial selection: shared rollback passed; the new fixture exposed an existing
+compiler refusal of an analog read of a two-part declared digital output
+(output q; reg q;), and an older assertion incorrectly queried a view's local
+event queue. That assertion now reads the circuit scheduler. The history fixture
+uses an internal digital variable bridged explicitly; the output-variable
+compiler defect remains tracked for the next increment. After those fixture
+adjustments, four focused cases passed in 0.02 seconds after a 32.86-second build.
+Logs: target/unified-mixed-fixes/mixed-static-history.log and
+mixed-static-history-final.log. No full suite was run.
+
+After incorporating main through ee4a2a80f (including circular-integrator and
+breakpoint changes), two actual deck regressions passed: mixed RC/idt against
+native trapezoidal equations in 0.06 seconds, and shared HDL/XSPICE off-grid
+causality with rejected analog steps in 2.78 seconds. Build: 1m22s. Log:
+target/unified-mixed-fixes/mixed-static-history-decks.log. The inherited built-in
+manifest digest is d510d76ec8a47fe0f516a9fea5b3bd97928f4f81c101baf9818abb2a90a9dfce;
+this core-only increment changes no generator inputs.
+
+This completes this acceptance/static-history prerequisite. Distinct derivative
+and integral companion coefficients, runtime/mixed F/Q capability proof and the
+remaining MS08 analysis work are still open; the OneStep guard remains in place.
+The wider MS00–MS15 plan, shipping-platform and reference qualification remain open.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

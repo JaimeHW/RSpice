@@ -72,7 +72,8 @@ impl Engine {
         let result = (|| {
             let finish = |circuit: &mut crate::CircuitData,
                           solution: &mut [Value],
-                          projected: &[(usize, Value)]| {
+                          projected: &[(usize, Value)],
+                          mixed_static: Option<&[Value]>| {
                 if !projected.is_empty() {
                     if let Some(native) = native.as_mut() {
                         native.snapshots.vbic_snapshots = None;
@@ -80,23 +81,15 @@ impl Engine {
                         native.snapshots.mosfet_caps = None;
                         native.snapshots.mosfet_gate_companion_charges = None;
                     }
-                    // Static-history capture performs this refresh itself. Other
-                    // paths must update native trial bias after an output projection.
-                    if !capture_static_history && circuit.has_nonlinear_devices() {
-                        self.update_transient_nonlinear_devices(circuit, solution)?;
-                    }
                 }
-                let static_history = if capture_static_history {
-                    Some(self.capture_xyce_static_residual(
-                        circuit,
-                        matrix,
-                        solution,
-                        time,
-                        baseline_diag_gmin,
-                    )?)
-                } else {
-                    None
-                };
+                // Refresh before final analog evaluation: updating device voltages
+                // invalidates numerical candidates, while static observation must
+                // retain the complete final candidate for subsequent acceptance.
+                if capture_static_history
+                    || (!projected.is_empty() && circuit.has_nonlinear_devices())
+                {
+                    self.update_transient_nonlinear_devices(circuit, solution)?;
+                }
                 #[cfg(feature = "veriloga")]
                 if circuit.has_veriloga_devices() {
                     circuit
@@ -109,6 +102,33 @@ impl Engine {
                         .evaluate_generated_veriloga_timepoint(matrix, solution)
                         .map_err(SimulationError::Circuit)?;
                 }
+                let static_history = if capture_static_history {
+                    let mut history = self.capture_xyce_static_residual(
+                        circuit,
+                        matrix,
+                        solution,
+                        time,
+                        baseline_diag_gmin,
+                    )?;
+                    if let Some(mixed) = mixed_static {
+                        if history.len() != mixed.len() {
+                            return Err(SimulationError::Circuit(
+                                "mixed static history has the wrong circuit dimension".into(),
+                            ));
+                        }
+                        for (value, mixed) in history.iter_mut().zip(mixed) {
+                            *value += mixed;
+                            if !value.is_finite() {
+                                return Err(SimulationError::Circuit(
+                                    "combined static history is not finite".into(),
+                                ));
+                            }
+                        }
+                    }
+                    Some(history)
+                } else {
+                    None
+                };
                 // Use the final projected electrical candidate, but retain the
                 // preceding material/load state until every HDL participant agrees.
                 let thermal = circuit
@@ -166,28 +186,10 @@ impl Engine {
                 Ok((discontinuity, static_history))
             };
             #[cfg(feature = "veriloga")]
-            if circuit.has_coupled_event_nets() {
-                let (mixed_discontinuity, (discontinuity, history)) = circuit
-                    .accept_coupled_transient_with(
-                        time,
-                        dt,
-                        solution,
-                        XspiceCompanionPolicy {
-                            coefficients,
-                            xyce_one_step_order2,
-                        },
-                        initial_step,
-                        final_step,
-                        rollback
-                            .as_ref()
-                            .expect("enrolled XSPICE rollback")
-                            .resources(),
-                        &mut projected,
-                        finish,
-                    )?;
-                return Ok((discontinuity || mixed_discontinuity, history));
-            }
-            if has_xspice {
+            let coupled = circuit.has_coupled_event_nets();
+            #[cfg(not(feature = "veriloga"))]
+            let coupled = false;
+            if has_xspice && !coupled {
                 circuit
                     .evaluate_xspice_transient_timestep_with_coefficients(
                         time,
@@ -206,7 +208,27 @@ impl Engine {
                     })?;
                 projected = circuit.project_xspice_voltage_outputs(solution, circuit.num_nodes());
             }
-            finish(circuit, solution, &projected)
+            #[cfg(feature = "veriloga")]
+            if circuit.has_mixed_signal_hosts() {
+                let (mixed_discontinuity, (discontinuity, history)) = circuit
+                    .accept_mixed_transient_with(
+                        time,
+                        dt,
+                        solution,
+                        XspiceCompanionPolicy {
+                            coefficients,
+                            xyce_one_step_order2,
+                        },
+                        initial_step,
+                        final_step,
+                        rollback.as_ref().map(|snapshot| snapshot.resources()),
+                        capture_static_history,
+                        &mut projected,
+                        finish,
+                    )?;
+                return Ok((discontinuity || mixed_discontinuity, history));
+            }
+            finish(circuit, solution, &projected, None)
         })();
         match (result, rollback) {
             (Ok(value), rollback) => {
@@ -459,6 +481,100 @@ mod tests {
     }
 
     #[test]
+    fn accepted_static_history_includes_settled_mixed_runtime_and_dac_terms() {
+        let engine = Engine::new(crate::SimulationConfig::default());
+        let deck = Netlist::parse("static history\nRnative native 0 2\nRva va 0 2\nRmix mixed 0 2\nRdac bridge 0 2\n.end\n").unwrap();
+        let mut circuit = engine.build_circuit(&deck).unwrap();
+        let va = circuit.get_node_by_name("va").unwrap();
+        let mixed = circuit.get_node_by_name("mixed").unwrap();
+        let bridge = circuit.get_node_by_name("bridge").unwrap();
+        let native = circuit.get_node_by_name("native").unwrap();
+        let compiled = VerilogACompiler::default()
+            .compile_runtime(
+                "module analog_only(p); inout p; electrical p;
+             analog I(p)<+2*V(p)+ddt(3e-9*V(p))+idt(1e9*V(p),4); endmodule",
+                None,
+            )
+            .unwrap();
+        circuit.add_veriloga_device(
+            VerilogADevice::try_new_with_canonical_ir(
+                "analog_only",
+                compiled.model,
+                &compiled.canonical_ir,
+                &[va],
+            )
+            .unwrap(),
+        );
+        let mut host = MixedSignalHost::compile(
+            "module mixed_history(p); inout p; electrical p; reg q;
+             initial begin q=0; #1 q=1; #1 q=0; end
+             analog I(p)<+2*(q+1)*V(p)+ddt(3e-9*V(p))+idt(1e9*V(p),4); endmodule",
+            None,
+            "mixed_history",
+            &[mixed],
+            SchedulerLimits::default(),
+        )
+        .unwrap();
+        host.add_dac_bridge("q", 0, (bridge, 0), 0.0, 1.0, 2.0)
+            .unwrap();
+        circuit.add_mixed_signal_host(host).unwrap();
+        circuit.begin_veriloga_analysis(2).unwrap();
+        circuit.start_mixed_digital_execution().unwrap();
+        let size = circuit.matrix_size();
+        let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries).unwrap();
+        circuit.link_indices(&matrix);
+        let mut solution = vec![0.0; size];
+        solution[native - 1] = 0.5;
+        solution[bridge - 1] = 0.25;
+        let (_, initial) =
+            step(&engine, &mut circuit, &mut matrix, &mut solution, 0.0, 0.0).unwrap();
+        let initial = initial.unwrap();
+        assert_eq!(initial[va - 1], 4.0);
+        assert_eq!(initial[mixed - 1], 4.0);
+        assert_eq!(initial[bridge - 1], 0.25);
+        assert_eq!(initial[native - 1], 0.25);
+        let checkpoint = circuit.clone();
+        for replay in 0..2 {
+            if replay == 1 {
+                circuit = checkpoint.clone();
+            }
+            for (time, voltage, integral, digital) in [(1e-9, 2.0, 6.0, 1.0), (2e-9, 3.0, 9.0, 0.0)]
+            {
+                solution[va - 1] = voltage;
+                solution[mixed - 1] = voltage;
+                let (_, history) = step(
+                    &engine,
+                    &mut circuit,
+                    &mut matrix,
+                    &mut solution,
+                    time,
+                    1e-9,
+                )
+                .unwrap();
+                let history = history.unwrap();
+                assert!(
+                    (history[va - 1] - (2.5 * voltage + integral)).abs() < 1e-12,
+                    "runtime history={history:?}"
+                );
+                assert!(
+                    (history[mixed - 1] - ((2.0 * (digital + 1.0) + 0.5) * voltage + integral))
+                        .abs()
+                        < 1e-12,
+                    "mixed history={history:?}"
+                );
+                assert_eq!(history[bridge - 1], 0.25 - 0.5 * digital);
+                assert_eq!(history[native - 1], 0.25);
+                assert_eq!(
+                    circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
+                    if digital == 1.0 { "1" } else { "0" }
+                );
+                assert!(!circuit.mixed_signal_hosts[0].trial_active());
+            }
+        }
+    }
+
+    #[test]
     fn acceptance_barrier_restores_earlier_models_when_a_later_mixed_candidate_fails() {
         let (engine, mut circuit, mut matrix, mut solution, resources) = fixture(false);
         step(&engine, &mut circuit, &mut matrix, &mut solution, 0.0, 0.0).unwrap();
@@ -496,8 +612,11 @@ mod tests {
             assert!(!host.trial_active());
             assert_eq!(host.read_digital("q").unwrap(), "0");
             assert_eq!(host.read_digital("later").unwrap(), "0");
-            assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
         }
+        assert!(
+            (circuit.next_mixed_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20,
+            "the circuit owner retains the pending event after rollback"
+        );
         assert_eq!(
             before,
             circuit

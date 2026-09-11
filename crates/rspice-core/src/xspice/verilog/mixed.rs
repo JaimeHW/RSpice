@@ -1895,6 +1895,49 @@ impl MixedSignalHost {
             .make_mut()
             .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
             .map_err(analog_error)?;
+        self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
+    }
+
+    /// Observe the already settled candidate without running HDL, resampling
+    /// A/D inputs, or changing the analog operator/task state.
+    pub(crate) fn stamp_static_dae<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        mut matrix_add: M,
+        mut rhs_add: R,
+    ) -> Result<(), MixedSignalError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        self.active_tick()?;
+        self.validate_solution(circuit_voltages)?;
+        if !self.trial.as_ref().is_some_and(|trial| trial.bridges_quiet) {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "static history requires a settled mixed boundary".into(),
+            });
+        }
+        self.analog
+            .make_mut()
+            .try_stamp_with_mode(
+                circuit_voltages,
+                &mut matrix_add,
+                &mut rhs_add,
+                rspice_veriloga::vm::VerilogAEvaluationMode::StaticDaeProbe,
+            )
+            .map_err(analog_error)?;
+        self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
+    }
+
+    fn stamp_dac_bridges<M, R>(
+        &self,
+        matrix_add: &mut M,
+        rhs_add: &mut R,
+    ) -> Result<(), MixedSignalError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
         for bridge in &self.state.bridges.dac {
             let value = self.state.digital.read(bridge.signal).ok_or_else(|| {
                 MixedSignalError::InvalidBridge {

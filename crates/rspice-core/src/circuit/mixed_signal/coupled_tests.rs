@@ -302,7 +302,7 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
         let rollback = circuit.capture_xspice_acceptance();
         let captures = resource.captures.load(Ordering::Relaxed);
         let mut projected = Vec::new();
-        let result = circuit.accept_coupled_transient_with(
+        let result = circuit.accept_mixed_transient_with(
             0.0,
             0.0,
             &mut solution,
@@ -312,9 +312,11 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
             },
             true,
             false,
-            rollback.resources(),
+            Some(rollback.resources()),
+            true,
             &mut projected,
-            |_, _, _| {
+            |_, _, _, history| {
+                assert!(history.unwrap().iter().all(|value| value.is_finite()));
                 assert!(
                     *resource.value.lock().unwrap() > 0,
                     "external candidate must have advanced before native preparation"

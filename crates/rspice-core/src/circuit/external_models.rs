@@ -562,9 +562,9 @@ impl CircuitData {
     /// order-two F/Q split without changing its model equations.
     ///
     /// Runtime-loaded analog-only and mixed models currently expose a combined
-    /// transient stamp. Both must retain the ordinary companion formulation:
-    /// mixed static contributions are not part of OneStep's accepted F history,
-    /// and their state operators consume the complete companion rule. This does
+    /// transient stamp. Static history can now observe their settled states,
+    /// but both must retain the ordinary companion formulation until derivative
+    /// and integral operators receive the distinct weighted rules. This does
     /// not restrict the ordinary trapezoidal/Gear integration order. Generated
     /// models carry a compiler-proven capability bit that excludes `idt`,
     /// nonlinear `ddt`, and `ddt`-dependent control flow.

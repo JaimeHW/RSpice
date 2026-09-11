@@ -15,8 +15,8 @@
 //!
 //! The shared runtime's next event joins the transient breakpoint list. Analog
 //! electrical boundaries remain physical loads. Enrolled XSPICE event drivers
-//! participate in the same numerical probe; the deck route remains refused
-//! until shared acceptance and candidate-control inspection are integrated.
+//! participate in the same numerical probe and acceptance barrier. Static
+//! history observes the settled candidate without replaying digital events.
 
 #[cfg(test)]
 #[path = "mixed_signal/coupled_tests.rs"]
@@ -178,6 +178,47 @@ impl<'a> MixedHostTrialGroup<'a> {
             host.instance_name(),
             host.boundary_settle_oscillation(MAX_BOUNDARY_SETTLE_PASSES),
         ))
+    }
+
+    fn static_residual(&mut self, solution: &[Value]) -> Result<Vec<Value>, SimulationError> {
+        let mut action = vec![0.0; solution.len()];
+        let mut rhs = vec![0.0; solution.len()];
+        for host in self.hosts.iter_mut() {
+            let (mut bad_matrix, mut bad_rhs) = (false, false);
+            let stamped = host.stamp_static_dae(
+                solution,
+                |row, col, value| {
+                    if let (Some(slot), Some(voltage)) = (action.get_mut(row), solution.get(col)) {
+                        *slot += value * voltage;
+                    } else {
+                        bad_matrix = true;
+                    }
+                },
+                |row, value| {
+                    if let Some(slot) = rhs.get_mut(row) {
+                        *slot += value;
+                    } else {
+                        bad_rhs = true;
+                    }
+                },
+            );
+            named(host, stamped)?;
+            if bad_matrix || bad_rhs {
+                return Err(SimulationError::Circuit(format!(
+                    "mixed Verilog-AMS instance '{}' static history stamp exceeds the circuit topology",
+                    host.instance_name()
+                )));
+            }
+        }
+        for (value, rhs) in action.iter_mut().zip(rhs) {
+            *value -= rhs;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(
+                    "mixed static residual is not finite".into(),
+                ));
+            }
+        }
+        Ok(action)
     }
 
     fn prepare(
@@ -580,12 +621,12 @@ impl CircuitData {
         )
     }
 
-    /// Settle and validate shared HDL/XSPICE before native acceptance work.
+    /// Settle and validate every mixed host before native acceptance work.
     /// The caller owns the XSPICE/resource and projected-solution rollback.
     /// Its finish callback must complete all remaining fallible preparation
     /// before promotion; after it succeeds, these HDL commits are infallible.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn accept_coupled_transient_with<T>(
+    pub(crate) fn accept_mixed_transient_with<T>(
         &mut self,
         time: Value,
         dt: Value,
@@ -593,18 +634,23 @@ impl CircuitData {
         companion: XspiceCompanionPolicy<'_>,
         initial_step: bool,
         final_step: bool,
-        resources: &crate::xspice::ResourceTransaction,
+        resources: Option<&crate::xspice::ResourceTransaction>,
+        capture_static_history: bool,
         projected: &mut Vec<(usize, Value)>,
         finish: impl FnOnce(
             &mut CircuitData,
             &mut [Value],
             &[(usize, Value)],
+            Option<&[Value]>,
         ) -> Result<T, SimulationError>,
     ) -> Result<(bool, T), SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, companion.coefficients)?;
-        let bindings = self.mixed_xspice_bindings.clone().ok_or_else(|| {
-            SimulationError::Circuit("shared acceptance requires enrolled event connections".into())
-        })?;
+        let bindings = self.mixed_xspice_bindings.clone();
+        if bindings.is_some() && resources.is_none() {
+            return Err(SimulationError::Circuit(
+                "shared acceptance requires its resource transaction".into(),
+            ));
+        }
         let mut owner = MixedCircuitOwner::begin(self, false)?;
         let mut digital = owner
             .coordinator
@@ -620,34 +666,38 @@ impl CircuitData {
             Some((initial_step, final_step)),
             false,
         )?;
-        let mut projected_quiet = false;
-        for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
-            let mut participant = XspiceDigitalParticipant::new(
-                owner.circuit,
-                &bindings,
-                solution,
-                time,
-                dt,
-                crate::xspice::AnalysisType::Transient,
-                crate::xspice::EvaluationPhase::AcceptedStep,
-                companion,
-                Some(resources),
-            );
-            group.settle_with(&mut digital, solution, Some(&mut participant))?;
-            drop(participant);
-            let updates = owner
-                .circuit
-                .project_xspice_voltage_outputs(solution, owner.circuit.num_nodes());
-            if updates.is_empty() {
-                projected_quiet = true;
-                break;
+        if let Some(bindings) = &bindings {
+            let mut projected_quiet = false;
+            for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
+                let mut participant = XspiceDigitalParticipant::new(
+                    owner.circuit,
+                    bindings,
+                    solution,
+                    time,
+                    dt,
+                    crate::xspice::AnalysisType::Transient,
+                    crate::xspice::EvaluationPhase::AcceptedStep,
+                    companion,
+                    resources,
+                );
+                group.settle_with(&mut digital, solution, Some(&mut participant))?;
+                drop(participant);
+                let updates = owner
+                    .circuit
+                    .project_xspice_voltage_outputs(solution, owner.circuit.num_nodes());
+                if updates.is_empty() {
+                    projected_quiet = true;
+                    break;
+                }
+                projected.extend(updates);
             }
-            projected.extend(updates);
-        }
-        if !projected_quiet {
-            return Err(SimulationError::Circuit(format!(
-                "mixed candidate voltage projection did not settle at t={time:.16e}s"
-            )));
+            if !projected_quiet {
+                return Err(SimulationError::Circuit(format!(
+                    "mixed candidate voltage projection did not settle at t={time:.16e}s"
+                )));
+            }
+        } else {
+            group.settle(&mut digital, solution)?;
         }
         let mut discontinuity = false;
         for host in group.hosts.iter_mut() {
@@ -657,8 +707,16 @@ impl CircuitData {
         }
         // Reserve every HDL candidate before native state can be promoted.
         // Dropping these reservations on a callback error unwinds all hosts.
+        let static_history = capture_static_history
+            .then(|| group.static_residual(solution))
+            .transpose()?;
         let prepared = group.prepare()?;
-        let result = finish(owner.circuit, solution, projected)?;
+        let result = finish(
+            owner.circuit,
+            solution,
+            projected,
+            static_history.as_deref(),
+        )?;
         for candidate in prepared {
             candidate.commit();
         }

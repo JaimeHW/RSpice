@@ -71,9 +71,10 @@ pub(crate) struct AcceptedNativeNonlinearCheckpointStates {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DiodeStampMode {
+enum NonlinearStampMode {
     LimitedNewton,
     StaticProbe,
+    StaticDaeProbe,
 }
 impl CircuitData {
     pub(crate) fn initialize_xyce_team_resistance_noise(
@@ -1268,11 +1269,11 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) -> Result<(), String> {
-        self.try_stamp_nonlinear_with_diode_mode(
+        self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
             voltages,
-            DiodeStampMode::LimitedNewton,
+            NonlinearStampMode::LimitedNewton,
             false,
         )
     }
@@ -1288,11 +1289,29 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
     ) -> Result<(), String> {
-        self.try_stamp_nonlinear_with_diode_mode(
+        self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
             voltages,
-            DiodeStampMode::StaticProbe,
+            NonlinearStampMode::StaticProbe,
+            false,
+        )
+    }
+
+    /// Static DAE history omits runtime Verilog-A derivatives while retaining
+    /// each device's settled operator state. Ordinary residual probes keep
+    /// their complete transient companions.
+    pub(crate) fn try_stamp_static_dae_nonlinear(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) -> Result<(), String> {
+        self.try_stamp_nonlinear_with_mode(
+            matrix,
+            rhs,
+            voltages,
+            NonlinearStampMode::StaticDaeProbe,
             false,
         )
     }
@@ -1307,11 +1326,11 @@ impl CircuitData {
         static_probe: bool,
     ) -> Result<(), String> {
         let mode = if static_probe {
-            DiodeStampMode::StaticProbe
+            NonlinearStampMode::StaticProbe
         } else {
-            DiodeStampMode::LimitedNewton
+            NonlinearStampMode::LimitedNewton
         };
-        self.try_stamp_nonlinear_with_diode_mode(matrix, rhs, voltages, mode, true)
+        self.try_stamp_nonlinear_with_mode(matrix, rhs, voltages, mode, true)
     }
 
     pub(crate) fn stamp_promoted_vbic_correction(
@@ -1328,18 +1347,20 @@ impl CircuitData {
         }
     }
 
-    fn try_stamp_nonlinear_with_diode_mode(
+    fn try_stamp_nonlinear_with_mode(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        diode_stamp_mode: DiodeStampMode,
+        stamp_mode: NonlinearStampMode,
         defer_vbic: bool,
     ) -> Result<(), String> {
         use crate::device::NonlinearDevice;
-        match diode_stamp_mode {
-            DiodeStampMode::LimitedNewton => self.diodes.stamp_all_direct(matrix, rhs, voltages),
-            DiodeStampMode::StaticProbe => {
+        match stamp_mode {
+            NonlinearStampMode::LimitedNewton => {
+                self.diodes.stamp_all_direct(matrix, rhs, voltages)
+            }
+            NonlinearStampMode::StaticProbe | NonlinearStampMode::StaticDaeProbe => {
                 self.diodes
                     .stamp_static_probe_all_direct(matrix, rhs, voltages);
             }
@@ -1353,11 +1374,11 @@ impl CircuitData {
         } else {
             self.bjts.stamp_all_direct(matrix, rhs, voltages);
         }
-        match diode_stamp_mode {
-            DiodeStampMode::LimitedNewton => {
+        match stamp_mode {
+            NonlinearStampMode::LimitedNewton => {
                 self.mosfets.stamp_all_direct(matrix, rhs, voltages);
             }
-            DiodeStampMode::StaticProbe => {
+            NonlinearStampMode::StaticProbe | NonlinearStampMode::StaticDaeProbe => {
                 self.mosfets
                     .stamp_all_static_probe_direct(matrix, rhs, voltages);
             }
@@ -1393,13 +1414,18 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             let veriloga_devices = self.veriloga_devices_mut();
-            veriloga_devices.update_all_voltages(voltages);
-            let evaluation_mode = match diode_stamp_mode {
-                DiodeStampMode::LimitedNewton => {
+            if stamp_mode != NonlinearStampMode::StaticDaeProbe {
+                veriloga_devices.update_all_voltages(voltages);
+            }
+            let evaluation_mode = match stamp_mode {
+                NonlinearStampMode::LimitedNewton => {
                     crate::device::veriloga::VerilogAEvaluationMode::NewtonLimited
                 }
-                DiodeStampMode::StaticProbe => {
+                NonlinearStampMode::StaticProbe => {
                     crate::device::veriloga::VerilogAEvaluationMode::StaticProbe
+                }
+                NonlinearStampMode::StaticDaeProbe => {
+                    crate::device::veriloga::VerilogAEvaluationMode::StaticDaeProbe
                 }
             };
             veriloga_devices.try_stamp_all_with_mode(
