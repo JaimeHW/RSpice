@@ -89,16 +89,11 @@
 //! missing rather than compiled into a device that is quietly short of what
 //! its author wrote. What still refuses here:
 //!
-//! - A module-level analog `integer` read from a process, and a `real` the
-//!   ownership rule above left in the continuous domain. Verilog-AMS LRM 2.4
-//!   section 7.3 allows both reads and section 7.3.6.3 fixes their value —
-//!   "the analog value calculated for the time corresponding to a real
-//!   promotion of the digital time at which the expression is evaluated" — so
-//!   what is missing is a boundary node for a *variable*, the way
-//!   [`CfgValueKind::DigitalAnalogPotential`] is one for a net. Until there is
-//!   one, a process-local declaration is the lowered form of the same intent.
+//! Scalar analog-owned real/integer reads now carry an explicit typed probe.
+//! The runtime must bind it to values retained by normal analog evaluation;
+//! the interpreter refuses an unavailable binding. Analog event subscriptions
+//! and arrays still require additional lowering and runtime support.
 //!
-//!   [`CfgValueKind::DigitalAnalogPotential`]: super::cfg::CfgValueKind::DigitalAnalogPotential
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
 //! - A nonblocking assignment to a process-local, which would need a store to
@@ -168,6 +163,40 @@ use std::collections::{BTreeSet, HashMap};
 /// accumulate-then-report discipline the rest of the front end uses, so an
 /// author with three unsupported constructs learns about three.
 pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
+    lower_with_analog_variables(digital, &HashMap::new())
+}
+
+pub(crate) fn lower_module(
+    module: &crate::semantic::AnalyzedModule,
+) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
+    use super::digital::DigitalAnalogQuantity;
+    let variables = module
+        .variables
+        .iter()
+        .filter_map(|variable| {
+            if module
+                .digital
+                .signals
+                .iter()
+                .any(|signal| signal.name == variable.name)
+            {
+                return None;
+            }
+            let quantity = match variable.value_type {
+                crate::ValueType::Real => DigitalAnalogQuantity::RealVariable,
+                crate::ValueType::Integer => DigitalAnalogQuantity::IntegerVariable,
+                _ => return None,
+            };
+            Some((variable.name.clone(), quantity))
+        })
+        .collect();
+    lower_with_analog_variables(&module.digital, &variables)
+}
+
+fn lower_with_analog_variables(
+    digital: &AnalyzedDigital,
+    analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
+) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
     if digital.is_empty() {
         return Ok(CanonicalDigitalPlan::default());
     }
@@ -275,6 +304,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     // the only expressions in one are a name and a select whose bounds are
     // already literals.
     let no_constants = DigitalConstants::default();
+    let no_analog_variables = HashMap::new();
 
     let mut processes = Vec::new();
     let mut drivers = Vec::new();
@@ -290,6 +320,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &signals,
             &module_scope,
             &digital.constants,
+            analog_variables,
             &mut probes,
             digital.time_scale,
         ) {
@@ -303,6 +334,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
             &signals,
             &module_scope,
             &digital.constants,
+            analog_variables,
             allocate(),
             &mut drivers,
             &mut probes,
@@ -320,6 +352,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &signals,
                 scope,
                 &instance.constants,
+                &no_analog_variables,
                 &mut probes,
                 instance.time_scale,
             ) {
@@ -333,6 +366,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &signals,
                 scope,
                 &instance.constants,
+                &no_analog_variables,
                 allocate(),
                 &mut drivers,
                 &mut probes,
@@ -348,6 +382,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
                 &signals,
                 &elaborated_scope,
                 &no_constants,
+                &no_analog_variables,
                 allocate(),
                 &mut drivers,
                 &mut probes,
@@ -450,6 +485,7 @@ fn lower_continuous_assign(
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
     constants: &DigitalConstants,
+    analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     id: DigitalProcessId,
     drivers: &mut Vec<DigitalDriver>,
     probes: &mut Vec<DigitalAnalogProbe>,
@@ -460,6 +496,7 @@ fn lower_continuous_assign(
         signals,
         index,
         constants,
+        analog_variables,
         probes,
         builder: ProcessBuilder::new(),
         diagnostics: Vec::new(),
@@ -611,6 +648,7 @@ fn lower_process(
     signals: &[DigitalSignal],
     index: &HashMap<&str, DigitalSignalId>,
     constants: &DigitalConstants,
+    analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
@@ -619,6 +657,7 @@ fn lower_process(
         signals,
         index,
         constants,
+        analog_variables,
         probes,
         builder: ProcessBuilder::new(),
         diagnostics: Vec::new(),
@@ -920,6 +959,7 @@ struct ProcessLowerer<'a> {
     /// is lowered against an empty table so a child's `WIDTH` can never be
     /// folded with a parent's.
     constants: &'a DigitalConstants,
+    analog_variables: &'a HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     /// The plan's continuous-net probe table, appended to as probes appear.
     ///
     /// Plan-wide rather than per-process, because it is what a host resolves
@@ -2371,7 +2411,9 @@ impl ProcessLowerer<'_> {
                     // name that denotes a signal is a runtime value and is
                     // never a constant, whatever else shares its spelling.
                     None => {
-                        self.constants.real(&identifier.name).is_some()
+                        self.analog_variables.get(&identifier.name)
+                            == Some(&super::digital::DigitalAnalogQuantity::RealVariable)
+                            || self.constants.real(&identifier.name).is_some()
                             || self.constants.non_finite_real(&identifier.name).is_some()
                     }
                 },
@@ -2475,7 +2517,7 @@ impl ProcessLowerer<'_> {
             ),
         };
         let id = match self.probes.iter().position(|probe| {
-            probe.access == function && probe.quantity == quantity && probe.target == target
+            probe.access == function && probe.quantity == quantity.into() && probe.target == target
         }) {
             Some(index) => DigitalAnalogProbeId::from(index),
             None => {
@@ -2483,7 +2525,7 @@ impl ProcessLowerer<'_> {
                 self.probes.push(DigitalAnalogProbe {
                     id,
                     access: function,
-                    quantity,
+                    quantity: quantity.into(),
                     target,
                     span: SourceSpanRef::from(access.span()),
                 });
@@ -2495,6 +2537,40 @@ impl ProcessLowerer<'_> {
             crate::ast::AccessKind::Flow => CfgValueKind::DigitalAnalogFlow { probe: id },
         };
         self.builder.push(block, CfgValueType::Real, kind)
+    }
+
+    fn analog_variable(&mut self, block: BlockId, name: &str, span: Span) -> ValueId {
+        use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
+        let quantity = self.analog_variables[name];
+        let target = DigitalAnalogProbeTarget::Variable { name: name.into() };
+        let id = match self
+            .probes
+            .iter()
+            .position(|probe| probe.target == target && probe.quantity == quantity)
+        {
+            Some(index) => DigitalAnalogProbeId::from(index),
+            None => {
+                let id = DigitalAnalogProbeId::from(self.probes.len());
+                self.probes.push(DigitalAnalogProbe {
+                    id,
+                    access: name.into(),
+                    quantity,
+                    target,
+                    span: span.into(),
+                });
+                id
+            }
+        };
+        let value_type = if quantity == DigitalAnalogQuantity::IntegerVariable {
+            CfgValueType::FourState { width: 32 }
+        } else {
+            CfgValueType::Real
+        };
+        self.builder.push(
+            block,
+            value_type,
+            CfgValueKind::DigitalAnalogVariable { probe: id },
+        )
     }
 
     /// Resolve constant module declarations independently of the process clock.
@@ -2587,6 +2663,9 @@ impl ProcessLowerer<'_> {
                                     identifier.span,
                                 );
                                 self.real_constant(0.0)
+                            }
+                            None if self.analog_variables.contains_key(&identifier.name) => {
+                                self.analog_variable(block, &identifier.name, identifier.span)
                             }
                             None => {
                                 self.error(
@@ -3284,10 +3363,13 @@ impl ProcessLowerer<'_> {
             // `integer` says so by being one.
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
                 Some(local) => self.local_signed(local),
-                None => self
-                    .index
-                    .get(identifier.name.as_str())
-                    .is_some_and(|signal| self.signed_signal(*signal)),
+                None => self.index.get(identifier.name.as_str()).map_or_else(
+                    || {
+                        self.analog_variables.get(&identifier.name)
+                            == Some(&super::digital::DigitalAnalogQuantity::IntegerVariable)
+                    },
+                    |signal| self.signed_signal(*signal),
+                ),
             },
             // Rules (d), (e) and (f).
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
@@ -3401,10 +3483,16 @@ impl ProcessLowerer<'_> {
             },
             Expression::Identifier(identifier) => match self.lookup_local(&identifier.name) {
                 Some(local) => self.local_width(local),
-                None => self
-                    .index
-                    .get(identifier.name.as_str())
-                    .map_or(1, |signal| self.width_of(*signal)),
+                None => self.index.get(identifier.name.as_str()).map_or_else(
+                    || {
+                        if self.analog_variables.contains_key(&identifier.name) {
+                            32
+                        } else {
+                            1
+                        }
+                    },
+                    |signal| self.width_of(*signal),
+                ),
             },
             Expression::ArrayAccess(_) => 1,
             Expression::ArrayLiteral(literal) => literal
@@ -3903,6 +3991,9 @@ impl ProcessLowerer<'_> {
                     CfgValueType::FourState { width },
                     CfgValueKind::DigitalSignalRead { signal: *signal },
                 )
+            }
+            None if self.analog_variables.contains_key(name) => {
+                self.analog_variable(block, name, span)
             }
             None => {
                 self.error(

@@ -132,6 +132,8 @@ pub struct MirModel {
     pub default_transition: f64,
     pub value_symbols: Vec<SmolStr>,
     pub ground_nodes: Vec<SmolStr>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub digital_observations: Vec<SmolStr>,
 }
 
 impl MirModel {
@@ -245,6 +247,7 @@ impl MirModel {
             default_transition: hir.default_transition,
             value_symbols: sorted_value_symbols(hir),
             ground_nodes: hir.ground_nodes.clone(),
+            digital_observations: hir.digital_observations.clone(),
         };
 
         let span = crate::metrics::FineSpan::new("mir.validate");

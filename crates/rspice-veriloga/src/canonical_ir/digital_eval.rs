@@ -180,6 +180,11 @@ pub trait DigitalEnvironment {
         None
     }
 
+    /// The value published by the normal analog evaluation, without replay.
+    fn read_analog_variable(&self, _probe: DigitalAnalogProbeId) -> Option<f64> {
+        None
+    }
+
     /// Accept one driver's contribution to a real net.
     ///
     /// The real twin of [`drive_signal`](Self::drive_signal), and it carries no
@@ -1851,6 +1856,36 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             // Which value the environment hands back is section 7.3.6.3's
             // question, and it is deliberately not asked here — the
             // interpreter has no clock to compare the two domains' against.
+            CfgValueKind::DigitalAnalogVariable { probe } => {
+                use super::digital::DigitalAnalogQuantity;
+                let probe_id = *probe;
+                let declaration = self
+                    .plan
+                    .analog_probe(probe_id)
+                    .ok_or(DigitalEvalError::UndeclaredAnalogProbe(probe_id))?;
+                let value = self
+                    .environment
+                    .read_analog_variable(probe_id)
+                    .ok_or(DigitalEvalError::AnalogProbeUnavailable(probe_id))?;
+                if declaration.quantity == DigitalAnalogQuantity::IntegerVariable {
+                    if !value.is_finite()
+                        || value.fract() != 0.0
+                        || value < f64::from(i32::MIN)
+                        || value > f64::from(i32::MAX)
+                    {
+                        return Err(DigitalEvalError::InvalidNumericConversion {
+                            value: id,
+                            detail: "an analog integer sample must be a finite signed 32-bit integer",
+                        });
+                    }
+                    Ok(DigitalScalar::FourState(FourStateValue::from_integer(
+                        32,
+                        value as i128,
+                    )))
+                } else {
+                    Ok(DigitalScalar::Real(value))
+                }
+            }
             CfgValueKind::DigitalAnalogFlow { probe } => {
                 let id = *probe;
                 if self.plan.analog_probe(id).is_none() {

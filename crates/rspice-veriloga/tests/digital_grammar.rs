@@ -2384,24 +2384,29 @@ fn an_analog_body_that_ignores_the_variable_leaves_the_promotion_alone() {
     );
 }
 
-/// A `real` no process writes is not touched at all.
-///
-/// The half of the rule that keeps every shipped analog model compiling exactly
-/// as it did: reading one from a process is still the old refusal, and the
-/// variable stays the continuous body's.
+/// Reading an analog-owned real does not transfer its ownership.
 #[test]
 fn a_module_level_real_no_process_writes_stays_in_the_analog_domain() {
-    let error = VerilogACompiler::new(CompilerOptions::default())
+    let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&digital_module(
-            "    wire clk;\n\
-         \x20   reg q;\n\
-         \x20   always @(posedge clk) q = (gain > 1.0);",
+            "wire clk; reg q; always @(posedge clk) q=(gain>1.0);",
         ))
-        .expect_err("reading an analog variable from a process is still refused")
-        .to_string();
+        .unwrap();
     assert!(
-        error.contains("real expression has no conversion") || error.contains("`gain`"),
-        "the read is refused rather than silently rehoused, got {error:?}"
+        !artifact
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "gain")
+    );
+    assert_eq!(
+        artifact
+            .hir
+            .digital_observations
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gain"]
     );
 }
 

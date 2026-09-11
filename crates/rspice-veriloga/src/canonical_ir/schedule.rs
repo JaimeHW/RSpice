@@ -1875,6 +1875,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // analog value a discrete read sees.
         | CfgValueKind::DigitalAnalogPotential { .. }
             | CfgValueKind::DigitalAnalogFlow { .. }
+        | CfgValueKind::DigitalAnalogVariable { .. }
         | CfgValueKind::DigitalRealArithmetic { .. }
         | CfgValueKind::DigitalRealCompare { .. }
         | CfgValueKind::DigitalExpression { .. }

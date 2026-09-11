@@ -3026,6 +3026,24 @@ pub(crate) fn live_canonical_assignment_slots(
     policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<bool>> {
     let mut live = vec![false; model.num_variables];
+    for name in &mir.digital_observations {
+        let slot = model
+            .variable_names
+            .iter()
+            .position(|variable| variable == name)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("digital observation names missing analog variable `{name}`")
+                    .into(),
+            })?;
+        let retained = live
+            .get_mut(slot)
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!("digital observation `{name}` exceeds variable storage").into(),
+            })?;
+        *retained = true;
+    }
     match policy {
         AssignmentRootPolicy::PostfixEntries => {
             mark_observable_variable_roots(model, &mut live);

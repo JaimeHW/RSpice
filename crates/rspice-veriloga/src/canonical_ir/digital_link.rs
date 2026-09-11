@@ -358,7 +358,8 @@ pub fn link_digital_plans(
                         .as_ref()
                         .map(|node| qualify_probe_node(layout.instance.name, node).into());
                 }
-                super::digital::DigitalAnalogProbeTarget::Branch { name } => {
+                super::digital::DigitalAnalogProbeTarget::Branch { name }
+                | super::digital::DigitalAnalogProbeTarget::Variable { name } => {
                     *name = format!("{}.{name}", layout.instance.name).into();
                 }
             }
@@ -526,7 +527,8 @@ fn relocate_value(
             *signal = map.signals[usize::from(*signal)];
         }
         CfgValueKind::DigitalAnalogPotential { probe }
-        | CfgValueKind::DigitalAnalogFlow { probe } => {
+        | CfgValueKind::DigitalAnalogFlow { probe }
+        | CfgValueKind::DigitalAnalogVariable { probe } => {
             *probe = map.analog_probes[usize::from(*probe)]
         }
         CfgValueKind::DigitalBlockingWrite { target, .. } => relocate_target(target, source, map),

@@ -2361,6 +2361,74 @@ analog-owned-variable reads/events, remaining hierarchy/ownership/value forms,
 all-owner startup and the rest of MS00-MS15 remain open. No licensed reference
 is available; vendor parity and production readiness are not established.
 
+## MS03/MS06: compiler contract for analog-owned variable reads
+
+Scalar real and integer variables read by digital processes now retain their
+analog ownership and lower to typed digital read nodes. Real reads participate
+in real expressions; integer reads retain signed 32-bit width before context
+extension and arithmetic. Missing samples are explicit interpreter errors,
+and malformed non-integral/out-of-range integer samples are distinguished from
+missing bindings. Existing illegal cross-domain writes, arrays and unsupported
+analog event subscriptions remain refused.
+
+The actual read set is retained as sorted HIR/MIR observation names. Artifact
+validation checks the declaration/type, exact read set, both IR levels and
+content identities. The native/Wasm common assignment-liveness builder roots
+these values in normal evaluation, including values the analog equations do
+not otherwise need. This adds no electrical unknowns and does not call the
+inspection/observation replay API. Pure analog models retain an empty list.
+Schema 56 captures this contract; linked digital plans relocate variable probe
+identities just as they relocate physical probe identities.
+
+Five focused compiler checks passed in 0.01 seconds after a 20.72-second build.
+They cover retained ownership, real sampling, integer sign extension to 64 bits,
+resampling, missing/invalid sample errors, existing physical-flow behavior and
+native publication from ordinary stamping at two inputs without an observation
+call. Logs: target/unified-mixed-fixes/analog-variable-compiler-tests.log and
+analog-variable-final-compiler-tests.log in the same directory. The tests pin
+compiler/environment behavior and the native producer, not full circuit support.
+
+The core host intentionally still refuses these variable probes, with a specific
+missing-evaluation-barrier diagnostic. Its existing sampler can directly read
+potentials/current unknowns from a candidate solution, but an analog variable
+must be produced by normal evaluation using the correct discrete inputs. Simply
+calling variable() before stamping could return a stale or optimized-out value;
+calling observe_variables() to fill it would replay calculations. Neither is
+an acceptable implementation. Startup is also relevant: initial processes may
+need to establish digital-owned inputs before the first analog evaluation.
+
+The next runtime increment must provide a demand/resume barrier for unavailable
+variable reads, retain prefix writes and process continuations, evaluate all
+required analog producers from the current candidate and discrete input bank,
+then resume readers against that common sample. Reuse prepared analog stamps
+when their inputs remain unchanged; invalidate them and the sample bank on
+relevant input changes, retries and rollback. This needs to work through shared
+HDL/XSPICE scheduling and all-owner initialization, not only an isolated host.
+Event-controlled analog variables additionally require their retained assignment
+value and future assignment-event delivery. The standards timing requirement is
+Verilog-AMS 2023 sections 7.3.6.1 and 7.3.6.3; see
+[Accellera LRM](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf#page=185).
+
+Main through 5b7f15983 was integrated cleanly before regeneration, preserving
+its small-signal integration-history changes and generated built-ins. The
+regenerator refreshed all 43 built-ins with unchanged numerical source relative
+to that commit. Generator digest:
+a37892ca5341ebfe22ec65e89239e0df33488fbba81a384113c7ba4524805437.
+Bundle digest:
+2cd3646b9677f3f1247809c7568cda0806b58e800331597e2a4bbf0aa874e504.
+Log: target/unified-mixed-fixes/analog-variable-generator.log.
+
+Both existing linked physical-flow circuits passed in 0.06 seconds after a
+53.73-second build, covering the widened probe metadata through core compilation,
+linking and actual analog/digital execution. Log:
+target/unified-mixed-fixes/analog-variable-core-compatibility.log.
+Main through b15878e08 was incorporated before publication; its HB and GMRES
+changes do not alter the compiler inputs or the direct transient solver path
+used by these fixtures, so the unchanged focused checks were not repeated.
+No broad test suite was run.
+This is a compiler/producer increment. It does not close analog-variable circuit
+execution, MS03/MS06, the full MS00-MS15 plan, or vendor/production qualification.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

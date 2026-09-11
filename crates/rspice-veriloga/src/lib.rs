@@ -1123,14 +1123,29 @@ impl VerilogACompiler {
         // artifact that silently omitted a driver would describe a different
         // circuit, which is the failure the old blanket refusal existed to
         // prevent.
-        let digital = canonical_ir::digital_lower::lower(&module.digital)
-            .map_err(Self::canonical_ir_error)?;
+        let digital =
+            canonical_ir::digital_lower::lower_module(module).map_err(Self::canonical_ir_error)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;
         trace_canonical_ir_phase(trace, &module.name, "hir", None);
         let phase_started = web_time::Instant::now();
         let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
+        hir.digital_observations = digital
+            .analog_probes
+            .iter()
+            .filter_map(|probe| {
+                if let canonical_ir::digital::DigitalAnalogProbeTarget::Variable { name } =
+                    &probe.target
+                {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        hir.digital_observations.sort();
+        hir.digital_observations.dedup();
         measurements.record(PipelinePhase::HirLowering, phase_started.elapsed())?;
         trace_canonical_ir_phase(trace, &module.name, "hir", Some(phase_started.elapsed()));
         measurements.checkpoint(PipelinePhase::MirLowering)?;

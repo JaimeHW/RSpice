@@ -243,6 +243,10 @@ impl DigitalEnvironment for Store {
         self.driven_reals.insert(drive.driver, drive);
     }
 
+    fn read_analog_variable(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.read_analog_potential(probe)
+    }
+
     fn read_analog_flow(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
         self.read_analog_potential(probe)
     }
@@ -5042,7 +5046,7 @@ endmodule
 
 #[test]
 fn digital_flow_probes_resolve_custom_nature_roles() {
-    use rspice_veriloga::ast::AccessKind;
+    use rspice_veriloga::canonical_ir::digital::DigitalAnalogQuantity as AccessKind;
     let mut harness = Harness::from_source(
         r#"
 nature TestPotential units="V"; access=TestU; abstol=1e-6; endnature
@@ -5106,4 +5110,43 @@ endmodule
             "{source}"
         );
     }
+}
+
+#[test]
+fn analog_variable_reads_retain_real_values_signed_width_and_resampling() {
+    let mut harness = Harness::from_source(
+        r#"
+module variable_reader(p); inout p; electrical p;
+real measured, captured; integer count; reg [63:0] wide; reg negative;
+analog begin measured=2*V(p); count=-3; I(p)<+V(p)/1000; end
+initial begin captured=measured; wide=count; negative=(count<0); #1 captured=measured; end
+endmodule
+"#,
+    );
+    assert!(matches!(
+        start(
+            &harness.plan,
+            &harness.plan.processes[0],
+            &mut harness.store
+        ),
+        Err(DigitalEvalError::AnalogProbeUnavailable(_))
+    ));
+    harness.set_analog("measured", 2.25);
+    harness.set_analog("count", -3.0);
+    let wait = expect_suspended(harness.start(0));
+    assert_eq!(harness.get_real("captured"), 2.25);
+    assert_eq!(harness.get("wide"), format!("{:064b}", u64::MAX - 2));
+    assert_eq!(harness.get("negative"), "1");
+    harness.set_analog("measured", 4.5);
+    expect_finished(harness.resume(0, wait.resume_state()));
+    assert_eq!(harness.get_real("captured"), 4.5);
+    harness.set_analog("count", -3.5);
+    assert!(matches!(
+        start(
+            &harness.plan,
+            &harness.plan.processes[0],
+            &mut harness.store
+        ),
+        Err(DigitalEvalError::InvalidNumericConversion { .. })
+    ));
 }

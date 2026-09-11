@@ -228,11 +228,61 @@ module unsupported(p, n, q);
   analog begin shared = V(p, n); I(p, n) <+ shared; end
 endmodule
 "#;
-    let error = compiler
-        .compile_runtime(shared_crossing, None)
-        .expect_err("implicit real-to-four-state crossing has no bridge contract");
-    assert!(
-        error.to_string().contains("analog") || error.to_string().contains("continuous-domain"),
-        "{error}"
+    let runtime = compiler.compile_runtime(shared_crossing, None).unwrap();
+    assert_eq!(
+        runtime
+            .canonical_ir
+            .hir
+            .digital_observations
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["shared"]
     );
+}
+
+#[cfg(feature = "native")]
+#[test]
+fn analog_variable_reads_are_published_by_the_normal_native_evaluation() {
+    use rspice_veriloga::device::VerilogADevice;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let runtime = compiler
+        .compile_runtime(
+            r#"
+module observed(p,q); inout p; electrical p; output q; reg q;
+real measured; integer count;
+analog begin measured=2*V(p); count=-3; I(p)<+V(p)/1000; end
+initial begin #1; q=(measured>1.0)&&(count<0); end
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        runtime
+            .canonical_ir
+            .hir
+            .digital_observations
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>(),
+        vec!["count", "measured"]
+    );
+    let mut device = VerilogADevice::try_new_with_canonical_ir(
+        "x",
+        runtime.model,
+        &runtime.canonical_ir,
+        &[1, 2],
+    )
+    .unwrap();
+    for (input, expected) in [(1.5, 3.0), (2.25, 4.5)] {
+        device
+            .try_stamp(&[input, 0.0], |_, _, _| {}, |_, _| {})
+            .unwrap();
+        assert_eq!(device.variable("measured"), Some(expected));
+        assert_eq!(device.variable("count"), Some(-3.0));
+    }
 }

@@ -896,6 +896,10 @@ pub enum CfgValueKind {
     DigitalAnalogFlow {
         probe: DigitalAnalogProbeId,
     },
+    /// A published analog-owned variable from the current analog evaluation.
+    DigitalAnalogVariable {
+        probe: DigitalAnalogProbeId,
+    },
     /// Arithmetic over two real values, inside a process function.
     ///
     /// Distinct from [`Self::Binary`], which is the analog body's arithmetic on
@@ -1228,6 +1232,7 @@ impl CfgValueKind {
             | Self::DigitalRepeatCount { .. }
             | Self::DigitalAnalogPotential { .. }
             | Self::DigitalAnalogFlow { .. }
+            | Self::DigitalAnalogVariable { .. }
             | Self::DigitalRealArithmetic { .. }
             | Self::DigitalRealCompare { .. }
             | Self::DigitalExpression { .. }

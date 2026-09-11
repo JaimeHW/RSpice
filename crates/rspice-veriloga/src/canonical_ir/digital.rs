@@ -410,6 +410,28 @@ pub enum DigitalAnalogProbeTarget {
     Branch {
         name: SmolStr,
     },
+    Variable {
+        name: SmolStr,
+    },
+}
+
+/// The value domain of a continuous-domain read. Integer variables retain
+/// their declared 32-bit signed domain rather than becoming real operands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalAnalogQuantity {
+    Potential,
+    Flow,
+    RealVariable,
+    IntegerVariable,
+}
+
+impl From<crate::ast::AccessKind> for DigitalAnalogQuantity {
+    fn from(kind: crate::ast::AccessKind) -> Self {
+        match kind {
+            crate::ast::AccessKind::Potential => Self::Potential,
+            crate::ast::AccessKind::Flow => Self::Flow,
+        }
+    }
 }
 
 /// A typed solver sample requested by a discrete-domain expression.
@@ -418,7 +440,7 @@ pub struct DigitalAnalogProbe {
     pub id: DigitalAnalogProbeId,
     /// Authored nature access function, resolved to its physical role.
     pub access: SmolStr,
-    pub quantity: crate::ast::AccessKind,
+    pub quantity: DigitalAnalogQuantity,
     pub target: DigitalAnalogProbeTarget,
     pub span: SourceSpanRef,
 }
@@ -435,6 +457,7 @@ impl DigitalAnalogProbe {
                 negative: None,
             } => format!("{}({})", self.access, positive),
             DigitalAnalogProbeTarget::Branch { name } => format!("{}(<{}>)", self.access, name),
+            DigitalAnalogProbeTarget::Variable { name } => name.to_string(),
         }
     }
 }

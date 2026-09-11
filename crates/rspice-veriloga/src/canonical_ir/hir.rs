@@ -762,6 +762,10 @@ pub struct HirModel {
     pub ports: Vec<HirPort>,
     pub parameters: Vec<HirParameter>,
     pub variables: Vec<HirVariable>,
+    /// Sorted names whose values must be published during ordinary analog
+    /// evaluation for discrete-domain readers. They are not electrical unknowns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub digital_observations: Vec<SmolStr>,
     /// Sorted state variables holding switch-branch source kinds.
     pub switch_branch_variables: Vec<VariableId>,
     pub arrays: Vec<HirArray>,
@@ -1024,6 +1028,7 @@ impl HirModel {
                 })
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
+            digital_observations: Vec::new(),
         }
     }
 
@@ -1060,6 +1065,25 @@ impl HirModel {
         validate_dense_port_ids(&mut diagnostics, &self.ports);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
+        if self
+            .digital_observations
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+            || self.digital_observations.iter().any(|name| {
+                !self.variables.iter().any(|variable| {
+                    variable.name == *name
+                        && matches!(
+                            variable.value_type,
+                            CanonicalValueType::Real | CanonicalValueType::Integer
+                        )
+                })
+            })
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirLowering,
+                "digital observations must name unique sorted scalar analog variables",
+            ));
+        }
         if self
             .switch_branch_variables
             .windows(2)

@@ -3045,8 +3045,8 @@ fn wire_analog_probes(
             ),
         })
     };
-    use rspice_veriloga::ast::AccessKind;
     use rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget;
+    use rspice_veriloga::canonical_ir::digital::DigitalAnalogQuantity as AccessKind;
     let resolve_mir_node = |name: &str| {
         if name == "0"
             || canonical_ir
@@ -3072,6 +3072,11 @@ fn wire_analog_probes(
         .iter()
         .map(|probe| {
             let (positive, negative, declared) = match &probe.target {
+                DigitalAnalogProbeTarget::Variable { name } => {
+                    return Err(MixedSignalError::InvalidBridge {
+                        detail: format!("analog-owned variable `{name}` requires the circuit-wide analog evaluation barrier; this runtime binding is not implemented yet"),
+                    });
+                }
                 DigitalAnalogProbeTarget::Nodes { positive, negative } => {
                     (positive.as_str(), negative.as_deref(), None)
                 }

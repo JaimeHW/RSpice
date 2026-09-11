@@ -159,6 +159,33 @@ impl CanonicalIrArtifact {
                 "stored connection identity does not match the connection source",
             ));
         }
+        let mut observed = std::collections::BTreeSet::new();
+        for probe in &self.digital.analog_probes {
+            if let super::digital::DigitalAnalogProbeTarget::Variable { name } = &probe.target {
+                observed.insert(name.clone());
+                let expected = match probe.quantity {
+                    super::digital::DigitalAnalogQuantity::IntegerVariable => {
+                        super::hir::CanonicalValueType::Integer
+                    }
+                    _ => super::hir::CanonicalValueType::Real,
+                };
+                if !self
+                    .hir
+                    .variables
+                    .iter()
+                    .any(|variable| variable.name == *name && variable.value_type == expected)
+                {
+                    diagnostics.push(artifact_error(format!(
+                        "digital read `{name}` does not match an analog variable declaration"
+                    )));
+                }
+            }
+        }
+        if observed.into_iter().collect::<Vec<_>>() != self.hir.digital_observations {
+            diagnostics.push(artifact_error(
+                "digital variable reads do not match retained analog observations",
+            ));
+        }
         if let Err(mut errors) = self.digital.validate() {
             diagnostics.append(&mut errors);
         }
@@ -344,6 +371,11 @@ fn artifact_diagnostics(
             "HIR default_transition {} must match MIR default_transition {}",
             hir.default_transition, mir.default_transition
         )));
+    }
+    if hir.digital_observations != mir.digital_observations {
+        diagnostics.push(artifact_error(
+            "HIR and MIR digital observation roots disagree",
+        ));
     }
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);

@@ -118,12 +118,25 @@ impl CanonicalDigitalPlan {
                     super::digital::DigitalAnalogProbeTarget::Nodes { positive, negative } => {
                         positive.is_empty() || negative.as_ref().is_some_and(|name| name.is_empty())
                     }
-                    super::digital::DigitalAnalogProbeTarget::Branch { name } => name.is_empty(),
+                    super::digital::DigitalAnalogProbeTarget::Branch { name }
+                    | super::digital::DigitalAnalogProbeTarget::Variable { name } => {
+                        name.is_empty()
+                    }
                 }
             {
                 return Err(error(
                     "digital analog probes must have dense IDs and nonempty access/net names",
                 ));
+            }
+        }
+        for probe in &self.analog_probes {
+            use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
+            let variable = matches!(
+                probe.quantity,
+                DigitalAnalogQuantity::RealVariable | DigitalAnalogQuantity::IntegerVariable
+            );
+            if variable != matches!(probe.target, DigitalAnalogProbeTarget::Variable { .. }) {
+                return Err(error("analog read quantity does not match its target kind"));
             }
         }
         let mut drivers = BTreeMap::new();
@@ -375,6 +388,30 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                         }
+                        CfgValueKind::DigitalAnalogVariable { probe } => {
+                            use super::digital::DigitalAnalogQuantity;
+                            let Some(declaration) = self.analog_probe(*probe) else {
+                                return Err(error(
+                                    "digital read names an undeclared analog variable",
+                                ));
+                            };
+                            let expected = match declaration.quantity {
+                                DigitalAnalogQuantity::RealVariable => CfgValueType::Real,
+                                DigitalAnalogQuantity::IntegerVariable => {
+                                    CfgValueType::FourState { width: 32 }
+                                }
+                                _ => {
+                                    return Err(error(
+                                        "digital variable read names a physical probe",
+                                    ));
+                                }
+                            };
+                            if value.value_type != expected {
+                                return Err(error(
+                                    "digital analog variable read has the wrong type",
+                                ));
+                            }
+                        }
                         CfgValueKind::DigitalAnalogPotential { probe }
                         | CfgValueKind::DigitalAnalogFlow { probe } => {
                             let Some(probe) = self.analog_probe(*probe) else {
@@ -382,9 +419,9 @@ impl CanonicalDigitalPlan {
                             };
                             let expected =
                                 if matches!(kind, CfgValueKind::DigitalAnalogPotential { .. }) {
-                                    crate::ast::AccessKind::Potential
+                                    super::digital::DigitalAnalogQuantity::Potential
                                 } else {
-                                    crate::ast::AccessKind::Flow
+                                    super::digital::DigitalAnalogQuantity::Flow
                                 };
                             if probe.quantity != expected || value.value_type != CfgValueType::Real
                             {
@@ -471,6 +508,7 @@ pub(crate) fn event_expression_schedule(
                 CfgValueKind::BlockParameter
                     | CfgValueKind::DigitalAnalogPotential { .. }
                     | CfgValueKind::DigitalAnalogFlow { .. }
+                    | CfgValueKind::DigitalAnalogVariable { .. }
             )
             || !(value.kind.is_digital() || matches!(value.kind, CfgValueKind::RealConstant(_)))
         {
@@ -556,6 +594,7 @@ fn expression_dependencies(
                 | CfgValueKind::DigitalDriverWrite { .. }
                 | CfgValueKind::DigitalAnalogPotential { .. }
                 | CfgValueKind::DigitalAnalogFlow { .. }
+                | CfgValueKind::DigitalAnalogVariable { .. }
         ) || !matches!(
             value.value_type,
             CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }
