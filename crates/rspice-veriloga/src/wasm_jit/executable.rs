@@ -24,6 +24,7 @@ pub(crate) enum WasmJitExecutableEntry {
 /// hot path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WasmJitExecutable {
+    one_step_dae_split_safe: bool,
     cache_key: String,
     assignment_coverage: NativeAssignmentCoverage,
     /// The module assignment pass, when it has steps to run.
@@ -50,11 +51,16 @@ pub(crate) struct WasmJitExecutable {
 }
 
 impl WasmJitExecutable {
+    pub(crate) fn one_step_dae_split_safe(&self) -> bool {
+        self.one_step_dae_split_safe
+    }
+
     pub(crate) fn from_artifact(
         model: &CompiledModel,
         artifact: &WasmJitModelArtifact,
     ) -> WasmJitResult<Self> {
         let mut executable = Self {
+            one_step_dae_split_safe: artifact.one_step_dae_split_safe,
             cache_key: artifact.cache_key().to_owned(),
             assignment_coverage: artifact.assignment_coverage,
             assignment_export: artifact.assignment_export().map(str::to_owned),

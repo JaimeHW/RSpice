@@ -335,6 +335,7 @@ impl PlanStats {
 }
 
 pub struct NativeModel {
+    one_step_dae_split_safe: bool,
     pub num_terminals: usize,
     pub num_internal_nodes: usize,
     pub num_variables: usize,
@@ -371,6 +372,15 @@ unsafe impl Send for NativeModel {}
 unsafe impl Sync for NativeModel {}
 
 impl NativeModel {
+    pub(crate) fn with_one_step_dae_split_safe(mut self, safe: bool) -> Self {
+        self.one_step_dae_split_safe = safe;
+        self
+    }
+
+    pub(crate) fn one_step_dae_split_safe(&self) -> bool {
+        self.one_step_dae_split_safe
+    }
+
     #[cfg(all(test, target_arch = "x86_64"))]
     pub(crate) fn from_executable_image(
         num_variables: usize,
@@ -479,6 +489,7 @@ impl NativeModel {
             evaluation_kernel_current_order_safe,
             stamp_kernel_branch_unknowns,
             stamp_kernel_current_order_safe,
+            one_step_dae_split_safe: false,
             required_storage,
             assignment_coverage,
             stats,

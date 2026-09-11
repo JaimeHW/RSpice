@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "fb5bb5c0652623058dc9e5e8aa2bc476b894d2dd5bcb35da97eb769c2b532835",
-  "generator_digest": "1b129951d5a218a01b0659fa2cc18a140e181edec2e3cd6b7d67bc24d4901fb2",
-  "bundle_digest": "8a6e4956184ed412aa70d24f5bfc29caf2dca6f65df09703ae64e1dd0d565f22",
+  "generator_digest": "87a34d036c6be77b39acc5e3ea481523f686dbd0c5295215638b3392194f4bea",
+  "bundle_digest": "90bf692657091a33dc398f91f063094ae67d77fbe3e33b857a1f787a495e1aa6",
   "device_count": 43,
   "file_count": 347,
-  "source_bytes": 34096983,
+  "source_bytes": 34096988,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -15,7 +15,7 @@
       "feature_name": "veriloga-model-diode-cmc",
       "package_name": "rspice-veriloga-model-diode-cmc",
       "file_count": 5,
-      "source_bytes": 452214,
+      "source_bytes": 452215,
       "workspace": {
         "abi_version": 3,
         "variable_count": 970,
@@ -420,7 +420,7 @@
       "feature_name": "veriloga-model-bsimbulk",
       "package_name": "rspice-veriloga-model-bsimbulk",
       "file_count": 5,
-      "source_bytes": 943569,
+      "source_bytes": 943570,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1913,
@@ -528,7 +528,7 @@
       "feature_name": "veriloga-model-bsimsoi-e2aff994",
       "package_name": "rspice-veriloga-model-bsimsoi-e2aff994",
       "file_count": 5,
-      "source_bytes": 1450799,
+      "source_bytes": 1450800,
       "workspace": {
         "abi_version": 3,
         "variable_count": 2293,
@@ -636,7 +636,7 @@
       "feature_name": "veriloga-model-hicuml0va",
       "package_name": "rspice-veriloga-model-hicuml0va",
       "file_count": 5,
-      "source_bytes": 200756,
+      "source_bytes": 200757,
       "workspace": {
         "abi_version": 3,
         "variable_count": 388,
@@ -852,7 +852,7 @@
       "feature_name": "veriloga-model-hisimsotb-va",
       "package_name": "rspice-veriloga-model-hisimsotb-va",
       "file_count": 5,
-      "source_bytes": 874189,
+      "source_bytes": 874190,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1144,
@@ -1568,8 +1568,8 @@
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/state.rs",
-      "bytes": 242651,
-      "blake3": "22a73fe5d80c360c2bb0865a43cb36605d5bdf6fde9df10af17b50e303026705"
+      "bytes": 242652,
+      "blake3": "1241cfa169bbf7cd7159289fe3bf2b927569b87e5557145a018d2052f731472a"
     },
     {
       "relative_path": "models/bsimbulk/src/lib.rs",
@@ -1728,8 +1728,8 @@
     },
     {
       "relative_path": "models/bsimsoi-e2aff994/src/bsimsoi__bsimsoi__e2aff994/state.rs",
-      "bytes": 275859,
-      "blake3": "2a3fff497497e8f701c3a824b79a7d3f917de701905d6d8b1b1d4cfa357d6189"
+      "bytes": 275860,
+      "blake3": "0959159c6cad9c8373e6aa79a6b6db28d9b9c88ee2c4e33e910c9386e5239bde"
     },
     {
       "relative_path": "models/bsimsoi-e2aff994/src/lib.rs",
@@ -1808,8 +1808,8 @@
     },
     {
       "relative_path": "models/diode-cmc/src/diode_cmc__diode_cmc__cdfab304/state.rs",
-      "bytes": 57466,
-      "blake3": "4b5c281f7fe1c391af4c532456cd05511ffac20ea5d94f6350c91e3c9c2fb8a3"
+      "bytes": 57467,
+      "blake3": "a4c90db565b467870b12745bd974ea3c514899f63ca61e4dcc7361ebbcc4e5a9"
     },
     {
       "relative_path": "models/diode-cmc/src/lib.rs",
@@ -1968,8 +1968,8 @@
     },
     {
       "relative_path": "models/hicuml0va/src/hicuml0_v2p1p0__hicuml0va__91cb3377/state.rs",
-      "bytes": 59517,
-      "blake3": "ee9e639694bd1447f7bad747e1d8f2324bd19ccf9cf0709f3521fa56183478e2"
+      "bytes": 59518,
+      "blake3": "0df0688ed71a74d7cd2f91d3d8c6bbd4c76c152856c1fadd78100c7bf52b09f0"
     },
     {
       "relative_path": "models/hicuml0va/src/lib.rs",
@@ -2288,8 +2288,8 @@
     },
     {
       "relative_path": "models/hisimsotb-va/src/hisimsotb__hisimsotb_va__41200697/state.rs",
-      "bytes": 91071,
-      "blake3": "728cadec09fb78a74a78a4598e1a79ab7361edd0e7b9ee6e38a1fc5fe57ec5e7"
+      "bytes": 91072,
+      "blake3": "53cc97fab2109497d2f496b7a4ebcec6ba68764026c245631242ef48f23e5471"
     },
     {
       "relative_path": "models/hisimsotb-va/src/lib.rs",

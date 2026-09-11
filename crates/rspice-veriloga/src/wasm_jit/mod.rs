@@ -247,6 +247,7 @@ impl WasmJitValueEntry {
 /// needed by a browser worker to install its entry table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WasmJitModelArtifact {
+    one_step_dae_split_safe: bool,
     module: WasmJitArtifact,
     cache_key: String,
     entries: Vec<WasmJitValueEntry>,
@@ -756,6 +757,7 @@ fn emit_model_value_module(
         .transpose()?;
     let cache_key = model_cache_key(canonical_ir);
     Ok(WasmJitModelArtifact {
+        one_step_dae_split_safe: plan.one_step_dae_split_safe,
         module: WasmJitArtifact {
             digest: blake3::hash(&bytes).to_hex().to_string(),
             bytes,

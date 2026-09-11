@@ -25,6 +25,7 @@ pub mod cfg_complex;
 pub mod cfg_eval;
 pub mod cfg_lower;
 pub mod cfg_opt;
+pub(crate) mod charge;
 pub mod diagnostic;
 pub mod digital;
 pub mod digital_eval;

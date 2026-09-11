@@ -75,6 +75,9 @@ pub struct CfgModel {
     /// Final values of event-controlled procedural variables at function exit,
     /// in dense accepted-state slot order.
     pub event_state_candidates: Vec<ValueId>,
+    /// Final named-variable values retained only by capability qualification.
+    /// Executable residual/noise slices keep this empty.
+    pub(crate) observation_roots: Vec<ValueId>,
     /// Smallest active `$bound_step` request, including its per-evaluation reset.
     pub timestep_bound: Option<ValueId>,
     /// Per-evaluation transient/Newton discontinuity request bits.
@@ -197,6 +200,23 @@ impl CfgModel {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::EXECUTABLE)
     }
 
+    /// Retain effects, event bodies and named readbacks for equation qualification.
+    pub(crate) fn from_hir_for_dae_proof(
+        hir: &HirModel,
+        mir: &MirModel,
+        per_instance_ports: bool,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode(
+            hir,
+            mir,
+            CfgLowerMode {
+                per_instance_ports,
+                record_observations: true,
+                ..CfgLowerMode::GENERATED
+            },
+        )
+    }
+
     /// Lower only the control-flow and reaching definitions needed to
     /// evaluate raw grouped-noise metadata. Contribution values are traversed
     /// structurally for noise sites, so a supported routing operator such as
@@ -236,6 +256,7 @@ impl CfgModel {
             residuals,
             activations,
             event_state_candidates,
+            observation_roots,
             noise,
             noise_processes,
             [timestep_bound, discontinuity],
@@ -255,6 +276,7 @@ impl CfgModel {
             residuals,
             activations,
             event_state_candidates,
+            observation_roots,
             timestep_bound,
             discontinuity,
             noise,
@@ -469,6 +491,7 @@ struct CfgLowerer<'a> {
     /// ordered assignment pass; numerical and noise slices must not replay it.
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
+    record_observations: bool,
     /// Whether each noise process publishes its site magnitudes as well as its
     /// exit-merged ones. See [`CfgNoiseProcess::site`].
     noise_site_values: bool,
@@ -915,6 +938,7 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
 struct CfgLowerMode {
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
     record_tasks: bool,
+    record_observations: bool,
     /// Lower only what raw grouped-noise metadata needs.
     noise_metadata_only: bool,
     /// Publish each noise process's magnitudes as its own *site* computed them,
@@ -992,6 +1016,7 @@ impl CfgLowerMode {
     const GENERATED: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: true,
+        record_observations: false,
         noise_metadata_only: false,
         noise_site_values: false,
         per_instance_ports: false,
@@ -1003,6 +1028,7 @@ impl CfgLowerMode {
     const EXECUTABLE: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
+        record_observations: false,
         noise_metadata_only: false,
         noise_site_values: true,
         per_instance_ports: true,
@@ -1014,6 +1040,7 @@ impl CfgLowerMode {
     const NOISE_METADATA: Self = Self {
         phase: rspice_veriloga_runtime::AnalogEvaluationPhase::Evaluation,
         record_tasks: false,
+        record_observations: false,
         noise_metadata_only: true,
         noise_site_values: false,
         per_instance_ports: true,
@@ -1062,6 +1089,7 @@ impl<'a> CfgLowerer<'a> {
                 .then(|| NoiseMetadataLiveness::for_model(hir)),
             phase: mode.phase,
             record_tasks: mode.record_tasks,
+            record_observations: mode.record_observations,
             noise_site_values: mode.noise_site_values,
             per_instance_ports: mode.per_instance_ports,
             lower_prologue: mode.lower_prologue,
@@ -1084,6 +1112,7 @@ impl<'a> CfgLowerer<'a> {
             CfgFunction,
             Vec<ValueId>,
             Vec<Option<ValueId>>,
+            Vec<ValueId>,
             Vec<ValueId>,
             Vec<CfgNoiseSource>,
             Vec<CfgNoiseProcess>,
@@ -1266,6 +1295,20 @@ impl<'a> CfgLowerer<'a> {
             }
         });
         outputs.extend(controls.into_iter().flatten());
+        let observation_roots: Vec<_> = if self.record_observations {
+            self.hir
+                .variables
+                .iter()
+                .map(|variable| {
+                    self.builder
+                        .read_variable(CfgVariable::Local(variable.id), exit)
+                        .unwrap_or(zero)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        outputs.extend(observation_roots.iter().copied());
         self.builder.set_terminator(exit, CfgTerminator::Return);
 
         // Through `finish_with_outputs`, because finishing renumbers values and
@@ -1273,6 +1316,8 @@ impl<'a> CfgLowerer<'a> {
         let builder = std::mem::take(&mut self.builder);
         match builder.finish_with_outputs(entry, &outputs) {
             Ok((function, outputs)) => {
+                let (outputs, observation_roots) =
+                    outputs.split_at(outputs.len() - observation_roots.len());
                 let control_count = controls.iter().flatten().count();
                 let (outputs, control_outputs) = outputs.split_at(outputs.len() - control_count);
                 let mut control_outputs = control_outputs.iter().copied();
@@ -1308,6 +1353,7 @@ impl<'a> CfgLowerer<'a> {
                     residuals.to_vec(),
                     activations,
                     event_state_candidates.to_vec(),
+                    observation_roots.to_vec(),
                     resolve_noise(pending, noise),
                     resolve_noise_processes(pending_processes, noise_processes, process_sites),
                     controls,

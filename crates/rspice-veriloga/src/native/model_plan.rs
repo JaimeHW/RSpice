@@ -28,6 +28,8 @@ use crate::codegen::CompiledModel;
 /// what keeps both routes filling `variables` by the same code.
 #[derive(Debug)]
 pub(crate) struct NativeModelPlan {
+    /// Full-source equation proof, computed once per compiled model.
+    pub(crate) one_step_dae_split_safe: bool,
     /// The CFG route's assignment pass, when this plan has one.
     ///
     /// `None` for every postfix plan, which is what production compiles, so

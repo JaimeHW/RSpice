@@ -1996,6 +1996,68 @@ proves the complete equation split and mixed stamps receive the external weight.
 The remaining MS08 and MS00–MS15 work and reference/platform qualification
 remain open.
 
+## Compiler qualification of the weighted F/Q formulation
+
+Charge recovery now lives in canonical_ir/charge.rs and remains shared by
+canonical Rust generation and native CFG consumers. A dedicated qualification
+CFG retains control, event candidates, named-variable readbacks and retained
+analog tasks. It rejects derivative-dependent control, readbacks, state inputs,
+noise magnitudes or tasks; nested/nonlinear/unrecovered derivatives; unresolved
+flow leaves; and time/state/solution-dependent coefficients outside DDT. A
+failed proof selects ordinary companions rather than refusing a valid model.
+Runtime IDT and Laplace contributions are eligible with their separate internal
+state companion bank. Generated models retain their existing additional IDT
+restriction. This proof operates on the current semantic artifact: diagnostic
+output tasks such as $strobe/$display are still warned about and discarded by
+semantic analysis, and their execution remains open under MS05.
+
+The eligibility bit is compiled once into the native/Wasm model image and
+shared by runtime instances. Bytecode-only instances use the same canonical
+proof when that artifact is available; legacy artifact-less construction is
+ineligible. Observation-only images remain ineligible. This changes neither
+the native evaluation context ABI nor persisted accepted-state payloads.
+
+The focused source matrix covers conservative nonlinear charge, constant and
+parameter-guarded coefficients, standalone IDT/Laplace state, nested and
+nonlinear derivatives, derivative-dependent control/state/tasks/readbacks,
+event-retained values, and independent/derivative-dependent noise magnitudes.
+Both generated and per-instance-port proof modes pass. Actual native and Wasm
+model images carry the eligibility for the existing G/DDT/IDT/IDTMod/Laplace
+fixture and reject the derivative-dependent bound-step fixture. This handoff
+check does not substitute for a shipping browser run.
+
+Initial fixture corrections replaced a discarded $strobe with retained $finish
+and moved DDT outside a timer body, as required by analog-operator restrictions.
+The final noise-expanded matrix passed in 0.01 seconds after a 13.93-second
+build. Earlier image handoff passed without changes to that path. Logs:
+target/unified-mixed-fixes/one-step-proof-final.log,
+one-step-proof-matrix.log and one-step-noise-proof.log. No broad suite was run.
+
+The stronger proof changes five generated eligibility bits from true to false:
+BSIM-BULK, BSIM-SOI 100.1.1, DIODE_CMC, HICUM L0 and HiSIM SOTB. A one-off source
+inspection confirmed derivative-valued __flow_state temporaries in all five,
+and an authored I_cth readback in HICUM L0. Their charge recovery completed.
+The separate BSIM-SOI 4.7 model also has an incomplete raw-CFG recovery and was
+already ineligible. Inspection log: one-step-changed-capabilities.log (six
+selected sources, 88.31 seconds after a 14.18-second build); the temporary
+inspection code was removed. Eligibility is deliberately conservative over all
+retained variables. Source-origin metadata and an observer-aware proof are
+needed before excluding synthetic variables without relying on name prefixes;
+that improvement and proof cost/capacity profiling remain open under MS14.
+These five devices retain the ordinary trapezoidal/Gear path.
+
+The authoritative final regeneration completed all 43 built-ins. Generator
+digest: 87a34d036c6be77b39acc5e3ea481523f686dbd0c5295215638b3392194f4bea.
+Bundle digest: 90bf692657091a33dc398f91f063094ae67d77fbe3e33b857a1f787a495e1aa6.
+Only the five eligibility constants and the manifest differ in generated output;
+adding noise qualification did not change that bundle. Log:
+target/unified-mixed-fixes/one-step-proof-generator-final.log.
+
+Core capability dispatch and external mixed-stamp weighting are the next
+integration increment. Other MS08 analyses, the wider MS00–MS15 requirements,
+platform qualification and licensed-reference comparison remain open. The
+user has confirmed that no reference installation is available yet.
+
 ## Next implementation work
 
 Complete the all-owner startup/history contract and the remaining MS05

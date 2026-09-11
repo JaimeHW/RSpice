@@ -1543,6 +1543,8 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     plan.noise_exponents = noise_exponents;
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
+    plan.one_step_dae_split_safe =
+        crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true);
     Ok(CfgModelPlan {
         plan,
         #[cfg(all(test, feature = "native"))]

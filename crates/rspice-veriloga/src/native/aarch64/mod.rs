@@ -205,6 +205,7 @@ pub(super) fn compile_model_plan(
         NativeRequiredStorage::for_model(model).with_prelude_slots(plan.prelude_slot_count()),
         plan.assignment_coverage,
     )
+    .map(|model| model.with_one_step_dae_split_safe(plan.one_step_dae_split_safe))
 }
 
 /// Emit the observation pass on its own: two functions, no entries, no kernels.

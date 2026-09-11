@@ -82,7 +82,11 @@ pub(crate) fn build_model_plan_with_canonical_ir(
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModelPlan> {
     validate_canonical_artifact_for_model(model, artifact)?;
-    build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::PostfixEntries)
+    let mut plan =
+        build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::PostfixEntries)?;
+    plan.one_step_dae_split_safe =
+        crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true);
+    Ok(plan)
 }
 
 /// [`build_model_plan_with_canonical_ir`], with the assignment pass rooted on
@@ -572,6 +576,7 @@ fn build_model_plan_inner(
         noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
     };
     let plan = NativeModelPlan {
+        one_step_dae_split_safe: false,
         // The postfix route has always had an assignment pass of its own; this
         // field is the CFG route's, and this route never builds one.
         prelude: None,

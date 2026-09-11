@@ -961,6 +961,8 @@ pub(crate) fn native_compile_count(module: &str) -> usize {
 /// Holds the compiled model, runtime context, and circuit connectivity.
 #[derive(Debug, Clone)]
 pub struct VerilogADevice {
+    /// Compiler-proven eligibility for externally weighted F/Q integration.
+    one_step_dae_split_safe: bool,
     /// Device instance name
     pub name: SmolStr,
     /// Compiled model, shared between clones. Newton line-search snapshots
@@ -2838,6 +2840,18 @@ impl VerilogADevice {
             }
         };
 
+        #[cfg(feature = "native")]
+        let one_step_dae_split_safe = native_model.one_step_dae_split_safe();
+        #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+        let one_step_dae_split_safe = wasm_jit_model.one_step_dae_split_safe();
+        #[cfg(all(
+            not(feature = "native"),
+            not(all(feature = "wasm-jit", target_arch = "wasm32"))
+        ))]
+        let one_step_dae_split_safe = canonical_artifact.is_some_and(|artifact| {
+            crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true)
+        });
+
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
         #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
@@ -2869,6 +2883,7 @@ impl VerilogADevice {
             #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
             fused_stamp_jacobians: vec![0.0; fused_jacobian_count],
             canonical_noise_plan,
+            one_step_dae_split_safe,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             #[cfg(feature = "native")]
             native_model,
@@ -3987,6 +4002,12 @@ impl VerilogADevice {
     /// Checked transient-timestep update.
     pub fn try_set_timestep(&mut self, dt: f64) -> Result<(), VmError> {
         self.context.try_set_timestep(dt)
+    }
+
+    /// Whether the full model permits the externally weighted F/Q formulation.
+    /// False selects ordinary companions without changing the authored equations.
+    pub fn one_step_dae_split_safe(&self) -> bool {
+        self.one_step_dae_split_safe
     }
 
     /// Select the transient solver's companion coefficients for analog
@@ -10075,6 +10096,7 @@ endmodule
             fused_program_active: vec![1; num_stamp_programs],
             fused_stamp_jacobians: vec![0.0; native_jacobian_count],
             canonical_noise_plan,
+            one_step_dae_split_safe: false,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             prev_discontinuity: false,
         };
