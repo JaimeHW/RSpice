@@ -317,6 +317,13 @@ mod tests {
     fn shared_model_plan_publishes_through_aarch64_backend() {
         let model = empty_model(1);
         let plan = NativeModelPlan {
+            // The answer `build_model_plan_inner` starts every plan on. The
+            // proof is read off a canonical artifact, this fixture builds its
+            // plan by hand and has none, and the backend only copies the field
+            // onto the published image — so the conservative answer is both the
+            // one the builder would carry here and the one that cannot make a
+            // caller split a DAE this plan never proved splittable.
+            one_step_dae_split_safe: false,
             // A postfix plan, which is what production compiles: no CFG
             // prelude, and a pass rooted on the observable set.
             prelude: None,
