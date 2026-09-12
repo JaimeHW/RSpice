@@ -739,6 +739,7 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     let mut worst: Option<(String, f64, f64, f64)> = None;
     let mut exact = 0_usize;
     let mut compared = 0_usize;
+    let mut digital_only = 0_usize;
     for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
         let Some(index) = operating_point
             .node_names
@@ -750,7 +751,16 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
                 operating_point.node_names
             );
         };
-        let (op, first) = (operating_point.node_voltages[index], values[0]);
+        // R2.15 keeps a digital-only net's NAME and empties its column, so an
+        // empty column is that rule and not a missing sample. There is no
+        // analog value on either side to compare, and the operating point's
+        // own row for such a net is the subject of
+        // `deck_a_operating_point_leaves_out_the_nets_its_transient_empties`.
+        let Some(&first) = values.first() else {
+            digital_only += 1;
+            continue;
+        };
+        let op = operating_point.node_voltages[index];
         compared += 1;
         if op.to_bits() == first.to_bits() {
             exact += 1;
@@ -766,10 +776,15 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
             worst = Some((name.clone(), op, first, relative));
         }
     }
-    let (node, op, first, relative) = worst.expect("deck A has nodes");
+    let (node, op, first, relative) = worst.expect("deck A has an analog node");
     println!(
         "TRIFAMILY deck_a_op_vs_first_point_worst_node={node} relative={relative:e} \
-         bit_exact={exact}/{compared}"
+         bit_exact={exact}/{compared} digital_only_skipped={digital_only}"
+    );
+    assert_eq!(
+        digital_only, 2,
+        "deck A's digital-only nets are `d_clk` and `d_inv`; a different count means the \
+         skip above is covering something it was not written for"
     );
     assert!(
         relative < 1.0e-10,
@@ -778,14 +793,65 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     );
 }
 
+/// **Open, and not this lane's to close.** An operating point publishes no
+/// analog value for a net the transient publishes none for.
+///
+/// R2.15 took `d_clk` and `d_inv` out of the analog result namespace by
+/// emptying their columns: `TransientResult::voltages` is a column per node,
+/// so "no analog value" has a shape there. `SimulationResult::node_voltages`
+/// is a dense `Vec<Value>` indexed BY NODE ID — `populate_public_dc_solution`
+/// writes `node_voltages[node]`, and `monte_carlo.rs` and the parametric
+/// sweeps read it back the same way — so dropping a row would renumber every
+/// row after it, and there is no other absent value in the type. The operating
+/// point therefore still publishes the placeholder row's `0.0` for both nets,
+/// which is the same defect R2.15 fixed on the transient side.
+///
+/// Closing it is a `SimulationResult` shape change, and it is not about mixed
+/// decks: `.op` and every `.dc` point on any deck with a digital-only net
+/// publish the same zero. Left here as the statement of what is correct, so
+/// the day the shape exists this case says so by failing to be ignorable.
+#[test]
+#[ignore = "R2.15 DC follow-up: SimulationResult has no absent row for a digital-only net"]
+fn deck_a_operating_point_leaves_out_the_nets_its_transient_empties() {
+    let (_models, netlist) = deck_a();
+    let operating_point = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("a deck with a mixed Verilog-AMS instance must have an operating point");
+    let transient = run_deck_a();
+    for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
+        if !values.is_empty() {
+            continue;
+        }
+        assert!(
+            !operating_point
+                .node_names
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(name)),
+            "the operating point publishes V({name}) as {:?} for a net the transient \
+             leaves empty",
+            operating_point
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case(name))
+                .map(|index| operating_point.node_voltages[index])
+        );
+    }
+}
+
 /// The `.op` voltage table names exactly the nodes the transient's does.
 ///
 /// R2.1 gives an event-only net no MNA row and R2.15 keeps a digital-only net
-/// out of the analog result namespace, and both rules are decided on the
+/// out of the analog result *namespace*, and both rules are decided on the
 /// circuit rather than per analysis: the two runs read the same
-/// `node_names_sorted`. So the statement that survives either rule changing is
-/// that the two namespaces agree — a `0 V` row that appears in one table and
-/// not the other is the defect, in whichever direction it appears.
+/// `node_names_sorted`, and R2.15 keeps the name and empties the column rather
+/// than deleting the entry. So the two namespaces have to agree, and a name
+/// that appears in one table and not the other is the defect in whichever
+/// direction it appears — a mixed deck's `.op` inventing a row, or losing one
+/// the deck wrote.
+///
+/// What this does NOT say is that the two agree on which of those names carry
+/// a value; the operating-point row for a digital-only net is
+/// `deck_a_operating_point_leaves_out_the_nets_its_transient_empties`.
 #[test]
 fn deck_a_operating_point_names_the_nodes_its_transient_names() {
     let (_models, netlist) = deck_a();
