@@ -8876,9 +8876,27 @@ impl Engine {
                 .uses_accepted_solution_reference()
                 && xyce_lte_restart_first_step
                 && !self.config.transient_new_bp_stepping;
+            // The native arm restarts predictor history at every breakpoint
+            // landing (the two `restart_history_from` calls at the accepted
+            // step below), so the step that follows one carries a single point
+            // of history and therefore a constant predictor;
+            // `LteEstimator::predictor_is_constant` records why the number that
+            // comes out of it bounds nothing. The acceptance criterion that
+            // replaces it is ngspice's: `CKTterr` estimates charge and flux
+            // states and never forms a voltage LTE at all, and on this arm
+            // `uses_ngspice_charge_truncation` is true, so every device
+            // family's ngspice truncation limit is computed and already
+            // enforced above - a stateful node keeps its own bound at this
+            // step, and a stateless one never had truncation error to bound.
+            // The Xyce arm beside this line does the same at its own restart.
+            let native_breakpoint_restart_controls_lte = !lte_estimator
+                .uses_accepted_solution_reference()
+                && !first_accepted_transient_step
+                && lte_estimator.predictor_is_constant();
             let device_or_startup_controls_lte = first_accepted_transient_step
                 || candidate_model_discontinuity
                 || legacy_xyce_breakpoint_restart_controls_lte
+                || native_breakpoint_restart_controls_lte
                 || (!lte_estimator.uses_accepted_solution_reference()
                     && (linearized_startup_recovery_points
                         || defer_voltage_lte_to_bjt_truncation

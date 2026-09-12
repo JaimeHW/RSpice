@@ -928,6 +928,28 @@ impl LteEstimator {
         self.reference != TransientLteReference::PredictorLocal
     }
 
+    /// Whether the predictor is just the constant the last accepted point holds.
+    ///
+    /// One point of history predicts `prev` at every candidate width (see
+    /// [`Self::predict_next_value`]), so `|curr - pred|` is then the step's own
+    /// increment and not a truncation error: it falls in proportion to the
+    /// width instead of with a power of it, and the width that would bring it
+    /// under `reltol` is `(abstol + reltol * |v|) / slope` — 1.0e-13 s for a
+    /// node sitting 1.65 V out of a 16.5 V/ns ramp, and 6.1e-17 s on the same
+    /// ramp leaving zero volts, where `|curr - pred|` and the reference
+    /// `max(|curr|, |pred|)` are the same number so the reference degenerates
+    /// to `abstol / reltol` and the demand becomes `abstol / slope`. No width
+    /// makes a constant agree with a ramp, so neither number bounds an error
+    /// and neither may reject a step; a caller that has no other acceptance
+    /// criterion for such a step must supply one.
+    ///
+    /// A transient reaches this state at its own first step and, on the native
+    /// arm, at the step after every breakpoint landing, where the predictor is
+    /// restarted alongside the integrator.
+    pub(crate) fn predictor_is_constant(&self) -> bool {
+        self.history_count < 2
+    }
+
     /// Advance Xyce OneStep's attempted coefficient history for a candidate
     /// that reaches the predictor. A rejected candidate is rolled back with
     /// the matching one-sided `restoreHistory` shift.
@@ -2413,5 +2435,43 @@ mod lte_estimator_tests {
             (5.0, 4.0, 3.0),
             "the next attempt must advance from the rejected mode-1 attempt"
         );
+    }
+
+    /// A restarted predictor is a constant, and its metric is not an error.
+    ///
+    /// Both numbers below are the deck-A arithmetic the engine relies on: the
+    /// estimate falls in exact proportion to the candidate width, so no width
+    /// satisfies it on the way down, and on a node leaving zero volts the
+    /// reference is the increment itself so the whole metric pins at
+    /// `x / (1 + x)`.
+    #[test]
+    fn a_restarted_predictor_is_a_constant_whose_metric_tracks_the_width() {
+        const SLOPE: Value = 1.65e10;
+        let mut estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+        estimator.restart_history_from(&[1.65, 0.0]);
+        assert!(estimator.predictor_is_constant());
+
+        let (wide, _) = estimator.estimate(&[1.65 - SLOPE * 1.0e-12, 0.0], 1.0e-12);
+        let (narrow, _) = estimator.estimate(&[1.65 - SLOPE * 1.0e-13, 0.0], 1.0e-13);
+        assert!(
+            (wide / narrow - 10.0).abs() < 1.0e-9,
+            "the metric must fall with the width, not with a power of it: \
+             {wide:e} at 1e-12 s against {narrow:e} at 1e-13 s"
+        );
+
+        // Leaving zero volts, `|curr - pred|` and `max(|curr|, |pred|)` are the
+        // same number, so the reference floors at `abstol / reltol` and the
+        // estimate reaches `reltol` only at `abstol / slope`.
+        let mut from_zero = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+        from_zero.restart_history_from(&[0.0]);
+        let demand = 1.0e-6 / SLOPE;
+        let (at_demand, accepts) = from_zero.estimate(&[SLOPE * demand], demand);
+        assert!(
+            accepts && (at_demand / 1.0e-3 - 1.0).abs() < 1.0e-2,
+            "the abstol/slope width is where this metric turns over: {at_demand:e}"
+        );
+
+        estimator.record(&[1.64, 0.0], 1.0e-12);
+        assert!(!estimator.predictor_is_constant());
     }
 }
