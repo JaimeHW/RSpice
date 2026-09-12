@@ -648,6 +648,16 @@ pub(crate) enum WorkerSimulationError {
         reason: String,
     },
     CircuitError(String),
+    /// A Verilog-A or mixed elaboration refusal, still typed on the far side
+    /// of the browser worker boundary: a schematic on this side has the same
+    /// right to mark the instance the engine named.
+    Elaboration {
+        instance: Option<String>,
+        module: Option<String>,
+        kind: String,
+        location: Option<String>,
+        message: String,
+    },
     SolverError(String),
     RequestedSignalUnavailable {
         signal: String,
@@ -696,6 +706,19 @@ impl From<SimulationError> for WorkerSimulationError {
                 reason,
             },
             SimulationError::CircuitError(message) => Self::CircuitError(message),
+            SimulationError::Elaboration {
+                instance,
+                module,
+                kind,
+                location,
+                message,
+            } => Self::Elaboration {
+                instance,
+                module,
+                kind,
+                location,
+                message,
+            },
             SimulationError::SolverError(message) => Self::SolverError(message),
             SimulationError::RequestedSignalUnavailable {
                 signal,
@@ -757,6 +780,19 @@ impl From<WorkerSimulationError> for SimulationError {
                 reason,
             },
             WorkerSimulationError::CircuitError(message) => Self::CircuitError(message),
+            WorkerSimulationError::Elaboration {
+                instance,
+                module,
+                kind,
+                location,
+                message,
+            } => Self::Elaboration {
+                instance,
+                module,
+                kind,
+                location,
+                message,
+            },
             WorkerSimulationError::SolverError(message) => Self::SolverError(message),
             WorkerSimulationError::RequestedSignalUnavailable {
                 signal,

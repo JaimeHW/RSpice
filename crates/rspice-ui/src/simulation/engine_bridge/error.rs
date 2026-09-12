@@ -75,6 +75,32 @@ impl EngineBridge {
                 }
             }
             rspice_core::SimulationError::Circuit(msg) => SimulationError::CircuitError(msg),
+            // The one place the Verilog-A and mixed elaboration seam is
+            // classified. It used to arrive here as `Circuit` or `Netlist`
+            // depending on which untyped variant each of some forty sites
+            // reached for, so a missing `.va` and a mis-wired discrete port
+            // were the same thing to this bridge and a wrong terminal count
+            // and an unreadable source were different things. The kind is now
+            // the engine's answer and this carries it through unchanged; the
+            // message is the engine's own rendering, which already names the
+            // instance, the master and the source span.
+            rspice_core::SimulationError::Elaboration(error) => {
+                let message = error.to_string();
+                let rspice_core::ElaborationError {
+                    instance,
+                    module,
+                    kind,
+                    span,
+                    ..
+                } = *error;
+                SimulationError::Elaboration {
+                    instance,
+                    module,
+                    kind: kind.as_str().to_owned(),
+                    location: span.map(|span| span.to_string()),
+                    message,
+                }
+            }
             // A device that could not evaluate finitely at a trial iterate is
             // a circuit error to the UI: the classification exists for the
             // solver's retry ladder, and by the time a run ends the engine has
@@ -168,6 +194,82 @@ mod tests {
         let wire = serde_json::to_string(&WorkerSimulationError::from(translated.clone())).unwrap();
         let decoded: WorkerSimulationError = serde_json::from_str(&wire).unwrap();
         assert_eq!(SimulationError::from(decoded), translated);
+    }
+
+    /// The classification a workbench acts on comes off the kind, not the
+    /// prose, and survives the browser worker boundary.
+    ///
+    /// Both halves matter. Before this, a missing `.va` reached the UI as a
+    /// `ParseError` and a mis-wired discrete port as a `CircuitError` purely
+    /// because the engine sites had picked different untyped variants, so
+    /// nothing downstream could tell "find the file" from "rewire the pin"
+    /// without matching text.
+    #[test]
+    fn elaboration_refusals_reach_the_ui_as_their_kind_and_named_objects() {
+        use crate::simulation::runner::worker_contract::WorkerSimulationError;
+
+        let core_error = rspice_core::SimulationError::from(rspice_core::ElaborationError {
+            instance: Some("x1".to_owned()),
+            module: Some("clock_divider".to_owned()),
+            kind: rspice_core::ElaborationErrorKind::PortDiscipline,
+            span: None,
+            detail: "connects discrete port 'q' to ground; a boundary net carries a logic value \
+                     and ground is the voltage reference, not a net"
+                .to_owned(),
+        });
+        let rendered = core_error.to_string();
+        let translated = EngineBridge::new().translate_error(core_error);
+
+        let SimulationError::Elaboration {
+            instance,
+            module,
+            kind,
+            location,
+            message,
+        } = &translated
+        else {
+            panic!("an elaboration refusal must not collapse into prose: {translated}");
+        };
+        assert_eq!(instance.as_deref(), Some("x1"));
+        assert_eq!(module.as_deref(), Some("clock_divider"));
+        assert_eq!(kind, "port_discipline");
+        assert_eq!(*location, None);
+        assert_eq!(message, &rendered);
+        assert_eq!(translated.to_string(), rendered);
+
+        let wire = serde_json::to_string(&WorkerSimulationError::from(translated.clone())).unwrap();
+        let decoded: WorkerSimulationError = serde_json::from_str(&wire).unwrap();
+        assert_eq!(SimulationError::from(decoded), translated);
+    }
+
+    /// A source-side refusal carries the file the workbench should open, and
+    /// is classified as a missing source rather than as a broken circuit.
+    #[test]
+    fn a_missing_verilog_a_source_is_classified_and_located() {
+        let translated = EngineBridge::new().translate_error(rspice_core::SimulationError::from(
+            rspice_core::ElaborationError {
+                instance: None,
+                module: Some("counter.va".to_owned()),
+                kind: rspice_core::ElaborationErrorKind::MissingSource,
+                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
+                    "counter.va",
+                    0,
+                )),
+                detail: "this source does not exist or is unreadable".to_owned(),
+            },
+        ));
+        let SimulationError::Elaboration {
+            instance,
+            kind,
+            location,
+            ..
+        } = &translated
+        else {
+            panic!("expected a typed elaboration refusal: {translated}");
+        };
+        assert_eq!(*instance, None, "no instance owns a missing source");
+        assert_eq!(kind, "missing_source");
+        assert_eq!(location.as_deref(), Some("counter.va:0"));
     }
 
     #[test]

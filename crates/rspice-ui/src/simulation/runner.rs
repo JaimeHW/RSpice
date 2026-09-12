@@ -1157,6 +1157,29 @@ pub enum SimulationError {
     /// Circuit building error
     CircuitError(String),
 
+    /// Binding an instance to a Verilog-A or mixed Verilog-AMS master failed.
+    ///
+    /// Kept apart from [`Self::ParseError`] and [`Self::CircuitError`] — which
+    /// is where the whole `.VERILOGA` seam used to land, split between them by
+    /// whichever untyped engine variant each site happened to reach for —
+    /// because the workbench acts on this one: `instance` names the symbol to
+    /// mark on the schematic, `module` the master to open, `location` the
+    /// source file to show, and `kind` decides between "the file is missing",
+    /// "the name is wrong", "this value is wrong", "this port is wrong", and
+    /// "this is ours to fix" without reading a word of the message.
+    Elaboration {
+        /// Deck name of the instance, when one instance owns the failure.
+        instance: Option<String>,
+        /// The master or source the failure is about.
+        module: Option<String>,
+        /// Stable token from `rspice_core::ElaborationErrorKind::as_str`.
+        kind: String,
+        /// File and line the engine could point at, rendered as it renders it.
+        location: Option<String>,
+        /// The engine's full sentence, which is what a person reads.
+        message: String,
+    },
+
     /// Solver error
     SolverError(String),
 
@@ -1232,6 +1255,10 @@ impl std::fmt::Display for SimulationError {
                  {canonical_dependency_name} in {canonical_owner_name} ({reason})"
             ),
             SimulationError::CircuitError(msg) => write!(f, "Circuit error: {}", msg),
+            // The engine's own rendering, verbatim: it already leads with the
+            // span, the instance and the master, so re-labelling it here would
+            // only push that identification further from the reader.
+            SimulationError::Elaboration { message, .. } => write!(f, "{message}"),
             SimulationError::SolverError(msg) => write!(f, "Solver error: {}", msg),
             SimulationError::RequestedSignalUnavailable {
                 signal,
