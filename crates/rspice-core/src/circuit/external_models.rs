@@ -4325,7 +4325,7 @@ impl CircuitData {
             // mixed tick is.
             let scheduled = self
                 .scheduler
-                .next_activation(scheduler::ActivationLanes::scheduled())
+                .next_activation(scheduler::ActivationLanes::scheduled(accepted_time))
                 .ok()
                 .flatten()
                 .map(|activation| (activation.owner, activation.seconds()));

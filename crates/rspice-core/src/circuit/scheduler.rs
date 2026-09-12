@@ -54,20 +54,25 @@ impl Activation<'_> {
     }
 }
 
-/// Which of the HDL wheel's activations a folded question is about.
+/// Which activations a folded question is about.
 ///
 /// The two callers that fold both lanes do not ask quite the same thing, and
-/// the difference is physics rather than taste:
+/// the differences are physics rather than taste:
 ///
 /// - The landing target ([`Self::landing`]) is the set of activations the
 ///   stepper *must* put an accepted point on. An HDL activation closer to the
 ///   accepted point than the solver's floor is left to the module that is
 ///   already coalescing it, because there is no analog instant between the two
 ///   to land on, and a target for it would only spend accepted points marching
-///   at the floor.
+///   at the floor. The code-model queue is not filtered that way: a coupled
+///   event is landed whatever the floor is, and where it lands is
+///   `landed_veriloga_event_time`'s question rather than this one's.
 /// - The sub-minimum schedule bound ([`Self::scheduled`]) asks whose schedule
-///   is pacing the accepted points, which is the same pair of lanes without
-///   that filter: a run of floor landings is exactly what it is looking for.
+///   is pacing the accepted points, so *both* lanes are filtered by one rule
+///   instead: an activation is only one at all if it is strictly after the
+///   accepted point. A lane holding nothing but a stale event must drop out
+///   here rather than hide the other lane's live one, which is what filtering
+///   after the fold instead of inside it would do.
 ///
 /// Both take the code-model queue only when it is coupled to a mixed module.
 /// Coupling is what makes those events landed rather than merely coalescible,
@@ -76,11 +81,12 @@ impl Activation<'_> {
 /// ([`CircuitScheduler::next_xspice_activation`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ActivationLanes {
-    /// Every activation the wheel has queued, beside the coupled queue.
-    Scheduled,
-    /// The same, restricted to what the stepper can still land on: an HDL
-    /// activation counts only when `due - accepted_time >= hard_min_dt`, the
-    /// same test the coordinator's own missed-breakpoint guard applies.
+    /// Every activation either lane has queued strictly after the accepted
+    /// point.
+    Scheduled { accepted_time: Value },
+    /// Every coupled code-model event, and every HDL activation the stepper
+    /// has a legal interval to: `due - accepted_time >= hard_min_dt`, the same
+    /// test the coordinator's own missed-breakpoint guard applies.
     Landing {
         accepted_time: Value,
         hard_min_dt: Value,
@@ -89,8 +95,8 @@ pub(crate) enum ActivationLanes {
 
 impl ActivationLanes {
     /// Everything the sub-minimum schedule bound calls a scheduled activation.
-    pub(crate) const fn scheduled() -> Self {
-        Self::Scheduled
+    pub(crate) const fn scheduled(accepted_time: Value) -> Self {
+        Self::Scheduled { accepted_time }
     }
 
     /// The lanes `accepted_veriloga_event_time` must land a point on.
@@ -104,11 +110,20 @@ impl ActivationLanes {
     /// Whether an HDL activation at `seconds` is one this question counts.
     fn admits_hdl(self, seconds: Value) -> bool {
         match self {
-            Self::Scheduled => true,
+            Self::Scheduled { accepted_time } => seconds > accepted_time,
             Self::Landing {
                 accepted_time,
                 hard_min_dt,
             } => seconds - accepted_time >= hard_min_dt,
+        }
+    }
+
+    /// Whether a coupled code-model activation at `seconds` is one this
+    /// question counts.
+    fn admits_xspice(self, seconds: Value) -> bool {
+        match self {
+            Self::Scheduled { accepted_time } => seconds > accepted_time,
+            Self::Landing { .. } => true,
         }
     }
 }
@@ -182,12 +197,11 @@ impl CircuitScheduler {
 
     /// The earliest activation across both lanes, and its owner.
     ///
-    /// One fold, one rule. Ties go to the HDL wheel, which is the landed
-    /// same-instant order across the two kernels: HDL events run, then the
-    /// code models' wave. Nothing here filters on the accepted point — the
-    /// callers that need "strictly after" apply it themselves, because the
-    /// landing fold and the schedule bound disagree about what to do with an
-    /// event at or before it.
+    /// One fold, one rule. Each lane is admitted or dropped on its own — which
+    /// is what keeps a lane holding a stale event from hiding the other lane's
+    /// live one — and the earliest of what is left wins. Ties go to the HDL
+    /// wheel, which is the landed same-instant order across the two kernels:
+    /// HDL events run, then the code models' wave.
     pub(crate) fn next_activation(
         &self,
         lanes: ActivationLanes,
@@ -197,6 +211,7 @@ impl CircuitScheduler {
             .filter(|activation| lanes.admits_hdl(activation.seconds()));
         if self.has_coupled_event_nets()
             && let Some(coupled) = self.next_xspice_activation()
+            && lanes.admits_xspice(coupled.seconds())
             && earliest.is_none_or(|held| coupled.at < held.at)
         {
             earliest = Some(coupled);

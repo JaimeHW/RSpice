@@ -878,14 +878,14 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
 
     // The sub-minimum schedule bound's own question, which folds the analog
     // lanes beside the two discrete ones.
-    fn bound(circuit: &crate::CircuitData) -> Option<(Option<String>, f64)> {
+    fn bound(circuit: &crate::CircuitData, accepted: f64) -> Option<(Option<String>, f64)> {
         circuit
-            .veriloga_scheduled_activation(0.0)
+            .veriloga_scheduled_activation(accepted)
             .map(|(owner, target)| (owner.map(|owner| owner.subject()), target))
     }
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
-        bound(&circuit),
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
+        bound(&circuit, 0.0),
         "one wheel activation and an empty queue fold to the same answer"
     );
 
@@ -919,13 +919,13 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
         "the code-model lane reaches the breakpoint list on its own"
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
         Some((Some("Verilog-A/AMS instance 'xtick'".to_string()), wheel)),
         "the earliest activation owns the point, whichever queue holds it"
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
-        bound(&circuit)
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
+        bound(&circuit, 0.0)
     );
 
     // A code-model event at exactly the wheel's instant: the tie goes to the
@@ -939,13 +939,13 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
         crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::zero()),
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
         Some((Some("Verilog-A/AMS instance 'xtick'".to_string()), wheel)),
         "HDL events run before the code models' wave at one instant"
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
-        bound(&circuit)
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
+        bound(&circuit, 0.0)
     );
 
     // A code-model event before it: the code model owns the point, and is
@@ -960,7 +960,7 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
         crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one()),
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
         Some((
             Some("XSPICE code-model instance 'aring'".to_string()),
             earlier
@@ -968,8 +968,22 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
         "the earliest activation owns the point, and carries its own noun"
     );
     assert_eq!(
-        folded(&circuit, ActivationLanes::scheduled()),
-        bound(&circuit)
+        folded(&circuit, ActivationLanes::scheduled(0.0)),
+        bound(&circuit, 0.0)
+    );
+
+    // Each lane is filtered against the accepted point on its own. A queue
+    // whose earliest event is at or before that point is not an activation
+    // after it — and dropping out must not take the other lane's live one
+    // with it, which is what a filter applied after the fold would do.
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled(earlier)),
+        Some((Some("Verilog-A/AMS instance 'xtick'".to_string()), wheel)),
+        "a stale code-model event does not hide the wheel's activation"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled(earlier)),
+        bound(&circuit, earlier)
     );
 
     // The landing question drops the wheel's lane when the stepper has no
@@ -1015,7 +1029,7 @@ fn an_uncoupled_code_model_queue_is_a_breakpoint_lane_and_not_an_activation() {
     );
     assert_eq!(
         circuit
-            .next_activation(ActivationLanes::scheduled())
+            .next_activation(ActivationLanes::scheduled(0.0))
             .expect("both lanes are readable")
             .map(|activation| activation.seconds()),
         None,
