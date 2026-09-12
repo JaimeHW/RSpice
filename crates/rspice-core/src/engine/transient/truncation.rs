@@ -3,6 +3,8 @@
 #[cfg(test)]
 use super::state::MosfetCompanionBiasSource;
 use super::*;
+#[cfg(feature = "veriloga")]
+use crate::device::veriloga::RuntimeDynamicCharge;
 use crate::numerics::integration::{LtePrefixWindow, integrated_charge_current};
 
 /// The three Meyer capacitances of one MOSFET on a candidate step:
@@ -2539,7 +2541,7 @@ impl Engine {
     /// deck decision, not a statement about the physics, so one entry point
     /// answers for all of them and the callers below never learn which route a
     /// limit came from.
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(super) fn veriloga_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         candidate_solution: &[Value],
@@ -2548,10 +2550,24 @@ impl Engine {
         accepted_dt_prev_prev: Value,
         tolerances: NgspiceTruncationTolerances,
     ) -> Option<Value> {
-        if !circuit.has_generated_veriloga_devices() {
-            return None;
-        }
-        Self::generated_veriloga_ngspice_truncation_limit(
+        #[cfg(feature = "veriloga-builtins-base")]
+        let generated = if circuit.has_generated_veriloga_devices() {
+            Self::generated_veriloga_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                step,
+                accepted_dt_prev,
+                accepted_dt_prev_prev,
+                tolerances,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let generated: Option<Value> = None;
+        #[cfg(feature = "veriloga")]
+        let runtime = Self::runtime_veriloga_ngspice_truncation_limit(
             circuit,
             candidate_solution,
             step,
@@ -2559,7 +2575,109 @@ impl Engine {
             accepted_dt_prev_prev,
             tolerances,
         )
-        .filter(|limit| limit.is_finite() && *limit > 0.0)
+        .filter(|limit| limit.is_finite() && *limit > 0.0);
+        #[cfg(not(feature = "veriloga"))]
+        let runtime: Option<Value> = None;
+        Self::min_truncation_limit(generated, runtime)
+    }
+
+    /// The same walk over the instances the Verilog-A runtime executes: plain
+    /// `.va` cards, and the continuous half of every mixed Verilog-AMS module.
+    ///
+    /// A mixed module's analog half is one runtime instance whose discrete
+    /// half is also executed. Its charges integrate through the same operators
+    /// and bind the analog step for the same reason, so it is walked here
+    /// rather than left to the event machinery, which controls when the step
+    /// lands and not how large accuracy allows it to be.
+    #[cfg(feature = "veriloga")]
+    pub(super) fn runtime_veriloga_ngspice_truncation_limit(
+        circuit: &crate::circuit::CircuitData,
+        candidate_solution: &[Value],
+        step: TruncationStep,
+        accepted_dt_prev: Value,
+        accepted_dt_prev_prev: Value,
+        tolerances: NgspiceTruncationTolerances,
+    ) -> Option<Value> {
+        let TruncationStep {
+            method,
+            trap_order,
+            dt,
+        } = step;
+        if !accepted_dt_prev.is_finite() || accepted_dt_prev <= 0.0 {
+            return None;
+        }
+        if circuit.veriloga_devices().is_empty() && circuit.mixed_signal_hosts.is_empty() {
+            return None;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            accepted_dt_prev,
+        );
+        let truncation = NgspiceChargeTruncationContext::new(
+            dt,
+            accepted_dt_prev,
+            accepted_dt_prev_prev,
+            effective_method,
+            trap_order,
+            tolerances,
+        )?;
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        let mut walk = |device: &crate::device::veriloga::VerilogADevice| {
+            // An instance whose probe will not evaluate at this candidate
+            // contributes no bound, exactly as a native family that cannot
+            // form its charge state contributes none. It is not swallowed:
+            // with no instance reporting a branch this returns `None`, and a
+            // `None` is what denies the deck charge-truncation coverage above
+            // and puts it back on the voltage-LTE rule.
+            let _ = device.visit_dynamic_charges_at(candidate_solution, &mut |charge| {
+                let RuntimeDynamicCharge {
+                    current: q_curr,
+                    previous: q_prev,
+                    older: q_prev_prev,
+                    third_back: q_prev_prev_prev,
+                    companion_previous: cq_prev,
+                } = charge;
+                // The accepted companion current belongs to the step it was
+                // accepted on. This candidate step may be a different length,
+                // so its own current is rebuilt from the candidate's
+                // coefficients exactly as the native families do.
+                let cq_curr = Self::jfet_companion_ccap(
+                    &coeff,
+                    dt,
+                    q_curr,
+                    BranchChargeHistory {
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    },
+                );
+                let Some(branch_limit) = truncation.limit(ChargeSamples {
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                }) else {
+                    return;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            });
+        };
+
+        for device in circuit.veriloga_devices().iter() {
+            walk(device);
+        }
+        for host in &circuit.mixed_signal_hosts {
+            walk(host.analog_device());
+        }
+
+        found_branch.then_some(limit)
     }
 
     /// Prepare the unique, non-excluded solution indices used by the
@@ -3050,6 +3168,7 @@ impl Engine {
         diode_truncation_limit: Option<Value>,
         mosfet_truncation_limit: Option<Value>,
         vdmos_truncation_limit: Option<Value>,
+        veriloga_truncation_limit: Option<Value>,
     ) -> bool {
         // Magnetically coupled and nonlinear inductors have no `L*i` flux walk
         // (see `inductor_ngspice_truncation_limit`), so those decks stay on
@@ -3063,18 +3182,16 @@ impl Engine {
             return false;
         }
         // A Verilog-A charge is a state of the deck like any other, and the
-        // native walks below cannot see it: they enumerate fixed per-family
-        // charge vectors, and an authored `ddt` operand is in none of them.
-        // Letting the native families claim coverage anyway hands the whole
-        // deck's accuracy to charges nobody estimated, which is why an
-        // authored 1 pF capacitor accepted the same 120 points at reltol 1e-2
-        // and 1e-5 while the native one moved 135 to 598. Until those operands
-        // report a limit of their own, such a deck falls to the voltage-LTE
-        // rule — the same fallback a family whose charge state could not be
-        // formed already takes.
-        if circuit.has_any_veriloga_devices() {
-            return false;
-        }
+        // native walks cannot see it: they enumerate fixed per-family charge
+        // vectors, and an authored `ddt` operand is in none of them. Letting
+        // the native families claim coverage without one would hand the whole
+        // deck's accuracy to charges nobody estimated, which is why an authored
+        // 1 pF capacitor accepted the same 120 points at reltol 1e-2 and 1e-5
+        // while the native one moved 135 to 598. It is held to its own charge
+        // walk on exactly the terms the native families are, so a `None` here
+        // means the operands' charge state could not be formed at all.
+        let veriloga_controlled =
+            !circuit.has_any_veriloga_devices() || veriloga_truncation_limit.is_some();
 
         let capacitor_controlled =
             circuit.capacitors.is_empty() || capacitor_truncation_limit.is_some();
@@ -3099,6 +3216,7 @@ impl Engine {
             && diode_controlled
             && mosfet_controlled
             && vdmos_controlled
+            && veriloga_controlled
     }
 
     #[inline]
@@ -3734,9 +3852,10 @@ L1 n 0 2.5u\n\
             None,
             None,
             None,
+            None,
         ));
         assert!(!Engine::ngspice_device_truncation_covers_transient_lte(
-            &circuit, None, None, None, None, None, None, None,
+            &circuit, None, None, None, None, None, None, None, None,
         ));
     }
 
@@ -3780,6 +3899,7 @@ K12 L1 L2 0.9\n\
             &circuit,
             None,
             Some(1.0e-9),
+            None,
             None,
             None,
             None,
@@ -3845,6 +3965,7 @@ D1 n 0 dmod
             None,
             None,
             Some(limit),
+            None,
             None,
             None,
         ));
@@ -3968,6 +4089,7 @@ Q1 n n 0 0 qmod
             None,
             None,
             None,
+            None,
         ));
     }
 
@@ -4028,6 +4150,7 @@ J1 n n 0 jmod
             Some(1.0e-9),
             None,
             Some(limit),
+            None,
             None,
             None,
             None,
@@ -4097,6 +4220,7 @@ M1 n n 0 0 mmod W=10u L=1u
             None,
             None,
             Some(limit),
+            None,
             None,
         ));
     }
@@ -4317,6 +4441,7 @@ M1 n g 0 0 vtrunc W=1 L=1u
             None,
             None,
             Some(limit),
+            None,
         ));
     }
 
@@ -4549,6 +4674,7 @@ C1 b 0 1p
                 None,
                 None,
                 None,
+                None,
             ),
             "a native-only deck keeps the charge-truncation shortcut"
         );
@@ -4577,8 +4703,26 @@ XD1 b 0 diode_cmc
                 None,
                 None,
                 None,
+                None,
             ),
             "a Verilog-A charge nobody estimated must not be covered by the native families"
+        );
+        // The authored charge reporting its own limit is what restores
+        // coverage: the deck is controlled again, on the same terms as the
+        // native families beside it.
+        assert!(
+            Engine::ngspice_device_truncation_covers_transient_lte(
+                &circuit,
+                Some(1.0e-9),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(1.0e-9),
+            ),
+            "an estimated Verilog-A charge restores the charge-truncation shortcut"
         );
     }
 

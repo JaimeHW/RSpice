@@ -1027,6 +1027,23 @@ pub struct VerilogADevice {
     discontinuity_slot: Option<usize>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
+    /// Integration-state slots that hold a `ddt` operand, ascending and
+    /// unique. A module's `ddt` inputs are its charges and fluxes whatever it
+    /// calls them, so this is the whole of what a charge-truncation walk has
+    /// to look at, and it is fixed by the compiled program: resolving it once
+    /// here keeps the walk off the instruction stream.
+    dynamic_charge_slots: Vec<usize>,
+    /// `Q` three accepted points back, one entry per
+    /// [`Self::dynamic_charge_slots`] entry.
+    ///
+    /// An order-two truncation estimate differences four accepted charges, and
+    /// the accepted record retains two. The fourth point exists only in the
+    /// instant before [`Self::apply_validated_advance_state`] promotes older
+    /// to previous and drops what older held, so it is taken there.
+    dynamic_charge_third_back: Vec<f64>,
+    /// Pre-rotation image of each charge slot, kept across steps so an
+    /// acceptance allocates nothing.
+    dynamic_charge_rotation_scratch: Vec<DynamicChargeRotation>,
 }
 
 /// The accepted-state payload's own version, independent of the outer
@@ -1050,6 +1067,41 @@ pub struct VerilogADevice {
 /// saved its unused integration history instead, so they cannot resume it.
 /// Version 11 retains exact circular-integrator origins when the modulus changes.
 pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 11;
+
+/// What one charge slot held immediately before an accepted-state rotation.
+///
+/// Captured rather than re-derived because the rotation consumes exactly the
+/// values the third-back lane needs: it overwrites the older charge and
+/// promotes the candidate status in the same pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct DynamicChargeRotation {
+    /// The older accepted charge, which the rotation is about to overwrite.
+    older: f64,
+    /// The candidate status, which the rotation advances only for a slot that
+    /// published a candidate.
+    status: u8,
+    /// Whether the slot already carried accepted history.
+    initialized: bool,
+}
+
+/// One `ddt` operand's charge at a probed solution, with the accepted history
+/// a charge-truncation walk differences it against.
+///
+/// The roles are the ones the native device families hand that walk, so a
+/// consumer needs to know nothing about Verilog-A to use it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeDynamicCharge {
+    /// `Q` at the probed solution.
+    pub current: f64,
+    /// `Q` at the last accepted timepoint.
+    pub previous: f64,
+    /// `Q` one accepted timepoint before that.
+    pub older: f64,
+    /// `Q` one accepted timepoint before that again.
+    pub third_back: f64,
+    /// The accepted companion current `dQ/dt` the site last published.
+    pub companion_previous: f64,
+}
 
 /// Reusable, ephemeral image of evaluated scalar variables and reporting state.
 /// The mixed host restores solver/discrete inputs separately. Accepted operator
@@ -2908,7 +2960,11 @@ impl VerilogADevice {
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
             wasm_jit_model,
             prev_discontinuity: false,
+            dynamic_charge_slots: Vec::new(),
+            dynamic_charge_third_back: Vec::new(),
+            dynamic_charge_rotation_scratch: Vec::new(),
         };
+        device.resolve_dynamic_charge_slots();
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
         for &(parameter, value) in parameters {
@@ -4342,12 +4398,221 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Resolve the integration-state slots this instance's `ddt` operands own.
+    ///
+    /// The slot a state instruction addresses is the bytecode half of the
+    /// state vocabulary, and `CanonicalStateOperator::Ddt` is what answers it
+    /// for this family. Slot numbering is per canonical *site* and identical
+    /// for the interpreter and every JIT — `codegen::state_renumbering` runs on
+    /// every compiled model regardless of which runtime executes it — so this
+    /// list is the same on all four routes.
+    fn resolve_dynamic_charge_slots(&mut self) {
+        use crate::canonical_ir::state::CanonicalStateOperator;
+
+        let mut slots = Vec::new();
+        let mut scan_program = |program: &BytecodeProgram| {
+            for instruction in &program.instructions {
+                // `DdtDerivativeState` addresses the same record as its
+                // primal site, so the dedup below keeps one entry for both.
+                if let Some(slot) = CanonicalStateOperator::Ddt.bytecode_slot(instruction) {
+                    slots.push(slot);
+                }
+            }
+        };
+
+        fn scan_steps(steps: &[AssignmentStep], scan_program: &mut impl FnMut(&BytecodeProgram)) {
+            for step in steps {
+                match step {
+                    AssignmentStep::Initialization { body, .. } => scan_steps(body, scan_program),
+                    AssignmentStep::Task(task) => task.expressions().for_each(&mut *scan_program),
+                    AssignmentStep::Assign(assignment) => scan_program(&assignment.program),
+                    AssignmentStep::AssignIndexed { index, value, .. } => {
+                        scan_program(index);
+                        scan_program(value);
+                    }
+                    AssignmentStep::Loop { condition, body } => {
+                        scan_program(condition);
+                        scan_steps(body, scan_program);
+                    }
+                }
+            }
+        }
+
+        scan_steps(&self.model.assignment_steps, &mut scan_program);
+        scan_steps(&self.model.noise_assignment_steps, &mut scan_program);
+        for stamp in &self.model.stamp_programs {
+            if let Some(condition) = &stamp.static_condition {
+                scan_program(condition);
+            }
+            scan_program(&stamp.value_program);
+            if let Some(program) = &stamp.limiter_correction {
+                scan_program(program);
+            }
+            for jacobian in &stamp.jacobian_programs {
+                scan_program(&jacobian.program);
+            }
+            for jacobian in &stamp.reactive_jacobians {
+                scan_program(&jacobian.program);
+            }
+        }
+
+        slots.sort_unstable();
+        slots.dedup();
+        self.dynamic_charge_third_back = vec![0.0; slots.len()];
+        self.dynamic_charge_rotation_scratch = vec![DynamicChargeRotation::default(); slots.len()];
+        self.dynamic_charge_slots = slots;
+    }
+
     /// Apply a commit only after all runtime instances in the circuit have
     /// passed [`Self::validate_advance_state`].
     pub fn apply_validated_advance_state(&mut self) {
         let discontinuity = self.discontinuity_pending();
+        self.capture_dynamic_charge_rotation();
         self.context.apply_validated_advance_state();
+        self.publish_dynamic_charge_third_back();
         self.prev_discontinuity = discontinuity;
+    }
+
+    /// Record what each charge slot's older lane, candidate status and
+    /// accepted-history flag hold immediately before the rotation runs.
+    fn capture_dynamic_charge_rotation(&mut self) {
+        for (scratch, &slot) in self
+            .dynamic_charge_rotation_scratch
+            .iter_mut()
+            .zip(&self.dynamic_charge_slots)
+        {
+            *scratch = DynamicChargeRotation {
+                older: self
+                    .context
+                    .state_values_older
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(0.0),
+                status: self
+                    .context
+                    .state_candidate_valid
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(0),
+                initialized: self
+                    .context
+                    .state_initialized
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(false),
+            };
+        }
+    }
+
+    /// Promote the captured older charge into the third-back lane, for the
+    /// slots the rotation actually advanced.
+    ///
+    /// Which those are is read off the candidate status rather than guessed
+    /// from the values: the rotation retires a published candidate and leaves
+    /// every other slot — never evaluated, idle since its last acceptance, or
+    /// owned by a limiter — exactly as it found it, so a slot advanced its
+    /// history if and only if its status changed. Comparing the charges
+    /// instead would miss a settled signal, whose successive accepted values
+    /// are equal while its history is still moving.
+    ///
+    /// A site's first accepted point has no third charge behind it, and
+    /// leaving a zero there is not a neutral placeholder: it is a full-scale
+    /// step away from the operating-point charge the other three lanes hold,
+    /// and the third-order divided difference built from it collapses the
+    /// timestep to nothing. The native families never meet this because they
+    /// seed all four of their charge lanes at the operating point, so their
+    /// differences start at zero. Seeding from the rotation's own result gives
+    /// a site the same start.
+    fn publish_dynamic_charge_third_back(&mut self) {
+        for ((third_back, &captured), &slot) in self
+            .dynamic_charge_third_back
+            .iter_mut()
+            .zip(&self.dynamic_charge_rotation_scratch)
+            .zip(&self.dynamic_charge_slots)
+        {
+            let DynamicChargeRotation {
+                older,
+                status,
+                initialized,
+            } = captured;
+            let status_after = self
+                .context
+                .state_candidate_valid
+                .get(slot)
+                .copied()
+                .unwrap_or(status);
+            if status_after == status {
+                continue;
+            }
+            *third_back = if initialized {
+                older
+            } else {
+                self.context
+                    .state_values_older
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(older)
+            };
+        }
+    }
+
+    /// Visit the dynamic charge of every `ddt` operand this instance owns,
+    /// evaluated at `circuit_voltages` and paired with its accepted history.
+    ///
+    /// Nothing is collected: the walk that consumes these reduces them to one
+    /// bound, so handing it a borrowed record per operand keeps a deck of
+    /// thousands of instances from allocating a history vector per instance
+    /// per accepted step.
+    ///
+    /// The probe runs on a copy, so asking a device what it would store at a
+    /// trial point cannot change what it did store at the accepted one. The
+    /// history is read off the live instance before the copy evaluates,
+    /// because a module whose `ddt` sites are inactive writes the trial value
+    /// into its own previous lane and would otherwise report a charge that
+    /// never moved.
+    pub fn visit_dynamic_charges_at(
+        &self,
+        circuit_voltages: &[f64],
+        visit: &mut dyn FnMut(RuntimeDynamicCharge),
+    ) -> Result<(), VmError> {
+        if self.dynamic_charge_slots.is_empty() {
+            return Ok(());
+        }
+        let mut probe = self.clone();
+        probe.context.record_task_effects = false;
+        probe.try_stamp_with_mode(
+            circuit_voltages,
+            |_, _, _| {},
+            |_, _| {},
+            crate::vm::VerilogAEvaluationMode::StaticProbe,
+        )?;
+        for (index, &slot) in self.dynamic_charge_slots.iter().enumerate() {
+            let (Some(&current), Some(&previous), Some(&older), Some(&companion_previous)) = (
+                probe.context.state_values.get(slot),
+                self.context.state_values_prev.get(slot),
+                self.context.state_values_older.get(slot),
+                self.context.state_derivatives_prev.get(slot),
+            ) else {
+                continue;
+            };
+            if !self
+                .context
+                .state_initialized
+                .get(slot)
+                .copied()
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            visit(RuntimeDynamicCharge {
+                current,
+                previous,
+                older,
+                third_back: self.dynamic_charge_third_back[index],
+                companion_previous,
+            });
+        }
+        Ok(())
     }
 
     /// Whether this model defines behavior for the initial nodeset solve.
@@ -10342,7 +10607,11 @@ endmodule
             noise_gain_live_variables: std::sync::OnceLock::new(),
             small_signal_replay_variables: std::sync::OnceLock::new(),
             prev_discontinuity: false,
+            dynamic_charge_slots: Vec::new(),
+            dynamic_charge_third_back: Vec::new(),
+            dynamic_charge_rotation_scratch: Vec::new(),
         };
+        device.resolve_dynamic_charge_slots();
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
         device

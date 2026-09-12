@@ -35,6 +35,9 @@ pub use rspice_veriloga::{
 
     device::DeviceBuilder,
     device::JacobianEntry,
+    // One `ddt` operand's charge and accepted history, as the transient step
+    // controller's charge-truncation walk consumes them.
+    device::RuntimeDynamicCharge,
 
     // Device types
     device::VerilogADevice,

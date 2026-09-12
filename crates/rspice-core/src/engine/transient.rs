@@ -8035,7 +8035,7 @@ impl Engine {
             // never rejects a candidate step and never caps the next one, so
             // an authored charge could hold no authority over the grid at all
             // while a function computing its limit existed.
-            #[cfg(feature = "veriloga-builtins-base")]
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             let veriloga_truncation_limit = if use_ngspice_charge_truncation
                 && !first_accepted_transient_step
                 && circuit.has_any_veriloga_devices()
@@ -8060,7 +8060,7 @@ impl Engine {
             } else {
                 None
             };
-            #[cfg(not(feature = "veriloga-builtins-base"))]
+            #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
             let veriloga_truncation_limit: Option<Value> = None;
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
@@ -8207,6 +8207,7 @@ impl Engine {
                     diode_truncation_limit,
                     mosfet_truncation_limit,
                     vdmos_truncation_limit,
+                    veriloga_truncation_limit,
                 );
             let legacy_xyce_breakpoint_restart_controls_lte = lte_estimator
                 .uses_accepted_solution_reference()
@@ -8757,7 +8758,7 @@ impl Engine {
                     } else {
                         None
                     };
-                    #[cfg(feature = "veriloga-builtins-base")]
+                    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
                     let force_accept_veriloga_truncation_limit =
                         if circuit.has_any_veriloga_devices() {
                             Self::veriloga_ngspice_truncation_limit(
@@ -8780,7 +8781,7 @@ impl Engine {
                         } else {
                             None
                         };
-                    #[cfg(not(feature = "veriloga-builtins-base"))]
+                    #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
                     let force_accept_veriloga_truncation_limit: Option<Value> = None;
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
