@@ -815,6 +815,11 @@ impl CircuitData {
         &self,
         include_fixed_reactive_stores: bool,
     ) -> NonlinearDeviceStateSnapshot {
+        // Counted because this image is the one cost here that is proportional
+        // to the design rather than to what the step touched: see
+        // `xspice::settle_cost`, and `engine::xspice_settle_ratchet` for the
+        // ceiling that keeps it off paths which mutate only code models.
+        crate::xspice::settle_cost::note_device_state_snapshot();
         NonlinearDeviceStateSnapshot {
             capacitors: (include_fixed_reactive_stores
                 || self.capacitors.has_solution_dependent_values())

@@ -16,6 +16,13 @@
 //!    handle. A new unconditional `make_mut` on a per-step path, or a write
 //!    that stores what is already there, silently restores the old cost.
 //!
+//! 3. **Whole-circuit device images.** `nonlinear_state_snapshot` clones every
+//!    device family the circuit holds. Newton's line search and the
+//!    continuation ladder have to, because they evaluate devices at a point
+//!    they intend to discard; a path that mutates only code models does not,
+//!    and one that takes the image anyway pays for the whole design at every
+//!    Newton iteration of every step.
+//!
 //! Wall-clock is the obvious thing to measure and the wrong thing to assert:
 //! a timing threshold on shared CI hardware is either loose enough to miss the
 //! regression or tight enough to fail on a noisy neighbour. These counters are
@@ -98,6 +105,19 @@ pub(crate) struct XspiceSettleCounts {
     /// feature has nothing that can move this number and `-D warnings` says so.
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_trial_deep_copies: u64,
+    /// Whole-circuit nonlinear device images captured by
+    /// `CircuitData::nonlinear_state_snapshot` and its trial variant.
+    ///
+    /// The third cost structure, and the one that is not copy-on-write at all:
+    /// this image clones every device family the circuit holds — capacitors,
+    /// inductors, diodes, BJTs, every MOSFET table, behavioural sources, the
+    /// Verilog-A devices — so one of them is proportional to the *design*
+    /// rather than to what the step touched. Newton's line search and the
+    /// continuation ladder need it, because they really do evaluate devices at
+    /// a point they intend to discard. The XSPICE trial stamp did not: it
+    /// evaluated code models only, and undid them with an image of everything.
+    /// Counting the captures is what keeps that from coming back.
+    pub(crate) device_state_snapshots: u64,
 }
 
 #[cfg(test)]
@@ -128,6 +148,7 @@ struct Counters {
     event_queue_deep_copies: Cell<u64>,
     #[cfg(feature = "veriloga")]
     mixed_trial_deep_copies: Cell<u64>,
+    device_state_snapshots: Cell<u64>,
 }
 
 thread_local! {
@@ -139,6 +160,7 @@ thread_local! {
             event_queue_deep_copies: Cell::new(0),
             #[cfg(feature = "veriloga")]
             mixed_trial_deep_copies: Cell::new(0),
+            device_state_snapshots: Cell::new(0),
         }
     };
 }
@@ -184,6 +206,12 @@ pub(crate) fn note_mixed_trial_deep_copy() {
     COUNTERS.with(|counters| bump(&counters.mixed_trial_deep_copies));
 }
 
+/// Record that a whole-circuit nonlinear device image was captured.
+#[inline]
+pub(crate) fn note_device_state_snapshot() {
+    COUNTERS.with(|counters| bump(&counters.device_state_snapshots));
+}
+
 /// Zero this thread's counters.
 ///
 /// A ratchet measures a delta, so it resets before the run it is measuring.
@@ -200,6 +228,7 @@ pub(crate) fn reset() {
         counters.event_queue_deep_copies.set(0);
         #[cfg(feature = "veriloga")]
         counters.mixed_trial_deep_copies.set(0);
+        counters.device_state_snapshots.set(0);
     });
 }
 
@@ -213,6 +242,7 @@ pub(crate) fn counts() -> XspiceSettleCounts {
         event_queue_deep_copies: counters.event_queue_deep_copies.get(),
         #[cfg(feature = "veriloga")]
         mixed_trial_deep_copies: counters.mixed_trial_deep_copies.get(),
+        device_state_snapshots: counters.device_state_snapshots.get(),
     })
 }
 
