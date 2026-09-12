@@ -491,6 +491,14 @@ pub struct CircuitData {
     /// bridge route can attach digital and real representations to the same
     /// electrical node; event-node accessors share this typed record.
     pub(crate) net_kinds: NetKinds,
+    /// Node identities an analog stamp reaches, by node id: the terminals of
+    /// every flat analog element, the nodes a behavioral source reads, and the
+    /// analog ports of every code model, auto-bridges included.
+    ///
+    /// `None` until a netlist build classifies them. A circuit assembled by
+    /// hand therefore claims no digital-only net and its analog namespace
+    /// keeps every row it has always kept.
+    pub(crate) analog_touched_nodes: Option<Vec<bool>>,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
     /// Number of private scalar DAE state variables appended after the public

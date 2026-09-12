@@ -8840,19 +8840,33 @@ impl Engine {
             }
         }
 
+        // Which nodes an analog stamp reaches, classified once for the whole
+        // build, after the planned auto-bridges are in the circuit so a
+        // bridged boundary counts as the physical node it became.
+        //
+        // Two questions need this one answer. The mixed-boundary classifier
+        // below tells an event-only net from an analog node whose only driver
+        // is a connect module; the transient result namespace tells a
+        // digital-only net — whose MNA row is a pinned placeholder, not a
+        // voltage — from a bridged one. A pure-XSPICE deck in a build without
+        // the `veriloga` feature asks the second question too, so the set is
+        // computed unconditionally and lives on the circuit rather than inside
+        // the mixed-module block that first needed it.
+        let mut physical_nodes = BTreeSet::new();
+        collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
+        for instance in &circuit.xspice_instances {
+            for index in 0..instance.ports().len() {
+                if let Some(connection) = instance.connection_at(index) {
+                    collect_analog_connection_nodes(&mut physical_nodes, connection);
+                }
+            }
+        }
+        circuit.set_analog_touched_nodes(&physical_nodes);
+
         // Validate mixed bindings only after source and generated XSPICE
         // connections have completed the event-domain table.
         #[cfg(feature = "veriloga")]
         {
-            let mut physical_nodes = BTreeSet::new();
-            collect_flat_analog_nodes(&mut physical_nodes, &circuit, &flat_elements);
-            for instance in &circuit.xspice_instances {
-                for index in 0..instance.ports().len() {
-                    if let Some(connection) = instance.connection_at(index) {
-                        collect_analog_connection_nodes(&mut physical_nodes, connection);
-                    }
-                }
-            }
             // What makes a mixed boundary net *event-only*, and what a net with
             // a single discrete endpoint is instead.
             //

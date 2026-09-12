@@ -23,6 +23,7 @@ impl CircuitData {
             branch_name_by_ordinal: Vec::new(),
             num_nodes: 0,
             net_kinds: NetKinds::default(),
+            analog_touched_nodes: None,
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),
@@ -584,6 +585,13 @@ impl CircuitData {
         // All participants now carry renumbered connections. Replay their
         // event identities into the cached net-kind table.
         self.rebuild_net_kinds();
+        // The analog-touch classification is keyed by node id, so a
+        // renumbering invalidates it. Dropping it rather than remapping it
+        // fails in the safe direction: an unclassified circuit claims no
+        // digital-only net, so no analog row can lose its voltage to a stale
+        // answer. The build classifies after every remap, which is why this
+        // is never the answer a run actually uses.
+        self.analog_touched_nodes = None;
 
         #[cfg(feature = "veriloga")]
         self.veriloga_devices

@@ -662,6 +662,42 @@ impl CircuitData {
         self.net_kinds.discrete_nodes().map(|node| node - 1)
     }
 
+    /// Whether a node identity is digital-only: an event kind is registered
+    /// for it and no analog stamp reaches it.
+    ///
+    /// This is the one predicate the analog result namespace is built from. A
+    /// digital-only net owns an MNA placeholder row that the assembly closes
+    /// with the identity equation `v = 0`; that row is a rank repair, not a
+    /// solved level, so publishing it as `V(net)` publishes 0 V for a net that
+    /// carries four-state logic.
+    ///
+    /// [`Self::is_discrete_net`] alone is not the predicate. An auto-bridged
+    /// node carries a digital identity *and* a bridge that conducts on it, so
+    /// it keeps `V()` and `D()` both — the same hybrid ngspice publishes on
+    /// both sides.
+    #[inline]
+    pub(crate) fn is_digital_only_net(&self, node: NodeId) -> bool {
+        self.is_discrete_net(node)
+            && self
+                .analog_touched_nodes
+                .as_ref()
+                .is_some_and(|touched| !touched.get(node).copied().unwrap_or(false))
+    }
+
+    /// Record the analog-touch classification the netlist build computed.
+    ///
+    /// One producer, one answer: the mixed-boundary classifier and the result
+    /// namespace ask the same question of the same set, so a pure-XSPICE deck
+    /// in a build without the `veriloga` feature gets the classification too.
+    pub(crate) fn set_analog_touched_nodes(&mut self, nodes: &std::collections::BTreeSet<NodeId>) {
+        let highest = nodes.iter().next_back().copied().unwrap_or(0);
+        let mut touched = vec![false; self.num_nodes.max(highest) + 1];
+        for &node in nodes {
+            touched[node] = true;
+        }
+        self.analog_touched_nodes = Some(touched);
+    }
+
     /// Set transient run context on all XSPICE instances.
     pub(crate) fn set_xspice_transient_context(&mut self, tstep: Value, tstop: Value) {
         let tstep = (tstep.is_finite() && tstep > 0.0).then_some(tstep);
