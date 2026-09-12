@@ -5262,6 +5262,194 @@ endmodule
         );
     }
 
+    /// The same module twice: once with the analog block reading what the
+    /// discrete half writes, once without.
+    ///
+    /// `gain` is written on `posedge ca` either way, so the discrete halves are
+    /// identical and only the feedback path differs. Node 3 carries `ca`, node
+    /// 4 carries `cb`.
+    const LANDING_FEEDBACK: &str = r#"
+module landing_feedback(p, n, ca, cb);
+  inout p, n;
+  electrical p, n;
+  input ca, cb;
+  wire ca, cb;
+  integer gain;
+  initial gain = 1;
+  always @(posedge ca) gain = 2;
+  analog I(p, n) <+ gain * V(p, n) / 1000.0;
+endmodule
+"#;
+
+    /// [`LANDING_FEEDBACK`] with the read deleted and nothing else changed.
+    const LANDING_NO_FEEDBACK: &str = r#"
+module landing_no_feedback(p, n, ca, cb);
+  inout p, n;
+  electrical p, n;
+  input ca, cb;
+  wire ca, cb;
+  integer gain;
+  initial gain = 1;
+  always @(posedge ca) gain = 2;
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+    fn landing_host(source: &str) -> MixedSignalHost {
+        let mut host = MixedSignalHost::compile(
+            source,
+            None,
+            "xlanding",
+            &[1, 0],
+            SchedulerLimits::default(),
+        )
+        .expect("the landing module compiles and starts");
+        host.add_adc_bridge("ca", 0, (3, 0), 0.4, 0.6)
+            .expect("the first A/D bridge");
+        host.add_adc_bridge("cb", 0, (4, 0), 0.4, 0.6)
+            .expect("the second A/D bridge");
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        host
+    }
+
+    /// Open a trial the way every Newton evaluation does — as a probe, which
+    /// [`MixedSignalHost::accept_trial`] refuses by name.
+    fn begin_probe(host: &mut MixedSignalHost, tick: u64) {
+        host.begin_probe_trial(
+            tick as f64 * 1.0e-9,
+            if tick == 0 { 0.0 } else { 1.0e-9 },
+            IntegrationCoefficients::inactive(),
+            tick == 0,
+            false,
+        )
+        .expect("begin a probe trial");
+    }
+
+    /// Settle to quiet and roll the whole thing back, as a probe does.
+    fn settle_and_reject(host: &mut MixedSignalHost, voltages: &[f64]) {
+        while host
+            .settle_analog_bridges(voltages)
+            .expect("bridges settle")
+        {}
+        host.reject_trial().expect("a settled probe rolls back");
+    }
+
+    /// The rule of `a_step_a_discrete_read_moved_in_has_no_interior_root` seen
+    /// across the boundary the engine actually re-solves over: the write is in
+    /// a Newton probe the solver has already rolled back.
+    ///
+    /// The two standalone cases above hand one trial two iterates, so the store
+    /// still shows `gain` moved when the second crossing is dated. The engine
+    /// never does that. `stamp_mixed_transient_trial` opens, settles, stamps
+    /// and rolls back a probe trial per Newton evaluation, and the inspection
+    /// that decides the candidate opens a fresh trial from the accepted store.
+    /// The write lands in one probe; the solution it moved is what the *next*
+    /// evaluation solves; and the trial that dates the resulting crossing was
+    /// opened after the write was undone. No reading of the store can see it.
+    ///
+    /// So the fact is latched per candidate instead. What that has to get right
+    /// is both halves: the bridge that crossed *before* the write keeps the
+    /// instant the circuit gave it and is still offered to the controller as a
+    /// root, and the bridge that only appears *after* it is dated where its
+    /// cause is. The third trial here asks for both at once — `ca` interior at
+    /// 1.6 ns, `cb` at the endpoint — and it is the one that fails if the latch
+    /// dates by position rather than by cause.
+    #[test]
+    fn a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is() {
+        let mut host = landing_host(LANDING_FEEDBACK);
+
+        // Newton probe *k* at 2 ns. `ca` reaches its threshold exactly at the
+        // endpoint — where the refinement puts a step it is resolving a root
+        // on — and the process it wakes writes `gain`. `cb` is still low: the
+        // solver has not yet re-solved with what that write moved. The probe
+        // then rolls back, taking the write with it.
+        begin_probe(&mut host, 2);
+        settle_and_reject(&mut host, &[0.0, 0.0, 0.6, 0.0]);
+
+        // Probe *k+1* and the inspection, over the same interval: the candidate
+        // carries what the write moved, so `cb` crosses on it, while the store
+        // this trial opened from shows `gain = 1`. Interpolated over the whole
+        // step, `cb` would date a fifth of the way in and the refinement would
+        // send the controller to a root *behind* the landing it just reached —
+        // the bisection ladder.
+        let landed = [0.0, 0.0, 0.6, 3.0];
+        begin(&mut host, 2);
+        assert_eq!(
+            boundary_root_of_trial(&mut host, &landed),
+            None,
+            "`cb` moved on what the rolled-back probe wrote, so there is no root \
+             behind this landing for the controller to be sent back to"
+        );
+
+        // The other half, on the same latch: `ca` crosses a fifth short of the
+        // endpoint this time, which is the circuit's own root and was published
+        // before the write. It keeps its interpolated instant and is still the
+        // root the controller is given — 1.6 ns, never `cb`'s 1.2 ns artefact,
+        // and never the endpoint.
+        begin(&mut host, 2);
+        let root = boundary_root_of_trial(&mut host, &[0.0, 0.0, 1.0, 3.0])
+            .expect("the crossing that happened before the write is still a root");
+        assert!(
+            (root - 1.6e-9).abs() < 1.0e-12,
+            "the root must be `ca`'s own crossing at 1.6 ns — not the 1.2 ns \
+             instant interpolating `cb` would invent, and not the endpoint a \
+             positional rule would raise `ca` onto: got {root:e}"
+        );
+
+        // And the instants say the same thing: the carried crossing is dated
+        // where its cause is rather than a fifth of a step ahead of it.
+        begin(&mut host, 2);
+        settle_and_accept(&mut host, &landed);
+        let cause = host
+            .last_transition_time("ca")
+            .expect("`ca` is an A/D bridge")
+            .expect("`ca` transitioned");
+        let carried = host
+            .last_transition_time("cb")
+            .expect("`cb` is an A/D bridge")
+            .expect("`cb` transitioned");
+        assert!(
+            (carried - 2.0e-9).abs() < 1.0e-21,
+            "the carried crossing belongs at the endpoint its cause is on, 2 ns: \
+             it was dated {carried:e} s, and interpolating it over the step would \
+             have said 1.2e-9 s"
+        );
+        assert!(
+            (cause - 2.0e-9).abs() < 1.0e-21,
+            "the trial ended on `ca`'s own crossing at 2 ns, got {cause:e}"
+        );
+    }
+
+    /// The control the pin above is worth nothing without: the same two trials
+    /// on a module whose analog block does not read what the discrete half
+    /// writes.
+    ///
+    /// `posedge ca` still fires and still writes `gain`, and the trial still
+    /// ends on `ca`'s crossing. Nothing continuous moved, so `cb`'s crossing is
+    /// the circuit's own — an interior root at 1.2 ns that the controller is
+    /// sent to land on. A rule that dated `cb` at the endpoint here would be
+    /// dating it by where it fell relative to the landing, and this deck has no
+    /// feedback path at all for it to have fallen behind.
+    #[test]
+    fn a_probe_that_moved_nothing_the_analog_block_reads_leaves_the_interior_root() {
+        let mut host = landing_host(LANDING_NO_FEEDBACK);
+
+        begin_probe(&mut host, 2);
+        settle_and_reject(&mut host, &[0.0, 0.0, 0.6, 0.0]);
+
+        begin(&mut host, 2);
+        let root = boundary_root_of_trial(&mut host, &[0.0, 0.0, 0.6, 3.0])
+            .expect("a crossing nothing carried is an interior root");
+        assert!(
+            (root - 1.2e-9).abs() < 1.0e-12,
+            "`cb`'s own crossing at 1.2 ns is the root, even though the trial ends \
+             on `ca`'s: got {root:e}"
+        );
+    }
+
     /// The control the whole distinction rests on: the discrete half runs
     /// inside the interval and moves no boundary, while the circuit carries an
     /// analog input across a threshold.
