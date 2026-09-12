@@ -518,3 +518,51 @@ fn vbic_hb_convergence_preserves_native_current_scales() {
         }
     }
 }
+
+#[test]
+fn nonlinear_hb_accepts_a_certified_update_at_its_iteration_limit() {
+    let netlist = Netlist::parse(
+        "* One correction establishes all physical rows
+.options hbint tahb=0
+V1 node 0 SIN(1m 2m 1meg)
+R1 node 0 1k
+D1 node 0 dm
+.model dm D(IS=1e-30)
+.end
+",
+    )
+    .unwrap();
+    for use_krylov in [false, true] {
+        let mut config = HbConfig::new(1e6).with_harmonics(1);
+        config.max_iterations = 1;
+        config.use_krylov = use_krylov;
+        let hb = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, config)
+            .unwrap();
+        assert!(hb.converged);
+        assert_eq!(
+            hb.result.iterations, 1,
+            "a certified direct update must not enter homotopy"
+        );
+        // Published spectra are amplitude phasors, so the first harmonic
+        // carries the authored 2 mV SIN amplitude, not its half-coefficient.
+        let dc = coefficient(&hb, "node", 0);
+        assert!(
+            (dc.re - 1e-3).abs() < 1e-14,
+            "the authored SIN offset must survive the certified update, got {dc}"
+        );
+        let fundamental = coefficient(&hb, "node", 1);
+        assert!(
+            (fundamental.norm() - 2e-3).abs() < 1e-14,
+            "the authored SIN amplitude must survive the certified update, got {fundamental}"
+        );
+        let current = &hb.result.mna_branch_currents[0].coefficients;
+        for (harmonic, &current) in current.iter().enumerate() {
+            let load = coefficient(&hb, "node", harmonic) / 1e3;
+            assert!(
+                (current + load).norm() < 1e-15,
+                "harmonic {harmonic} source current {current} does not close KCL against {load}"
+            );
+        }
+    }
+}

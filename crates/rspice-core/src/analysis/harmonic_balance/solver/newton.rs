@@ -976,18 +976,18 @@ impl HbSolver {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            state.iteration = iter;
-            state.total_iterations += 1;
-
-            // 1. Compute full residual: linear + nonlinear + GMIN contributions
-            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
-
-            // 2. Check convergence: per-row KCL test. A global norm hides a
-            // microamp imbalance at a high-impedance node behind the amp
-            // scale of stiff source rows, accepting grossly wrong bias.
-            if state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
-                return Ok(true);
+            state.begin_newton_iteration(iter)?;
+            if iter == 0 {
+                self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                if state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
+                    return Ok(true);
+                }
             }
+            // Subsequent iterations reuse the residual and physical row scales
+            // computed by the previous line search at its accepted trial state.
 
             // 3+4. Build the Jacobian and solve J * dX = -R. The exact path
             // carries the conjugate (Hankel) coupling in a real-split system
@@ -1024,6 +1024,14 @@ impl HbSolver {
                 Ok(()) => {}
                 Err(error) if error.is_convergence_failure() => return Ok(false),
                 Err(err) => return Err(err),
+            }
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            // Certify every update, including the last allowed one. The line
+            // search has already assembled the matching KCL/KVL certificate.
+            if state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
+                return Ok(true);
             }
         }
 
@@ -3139,11 +3147,66 @@ mod exact_matrix_free_tests {
     }
 
     #[test]
+    fn hb_newton_certifies_the_last_allowed_mna_update() {
+        for use_krylov in [false, true] {
+            let mut config = HbConfig::new(1e6).with_harmonics(1);
+            config.use_krylov = use_krylov;
+            let mut solver = HbSolver::new(config, 1);
+            solver.add_conductance(0, 0, 2.0);
+            let source = solver
+                // An authored AC amplitude splits over the conjugate pair, so
+                // the 4 mV first harmonic drives a 2 mV spectral coefficient.
+                .try_add_named_voltage_source_branch_harmonics(1, 0, 1e-3, &[(1, 4e-3, 0.0)], "V1")
+                .unwrap();
+            solver
+                .try_add_periodic_voltage_source_branch(1, 0, source, 1, "V1")
+                .unwrap();
+            let mut state = HbSolverState::new(1, 1);
+            state.try_prepare_mna_branches(1, 1).unwrap();
+            let limits = HbNewtonLimits {
+                gmin: 0.0,
+                max_iterations: 1,
+                tol: 1e-9,
+                abstol: 1e-15,
+                source_scale: 1.0,
+            };
+            assert!(
+                solver
+                    .newton_inner_loop(&mut state, limits, &NoAbort)
+                    .unwrap()
+            );
+            assert_eq!(state.total_iterations, 1);
+            for (k, voltage) in [(0, 1e-3), (1, 2e-3)] {
+                let node = state.x[0][k];
+                assert!(
+                    (node - Complex64::new(voltage, 0.0)).norm() < 1e-14,
+                    "harmonic {k} node voltage {node} is not the forced {voltage}"
+                );
+                let current = state.mna_branch_currents[0][k];
+                assert!(
+                    (current + 2.0 * node).norm() < 1e-14,
+                    "harmonic {k} branch current {current} does not carry the 2 S load"
+                );
+            }
+            state.total_iterations = usize::MAX;
+            let error = solver
+                .newton_inner_loop(&mut state, limits, &NoAbort)
+                .unwrap_err();
+            assert!(error.to_string().contains("iteration counter"));
+        }
+    }
+
+    #[test]
     fn source_continuation_restores_failed_node_and_branch_trials() {
         for budget in [1, 4] {
             let mut config = HbConfig::new(1e6).with_harmonics(1);
             config.max_iterations = budget;
+            config.tolerance = 1e-12;
+            config.abstol = 1e-18;
             let mut solver = HbSolver::new(config, 1);
+            if budget == 1 {
+                solver.add_diode(1, 0, 1e-3, 1.0);
+            }
             solver.add_conductance(0, 0, 1.0);
             let source = solver
                 .try_add_named_voltage_source_branch_harmonics(1, 0, 1e-3, &[], "V1")
@@ -3155,8 +3218,8 @@ mod exact_matrix_free_tests {
             state.try_prepare_mna_branches(1, 1).unwrap();
             let converged = solver.solve_source_stepping(&mut state, &NoAbort).unwrap();
             if budget == 1 {
-                // Every nonzero trial updates both coordinates but exhausts
-                // its inner budget before certification. Keep only the seed.
+                // The curved diode KCL needs more than one correction at
+                // every nonzero trial. Keep only the certified zero seed.
                 assert!(!converged);
                 assert!(state.total_iterations > 1 && state.total_iterations <= 20);
                 assert_eq!(state.x[0][0], Complex64::ZERO);
@@ -3183,7 +3246,7 @@ mod exact_matrix_free_tests {
         // its saturation current has no physical equilibrium, even though its
         // nonlinear registry and matrix structure are valid.
         solver.add_diode(1, 0, 1e-12, 1.0);
-        solver.add_dc_source(0, -1e-3);
+        solver.add_dc_source(0, -1e3);
         let mut state = HbSolverState::new(1, 1);
         state.total_iterations = 11; // earlier retained solve work is not this attempt
         state.converged = true;

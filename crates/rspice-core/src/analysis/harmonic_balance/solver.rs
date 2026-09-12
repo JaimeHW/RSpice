@@ -206,9 +206,8 @@ pub struct HbSolverState {
     /// Number of iterations
     pub iteration: usize,
 
-    /// Total harmonic Newton iterations accumulated across every phase of
-    /// the convergence strategy (never reset by the ladder), for honest
-    /// convergence-cost reporting.
+    /// Total Newton iterations across the DC seed and harmonic continuation
+    /// phases, never reset by the convergence ladder.
     pub total_iterations: usize,
 
     /// Converged flag
@@ -226,6 +225,15 @@ pub struct HbSolverState {
 }
 
 impl HbSolverState {
+    fn begin_newton_iteration(&mut self, iteration: usize) -> Result<(), HbError> {
+        let total = self.total_iterations.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit("HB iteration counter exceeds this platform".to_owned())
+        })?;
+        self.iteration = iteration;
+        self.total_iterations = total;
+        Ok(())
+    }
+
     /// Create new solver state
     pub fn new(num_nodes: usize, num_harmonics: usize) -> Self {
         Self {

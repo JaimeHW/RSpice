@@ -39,6 +39,7 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
+        let iteration_start = state.total_iterations;
         let branch_count = self.validate_dc_exact_mna_registry()?;
         state.try_prepare_mna_branches(branch_count, self.num_harmonics)?;
         self.validate_dc_state(state)?;
@@ -215,7 +216,7 @@ impl HbSolver {
 
         // DC solve failed - return what we have
         Err(HbError::ConvergenceFailed {
-            iterations: source_stepper.steps(),
+            iterations: state.total_iterations - iteration_start,
             residual: state.residual_norm,
         })
     }
@@ -320,19 +321,19 @@ impl HbSolver {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            state.iteration = iteration;
-
-            // Compute DC residual
-            self.compute_dc_residual(state, gmin, source_scale)?;
-
-            // Check convergence per KCL row: |res| <= abstol + reltol*scale
-            // with the scale built from that row's own current contributions.
-            // Any circuit-wide reference (a norm, the max source current)
-            // lets a microamp imbalance at a high-impedance node hide under
-            // an unrelated large-row scale.
-            if state.dc_rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
-                return Ok(true);
+            state.begin_newton_iteration(iteration)?;
+            if iteration == 0 {
+                self.compute_dc_residual(state, gmin, source_scale)?;
+                if abort.is_aborted() {
+                    return Err(HbError::Aborted);
+                }
+                if state.dc_rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol)
+                {
+                    return Ok(true);
+                }
             }
+            // Each line search leaves a complete residual certificate at the
+            // new state, so the next iteration need not evaluate it again.
 
             // Build DC Jacobian
             let jacobian = self.build_dc_jacobian(state, gmin)?;
@@ -372,6 +373,12 @@ impl HbSolver {
                     source_scale,
                 },
             )?;
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            if state.dc_rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
+                return Ok(true);
+            }
         }
 
         Ok(false)
@@ -1427,6 +1434,34 @@ mod linear_solve_tests {
         );
         let jac = solver.build_dc_jacobian(&state, 0.2).unwrap();
         assert_eq!([jac[0][0], jac[1][1], jac[2][2]], [-0.2, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn dc_newton_certifies_the_last_allowed_update_and_records_seed_work() {
+        let mut solver = solver();
+        solver.add_conductance(0, 0, 2.0);
+        solver.add_dc_source(0, 1e-3);
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+        state.total_iterations = 7;
+        let limits = HbNewtonLimits {
+            gmin: 0.0,
+            max_iterations: 1,
+            tol: 1e-9,
+            abstol: 1e-15,
+            source_scale: 1.0,
+        };
+        assert!(
+            solver
+                .dc_newton_inner_loop(&mut state, limits, &NoAbort)
+                .unwrap()
+        );
+        assert_eq!(state.total_iterations, 8);
+        assert!((state.x[0][0].re - 0.5e-3).abs() < 1e-16);
+        state.total_iterations = usize::MAX;
+        let error = solver
+            .dc_newton_inner_loop(&mut state, limits, &NoAbort)
+            .unwrap_err();
+        assert!(error.to_string().contains("iteration counter"));
     }
 
     #[test]
