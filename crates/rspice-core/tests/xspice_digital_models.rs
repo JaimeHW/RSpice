@@ -4582,3 +4582,290 @@ a_digital [mix] converted dtr
         "a hybrid node is not event-only"
     );
 }
+
+//=============================================================================
+// The same rule at a solved DC point (R2.15 part C)
+//=============================================================================
+
+/// A deck whose digital half is reached from a plain DC source, so that `.op`
+/// and `.dc` both have something to solve.
+const DC_EVENT_DECK: &str = "\
+* a dc level crossing into the digital world and back
+vin in 0 1.5
+rin in 0 1k
+aobs in watched obs
+.model obs v_to_real
+aadc [in] [d] adc
+.model adc adc_bridge (in_low=1.0 in_high=2.0)
+ainv [d] [q] inv
+.model inv d_inverter (rise_delay=0.3n fall_delay=0.3n)
+adac [q] [out] dac
+.model dac dac_bridge (out_low=0 out_high=3.3 t_rise=0.2n t_fall=0.2n)
+rout out 0 1k
+";
+
+fn dc_event_deck(cards: &str) -> String {
+    format!("{DC_EVENT_DECK}{cards}.end\n")
+}
+
+fn node_index(names: &[String], name: &str) -> usize {
+    names
+        .iter()
+        .position(|candidate| candidate.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("node {name} missing from {names:?}"))
+}
+
+/// An operating point publishes no voltage for an event-only net, and says so
+/// rather than leaving a zero to be read as one.
+///
+/// `d` and `q` are the adc output and the inverter output and `watched` is
+/// the real-valued twin: no analog element and no code model's analog port
+/// reaches any of them, so each owns only the placeholder row the assembly
+/// closes with `v = 0`. Before this rule, `.op` published that row — `D`, `Q`
+/// and `WATCHED` all read 0.0 while `IN` read 1.5 and `OUT` read 1.65, the
+/// mid-rail the dac holds because the inverter's state at t = 0 is unknown.
+/// The names stay, because the two namespaces have to agree with the
+/// transient's; the values do not.
+#[test]
+fn an_operating_point_publishes_no_voltage_for_an_event_only_net() {
+    let netlist = Netlist::parse(&dc_event_deck("")).expect("deck parses");
+    let operating_point = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+
+    for (name, kind) in [
+        ("d", EventOnlyNetKind::Digital),
+        ("q", EventOnlyNetKind::Digital),
+        ("watched", EventOnlyNetKind::Real),
+    ] {
+        let index = node_index(&operating_point.node_names, name);
+        assert_eq!(
+            operating_point.event_only_node_kind(index),
+            Some(kind),
+            "{name} is owned by one event domain and the mask must name it"
+        );
+        assert_eq!(
+            operating_point.try_voltage(index),
+            None,
+            "{name} has no voltage to answer with"
+        );
+        assert_eq!(
+            operating_point.try_voltage_named(name),
+            None,
+            "and the name resolves to the same absence"
+        );
+    }
+    for analog in ["in", "out"] {
+        let index = node_index(&operating_point.node_names, analog);
+        assert!(
+            operating_point.event_only_node_kind(index).is_none(),
+            "{analog} is an analog node"
+        );
+        assert!(
+            operating_point.try_voltage(index).is_some(),
+            "{analog} keeps its solved level"
+        );
+    }
+    // Ground is never masked, whatever the deck does.
+    assert_eq!(operating_point.try_voltage(0), Some(0.0));
+
+    // The typed document is the surface every frontend reads, so the absence
+    // has to be an absence there too: no descriptor at all, not an
+    // unprojected one.
+    let signals = rspice_core::execution::operating_point_projection_signals(&operating_point)
+        .expect("the point projects onto export signals");
+    let columns: Vec<&str> = signals
+        .iter()
+        .map(|signal| signal.descriptor().display_name())
+        .collect();
+    for absent in ["V(D)", "V(Q)", "V(WATCHED)"] {
+        assert!(
+            !columns
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case(absent)),
+            "{absent} must not be an operating-point column, got {columns:?}"
+        );
+    }
+    assert!(
+        columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case("V(OUT)")),
+        "the analog nodes still publish theirs, got {columns:?}"
+    );
+}
+
+/// The same rule at every point of a `.DC` sweep, which re-settles the
+/// discrete state per point and so has a different value to publish at each.
+///
+/// Before this rule the sweep published `D=0.0 Q=0.0 WATCHED=0.0` at all four
+/// points while `OUT` correctly walked 3.3, 3.3, 0.0, 0.0 as the input
+/// crossed the adc's thresholds — the digital half was working and only its
+/// publication was wrong.
+#[test]
+fn a_dc_sweep_publishes_no_voltage_column_for_an_event_only_net() {
+    let netlist = Netlist::parse(&dc_event_deck("")).expect("deck parses");
+    let sweep = Engine::default()
+        .run_dc_sweep(&netlist, "vin", 0.0, 3.0, 1.0)
+        .expect("the sweep solves");
+    assert_eq!(sweep.len(), 4, "four sweep points");
+
+    for (sweep_value, point) in &sweep {
+        for name in ["d", "q", "watched"] {
+            let index = node_index(&point.node_names, name);
+            assert!(
+                point.event_only_node_kind(index).is_some(),
+                "at vin={sweep_value} the sweep published V({name}) as {}",
+                point.node_voltages[index]
+            );
+            assert_eq!(point.try_voltage(index), None);
+        }
+        assert!(
+            point.try_voltage_named("out").is_some(),
+            "the analog output is published at every point"
+        );
+    }
+
+    // Every export table of the sweep is built from each point's projection
+    // inventory, so the column set is what a reader actually gets.
+    for (sweep_value, point) in &sweep {
+        let signals = rspice_core::execution::operating_point_projection_signals(point)
+            .expect("the point projects onto export signals");
+        let columns: Vec<&str> = signals
+            .iter()
+            .map(|signal| signal.descriptor().display_name())
+            .collect();
+        for absent in ["V(D)", "V(Q)", "V(WATCHED)"] {
+            assert!(
+                !columns
+                    .iter()
+                    .any(|column| column.eq_ignore_ascii_case(absent)),
+                "{absent} must not be a DC sweep column at vin={sweep_value}, got {columns:?}"
+            );
+        }
+        assert!(
+            columns
+                .iter()
+                .any(|column| column.eq_ignore_ascii_case("V(OUT)")),
+            "the analog nodes still publish theirs, got {columns:?}"
+        );
+    }
+}
+
+/// An authored DC output card that names an event-only net is refused before
+/// the analysis solves anything, with the one sentence.
+///
+/// The card asserted that `V(q)` is a number this run can produce. It is not,
+/// and the only thing the run could put in that column is the placeholder
+/// row's zero, so the refusal happens where the card and the circuit are both
+/// in hand — exactly as the transient refuses the same card.
+#[test]
+fn an_authored_dc_card_naming_an_event_only_net_is_refused() {
+    for (cards, wanted) in [
+        (".dc vin 0 3 1\n.print dc v(q)\n", "q"),
+        (".dc vin 0 3 1\n.plot dc v(watched)\n", "watched"),
+        (".op\n.print op v(d)\n", "d"),
+    ] {
+        let netlist = Netlist::parse(&dc_event_deck(cards)).expect("deck parses");
+        let engine = Engine::default();
+        let refusal = if cards.starts_with(".op") {
+            engine.run_dc_op(&netlist).err()
+        } else {
+            engine.run_dc_sweep(&netlist, "vin", 0.0, 3.0, 1.0).err()
+        }
+        .unwrap_or_else(|| panic!("{cards} must be refused"))
+        .to_string();
+        assert!(
+            refusal.contains("an event-only net"),
+            "the refusal must be the one sentence, got {refusal}"
+        );
+        assert!(
+            refusal.contains(&format!("V({wanted})")),
+            "and it must name the operand, got {refusal}"
+        );
+        assert!(
+            refusal.contains("a transient run's"),
+            "and the accessor it recommends must be one this class does not \
+             pretend to have, got {refusal}"
+        );
+    }
+}
+
+/// A bare `.MEASURE DC` operand naming an event-only net meets the same
+/// sentence after the run.
+///
+/// A bare `q` is not an accessor call, so it is not among the card's typed
+/// dependencies and the pre-run refusal never sees it. The measurement
+/// resolver's signal table deliberately holds no entry for the net, so the
+/// miss lands here — and "Signal 'q' not found" would be the wrong diagnosis,
+/// because the net is not missing, its voltage is.
+#[test]
+fn a_bare_dc_measurement_operand_naming_an_event_only_net_meets_the_sentence() {
+    let netlist = Netlist::parse(&dc_event_deck(".dc vin 0 3 1\n.measure dc probe max q\n"))
+        .expect("deck parses");
+    let sweep = Engine::default()
+        .run_dc_sweep(&netlist, "vin", 0.0, 3.0, 1.0)
+        .expect("the sweep solves");
+    let measurements = rspice_core::analysis::evaluate_dc_measurements(&netlist, &sweep);
+    let probe = measurements
+        .iter()
+        .find(|measurement| measurement.name.eq_ignore_ascii_case("probe"))
+        .expect("the deck authors one measurement");
+    let error = probe
+        .error
+        .as_deref()
+        .expect("a measurement over an event-only net cannot produce a value");
+    // The resolver reports the canonical spelling of the net, which is the
+    // upper-cased MNA name, so the carrier is named in that case too.
+    assert!(
+        error.contains("an event-only net")
+            && error.to_ascii_uppercase().contains("D(Q)")
+            && error.contains("a transient run's"),
+        "the miss must be rewritten into the one sentence, got {error}"
+    );
+}
+
+/// Every carrier the DC refusal recommends is a spelling that really exists,
+/// on an object a reader can actually reach.
+///
+/// A solved DC point carries no event trace of its own, so naming its own
+/// accessor would recommend a method that does not exist at all — the same
+/// defect as naming the wrong class's. The sentence therefore names the
+/// transient run's accessor and says whose it is, and this checks both halves
+/// against the run that has them.
+#[test]
+fn the_dc_refusals_carriers_name_a_surface_that_really_publishes_them() {
+    let digital = rspice_core::analysis::transient::event_only_voltage_refusal(
+        "q",
+        EventOnlyNetKind::Digital,
+        EventTraceSurface::SolvedPoint,
+    );
+    let real = rspice_core::analysis::transient::event_only_voltage_refusal(
+        "watched",
+        EventOnlyNetKind::Real,
+        EventTraceSurface::SolvedPoint,
+    );
+    assert!(
+        digital.contains("a transient run's digital_events('q')"),
+        "{digital}"
+    );
+    assert!(
+        real.contains("a transient run's real_trace('watched')"),
+        "{real}"
+    );
+    assert!(digital.contains("D(q)"), "{digital}");
+    assert!(real.contains("E(watched)"), "{real}");
+
+    // And that transient run really does carry both, under those names.
+    let netlist = Netlist::parse(&dc_event_deck("")).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect("transient solves");
+    assert!(
+        result.digital_trace_named("q").is_some(),
+        "the digital carrier the sentence names"
+    );
+    assert!(
+        result.real_trace_named("watched").is_some(),
+        "and the real one"
+    );
+}

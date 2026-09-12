@@ -793,8 +793,8 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     );
 }
 
-/// **Open, and not this lane's to close.** An operating point publishes no
-/// analog value for a net the transient publishes none for.
+/// An operating point publishes no analog value for a net the transient
+/// publishes none for.
 ///
 /// R2.15 took `d_clk` and `d_inv` out of the analog result namespace by
 /// emptying their columns: `TransientResult::voltages` is a column per node,
@@ -802,40 +802,50 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
 /// is a dense `Vec<Value>` indexed BY NODE ID — `populate_public_dc_solution`
 /// writes `node_voltages[node]`, and `monte_carlo.rs` and the parametric
 /// sweeps read it back the same way — so dropping a row would renumber every
-/// row after it, and there is no other absent value in the type. The operating
-/// point therefore still publishes the placeholder row's `0.0` for both nets,
-/// which is the same defect R2.15 fixed on the transient side.
+/// row after it. The absence is therefore carried beside the values: the slot
+/// keeps the placeholder row's number and the result's own mask says that
+/// number is not a voltage, which is what every accessor and every export
+/// surface decides through.
 ///
-/// Closing it is a `SimulationResult` shape change, and it is not about mixed
-/// decks: `.op` and every `.dc` point on any deck with a digital-only net
-/// publish the same zero. Left here as the statement of what is correct, so
-/// the day the shape exists this case says so by failing to be ignorable.
+/// So this asserts the absence the way the type expresses it, not by the name
+/// going missing. The name stays — the two namespaces have to agree, which is
+/// what `deck_a_operating_point_names_the_nodes_its_transient_names` below
+/// says — and what must not survive is the value.
 #[test]
-#[ignore = "R2.15 DC follow-up: SimulationResult has no absent row for a digital-only net"]
 fn deck_a_operating_point_leaves_out_the_nets_its_transient_empties() {
     let (_models, netlist) = deck_a();
     let operating_point = Engine::default()
         .run_dc_op(&netlist)
         .expect("a deck with a mixed Verilog-AMS instance must have an operating point");
     let transient = run_deck_a();
+    let mut absent = 0;
     for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
         if !values.is_empty() {
             continue;
         }
+        let index = operating_point
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("the operating point keeps the name {name}"));
         assert!(
-            !operating_point
-                .node_names
-                .iter()
-                .any(|node| node.eq_ignore_ascii_case(name)),
-            "the operating point publishes V({name}) as {:?} for a net the transient \
+            operating_point.event_only_node_kind(index).is_some(),
+            "the operating point publishes V({name}) as {} for a net the transient \
              leaves empty",
-            operating_point
-                .node_names
-                .iter()
-                .position(|node| node.eq_ignore_ascii_case(name))
-                .map(|index| operating_point.node_voltages[index])
+            operating_point.node_voltages[index]
         );
+        assert_eq!(
+            operating_point.try_voltage(index),
+            None,
+            "and no accessor may answer with the placeholder row for {name}"
+        );
+        absent += 1;
     }
+    assert_eq!(
+        absent, 2,
+        "deck A's event-only nets are `d_clk` and `d_inv`; a different count means this \
+         case is no longer looking at what it was written for"
+    );
 }
 
 /// The `.op` voltage table names exactly the nodes the transient's does.
