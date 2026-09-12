@@ -1787,6 +1787,128 @@ mod tests {
         }
     }
 
+    /// The third rule, against the other two: an instant crossing in from
+    /// another event kernel is dated at the least tick not before it, so the
+    /// HDL never labels a foreign event earlier than it happened.
+    ///
+    /// The three agree exactly on a tick boundary and differ nowhere else by
+    /// more than one tick, which is what makes them substitutable nowhere and
+    /// comparable everywhere.
+    #[test]
+    fn the_three_rounding_rules_agree_on_a_boundary_and_part_inside_a_tick() {
+        let resolution = TimeResolution::new(-9).expect("1 ns");
+
+        for tick in [0u64, 1, 2, 7, 1_000] {
+            let on_grid = Instant::from_tick(tick, resolution).expect("in range");
+            assert_eq!(on_grid.floor_tick(resolution), Ok(tick));
+            assert_eq!(on_grid.nearest_tick(resolution), Ok(tick));
+            assert_eq!(on_grid.ceil_tick(resolution), Ok(tick));
+        }
+
+        // Strictly inside a tick: the floor stays, the ceiling moves on, and
+        // the nearest one picks whichever half the instant is in.
+        assert_eq!(instant(2.4e-9).ceil_tick(resolution), Ok(3));
+        assert_eq!(instant(2.5e-9).ceil_tick(resolution), Ok(3));
+        assert_eq!(instant(2.6e-9).ceil_tick(resolution), Ok(3));
+
+        let mut seconds = 0.0f64;
+        while seconds < 5.0e-9 {
+            let at = instant(seconds);
+            let floor = at.floor_tick(resolution).expect("in range");
+            let ceil = at.ceil_tick(resolution).expect("in range");
+            assert!(
+                ceil == floor || ceil == floor + 1,
+                "{seconds:e} s floored to {floor} but ceiled to {ceil}"
+            );
+            seconds += 3.7e-11;
+        }
+    }
+
+    /// Every HDL tick embeds in an instant exactly, and reads back as itself.
+    ///
+    /// This is the property the whole one-key design rests on: a module's
+    /// `#5` and a code model's 100.4 ps output can share one heap because the
+    /// tick is not approximated by the instant it becomes. The bound is
+    /// [`TimeResolution::MAX_EXACT_TICKS`], which is also where `from_tick`
+    /// refuses rather than rounds.
+    #[test]
+    fn an_hdl_tick_embeds_in_an_instant_and_reads_back_as_itself() {
+        for exponent in [-9i8, -12, -15] {
+            let resolution = TimeResolution::new(exponent).expect("declared precision");
+            for tick in [
+                0u64,
+                1,
+                2,
+                3,
+                7,
+                999,
+                1_000,
+                1_001,
+                123_456_789,
+                TimeResolution::MAX_EXACT_TICKS,
+            ] {
+                let at = Instant::from_tick(tick, resolution).expect("in range");
+                assert_eq!(
+                    at.seconds(),
+                    resolution.ticks_to_seconds(tick).expect("in range"),
+                    "exponent {exponent} tick {tick} is the seconds the grid names"
+                );
+                assert_eq!(
+                    at.floor_tick(resolution),
+                    Ok(tick),
+                    "exponent {exponent} tick {tick} floor round trip"
+                );
+                assert_eq!(
+                    at.nearest_tick(resolution),
+                    Ok(tick),
+                    "exponent {exponent} tick {tick} nearest round trip"
+                );
+                assert_eq!(
+                    at.ceil_tick(resolution),
+                    Ok(tick),
+                    "exponent {exponent} tick {tick} ceil round trip"
+                );
+            }
+            assert!(
+                Instant::from_tick(TimeResolution::MAX_EXACT_TICKS + 1, resolution).is_err(),
+                "a tick with no exact image is refused rather than rounded"
+            );
+        }
+    }
+
+    /// An instant that is on no grid is kept as the time it is.
+    ///
+    /// This is the XSPICE lane's whole requirement of the key (design decision
+    /// D1): a 100.4 ps code-model output on a 1 ns design is not quantized on
+    /// the way in, because its instant is handed to the analog breakpoint
+    /// manager unrounded.
+    #[test]
+    fn an_instant_off_every_grid_is_stored_bit_for_bit() {
+        for seconds in [
+            0.0,
+            1.0e-18,
+            1.0 / 3.0e9,
+            2.718_281_828_459_045e-9,
+            7.234_567_890_123_456e-4,
+            123.456_789,
+        ] {
+            let at = Instant::from_seconds(seconds).expect("a schedulable time");
+            assert_eq!(at.seconds().to_bits(), seconds.to_bits(), "{seconds:e} s");
+        }
+
+        // Ordering is the numeric ordering, which is what lets the heap use
+        // the bits directly.
+        assert!(instant(100.4e-12) < instant(1.0e-9));
+        assert!(Instant::ZERO < instant(f64::MIN_POSITIVE));
+
+        // Negative zero is the same instant as positive zero, and a time that
+        // cannot be scheduled has no instant at all.
+        assert_eq!(Instant::from_seconds(-0.0), Some(Instant::ZERO));
+        assert_eq!(Instant::from_seconds(-1.0e-12), None);
+        assert_eq!(Instant::from_seconds(f64::NAN), None);
+        assert_eq!(Instant::from_seconds(f64::INFINITY), None);
+    }
+
     #[test]
     fn flooring_a_tick_boundary_returns_that_tick_and_not_the_one_before() {
         // The error a bare division would make: an event time handed back as a

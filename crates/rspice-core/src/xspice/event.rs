@@ -614,6 +614,39 @@ mod tests {
         assert_eq!(times, awkward.to_vec());
     }
 
+    /// A code-model output that lands between two HDL ticks keeps its own
+    /// instant through the queue.
+    ///
+    /// This is design decision D1 at the queue: the kernel is keyed on the
+    /// instant, not on any declared grid, so a 100.4 ps delay on a design
+    /// whose modules declare 1 ns fires at 100.4 ps and is handed to the
+    /// transient breakpoint manager there. Quantizing it onto the HDL grid
+    /// would move it to 1 ns and break ngspice parity for every
+    /// `xspice_digital_models` golden.
+    #[test]
+    fn an_off_grid_code_model_output_keeps_its_own_instant() {
+        let mut scheduler = XspiceEventScheduler::new();
+        let off_grid = 1.0e-9 + 100.4e-12;
+
+        scheduler.schedule_delayed(
+            1.0e-9,
+            100.4e-12,
+            1,
+            "out",
+            "an_off_grid_inverter",
+            DigitalValue::one(),
+        );
+
+        assert_eq!(scheduler.next_event_time(), Some(off_grid));
+        let events = drain(&mut scheduler, 2.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].time.to_bits(),
+            off_grid.to_bits(),
+            "the instant the model dated its output at is the instant it fires at"
+        );
+    }
+
     #[test]
     fn a_later_output_replaces_this_drivers_pending_output() {
         let mut scheduler = XspiceEventScheduler::new();
