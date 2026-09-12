@@ -147,6 +147,91 @@ fn analog_timer_near_the_model_floor_lands_without_an_invalid_equalized_step() {
     let _ = std::fs::remove_file(model);
 }
 
+/// A re-arming analog timer finer than the solver's floor paces the whole
+/// analysis at that floor, and the run still reaches a round `tstop`.
+///
+/// `timer(0, 1f)` asks for another activation a femtosecond after every point
+/// the solver lands on, and ngspice's floor for a millisecond maximum step is
+/// ten femtoseconds (`delmin = 1e-11 x tmax`), so no analog instant separates
+/// the accepted point from the target and every one of them is landed on the
+/// floor instead. Ten thousand of those floor points is exactly the hundred
+/// picoseconds this analysis runs for.
+///
+/// The timer also bounds the step it asks for, so the solver's candidate
+/// maximum is the floor as well, and that is what made this deck end three
+/// points in. Deriving each landing from the point before it and nudging it up
+/// until the interval measures a floor *by subtraction* puts it a couple of ulps
+/// beyond one floor, and a bound pinned at the floor has no step that reaches
+/// it — one falls short of the target and two overshoot by a whole floor:
+/// `cannot integrate to mandatory time 3.0000000000000005e-14s from
+/// 2.0000000000000000e-14s: interval 1.0000000000000005e-14s cannot satisfy
+/// model minimum 1.0000000000000000e-14s, maximum 1.0000000000000000e-3s and
+/// current bound 1.0000000000000000e-14s` — an interval that looks exactly like
+/// the floor it is said not to satisfy. The same nudge accumulates about half an
+/// ulp per point over a long march, which is what used to leave a round `tstop`
+/// unreachable; both are the chain, and the landings are points on one grid
+/// instead.
+///
+/// The module's own output is deliberately constant: this is about the width
+/// of the steps, not about anything the timer does when it fires.
+#[test]
+fn a_sub_minimum_analog_timer_marches_to_a_round_stop_time() {
+    const TSTOP: f64 = 1.0e-10;
+    const MAX_STEP: f64 = 1.0e-3;
+    // `delmin = 1e-11 x tmax`, and the analysis is exactly this many of them.
+    let floor = MAX_STEP * 1.0e-11;
+    assert_eq!(TSTOP / floor, 10_000.0);
+
+    let model = write_model(
+        &format!("floor_march_{}.va", std::process::id()),
+        "module floor_march(p); inout p; electrical p; integer q; \
+         analog begin @(initial_step) q = 1; @(timer(0.0, 1.0e-15)) q = 1; V(p) <+ q; end \
+         endmodule\n",
+    );
+    let deck = Netlist::parse(&format!(
+        "floor march\nX1 out floor_march\nR1 out 0 1k\n.va \"{model}\" floor_march\n.end\n"
+    ))
+    .expect("the deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&deck, TSTOP, MAX_STEP)
+        .unwrap_or_else(|error| panic!("the femtosecond timer must reach tstop: {error}"));
+
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= TSTOP - floor,
+        "the run must reach tstop {TSTOP:e}s, it stopped at {last:e}s"
+    );
+    // One accepted point per floor step, which is what makes this a march
+    // rather than a handful of landings: a different floor would show up here
+    // as a different count long before the residual below.
+    assert!(
+        (9_000..=11_000).contains(&result.time.len()),
+        "the analysis must be paced at the {floor:e}s floor, it took {} accepted points",
+        result.time.len()
+    );
+    // The accepted points are the floor grid the run started on, so the residual
+    // against `k x delmin` never leaves the ulps of one multiply-add.
+    let drifted = result
+        .time
+        .iter()
+        .map(|time| (time, (time / floor).round()))
+        .filter(|(_, index)| *index >= 1.0)
+        .map(|(time, index)| (time, time - index * floor))
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()));
+    if let Some((time, residual)) = drifted {
+        let ulp = time.next_up() - time;
+        println!(
+            "worst floor-grid residual: {residual:+.3e}s ({:+.1} ulps)",
+            residual / ulp
+        );
+        assert!(
+            residual.abs() <= 64.0 * f64::EPSILON * TSTOP,
+            "a floor march may not drift off its grid, saw {residual:+.3e}s at t={time:e}s"
+        );
+    }
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn bound_step_at_or_below_the_integration_floor_uses_the_minimum() {
     let model = write_model(
