@@ -2966,15 +2966,15 @@ fn legacy_substrate_current_and_charge_flow_through_the_intrinsic_lead() {
             let result = engine.run_tran(&deck, 200e-9, 10e-9).unwrap();
             let currents = result.try_branch_current_waveform_named("VS").unwrap();
             let mut previous = operating_voltage;
-            for i in 1..result.time.len() {
+            for (i, &current) in currents.iter().enumerate().skip(1) {
                 let drive = 0.5 + 0.2 * (result.time[i] / 200e-9);
                 let voltage = solve(drive, previous, result.time[i] - result.time[i - 1]);
                 let expected = -polarity * (drive - voltage) / resistance;
                 assert!(
-                    (currents[i] - expected).abs() < 2e-7 * expected.abs() + 1e-13,
+                    (current - expected).abs() < 2e-7 * expected.abs() + 1e-13,
                     "{kind} SUBS={subs} t={}: {} != {expected:e}",
                     result.time[i],
-                    currents[i]
+                    current
                 );
                 previous = voltage;
             }
