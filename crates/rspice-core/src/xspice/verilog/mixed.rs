@@ -18,7 +18,7 @@
 //! cross between them, and they do not quantize the same way. Conflating them
 //! is the mistake this section exists to prevent. **This is the one place all
 //! three are stated; a call site states which of them it is using and why, and
-//! never invents a fourth.**
+//! never invents a fourth base.**
 //!
 //! *How far may the digital world be advanced?* is answered from the trial's
 //! own timestamp, **floored** onto the tick grid — see
@@ -47,6 +47,28 @@
 //! the least tick whose own instant is not before it, so the HDL never labels
 //! a foreign-kernel event earlier than it happened. Exact one way,
 //! least-tick-not-before the other.
+//!
+//! A fourth question is not a fourth base. It asks which of the answers above
+//! a particular crossing gets, and it is written here because the answer is
+//! only correct when read beside them.
+//!
+//! *Which instant does a crossing the digital half caused get?* **The trial's
+//! endpoint**, and its tick is that endpoint's floored tick — the first
+//! question's answer rather than the second's. A step in which the discrete
+//! half moved something the analog equations read — a D/A bridge's level, or
+//! a discrete variable an analog block references — is a step whose continuous
+//! problem changed inside it. A threshold an A/D input crosses on the re-solve
+//! was carried across *by that movement*, at the instant the movement
+//! happened; it is not a root the interval's own solution passed through,
+//! because no single solution of this interval ever passed through it.
+//! Interpolating it across the whole step dates it wherever two iterates
+//! happen to differ, which can be *before* the edge that caused it — an effect
+//! preceding its cause, and a `$abstime` no physics produced. So it is dated
+//! where its cause is, and [`MixedSignalHost::trial_boundary_refinement_time`]
+//! asks the controller for no interior root on such a step. A crossing with no
+//! such feedback before it in the same trial is the circuit's own: it keeps
+//! the interpolated instant and the nearest-tick rule above, because dating it
+//! at the endpoint would be a setup/hold-class error on a sampling edge.
 //!
 //! Nearest-tick here would not violate any standard, and this document does
 //! not claim it would. A `#1` from a process dated at tick `T` fires at
@@ -724,6 +746,20 @@ struct TrialVectors {
     /// which is after that pass has already had to decide how to date its A/D
     /// crossings. This is the same question asked early enough to answer that.
     dac_at_trial_start: Vec<FourStateBit>,
+    /// Every discrete quantity an analog block reads, as the *store* held it
+    /// when the trial opened. Parallel to `MixedSignalHost::discrete_inputs`.
+    ///
+    /// The other half of the same early question, for the other half of the
+    /// digital-to-analog path: a variable the discrete half writes and the
+    /// analog equations read moves the continuous problem exactly as a D/A
+    /// bridge's level does, and moves it without any bridge bit changing.
+    ///
+    /// Read from the store rather than from the analog device, so what it
+    /// answers is "did the *digital* world move this". The device's own copy
+    /// (`discrete_inputs`, kept for rollback) is written by
+    /// [`MixedSignalHost::sample_discrete_inputs`] at the end of a settle
+    /// pass, which is again too late to date that pass's crossings with.
+    discrete_at_trial_start: Vec<Option<f64>>,
 }
 
 /// Everything a rejected trial has to put back.
@@ -761,30 +797,32 @@ struct MixedState {
 #[derive(Clone)]
 struct ActiveTrial {
     start_digital: bool,
-    /// Whether a D/A bridge anywhere in the circuit changed its bit inside
-    /// this trial — this instance's own, or another enrolled instance's as
-    /// the coordinator reports it.
+    /// Whether the discrete half moved something the analog equations read,
+    /// anywhere in the circuit, inside this trial — a D/A bridge's bit or a
+    /// discrete variable an analog block references, this instance's own or
+    /// another enrolled instance's as the coordinator reports it.
     ///
-    /// A D/A bridge that changes at the tick ending the step steps the analog
-    /// solution at that instant. An A/D threshold the step then crosses was
-    /// crossed *by that event*, at the tick it happened on, and is not a root
-    /// the analog solver can go back and find inside the interval: the
-    /// interval's own solution never passed through the threshold. So the
-    /// crossing is dated at the trial's endpoint and no refinement is asked
-    /// for.
+    /// Such a movement steps the analog solution at the instant it happened.
+    /// An A/D threshold the step then crosses was crossed *by that event*, at
+    /// the tick it happened on, and is not a root the analog solver can go
+    /// back and find inside the interval: no solution of that interval ever
+    /// passed through the threshold. So the crossing is dated at the trial's
+    /// endpoint and no refinement is asked for — the fourth question of this
+    /// module's "three time bases" carries the argument in full.
     ///
-    /// The predicate is the D/A movement and not "the discrete half ran". A
-    /// divider, a counter or a state machine ticking inside this interval
-    /// moves no boundary, and an analog input that crosses a threshold while
+    /// The predicate is the movement of a quantity the *analog* half reads,
+    /// not "the discrete half ran". A divider, a counter or a state machine
+    /// ticking inside this interval whose state no analog equation reads moves
+    /// nothing continuous, and an analog input that crosses a threshold while
     /// one of them ticks was moved by the circuit — it keeps its interpolated
     /// crossing and its refinement, because dating it at the endpoint would be
     /// a setup/hold-class error on a sampling edge.
     ///
     /// What remains approximate: an A/D crossing the circuit causes in the
-    /// same interval as a D/A transition is still dated at that transition's
+    /// same interval as such a movement is still dated at that movement's
     /// tick. Both events are inside one step and no second solve can separate
-    /// them, because re-solving lands on the D/A transition again.
-    dac_activity: bool,
+    /// them, because re-solving lands on the movement again.
+    digital_feedback: bool,
     /// The digital host as it stood when the trial opened — the whole of what
     /// a rejected trial has to put back.
     ///
@@ -1982,9 +2020,16 @@ impl MixedSignalHost {
         }
 
         // Taken before anything in this function can run the discrete half,
-        // so the settle pass can tell a D/A bridge this trial moved from one
-        // that was already where it is.
+        // so the settle pass can tell a boundary this trial moved from one
+        // that was already where it is. Both halves of the digital-to-analog
+        // path are imaged, because either one changes the continuous problem
+        // inside the step and the dating rule cannot tell them apart.
         read_dac_bits(&self.state, &mut self.scratch.trial.dac_at_trial_start)?;
+        read_discrete_inputs(
+            &self.state,
+            &self.discrete_inputs,
+            &mut self.scratch.trial.discrete_at_trial_start,
+        );
         let rollback = self.state.digital.clone();
         let previous_inputs = self.analog_inputs;
         self.analog
@@ -2068,7 +2113,7 @@ impl MixedSignalHost {
             .resize(self.state.bridges.dac.len(), false);
         self.trial = Some(ActiveTrial {
             start_digital,
-            dac_activity: false,
+            digital_feedback: false,
             rollback,
             analog_inputs: previous_inputs,
             tick,
@@ -2088,29 +2133,45 @@ impl MixedSignalHost {
         self.trial.is_some()
     }
 
-    /// Record that some enrolled instance's D/A output moved inside this
-    /// trial.
+    /// Record that some enrolled instance's discrete half moved something an
+    /// analog block reads inside this trial.
     ///
     /// One instance's D/A bridge and another's A/D bridge can sit on one deck
-    /// node, so the boundary that moved need not belong to the instance whose
-    /// crossing is being dated. The coordinator makes the comparison for every
-    /// enrolled instance at once and reports the disjunction here.
-    pub(crate) fn note_shared_dac_movement(&mut self) {
+    /// node, and one instance's discrete variable steers the current its own
+    /// analog block pushes into a node any other instance may sense, so what
+    /// moved need not belong to the instance whose crossing is being dated.
+    /// The coordinator makes the comparison for every enrolled instance at
+    /// once and reports the disjunction here.
+    pub(crate) fn note_shared_digital_feedback(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
-            trial.dac_activity = true;
+            trial.digital_feedback = true;
         }
     }
 
-    /// Whether any of this instance's D/A bridges holds a different bit than
-    /// it did when the open trial began.
+    /// Whether the discrete half has moved anything this instance's analog
+    /// equations read since the open trial began — a D/A bridge's bit, or a
+    /// discrete variable an analog block references.
+    ///
+    /// Both halves are asked of the *store*, against the image of it taken
+    /// before anything in the trial could run the discrete half, so what is
+    /// answered is "did the digital world move this, inside this interval". A
+    /// variable the analog half writes and the discrete half only reads never
+    /// answers yes here, because the analog half does not write the store.
     ///
     /// Answers nothing when no trial is open: with no trial there is no
-    /// interval for a bridge to have moved inside.
-    pub(crate) fn dac_moved_since_trial_start(&self) -> Result<bool, MixedSignalError> {
+    /// interval for anything to have moved inside.
+    pub(crate) fn digital_feedback_since_trial_start(&self) -> Result<bool, MixedSignalError> {
         let Some(trial) = self.trial.as_ref() else {
             return Ok(false);
         };
-        dac_bits_differ(&self.state, &trial.vectors.dac_at_trial_start)
+        if dac_bits_differ(&self.state, &trial.vectors.dac_at_trial_start)? {
+            return Ok(true);
+        }
+        Ok(discrete_reads_differ(
+            &self.state,
+            &self.discrete_inputs,
+            &trial.vectors.discrete_at_trial_start,
+        ))
     }
 
     fn advance_trial_digital(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
@@ -2140,16 +2201,7 @@ impl MixedSignalHost {
     fn sample_discrete_inputs(&mut self) -> Result<bool, MixedSignalError> {
         let mut changed = false;
         for input in &self.discrete_inputs {
-            let value = if self.state.digital.is_real(input.signal) {
-                self.state.digital.read_real(input.signal)
-            } else {
-                self.state
-                    .digital
-                    .read(input.signal)
-                    .and_then(|value| value.to_integer(input.signed))
-                    .map(|value| value as f64)
-            };
-            let value = value.filter(|value| value.is_finite()).ok_or_else(|| {
+            let value = read_discrete_input(&self.state, input).ok_or_else(|| {
                 MixedSignalError::InvalidBridge {
                     detail: format!(
                         "analog read of discrete signal `{}` has an X, Z, or non-finite value",
@@ -2408,12 +2460,14 @@ impl MixedSignalHost {
     /// settled trial published inside its own interval.
     ///
     /// Read from the trial rather than predicted before it, because the fact
-    /// that decides whether a crossing is an interior root at all — did a D/A
-    /// bridge move in this interval — is one the discrete half has to run to
-    /// establish. [`Self::settle_into`] has already applied that fact when it
-    /// dated each transition: a crossing on an interval a boundary moved in is
+    /// that decides whether a crossing is an interior root at all — did the
+    /// discrete half move something the analog equations read in this interval
+    /// — is one the discrete half has to run to establish.
+    /// [`Self::settle_into`] has already applied that fact when it dated each
+    /// transition: a crossing on an interval such a movement happened in is
     /// dated at the endpoint, so it is not interior here and asks for nothing.
-    /// The two rules are therefore one rule, written once.
+    /// The two rules are therefore one rule, written once — the fourth
+    /// question of this module's "three time bases".
     pub(crate) fn trial_boundary_refinement_time(
         &self,
         minimum_timestep: f64,
@@ -2570,15 +2624,19 @@ impl MixedSignalHost {
             self.advance_digital_at_candidate(circuit_voltages, &scratch.probes, tick, start)?;
         }
         // Established after the discrete half has run and before the first
-        // crossing of this pass is dated: whether a boundary moved is what
-        // decides how to date one, and the trial's own `dac_moved` is not
-        // written until the end of the pass.
-        if self.dac_moved_since_trial_start()?
+        // crossing of this pass is dated: whether the digital world moved
+        // something the analog equations read is what decides how to date one,
+        // and the trial's own `dac_moved` and the device's own copy of the
+        // discrete reads are not written until the end of the pass.
+        if self.digital_feedback_since_trial_start()?
             && let Some(trial) = self.trial.as_mut()
         {
-            trial.dac_activity = true;
+            trial.digital_feedback = true;
         }
-        let dac_activity = self.trial.as_ref().is_some_and(|trial| trial.dac_activity);
+        let digital_feedback = self
+            .trial
+            .as_ref()
+            .is_some_and(|trial| trial.digital_feedback);
         scratch.bit_drives.clear();
         scratch.drives.clear();
         scratch.crossings.clear();
@@ -2614,10 +2672,11 @@ impl MixedSignalHost {
             {
                 continue;
             }
-            // A step a D/A bridge moved in stepped this node itself, at the
-            // tick the bridge moved on, so there is no interior root to
-            // interpolate towards: the transition is this endpoint's own.
-            let crossing = if dac_activity {
+            // A step the digital half moved the analog equations in stepped
+            // this node itself, at the tick that movement happened on, so
+            // there is no interior root to interpolate towards: the transition
+            // is this endpoint's own.
+            let crossing = if digital_feedback {
                 time_seconds
             } else {
                 threshold_crossing_time(
@@ -2693,7 +2752,7 @@ impl MixedSignalHost {
             // digital world has already left, and an earlier group — of this
             // pass or of an earlier Newton iteration of this same trial — may
             // have left a later one still.
-            let crossing_tick = if dac_activity {
+            let crossing_tick = if digital_feedback {
                 tick
             } else {
                 self.resolution
@@ -3501,6 +3560,57 @@ fn dac_bits_differ(
         }
     }
     Ok(false)
+}
+
+/// The value the store holds for one discrete quantity an analog block reads,
+/// or `None` when it is X, Z, or not finite.
+///
+/// The one reader of that question, so what the dating rule compares and what
+/// [`MixedSignalHost::sample_discrete_inputs`] hands the analog device cannot
+/// disagree about a value. `None` is not a value the analog half can be given
+/// at all: `sample_discrete_inputs` refuses the run by name when it is next
+/// asked for one, which is why the comparison below can treat it as just
+/// another reading.
+fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Option<f64> {
+    let value = if state.digital.is_real(input.signal) {
+        state.digital.read_real(input.signal)
+    } else {
+        state
+            .digital
+            .read(input.signal)
+            .and_then(|value| value.to_integer(input.signed))
+            .map(|value| value as f64)
+    };
+    value.filter(|value| value.is_finite())
+}
+
+fn read_discrete_inputs(
+    state: &MixedState,
+    inputs: &[DiscreteAnalogInput],
+    out: &mut Vec<Option<f64>>,
+) {
+    out.clear();
+    out.extend(inputs.iter().map(|input| read_discrete_input(state, input)));
+}
+
+/// Whether the store holds a different value for any analog-read discrete
+/// quantity than `reference` recorded.
+///
+/// Compared by bit pattern, as [`MixedSignalHost::sample_discrete_inputs`]
+/// compares: a discrete quantity is an exact integer or an exact real the
+/// discrete half assigned, and a value that merely rounds to the same one is a
+/// different value the analog equations will read differently.
+fn discrete_reads_differ(
+    state: &MixedState,
+    inputs: &[DiscreteAnalogInput],
+    reference: &[Option<f64>],
+) -> bool {
+    if reference.len() != inputs.len() {
+        return true;
+    }
+    inputs.iter().zip(reference).any(|(input, was)| {
+        read_discrete_input(state, input).map(f64::to_bits) != was.map(f64::to_bits)
+    })
 }
 
 fn read_dac_bits(state: &MixedState, out: &mut Vec<FourStateBit>) -> Result<(), MixedSignalError> {
@@ -4737,7 +4847,7 @@ endmodule
         // — another enrolled instance's bridge on this node — is that
         // movement's own transition, not a root inside the interval.
         begin(&mut host, 2);
-        host.note_shared_dac_movement();
+        host.note_shared_digital_feedback();
         assert_eq!(
             boundary_root_of_trial(&mut host, &rising),
             None,
@@ -4757,6 +4867,94 @@ endmodule
             (resume / 1.0e-9).round() as u64,
             2 + EDGE_PROCESS_DELAY_TICKS,
             "the resume must be the `#2` after the publication tick, got {resume:e}"
+        );
+    }
+
+    /// The other half of the same rule: a step the discrete half moved an
+    /// *analog-read variable* in carries no interior root towards the crossing
+    /// that movement caused either.
+    ///
+    /// The feedback path here is a variable rather than a D/A bridge — this
+    /// module declares no D/A bridge at all — which is exactly what a rule
+    /// watching only bridge bits misses. `ca`'s own crossing is interior and
+    /// stays interior: nothing digital had moved when the first iterate found
+    /// it. `cb`'s is found on the re-solve `gain` caused, and interpolating it
+    /// over the whole step would ask the controller to land at 1.2 ns —
+    /// *before* the 1.6 ns edge that caused it, on a solution that never
+    /// existed. The root the controller is given is `ca`'s, and only `ca`'s.
+    #[test]
+    fn a_step_a_discrete_read_moved_in_has_no_interior_root() {
+        // `gain` is the analog-read discrete quantity; `ca` and `cb` are A/D
+        // inputs on nodes 3 and 4. `spun` would be the control's shape — a
+        // variable no analog equation reads — and is deliberately absent, so
+        // every digital write here reaches the continuous problem.
+        let source = r#"
+module discrete_feedback(p, n, ca, cb);
+  inout p, n;
+  electrical p, n;
+  input ca, cb;
+  wire ca, cb;
+  integer gain;
+  initial gain = 1;
+  always @(posedge ca) gain = 2;
+  analog I(p, n) <+ gain * V(p, n) / 1000.0;
+endmodule
+"#;
+        let mut host = MixedSignalHost::compile(
+            source,
+            None,
+            "xfeedback",
+            &[1, 0],
+            SchedulerLimits::default(),
+        )
+        .expect("the feedback module compiles and starts");
+        host.add_adc_bridge("ca", 0, (3, 0), 0.4, 0.6)
+            .expect("the first A/D bridge");
+        host.add_adc_bridge("cb", 0, (4, 0), 0.4, 0.6)
+            .expect("the second A/D bridge");
+
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0; 4]);
+
+        // The control: the same `cb` ramp with nothing digital moving ahead of
+        // it. 0 V to 3 V across (1 ns, 2 ns] puts the 0.6 V threshold a fifth
+        // of the way in, and the controller is asked to land there.
+        begin(&mut host, 2);
+        let control = boundary_root_of_trial(&mut host, &[0.0, 0.0, 0.0, 3.0])
+            .expect("a crossing with no feedback before it is an interior root");
+        assert!(
+            (control - 1.2e-9).abs() < 1.0e-12,
+            "the control must be the interpolated crossing at 1.2 ns, got {control:e}"
+        );
+
+        begin(&mut host, 2);
+        // The first iterate: `ca` crosses six tenths of the way through the
+        // step, and the process it wakes writes `gain`.
+        while host
+            .settle_analog_bridges(&[0.0, 0.0, 1.0, 0.0])
+            .expect("bridges settle")
+        {}
+        // The re-solve that feedback caused, over the same interval: `cb`
+        // crosses on it, and a plain interpolation would date that at 1.2 ns.
+        while host
+            .settle_analog_bridges(&[0.0, 0.0, 1.0, 3.0])
+            .expect("bridges settle")
+        {}
+        let target = host
+            .trial_boundary_refinement_time(1.0e-20)
+            .expect("the inspection succeeds");
+        host.reject_trial().expect("a settled trial rolls back");
+        let target = target.expect("`ca`'s own crossing is still an interior root");
+        assert!(
+            (target - 1.6e-9).abs() < 1.0e-12,
+            "the only interior root is `ca`'s own crossing at 1.6 ns, got {target:e}"
+        );
+        assert!(
+            target > control,
+            "the controller must not be sent back to the {control:e} s artefact the \
+             re-solve produced, and was sent to {target:e} s"
         );
     }
 

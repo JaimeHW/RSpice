@@ -880,7 +880,10 @@ impl SharedDigitalTrial<'_> {
             // `settle_into`. Rounding this trial's own timestamp here would
             // publish the shared bank one tick past the instant the
             // integrator accepted, which is the same error in the shared path.
-            let endpoint_dated = host.trial.as_ref().is_none_or(|trial| trial.dac_activity);
+            let endpoint_dated = host
+                .trial
+                .as_ref()
+                .is_none_or(|trial| trial.digital_feedback);
             for (&(bridge, bit), &(_, crossing)) in
                 host.scratch.bit_drives.iter().zip(&host.scratch.crossings)
             {

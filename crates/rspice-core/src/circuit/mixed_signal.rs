@@ -166,18 +166,21 @@ impl<'a> MixedHostTrialGroup<'a> {
         // before it compares the view against itself and always answers no.
         //
         // The coordinator ran the wheel for every enrolled instance at once,
-        // so whether that run moved a D/A output is a question about the whole
-        // circuit rather than about any one instance: one instance's bridge
-        // and another's A/D input can share a deck node. Ask every instance
-        // whether its own outputs moved, and report the disjunction to all of
-        // them before any of their bridges are sampled.
-        let mut boundary_moved = false;
+        // so whether that run moved something the analog equations read — a
+        // D/A output, or a discrete variable an analog block references — is a
+        // question about the whole circuit rather than about any one instance:
+        // one instance's bridge and another's A/D input can share a deck node,
+        // and one instance's variable steers the current it pushes into a node
+        // any other may sense. Ask every instance whether its own digital half
+        // moved one, and report the disjunction to all of them before any of
+        // their bridges are sampled.
+        let mut fed_back = false;
         for host in self.hosts.iter() {
-            boundary_moved |= named(host, host.dac_moved_since_trial_start())?;
+            fed_back |= named(host, host.digital_feedback_since_trial_start())?;
         }
-        if boundary_moved {
+        if fed_back {
             for host in self.hosts.iter_mut() {
-                host.note_shared_dac_movement();
+                host.note_shared_digital_feedback();
             }
         }
         for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
