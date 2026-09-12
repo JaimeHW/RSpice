@@ -137,11 +137,31 @@ impl PySimulationResult {
 
     /// Get all node voltages as a NumPy array
     ///
+    /// The array stays aligned with `node_names`, so a net only the event
+    /// domain resolves keeps its position and reads back as `nan`: it owns an
+    /// MNA placeholder row rather than a solved level, and publishing that
+    /// row would publish 0 V for a net that carries events. Read such a net
+    /// through a transient run's event trace; asking `voltage()` for it
+    /// raises `KeyError` with the same explanation.
+    ///
     /// Returns:
     ///     numpy.ndarray: Array of all node voltages (index 0 = ground = 0V)
     #[getter]
     fn node_voltages<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
-        self.inner.node_voltages.to_pyarray(py)
+        let voltages: Vec<f64> = self
+            .inner
+            .node_voltages
+            .iter()
+            .enumerate()
+            .map(|(node, value)| {
+                if self.inner.event_only_node_kind(node).is_some() {
+                    f64::NAN
+                } else {
+                    *value
+                }
+            })
+            .collect();
+        voltages.to_pyarray(py)
     }
 
     /// Get all node names
@@ -259,15 +279,19 @@ impl PySimulationResult {
     }
 
     /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// `event_only_nodes` is optional so a pickle written before a solved
+    /// point carried that mask still loads.
     #[staticmethod]
+    #[pyo3(signature = (state, device_operating_points, event_only_nodes=None))]
     fn _unpickle(
         state: SimulationResultState,
         device_operating_points: Option<Vec<PyDeviceOperatingPoint>>,
+        event_only_nodes: Option<Vec<u8>>,
     ) -> Self {
-        Self::new_with_device_operating_points(
-            rebuild_simulation_result(state),
-            device_operating_points,
-        )
+        let mut inner = rebuild_simulation_result(state);
+        restore_event_only_nodes(&mut inner, event_only_nodes);
+        Self::new_with_device_operating_points(inner, device_operating_points)
     }
 
     /// Project this operating point onto a deck's authored output contract
@@ -312,13 +336,18 @@ impl PySimulationResult {
         py: Python<'py>,
     ) -> PyResult<(
         Bound<'py, PyAny>,
-        (SimulationResultState, Option<Vec<PyDeviceOperatingPoint>>),
+        (
+            SimulationResultState,
+            Option<Vec<PyDeviceOperatingPoint>>,
+            Option<Vec<u8>>,
+        ),
     )> {
         Ok((
             unpickler::<Self>(py)?,
             (
                 simulation_result_state(&self.inner),
                 self.device_operating_points.clone(),
+                event_only_node_state(&self.inner),
             ),
         ))
     }
@@ -430,5 +459,129 @@ impl PyDeviceOperatingPoint {
                 self.params.clone(),
             ),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A solved point whose second node carries logic rather than a level.
+    fn masked_point() -> SimulationResult {
+        let mut result = SimulationResult::new(2, 0);
+        result.node_names = vec!["0".to_owned(), "clk".to_owned(), "out".to_owned()];
+        result.node_voltages = vec![0.0, 0.0, 1.25];
+        result.set_event_only_nodes(vec![None, Some(EventOnlyNetKind::Digital), None]);
+        result
+    }
+
+    /// Asking a solved DC point for the voltage of an event-only net raises
+    /// `KeyError` with the engine's one sentence, not "unknown node" and not
+    /// the placeholder row's zero.
+    ///
+    /// "Unknown node" would send the caller looking for a typo; `0.0` would be
+    /// read as a level. The net exists, it was recorded, and it was recorded
+    /// in the only domain that resolves it — which is what the sentence says.
+    #[test]
+    fn an_event_only_net_refuses_the_operating_points_voltage_accessors() {
+        let result = masked_point();
+        let by_name = checked_simulation_voltage_named(&result, "clk")
+            .expect_err("an event-only net has no voltage");
+        let by_index =
+            checked_simulation_voltage(&result, 1).expect_err("addressing it by index is the same");
+        assert_eq!(by_name, by_index);
+        assert_eq!(
+            by_name,
+            ResultAccessError::EventOnlyNode {
+                name: "clk".to_owned(),
+                kind: EventOnlyNetKind::Digital,
+                surface: EventTraceSurface::SolvedPoint,
+            }
+        );
+
+        // The analog node beside it is unaffected, and a genuinely unknown
+        // name still says so.
+        assert_eq!(
+            checked_simulation_voltage_named(&result, "out"),
+            Ok(1.25_f64)
+        );
+        assert_eq!(
+            checked_simulation_voltage_named(&result, "nope"),
+            Err(ResultAccessError::UnknownNodeName {
+                name: "nope".to_owned()
+            })
+        );
+    }
+
+    /// The carrier the refusal recommends is a spelling a reader can reach.
+    ///
+    /// A solved DC point publishes no event trace of its own, so the sentence
+    /// names a transient run's accessor and says whose it is. Both halves are
+    /// checked against the published type stub, which `stubtest` holds to the
+    /// real classes.
+    #[test]
+    fn the_solved_points_refusal_names_an_accessor_the_stub_declares() {
+        let stub = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/rspice.pyi"))
+            .expect("the published type stub is beside the crate manifest");
+
+        let digital = rspice_core::analysis::transient::event_only_voltage_refusal(
+            "clk",
+            EventOnlyNetKind::Digital,
+            EventTraceSurface::SolvedPoint,
+        );
+        assert!(
+            digital.contains("a transient run's digital_events('clk')"),
+            "{digital}"
+        );
+        assert!(stub.contains("def digital_events("), "the stub declares it");
+
+        let real = rspice_core::analysis::transient::event_only_voltage_refusal(
+            "ctrl",
+            EventOnlyNetKind::Real,
+            EventTraceSurface::SolvedPoint,
+        );
+        assert!(
+            real.contains("a transient run's real_trace('ctrl')"),
+            "{real}"
+        );
+        assert!(stub.contains("def real_trace("), "the stub declares it");
+    }
+
+    /// The mask survives a pickle, and its absence is how an older pickle
+    /// reads.
+    ///
+    /// Without the round trip an unpickled operating point would publish the
+    /// placeholder row again, which is the whole defect coming back through
+    /// the serialization path.
+    #[test]
+    fn the_event_only_mask_round_trips_through_pickled_state() {
+        let result = masked_point();
+        let codes = event_only_node_state(&result).expect("the point has an event domain");
+        assert_eq!(codes, vec![0, 1, 0]);
+
+        let mut restored = rebuild_simulation_result(simulation_result_state(&result));
+        assert_eq!(
+            restored.event_only_node_kind(1),
+            None,
+            "state alone carries no mask"
+        );
+        restore_event_only_nodes(&mut restored, Some(codes));
+        assert_eq!(
+            restored.event_only_node_kind(1),
+            Some(EventOnlyNetKind::Digital)
+        );
+        assert_eq!(restored.try_voltage(1), None);
+        assert_eq!(restored.try_voltage(2), Some(1.25));
+
+        // A pickle written before the mask existed carries none, and a result
+        // with no event domain writes none.
+        restore_event_only_nodes(&mut restored, None);
+        assert_eq!(
+            restored.event_only_node_kind(1),
+            Some(EventOnlyNetKind::Digital),
+            "an absent mask leaves what is already there alone"
+        );
+        let analog = SimulationResult::new(2, 0);
+        assert_eq!(event_only_node_state(&analog), None);
     }
 }

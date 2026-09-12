@@ -554,8 +554,21 @@ impl PyDcSweepResult {
     }
 
     /// Rebuild from pickled state. Not part of the public API.
+    ///
+    /// Every point of a sweep shares one namespace, so the event-only mask is
+    /// recorded once and restored onto each point. It is optional so a pickle
+    /// written before a solved point carried that mask still loads.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        points,
+        device_operating_points,
+        primary_source,
+        secondary_source,
+        secondary_sweep_values,
+        inner_points,
+        event_only_nodes=None
+    ))]
     fn _unpickle(
         points: Vec<(f64, SimulationResultState)>,
         device_operating_points: Option<Vec<Vec<PyDeviceOperatingPoint>>>,
@@ -563,11 +576,16 @@ impl PyDcSweepResult {
         secondary_source: Option<String>,
         secondary_sweep_values: Option<Vec<f64>>,
         inner_points: usize,
+        event_only_nodes: Option<Vec<u8>>,
     ) -> Self {
         Self {
             results: points
                 .into_iter()
-                .map(|(value, state)| (value, rebuild_simulation_result(state)))
+                .map(|(value, state)| {
+                    let mut result = rebuild_simulation_result(state);
+                    restore_event_only_nodes(&mut result, event_only_nodes.clone());
+                    (value, result)
+                })
                 .collect(),
             device_operating_points,
             primary_source,
@@ -591,6 +609,7 @@ impl PyDcSweepResult {
             Option<String>,
             Option<Vec<f64>>,
             usize,
+            Option<Vec<u8>>,
         ),
     )> {
         Ok((
@@ -605,6 +624,9 @@ impl PyDcSweepResult {
                 self.secondary_source.clone(),
                 self.secondary_sweep_values.clone(),
                 self.inner_points,
+                self.results
+                    .first()
+                    .and_then(|(_, result)| event_only_node_state(result)),
             ),
         ))
     }
@@ -664,6 +686,18 @@ impl PyDcSweepResult {
         // node_names[0] is ground; it is a constant zero column and is
         // deliberately omitted, matching the transient and AC exporters.
         for (index, name) in node_names.iter().enumerate().skip(1) {
+            // A net only the event domain resolves gets no `V()` column at
+            // all — not a column of zeros and not one of NaNs. Its slot holds
+            // the placeholder row the assembly closed to restore rank, and
+            // `export_columns`/`to_csv` read this same layout, so all three
+            // agree on what the sweep publishes.
+            if self
+                .results
+                .first()
+                .is_some_and(|(_, result)| result.event_only_node_kind(index).is_some())
+            {
+                continue;
+            }
             variables.push(RawVariable {
                 name: format!("V({name})"),
                 kind: RawVariableKind::Voltage,
@@ -702,5 +736,60 @@ impl PyDcSweepResult {
             complex: false,
             timestamp: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn point(sweep_value: f64, out: f64) -> (f64, SimulationResult) {
+        let mut result = SimulationResult::new(2, 0);
+        result.node_names = vec!["0".to_owned(), "clk".to_owned(), "out".to_owned()];
+        result.node_voltages = vec![0.0, 0.0, out];
+        result.set_event_only_nodes(vec![None, Some(EventOnlyNetKind::Digital), None]);
+        (sweep_value, result)
+    }
+
+    fn swept() -> PyDcSweepResult {
+        PyDcSweepResult {
+            results: vec![point(0.0, 1.0), point(1.0, 2.0)],
+            device_operating_points: None,
+            primary_source: Some("v1".to_owned()),
+            secondary_source: None,
+            secondary_sweep_values: None,
+            inner_points: 0,
+            evidence: None,
+        }
+    }
+
+    /// The exported column layout has no `V()` for an event-only net — not a
+    /// column of zeros, and not one of NaNs.
+    ///
+    /// `export_columns`, `to_csv` and both raw writers all read this one
+    /// layout, so pinning it here pins every one of them: a net whose slot
+    /// holds the placeholder row the assembly closed with `v = 0` is simply
+    /// not a column of a DC sweep.
+    #[test]
+    fn the_sweeps_export_layout_omits_an_event_only_nets_column() {
+        let plot = swept().raw_plot("");
+        let columns: Vec<&str> = plot
+            .variables
+            .iter()
+            .map(|variable| variable.name.as_str())
+            .collect();
+        assert!(
+            !columns.iter().any(|column| column.contains("clk")),
+            "an event-only net is not a sweep column, got {columns:?}"
+        );
+        assert!(
+            columns.contains(&"V(out)"),
+            "the analog node still is, got {columns:?}"
+        );
+        assert_eq!(
+            plot.series.len(),
+            plot.variables.len(),
+            "every declared column keeps its series"
+        );
     }
 }

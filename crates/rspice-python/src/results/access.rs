@@ -161,22 +161,52 @@ pub(crate) fn is_ground_name(name: &str) -> bool {
     matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
 }
 
+/// The refusal a DC node addressed as a voltage gets when it carries events.
+///
+/// `try_voltage` answers `None` for both "no such node" and "that node has no
+/// voltage", and the two need different sentences: one sends the caller
+/// looking for a typo, the other names the carrier that does exist. The kind
+/// decides which carrier, and the surface says whose accessor it is — a
+/// solved DC point publishes no event trace of its own.
+fn simulation_event_only_error(
+    result: &SimulationResult,
+    node: usize,
+    name: &str,
+) -> Option<ResultAccessError> {
+    let kind = result.event_only_node_kind(node)?;
+    Some(event_only_node_error(
+        name,
+        kind,
+        rspice_core::analysis::transient::EventTraceSurface::SolvedPoint,
+    ))
+}
+
 pub(super) fn checked_simulation_voltage(
     result: &SimulationResult,
     node: usize,
 ) -> AccessResult<f64> {
-    result
-        .try_voltage(node)
-        .ok_or_else(|| invalid_node_index_error(node, result.node_voltages.len().saturating_sub(1)))
+    result.try_voltage(node).ok_or_else(|| {
+        let name = result
+            .node_names
+            .get(node)
+            .cloned()
+            .unwrap_or_else(|| node.to_string());
+        simulation_event_only_error(result, node, &name).unwrap_or_else(|| {
+            invalid_node_index_error(node, result.node_voltages.len().saturating_sub(1))
+        })
+    })
 }
 
 pub(super) fn checked_simulation_voltage_named(
     result: &SimulationResult,
     name: &str,
 ) -> AccessResult<f64> {
-    result
-        .try_voltage_named(name)
-        .ok_or_else(|| unknown_node_name_error(name))
+    result.try_voltage_named(name).ok_or_else(|| {
+        result
+            .node_index_named(name)
+            .and_then(|node| simulation_event_only_error(result, node, name))
+            .unwrap_or_else(|| unknown_node_name_error(name))
+    })
 }
 
 /// Helper enum for node identification (by index or name)
