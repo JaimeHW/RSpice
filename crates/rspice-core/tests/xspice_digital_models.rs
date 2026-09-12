@@ -736,6 +736,106 @@ rdiv div 0 1k
     );
 }
 
+/// One node's operating-point voltage, by deck name.
+fn operating_point_voltage(result: &rspice_core::solver::SimulationResult, node: &str) -> f64 {
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} missing from {:?}", result.node_names));
+    result.node_voltages[index]
+}
+
+/// **D3, the code-model half.** `.op` puts the event-driven side at exactly
+/// the state `.tran`'s t=0 initialization puts it in, and no further.
+///
+/// The deck is the UIC transient's, asked for an operating point instead. Its
+/// two D/A outputs are the two things a bridge can be holding at t=0 and
+/// neither is a transition: a `d_dff ic=2` that has never been clocked is
+/// UNKNOWN, so its bridge drives `out_undef`, and a `d_fdiv i_count=4` with
+/// `high_cycles=20` starts high, so its bridge drives `out_high`. An operating
+/// point that skipped the code models' initialization would read `out_low` on
+/// both — the `0 V` an undriven analog node holds — and one that ran the event
+/// wheel past zero would have clocked neither, because the deck's only clock
+/// never transitions.
+#[test]
+fn an_operating_point_holds_the_code_models_time_zero_state() {
+    let deck = "\
+* the operating point is the code models' t=0 state
+vzero z 0 dc 0
+a_adc [z] [d_low] adc
+.model adc adc_bridge (in_low=0.5 in_high=0.5)
+a_dff d_low d_low d_low d_low d_q d_qn flop
+.model flop d_dff (clk_delay=1e-10 set_delay=1e-10 reset_delay=1e-10
++ ic=2 rise_delay=1e-10 fall_delay=1e-10)
+a_div d_low d_div fdiv
+.model fdiv d_fdiv (div_factor=40 high_cycles=20 i_count=4
++ rise_delay=1e-10 fall_delay=1e-10)
+a_dac [d_q d_div] [q div] dac
+.model dac dac_bridge (out_low=0 out_high=1 out_undef=0.5
++ t_rise=1e-10 t_fall=1e-10)
+rq q 0 1k
+rdiv div 0 1k
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("an operating point with digital code models");
+
+    let q = operating_point_voltage(&result, "q");
+    let div = operating_point_voltage(&result, "div");
+    assert!(
+        (q - 0.5).abs() <= 1.0e-9,
+        "d_dff ic=2 is UNKNOWN before any clock, so its bridge holds out_undef, got {q}"
+    );
+    assert!(
+        (div - 1.0).abs() <= 1.0e-9,
+        "d_fdiv i_count=4 with high_cycles=20 starts high, so its bridge holds out_high, \
+         got {div}"
+    );
+}
+
+/// **D3, the A/D half.** An operating point evaluates the analog-to-digital
+/// bridge against the solved bias, once, and the digital value it produces
+/// reaches the D/A on the other side of the chain.
+///
+/// `out_undef` is the discriminator: a digital net nothing ever wrote is
+/// UNKNOWN, and its bridge drives 0.5 V here. So an operating point that
+/// answered without evaluating the A/D would read 0.5 V for either input
+/// level, and one that evaluated it would read the level the input crossed
+/// into. Both input levels are run, because a single one agrees with
+/// `out_low` by accident.
+#[test]
+fn an_operating_point_evaluates_the_analog_to_digital_bridge_at_its_bias() {
+    for (input, expected) in [(3.3, 3.3), (0.0, 0.0)] {
+        let deck = format!(
+            "\
+* one A/D conversion at the operating point's own bias
+vin in 0 dc {input}
+a_adc [in] [din] adc
+.model adc adc_bridge (in_low=1.6 in_high=1.7)
+a_dac [din] [out] dac
+.model dac dac_bridge (out_low=0 out_high=3.3 out_undef=0.5)
+rout out 0 10k
+.op
+.end
+"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("an operating point with an A/D bridge");
+        let out = operating_point_voltage(&result, "out");
+        assert!(
+            (out - expected).abs() <= 1.0e-9,
+            "V(in)={input} must convert once and drive {expected}; 0.5 V means the A/D \
+             was never evaluated and the net stayed UNKNOWN, got {out}"
+        );
+    }
+}
+
 /// A `d_fdiv` clock that is already high at t=0 has not risen, so the level
 /// standing at t=0 must not be counted the first time the event scheduler
 /// re-evaluates the divider. ngspice 46 holds this deck's `d_fdiv` output at
