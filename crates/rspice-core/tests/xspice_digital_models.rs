@@ -4124,3 +4124,139 @@ fn suppressed_event_tracing_leaves_the_hook_firing_with_empty_event_slices() {
         "the analog view must survive event tracing being off"
     );
 }
+
+//=============================================================================
+// The analog namespace of an event-only net (R2.15)
+//=============================================================================
+
+/// A net only the event domain resolves publishes no voltage, in a build with
+/// no Verilog-A feature at all.
+///
+/// `d` and `q` are the adc output and the inverter output: no analog element,
+/// and no code model's analog port, reaches either, so the only thing the MNA
+/// system holds for them is the placeholder row every assembly closes with
+/// `v = 0` to restore rank. That row is a rank repair, not a level, and
+/// publishing it as `V(d)` published 0 V for a net that was toggling.
+///
+/// `watched` is the real-valued twin of the same rule, and `clk`/`out` are the
+/// control: both are loaded, so both keep an analog channel. Every name stays
+/// in `node_names`, because the event traces are named through it.
+#[test]
+fn an_event_only_net_publishes_no_voltage_and_keeps_its_name() {
+    let netlist = Netlist::parse(&event_state_deck("")).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect("transient solves");
+
+    for name in ["d", "q", "watched", "clk", "out"] {
+        assert!(
+            result
+                .node_names
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(name)),
+            "{name} must keep its MNA name, got {:?}",
+            result.node_names
+        );
+    }
+    for digital_only in ["d", "q"] {
+        assert!(
+            transient_node_series(&result, digital_only).is_empty(),
+            "{digital_only} carries logic, not a voltage, but published {} samples",
+            transient_node_series(&result, digital_only).len()
+        );
+        assert!(
+            !digital_tokens(&result, digital_only).is_empty(),
+            "{digital_only} must still reach the result as logic"
+        );
+        assert!(
+            result.is_digital_only_node_named(digital_only),
+            "the result-side test must recognise {digital_only}"
+        );
+    }
+    assert!(
+        transient_node_series(&result, "watched").is_empty(),
+        "a real-valued event net has no voltage either"
+    );
+    assert!(
+        !real_event_values(&result, "watched").is_empty(),
+        "the real event trace is that net's carrier"
+    );
+    for loaded in ["clk", "out"] {
+        assert!(
+            !transient_node_series(&result, loaded).is_empty(),
+            "{loaded} is loaded and keeps its analog channel"
+        );
+        assert!(
+            !result.is_digital_only_node_named(loaded),
+            "{loaded} is not digital-only"
+        );
+    }
+}
+
+/// An authored `V()` of an event-only XSPICE net is refused before the run,
+/// naming the carrier that does exist.
+#[test]
+fn an_authored_voltage_of_an_event_only_net_is_refused_with_its_carrier() {
+    let netlist =
+        Netlist::parse(&event_state_deck(".print tran v(q)\n")).expect("probe deck parses");
+    let error = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect_err("an authored V() of an event-only net must be refused");
+    // The card, the operand, and one sentence. Compared case-insensitively
+    // because the sentence names the net as the circuit spells it, and the
+    // parser's namespace is upper-case.
+    let rendered = error.to_string().to_ascii_uppercase();
+    for expected in [
+        "OUTPUT OPERAND 0 'V(Q)'",
+        "AT LINE 14",
+        "A DIGITAL-ONLY NET: IT CARRIES FOUR-STATE LOGIC, NOT A VOLTAGE",
+        "READ IT AS D(Q)",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "the refusal must mention {expected:?}, got: {rendered}"
+        );
+    }
+}
+
+/// A loaded node that carries an event identity keeps `V()` and `D()` both,
+/// and a raw save of it retains both.
+///
+/// This is the boundary the namespace rule must not cross. `mix` is driven and
+/// loaded, so the analog system really does solve it; the auto-bridge planted
+/// for `a_digital`'s digital input registers a digital identity on the same
+/// node. A raw `.SAVE` selects the voltage as well as the event trace — which
+/// is why "voltage column empty AND a digital trace present" is an
+/// unambiguous test for a digital-only net: no save shape produces that pair
+/// for a hybrid.
+#[test]
+fn a_loaded_net_with_an_event_identity_keeps_its_voltage_and_its_trace() {
+    let netlist = Netlist::parse(
+        "\
+* one loaded electrical node with a digital identity of its own
+v1 mix 0 pulse(0 3.3 1n 0.2n 0.2n 4n 8n)
+r1 mix 0 1k
+a_digital [mix] converted dtr
+.model dtr d_to_real
+.save mix
+.end
+",
+    )
+    .expect("hybrid deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 2.0e-8, 2.0e-10)
+        .expect("transient solves");
+
+    assert!(
+        !transient_node_series(&result, "mix").is_empty(),
+        "a raw save of a loaded hybrid node must retain its voltage"
+    );
+    assert!(
+        !digital_tokens(&result, "mix").is_empty(),
+        "the same raw save must retain its digital trace"
+    );
+    assert!(
+        !result.is_digital_only_node_named("mix"),
+        "a hybrid node is not digital-only"
+    );
+}

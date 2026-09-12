@@ -276,6 +276,16 @@ fn traces_by_name(result: &TransientResult) -> BTreeMap<String, Vec<String>> {
         .collect()
 }
 
+/// One node's raw voltage column, empty when the run published none.
+fn waveform_of<'a>(result: &'a TransientResult, name: &str) -> &'a [f64] {
+    let index = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("no node {name} in {:?}", result.node_names));
+    result.voltages[index].as_slice()
+}
+
 /// One node's waveform, linearly interpolated at `time`.
 ///
 /// Two runs on different accepted grids have no sample in common, so a
@@ -456,6 +466,29 @@ fn deck_a_tri_family_transient_sequence_golden() {
         result.time.windows(2).all(|pair| pair[1] > pair[0]),
         "the accepted grid must be strictly increasing"
     );
+    // What `DECK_A_VOLT_HASH` hashes, stated structurally so the hash cannot
+    // quietly go back to including two columns of zeros. `d_clk` and `d_inv`
+    // are the adc output and the inverter output: nothing analog touches
+    // either, so neither has a voltage, and both reach the result as logic.
+    // `q` and `y` are the control — discrete outputs the deck loads with
+    // `rq`/`ry`, so they keep an analog channel as well as a trace.
+    for digital_only in ["d_clk", "d_inv"] {
+        assert!(
+            waveform_of(&result, digital_only).is_empty(),
+            "{digital_only} is digital-only and must publish no voltage, got {} samples",
+            waveform_of(&result, digital_only).len()
+        );
+        assert!(
+            result.digital_trace_named(digital_only).is_some(),
+            "{digital_only} must still reach the result as logic"
+        );
+    }
+    for loaded in ["q", "y"] {
+        assert!(
+            !waveform_of(&result, loaded).is_empty(),
+            "{loaded} is loaded and must keep its analog channel"
+        );
+    }
 
     if !DIODE_CMC {
         // Without the generated card the deck is a different circuit, so the

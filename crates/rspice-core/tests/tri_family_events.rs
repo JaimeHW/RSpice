@@ -234,6 +234,135 @@ fn deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc() {
     pin_f64("deck_e_out_late", late, DECK_E_OUT_LATE, 1e-3);
 }
 
+/// Deck E's `clk` is digital-only, and the analog namespace says so.
+///
+/// Two discrete endpoints meet on `clk` — the clock module's output and the
+/// divider's input — and no analog element touches it, so the only thing the
+/// analog solver holds for it is the placeholder row every assembly closes
+/// with `v = 0` to restore rank. Publishing that row as `V(clk)` published
+/// 0 V for a net that was toggling, which is what this pins shut: the NAME
+/// stays in the MNA namespace, because the digital trace is named through it
+/// and every consumer is aligned by index, and the voltage column is empty.
+///
+/// `qdiv` is the control. It is the same kind of discrete output, and `R1`
+/// makes it physical, so it keeps its voltage and its trace both — the hybrid
+/// ngspice publishes on both sides.
+#[test]
+fn deck_e_digital_only_net_carries_no_analog_channel() {
+    let (clock, divider) = digital_pair();
+    let result = run(
+        &format!(
+            "* bare HDL event net into an analog RC\n\
+             Xclock clk dclk\n\
+             Xdiv clk qdiv ddiv\n\
+             R1 qdiv out 1k\n\
+             C1 out 0 10p\n\
+             .va \"{}\" dclk\n\
+             .va \"{}\" ddiv\n\
+             .end\n",
+            clock.path(),
+            divider.path()
+        ),
+        40e-9,
+        0.5e-9,
+    );
+
+    assert!(
+        result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("clk")),
+        "the digital-only net keeps its name in the MNA namespace, got {:?}",
+        result.node_names
+    );
+    assert!(
+        waveform(&result, "clk").is_empty(),
+        "clk has no voltage to publish, got {} samples",
+        waveform(&result, "clk").len()
+    );
+    assert!(
+        !trace_points(&result, "clk").is_empty(),
+        "clk must still reach the result as logic"
+    );
+    assert!(
+        result.is_digital_only_node_named("clk"),
+        "the result-side test must recognise clk"
+    );
+
+    assert!(
+        !waveform(&result, "qdiv").is_empty(),
+        "qdiv is loaded by R1, so it keeps its analog channel"
+    );
+    assert!(
+        !trace_points(&result, "qdiv").is_empty(),
+        "qdiv keeps its digital trace as well"
+    );
+    assert!(
+        !result.is_digital_only_node_named("qdiv"),
+        "a loaded discrete output is not digital-only"
+    );
+}
+
+/// An authored `V()` of a digital-only net is refused before the run starts,
+/// and a wildcard over the same namespace is not.
+///
+/// The card asserted something about a net the analog solver does not
+/// resolve, so the only answer available was the placeholder zero. Refusing
+/// names the carrier that does exist. A wildcard asserts nothing about any one
+/// net, so it skips the same net in silence.
+#[test]
+fn deck_e_authored_voltage_of_a_digital_only_net_is_refused() {
+    let (clock, divider) = digital_pair();
+    let deck = |card: &str| {
+        format!(
+            "* an authored probe over a bare HDL event net\n\
+             Xclock clk dclk\n\
+             Xdiv clk qdiv ddiv\n\
+             R1 qdiv out 1k\n\
+             C1 out 0 10p\n\
+             {card}\n\
+             .va \"{}\" dclk\n\
+             .va \"{}\" ddiv\n\
+             .end\n",
+            clock.path(),
+            divider.path()
+        )
+    };
+
+    let netlist = Netlist::parse(&deck(".print tran v(clk)")).expect("deck parses");
+    let error = Engine::default()
+        .run_tran(&netlist, 40e-9, 0.5e-9)
+        .expect_err("an authored V() of a digital-only net must be refused");
+    // The card, the operand, and one sentence. Compared case-insensitively
+    // because the sentence names the net as the circuit spells it, and the
+    // parser's namespace is upper-case.
+    let rendered = error.to_string().to_ascii_uppercase();
+    for expected in [
+        "OUTPUT OPERAND 0 'V(CLK)'",
+        "AT LINE 6",
+        "A DIGITAL-ONLY NET: IT CARRIES FOUR-STATE LOGIC, NOT A VOLTAGE",
+        "READ IT AS D(CLK)",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "the refusal must mention {expected:?}, got: {rendered}"
+        );
+    }
+
+    let netlist = Netlist::parse(&deck(".save all")).expect("wildcard deck parses");
+    let wildcard = Engine::default()
+        .run_tran(&netlist, 40e-9, 0.5e-9)
+        .expect("a wildcard skips a digital-only net instead of refusing");
+    assert!(
+        waveform(&wildcard, "clk").is_empty(),
+        "the wildcard must not manufacture a voltage for clk"
+    );
+    assert!(
+        !trace_points(&wildcard, "clk").is_empty(),
+        "the wildcard still retains the logic the net does carry"
+    );
+}
+
 //=============================================================================
 // Deck E2: HDL clock, XSPICE inverter, HDL divider on shared event nets
 //=============================================================================
