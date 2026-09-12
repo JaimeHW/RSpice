@@ -384,9 +384,31 @@ fn ambiguous_veriloga_bindings_never_select_the_first_loaded_module() {
             let error = Engine::default()
                 .run_dc_op(&Netlist::parse_validated(&deck).unwrap())
                 .expect_err("an ambiguous alias must not choose a model by include order");
-            assert!(
-                error.to_string().contains("ambiguous Verilog-A model"),
+            // The refusal is typed, so what pins it is the kind and the name
+            // that turned out to be ambiguous rather than the sentence that
+            // reports them. That is the whole difference this makes: a GUI
+            // marking X1 and offering to add an alias reads these two fields,
+            // where before it had to recognize the prose.
+            let rspice_core::SimulationError::Elaboration(refusal) = &error else {
+                panic!("an ambiguous binding must be a typed elaboration refusal: {error}");
+            };
+            assert_eq!(
+                refusal.kind,
+                rspice_core::ElaborationErrorKind::ModuleNotSelected,
                 "{error}"
+            );
+            assert!(
+                refusal
+                    .module
+                    .as_deref()
+                    .is_some_and(|module| module.eq_ignore_ascii_case(binding)),
+                "the refusal must name the ambiguous master: {error}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains("assign distinct explicit aliases"),
+                "the refusal must keep the fix it suggests: {error}"
             );
         }
     }

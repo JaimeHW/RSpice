@@ -103,10 +103,9 @@ endmodule
 /// would only add a second chance for something else to fail first.
 fn elaboration_error(deck: &str) -> ElaborationError {
     let netlist = Netlist::parse(deck).expect("the deck parses");
-    let error = Engine::default()
-        .build_circuit(&netlist)
-        .err()
-        .expect("the deck must be refused");
+    let Err(error) = Engine::default().build_circuit(&netlist) else {
+        panic!("the deck must be refused");
+    };
     match error {
         SimulationError::Elaboration(error) => *error,
         other => panic!(
