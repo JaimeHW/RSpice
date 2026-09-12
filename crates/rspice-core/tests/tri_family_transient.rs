@@ -55,9 +55,32 @@ const EMIT_ENV: &str = "RSPICE_TRI_FAMILY_EMIT";
 /// and are asserted only in that configuration.
 const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 
-const DECK_A_POINTS: usize = 1458;
-const DECK_A_GRID_HASH: u64 = 0x3e5f_36d3_ad4e_30bd;
-const DECK_A_VOLT_HASH: u64 = 0xbc9a_9ba1_03f5_f494;
+/// Deck A's accepted grid, re-measured after R2.14 ended two of the three
+/// retry ladders the deck carried. 1458 points before, 1270 after, and the 188
+/// the deck stopped taking are accounted for instant by instant in the trace:
+///
+/// * the mixed module's D/A output left the voltage-LTE norm, which ended the
+///   six ladders at its own edges (0.05, 10.05 … 50.05 ns; 54/73/56/73/55/73
+///   rejections, and the 50 accepted points below ten femtoseconds they left
+///   behind while doubling back up), and
+/// * the native estimator now restarts predictor history at a breakpoint,
+///   which ended the twelve ladders at the far end of each `y` ramp (x.x65 ns;
+///   51-68 rejections and 54 more sub-femtosecond points).
+///
+/// The one class still open owns every point below ten femtoseconds that
+/// remains: a `y` ramp *leaving* zero volts, where the estimator's reference
+/// degenerates to `abstol/reltol` and the demand becomes 6.1e-17 s. It is
+/// R2.24, it was 54 points before this change and is 78 after — the restart
+/// hands it 24 more at the model-interval breakpoint 2.4 ps into each ramp,
+/// where history that was tracking the ramp is discarded and the same abstol
+/// demand reappears on a node 40 mV from ground.
+///
+/// Nothing else in this file moved: deck C, C2 and C3 keep their point counts
+/// exactly, deck E its sampled voltages, and deck A its pinned analog solution
+/// at every digital instant.
+const DECK_A_POINTS: usize = 1270;
+const DECK_A_GRID_HASH: u64 = 0x7e98_da9f_82f6_198b;
+const DECK_A_VOLT_HASH: u64 = 0xf928_70ad_27e0_4778;
 const DECK_C2_POINTS: usize = 265;
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
