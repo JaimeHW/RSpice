@@ -1501,10 +1501,17 @@ impl CodeGenerator {
                 } => {
                     // $limit(expr, <limiting function>, ...) - the body decides
                     // what this Newton iterate may be, and it reads the
-                    // proposal and the previous iterate of this very slot, so
-                    // the slot is allocated before the body is emitted.
-                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
+                    // previous iterate of this very slot, so the slot is
+                    // allocated before the body is emitted.
+                    //
+                    // And after the proposal, not before it: a limiter nested
+                    // inside another's proposal has to take the lower slot, as
+                    // it did when this site was a bare state marker emitted
+                    // after its operand. A runtime checkpoint records state by
+                    // slot, so numbering the two the other way round would
+                    // restore each limiter's history into the other's.
                     self.emit_expr(arena, proposed, emit_ctx, program)?;
+                    let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     self.named_limiter_slots.borrow_mut().push(state_id);
                     let body = self.emit_expr(arena, candidate, emit_ctx, program);
                     self.named_limiter_slots.borrow_mut().pop();
@@ -2552,5 +2559,64 @@ mod limiter_correction_tests {
                 assert_eq!(g - (f - c), limited * limited);
             }
         }
+    }
+
+    /// A limiter nested inside another's proposal owns the lower state slot.
+    ///
+    /// The order is not a free choice. A runtime checkpoint records limiter
+    /// history by slot and its shape identity counts slots without naming the
+    /// sites that own them, so a model whose two limiters swapped numbers
+    /// across an upgrade would restore each limiter's previous iterate into
+    /// the other's. The emission that produced these numbers before the
+    /// limiting function moved into the bytecode entry allocated the site's
+    /// slot after its operand, and this keeps that: the inner limiter is
+    /// reached, and numbered, while the outer proposal is still being emitted.
+    #[test]
+    fn a_limiter_nested_in_a_proposal_owns_the_lower_state_slot() {
+        let arena = &mut ExprArena::new();
+        let bias = arena.push(Node::Voltage(0, u32::MAX));
+        let inner_previous = arena.push(Node::LimiterPrevious(bias));
+        let inner_step = arena.push(Node::Const(0.1));
+        let inner_candidate = arena.push(Node::Binary(BinaryOp::Add, inner_previous, inner_step));
+        let inner = arena.push(Node::NamedLimit {
+            proposed: bias,
+            candidate: inner_candidate,
+        });
+        let outer_previous = arena.push(Node::LimiterPrevious(inner));
+        let outer_step = arena.push(Node::Const(0.25));
+        let outer_candidate = arena.push(Node::Binary(BinaryOp::Add, outer_previous, outer_step));
+        let outer = arena.push(Node::NamedLimit {
+            proposed: inner,
+            candidate: outer_candidate,
+        });
+
+        let generator = CodeGenerator::new();
+        let program = generator
+            .compile_expr(arena, outer, &empty_emit_context())
+            .expect("compile nested named limiters");
+        let mut first_seen = Vec::new();
+        for instruction in &program.instructions {
+            if let Instruction::NamedLimiterPrevious(slot) | Instruction::NamedLimiterStore(slot) =
+                instruction
+                && !first_seen.contains(slot)
+            {
+                first_seen.push(*slot);
+            }
+        }
+        assert_eq!(
+            first_seen,
+            vec![0, 1],
+            "the nested limiter must take slot 0 and the enclosing one slot 1: {:?}",
+            program.instructions
+        );
+        assert!(
+            matches!(
+                program.instructions.last(),
+                Some(Instruction::NamedLimiterStore(1))
+            ),
+            "the enclosing limiter publishes last, into its own slot: {:?}",
+            program.instructions
+        );
+        assert_eq!(generator.limit_state_count.get(), 2, "one slot per site");
     }
 }
