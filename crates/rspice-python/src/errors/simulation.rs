@@ -64,6 +64,19 @@ fn simulation_error_attributes(
             Some(error.canonical_dependency_name.clone()),
             Some(error.reason.as_str()),
         ),
+        // A Verilog-A or mixed binding refusal. `code`, `category`, `line` and
+        // `path` already follow from the descriptor and the span, so what is
+        // added here is the pair a caller acts on: which instance failed, and
+        // which of the eleven binding steps it failed at. `missing_dependency`
+        // carries the master, which is the thing a script has to go and find.
+        rspice_core::engine::SimulationError::Elaboration(error) => (
+            error.instance.clone(),
+            // No canonical spelling: the deck's name for the card is the only
+            // one this refusal has, and it is already in `instance_name`.
+            None,
+            error.module.clone(),
+            Some(error.kind.as_str()),
+        ),
         _ => (None, None, None, None),
     };
     let capability = match error {
@@ -193,6 +206,39 @@ mod tests {
         assert_eq!(attributes.capability, Some("device.ltra.rg_finite_length"));
         assert_eq!(attributes.line, Some(12));
         assert_eq!(attributes.path.as_deref(), Some("deck.cir"));
+        assert!(!attributes.retryable);
+    }
+
+    /// A Verilog-A binding refusal reaches Python as bad input, naming the
+    /// instance, the master and which binding step failed.
+    ///
+    /// The generic `SimulationError` exception class is deliberate: every
+    /// netlist-category failure already raises it, and what a caller branches
+    /// on is `category` and `reason`, not the class. What was missing before
+    /// was that those two said nothing — the whole seam arrived as either
+    /// `circuit` or `netlist` depending on which untyped variant each engine
+    /// site had reached for.
+    #[test]
+    fn elaboration_refusals_publish_their_kind_instance_and_source_span() {
+        let attributes = simulation_error_attributes(&rspice_core::engine::SimulationError::from(
+            rspice_core::ElaborationError {
+                instance: Some("x1".to_string()),
+                module: Some("counter.va".to_string()),
+                kind: rspice_core::ElaborationErrorKind::MissingSource,
+                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
+                    "counter.va",
+                    0,
+                )),
+                detail: "this source does not exist or is unreadable".to_string(),
+            },
+        ));
+        assert_eq!(attributes.kind, "netlist");
+        assert_eq!(attributes.category, "netlist");
+        assert_eq!(attributes.reason, Some("missing_source"));
+        assert_eq!(attributes.instance_name.as_deref(), Some("x1"));
+        assert_eq!(attributes.missing_dependency.as_deref(), Some("counter.va"));
+        assert_eq!(attributes.line, Some(0));
+        assert_eq!(attributes.path.as_deref(), Some("counter.va"));
         assert!(!attributes.retryable);
     }
 
