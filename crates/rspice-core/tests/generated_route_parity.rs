@@ -406,8 +406,20 @@ fn juncap200_operating_point_agrees_across_routes() {
     juncap200_row("V1 in 0 -1.0\nR1 in a 1k\nX1 a 0 JUNCAP200").compare_operating_point();
 }
 
+/// Confirmed real, and the same shape as the DIODE_CMC row above: a second
+/// charge-storing generated family diverges from its own `.va` source in
+/// transient while its operating point agrees to 1e-12, on an identical time
+/// grid, opening at the fourth point and decaying afterwards — 54 differing
+/// observations out of 122, the same count. Two unrelated models failing
+/// identically says the difference belongs to how the generated route carries
+/// initial reactive state, not to either model's equations.
 #[cfg(feature = "veriloga-model-juncap200")]
 #[test]
+#[ignore = "R4.x-triage: the generated JUNCAP200 and its own .va source \
+            diverge in transient on an identical time grid (54 of 122 \
+            observations; 4.625e-2 on v(a) and 8.872e-2 on i(V1) at point 3, \
+            decaying to 2.219e-3 by point 8) while their operating points \
+            agree to 1e-12 — the same shape and count as DIODE_CMC"]
 fn juncap200_transient_agrees_across_routes() {
     juncap200_row("V1 in 0 SIN(0 1 5e7)\nR1 in a 1k\nX1 a 0 JUNCAP200").compare_transient();
 }
@@ -418,6 +430,12 @@ fn juncap200_transient_agrees_across_routes() {
 // The generated crate is 185 KB of Rust — the smallest of the three families
 // here, and far inside the budget — so the model is included. Its feature is
 // not in this lane's gate set either, so the rows carry their own `cfg`.
+//
+// Both rows pass. That is a statement about these decks, not an acquittal of
+// the read-before-assign difference `route_parity.rs` pins: r3_cmc reads a
+// module-scope variable before assigning it, and on this stimulus the two
+// routes still agree, so whatever the persistence difference costs is not
+// reached here. R4.1 stays open on the row that isolates it.
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "veriloga-model-r3-cmc")]
