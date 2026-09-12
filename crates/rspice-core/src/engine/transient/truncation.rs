@@ -2962,6 +2962,7 @@ impl Engine {
             && circuit.jiles_atherton_inductors.is_empty()
             && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
+            && !circuit.has_any_veriloga_devices()
     }
 
     #[inline]
@@ -2984,6 +2985,7 @@ impl Engine {
             && circuit.jiles_atherton_inductors.is_empty()
             && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
+            && !circuit.has_any_veriloga_devices()
     }
 
     #[inline]
@@ -3006,6 +3008,7 @@ impl Engine {
             && circuit.jiles_atherton_inductors.is_empty()
             && circuit.xyce_core_groups.is_empty()
             && !circuit.has_xspice_devices()
+            && !circuit.has_any_veriloga_devices()
     }
 
     #[inline]
@@ -3029,6 +3032,19 @@ impl Engine {
             || !circuit.jiles_atherton_inductors.is_empty()
             || !circuit.xyce_core_groups.is_empty()
         {
+            return false;
+        }
+        // A Verilog-A charge is a state of the deck like any other, and the
+        // native walks below cannot see it: they enumerate fixed per-family
+        // charge vectors, and an authored `ddt` operand is in none of them.
+        // Letting the native families claim coverage anyway hands the whole
+        // deck's accuracy to charges nobody estimated, which is why an
+        // authored 1 pF capacitor accepted the same 120 points at reltol 1e-2
+        // and 1e-5 while the native one moved 135 to 598. Until those operands
+        // report a limit of their own, such a deck falls to the voltage-LTE
+        // rule — the same fallback a family whose charge state could not be
+        // formed already takes.
+        if circuit.has_any_veriloga_devices() {
             return false;
         }
 
@@ -4477,6 +4493,64 @@ M1 d g s 0 VM W=1 L=1u
         assert!(
             !Engine::mosfet_charge_truncation_covers_transient_lte(&circuit, Some(1.0e-9)),
             "MOSFET-family LTE shortcut must not hide generic LTE when a VDMOS is also present"
+        );
+    }
+
+    /// The native walks enumerate fixed per-family charge vectors, and an
+    /// authored `ddt` operand is in none of them. A deck that carries one is
+    /// therefore not covered however complete the native limits are.
+    #[test]
+    #[cfg(feature = "veriloga-model-diode-cmc")]
+    fn a_veriloga_charge_denies_the_native_families_lte_coverage() {
+        let native_only = "\
+Native capacitor alone
+V1 a 0 1
+R1 a b 1k
+C1 b 0 1p
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(native_only);
+        assert!(
+            Engine::ngspice_device_truncation_covers_transient_lte(
+                &circuit,
+                Some(1.0e-9),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            "a native-only deck keeps the charge-truncation shortcut"
+        );
+
+        let with_authored_charge = "\
+Native capacitor beside a generated Verilog-A charge
+V1 a 0 1
+R1 a b 1k
+C1 b 0 1p
+XD1 b 0 diode_cmc
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(with_authored_charge);
+        assert!(
+            circuit.has_any_veriloga_devices(),
+            "the deck under test must actually carry a Verilog-A instance"
+        );
+        assert!(
+            !Engine::ngspice_device_truncation_covers_transient_lte(
+                &circuit,
+                Some(1.0e-9),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            "a Verilog-A charge nobody estimated must not be covered by the native families"
         );
     }
 
