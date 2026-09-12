@@ -413,4 +413,52 @@ fn every_lowering_route_reads_realtime_through_the_module_time_unit() {
          analog I(p, n) <+ laplace_nd($realtime * V(p, n), '{1.0, 0.5}, '{1.0, 0.25});\n\
          endmodule\n",
     );
+
+    // Two routes above cannot be executed from this crate's default-feature
+    // test set: the native JIT is behind `feature = "native"`, and the
+    // generated-Rust noise pass classifies rather than computes. Both select
+    // their behaviour by matching the system function's *name* on the same HIR
+    // every other route reads, so they are settled by absence instead — a name
+    // that never reaches the HIR cannot reach a name match below it, and that
+    // is one measurement rather than a compile per feature set.
+    //
+    // The placements are the ones a rewrite could plausibly miss and the
+    // measurements above do not cover: an analog function body, a conditional,
+    // and a noise amplitude, which is the one the noise pass reads.
+    for body in [
+        "analog I(p) <+ V(p) * $realtime;",
+        "real t;\n    analog begin t = $realtime; I(p) <+ V(p) * t; end",
+        "analog I(p) <+ ($realtime > 1.0 ? V(p) : 0.0);",
+        "analog function real scaled;\n\
+         \x20       input x; real x;\n\
+         \x20       scaled = x * $realtime;\n\
+         \x20   endfunction\n\
+         \x20   analog I(p) <+ scaled(V(p));",
+        "analog I(p) <+ white_noise($realtime + 1.0, \"rt\");",
+    ] {
+        use rspice_veriloga::canonical_ir::HirExprKind;
+        let source = format!(
+            "`timescale 1us/1ns\nmodule realtime_spelling(p);\n    inout p; electrical p;\n    {body}\nendmodule\n"
+        );
+        let artifact = artifact_of(&source);
+        let mut abstime = 0usize;
+        for expression in &artifact.hir.expressions {
+            let HirExprKind::SystemFunction { name, .. } = &expression.kind else {
+                continue;
+            };
+            let normalized = name.trim_start_matches('$').to_ascii_lowercase();
+            assert_ne!(
+                normalized, "realtime",
+                "{body}: `$realtime` survived semantic analysis into the HIR every route \
+                 reads, so a route that still spells it would answer in plain seconds"
+            );
+            if normalized == "abstime" {
+                abstime += 1;
+            }
+        }
+        assert!(
+            abstime >= 1,
+            "{body}: the rewrite must leave an `$abstime` behind, or this proves nothing"
+        );
+    }
 }
