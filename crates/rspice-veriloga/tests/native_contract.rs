@@ -125,8 +125,26 @@ fn canonical_device_and_artifact_from_source(
     (device, artifact)
 }
 
+/// The name no lowering has a case for, substituted into a real call below.
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-fn canonical_artifact_with_unsupported_root(
+const UNLOWERABLE_INTRINSIC: &str = "rspice_unlowerable_intrinsic";
+
+/// `source`'s canonical artifact with every call in it renamed to
+/// [`UNLOWERABLE_INTRINSIC`], which neither canonical route has a case for.
+///
+/// Renaming rather than replacing a kind, because a kind cannot be replaced
+/// from here. `HirModel` lowers one module into its arena twice — as the
+/// guard-folded `contributions` the postfix plan reads, and again as the
+/// structured `body` the CFG plan reads — and `HirModel::validate` checks every
+/// expression ref's declared kind label against the arena entry it names. A
+/// test can reach the contributions' refs but not the body's (`HirRegion` is
+/// not exported), so a kind change refuses at `from_parts` before any backend
+/// sees it, while changing only the contribution root leaves the body copy
+/// lowerable and the CFG plan compiles the module this is asking it to refuse.
+/// A call's name is not part of its label, so renaming moves both copies at
+/// once and leaves the artifact valid.
+#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
+fn canonical_artifact_with_unlowerable_calls(
     compiler: &VerilogACompiler,
     source: &str,
 ) -> CanonicalIrArtifact {
@@ -136,14 +154,13 @@ fn canonical_artifact_with_unsupported_root(
     let metadata = artifact.metadata.clone();
     let mut hir = artifact.hir.clone();
     let mut mir = artifact.mir.clone();
-    let root = usize::from(mir.equations[0].expression.id);
-    let unsupported = HirExprKind::StringLiteral {
-        value: "unsupported-native-expression".into(),
-    };
-    hir.expressions[root].kind = unsupported.clone();
-    mir.expressions[root].kind = unsupported;
-    hir.contributions[0].expression.kind = "string".into();
-    mir.equations[0].expression.kind = "string".into();
+    for expressions in [&mut hir.expressions, &mut mir.expressions] {
+        for expression in expressions.iter_mut() {
+            if let HirExprKind::Call { name, .. } = &mut expression.kind {
+                *name = UNLOWERABLE_INTRINSIC.into();
+            }
+        }
+    }
     CanonicalIrArtifact::from_parts(metadata, hir, mir)
         .expect("synthetic canonical artifact has refreshed digests")
 }
@@ -1048,23 +1065,6 @@ endmodule
     )
 }
 
-#[cfg(feature = "native-bytecode-contract-tests")]
-fn reactive_current_probe_model() -> rspice_veriloga::CompiledModel {
-    compile(
-        r#"
-`include "disciplines.vams"
-module reactive_current_probe(p, n);
-    inout p, n;
-    electrical p, n;
-    analog begin
-        I(p, n) <+ V(p, n);
-        I(p, n) <+ ddt(I(p, n) * V(p, n));
-    end
-endmodule
-"#,
-    )
-}
-
 fn idt_current_model() -> rspice_veriloga::CompiledModel {
     compile(
         r#"
@@ -1153,17 +1153,31 @@ endmodule
     )
 }
 
-fn unavailable_current_probe_model() -> rspice_veriloga::CompiledModel {
-    compile(
-        r#"
-`include "disciplines.vams"
-module native_missing_current_probe(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ I(p, n);
-endmodule
-"#,
-    )
+/// A model the native route cannot compile, for the two contracts that say
+/// what happens when it cannot.
+///
+/// Until `bea8ba089` this was `I(p, n) <+ I(p, n)`, whose current probe had no
+/// solver current to read; flow probes now carry a branch equation of their own
+/// and that module compiles natively like any other. What lowering still has no
+/// answer for is a dynamic operand inside a static condition — a program the
+/// compiler never emits, which is why it is doctored in here exactly as
+/// `native_static_condition_rejects_dynamic_guard_bytecode_without_fallback`
+/// doctors it.
+///
+/// Without `native-bytecode-contract-tests` the constructors below refuse for
+/// the absent canonical artifact before they read the model at all, so the
+/// undoctored model is the right one there: the doctoring needs `Instruction`,
+/// which only that feature imports.
+fn native_uncompilable_model() -> rspice_veriloga::CompiledModel {
+    #[allow(unused_mut)]
+    let mut model = static_condition_model();
+    #[cfg(feature = "native-bytecode-contract-tests")]
+    for program in &mut model.stamp_programs {
+        if let Some(static_condition) = program.static_condition.as_mut() {
+            static_condition.instructions = vec![Instruction::PushVoltage(0, 1)];
+        }
+    }
+    model
 }
 
 fn nonfinite_prior_current_probe_model() -> rspice_veriloga::CompiledModel {
@@ -1176,42 +1190,6 @@ module native_nonfinite_current_probe(p, n);
     analog begin
         I(p, n) <+ V(p, n) / 0.0;
         I(p, n) <+ I(p, n);
-    end
-endmodule
-"#,
-    )
-}
-
-#[cfg(feature = "native-bytecode-contract-tests")]
-fn dead_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
-    compile(
-        r#"
-`include "disciplines.vams"
-module native_dead_assignment_current_probe(p, n);
-    inout p, n;
-    electrical p, n;
-    real op_i;
-    analog begin
-        I(p, n) <+ V(p, n);
-        op_i = I(p, n);
-    end
-endmodule
-"#,
-    )
-}
-
-#[cfg(feature = "native-bytecode-contract-tests")]
-fn live_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
-    compile(
-        r#"
-`include "disciplines.vams"
-module native_live_assignment_current_probe(p, n);
-    inout p, n;
-    electrical p, n;
-    real sensed;
-    analog begin
-        sensed = I(p, n);
-        I(p, n) <+ sensed;
     end
 endmodule
 "#,
@@ -3676,12 +3654,12 @@ fn native_device_canonical_ir_cache_key_does_not_reuse_bytecode_native_image() {
 module native_canonical_cache_guard(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ V(p, n);
+    analog I(p, n) <+ sqrt(V(p, n));
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     let model = std::sync::Arc::new(compiler.compile(source).expect("compile bytecode model"));
-    let artifact = canonical_artifact_with_unsupported_root(&compiler, source);
+    let artifact = canonical_artifact_with_unlowerable_calls(&compiler, source);
 
     let bytecode_device =
         VerilogADevice::try_new("BYTECACHE1", std::sync::Arc::clone(&model), &[1, 0])
@@ -3696,10 +3674,11 @@ endmodule
     )
     .expect_err("canonical-native path must not reuse cached bytecode-native image");
 
-    assert!(
-        error.to_string().contains("expression kind string"),
-        "{error}"
-    );
+    // Whichever canonical route reports it — the CFG lowering refuses the call
+    // by name and the postfix plan behind it refuses the same intrinsic — the
+    // name is in the message, and a reused bytecode-native image would have
+    // been a success instead.
+    assert!(error.to_string().contains(UNLOWERABLE_INTRINSIC), "{error}");
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -5700,21 +5679,6 @@ fn native_device_stamps_reactive_ddt_capacitance_without_fallback() {
     );
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-#[test]
-fn native_compile_rejects_reactive_current_probes_without_fallback() {
-    let model = reactive_current_probe_model();
-
-    let err = compile_native(&model).expect_err("reactive current probes must not compile native");
-    let msg = err.to_string();
-
-    assert_native_hard_fail_message(&msg);
-    assert!(
-        msg.contains("PushCurrent terminal pair 0,1 unavailable"),
-        "error must name unavailable reactive current dependency, got: {msg}"
-    );
-}
-
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_device_executes_idt_current_and_jacobian_without_fallback() {
@@ -5986,26 +5950,6 @@ fn native_device_executes_single_ended_current_probes_using_solver_current() {
     }
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-#[test]
-fn native_rejects_observable_assignment_current_probe_without_fallback() {
-    for (name, model) in [
-        ("otherwise-dead", dead_assignment_current_probe_model()),
-        ("live", live_assignment_current_probe_model()),
-    ] {
-        let err = compile_native(&model).expect_err(
-            "observable assignment current probe must not compile before currents exist",
-        );
-        let msg = err.to_string();
-
-        assert_native_hard_fail_message(&msg);
-        assert!(
-            msg.contains("PushCurrent terminal pair 0,1 unavailable"),
-            "{name}: unexpected error: {msg}"
-        );
-    }
-}
-
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_device_with_canonical_ir_executes_explicit_ground_current_probe_without_fallback() {
@@ -6044,21 +5988,6 @@ endmodule
     }
 }
 
-#[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
-#[test]
-fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallback() {
-    let model = unavailable_current_probe_model();
-
-    let err = compile_native(&model).expect_err("missing current probe source must not compile");
-    let msg = err.to_string();
-
-    assert_native_hard_fail_message(&msg);
-    assert!(
-        msg.contains("PushCurrent terminal pair 0,1 unavailable"),
-        "error must name unavailable current pair, got: {msg}"
-    );
-}
-
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_evaluate_rejects_nonfinite_contributions_before_current_probes() {
@@ -6080,7 +6009,7 @@ fn native_evaluate_rejects_nonfinite_contributions_before_current_probes() {
 
 #[test]
 fn native_compile_failure_is_not_interpreter_fallback() {
-    let model = unavailable_current_probe_model();
+    let model = native_uncompilable_model();
 
     let err = VerilogADevice::try_new("H1", model, &[1, 0])
         .expect_err("native mode must fail until a complete native image exists");
@@ -6091,7 +6020,7 @@ fn native_compile_failure_is_not_interpreter_fallback() {
 
 #[test]
 fn native_new_panics_instead_of_falling_back() {
-    let model = unavailable_current_probe_model();
+    let model = native_uncompilable_model();
 
     let panic = std::panic::catch_unwind(|| {
         let _ = VerilogADevice::new("H2", model, &[1, 0]);
