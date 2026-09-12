@@ -622,6 +622,17 @@ pub struct CircuitData {
     /// Circuit-level XSPICE digital event queue, shared with rollback
     /// snapshots until an event is scheduled or drained.
     pub(crate) xspice_event_queue: SharedXspiceEventQueue,
+    /// Smallest interval the analog solver may advance by, or zero when
+    /// nothing has declared one.
+    ///
+    /// The coupled code-model half of the same floor
+    /// [`CircuitData::set_mixed_analog_step_floor`] publishes to every mixed
+    /// module: one floor, both kernels. Read by
+    /// `circuit::external_models::coupled`'s missed-breakpoint guard, which is
+    /// the only place a queued code-model event is measured against an
+    /// interval the stepper could have taken.
+    #[cfg(feature = "veriloga")]
+    pub(crate) xspice_analog_step_floor: Value,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.

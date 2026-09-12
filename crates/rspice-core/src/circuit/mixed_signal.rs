@@ -988,7 +988,7 @@ impl CircuitData {
     }
 
     /// Publish the transient stepper's hard minimum timestep to every mixed
-    /// module.
+    /// module, and to the coupled code-model queue beside them.
     ///
     /// A module's digital half schedules on its own declared precision, which
     /// can be finer than any interval the analog solver is allowed to advance
@@ -996,6 +996,15 @@ impl CircuitData {
     /// activation" means, and a schedule the analog side merely cannot resolve
     /// is reported as a lost breakpoint. With it, such an activation keeps its
     /// exact digital tick and coalesces onto the next analog timepoint.
+    ///
+    /// One floor, both kernels. A code model sharing an event net with a mixed
+    /// module schedules on the same picosecond-and-finer grid — ngspice clamps
+    /// a gate delay at 1 ps, which is a tenth of the minimum a one-second
+    /// maximum timestep leaves the solver — and
+    /// `engine::transient::accepted_veriloga_event_time` lands its events by
+    /// the same contract as an HDL tick. So its own guard needs the same
+    /// interval to measure against, and gets it here rather than from a second
+    /// knob: see `circuit::external_models::coupled`'s `event_was_reachable`.
     pub(crate) fn set_mixed_analog_step_floor(&mut self, floor: Value) {
         if let Some(digital) = self.mixed_digital_coordinator.as_mut() {
             digital.set_analog_step_floor(floor);
@@ -1003,6 +1012,11 @@ impl CircuitData {
         for host in &mut self.mixed_signal_hosts {
             host.set_analog_step_floor(floor);
         }
+        self.xspice_analog_step_floor = if floor.is_finite() && floor > 0.0 {
+            floor
+        } else {
+            0.0
+        };
     }
 
     /// Earliest scheduled digital activation across every mixed module.

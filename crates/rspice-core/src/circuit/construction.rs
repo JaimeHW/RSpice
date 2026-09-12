@@ -86,6 +86,8 @@ impl CircuitData {
             xspice_event_values: SharedXspiceEventValues::default(),
             xspice_event_loads: HashMap::new(),
             xspice_event_queue: SharedXspiceEventQueue::new(),
+            #[cfg(feature = "veriloga")]
+            xspice_analog_step_floor: 0.0,
             xspice_touched_digital_nodes: Vec::new(),
             xspice_touched_real_nodes: Vec::new(),
             xspice_event_dispatch: None,

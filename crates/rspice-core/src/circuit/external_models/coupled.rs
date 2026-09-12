@@ -229,6 +229,43 @@ impl<'a> XspiceDigitalParticipant<'a> {
     pub(crate) fn into_wave(self) -> Option<XspiceActiveWave> {
         self.wave
     }
+
+    /// Whether a queued code-model event this candidate has already passed was
+    /// one the analog solver could have opened a wave at.
+    ///
+    /// The event's own scheduler owns its exact time and its ordering; the
+    /// analog solver owes it only a timepoint at or after it. An event a whole
+    /// hard-minimum step or more after the accepted analog time is reachable:
+    /// the stepper had a legal interval to it and did not take it, which is
+    /// the synchronization fault `settle_active` refuses. One closer than that
+    /// is not reachable at all — there is no analog instant between the
+    /// accepted point and it — so it is delivered at the timepoint the stepper
+    /// did land on, which is where `engine::transient`'s
+    /// `landed_veriloga_event_time` coalesces it (`accepted + hard_min`) and
+    /// where `step_xspice_active_wave_with_resolver` drains it in queue order.
+    /// Refusing that one would end a run over a schedule the analog side is
+    /// simply too coarse to resolve: a 1 ps gate delay — ngspice's clamped
+    /// minimum — under the 10 ps minimum a one-second maximum timestep leaves
+    /// the solver.
+    ///
+    /// This is the mixed half's rule, on the other kernel's queue:
+    /// `xspice::verilog::mixed::shared::MixedDigitalCoordinator::activation_was_reachable`
+    /// and `MixedSignalHost::begin_trial_with_integration_rules`' contract
+    /// state it for HDL activations, against the same floor
+    /// `CircuitData::set_mixed_analog_step_floor` publishes to both. A zero
+    /// floor means no solver has declared one — a directly driven participant,
+    /// or an analysis that never set it — and then every event stepped past is
+    /// a fault, as it was before either half had a floor.
+    ///
+    /// The accepted time is the candidate's own start, `time - timestep`:
+    /// `settle_active` already refuses physical work outside
+    /// `[time - timestep, time]`, so that difference is the interval the
+    /// stepper chose, and there is no earlier instant for an event to have
+    /// been landed on.
+    fn event_was_reachable(&self, due: Value) -> bool {
+        let floor = self.circuit.xspice_analog_step_floor;
+        !floor.is_finite() || floor <= 0.0 || due - (self.time - self.timestep) >= floor
+    }
 }
 
 impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
@@ -252,8 +289,11 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                     "XSPICE physical time cannot advance with pending shared-net observations or move backwards within one candidate",
                 ));
             }
+            // See `Self::event_was_reachable`: only an event the stepper had a
+            // legal interval to and skipped anyway is a lost breakpoint.
             if let Some(due) = self.circuit.xspice_event_queue.next_event_time()
                 && due < physical
+                && self.event_was_reachable(due)
             {
                 return Err(external_error(format!(
                     "missed XSPICE breakpoint at {due:.16e}s before shared Active work at {physical:.16e}s"

@@ -614,6 +614,127 @@ endmodule
     );
 }
 
+/// A coupled circuit with one code-model event queued a picosecond after the
+/// accepted analog time, and nothing else pending, as
+/// `(host, circuit, bindings, accepted, due)`.
+///
+/// The interval is the gate's arithmetic rather than a choice:
+/// `rise_delay`/`fall_delay` are clamped to ngspice's 1 ps minimum, so it is
+/// the finest one this path can produce, and a floor either side of it is what
+/// puts the same queued event on either side of the reachability line.
+fn a_pending_coupled_event() -> (
+    DigitalHost,
+    crate::CircuitData,
+    super::XspiceDigitalBindings,
+    f64,
+    f64,
+) {
+    let mut digital = host(
+        r#"
+`timescale 1ns/1ps
+module armed;
+ reg a, captured; wire command, bus, response, trigger;
+ assign command = a;
+ initial begin a = 0; captured = 1; end
+ always @(posedge trigger) a = 1;
+ always @(negedge bus) captured = 0;
+endmodule
+"#,
+        &["command", "bus", "response"],
+    );
+    let mut circuit = routed_inverters();
+    let bindings =
+        super::XspiceDigitalBindings::enroll(&circuit, &mut digital, &[(1, 0), (2, 1), (3, 2)])
+            .unwrap()
+            .unwrap();
+    digital.prepare_start().unwrap();
+    digital
+        .advance_to_with(
+            0,
+            &mut routed_participant(&mut circuit, &bindings, 0.0, 0.0),
+        )
+        .unwrap();
+    let accepted = 1.0e-9;
+    let trigger = [(
+        digital.signal("trigger").unwrap(),
+        FourStateValue::splat(1, rspice_veriloga::four_state::FourStateBit::One),
+    )];
+    digital
+        .force_many_from_analog_with(
+            &trigger,
+            1000,
+            accepted,
+            &mut routed_participant(&mut circuit, &bindings, accepted, accepted),
+        )
+        .unwrap();
+    let due = circuit
+        .xspice_event_queue
+        .next_event_time()
+        .expect("the gate queued its clamped 1 ps output");
+    (digital, circuit, bindings, accepted, due)
+}
+
+/// The missed-breakpoint refusal is kept for a code-model event the stepper
+/// had a legal interval to, and only for that one.
+///
+/// Both sides of the line, from the participant's own interface, because only
+/// one of them is reachable from a deck: a coupled code model's events are
+/// landing targets the stepper owns, and the finest interval one can ask for —
+/// a 1 ps gate delay — is a tenth of the minimum step a deck that gets
+/// anywhere near this guard leaves the solver. See
+/// `XspiceDigitalParticipant::event_was_reachable`. The mixed half states the
+/// same rule against the same floor, and pins it the same way, in
+/// `xspice::verilog::mixed`'s
+/// `only_an_activation_with_an_interval_to_it_is_a_missed_breakpoint`.
+#[test]
+fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
+    let (mut digital, mut circuit, bindings, accepted, due) = a_pending_coupled_event();
+    let interval = due - accepted;
+    assert!(
+        interval > 0.0,
+        "the queued event must be ahead of the accepted point, {due:e}s against {accepted:e}s"
+    );
+    let past = due + 0.1e-12;
+
+    circuit.set_mixed_analog_step_floor(interval * 0.5);
+    let error = digital
+        .force_many_from_analog_with(
+            &[],
+            1002,
+            past,
+            &mut routed_participant(&mut circuit, &bindings, past, past - accepted),
+        )
+        .expect_err("Active work past a reachable code-model event is a lost breakpoint");
+    assert!(
+        error.to_string().contains("missed XSPICE breakpoint"),
+        "the refusal must name the breakpoint that was stepped over, got {error}"
+    );
+
+    let (mut digital, mut circuit, bindings, accepted, due) = a_pending_coupled_event();
+    let past = due + 0.1e-12;
+    circuit.set_mixed_analog_step_floor((due - accepted) * 2.0);
+    digital
+        .force_many_from_analog_with(
+            &[],
+            1002,
+            past,
+            &mut routed_participant(&mut circuit, &bindings, past, past - accepted),
+        )
+        .expect("an event no analog step can reach is delivered here, not refused");
+    assert_eq!(
+        circuit.xspice_event_values.digital_event_times[&2], past,
+        "the coalesced event is dated at the timepoint the stepper landed on — the shared \
+         net's resolved value is observed inside this wave — rather than at the sub-floor \
+         instant the gate asked for, which no analog step reached"
+    );
+    assert_eq!(
+        bit(&digital, "bus"),
+        "0",
+        "and it is delivered rather than left in the queue: the HDL half reads what the code \
+         model published"
+    );
+}
+
 struct RoutedVector {
     ports: Vec<crate::xspice::PortSpec>,
 }
