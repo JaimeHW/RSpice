@@ -5171,6 +5171,18 @@ impl Engine {
         // Main transient loop
         let mut retry_count = 0;
         let mut veriloga_event_refinement_count = 0_usize;
+        // The step the controller was proposing when a Verilog-A event root
+        // first rejected a candidate, held until a step is accepted that is
+        // not one of that chase's own landings.
+        //
+        // A chase re-solves one interval at ever shorter widths, and each of
+        // those widths reaches both the breakpoint manager's saved approach
+        // delta and the controller's own proposal. Restarting from either
+        // after the event is solved restarts from a refinement rather than
+        // from the step the event interrupted, which is the femtosecond
+        // ladder the audit measured after every digital edge. Restarting from
+        // this instead is the policy a native source breakpoint already gets.
+        let mut veriloga_refinement_approach_step: Option<Value> = None;
         // Xyce's OneStep/Gear12 `nef_` counts every rejected attempt, including
         // Newton failures and LTE failures, and is reset only after a point is
         // accepted.  Keep that integration-state counter separate from the
@@ -5838,6 +5850,11 @@ impl Engine {
                 && target <= tstop
                 && target - t <= dt
             {
+                // Landing on an event is the other way this step gets cut, and
+                // a run of landings hands the restart the width of the last
+                // one exactly as a refinement chase does. Record the proposal
+                // the first landing of the run interrupted, before it is cut.
+                veriloga_refinement_approach_step.get_or_insert(timestep.dt().max(dt));
                 dt = target - t;
                 exact_veriloga_event_time = Some(target);
                 at_breakpoint = true;
@@ -6228,6 +6245,10 @@ impl Engine {
                                 )));
                             }
                             pending_veriloga_event_time = Some(target);
+                            // Recorded before the chase's first cut, so the
+                            // step this root interrupted survives it.
+                            veriloga_refinement_approach_step
+                                .get_or_insert_with(|| timestep.dt().max(dt));
                             retry_count = retry_count.saturating_add(1);
                             self.record_convergence(|quality| quality.record_timestep_reduction());
                             trap_order = Self::trapezoidal_order_after_timestep_control_reject(
@@ -8525,12 +8546,26 @@ impl Engine {
                                 t = snapped;
                             }
                         }
+                        let approach = veriloga_refinement_approach_step;
+                        if let Some(step) = approach {
+                            breakpoints.restore_approach_step(step);
+                        }
                         let restart_dt = if landed_veriloga_event {
-                            breakpoints.mark_external_breakpoint_solved(t, dt)
+                            breakpoints.mark_external_breakpoint_solved(
+                                t,
+                                approach.map_or(dt, |step| step.max(dt)),
+                            )
                         } else {
                             breakpoints.mark_breakpoint_solved(t)
                         };
-                        timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
+                        let controller_dt =
+                            approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
+                        timestep.force_step(restart_dt.min(controller_dt).min(max_step));
+                    }
+                    if !landed_veriloga_event {
+                        // A step that is not one of the chase's own landings
+                        // ends it, whether or not it hit a breakpoint.
+                        veriloga_refinement_approach_step = None;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -9527,8 +9562,15 @@ impl Engine {
                 }
             }
             if hit_breakpoint {
+                let approach = veriloga_refinement_approach_step;
+                if let Some(step) = approach {
+                    breakpoints.restore_approach_step(step);
+                }
                 let restart_dt = if landed_veriloga_event || veriloga_discontinuity {
-                    breakpoints.mark_external_breakpoint_solved(t, dt)
+                    breakpoints.mark_external_breakpoint_solved(
+                        t,
+                        approach.map_or(dt, |step| step.max(dt)),
+                    )
                 } else {
                     breakpoints.mark_breakpoint_solved(t)
                 };
@@ -9538,11 +9580,18 @@ impl Engine {
                     .transient_device_max_timestep(&circuit, t, hinted_max_step)
                     .min(span_ceiling.unwrap_or(Value::INFINITY));
                 timestep.set_max_dt(restarted_max_step);
-                timestep.force_step(restart_dt.min(timestep.dt()).min(restarted_max_step));
+                let controller_dt = approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
+                timestep.force_step(restart_dt.min(controller_dt).min(restarted_max_step));
                 if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
                 {
                     lte_warmup_skips = lte_warmup_skips.max(2);
                 }
+            }
+            if !landed_veriloga_event {
+                // A step that is not one of the chase's own landings ends it,
+                // whether or not it hit a breakpoint: a chase that resolved
+                // its root away from one must not raise a later restart.
+                veriloga_refinement_approach_step = None;
             }
             if !xyce_iteration_error_control
                 && !first_accepted_transient_step

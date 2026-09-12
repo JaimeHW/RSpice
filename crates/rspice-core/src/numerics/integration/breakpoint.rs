@@ -511,6 +511,30 @@ impl BreakpointManager {
         }
     }
 
+    /// Put back the step the controller was proposing before a device root
+    /// chase cut it down, so the restart after this breakpoint is the one the
+    /// approach earned rather than the width of the last refinement.
+    ///
+    /// A root chase re-solves one interval at ever shorter widths, and every
+    /// one of those proposals re-enters [`Self::limit_step`], so by the time
+    /// the breakpoint is solved the saved approach delta is a refinement's
+    /// width rather than the step the breakpoint interrupted. Ten percent of a
+    /// femtosecond is where the post-event restart ladder comes from.
+    ///
+    /// Only the refinement path calls this, and only with the proposal it
+    /// interrupted: every ordinary approach keeps the delta `limit_step`
+    /// saved for it, so the native and XSPICE restart policy is untouched.
+    pub(crate) fn restore_approach_step(&mut self, delta: Value) {
+        if !delta.is_finite() || delta <= 0.0 {
+            return;
+        }
+        let restored = match self.saved_delta_before_breakpoint {
+            Some(saved) if saved.is_finite() && saved > delta => saved,
+            _ => delta,
+        };
+        self.saved_delta_before_breakpoint = Some(restored);
+    }
+
     /// Mark that we just solved at a breakpoint (call after solving at BP)
     /// Returns the dialect-specific restart timestep.
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
@@ -636,6 +660,52 @@ mod breakpoint_manager_tests {
 
         assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
         assert!(breakpoints.should_use_minimal_step());
+    }
+
+    /// A root chase re-proposes the interval it is refining, so the last
+    /// proposal `limit_step` sees before the breakpoint is a refinement's
+    /// width rather than the step the breakpoint interrupted. Restoring the
+    /// interrupted proposal restarts from it; ten percent of a femtosecond is
+    /// the ladder this exists to prevent.
+    #[test]
+    fn a_refinement_chase_restarts_from_the_step_it_interrupted() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        // The approach: the controller wanted 6.0 and was cut to the
+        // breakpoint. Then the chase re-proposes its way down to 1e-15.
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+        let (_, chased) = breakpoints.limit_step(10.0 - 1.0e-15, 1.0e-15);
+        assert!(chased, "the chase's last proposal reaches the breakpoint");
+
+        breakpoints.restore_approach_step(6.0);
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        assert!(
+            (restart - 0.6).abs() <= 8.0 * Value::EPSILON,
+            "the restart must be a tenth of the interrupted 6.0, got {restart:e}"
+        );
+    }
+
+    /// Restoring never *lowers* an approach the chase did not shrink, and a
+    /// nonsense width is ignored rather than installed.
+    #[test]
+    fn restoring_an_approach_step_keeps_the_wider_of_the_two() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        let (_, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert!(lands_on_breakpoint);
+        breakpoints.restore_approach_step(1.0);
+        breakpoints.restore_approach_step(Value::NAN);
+        breakpoints.restore_approach_step(-1.0);
+
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        assert!(
+            (restart - 0.6).abs() <= 8.0 * Value::EPSILON,
+            "the saved 6.0 must survive a narrower or invalid restore, got {restart:e}"
+        );
     }
 
     #[test]
