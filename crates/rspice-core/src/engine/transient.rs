@@ -6316,6 +6316,26 @@ impl Engine {
             };
         }
 
+        // The rollback image the merit globalization base restores from,
+        // held across steps rather than per step.
+        //
+        // `capture_transient_merit_rollback` refreshes this buffer in place when
+        // it already holds one and takes a fresh whole-circuit device image when
+        // it does not, so declaring it inside the loop below bought one image per
+        // step: 120 of them on the pinned 72-NAND deck that
+        // `engine::xspice_settle_ratchet` measures, against the 38 that deck's
+        // real rollback work needs.
+        //
+        // Carrying it across steps cannot leak the previous step's device state
+        // into this one. Its only reader is the merit-backtrack arm, and that arm
+        // is gated on `last_stamped_merit`, which stays per-step and starts at
+        // infinity: `step_needs_globalization` returns false for a non-finite
+        // previous merit and the Xyce-core arm tests `is_finite()` directly, so
+        // neither can fire before this step assigns it -- and every one of the
+        // four assignments that makes it finite is immediately followed by a
+        // capture, which refreshes the buffer from the circuit as it stands now.
+        let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
+
         // Adaptive integration may legitimately take far more attempts than
         // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
         // ceiling are numerical work, not retained results. Termination is
@@ -7164,7 +7184,6 @@ impl Engine {
             )> = None;
             let mut last_stamped_iterate: Vec<Value> = Vec::new();
             let mut last_stamped_merit = Value::INFINITY;
-            let mut last_stamped_rollback: Option<TransientMeritRollback> = None;
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
