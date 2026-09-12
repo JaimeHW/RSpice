@@ -58,6 +58,18 @@ pub(super) struct DynamicBreakpointSink<'a> {
 /// integration floor before the next mandatory time. The persistent ceiling is
 /// the user's maximum; the candidate ceiling also includes the current model
 /// bound, which may change after acceptance. This does not accept a trial.
+///
+/// # A mandatory time closer than the floor
+///
+/// A device or HDL event can be scheduled closer to the accepted time than
+/// `minimum`: a `` `timescale 1ps/1fs `` activation, a sub-picosecond delay
+/// chained onto a crossing, a second event inside the breakpoint tolerance of
+/// the first. The interval to it does not exist for the solver, so the step is
+/// fitted at `minimum` and the event lands on the timepoint that step reaches
+/// — its own scheduler keeps the exact time, and events inside that window
+/// coalesce onto one analog point. `is_stop_time` keeps its established
+/// refusal: a horizon the integration floor overshoots is a configuration the
+/// caller has to see, not a discrete schedule to be folded.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fit_model_interval(
     time: Value,
@@ -99,7 +111,10 @@ pub(super) fn fit_model_interval(
         return Ok(minimum);
     }
     if gap < minimum {
-        return Err(refuse());
+        if is_stop_time {
+            return Err(refuse());
+        }
+        return Ok(minimum);
     }
     if is_stop_time && candidate_maximum == minimum {
         let count = (gap / minimum).round();
@@ -1307,7 +1322,15 @@ mod tests {
             fit_model_interval(0.0, 2.5, 1.125, 1.0, 3.0, 1.125, false).unwrap(),
             1.125
         );
-        assert!(fit_model_interval(0.0, 0.75, 1.0, 1.0, 3.0, 3.0, false).is_err());
+        // A mandatory device/event time inside the integration floor is landed
+        // at the floor, not refused: the solver has no interval to it, and its
+        // own scheduler keeps the exact time.
+        assert_eq!(
+            fit_model_interval(0.0, 0.75, 1.0, 1.0, 3.0, 3.0, false).unwrap(),
+            1.0
+        );
+        // A stop time the floor overshoots by more than roundoff still refuses.
+        assert!(fit_model_interval(0.0, 0.75, 1.0, 1.0, 3.0, 3.0, true).is_err());
         assert_eq!(
             fit_model_interval(0.0, 100.0, 3.0, 1e-20, 5.0, 5.0, false).unwrap(),
             3.0

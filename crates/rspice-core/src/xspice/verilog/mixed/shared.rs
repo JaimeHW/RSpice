@@ -204,6 +204,12 @@ pub(crate) struct MixedDigitalCoordinator {
     resolution: TimeResolution,
     enabled: bool,
     accepted_time: Option<f64>,
+    /// Smallest interval the analog solver is allowed to advance by, or zero
+    /// when nothing has declared one.
+    ///
+    /// See [`Self::set_analog_step_floor`]: this is what separates an
+    /// activation the stepper skipped from one it could not have landed on.
+    analog_step_floor: f64,
     probes: Vec<Option<f64>>,
     drives: Vec<(DigitalSignalId, FourStateValue)>,
 }
@@ -454,6 +460,7 @@ impl MixedDigitalCoordinator {
             resolution,
             enabled: false,
             accepted_time: None,
+            analog_step_floor: 0.0,
             probes,
             drives: Vec::new(),
         })
@@ -468,6 +475,7 @@ impl MixedDigitalCoordinator {
             resolution: self.resolution,
             enabled: false,
             accepted_time: None,
+            analog_step_floor: self.analog_step_floor,
             probes: vec![None; self.probes.len()],
             drives: Vec::new(),
         }
@@ -564,6 +572,51 @@ impl MixedDigitalCoordinator {
             .transpose()
     }
 
+    /// Declare the smallest interval the analog solver may advance by.
+    ///
+    /// Zero — the default — means no solver has declared one, and every
+    /// activation the analog side steps past is a synchronization fault. A
+    /// positive floor is the transient stepper's hard minimum timestep, and it
+    /// is what makes [`Self::begin_trial`] able to tell the two cases apart.
+    pub(crate) fn set_analog_step_floor(&mut self, floor: f64) {
+        self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
+            floor
+        } else {
+            0.0
+        };
+    }
+
+    /// Whether an activation the analog side stepped past was one it could
+    /// have landed on.
+    ///
+    /// A digital tick more than one hard-minimum step after the accepted
+    /// analog time is reachable: the stepper had a legal interval to it and
+    /// did not take it, which is the missed-breakpoint fault this refuses.
+    /// One closer than that is not reachable at all — there is no analog time
+    /// between the accepted point and it — so refusing it would end a run over
+    /// a schedule the analog side is simply too coarse to resolve, which is
+    /// not what Spectre/AMS Designer does with one.
+    fn activation_was_reachable(&self, scheduled_seconds: f64) -> bool {
+        if self.analog_step_floor <= 0.0 {
+            return true;
+        }
+        let accepted = self.accepted_time.unwrap_or(0.0);
+        scheduled_seconds - accepted >= self.analog_step_floor
+    }
+
+    /// Open a trial at an analog time.
+    ///
+    /// # Contract for a schedule finer than the analog resolution
+    ///
+    /// The digital scheduler owns the exact tick and the ordering of every
+    /// activation; the analog solver owes an activation only a timepoint at or
+    /// after it. So a trial whose time is past a pending activation is opened,
+    /// not refused, whenever that activation is closer to the accepted analog
+    /// time than [`Self::set_analog_step_floor`]'s interval: the queue is then
+    /// drained to this trial's tick in tick order, and every activation inside
+    /// that window coalesces onto this one analog timepoint. The refusal is
+    /// kept for an activation the stepper could have landed on, because that
+    /// one is a lost breakpoint rather than a resolution limit.
     pub(crate) fn begin_trial(
         &mut self,
         time: f64,
@@ -586,13 +639,16 @@ impl MixedDigitalCoordinator {
         if let Some(next) = self.digital.next_tick()
             && next < tick
         {
-            return Err(MixedSignalError::MissedDigitalBreakpoint {
-                scheduled_seconds: self
-                    .resolution
-                    .ticks_to_seconds(next)
-                    .map_err(DigitalRunError::from)?,
-                trial_seconds: time,
-            });
+            let scheduled_seconds = self
+                .resolution
+                .ticks_to_seconds(next)
+                .map_err(DigitalRunError::from)?;
+            if self.activation_was_reachable(scheduled_seconds) {
+                return Err(MixedSignalError::MissedDigitalBreakpoint {
+                    scheduled_seconds,
+                    trial_seconds: time,
+                });
+            }
         }
         let rollback = self.digital.clone();
         Ok(SharedDigitalTrial {

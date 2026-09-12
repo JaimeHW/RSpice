@@ -846,6 +846,9 @@ pub struct MixedSignalHost {
     event_nodes: Vec<usize>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
+    /// Smallest interval the analog solver is allowed to advance by, or zero
+    /// when nothing has declared one. See [`Self::set_analog_step_floor`].
+    analog_step_floor: f64,
 }
 
 #[derive(Clone)]
@@ -1113,6 +1116,7 @@ impl MixedSignalHost {
             event_nodes: Vec::new(),
             max_circuit_node,
             max_bridge_iterations,
+            analog_step_floor: 0.0,
         })
     }
 
@@ -1680,8 +1684,46 @@ impl MixedSignalHost {
         )
     }
 
+    /// Declare the smallest interval the analog solver may advance by.
+    ///
+    /// Zero — the default, and what a host driven directly rather than by the
+    /// transient stepper keeps — means no solver has declared one, and every
+    /// activation stepped past is treated as a lost breakpoint. A positive
+    /// floor is the stepper's hard minimum timestep.
+    pub(crate) fn set_analog_step_floor(&mut self, floor: f64) {
+        self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
+            floor
+        } else {
+            0.0
+        };
+    }
+
+    /// The last accepted analog time, or zero before the first acceptance.
+    fn accepted_analog_time(&self) -> f64 {
+        if self.state.started {
+            self.state.accepted_time
+        } else {
+            0.0
+        }
+    }
+
     /// Begin a circuit trial with separate derivative and internal-state rules.
     /// A probe may inspect an already accepted timepoint but cannot commit.
+    ///
+    /// # Contract for a schedule finer than the analog resolution
+    ///
+    /// The digital scheduler owns the exact time and the ordering of every
+    /// activation; the analog solver owes an activation only a timepoint at or
+    /// after it. A trial past a pending activation is therefore opened rather
+    /// than refused whenever that activation is closer to the accepted analog
+    /// time than [`Self::set_analog_step_floor`]'s interval — no analog time
+    /// exists between the two, so the activation is drained with the rest of
+    /// the queue at this trial's tick, in tick order, and every activation in
+    /// that window coalesces onto one analog timepoint. A `` `timescale
+    /// 1ps/1fs `` clock, a sub-picosecond `#delay` chained onto an A/D
+    /// crossing, and two activations inside one breakpoint tolerance all land
+    /// this way. [`MixedSignalError::MissedDigitalBreakpoint`] is kept for an
+    /// activation the stepper had a legal interval to and skipped anyway.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin_trial_with_integration_rules(
         &mut self,
@@ -1736,13 +1778,25 @@ impl MixedSignalHost {
         if let Some(next) = self.state.digital.next_tick()
             && next < tick
         {
-            return Err(MixedSignalError::MissedDigitalBreakpoint {
-                scheduled_seconds: self
-                    .resolution
-                    .ticks_to_seconds(next)
-                    .map_err(DigitalRunError::from)?,
-                trial_seconds: time_seconds,
-            });
+            let scheduled_seconds = self
+                .resolution
+                .ticks_to_seconds(next)
+                .map_err(DigitalRunError::from)?;
+            // An activation the stepper had a legal interval to and stepped
+            // over is a lost breakpoint. One closer to the accepted analog
+            // time than the solver's hard minimum is not reachable at all, so
+            // it is landed on this timepoint instead of ending the run: the
+            // queue below drains to this trial's tick in tick order, which is
+            // where the activation keeps its exact time and its ordering.
+            if !self.analog_step_floor.is_finite()
+                || self.analog_step_floor <= 0.0
+                || scheduled_seconds - self.accepted_analog_time() >= self.analog_step_floor
+            {
+                return Err(MixedSignalError::MissedDigitalBreakpoint {
+                    scheduled_seconds,
+                    trial_seconds: time_seconds,
+                });
+            }
         }
 
         let rollback = self.state.digital.clone();

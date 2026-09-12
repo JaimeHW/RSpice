@@ -225,32 +225,61 @@ fn accepted_veriloga_event_time(
     let Some(target) = target else {
         return Ok(None);
     };
-    validate_veriloga_event_interval(target, accepted_time, hard_min_dt)?;
-    Ok(Some(target))
+    Ok(Some(landed_veriloga_event_time(
+        target,
+        accepted_time,
+        hard_min_dt,
+    )?))
 }
 
-fn validate_veriloga_event_interval(
+/// The analog time a scheduled Verilog-A/AMS or shared code-model event lands
+/// on.
+///
+/// # Contract
+///
+/// The event's own scheduler owns its exact time and its ordering; the analog
+/// solver owes it only a timepoint at or after that instant. An event whose
+/// interval from the accepted time is shorter than the solver's hard minimum
+/// step — a `` `timescale 1ps/1fs `` clock, a sub-picosecond `#delay` chained
+/// onto an A/D crossing, an activation inside the breakpoint tolerance of one
+/// already registered — therefore *lands* at `accepted_time + hard_min_dt`
+/// rather than ending the run. Every event inside that window coalesces onto
+/// that one analog timepoint, which is what Spectre and AMS Designer do with a
+/// schedule finer than the analog resolution, and ordering survives because
+/// the discrete queue is drained in tick order while the analog side advances.
+///
+/// The landed time is nudged up until it is at least one hard minimum after
+/// the accepted time *as measured by subtraction*: `accepted + hard_min` can
+/// round down, and every downstream comparison re-derives the interval that
+/// way.
+///
+/// The only refusal left is a hard minimum that is not a usable interval,
+/// because there is then no instant to land on. A non-finite or
+/// non-strictly-later target is refused upstream, by the device that produced
+/// it, where the diagnostic can name the instance.
+fn landed_veriloga_event_time(
     target: Value,
     accepted_time: Value,
     hard_min_dt: Value,
-) -> Result<(), SimulationError> {
+) -> Result<Value, SimulationError> {
     if !hard_min_dt.is_finite() || hard_min_dt <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Verilog-A event scheduling received invalid solver hard minimum {hard_min_dt}"
         )));
     }
-    let event_dt = target - accepted_time;
-    if !event_dt.is_finite() {
-        return Err(SimulationError::Circuit(format!(
-            "Verilog-A event {target} has an invalid interval from accepted time {accepted_time}"
-        )));
+    if target - accepted_time >= hard_min_dt {
+        return Ok(target);
     }
-    if event_dt < hard_min_dt {
-        return Err(SimulationError::Circuit(format!(
-            "Verilog-A event at t={target:.16e}s requires dt={event_dt:.16e}s below the solver hard minimum {hard_min_dt:.16e}s from accepted time {accepted_time:.16e}s"
-        )));
+    let mut landed = accepted_time + hard_min_dt;
+    // At most a couple of ulps: `accepted + hard_min` rounds by at most half an
+    // ulp of the sum, and one step up recovers a difference that rounded short.
+    for _ in 0..4 {
+        if landed - accepted_time >= hard_min_dt {
+            break;
+        }
+        landed = landed.next_up();
     }
-    Ok(())
+    Ok(landed)
 }
 
 #[inline]
@@ -4197,6 +4226,12 @@ impl Engine {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
         let hard_min_dt = dialect_min_dt.max(model_min_dt);
+        // A mixed module's discrete half schedules on its own declared
+        // precision, which can be far finer than this. Tell it what the analog
+        // side can resolve so an activation inside that window is landed
+        // instead of reported as a breakpoint the stepper skipped.
+        #[cfg(feature = "veriloga")]
+        circuit.set_mixed_analog_step_floor(hard_min_dt);
         let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
@@ -5592,6 +5627,10 @@ impl Engine {
                 // physical boundary layer.
                 dialect_min_dt = xyce_hard_min_timestep(t);
                 timestep.set_hard_min_dt(dialect_min_dt.max(model_min_dt));
+                // Xyce's floor moves with the clock, so the mixed modules'
+                // copy of it moves with every accepted point.
+                #[cfg(feature = "veriloga")]
+                circuit.set_mixed_analog_step_floor(timestep.hard_min_dt());
                 let breakpoint_tolerance = 2.0 * dialect_min_dt;
                 circuit
                     .voltage_sources
@@ -5607,11 +5646,16 @@ impl Engine {
                         "Verilog-A event target {target} is not strictly after accepted transient time {t}"
                     )));
                 }
+                // A hard minimum that moved with the clock (Xyce) or a target
+                // refined into the unresolvable window since it was scheduled
+                // re-lands here, on the same contract
+                // `landed_veriloga_event_time` documents.
                 if event_dt < timestep.hard_min_dt() {
-                    return Err(SimulationError::Circuit(format!(
-                        "Verilog-A event at t={target:.16e}s requires dt={event_dt:.16e}s below the solver hard minimum {:.16e}s from accepted time {t:.16e}s",
-                        timestep.hard_min_dt()
-                    )));
+                    pending_veriloga_event_time = Some(landed_veriloga_event_time(
+                        target,
+                        t,
+                        timestep.hard_min_dt(),
+                    )?);
                 }
             }
             // Progress logging every 2 seconds
@@ -6143,7 +6187,25 @@ impl Engine {
                             XspiceCompanionPolicy { coefficients: &coeff, xyce_one_step_order2 },
                             timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
                         )?;
-                        if let Some(target) = model_candidate.refinement_time {
+                        // A root the solver cannot separate from the accepted
+                        // point is landed on the earliest interior time it can
+                        // reach; one whose landing is not interior at all is
+                        // resolved by accepting the candidate endpoint, which
+                        // is the nearest analog time to it. Both are the
+                        // contract `landed_veriloga_event_time` documents, and
+                        // both replace a refusal over analog resolution alone.
+                        let mut refinement = model_candidate.refinement_time;
+                        if let Some(target) = refinement
+                            && target.is_finite()
+                            && target > t
+                            && target < $candidate_time
+                            && target - t < timestep.hard_min_dt()
+                        {
+                            let landed =
+                                landed_veriloga_event_time(target, t, timestep.hard_min_dt())?;
+                            refinement = (landed < $candidate_time).then_some(landed);
+                        }
+                        if let Some(target) = refinement {
                             let accepted_time = t;
                             let candidate_time = $candidate_time;
                             let refinement_dt = target - accepted_time;
@@ -6155,13 +6217,6 @@ impl Engine {
                                 restore_rejected_transient_nonlinear_state!();
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A event refinement target {target} is not strictly inside transient interval ({accepted_time}, {candidate_time})"
-                                )));
-                            }
-                            if refinement_dt < timestep.hard_min_dt() {
-                                restore_rejected_transient_nonlinear_state!();
-                                return Err(SimulationError::Circuit(format!(
-                                    "Verilog-A event refinement at t={accepted_time:.16e}s requires dt={refinement_dt:.16e}s below the solver hard minimum {:.16e}s",
-                                    timestep.hard_min_dt()
                                 )));
                             }
                             veriloga_event_refinement_count =
@@ -10746,16 +10801,39 @@ mod tests {
     }
 
     #[test]
-    fn veriloga_event_interval_validation_fails_closed_below_hard_minimum() {
-        validate_veriloga_event_interval(1.25, 1.0, 0.25)
-            .expect("an event exactly at the hard minimum must be schedulable");
+    fn veriloga_events_below_the_hard_minimum_land_on_the_earliest_reachable_time() {
+        assert_eq!(
+            landed_veriloga_event_time(1.25, 1.0, 0.25)
+                .expect("an event exactly at the hard minimum is schedulable"),
+            1.25,
+            "an event the solver can reach keeps its own exact time"
+        );
 
-        let error = validate_veriloga_event_interval(1.25, 1.0, 0.250_000_000_000_000_1)
-            .expect_err("a Verilog-A event below the hard minimum must fail closed");
-        assert!(error.to_string().contains("below the solver hard minimum"));
+        let landed = landed_veriloga_event_time(1.25, 1.0, 0.250_000_000_000_000_1)
+            .expect("an event below the hard minimum lands rather than ending the run");
+        assert!(
+            landed - 1.0 >= 0.250_000_000_000_000_1,
+            "the landed time must be a reachable step from the accepted time, saw {landed}"
+        );
+        assert!(
+            landed > 1.25,
+            "the landing may not precede the event it stands in for, saw {landed}"
+        );
 
-        let error = validate_veriloga_event_interval(1.25, 1.0, Value::NAN)
-            .expect_err("an invalid hard minimum must fail closed");
+        // The clock scale this actually arises at: a femtosecond of digital
+        // time after a hundred microseconds of analog time, against ngspice's
+        // ten-femtosecond floor for a millisecond maximum step.
+        let accepted = 1.005e-4;
+        let landed = landed_veriloga_event_time(accepted + 1.0e-15, accepted, 1.0e-14)
+            .expect("a femtosecond follow-up lands");
+        assert!(
+            landed - accepted >= 1.0e-14,
+            "the landed time must clear the floor by subtraction, saw {:e}",
+            landed - accepted
+        );
+
+        let error = landed_veriloga_event_time(1.25, 1.0, Value::NAN)
+            .expect_err("an unusable hard minimum has no instant to land on");
         assert!(error.to_string().contains("invalid solver hard minimum"));
     }
 

@@ -887,6 +887,24 @@ impl CircuitData {
         })
     }
 
+    /// Publish the transient stepper's hard minimum timestep to every mixed
+    /// module.
+    ///
+    /// A module's digital half schedules on its own declared precision, which
+    /// can be finer than any interval the analog solver is allowed to advance
+    /// by. Without this the two halves disagree about what "stepped past an
+    /// activation" means, and a schedule the analog side merely cannot resolve
+    /// is reported as a lost breakpoint. With it, such an activation keeps its
+    /// exact digital tick and coalesces onto the next analog timepoint.
+    pub(crate) fn set_mixed_analog_step_floor(&mut self, floor: Value) {
+        if let Some(digital) = self.mixed_digital_coordinator.as_mut() {
+            digital.set_analog_step_floor(floor);
+        }
+        for host in &mut self.mixed_signal_hosts {
+            host.set_analog_step_floor(floor);
+        }
+    }
+
     /// Earliest scheduled digital activation across every mixed module.
     pub(crate) fn next_mixed_event_time(&self) -> Result<Option<Value>, SimulationError> {
         self.mixed_digital_coordinator
