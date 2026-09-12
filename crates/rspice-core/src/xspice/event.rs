@@ -226,6 +226,13 @@ impl XspiceEventScheduler {
     }
 
     /// Time of the next pending event.
+    ///
+    /// Gated with its readers. The circuit folds this lane through
+    /// `CircuitScheduler::next_xspice_activation`, which needs the driver as
+    /// well and asks [`Self::next_event_instance`]; what is left asking for the
+    /// bare time is the coupled participant's missed-breakpoint guard, which
+    /// exists only on the Verilog-A/AMS route, and this module's own tests.
+    #[cfg(any(test, feature = "veriloga"))]
     pub(crate) fn next_event_time(&self) -> Option<Value> {
         self.inner.next_instant().map(Instant::seconds)
     }
