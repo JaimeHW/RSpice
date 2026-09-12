@@ -4827,14 +4827,24 @@ endmodule
 
     #[test]
     fn an_undefined_digital_level_stamps_the_midpoint_rather_than_refusing() {
-        // `q` is a `reg` whose initial value the source does assign; `dac`
-        // follows it through a continuous assignment, which has not run at the
-        // instant a bridge is first read in a design that does not initialise.
+        // `dac` is a `reg` no process has assigned yet: the one process that
+        // would assign it waits on `trig`, which nothing drives, so it has not
+        // run at the instant the bridge is first read. That is the ordinary
+        // shape of a design that does not initialise its boundary output.
+        //
+        // The sensitivity is a discrete net rather than the module's own
+        // `electrical p`, because `@(p)` on an analog net is not a digital
+        // event control at all — Verilog-AMS LRM 2.4 reaches an analog
+        // quantity from the discrete domain through an A/D connect, and
+        // reaches an analog *event* through `cross`/`above` inside an analog
+        // block. The front end refuses it, and what this test is about is the
+        // undefined level, not the sensitivity that leaves it undefined.
         let source = r#"
-module undriven(p, n, dac);
+module undriven(p, n, trig, dac);
   inout p, n; electrical p, n;
+  input trig; wire trig;
   output dac; reg dac;
-  always @(p) dac <= 1'b0;
+  always @(trig) dac <= 1'b0;
   analog I(p, n) <+ V(p, n);
 endmodule
 "#;
