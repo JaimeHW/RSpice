@@ -2385,3 +2385,153 @@ fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
         );
     }
 }
+
+//=============================================================================
+// 5 — a schedule the stepper can never catch up with is bounded, by name
+//=============================================================================
+
+/// A module whose discrete half re-arms itself every femtosecond forever, and
+/// never tells the analog side anything.
+///
+/// `#0.001` on a `1ps/1fs` timescale is one unit of the declared *precision*:
+/// a free-running one-femtosecond process, a decade below the ten-femtosecond
+/// minimum step a millisecond maximum step leaves the solver (ngspice's
+/// `delmin` is `delmax * 1e-11`). Every activation is a mandatory analog
+/// timepoint and the next one is issued from it, so the run advances one
+/// femtosecond per accepted point — 1e9 accepted points per microsecond of
+/// simulated time — and reaches no useful `tstop` at any wall-clock budget.
+///
+/// The counter is deliberately internal. A boundary net that moved on every
+/// accepted point would instead trip the interleave guard, which reads a net
+/// that flips as fast as the solver samples it as a zero-delay feedback loop;
+/// what is being pinned here is the *schedule*, with the analog boundary
+/// entirely quiet.
+const FEMTOSECOND_FREE_RUNNING: &str = r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module femtosecond_free_running(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    integer ticks;
+    initial begin q = 1'b0; ticks = 0; end
+    always #0.001 ticks = ticks + 1;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// The same cadence, interrupted: one femtosecond activation, then a
+/// picosecond the solver can resolve, over and over.
+///
+/// Every second activation is a hundred times the ten-femtosecond minimum, so
+/// the run advances a picosecond per cycle and reaches any horizon. Nothing
+/// here is pathological — it is an ordinary picosecond schedule with one
+/// sub-resolution edge in it — and the interesting part is that the analog
+/// side spends every accepted point well under the floor-`dt` livelock
+/// detector's `64 * delmin` ceiling while doing so.
+const INTERRUPTED_FEMTOSECOND_CADENCE: &str = r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module interrupted_femtosecond_cadence(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    integer ticks;
+    initial begin q = 1'b0; ticks = 0; end
+    always begin
+        #0.001 ticks = ticks + 1;
+        #1 ticks = ticks + 1;
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+fn free_running_deck(model: &ModelFile, module: &str) -> String {
+    format!(
+        "* a free-running digital schedule beside a quiet analog boundary\n\
+         x1 p 0 q {module}\n\
+         rp p 0 1meg\n\
+         rq q 0 10k\n\
+         .va \"{}\" {module}\n\
+         .tran 1n 10n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **Property 5, case a.** A schedule finer than the solver's minimum that
+/// never widens is refused, and the refusal names the module that holds the
+/// stepper instead of blaming the circuit.
+///
+/// Before this bound the same deck failed after 64 accepted points as
+/// `the circuit is numerically ill-conditioned at this operating point` — the
+/// floor-`dt` livelock detector, whose ceiling is 64 `delmin` and therefore
+/// covers every picosecond-scale digital cadence under a millisecond maximum
+/// step. Nothing about this circuit is ill-conditioned: one resistor and one
+/// quiet boundary net. The module's schedule is the fact, and the diagnostic
+/// has to carry it — the instance, the floor it is under, how many points in a
+/// row it has held, and what reaching `tstop` would cost at that rate.
+#[test]
+fn a_free_running_sub_minimum_schedule_is_refused_by_naming_the_module_that_holds_the_stepper() {
+    const TSTOP: f64 = 1.0e-10;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let model = ModelFile::new("femtosecond_free_running", FEMTOSECOND_FREE_RUNNING);
+    let error = error_for(
+        &free_running_deck(&model, "femtosecond_free_running"),
+        TSTOP,
+        MAX_STEP,
+    );
+    let lowered = error.to_lowercase();
+    assert!(
+        lowered.contains("instance 'x1'"),
+        "the module that owns the schedule must be named: {error}"
+    );
+    assert!(
+        lowered.contains("16384"),
+        "the count that ended the run is the evidence and must be reported: {error}"
+    );
+    assert!(
+        lowered.contains("1.000e-14"),
+        "the solver minimum the schedule is under must be reported: {error}"
+    );
+    assert!(
+        !lowered.contains("ill-conditioned"),
+        "the circuit is not the subject of this refusal: {error}"
+    );
+}
+
+/// **Property 5, case b.** A resolvable interval in the schedule keeps the run
+/// alive, and an ordinary picosecond cadence is not a trapped controller.
+///
+/// Ten picoseconds is ten cycles of this module, and the base refused the same
+/// deck partway through the eighth: every accepted point sat under the
+/// floor-`dt` livelock detector's `64 * delmin` ceiling — 640 fs when the
+/// requested maximum step is a millisecond — so the streak reached the restart
+/// limit twice and ended the run as `numerically ill-conditioned`. It is not:
+/// the picosecond gaps are intervals the solver takes, which is exactly what
+/// both counts here have to see. The sub-minimum count starts again at each of
+/// them, and the livelock detector stands aside for a width the schedule
+/// chose.
+#[test]
+fn a_resolvable_interval_keeps_an_interrupted_sub_minimum_cadence_running() {
+    const TSTOP: f64 = 1.0e-11;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let model = ModelFile::new(
+        "interrupted_femtosecond_cadence",
+        INTERRUPTED_FEMTOSECOND_CADENCE,
+    );
+    let result = run(
+        &free_running_deck(&model, "interrupted_femtosecond_cadence"),
+        TSTOP,
+        MAX_STEP,
+    );
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= TSTOP - 1.0e-15,
+        "the run must reach tstop {TSTOP:e}s, it stopped at {last:e}s"
+    );
+}
