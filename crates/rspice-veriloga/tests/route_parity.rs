@@ -405,23 +405,24 @@ endmodule
 }
 
 /// A small-signal probe taken *after* the value pass and before acceptance
-/// does not leave the two routes in the same state.
+/// leaves both routes with the same integrator history.
 ///
 /// Found while writing `transient_walk`, which originally ended each step with
-/// `try_stamp_reactive`. With that ordering the bytecode route accepts the
-/// pre-step integrator history and the canonical route accepts the stepped one,
-/// so the next point's current differs by a whole step: on the `ddt` fixture at
-/// t=2 ns the bytecode route returned 5.00499999999999945e-1 where the
+/// `try_stamp_reactive`. With that ordering the bytecode route accepted the
+/// pre-step integrator history and the canonical route the stepped one, so
+/// every point after the first differed by a whole step: on the `ddt` fixture
+/// at t=2 ns the bytecode route returned 5.00499999999999945e-1 where the
 /// canonical route returned -4.99499999999999944e-1 (exactly G*V against
-/// G*V - 1), and its companion RHS stayed at zero where the canonical route
-/// carried 9.99999999999999889e-1. The engine never ends a step this way — a
-/// reactive stamp is an observation — so `transient_walk` reorders it, and this
-/// row keeps the original ordering as the statement of the difference.
+/// G*V - 1), its companion RHS stayed at zero against the canonical route's
+/// 9.99999999999999889e-1, and its accepted charge never left the operating
+/// point for the rest of the walk. The canonical route is the one the
+/// integrator contract names: an observation reads the accepted history and
+/// the trial charge, and `advance_state` rotates the candidate the value pass
+/// published — so an observation may not reopen that candidate, because the
+/// bytecode lowering's reactive Jacobian is `dQ/dx` alone and republishes
+/// nothing. `transient_walk` covers the ordering the engine uses; this row
+/// covers the one it does not.
 #[test]
-#[ignore = "R4.x-triage: a reactive stamp taken between the value pass and \
-            advance_state leaves the bytecode route's integrator history \
-            un-stepped while the canonical route keeps it (ddt at t=2 ns: \
-            5.005e-1 against -4.995e-1)"]
 fn reactive_probe_before_acceptance_agrees_across_lowerings() {
     compare_routes(
         r#"
