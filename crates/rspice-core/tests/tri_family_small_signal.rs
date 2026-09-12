@@ -179,7 +179,6 @@ fn authored_one_ports_answer_ac_and_noise_without_a_step_bound() {
 }
 
 #[test]
-#[ignore = "R1.1: $bound_step produces a non-finite small-signal intermediate"]
 fn a_step_bound_does_not_change_the_small_signal_answer() {
     for (label, body) in [("resistive", RESISTIVE), ("charged", CHARGED)] {
         let plain = ModelFile::new(&one_port(body));
