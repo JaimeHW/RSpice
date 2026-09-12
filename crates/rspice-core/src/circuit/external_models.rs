@@ -3698,11 +3698,11 @@ impl CircuitData {
     /// the deck name its discrete half is registered under.
     ///
     /// The instance is itself optional: enrolled mixed instances schedule into
-    /// one shared process queue, so an activation reported by that queue names
-    /// an instance only when exactly one is enrolled. A pure code-model event
-    /// net is deliberately not folded in at all — this query exists to
-    /// attribute a schedule to a module, and no answer is better than a
-    /// guessed one.
+    /// one shared process queue, and while that queue can say which process an
+    /// activation belongs to — and therefore which module — it also holds
+    /// wakeups that belong to no module at all. A pure code-model event net is
+    /// deliberately not folded in either: this query exists to attribute a
+    /// schedule to a module, and no answer is better than a guessed one.
     ///
     /// Called once per accepted transient point, so it allocates nothing and
     /// borrows the instance name rather than rendering it.
@@ -3740,19 +3740,21 @@ impl CircuitData {
                     .map(move |target| (Some(instance), target))
             });
             // The shared process queue every enrolled instance schedules into.
-            // It is one queue for all of them, so the activation it reports is
-            // attributable to an instance only when there is exactly one to
-            // attribute it to; with several, the honest answer is the schedule
-            // without an owner.
+            // It is one queue for all of them, but the kernel still knows which
+            // process drew the earliest event, and the linker knows which
+            // instance owns that process — so a deck with several mixed
+            // modules is attributed as precisely as a deck with one. The
+            // single-host fallback stands in for the wakeups that belong to no
+            // process of the design.
             let shared = self
                 .mixed_digital_coordinator
                 .as_ref()
                 .and_then(|coordinator| coordinator.next_event_time().ok().flatten())
-                .map(|target| {
-                    let instance = match self.mixed_signal_hosts.as_slice() {
+                .map(|(instance, target)| {
+                    let instance = instance.or(match self.mixed_signal_hosts.as_slice() {
                         [only] => Some(only.instance_name()),
                         _ => None,
-                    };
+                    });
                     (instance, target)
                 });
             for (instance, target) in analog.chain(mixed).chain(shared) {
@@ -3770,6 +3772,25 @@ impl CircuitData {
         #[cfg(not(feature = "veriloga"))]
         let _ = accepted_time;
         owner
+    }
+
+    /// Every mixed Verilog-AMS instance in the circuit, in circuit order.
+    ///
+    /// What a diagnostic falls back to when
+    /// [`Self::veriloga_scheduled_activation`] reports a schedule it cannot
+    /// attribute: the set of modules one of which must own it is a better
+    /// subject than "something". It allocates, and is called only on the way
+    /// to a report or a refusal.
+    pub(crate) fn mixed_digital_instance_names(&self) -> Vec<&str> {
+        #[cfg(feature = "veriloga")]
+        let names: Vec<&str> = self
+            .mixed_signal_hosts
+            .iter()
+            .map(|host| host.instance_name())
+            .collect();
+        #[cfg(not(feature = "veriloga"))]
+        let names: Vec<&str> = Vec::new();
+        names
     }
 
     /// Check if all XSPICE instances have converged

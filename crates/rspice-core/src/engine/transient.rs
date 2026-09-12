@@ -5888,7 +5888,17 @@ impl Engine {
                     let subject = activation
                         .and_then(|(instance, _)| instance)
                         .map_or_else(
-                            || "A Verilog-A/AMS schedule".to_string(),
+                            || match circuit.mixed_digital_instance_names().as_slice() {
+                                [] => "A Verilog-A/AMS schedule".to_string(),
+                                names => format!(
+                                    "A Verilog-A/AMS schedule of instance {}",
+                                    names
+                                        .iter()
+                                        .map(|name| format!("'{name}'"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                            },
                             |instance| format!("Verilog-A/AMS instance '{instance}'"),
                         );
                     let next_activation = activation.map_or(t, |(_, target)| target);

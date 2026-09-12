@@ -847,6 +847,29 @@ impl EventQueues {
         self.future.peek().map(|Reverse(top)| top.0.tick)
     }
 
+    /// [`Self::slot_min_tick`] with the driver that event names, for a
+    /// diagnostic that has to say whose activation it is. Ties on the tick go
+    /// to the lower sequence, which is the one the slot would run first.
+    #[cfg(feature = "veriloga")]
+    fn slot_min_event(&self) -> Option<(u64, TargetId)> {
+        if self.slot_is_empty() {
+            return None;
+        }
+        self.slot
+            .iter()
+            .flatten()
+            .min_by_key(|event| (event.tick, event.sequence))
+            .map(|event| (event.tick, event.target))
+    }
+
+    /// [`Self::future_min_tick`] with the driver that event names.
+    #[cfg(feature = "veriloga")]
+    fn future_min_event(&self) -> Option<(u64, TargetId)> {
+        self.future
+            .peek()
+            .map(|Reverse(top)| (top.0.tick, top.0.target))
+    }
+
     /// Number of events not yet executed.
     ///
     /// Exact, not an estimate: `cancelled` holds one sequence per tombstoned
@@ -1063,6 +1086,22 @@ impl EventScheduler {
         let future = self.queues.future_min_tick();
         match (slot, future) {
             (Some(slot), Some(future)) => Some(slot.min(future)),
+            (slot, future) => slot.or(future),
+        }
+    }
+
+    /// [`Self::next_tick`], with the driver the earliest event belongs to.
+    ///
+    /// The tick is the same one [`Self::next_tick`] answers with — both tiers
+    /// consulted, the earlier winning — and the driver is the one a diagnostic
+    /// has to name to say *whose* schedule is holding a run. Ties between the
+    /// tiers go to the slot, which is where the earlier sequence sits.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn next_tick_target(&self) -> Option<(u64, TargetId)> {
+        let slot = self.queues.slot_min_event();
+        let future = self.queues.future_min_event();
+        match (slot, future) {
+            (Some(slot), Some(future)) => Some(if future.0 < slot.0 { future } else { slot }),
             (slot, future) => slot.or(future),
         }
     }

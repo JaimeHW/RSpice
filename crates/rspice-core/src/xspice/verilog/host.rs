@@ -654,6 +654,21 @@ impl DigitalHost {
         self.scheduler.next_tick()
     }
 
+    /// [`Self::next_tick`], with the process whose activation it is.
+    ///
+    /// The process is itself optional: the kernel also holds the host's
+    /// nonblocking-update wakeup and any external bit driver, and neither
+    /// belongs to a process of the design. A caller that wants to *name* the
+    /// module behind a tick gets `None` for those rather than a process index
+    /// that happens to sit at the same interned slot.
+    pub(crate) fn next_tick_process(&self) -> Option<(u64, Option<usize>)> {
+        let (tick, target) = self.scheduler.next_tick_target()?;
+        Some((
+            tick,
+            self.process_of_target.get(usize::from(target)).copied(),
+        ))
+    }
+
     /// Queue every process's first activation at tick zero and settle it.
     ///
     /// IEEE 1364-2005 section 9.9 starts every `always` and `initial` process

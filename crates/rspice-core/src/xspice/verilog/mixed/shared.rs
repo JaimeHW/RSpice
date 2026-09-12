@@ -204,6 +204,16 @@ impl MixedDigital {
 pub(crate) struct MixedDigitalCoordinator {
     digital: MixedCell<DigitalHost>,
     maps: Vec<DigitalLinkedInstance>,
+    /// Linked process index to its position in `maps`, or `usize::MAX` for a
+    /// process no instance claimed.
+    ///
+    /// The linker hands every instance its own process ids, so inverting the
+    /// maps once at enrollment turns "which module scheduled this activation"
+    /// into an index. [`Self::execution_error`] answers the same question by
+    /// scanning, which it can afford to because it runs on the way to a
+    /// refusal; [`Self::next_event_time`] is asked at every accepted transient
+    /// point.
+    instance_of_process: Vec<usize>,
     port_signals: Vec<Vec<DigitalSignalId>>,
     event_nodes: Vec<usize>,
     resolution: TimeResolution,
@@ -443,6 +453,14 @@ impl MixedDigitalCoordinator {
                     .min(right.max_reported_oscillating_entities),
             })
             .unwrap_or_default();
+        let mut instance_of_process = vec![usize::MAX; linked.plan.processes.len()];
+        for (owner, map) in maps.iter().enumerate() {
+            for process in map.processes.iter().chain(&map.connection_processes) {
+                if let Some(slot) = instance_of_process.get_mut(usize::from(*process)) {
+                    *slot = owner;
+                }
+            }
+        }
         let mut digital = DigitalHost::from_plan(Arc::new(linked.plan), resolution, limits);
         let dependencies: Vec<_> = hosts
             .iter()
@@ -478,6 +496,7 @@ impl MixedDigitalCoordinator {
         Ok(Self {
             digital: MixedCell::new(digital),
             maps,
+            instance_of_process,
             port_signals,
             event_nodes: event_node_ids,
             resolution,
@@ -494,6 +513,7 @@ impl MixedDigitalCoordinator {
         Self {
             digital: MixedCell::new(self.digital.fresh()),
             maps: self.maps.clone(),
+            instance_of_process: self.instance_of_process.clone(),
             port_signals: self.port_signals.clone(),
             event_nodes: self.event_nodes.clone(),
             resolution: self.resolution,
@@ -585,16 +605,32 @@ impl MixedDigitalCoordinator {
             .filter(|(node, _)| *node > 0)
     }
 
-    pub(crate) fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {
-        self.digital
-            .next_tick()
-            .map(|tick| {
-                self.resolution
-                    .ticks_to_seconds(tick)
-                    .map_err(DigitalRunError::from)
-                    .map_err(Into::into)
-            })
-            .transpose()
+    /// The earliest activation the one shared queue holds, in seconds, and the
+    /// enrolled instance whose process scheduled it.
+    ///
+    /// Enrolling collapses every instance's queue into this one, so a caller
+    /// that only reads the time cannot say which module is driving a run — and
+    /// a diagnostic that has to name one would otherwise have nothing to name
+    /// as soon as a deck holds two mixed instances. The kernel does know: the
+    /// earliest event carries the driver it belongs to, and every process was
+    /// handed out to an instance at link time.
+    ///
+    /// The instance is still optional. The queue also holds the host's
+    /// nonblocking-update wakeup and external bit drivers, which belong to no
+    /// module, and an answer of `None` there is the honest one.
+    pub(crate) fn next_event_time(&self) -> Result<Option<(Option<&str>, f64)>, MixedSignalError> {
+        let Some((tick, process)) = self.digital.next_tick_process() else {
+            return Ok(None);
+        };
+        let seconds = self
+            .resolution
+            .ticks_to_seconds(tick)
+            .map_err(DigitalRunError::from)?;
+        let owner = process
+            .and_then(|process| self.instance_of_process.get(process).copied())
+            .and_then(|owner| self.maps.get(owner))
+            .map(|map| map.name.as_str());
+        Ok(Some((owner, seconds)))
     }
 
     /// Declare the smallest interval the analog solver may advance by.

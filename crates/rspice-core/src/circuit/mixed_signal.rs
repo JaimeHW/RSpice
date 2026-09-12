@@ -965,7 +965,12 @@ impl CircuitData {
     pub(crate) fn next_mixed_event_time(&self) -> Result<Option<Value>, SimulationError> {
         self.mixed_digital_coordinator
             .as_ref()
-            .map(|digital| digital.next_event_time().map_err(shared_error))
+            .map(|digital| {
+                digital
+                    .next_event_time()
+                    .map(|next| next.map(|(_, seconds)| seconds))
+                    .map_err(shared_error)
+            })
             .transpose()
             .map(Option::flatten)
     }
