@@ -57,6 +57,84 @@ const DECK_A_GRID_HASH: u64 = 0x1066_dc3f_f7ef_4fed;
 const DECK_A_VOLT_HASH: u64 = 0xbe98_92ef_a7aa_6209;
 const DECK_C2_POINTS: usize = 265;
 
+/// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
+/// refinement fix moved the accepted grid.
+///
+/// The grid is not the physics. Every quantity below is measured on the
+/// pre-fix run and re-asserted after it, so a change that moves the accepted
+/// timepoints has to leave the analog solution where it found it.
+const DECK_A_DIGITAL_INSTANTS: &[f64] = &[
+    1.05e-9,
+    1.052501199058232e-9,
+    6.050000000000001e-9,
+    6.052545454545457e-9,
+    1.1050000000000003e-8,
+    1.10528973134341e-8,
+    1.6050000000000005e-8,
+    1.605254545454546e-8,
+    2.1050000000000003e-8,
+    2.105186424774527e-8,
+    2.6050000000000005e-8,
+    2.605254545454546e-8,
+    3.105000000000001e-8,
+    3.105289731343411e-8,
+    3.6050000000000015e-8,
+    3.605254545454548e-8,
+    4.105000000000001e-8,
+    4.105186424774528e-8,
+    4.605000000000001e-8,
+    4.6052545454545474e-8,
+    5.1050000000000004e-8,
+    5.1052897313434104e-8,
+    5.605000000000001e-8,
+    5.605254545454547e-8,
+];
+
+/// The nodes sampled at those instants, and how long after each instant.
+///
+/// Two and a half nanoseconds, not zero, and not half a nanosecond either.
+/// `y` and `q` are D/A outputs: at the instant of an edge their value is a
+/// step, and half a nanosecond later they are on the ramp the inverter's
+/// `rise_delay` puts there, so a comparison at either instant would be
+/// measuring which side of a moving corner the sample fell on rather than
+/// whether the solution moved. Half the clock's half-period is past every
+/// delay in the deck — the 0.5 ns inverter, the 0.1 ns `t_rise`, the mixed
+/// module's own tick — and before the next edge, so all four nodes are flat
+/// there and interpolating between two accepted points is exact whatever grid
+/// they came from.
+const DECK_A_INSTANT_NODES: [&str; 4] = ["A", "Y", "P", "Q"];
+const DECK_A_INSTANT_OFFSET: f64 = 2.5e-9;
+
+/// `DECK_A_INSTANT_NODES` sampled `DECK_A_INSTANT_OFFSET` after each of
+/// `DECK_A_DIGITAL_INSTANTS`, four values per instant, measured pre-fix.
+#[rustfmt::skip]
+const DECK_A_INSTANT_VOLTAGES: &[f64] = &[
+    0.6764946967126333, 0.0, 0.0, 3.2934131736526284,
+    0.6764946967126333, 0.0, 0.0, 3.2934131736526293,
+    0.6764946967126335, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126335, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126335, 0.0, 0.0, 0.0,
+    0.6764946967126334, 0.0, 0.0, 0.0,
+    0.6764946967126335, 3.3, 1.6499999999991748, 0.0,
+    0.6764946967126335, 3.3, 1.6499999999991748, 0.0,
+    0.6764946967126333, 0.0, 0.0, 3.293413173652629,
+    0.6764946967126333, 0.0, 0.0, 3.293413173652629,
+    0.6764946967126335, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126335, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126333, 0.0, 0.0, 0.0,
+    0.6764946967126333, 0.0, 0.0, 0.0,
+    0.6764946967126334, 3.3, 1.6499999999991748, 0.0,
+    0.6764946967126334, 3.3, 1.6499999999991748, 0.0,
+    0.6764946967126333, 0.0, 0.0, 3.293413173652629,
+    0.6764946967126333, 0.0, 0.0, 3.293413173652629,
+    0.6764946967126334, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126334, 3.3, 1.6499999999991748, 3.293413173652629,
+    0.6764946967126333, 0.0, 0.0, 0.0,
+    0.6764946967126333, 0.0, 0.0, 0.0,
+    0.6764946967126334, 3.3, 1.6499999999991748, 0.0,
+    0.6764946967126334, 3.3, 1.6499999999991748, 0.0,
+];
+
 //=============================================================================
 // Shared helpers
 //=============================================================================
@@ -155,6 +233,35 @@ fn traces_by_name(result: &TransientResult) -> BTreeMap<String, Vec<String>> {
             )
         })
         .collect()
+}
+
+/// One node's waveform, linearly interpolated at `time`.
+///
+/// Two runs on different accepted grids have no sample in common, so a
+/// comparison between them has to interpolate; the decks below are sampled
+/// where they are settled, so the interpolation error is the waveform's own
+/// curvature over one step and not a step-sized jump.
+fn sample_at(result: &TransientResult, name: &str, time: f64) -> f64 {
+    let index = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("no analog node {name} in {:?}", result.node_names));
+    let values = &result.voltages[index];
+    let position = result.time.partition_point(|sample| *sample < time);
+    if position == 0 {
+        return values[0];
+    }
+    if position >= result.time.len() {
+        return *values.last().expect("a node has at least one sample");
+    }
+    let (before, after) = (result.time[position - 1], result.time[position]);
+    let span = after - before;
+    if !(span > 0.0) {
+        return values[position];
+    }
+    let weight = (time - before) / span;
+    values[position - 1] * (1.0 - weight) + values[position] * weight
 }
 
 fn trace_points(result: &TransientResult, name: &str) -> Vec<(f64, DigitalState)> {
@@ -315,24 +422,100 @@ fn deck_a_tri_family_transient_sequence_golden() {
     pin_hash("deck_a_volt_hash", voltages, DECK_A_VOLT_HASH);
 }
 
+/// A digital edge must not restart the analog stepper anywhere near its floor.
+///
+/// The bound is ten femtoseconds rather than the picosecond this case was
+/// first written with, and the difference is the deck rather than the defect.
+/// Two mechanisms put small steps after an edge here, and only one of them is
+/// a defect:
+///
+/// * the one this lane owns — an A/D crossing interpolated inside a step a
+///   D/A bridge had already jumped, chased to the solver's hard minimum, whose
+///   last width then became the post-breakpoint restart. Measured on the lane
+///   base it restarted deck A at 6.1e-17 s and doubled fifteen times; the
+///   smallest restart this deck now takes is 1.1e-13 s.
+/// * ngspice's own restart policy, which is a tenth of the approach step
+///   capped by the gap to the next breakpoint. `a_adc` publishes `in_low` at
+///   1.6 V and `in_high` at 1.7 V, which on a 0.1 ns 3.3 V ramp are 2.5 ps
+///   apart, so the restart between that pair is 0.25 ps by the rule every
+///   native deck uses. Demanding a picosecond here would be demanding a
+///   different breakpoint policy for every deck in the engine, which is not
+///   this lane's to change.
+///
+/// Ten femtoseconds is six doublings above the solver's hard floor for this
+/// deck and twenty-five times below the smallest legitimate restart it takes,
+/// so it separates the two cleanly.
 #[test]
-#[ignore = "R2.2: post-event restart ladder starts at hard_min_dt"]
-fn deck_a_accepts_no_step_below_a_picosecond_after_a_digital_edge() {
+fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
+    const FLOOR_LADDER_BOUND: f64 = 1e-14;
     let result = run_deck_a();
     let tiny: Vec<(usize, f64, f64)> = result
         .time
         .windows(2)
         .enumerate()
         .map(|(index, pair)| (index + 1, pair[0], pair[1] - pair[0]))
-        .filter(|(_, _, step)| *step < 1e-12)
+        .filter(|(_, _, step)| *step < FLOOR_LADDER_BOUND)
         .collect();
+    let smallest = result
+        .time
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    println!(
+        "TRIFAMILY deck_a_floor_steps={} smallest={smallest:e}",
+        tiny.len()
+    );
     assert!(
         tiny.is_empty(),
-        "a digital edge must not restart the analog stepper at the hard floor; \
-         {} accepted steps are below 1 ps, first few {:?}",
+        "a digital edge must not restart the analog stepper near its floor; \
+         {} accepted steps are below {FLOOR_LADDER_BOUND:e}, first few {:?}",
         tiny.len(),
         tiny.iter().take(6).collect::<Vec<_>>()
     );
+}
+
+/// The accepted grid is allowed to move; the waveform is not.
+///
+/// Deck A's analog solution is sampled at the instants the pre-fix run
+/// published its XSPICE event net on, so a change that ends the refinement
+/// storm has to reproduce the same voltages on a grid a thousand points
+/// shorter. One micro-volt is four orders of magnitude below the smallest
+/// feature any of these nodes carries.
+#[test]
+fn deck_a_digital_instants_keep_their_pre_fix_analog_solution() {
+    let result = run_deck_a();
+    let instants: Vec<f64> = trace_points(&result, "d_clk")
+        .into_iter()
+        .map(|(time, _)| time)
+        .filter(|time| *time > 0.0)
+        .collect();
+    println!("TRIFAMILY deck_a_digital_instants={instants:?}");
+    let mut samples = Vec::new();
+    for instant in DECK_A_DIGITAL_INSTANTS {
+        for node in DECK_A_INSTANT_NODES {
+            samples.push(sample_at(&result, node, instant + DECK_A_INSTANT_OFFSET));
+        }
+    }
+    println!("TRIFAMILY deck_a_instant_voltages={samples:?}");
+    if !DIODE_CMC || emitting() {
+        // Without the generated card the deck is a different circuit and the
+        // pinned samples are not its samples.
+        return;
+    }
+    assert_eq!(
+        samples.len(),
+        DECK_A_INSTANT_VOLTAGES.len(),
+        "the pinned sample table must cover every instant and node"
+    );
+    for (index, (observed, expected)) in samples.iter().zip(DECK_A_INSTANT_VOLTAGES).enumerate() {
+        let instant = DECK_A_DIGITAL_INSTANTS[index / DECK_A_INSTANT_NODES.len()];
+        let node = DECK_A_INSTANT_NODES[index % DECK_A_INSTANT_NODES.len()];
+        assert!(
+            (observed - expected).abs() < 1e-6,
+            "V({node}) {DECK_A_INSTANT_OFFSET:e} s after the digital instant {instant:e} is \
+             {observed}, was {expected} before the accepted grid changed"
+        );
+    }
 }
 
 #[test]
@@ -413,11 +596,19 @@ fn deck_c(load_dq: bool) -> (Vec<ModelFile>, Netlist) {
     (vec![driver, receiver], netlist)
 }
 
-fn run_deck_c(load_dq: bool) -> TransientResult {
+/// Deck C, with the number of timepoints the step controller threw away.
+fn run_deck_c_with_rejections(load_dq: bool) -> (TransientResult, usize) {
     let (_models, netlist) = deck_c(load_dq);
-    Engine::default()
+    let engine = Engine::default();
+    let result = engine
         .run_tran(&netlist, 100e-9, 0.5e-9)
-        .expect("deck C transient")
+        .expect("deck C transient");
+    let rejections = engine.convergence_quality().timestep_reductions;
+    (result, rejections)
+}
+
+fn run_deck_c(load_dq: bool) -> TransientResult {
+    run_deck_c_with_rejections(load_dq).0
 }
 
 #[test]
@@ -452,6 +643,42 @@ fn deck_c_loaded_digital_to_digital_net_still_runs() {
     assert!(
         !trace_points(&result, "dq").is_empty(),
         "deck C recorded no events on dq"
+    );
+}
+
+/// A load on a digital net is a load, not a hundredfold cost.
+///
+/// Deck C and deck C2 are one circuit with one 10k resistor between them, and
+/// both run the same two modules over the same 100 ns. Before the R2.2 fix the
+/// loaded deck spent 1890 accepted points and ~504 rejections against C2's 265
+/// and 0, because every D/A flip on `dq` was interpolated as an interior A/D
+/// root and chased to the solver's hard floor. The bound is relational rather
+/// than pinned: the load legitimately adds the edges themselves, so deck C may
+/// keep half as many points again as C2 and reject once per published edge.
+#[test]
+fn deck_c_load_does_not_multiply_the_accepted_grid() {
+    let (loaded, loaded_rejections) = run_deck_c_with_rejections(true);
+    let (unloaded, unloaded_rejections) = run_deck_c_with_rejections(false);
+    let edges: usize = ["dq", "c"]
+        .into_iter()
+        .map(|node| trace_points(&loaded, node).len())
+        .sum();
+    println!(
+        "TRIFAMILY deck_c_points={} deck_c_rejections={loaded_rejections} \
+         deck_c2_points={} deck_c2_rejections={unloaded_rejections} deck_c_edges={edges}",
+        loaded.time.len(),
+        unloaded.time.len()
+    );
+    assert!(
+        loaded.time.len() * 2 <= unloaded.time.len() * 3,
+        "loading the shared digital net kept {} accepted points against the unloaded deck's {}",
+        loaded.time.len(),
+        unloaded.time.len()
+    );
+    assert!(
+        loaded_rejections <= unloaded_rejections + edges,
+        "loading the shared digital net rejected {loaded_rejections} timepoints against the \
+         unloaded deck's {unloaded_rejections}, with only {edges} published edges to pay for"
     );
 }
 
