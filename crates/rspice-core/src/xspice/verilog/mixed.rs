@@ -70,6 +70,13 @@
 //! the interpolated instant and the nearest-tick rule above, because dating it
 //! at the endpoint would be a setup/hold-class error on a sampling edge.
 //!
+//! "Before it" spans the Newton probes of one candidate rather than one trial.
+//! The solver rolls a probe back before the solution that probe's write moved
+//! is ever solved, so the fact is latched per candidate instead of re-read per
+//! trial — `CarriedFeedback` carries that argument. It is the same question
+//! about the same movement, asked where the re-solve actually happens; nothing
+//! is dated by where it fell relative to another crossing.
+//!
 //! Nearest-tick here would not violate any standard, and this document does
 //! not claim it would. A `#1` from a process dated at tick `T` fires at
 //! `T + 1` — one whole time unit later in the digital base, whatever the
@@ -744,6 +751,12 @@ impl AnalogSolverInputs {
 /// answer a question about two bridges — the boundary tables are a handful of
 /// entries wide, so the allocation dominated the arithmetic.
 ///
+/// Two of them are instead deliberately *longer*-lived than a trial, and both
+/// say so on themselves: [`BoundaryProbeHistory`] and [`CarriedFeedback`] are
+/// facts about one candidate timepoint that the solver's rolled-back Newton
+/// probes would otherwise erase, so they live where a probe cannot reach them
+/// and are keyed by the timestamp they belong to.
+///
 /// Held by value rather than behind a [`MixedCell`]: a capture must never see
 /// one, and a host clone is welcome to start with empty ones.
 #[derive(Clone, Default)]
@@ -767,13 +780,80 @@ struct TrialScratch {
     drives: Vec<(DigitalSignalId, FourStateValue)>,
     /// The interpolated crossing times, paired with the bridge index.
     crossings: Vec<(usize, f64)>,
+    /// Which of those crossings was dated at the trial's endpoint rather than
+    /// interpolated. Parallel to `bit_drives` and `crossings`, and reordered
+    /// with them by [`order_publications_by_crossing`].
+    ///
+    /// Per bridge rather than per trial because one pass can hold both kinds
+    /// at once: a bridge that published *before* the discrete half's write
+    /// keeps the instant the circuit gave it, while one found after that write
+    /// is dated where its cause is. A trial-wide flag answers for both and is
+    /// therefore wrong about one of them — see [`CarriedFeedback`].
+    endpoint_dated: Vec<bool>,
     /// The boundary histories an acceptance would produce, computed before
     /// anything is committed so a chattering boundary can still be refused.
     adc_history: Vec<BoundaryNetHistory>,
     dac_history: Vec<BoundaryNetHistory>,
     probe_history: BoundaryProbeHistory,
+    carried: CarriedFeedback,
     /// The five vectors of the last finished trial, ready to be refilled.
     trial: TrialVectors,
+}
+
+/// What the discrete half fed back into one candidate timepoint, remembered
+/// across the Newton probes the solver rolls back.
+///
+/// [`ActiveTrial::digital_feedback`] answers the fourth question of this
+/// module's "three time bases" — did the discrete half move something the
+/// analog equations read inside this interval — by comparing the store against
+/// the image taken when the trial opened. That comparison is exact, and it is
+/// blind in exactly one place.
+///
+/// The engine's re-solve is not a later pass of one trial. It is the next
+/// Newton probe: `circuit::mixed_signal`'s `stamp_mixed_transient_trial` opens,
+/// settles, stamps and rolls back a probe trial for every Newton evaluation,
+/// and `visit_mixed_transient_candidate_task` then opens a fresh trial from the
+/// accepted store to inspect the converged candidate. A write that lands in
+/// probe *k* is undone before probe *k+1* opens and before the inspection opens,
+/// while its effect — the analog solution it moved — is precisely what those
+/// later evaluations solve. So at the moment the effect is dated, the fact that
+/// caused it is true of the *candidate* and false of every trial that can be
+/// asked about it, and no pass-local reading of the store can recover it.
+///
+/// It is therefore latched here, on the scratch, which survives a probe because
+/// hosts are moved rather than cloned through one — the same thing
+/// [`BoundaryProbeHistory`] relies on, keyed the same way, by the candidate's
+/// own timestamp. Arming records which bridges had *already* published when the
+/// write landed: those crossed before it and are the circuit's own. Every other
+/// bridge found crossing on this candidate first appears after the write and is
+/// dated where its cause is.
+///
+/// What that approximates is what [`ActiveTrial::digital_feedback`] already
+/// approximates and for the same reason: a crossing the circuit caused in the
+/// same interval as such a movement cannot be separated from it, because
+/// re-solving lands on the movement again. What it does *not* do is date a
+/// crossing by where it fell relative to another one. Two crossings on a
+/// candidate nothing fed back into keep their own instants however they are
+/// ordered — which matters because interpolation is a chord, and a chord across
+/// a curved rise can order two roots the other way round on a long interval
+/// than on the short one that lands the later of them.
+#[derive(Clone, Default)]
+struct CarriedFeedback {
+    /// The candidate timestamp this was armed for. `None` when nothing is
+    /// latched: a new accepted point opens a new interval and the write that
+    /// was latched is now part of the accepted state rather than of a step.
+    time: Option<f64>,
+    /// The A/D bridges that had already published in the trial that armed
+    /// this. Parallel to `bridges.adc`.
+    innocent: Vec<bool>,
+}
+
+impl CarriedFeedback {
+    /// Whether a crossing found on candidate `time` was carried by the write
+    /// this latched.
+    fn carries(&self, time: f64, bridge: usize) -> bool {
+        self.time == Some(time) && !self.innocent.get(bridge).copied().unwrap_or(false)
+    }
 }
 
 /// The per-trial vectors, moved between [`TrialScratch`] and [`ActiveTrial`].
@@ -1395,6 +1475,7 @@ impl MixedSignalHost {
         self.state.started = false;
         self.digital_started = false;
         self.scratch.probe_history.time = None;
+        self.scratch.carried.time = None;
         Ok(())
     }
 
@@ -2594,7 +2675,15 @@ impl MixedSignalHost {
     /// transition: a crossing on an interval such a movement happened in is
     /// dated at the endpoint, so it is not interior here and asks for nothing.
     /// The two rules are therefore one rule, written once — the fourth
-    /// question of this module's "three time bases".
+    /// question of this module's "three time bases". The movement it is applied
+    /// from may have happened in a Newton probe this trial never saw, which is
+    /// what [`CarriedFeedback`] exists to carry; without it the landing this
+    /// refinement has just reached is rejected in favour of an instant behind
+    /// itself, and the controller bisects into the root it had already found,
+    /// one accepted timepoint per rung, down to `minimum_timestep`.
+    ///
+    /// The window below is [`endpoint_root_window`], which is the one place it
+    /// is derived.
     pub(crate) fn trial_boundary_refinement_time(
         &self,
         minimum_timestep: f64,
@@ -2610,9 +2699,7 @@ impl MixedSignalHost {
         }
         let time = trial.time_seconds;
         let start = self.state.accepted_time;
-        // A physical root cannot be resolved more finely than the solver can
-        // advance. Keep this tolerance in seconds, independent of HDL precision.
-        let tolerance = (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(minimum_timestep);
+        let tolerance = endpoint_root_window(time, start, minimum_timestep);
         let mut first_allowed = (start + minimum_timestep).max(start.next_up());
         if first_allowed - start < minimum_timestep {
             first_allowed = first_allowed.next_up();
@@ -2764,9 +2851,26 @@ impl MixedSignalHost {
             .trial
             .as_ref()
             .is_some_and(|trial| trial.digital_feedback);
+        // Latched the first time this candidate is seen to have been fed back
+        // into, because the trial that sees it is not the trial the effect is
+        // dated in: the solver rolls this one back and solves the moved problem
+        // in the next Newton probe. [`CarriedFeedback`] carries the argument in
+        // full. Armed once per candidate — a later pass must not widen the
+        // innocent set with bridges that published *after* the write.
+        if digital_feedback
+            && scratch.carried.time != Some(time_seconds)
+            && let Some(trial) = self.trial.as_ref()
+        {
+            scratch.carried.time = Some(time_seconds);
+            scratch
+                .carried
+                .innocent
+                .clone_from(&trial.vectors.adc_moved);
+        }
         scratch.bit_drives.clear();
         scratch.drives.clear();
         scratch.crossings.clear();
+        scratch.endpoint_dated.clear();
         scratch.sampled.clear();
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
@@ -2803,7 +2907,13 @@ impl MixedSignalHost {
             // this node itself, at the tick that movement happened on, so
             // there is no interior root to interpolate towards: the transition
             // is this endpoint's own.
-            let crossing = if digital_feedback {
+            //
+            // Asked of this bridge rather than of the trial, because the
+            // movement may have happened in a Newton probe the solver has
+            // already rolled back, and because a bridge that published before
+            // it crossed on the circuit's own account and keeps its instant.
+            let carried = digital_feedback || scratch.carried.carries(time_seconds, index);
+            let crossing = if carried {
                 time_seconds
             } else {
                 threshold_crossing_time(
@@ -2817,12 +2927,17 @@ impl MixedSignalHost {
             };
             scratch.bit_drives.push((index, bit));
             scratch.crossings.push((index, crossing));
+            scratch.endpoint_dated.push(carried);
         }
         // Each transition carries its own instant, so the pass publishes in
         // ascending crossing order rather than as one bank: two bridges that
         // crossed at different times are two events, and collapsing them onto
         // the later one's tick delays the earlier one by a whole tick.
-        order_publications_by_crossing(&mut scratch.bit_drives, &mut scratch.crossings);
+        order_publications_by_crossing(
+            &mut scratch.bit_drives,
+            &mut scratch.crossings,
+            &mut scratch.endpoint_dated,
+        );
         // Sampled from the same converged candidate the bridges were, and
         // published into the store *before* the transitions that wake the
         // processes reading it. That ordering is what makes the standard's own
@@ -2873,13 +2988,23 @@ impl MixedSignalHost {
             // floored tick is where this transition belongs, because the
             // event that caused it happened on that tick.
             //
+            // The exemption is read from the bridges of this group rather than
+            // from the trial: one pass can hold an endpoint-dated crossing and
+            // an interpolated one at once, and only the former names no tick of
+            // its own. A group is one instant, so all it takes is that the
+            // instant be the endpoint's — which is what an endpoint-dated
+            // bridge in it says.
+            //
             // `published_tick` carries the running maximum rather than the
             // group's own answer, which is what keeps the sequence monotone: a
             // crossing in the lower half of a tick rounds to a slot the
             // digital world has already left, and an earlier group — of this
             // pass or of an earlier Newton iteration of this same trial — may
             // have left a later one still.
-            let crossing_tick = if digital_feedback {
+            let crossing_tick = if scratch.endpoint_dated[group..end]
+                .iter()
+                .any(|dated| *dated)
+            {
                 tick
             } else {
                 self.resolution
@@ -3064,6 +3189,11 @@ impl MixedSignalHost {
         );
         self.scratch.trial = trial.vectors;
         self.scratch.probe_history.time = None;
+        // A new accepted point is a new interval. Whatever the discrete half
+        // fed back into the candidate just accepted is now part of the accepted
+        // state that the next interval's crossings are interpolated from, so
+        // there is nothing left for it to have carried.
+        self.scratch.carried.time = None;
     }
 
     /// Put a trial back the way it found things, and take its vectors back.
@@ -3200,6 +3330,7 @@ impl MixedSignalHost {
         self.state = checkpoint.state.clone();
         self.digital_started = true;
         self.scratch.probe_history.time = None;
+        self.scratch.carried.time = None;
         self.max_circuit_node = (0..self.analog.num_terminals())
             .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
@@ -3596,26 +3727,48 @@ impl MixedSignalHost {
     }
 }
 
-/// Put the bits one settle moved, and their crossing times, into ascending
-/// crossing order — the order the analog world produced them in.
+/// How near the end of `[start, time]` a crossing has to fall to *be* that
+/// endpoint rather than a root inside the interval.
 ///
-/// The two vectors are filled in lockstep by `settle_into`, one entry per
+/// Endpoint roundoff at these magnitudes — 64 ulps of the larger endpoint,
+/// which is what an interpolation across the interval can be trusted to —
+/// widened to `floor`, the smallest step the solver can actually advance by,
+/// because a physical root cannot be resolved more finely than that however
+/// exactly it is named. In seconds throughout, independent of HDL precision.
+///
+/// Written once and called from every site that asks the question, so "this
+/// crossing is the endpoint" cannot be answered two ways that disagree by a few
+/// ulps. Two derivations of one number is how `settle_into` and
+/// [`MixedSignalHost::trial_boundary_refinement_time`] came to be able to
+/// disagree about whether a landing had been reached.
+fn endpoint_root_window(time: f64, start: f64, floor: f64) -> f64 {
+    (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(floor)
+}
+
+/// Put the bits one settle moved, their crossing times, and how each of those
+/// was dated into ascending crossing order — the order the analog world
+/// produced them in.
+///
+/// The three vectors are filled in lockstep by `settle_into`, one entry per
 /// moved bridge, and they stay aligned through this: a caller that reads
-/// `bit_drives[i]` and `crossings[i]` is reading one transition either side of
-/// the reordering. A pass moves a handful of bridges at most — an insertion
-/// sort over both at once is what keeps them aligned without a permutation
-/// buffer, and it is stable, so bridges that crossed at the same instant keep
-/// bridge order and publish as one bank.
+/// `bit_drives[i]`, `crossings[i]` and `endpoint_dated[i]` is reading one
+/// transition either side of the reordering. A pass moves a handful of bridges
+/// at most — an insertion sort over all three at once is what keeps them
+/// aligned without a permutation buffer, and it is stable, so bridges that
+/// crossed at the same instant keep bridge order and publish as one bank.
 fn order_publications_by_crossing(
     bit_drives: &mut [(usize, FourStateBit)],
     crossings: &mut [(usize, f64)],
+    endpoint_dated: &mut [bool],
 ) {
     debug_assert_eq!(bit_drives.len(), crossings.len());
+    debug_assert_eq!(bit_drives.len(), endpoint_dated.len());
     for index in 1..crossings.len() {
         let mut slot = index;
         while slot > 0 && crossings[slot - 1].1 > crossings[slot].1 {
             crossings.swap(slot - 1, slot);
             bit_drives.swap(slot - 1, slot);
+            endpoint_dated.swap(slot - 1, slot);
             slot -= 1;
         }
     }

@@ -161,29 +161,42 @@ impl<'a> MixedHostTrialGroup<'a> {
         }
         .map_err(shared_error)?;
         digital.synchronize(self.hosts).map_err(shared_error)?;
-        // After the synchronize, because an enrolled instance reads its
-        // boundary through a view and that is what refreshes one: asking
-        // before it compares the view against itself and always answers no.
-        //
-        // The coordinator ran the wheel for every enrolled instance at once,
-        // so whether that run moved something the analog equations read — a
-        // D/A output, or a discrete variable an analog block references — is a
-        // question about the whole circuit rather than about any one instance:
-        // one instance's bridge and another's A/D input can share a deck node,
-        // and one instance's variable steers the current it pushes into a node
-        // any other may sense. Ask every instance whether its own digital half
-        // moved one, and report the disjunction to all of them before any of
-        // their bridges are sampled.
-        let mut fed_back = false;
-        for host in self.hosts.iter() {
-            fed_back |= named(host, host.digital_feedback_since_trial_start())?;
-        }
-        if fed_back {
-            for host in self.hosts.iter_mut() {
-                host.note_shared_digital_feedback();
-            }
-        }
         for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
+            // The coordinator ran the wheel for every enrolled instance at
+            // once, so whether that run moved something the analog equations
+            // read — a D/A output, or a discrete variable an analog block
+            // references — is a question about the whole circuit rather than
+            // about any one instance: one instance's bridge and another's A/D
+            // input can share a deck node, and one instance's variable steers
+            // the current it pushes into a node any other may sense. Ask every
+            // instance whether its own digital half moved one, and report the
+            // disjunction to all of them before any of their bridges are
+            // sampled.
+            //
+            // Asked before every pass rather than once before the first,
+            // because the write that matters is usually made by a process
+            // *this trial's own publications* woke, which happens inside a
+            // pass. [`MixedSignalHost::settle_analog_bridges`] asks the same
+            // question of the instance's own store at the top of every pass,
+            // for the same reason; an instance that holds no analog equation
+            // of its own — a sampler whose only port is an A/D input — has no
+            // store of its own to answer it with, and the circuit's answer is
+            // the only one it can ever get.
+            //
+            // After a synchronize either way, because an enrolled instance
+            // reads its boundary through a view and that is what refreshes
+            // one: asking before it compares the view against itself and
+            // always answers no. The first pass is preceded by the one above,
+            // every later pass by the loop's own.
+            let mut fed_back = false;
+            for host in self.hosts.iter() {
+                fed_back |= named(host, host.digital_feedback_since_trial_start())?;
+            }
+            if fed_back {
+                for host in self.hosts.iter_mut() {
+                    host.note_shared_digital_feedback();
+                }
+            }
             let mut moved = false;
             for host in self.hosts.iter_mut() {
                 let settled = host.settle_analog_bridges(voltages);

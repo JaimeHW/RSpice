@@ -902,13 +902,28 @@ impl SharedDigitalTrial<'_> {
             // `settle_into`. Rounding this trial's own timestamp here would
             // publish the shared bank one tick past the instant the
             // integrator accepted, which is the same error in the shared path.
-            let endpoint_dated = host
-                .trial
-                .as_ref()
-                .is_none_or(|trial| trial.digital_feedback);
-            for (&(bridge, bit), &(_, crossing)) in
-                host.scratch.bit_drives.iter().zip(&host.scratch.crossings)
+            //
+            // Read per bridge, from the mark the pass left beside each
+            // crossing, because one pass holds both kinds: a bridge that
+            // published before the discrete half's write keeps the instant the
+            // circuit gave it and the tick nearest that instant. With no trial
+            // open there is no interval for anything to have been interpolated
+            // across, and every transition of the pass is the timepoint's own.
+            let no_trial = host.trial.is_none();
+            for (position, (&(bridge, bit), &(_, crossing))) in host
+                .scratch
+                .bit_drives
+                .iter()
+                .zip(&host.scratch.crossings)
+                .enumerate()
             {
+                let endpoint_dated = no_trial
+                    || host
+                        .scratch
+                        .endpoint_dated
+                        .get(position)
+                        .copied()
+                        .unwrap_or(false);
                 let tick = if endpoint_dated {
                     trial_tick
                 } else {
