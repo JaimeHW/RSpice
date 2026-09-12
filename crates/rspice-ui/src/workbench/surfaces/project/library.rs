@@ -200,7 +200,10 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
             ui.set_min_height(CONTEXT_HEIGHT - 10.0);
             // A `Frame` shrinks to its content, so a band that is not told
             // to take the visible width stops partway across the workspace.
-            ui.set_width((visible_workspace_width(ui) - 20.0).max(1.0));
+            // Measured from inside the frame, the visible width is already the
+            // band's inner width: subtracting the margins again leaves the fill
+            // 20 px short of the edge.
+            ui.set_width(visible_workspace_width(ui));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 let search_width = (ui.available_width() * 0.38).clamp(180.0, 420.0);

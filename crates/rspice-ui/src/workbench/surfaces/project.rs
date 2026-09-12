@@ -137,6 +137,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     let tokens = Tokens::get(ui.ctx());
     egui::Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
+        // The application's central panel zeroes item spacing before handing a
+        // surface the frame; a page that inherits it instead of asserting it
+        // grows a four-pixel seam of background under every band the moment it
+        // is drawn anywhere else, which is where these pages get reviewed.
+        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         project_chrome(ui, app);
         let page = app.state.workbench.project_page;
         let panel = ui.scope(|ui| match page {
