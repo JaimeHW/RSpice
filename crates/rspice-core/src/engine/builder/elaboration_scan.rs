@@ -8,13 +8,16 @@
 //! one run: a refusal nothing reaches is exactly the one a formatted string
 //! would slip back into, because no test would ever render it.
 //!
-//! So this scans the seam's own text. Four of the six files are wholly
+//! So this scans the seam's own text. Four of the seven files are wholly
 //! elaboration and may not name the untyped constructors at all. The other
-//! two — the builder, which is mostly other device families, and the mixed
-//! circuit, which is mostly the transient stepper — carry non-elaboration
-//! refusals that legitimately mention Verilog-A, so those are enumerated by
-//! name with the reason each is not an elaboration site. The list is matched
-//! exactly, so removing one is as loud as adding one.
+//! three — the builder, which is mostly other device families; the mixed
+//! circuit, which is mostly the transient stepper; and the trial protocol,
+//! which is nothing but the stepper, because the companion-rule interval
+//! refusal and the static-history stamp are both raised while stepping a
+//! candidate, long after elaboration finished — carry non-elaboration refusals
+//! that legitimately mention Verilog-A, so those are enumerated by name with
+//! the reason each is not an elaboration site. The list is matched exactly, so
+//! removing one is as loud as adding one.
 //!
 //! One site on the seam is deliberately outside all of this: the X-card
 //! fallthrough that no `.VERILOGA` include, generated builtin or subcircuit
@@ -128,6 +131,9 @@ fn the_only_untyped_verilog_a_refusals_left_are_not_elaboration() {
     let mut sites = untyped_seam_sites(include_str!("../builder.rs"));
     sites.extend(untyped_seam_sites(include_str!(
         "../../circuit/mixed_signal.rs"
+    )));
+    sites.extend(untyped_seam_sites(include_str!(
+        "../../circuit/scheduler/trial.rs"
     )));
 
     for site in &sites {
