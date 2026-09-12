@@ -224,7 +224,9 @@ impl Engine {
                     .map_err(SimulationError::from)?;
             }
             if circuit.has_xspice_devices() {
-                circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution);
+                circuit
+                    .stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution)
+                    .map_err(SimulationError::from)?;
             }
             #[cfg(feature = "veriloga")]
             if circuit.has_mixed_signal_hosts() {

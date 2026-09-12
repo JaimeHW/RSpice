@@ -345,7 +345,9 @@ impl Engine {
         }
         if circuit.has_xspice_devices() {
             let zero_solution = vec![0.0; rhs.len()];
-            circuit.stamp_xspice_transient_trial(matrix, rhs, time, 0.0, &zero_solution);
+            circuit
+                .stamp_xspice_transient_trial(matrix, rhs, time, 0.0, &zero_solution)
+                .map_err(SimulationError::from)?;
         }
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {
