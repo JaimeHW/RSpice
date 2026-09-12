@@ -355,22 +355,26 @@ fn diode_cmc_operating_point_agrees_across_routes() {
     diode_cmc_row("V1 in 0 0.8\nR1 in a 1k\nX1 a 0 DIODE_CMC").compare_operating_point();
 }
 
-/// Confirmed real: the two routes walk the *same* time grid — no `tran[n].t`
-/// entry differs — and still disagree on the trajectory, while the operating
-/// point of the same two decks agrees to 1e-12. The divergence opens at the
-/// fourth point and decays: v(a) 1.87345989660413583e-3 generated against
-/// 1.92713544463720093e-3 runtime (2.785e-2 relative) and i(V1)
-/// -6.39811580402103769e-7 against -5.86136032369038741e-7 (8.389e-2) at
-/// point 3, falling to 2.002e-5 on v(a) and 2.390e-3 on i(V1) by point 8, for
-/// 54 differing observations out of 122. A shrinking early-time disagreement
-/// with a common grid is the shape of a different initial reactive state, not
-/// of arithmetic noise.
+/// The two routes walk the same time grid *and* the same trajectory along it.
+///
+/// They did not before `76849f71b`. The grid this row compares is the deck's
+/// `tstep`, but the internal steps behind it were the stepper's, and the
+/// stepper heard from only one of the two routes. A deck whose only reactive
+/// state is a `ddt` operand instantiates none of the native reactive families,
+/// so `ngspice_device_truncation_covers_transient_lte` found every one of them
+/// vacuously controlled and handed the deck's accuracy to the charge rule —
+/// which then walked native charge vectors an authored `ddt` is in none of.
+/// The generated route was nevertheless bounded by
+/// `generated_veriloga_ngspice_truncation_limit`, and the runtime route by
+/// nothing at all, so the same equations were integrated over different step
+/// sequences and reported different values at the same output times: 54 of 122
+/// observations differed, v(a) 1.87345989660413583e-3 generated against
+/// 1.92713544463720093e-3 runtime (2.785e-2) and i(V1)
+/// -6.39811580402103769e-7 against -5.86136032369038741e-7 (8.389e-2) at point
+/// 3, decaying to 2.002e-5 and 2.390e-3 by point 8. Neither lowering's
+/// arithmetic was ever involved, which is why the operating point agreed to
+/// 1e-12 throughout.
 #[test]
-#[ignore = "R4.x-triage: the generated DIODE_CMC and its own .va source \
-            diverge in transient on an identical time grid (54 of 122 \
-            observations; 2.785e-2 on v(a) and 8.389e-2 on i(V1) at point 3, \
-            decaying to 2.390e-3 by point 8) while their operating points \
-            agree to 1e-12"]
 fn diode_cmc_transient_agrees_across_routes() {
     diode_cmc_row("V1 in 0 SIN(0 1 5e7)\nR1 in a 1k\nX1 a 0 DIODE_CMC").compare_transient();
 }
@@ -406,20 +410,17 @@ fn juncap200_operating_point_agrees_across_routes() {
     juncap200_row("V1 in 0 -1.0\nR1 in a 1k\nX1 a 0 JUNCAP200").compare_operating_point();
 }
 
-/// Confirmed real, and the same shape as the DIODE_CMC row above: a second
-/// charge-storing generated family diverges from its own `.va` source in
-/// transient while its operating point agrees to 1e-12, on an identical time
-/// grid, opening at the fourth point and decaying afterwards — 54 differing
-/// observations out of 122, the same count. Two unrelated models failing
-/// identically says the difference belongs to how the generated route carries
-/// initial reactive state, not to either model's equations.
+/// A second charge-storing generated family, held to the same agreement.
+///
+/// It diverged with the DIODE_CMC row above and on exactly the same count —
+/// 54 of 122 observations, 4.625e-2 on v(a) and 8.872e-2 on i(V1) at point 3,
+/// decaying to 2.810e-5 and 2.219e-3 by point 8 — because what went missing
+/// was the deck's step control and not any one model's: nothing in it knew
+/// which module it was failing to bound. The row stays so that the timestep
+/// authority an authored `ddt` operand carries is asserted by two unrelated
+/// models rather than one.
 #[cfg(feature = "veriloga-model-juncap200")]
 #[test]
-#[ignore = "R4.x-triage: the generated JUNCAP200 and its own .va source \
-            diverge in transient on an identical time grid (54 of 122 \
-            observations; 4.625e-2 on v(a) and 8.872e-2 on i(V1) at point 3, \
-            decaying to 2.219e-3 by point 8) while their operating points \
-            agree to 1e-12 — the same shape and count as DIODE_CMC"]
 fn juncap200_transient_agrees_across_routes() {
     juncap200_row("V1 in 0 SIN(0 1 5e7)\nR1 in a 1k\nX1 a 0 JUNCAP200").compare_transient();
 }
