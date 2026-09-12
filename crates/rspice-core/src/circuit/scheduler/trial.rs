@@ -392,7 +392,7 @@ impl Trial<'_> {
             None => *outer_resources,
         };
         let mut participant = XspiceDigitalParticipant::new(
-            &mut **circuit,
+            circuit,
             &bindings,
             solution,
             candidate.time,
@@ -454,7 +454,7 @@ impl Trial<'_> {
         };
         let mut participant = if pass == 0 {
             XspiceDigitalParticipant::new(
-                &mut **circuit,
+                circuit,
                 &bindings,
                 solution,
                 candidate.time,
@@ -466,7 +466,7 @@ impl Trial<'_> {
             )
         } else {
             XspiceDigitalParticipant::resume(
-                &mut **circuit,
+                circuit,
                 &bindings,
                 solution,
                 candidate.time,
@@ -644,7 +644,7 @@ impl Trial<'_> {
             );
         }
         Ok(Prepared {
-            circuit: &mut **circuit,
+            circuit,
             coordinator,
             cursor,
             hosts_active,
