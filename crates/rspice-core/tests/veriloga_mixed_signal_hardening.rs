@@ -1766,3 +1766,465 @@ fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
          branch's analog point"
     );
 }
+
+//=============================================================================
+// Crossing instants
+//=============================================================================
+//
+// **Property 5.** A transition that crosses a domain boundary is dated by the
+// instant it happened, and the three mappings that quantize such an instant
+// are the three `xspice::verilog::mixed` documents — no more, and never one
+// standing in for another.
+//
+// * An A/D crossing interior to an analog step is dated at the interpolated
+//   crossing, which is both what `$abstime` reads in the process it wakes and
+//   what names the tick its event lands on. The endpoint of the step that
+//   discovered it is a different instant and is not either answer.
+// * Two bridges that crossed at two instants are two events at two ticks,
+//   published earliest first. One bank at the latest of their ticks delays the
+//   earlier transition by a whole tick.
+// * A wake from the other event kernel — an XSPICE code model's output — is
+//   dated at the tick *at or after* it, because the reverse direction hands an
+//   HDL tick to XSPICE at exactly the instant that tick names. Nearest-tick
+//   would let a `#1` from the woken process elapse in under one time unit.
+
+/// The threshold every A/D bridge below is declared at: half of the 3.3 V
+/// supply, which is what the deck route gives a boundary net.
+const CROSSING_THRESHOLD: f64 = 1.65;
+
+/// Where a linear ramp from zero volts to `voltage` over `[time - dt, time]`
+/// passes [`CROSSING_THRESHOLD`].
+///
+/// Written as the interpolation the bridge itself performs rather than as a
+/// fraction of the step, so a measured crossing is compared with the
+/// arithmetic that produced it and not with a restatement of it.
+fn analytic_crossing(time: f64, dt: f64, voltage: f64) -> f64 {
+    time - dt * (voltage - CROSSING_THRESHOLD) / voltage
+}
+
+/// The candidate voltage whose ramp crosses the threshold `fraction` of the
+/// way through a step.
+fn ramp_reaching_threshold_at(fraction: f64) -> f64 {
+    CROSSING_THRESHOLD / fraction
+}
+
+/// A module-level `real` read back out of a four-state register.
+///
+/// `$realtobits` is the only exact route from the discrete half's real
+/// arithmetic to something [`MixedSignalHost::read_digital`] can report, and
+/// exactness is the whole point: the quantity under test is a sub-tick instant
+/// and any scaling would round away the difference being measured.
+fn read_real_bits(host: &MixedSignalHost, signal: &str) -> f64 {
+    let spelling = host
+        .read_digital(signal)
+        .unwrap_or_else(|error| panic!("`{signal}` is readable: {error}"));
+    let bits = u64::from_str_radix(&spelling, 2)
+        .unwrap_or_else(|_| panic!("`{signal}` holds `{spelling}`, not a known 64-bit pattern"));
+    f64::from_bits(bits)
+}
+
+/// A module that records the simulation time an A/D crossing woke it at, and
+/// reacts a declared delay later so the tick it was published into is readable
+/// through `next_event_time`.
+const CROSSING_STAMP: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module crossing_stamp(p, n, c, y);
+    inout p, n;
+    electrical p, n;
+    input c;
+    output y;
+    wire c;
+    reg y;
+    reg [63:0] woke;
+    initial begin y = 1'b0; woke = 64'd0; end
+    always @(posedge c) begin
+        woke = $realtobits($abstime);
+        #3 y = ~y;
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// Two independent A/D bridges on one instance, each recording its own wake
+/// instant and reacting one tick later.
+const TWO_CROSSINGS: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module two_crossings(p, n, ca, cb, ya, yb);
+    inout p, n;
+    electrical p, n;
+    input ca, cb;
+    output ya, yb;
+    wire ca, cb;
+    reg ya, yb;
+    reg [63:0] woke_a, woke_b;
+    initial begin
+        ya = 1'b0; yb = 1'b0; woke_a = 64'd0; woke_b = 64'd0;
+    end
+    always @(posedge ca) begin woke_a = $realtobits($abstime); #1 ya = ~ya; end
+    always @(posedge cb) begin woke_b = $realtobits($abstime); #1 yb = ~yb; end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// Drive one standalone host the way a transient stepper without boundary
+/// refinement drives it: accept a point, open the next trial over the whole
+/// interval to it, settle, accept.
+///
+/// Refinement is deliberately absent. `trial_boundary_refinement_time` asks
+/// the engine to re-solve on an interior crossing, which drives the accepted
+/// endpoint onto the crossing and hides the distinction being measured here;
+/// an interval a controller chose for truncation error does not, and that is
+/// the interval a crossing is genuinely interior to.
+struct CrossingDriver {
+    host: MixedSignalHost,
+    accepted: f64,
+    open: f64,
+}
+
+impl CrossingDriver {
+    fn new(host: MixedSignalHost, voltages: &[f64]) -> Self {
+        let mut driver = Self {
+            host,
+            accepted: f64::NEG_INFINITY,
+            open: 0.0,
+        };
+        driver.begin_and_settle(0.0, voltages);
+        driver.accept();
+        driver
+    }
+
+    fn begin_and_settle(&mut self, time: f64, voltages: &[f64]) {
+        let first = !self.accepted.is_finite();
+        let dt = if first { 0.0 } else { time - self.accepted };
+        self.open = time;
+        self.host
+            .begin_trial(time, dt, IntegrationCoefficients::inactive(), first, false)
+            .unwrap_or_else(|error| panic!("a trial at {time:e} s begins: {error}"));
+        while self
+            .host
+            .settle_analog_bridges(voltages)
+            .unwrap_or_else(|error| panic!("the bridges settle at {time:e} s: {error}"))
+        {}
+    }
+
+    fn accept(&mut self) {
+        let time = self.open;
+        self.host
+            .accept_trial()
+            .unwrap_or_else(|error| panic!("a quiet trial at {time:e} s commits: {error}"));
+        self.accepted = time;
+    }
+
+    fn step_to(&mut self, time: f64, voltages: &[f64]) {
+        self.begin_and_settle(time, voltages);
+        self.accept();
+    }
+
+    fn next_event(&self) -> f64 {
+        self.host
+            .next_event_time()
+            .expect("the schedule is readable")
+            .expect("a published boundary change schedules the module's reaction")
+    }
+
+    fn scheduled(&self) -> Option<f64> {
+        self.host
+            .next_event_time()
+            .expect("the schedule is readable")
+    }
+}
+
+/// **Property 5, case a.** `$abstime` inside a process woken by an A/D
+/// crossing is the crossing, not the endpoint of the step that found it.
+///
+/// The ramp is linear and starts at the accepted point, so the crossing has a
+/// closed form and the module's own reading of it can be compared with
+/// arithmetic rather than with a recorded trace. Two fractions are measured
+/// because the tick the transition is published into is the *nearest* one to
+/// the crossing and the two fractions fall either side of a half tick: at 0.4
+/// of a tick past the accepted point the crossing rounds back onto the trial's
+/// own tick, at 0.8 it rounds forward onto the next one. `$abstime` is the
+/// same quantity in both, and `$realtime` follows it rather than the endpoint.
+#[test]
+fn an_a_d_woken_process_reads_the_crossing_as_its_absolute_time() {
+    /// The module waits this many ticks after the crossing that woke it.
+    const REACTION: u64 = 3;
+    const START: f64 = 10.0e-9;
+    const STEP: f64 = 0.9e-9;
+
+    for fraction in [0.4 / 0.9, 0.8 / 0.9] {
+        let mut host = MixedSignalHost::compile(
+            CROSSING_STAMP,
+            None,
+            "xstamp",
+            &[1, 0],
+            SchedulerLimits::default(),
+        )
+        .expect("the crossing-stamp module compiles");
+        host.add_adc_bridge("c", 0, (2, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+            .expect("the A/D bridge is declarable");
+
+        let mut driver = CrossingDriver::new(host, &[0.0, 0.0]);
+        driver.step_to(START, &[0.0, 0.0]);
+
+        let candidate = START + STEP;
+        let voltage = ramp_reaching_threshold_at(fraction);
+        driver.begin_and_settle(candidate, &[0.0, voltage]);
+
+        let expected = analytic_crossing(candidate, STEP, voltage);
+        let woke = read_real_bits(&driver.host, "woke");
+        assert!(
+            (woke - expected).abs() <= 1.0e-21,
+            "a process woken by the crossing at {expected:.16e} s read $abstime \
+             {woke:.16e} s (the step ran from {START:.16e} s to {candidate:.16e} s)"
+        );
+
+        // The tick the transition was published into, recovered through the
+        // reaction delay: the process waits REACTION ticks after the change.
+        driver.accept();
+        let published = floor_ticks(driver.next_event()) - REACTION;
+        let nearest = (expected / tick_seconds()).round() as u64;
+        assert_eq!(
+            published,
+            nearest.max(floor_ticks(candidate)),
+            "the crossing at {expected:.16e} s belongs to tick {nearest}, and $realtime \
+             must name it rather than the endpoint's tick {}",
+            floor_ticks(candidate)
+        );
+    }
+}
+
+/// **Property 5, case b.** Two bridges that crossed at two instants inside one
+/// step publish at two ticks, earliest first.
+///
+/// The crossings are placed 0.4 and 0.6 of a tick past the accepted point, so
+/// they round to two different ticks, and the step ends before the next tick
+/// so neither is clamped forward onto the endpoint's. Each reaction is a
+/// single tick, which turns the two publication ticks into two activations the
+/// driver can land on separately: one process flips at the first, the other
+/// only at the second.
+#[test]
+fn two_crossings_in_one_step_publish_at_their_own_ticks_in_order() {
+    const START: f64 = 10.0e-9;
+    const STEP: f64 = 0.9e-9;
+
+    let mut host = MixedSignalHost::compile(
+        TWO_CROSSINGS,
+        None,
+        "xpair",
+        &[1, 0],
+        SchedulerLimits::default(),
+    )
+    .expect("the two-crossing module compiles");
+    host.add_adc_bridge("ca", 0, (2, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the first A/D bridge is declarable");
+    host.add_adc_bridge("cb", 0, (3, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the second A/D bridge is declarable");
+
+    let quiet = [0.0, 0.0, 0.0];
+    let mut driver = CrossingDriver::new(host, &quiet);
+    driver.step_to(START, &quiet);
+
+    let candidate = START + STEP;
+    let early = ramp_reaching_threshold_at(0.4 / 0.9);
+    let late = ramp_reaching_threshold_at(0.6 / 0.9);
+    let high = [0.0, early, late];
+    driver.begin_and_settle(candidate, &high);
+
+    let expected_early = analytic_crossing(candidate, STEP, early);
+    let expected_late = analytic_crossing(candidate, STEP, late);
+    for (signal, expected) in [("woke_a", expected_early), ("woke_b", expected_late)] {
+        let woke = read_real_bits(&driver.host, signal);
+        assert!(
+            (woke - expected).abs() <= 1.0e-21,
+            "`{signal}` must read its own crossing {expected:.16e} s, read {woke:.16e} s"
+        );
+    }
+    assert!(
+        expected_early < expected_late,
+        "the fixture must place one crossing before the other: {expected_early:.16e} s \
+         against {expected_late:.16e} s"
+    );
+    driver.accept();
+
+    let first = driver.next_event();
+    assert_eq!(
+        first.to_bits(),
+        tick_to_seconds((expected_early / tick_seconds()).round() as u64 + 1).to_bits(),
+        "the earlier crossing's reaction is one tick after its own tick, saw {first:.16e} s"
+    );
+    driver.step_to(first, &high);
+    assert_eq!(
+        driver
+            .host
+            .read_digital("ya")
+            .expect("the first reaction is readable"),
+        "1",
+        "the earlier crossing must have published and woken its own process first"
+    );
+    assert_eq!(
+        driver
+            .host
+            .read_digital("yb")
+            .expect("the second reaction is readable"),
+        "0",
+        "the later crossing must not have been dragged onto the earlier one's tick"
+    );
+
+    let second = driver.scheduled().unwrap_or_else(|| {
+        panic!("the later crossing owes an activation of its own after {first:.16e} s")
+    });
+    assert_eq!(
+        second.to_bits(),
+        tick_to_seconds((expected_late / tick_seconds()).round() as u64 + 1).to_bits(),
+        "the later crossing's reaction is one tick after *its* tick, saw {second:.16e} s"
+    );
+    driver.step_to(second, &high);
+    assert_eq!(
+        driver
+            .host
+            .read_digital("yb")
+            .expect("the second reaction is readable"),
+        "1",
+        "the later crossing must still reach its own process"
+    );
+}
+
+/// A five-nanosecond HDL clock, declared in nanoseconds.
+const CEIL_CLOCK: &str = r#"
+`timescale 1ns/1ps
+module ceil_clock(clk); output clk; reg clk; initial clk=0; always #5 clk=~clk; endmodule
+"#;
+
+/// A divider whose unit is one tick, so its `#1` is one tick after whatever
+/// tick the code model's output was dated at.
+const CEIL_DIVIDER: &str = r#"
+`timescale 1ps/1ps
+module ceil_divider(fromx, q);
+ input fromx; wire fromx;
+ output q; reg q;
+ initial q = 1'b0;
+ always @(posedge fromx) #1 q = ~q;
+endmodule
+"#;
+
+/// The picosecond grid the deck below runs on, from the resolution rather than
+/// written out.
+fn picosecond_tick() -> f64 {
+    TimeResolution::new(-12)
+        .expect("a picosecond resolution is declarable")
+        .seconds_per_tick()
+}
+
+/// The least tick of that grid whose own instant is not before `seconds`.
+fn ceil_picosecond_ticks(seconds: f64) -> u64 {
+    let scale = picosecond_tick();
+    let mut ticks = (seconds / scale).ceil() as u64;
+    while ticks > 0 && ((ticks - 1) as f64) * scale >= seconds {
+        ticks -= 1;
+    }
+    while (ticks as f64) * scale < seconds {
+        ticks += 1;
+    }
+    ticks
+}
+
+/// **Property 5, case c.** A process woken by an XSPICE code model off the
+/// tick grid is dated at the tick at or after the wake, so a `#1` from it
+/// takes at least one whole time unit.
+///
+/// The deck is the E2 shape: an HDL clock drives a `d_inverter` whose delay is
+/// 100.4 ps — four tenths of a tick, in the half that rounds *down* — and the
+/// inverter's output drives an HDL divider whose reaction is a single tick.
+///
+/// Both directions of the boundary are asserted, because the rule is one rule
+/// and the halves only mean something together. The HDL-to-XSPICE direction is
+/// exact: a clock edge on tick `T` reaches the code model at precisely the
+/// instant `T` names, which is why the inverter's output lands on a whole
+/// clock edge plus the declared delay and not on a quantized approximation of
+/// it. The XSPICE-to-HDL direction is that map's inverse, which is the least
+/// tick not before the instant. Dating the wake at the *nearest* tick instead
+/// puts `$realtime` 0.4 ps before the wake actually happened, and the `#1`
+/// then fires 0.6 ps after it — less than the one time unit it asked for.
+#[test]
+fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
+    /// The code model's declared propagation delay.
+    const DELAY: f64 = 100.4e-12;
+    const PERIOD: f64 = 5.0e-9;
+
+    let clock = ModelFile::new("ceil_clock", CEIL_CLOCK);
+    let divider = ModelFile::new("ceil_divider", CEIL_DIVIDER);
+    let deck = format!(
+        "* an off-grid code-model wake dated onto the HDL tick grid\n\
+         Xclock clk ceil_clock\n\
+         Ainv clk fromx inverter\n\
+         .model inverter d_inverter (rise_delay=100.4p fall_delay=100.4p)\n\
+         Xdivider fromx qdiv ceil_divider\n\
+         R1 qdiv out 1k\nC1 out 0 10p\n\
+         .va \"{}\" ceil_clock\n.va \"{}\" ceil_divider\n.end\n",
+        clock.deck_path(),
+        divider.deck_path()
+    );
+    let result = run(&deck, 41.0e-9, 1.0e-9);
+
+    // The HDL-to-XSPICE half: every clock edge reaches the model at the exact
+    // instant its tick names, so every inverter output edge is one of those
+    // instants plus the declared delay.
+    let clk = digital_points(&result, "clk");
+    let fromx = digital_points(&result, "fromx");
+    assert!(clk.len() >= 8, "the clock must run: {clk:?}");
+    for (index, (time, _)) in clk.iter().enumerate().skip(1) {
+        let expected = index as f64 * PERIOD;
+        assert!(
+            (time - expected).abs() < 2.0e-20,
+            "clock edge {index} must land on its own tick, {time:.16e} s against \
+             {expected:.16e} s"
+        );
+    }
+    for (index, (time, _)) in fromx.iter().enumerate().skip(1) {
+        let expected = index as f64 * PERIOD + DELAY;
+        assert!(
+            (time - expected).abs() < 2.0e-20,
+            "code-model edge {index} must land a whole declared delay after an exact \
+             clock tick, {time:.16e} s against {expected:.16e} s"
+        );
+    }
+
+    // The XSPICE-to-HDL half: each rising output edge wakes the divider, and
+    // its `#1` lands one tick after the tick that wake was dated at. The
+    // inverter's own initial level is one of those edges — the model reports it
+    // at time zero, which is on the grid, and the divider reacts to it — so it
+    // is counted here even though the timing loop above skipped it.
+    let rising: Vec<f64> = fromx
+        .iter()
+        .filter(|(_, state)| state.as_str() == "One")
+        .map(|(time, _)| *time)
+        .collect();
+    let reactions = digital_points(&result, "qdiv");
+    assert!(
+        rising.len() >= 3,
+        "the fixture needs several code-model wakes: {fromx:?}"
+    );
+    assert_eq!(
+        reactions.len(),
+        rising.len() + 1,
+        "one reaction per wake, plus the initial level: {reactions:?} against {rising:?}"
+    );
+    for (index, (wake, (reaction, _))) in rising.iter().zip(reactions.iter().skip(1)).enumerate() {
+        let dated = ceil_picosecond_ticks(*wake);
+        let expected = (dated + 1) as f64 * picosecond_tick();
+        assert!(
+            (reaction - expected).abs() < 2.0e-20,
+            "reaction {index} to a wake at {wake:.16e} s must fire one tick after tick \
+             {dated}, at {expected:.16e} s, saw {reaction:.16e} s"
+        );
+        assert!(
+            reaction - wake >= picosecond_tick(),
+            "reaction {index} took {:.16e} s after a wake at {wake:.16e} s, which is less \
+             than the one time unit its `#1` asked for",
+            reaction - wake
+        );
+    }
+}
