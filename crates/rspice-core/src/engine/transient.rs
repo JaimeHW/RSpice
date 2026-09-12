@@ -208,8 +208,10 @@ fn canonical_transient_step_time_with_device_event(
 
 fn accepted_veriloga_event_time(
     circuit: &crate::circuit::CircuitData,
+    floor_grid: &mut FloorLandingGrid,
     accepted_time: Value,
     hard_min_dt: Value,
+    stop_time: Value,
 ) -> Result<Option<Value>, SimulationError> {
     let mut target = circuit
         .veriloga_transient_event_time(accepted_time)
@@ -240,14 +242,9 @@ fn accepted_veriloga_event_time(
     // same `>= hard_min_dt` test its missed-breakpoint guard applies. One
     // closer than that has no analog instant between the accepted point and
     // it: the module coalesces it onto the next timepoint and never reports it
-    // as missed, so a landing target for it would buy nothing — and it would
-    // cost, because landing a sub-minimum target means marching at the floor
-    // through times that are `accepted + hard_min` nudged up to survive
-    // subtraction. Over the ten thousand points a femtosecond schedule takes
-    // to cross a decade those nudges accumulate thousands of ulps, and the
-    // last interval to `tstop` ends up a hair under the integration floor,
-    // which `breakpoints::fit_model_interval` refuses as an unreachable
-    // mandatory time.
+    // as missed, so a landing target for it would buy nothing — it would only
+    // spend accepted points marching at the floor on a schedule the module is
+    // already coalescing for itself.
     #[cfg(feature = "veriloga")]
     if let Some(event) = circuit.next_mixed_event_time()?
         && event - accepted_time >= hard_min_dt
@@ -258,10 +255,41 @@ fn accepted_veriloga_event_time(
         return Ok(None);
     };
     Ok(Some(landed_veriloga_event_time(
+        floor_grid,
         target,
         accepted_time,
         hard_min_dt,
+        stop_time,
     )?))
+}
+
+/// One run of consecutive landings on the solver's floor.
+///
+/// See [`landed_veriloga_event_time`] for why a run of them is a grid rather
+/// than a chain.
+#[derive(Clone, Copy)]
+struct FloorMarch {
+    /// The accepted time this run started from, and the floor that spaces it.
+    /// A floor that moves — Xyce derives its own from the clock — starts a new
+    /// run, because the old grid no longer describes the points ahead of it.
+    origin: Value,
+    hard_min_dt: Value,
+    /// How many floor steps from `origin` the latest landing stands.
+    steps: Value,
+    /// The accepted time that landing was computed from, and the time it
+    /// produced. Asking the same question again answers it the same way — the
+    /// re-landing after a moved floor, and the refinement path, both ask twice
+    /// about one accepted point — while asking from its own answer is the run
+    /// continuing, and advances the grid by one step.
+    accepted: Value,
+    landed: Value,
+}
+
+/// The floor grid the current run of landings walks, carried across accepted
+/// points by the transient loop.
+#[derive(Clone, Copy, Default)]
+struct FloorLandingGrid {
+    march: Option<FloorMarch>,
 }
 
 /// The analog time a scheduled Verilog-A/AMS or shared code-model event lands
@@ -280,19 +308,59 @@ fn accepted_veriloga_event_time(
 /// schedule finer than the analog resolution, and ordering survives because
 /// the discrete queue is drained in tick order while the analog side advances.
 ///
-/// The landed time is nudged up until it is at least one hard minimum after
-/// the accepted time *as measured by subtraction*: `accepted + hard_min` can
-/// round down, and every downstream comparison re-derives the interval that
-/// way.
+/// # A run of landings is a grid, not a chain
+///
+/// A schedule finer than the floor has another activation waiting at every one
+/// of the points it lands on, so the accepted points march at the floor for as
+/// long as it keeps asking. Deriving each landing from the point before it, and
+/// nudging it up until the difference measures at least one floor *by
+/// subtraction*, rounds once per landing and always in the same direction. Two
+/// things come of that bias, and both end the run over an interval that looks
+/// exactly like the floor it is said not to satisfy:
+///
+/// - the nudge puts the landing a couple of ulps *beyond* one floor, and a
+///   module whose own `$bound_step` pins the solver's candidate maximum at the
+///   floor has no step that reaches it — one is an ulp short and two overshoot
+///   by a whole floor. A re-arming femtosecond timer is refused at its third
+///   landing;
+/// - over the ten thousand floor points a femtosecond schedule takes to cross
+///   a decade the nudges accumulate thousands of ulps, so the last interval to
+///   a round `tstop` ends a hair *under* the floor, which
+///   [`breakpoints::fit_model_interval`] refuses as an unreachable mandatory
+///   time.
+///
+/// Both are the chain rather than the rounding, so consecutive landings are
+/// points on one grid instead: `origin + k * hard_min`, where `origin` is the
+/// accepted time the run started from and `k` counts the landings since. Each
+/// carries the single rounding of its own multiply-add and none of its
+/// predecessors', so a run of any length stays within an ulp of the grid it
+/// started on, and a round `tstop` stays reachable from it.
+///
+/// Nothing is nudged, in either direction. The interval between two
+/// neighbouring grid points measures a hair either side of `hard_min`, and both
+/// sides are what [`breakpoints::fit_model_interval`] fits at the floor by the
+/// rule it documents for a mandatory time one floor away. Paying that is not
+/// optional: requiring every landing to clear the floor by subtraction forces
+/// the k-th one to be at least `origin + k * hard_min` *plus* one round-up per
+/// step, which is the drift itself.
+///
+/// A landing that would leave less than one floor before `stop_time` lands on
+/// `stop_time`. The sliver it would otherwise leave behind is an interval the
+/// solver cannot take, and the horizon is then refused as a mandatory time the
+/// run cannot integrate to — over a gap the landing itself created. The horizon
+/// is at or after the event, which is all the schedule is owed. Pass an
+/// infinite `stop_time` where there is no horizon to respect.
 ///
 /// The only refusal left is a hard minimum that is not a usable interval,
 /// because there is then no instant to land on. A non-finite or
 /// non-strictly-later target is refused upstream, by the device that produced
 /// it, where the diagnostic can name the instance.
 fn landed_veriloga_event_time(
+    floor_grid: &mut FloorLandingGrid,
     target: Value,
     accepted_time: Value,
     hard_min_dt: Value,
+    stop_time: Value,
 ) -> Result<Value, SimulationError> {
     if !hard_min_dt.is_finite() || hard_min_dt <= 0.0 {
         return Err(SimulationError::Circuit(format!(
@@ -302,15 +370,52 @@ fn landed_veriloga_event_time(
     if target - accepted_time >= hard_min_dt {
         return Ok(target);
     }
-    let mut landed = accepted_time + hard_min_dt;
-    // At most a couple of ulps: `accepted + hard_min` rounds by at most half an
-    // ulp of the sum, and one step up recovers a difference that rounded short.
-    for _ in 0..4 {
-        if landed - accepted_time >= hard_min_dt {
-            break;
-        }
-        landed = landed.next_up();
+    let resumed = floor_grid
+        .march
+        .filter(|march| march.hard_min_dt == hard_min_dt)
+        .and_then(|march| {
+            if accepted_time == march.accepted {
+                Some((march.origin, march.steps))
+            } else if accepted_time == march.landed {
+                Some((march.origin, march.steps + 1.0))
+            } else {
+                None
+            }
+        })
+        .and_then(|(origin, steps)| {
+            let landed = origin + steps * hard_min_dt;
+            // The grid has to still describe this point: one floor step away
+            // from the accepted time, give or take the rounding of the two grid
+            // points either side of it. A grid that no longer does — `steps`
+            // beyond the precision of the clock it is added to — is abandoned
+            // rather than trusted.
+            (landed.is_finite()
+                && landed > accepted_time
+                && landed - accepted_time <= 2.0 * hard_min_dt)
+                .then_some((origin, steps, landed))
+        });
+    let (origin, steps, mut landed) = resumed.unwrap_or_else(|| {
+        let landed = accepted_time + hard_min_dt;
+        // A floor smaller than an ulp of the clock rounds straight back to the
+        // accepted time, and one step up is then the only strictly later
+        // instant there is to land on.
+        let landed = if landed > accepted_time {
+            landed
+        } else {
+            accepted_time.next_up()
+        };
+        (accepted_time, 1.0, landed)
+    });
+    if landed < stop_time && stop_time - landed < hard_min_dt {
+        landed = stop_time;
     }
+    floor_grid.march = Some(FloorMarch {
+        origin,
+        hard_min_dt,
+        steps,
+        accepted: accepted_time,
+        landed,
+    });
     Ok(landed)
 }
 
@@ -352,9 +457,9 @@ const SUB_MINIMUM_ACTIVATION_REFUSE: usize = SUB_MINIMUM_ACTIVATION_REPORT * 16;
 
 /// Whether an accepted interval is one the solver cannot subdivide.
 ///
-/// [`landed_veriloga_event_time`] nudges its landing up by at most a couple of
-/// ulps and a snapped breakpoint can sit a rounding step either side of the
-/// floor, so the comparison carries a relative slack — far tighter than the
+/// [`landed_veriloga_event_time`] lands on a floor grid whose points sit a
+/// rounding step either side of the floor, and a snapped breakpoint does the
+/// same, so the comparison carries a relative slack — far tighter than the
 /// next interval of any schedule that is making progress, which is what keeps
 /// a merely dense cadence out of the count.
 fn interval_is_within_solver_floor(interval: Value, hard_min_dt: Value) -> bool {
@@ -4538,6 +4643,10 @@ impl Engine {
         // It is reconstructed from t=0/checkpoint state below and replaced
         // only after another atomic Verilog-A acceptance.
         let mut pending_veriloga_event_time: Option<Value> = None;
+        // The floor grid the current run of sub-minimum landings walks. It
+        // belongs to the run rather than to any one point, which is what keeps
+        // a march at the minimum from drifting off the grid it started on.
+        let mut veriloga_floor_grid = FloorLandingGrid::default();
         let mut dynamic_tline_breakpoints_added = resume
             .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
             .unwrap_or(0);
@@ -4821,8 +4930,13 @@ impl Engine {
                     )?;
                 }
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
-                pending_veriloga_event_time =
-                    accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
+                pending_veriloga_event_time = accepted_veriloga_event_time(
+                    &circuit,
+                    &mut veriloga_floor_grid,
+                    resume_time,
+                    timestep.hard_min_dt(),
+                    tstop,
+                )?;
                 if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
@@ -5229,8 +5343,13 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
-            pending_veriloga_event_time =
-                accepted_veriloga_event_time(&circuit, resume_time, timestep.hard_min_dt())?;
+            pending_veriloga_event_time = accepted_veriloga_event_time(
+                &circuit,
+                &mut veriloga_floor_grid,
+                resume_time,
+                timestep.hard_min_dt(),
+                tstop,
+            )?;
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
@@ -6099,9 +6218,11 @@ impl Engine {
                 // `landed_veriloga_event_time` documents.
                 if event_dt < timestep.hard_min_dt() {
                     pending_veriloga_event_time = Some(landed_veriloga_event_time(
+                        &mut veriloga_floor_grid,
                         target,
                         t,
                         timestep.hard_min_dt(),
+                        tstop,
                     )?);
                 }
             }
@@ -6671,8 +6792,13 @@ impl Engine {
                             && target < $candidate_time
                             && target - t < timestep.hard_min_dt()
                         {
-                            let landed =
-                                landed_veriloga_event_time(target, t, timestep.hard_min_dt())?;
+                            let landed = landed_veriloga_event_time(
+                                &mut veriloga_floor_grid,
+                                target,
+                                t,
+                                timestep.hard_min_dt(),
+                            tstop,
+                            )?;
                             refinement = (landed < $candidate_time).then_some(landed);
                         }
                         if let Some(target) = refinement {
@@ -9456,8 +9582,13 @@ impl Engine {
                         breakpoints.mark_external_breakpoint_solved(t, interrupted)
                     });
                     hit_breakpoint |= veriloga_discontinuity;
-                    pending_veriloga_event_time =
-                        accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
+                    pending_veriloga_event_time = accepted_veriloga_event_time(
+                        &circuit,
+                        &mut veriloga_floor_grid,
+                        t,
+                        timestep.hard_min_dt(),
+                        tstop,
+                    )?;
                     if analysis_final_step {
                         Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
                     }
@@ -9929,8 +10060,13 @@ impl Engine {
             if has_external_models {
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
             }
-            pending_veriloga_event_time =
-                accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
+            pending_veriloga_event_time = accepted_veriloga_event_time(
+                &circuit,
+                &mut veriloga_floor_grid,
+                t,
+                timestep.hard_min_dt(),
+                tstop,
+            )?;
             if analysis_final_step {
                 Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
             }
@@ -11479,39 +11615,223 @@ mod tests {
 
     #[test]
     fn veriloga_events_below_the_hard_minimum_land_on_the_earliest_reachable_time() {
+        const NO_HORIZON: Value = Value::INFINITY;
+        let grid = &mut FloorLandingGrid::default();
         assert_eq!(
-            landed_veriloga_event_time(1.25, 1.0, 0.25)
+            landed_veriloga_event_time(grid, 1.25, 1.0, 0.25, NO_HORIZON)
                 .expect("an event exactly at the hard minimum is schedulable"),
             1.25,
             "an event the solver can reach keeps its own exact time"
         );
 
-        let landed = landed_veriloga_event_time(1.25, 1.0, 0.250_000_000_000_000_1)
-            .expect("an event below the hard minimum lands rather than ending the run");
+        let landed =
+            landed_veriloga_event_time(grid, 1.25, 1.0, 0.250_000_000_000_000_1, NO_HORIZON)
+                .expect("an event below the hard minimum lands rather than ending the run");
         assert!(
-            landed - 1.0 >= 0.250_000_000_000_000_1,
-            "the landed time must be a reachable step from the accepted time, saw {landed}"
+            landed >= 1.25,
+            "the landing may not precede the event it stands in for, saw {landed}"
         );
         assert!(
-            landed > 1.25,
-            "the landing may not precede the event it stands in for, saw {landed}"
+            (landed - 1.0 - 0.250_000_000_000_000_1).abs() <= 4.0 * (landed.next_up() - landed),
+            "the landed time must be one floor from the accepted time, saw {landed}"
         );
 
         // The clock scale this actually arises at: a femtosecond of digital
         // time after a hundred microseconds of analog time, against ngspice's
         // ten-femtosecond floor for a millisecond maximum step.
         let accepted = 1.005e-4;
-        let landed = landed_veriloga_event_time(accepted + 1.0e-15, accepted, 1.0e-14)
-            .expect("a femtosecond follow-up lands");
+        let landed =
+            landed_veriloga_event_time(grid, accepted + 1.0e-15, accepted, 1.0e-14, NO_HORIZON)
+                .expect("a femtosecond follow-up lands");
         assert!(
-            landed - accepted >= 1.0e-14,
-            "the landed time must clear the floor by subtraction, saw {:e}",
+            (landed - accepted - 1.0e-14).abs() <= 4.0 * (landed.next_up() - landed),
+            "the landed time must be one floor from the accepted time, saw {:e}",
             landed - accepted
         );
 
-        let error = landed_veriloga_event_time(1.25, 1.0, Value::NAN)
+        // A landing that would leave a sliver before the horizon lands on it:
+        // the interval it would leave behind is one the solver cannot take.
+        let horizon = accepted + 1.5e-14;
+        assert_eq!(
+            landed_veriloga_event_time(
+                &mut FloorLandingGrid::default(),
+                accepted + 1.0e-15,
+                accepted,
+                1.0e-14,
+                horizon,
+            )
+            .expect("a femtosecond follow-up lands"),
+            horizon,
+            "a landing half a floor short of the horizon is the horizon"
+        );
+
+        let error = landed_veriloga_event_time(grid, 1.25, 1.0, Value::NAN, NO_HORIZON)
             .expect_err("an unusable hard minimum has no instant to land on");
         assert!(error.to_string().contains("invalid solver hard minimum"));
+    }
+
+    /// Ten thousand consecutive floor landings leave a round `tstop` reachable.
+    ///
+    /// The schedule here is the one the landing contract exists for: a module
+    /// asking for another activation a femtosecond after every point the solver
+    /// lands on, under ngspice's ten-femtosecond floor for a millisecond
+    /// maximum step. Ten thousand of those cross a decade, which is exactly the
+    /// distance from the origin to `tstop` in this fixture.
+    ///
+    /// Both rules are marched side by side. Chaining each landing onto the
+    /// previous one — `accepted + hard_min` nudged up until the difference
+    /// measures a floor — rounds upwards once per point, and that shows up at
+    /// both ends of the run: the *third* landing already sits a couple of ulps
+    /// beyond one floor, which a bound pinned at the floor has no step to
+    /// reach, and after ten thousand the drift has put the last interval to
+    /// `tstop` under the floor. Both end the run at `fit_model_interval` over
+    /// an interval that looks exactly like the floor it is said not to satisfy.
+    /// The grid rule derives every landing from the origin instead, so the
+    /// residual is zero by construction and both intervals fit.
+    #[test]
+    fn a_long_run_of_floor_landings_leaves_a_round_stop_time_reachable() {
+        const HARD_MIN: Value = 1.0e-14;
+        const TMAX: Value = 1.0e-3;
+        const TSTOP: Value = 1.0e-10;
+        const LANDINGS: usize = 9_999;
+        const NO_HORIZON: Value = Value::INFINITY;
+
+        // The rule the grid replaces, kept here because it is the reproduction:
+        // `accepted + hard_min`, nudged up until the difference measures at
+        // least one floor.
+        let chain = |accepted: Value| {
+            let mut landed = accepted + HARD_MIN;
+            for _ in 0..4 {
+                if landed - accepted >= HARD_MIN {
+                    break;
+                }
+                landed = landed.next_up();
+            }
+            landed
+        };
+        // What the stop-time rule absorbs: the accumulated addition error it
+        // already forgives a canonical horizon.
+        let roundoff = 64.0 * Value::EPSILON * TSTOP;
+        let fit_stop = |from: Value| {
+            super::breakpoints::fit_model_interval(
+                from, TSTOP, HARD_MIN, HARD_MIN, TMAX, TMAX, true,
+            )
+        };
+        // The same fit for a scheduled event, against a model bound that is the
+        // floor itself.
+        let fit_event = |from: Value, to: Value| {
+            super::breakpoints::fit_model_interval(
+                from, to, HARD_MIN, HARD_MIN, TMAX, HARD_MIN, false,
+            )
+        };
+
+        let grid = &mut FloorLandingGrid::default();
+        let mut on_grid = 0.0;
+        let mut chained = 0.0;
+        let mut third = (0.0, 0.0, 0.0);
+        for landing in 1..=LANDINGS {
+            let (previous_grid, previous_chain) = (on_grid, chained);
+            // Every point's schedule asks for a target no analog instant
+            // separates from it.
+            on_grid =
+                landed_veriloga_event_time(grid, on_grid + 1.0e-15, on_grid, HARD_MIN, NO_HORIZON)
+                    .expect("a sub-minimum target lands");
+            chained = chain(chained);
+            if landing == 3 {
+                third = (previous_grid, on_grid, previous_chain);
+            }
+            if landing % 1_000 == 0 {
+                let ideal = landing as Value * HARD_MIN;
+                let ulp = ideal.next_up() - ideal;
+                println!(
+                    "after {landing:5} floor landings: on the grid t={on_grid:.17e}s \
+                     (residual {:+.3e}s = {:+.1} ulps), chained t={chained:.17e}s \
+                     (residual {:+.3e}s = {:+.1} ulps)",
+                    on_grid - ideal,
+                    (on_grid - ideal) / ulp,
+                    chained - ideal,
+                    (chained - ideal) / ulp,
+                );
+            }
+        }
+
+        // The near end of the reproduction: the third landing. The nudge puts it
+        // strictly beyond one floor, which is the interval a bound pinned at the
+        // floor has no step to reach, and it is why a re-arming femtosecond
+        // timer used to be refused three points into the analysis.
+        let (third_from, third_grid, third_chain_from) = third;
+        let third_chain = chain(third_chain_from);
+        println!(
+            "third landing from t={third_chain_from:.17e}s: nudged to {third_chain:.17e}s \
+             (interval {:.17e}s), on the grid {third_grid:.17e}s (interval {:.17e}s)",
+            third_chain - third_chain_from,
+            third_grid - third_from
+        );
+        assert!(
+            third_chain - third_chain_from > HARD_MIN,
+            "the nudge must land beyond one floor, which is what the bound cannot reach"
+        );
+        for (from, to, what) in [
+            (third_from, third_grid, "the grid landing"),
+            (third_chain_from, third_chain, "the nudged landing"),
+        ] {
+            let dt = fit_event(from, to)
+                .unwrap_or_else(|error| panic!("{what} must be one step from its point: {error}"));
+            assert!(
+                (dt - HARD_MIN).abs() <= HARD_MIN * 1.0e-9,
+                "{what} is one floor away, saw {dt:.17e}s"
+            );
+        }
+        // The tolerance is the grid's own rounding and nothing wider: an
+        // interval the bound genuinely cannot take still refuses.
+        assert!(
+            fit_event(third_from, third_from + 1.5 * HARD_MIN).is_err(),
+            "an interval half a floor past the bound is not a rounding of it"
+        );
+
+        // The far end: the drift is what puts the last interval under the floor.
+        let ideal = LANDINGS as Value * HARD_MIN;
+        let ulp = ideal.next_up() - ideal;
+        assert!(
+            chained - ideal > roundoff,
+            "chaining each landing onto the last must drift past what the stop-time rule \
+             forgives ({roundoff:.3e}s), saw {:+.3e}s ({:+.1} ulps)",
+            chained - ideal,
+            (chained - ideal) / ulp
+        );
+        let refusal = fit_stop(chained)
+            .expect_err("the drifted march must leave the stop time unreachable")
+            .to_string();
+        println!("chained march at the stop time: {refusal}");
+        assert!(
+            refusal.contains("cannot integrate to mandatory time")
+                && refusal.contains("cannot satisfy model minimum"),
+            "the drift must surface as the unreachable-mandatory-time refusal, saw {refusal}"
+        );
+
+        // The grid is the fix: every landing is `origin + k * hard_min` from
+        // the one origin, so there is no residual to accumulate at all.
+        assert_eq!(
+            on_grid, ideal,
+            "a landing must be the k-th point of the grid its run started on"
+        );
+        let dt = fit_stop(on_grid).expect("the stop time stays reachable from the grid");
+        assert!(
+            (dt - HARD_MIN).abs() <= HARD_MIN * 1.0e-9,
+            "the last interval is the floor itself, saw {dt:.17e}s"
+        );
+
+        // The re-landing after a moved floor, and the refinement path, both ask
+        // twice about one accepted point. Asking again may not advance the run.
+        let again =
+            landed_veriloga_event_time(grid, on_grid + 1.0e-15, on_grid, HARD_MIN, NO_HORIZON)
+                .expect("a sub-minimum target lands");
+        let repeated = landed_veriloga_event_time(grid, again, on_grid, HARD_MIN, NO_HORIZON)
+            .expect("re-landing an already landed target is the same question");
+        assert_eq!(
+            again, repeated,
+            "one accepted point has one landing, however many callers ask for it"
+        );
     }
 
     /// The sub-minimum activation count is a run of *consecutive* points, and
