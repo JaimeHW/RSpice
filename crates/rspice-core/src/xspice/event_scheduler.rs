@@ -1106,6 +1106,18 @@ impl EventScheduler {
         }
     }
 
+    /// [`Self::next_tick_target`], resolved to the driver's own identity.
+    ///
+    /// The interned id is an index into this scheduler's table and means
+    /// nothing outside it; the instance name is what a diagnostic prints. A
+    /// caller that has no target table of its own — the XSPICE queue, whose
+    /// drivers *are* code-model instances — asks for the name directly.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn next_tick_instance(&self) -> Option<(u64, &str)> {
+        let (tick, target) = self.next_tick_target()?;
+        Some((tick, self.queues.target(target).instance.as_str()))
+    }
+
     /// Number of events not yet executed.
     pub fn pending(&self) -> usize {
         self.queues.pending()

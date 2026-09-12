@@ -465,6 +465,29 @@ impl BuiltinVerilogADevices {
         Ok(earliest)
     }
 
+    /// [`Self::transient_timer_event_time`], with the instance that owns it.
+    ///
+    /// The diagnostic's form of the same walk: an invalid target is skipped
+    /// rather than reported, because the fold above runs with `?` on every
+    /// accepted point and has already refused one by the time anything asks
+    /// this. What it adds is the name — a refusal that says a schedule is
+    /// holding the stepper has to say whose.
+    pub(crate) fn scheduled_timer_activation(&self) -> Option<(&str, Value)> {
+        let mut owner: Option<(&str, Value)> = None;
+        for device in &self.devices {
+            let Some(target) = device.kind.transient_timer_event_time() else {
+                continue;
+            };
+            if !target.is_finite() {
+                continue;
+            }
+            if owner.is_none_or(|(_, earliest)| target < earliest) {
+                owner = Some((device.instance_name.as_str(), target));
+            }
+        }
+        owner
+    }
+
     #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &BuiltinVerilogAInstance> {
         self.devices.iter()

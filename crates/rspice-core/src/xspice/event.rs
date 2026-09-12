@@ -260,6 +260,20 @@ impl XspiceEventScheduler {
         self.inner.next_tick().map(tick_seconds)
     }
 
+    /// [`Self::next_event_time`], with the code-model instance that queued it.
+    ///
+    /// Every driver in this queue is an output port of a code model, so the
+    /// earliest event always has an instance to name — unlike the mixed
+    /// process queue next door, which also holds wakeups belonging to no
+    /// module. What asks is the diagnostic that has to say whose schedule is
+    /// holding a run at the solver's minimum step.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn next_event_instance(&self) -> Option<(&str, Value)> {
+        self.inner
+            .next_tick_instance()
+            .map(|(tick, instance)| (instance, tick_seconds(tick)))
+    }
+
     /// Whether an event is pending at or before the given time.
     pub(crate) fn has_event_at_or_before(&self, time: Value) -> bool {
         self.inner
@@ -487,6 +501,49 @@ mod tests {
             .run_due_events(time, |event| drained.push(event))
             .expect("a queue nothing feeds back into settles");
         drained
+    }
+
+    /// The earliest pending event knows which code model queued it, which is
+    /// what a diagnostic naming the schedule that holds a run at the solver's
+    /// minimum step prints. Every driver here is a code-model output port, so
+    /// the answer is never anonymous — and it is the *earliest* event's
+    /// instance, not the most recently scheduled one.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn the_next_scheduled_activation_carries_the_code_model_that_queued_it() {
+        let mut scheduler = XspiceEventScheduler::new();
+        assert_eq!(scheduler.next_event_instance(), None);
+
+        scheduler.schedule(
+            4.0e-12,
+            1,
+            "out",
+            "aslow",
+            0,
+            EventValue::Digital(DigitalValue::one()),
+        );
+        scheduler.schedule(
+            1.0e-12,
+            2,
+            "out",
+            "aring",
+            0,
+            EventValue::Digital(DigitalValue::zero()),
+        );
+
+        assert_eq!(scheduler.next_event_instance(), Some(("aring", 1.0e-12)));
+        assert_eq!(
+            scheduler.next_event_instance().map(|(_, time)| time),
+            scheduler.next_event_time(),
+            "the time must be the one the stepper lands on, read the same way"
+        );
+
+        drain(&mut scheduler, 1.0e-12);
+        assert_eq!(
+            scheduler.next_event_instance(),
+            Some(("aslow", 4.0e-12)),
+            "with the ring's event executed the next schedule is the other driver's"
+        );
     }
 
     #[test]

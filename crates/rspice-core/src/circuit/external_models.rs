@@ -24,6 +24,73 @@ use crate::xspice::{
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+/// Who a scheduled activation belongs to, for a diagnostic that has to name
+/// it.
+///
+/// Three kinds of scheduler queue activations the transient stepper lands
+/// points for — a Verilog-A/AMS instance, a code model on an event net shared
+/// with one, and a generated built-in device's timer — and a refusal that
+/// called any of them by another's name would send its reader to the wrong
+/// half of the deck. The noun travels with the name so that the message does
+/// not have to guess which it has.
+///
+/// Borrowed, not rendered: this is produced once per accepted transient point
+/// and turned into a string only on the way to a report or a refusal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScheduleOwner<'a> {
+    /// What kind of thing owns the schedule, spelled as the diagnostic says
+    /// it.
+    kind: &'static str,
+    /// The deck name of the instance.
+    name: &'a str,
+}
+
+impl ScheduleOwner<'_> {
+    /// The subject of a diagnostic about this owner's schedule.
+    pub(crate) fn subject(self) -> String {
+        let Self { kind, name } = self;
+        format!("{kind} '{name}'")
+    }
+}
+
+/// The owner of an activation queued by any of the Verilog-A/AMS schedulers:
+/// a standalone device, a mixed instance's analog half, and the process queue
+/// its discrete half schedules into are one kind of thing to the reader of a
+/// refusal.
+#[cfg(feature = "veriloga")]
+fn veriloga_schedule_owner(name: &str) -> ScheduleOwner<'_> {
+    ScheduleOwner {
+        kind: "Verilog-A/AMS instance",
+        name,
+    }
+}
+
+/// Keep the earlier of the activation held so far and one more candidate.
+///
+/// Shared by the feature-gated arms of
+/// [`CircuitData::veriloga_scheduled_activation`] so that every scheduler is
+/// folded on one rule: strictly after the accepted point, finite, earliest
+/// wins, and the first to claim a time keeps it.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+fn fold_scheduled_activation<'a>(
+    owner: &mut Option<(Option<ScheduleOwner<'a>>, Value)>,
+    candidate: Option<(Option<ScheduleOwner<'a>>, Value)>,
+    accepted_time: Value,
+) {
+    let Some((instance, target)) = candidate else {
+        return;
+    };
+    if !target.is_finite() || target <= accepted_time {
+        return;
+    }
+    if owner
+        .as_ref()
+        .is_none_or(|(_, earliest)| target < *earliest)
+    {
+        *owner = Some((instance, target));
+    }
+}
+
 /// A resumable XSPICE Active settle at one physical candidate. Pending
 /// dispatch flags stay with the circuit; transition observations and source
 /// samples remain here across yields to another event participant.
@@ -3835,8 +3902,8 @@ impl CircuitData {
         Ok(earliest)
     }
 
-    /// The earliest activation any Verilog-A or mixed Verilog-AMS instance has
-    /// scheduled strictly after `accepted_time`, and the instance that owns it.
+    /// The earliest activation any scheduler the engine lands points for has
+    /// queued strictly after `accepted_time`, and the instance that owns it.
     ///
     /// Unlike [`Self::veriloga_transient_event_time`], which answers the
     /// stepper's question "is there an exact event target I must land on", this
@@ -3847,23 +3914,33 @@ impl CircuitData {
     /// queue is not. Both are folded here, and the mixed instance is named by
     /// the deck name its discrete half is registered under.
     ///
-    /// The instance is itself optional: enrolled mixed instances schedule into
+    /// The three schedulers whose activations `accepted_veriloga_event_time`
+    /// lands are all folded, because a run pinned at the solver's floor is the
+    /// same fact about the same stepper whichever of them is asking: a
+    /// Verilog-A/AMS instance, a code model sharing an event net with one, and
+    /// a generated built-in device's timer. Each is named as the kind of thing
+    /// it is — [`ScheduleOwner`] carries the noun — so a refusal never calls a
+    /// code model a Verilog-A module.
+    ///
+    /// The owner is itself optional: enrolled mixed instances schedule into
     /// one shared process queue, and while that queue can say which process an
     /// activation belongs to — and therefore which module — it also holds
-    /// wakeups that belong to no module at all. A pure code-model event net is
-    /// deliberately not folded in either: this query exists to attribute a
-    /// schedule to a module, and no answer is better than a guessed one.
+    /// wakeups that belong to no module at all. An uncoupled code-model event
+    /// net is deliberately not folded either: its events reach the stepper
+    /// only through the breakpoint manager, which is free to coalesce them, so
+    /// no point is landed *because of* one and there is nothing here to
+    /// attribute.
     ///
     /// Called once per accepted transient point, so it allocates nothing and
     /// borrows the instance name rather than rendering it.
     pub(crate) fn veriloga_scheduled_activation(
         &self,
         accepted_time: Value,
-    ) -> Option<(Option<&str>, Value)> {
-        #[cfg(feature = "veriloga")]
-        let mut owner: Option<(Option<&str>, Value)> = None;
-        #[cfg(not(feature = "veriloga"))]
-        let owner: Option<(Option<&str>, Value)> = None;
+    ) -> Option<(Option<ScheduleOwner<'_>>, Value)> {
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let mut owner: Option<(Option<ScheduleOwner<'_>>, Value)> = None;
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let owner: Option<(Option<ScheduleOwner<'_>>, Value)> = None;
         #[cfg(feature = "veriloga")]
         {
             let analog = self.veriloga_devices.iter().flat_map(|device| {
@@ -3871,7 +3948,7 @@ impl CircuitData {
                     .try_transient_event_time()
                     .ok()
                     .flatten()
-                    .map(|target| (Some(device.name.as_str()), target))
+                    .map(|target| (Some(veriloga_schedule_owner(&device.name)), target))
             });
             let mixed = self.mixed_signal_hosts.iter().flat_map(|host| {
                 let instance = host.instance_name();
@@ -3887,7 +3964,7 @@ impl CircuitData {
                 [analog_target, digital_target]
                     .into_iter()
                     .flatten()
-                    .map(move |target| (Some(instance), target))
+                    .map(move |target| (Some(veriloga_schedule_owner(instance)), target))
             });
             // The shared process queue every enrolled instance schedules into.
             // It is one queue for all of them, but the kernel still knows which
@@ -3905,21 +3982,52 @@ impl CircuitData {
                         [only] => Some(only.instance_name()),
                         _ => None,
                     });
-                    (instance, target)
+                    (instance.map(veriloga_schedule_owner), target)
                 });
-            for (instance, target) in analog.chain(mixed).chain(shared) {
-                if !target.is_finite() || target <= accepted_time {
-                    continue;
-                }
-                if owner
-                    .as_ref()
-                    .is_none_or(|(_, earliest)| target < *earliest)
-                {
-                    owner = Some((instance, target));
-                }
+            // A code model whose event net is shared with a mixed module.
+            // Those events are landed by `accepted_veriloga_event_time` on the
+            // same contract a mixed activation is — the breakpoint manager's
+            // coalescing may not move them — so a point landed at the floor
+            // for one is paced by a schedule exactly as a mixed tick is, and
+            // the kernel hands back the driver that queued it.
+            let coupled = self
+                .has_coupled_event_nets()
+                .then(|| self.xspice_event_queue.next_event_instance())
+                .flatten()
+                .map(|(instance, target)| {
+                    (
+                        Some(ScheduleOwner {
+                            kind: "XSPICE code-model instance",
+                            name: instance,
+                        }),
+                        target,
+                    )
+                });
+            for candidate in analog.chain(mixed).chain(shared).chain(coupled) {
+                fold_scheduled_activation(&mut owner, Some(candidate), accepted_time);
             }
         }
-        #[cfg(not(feature = "veriloga"))]
+        // A generated built-in device's timer is an absolute event target the
+        // same fold lands — `veriloga_transient_event_time` folds it beside
+        // the JIT devices' — so a run it pins is this bound's business too,
+        // and the generated instance carries the deck name to say whose.
+        #[cfg(feature = "veriloga-builtins-base")]
+        fold_scheduled_activation(
+            &mut owner,
+            self.generated_veriloga_devices
+                .scheduled_timer_activation()
+                .map(|(instance, target)| {
+                    (
+                        Some(ScheduleOwner {
+                            kind: "generated Verilog-A device",
+                            name: instance,
+                        }),
+                        target,
+                    )
+                }),
+            accepted_time,
+        );
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
         let _ = accepted_time;
         owner
     }
@@ -4059,6 +4167,115 @@ mod tests {
     };
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
+
+    /// One fold rule for every scheduler, and a noun that travels with each
+    /// name.
+    ///
+    /// The rule is what makes a single count and a single message legitimate
+    /// across three queues: an activation is a candidate only if it is finite
+    /// and strictly after the accepted point, the earliest wins, and a tie
+    /// leaves the one already held. The noun is what keeps the resulting
+    /// refusal honest — a code model named as a Verilog-A module sends its
+    /// reader to the wrong half of a coupled deck.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    #[test]
+    fn a_scheduled_activation_folds_on_one_rule_and_names_the_kind_of_owner() {
+        const ACCEPTED: Value = 1.0e-9;
+        let mixed = ScheduleOwner {
+            kind: "Verilog-A/AMS instance",
+            name: "x1",
+        };
+        let code_model = ScheduleOwner {
+            kind: "XSPICE code-model instance",
+            name: "aring",
+        };
+        let generated = ScheduleOwner {
+            kind: "generated Verilog-A device",
+            name: "n1",
+        };
+
+        assert_eq!(mixed.subject(), "Verilog-A/AMS instance 'x1'");
+        assert_eq!(code_model.subject(), "XSPICE code-model instance 'aring'");
+        assert_eq!(generated.subject(), "generated Verilog-A device 'n1'");
+
+        let mut owner = None;
+        fold_scheduled_activation(&mut owner, None, ACCEPTED);
+        assert_eq!(owner, None, "nothing queued is not an activation");
+
+        for refused in [ACCEPTED, ACCEPTED - 1.0e-12, Value::NAN, Value::INFINITY] {
+            fold_scheduled_activation(&mut owner, Some((Some(mixed), refused)), ACCEPTED);
+            assert_eq!(
+                owner, None,
+                "{refused:e} is not an activation strictly after {ACCEPTED:e}"
+            );
+        }
+
+        fold_scheduled_activation(
+            &mut owner,
+            Some((Some(mixed), ACCEPTED + 1.0e-12)),
+            ACCEPTED,
+        );
+        fold_scheduled_activation(
+            &mut owner,
+            Some((Some(code_model), ACCEPTED + 1.0e-15)),
+            ACCEPTED,
+        );
+        assert_eq!(
+            owner,
+            Some((Some(code_model), ACCEPTED + 1.0e-15)),
+            "the earliest activation owns the point, whichever queue holds it"
+        );
+
+        fold_scheduled_activation(
+            &mut owner,
+            Some((Some(generated), ACCEPTED + 1.0e-15)),
+            ACCEPTED,
+        );
+        assert_eq!(
+            owner,
+            Some((Some(code_model), ACCEPTED + 1.0e-15)),
+            "a tie leaves the owner already holding the time"
+        );
+
+        fold_scheduled_activation(&mut owner, Some((None, ACCEPTED + 1.0e-16)), ACCEPTED);
+        assert_eq!(
+            owner,
+            Some((None, ACCEPTED + 1.0e-16)),
+            "an unattributable wakeup still wins on time; the diagnostic falls back"
+        );
+    }
+
+    /// A code-model queue with no mixed module beside it is deliberately
+    /// outside the classification.
+    ///
+    /// Coupling is what makes an XSPICE event a *landed* activation: the
+    /// stepper folds the queue into `accepted_veriloga_event_time` only for a
+    /// deck with shared event nets, and only a landed activation sets the
+    /// width of an accepted point. An uncoupled queue reaches the stepper
+    /// through the breakpoint manager, which is free to coalesce it, so there
+    /// is no point the schedule can be said to have paced and nothing here to
+    /// attribute.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn an_uncoupled_code_model_queue_is_not_a_scheduled_activation() {
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("out");
+        circuit.xspice_event_queue.make_mut().schedule(
+            1.0e-12,
+            node,
+            "out",
+            "aring",
+            0,
+            EventValue::Digital(DigitalValue::one()),
+        );
+
+        assert!(!circuit.has_coupled_event_nets());
+        assert_eq!(
+            circuit.veriloga_scheduled_activation(0.0),
+            None,
+            "an uncoupled code-model event paces no accepted point"
+        );
+    }
 
     #[cfg(feature = "veriloga")]
     #[test]

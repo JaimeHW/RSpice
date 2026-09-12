@@ -259,6 +259,87 @@ fn stamp(
     Ok(rhs)
 }
 
+/// A coupled code model's queued event is a scheduled activation, and the
+/// classification names it as a code model.
+///
+/// The transient stepper's sub-minimum activation bound asks one question
+/// after every accepted point — is anything scheduled close enough to be
+/// setting the width of these steps, and whose is it — and a coupled deck has
+/// two queues that can answer. Both are landed by the same fold
+/// (`accepted_veriloga_event_time`), so both have to be classified by the same
+/// one, or the points a code model paces are attributed to a Verilog-A module
+/// that is not scheduling anything, or to nothing at all.
+///
+/// The event's *node* is deliberately not consulted: what the diagnostic needs
+/// is the driver the kernel says queued the earliest event, which is a code
+/// model instance whether or not that particular net is one of the shared
+/// ones. The coupling is what makes the whole XSPICE queue landable.
+#[test]
+fn a_coupled_code_model_event_is_a_scheduled_activation_named_as_a_code_model() {
+    const ACCEPTED: f64 = 1.0e-9;
+
+    let (mut circuit, _matrix, _solution, _resource) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    assert!(
+        circuit.has_coupled_event_nets(),
+        "the fixture's code models share event nets with its mixed instances"
+    );
+    let bus = circuit.get_node_by_name("bus").unwrap();
+
+    // Whatever the mixed side has queued is the time to beat, so the fixture
+    // does not depend on the coordinator's queue being empty. Rendered on the
+    // spot rather than held: an owner borrows the circuit the next line has to
+    // schedule into.
+    let baseline = circuit
+        .veriloga_scheduled_activation(ACCEPTED)
+        .map(|(owner, target)| (owner.map(|owner| owner.subject()), target));
+    let queued = baseline.as_ref().map_or(ACCEPTED + 1.0e-12, |(_, target)| {
+        ACCEPTED + (target - ACCEPTED) / 2.0
+    });
+
+    circuit.xspice_event_queue.make_mut().schedule(
+        ACCEPTED - 1.0e-12,
+        bus,
+        "out",
+        "apast",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one()),
+    );
+    assert_eq!(
+        circuit
+            .veriloga_scheduled_activation(ACCEPTED)
+            .map(|(owner, target)| (owner.map(|owner| owner.subject()), target)),
+        baseline,
+        "an event at or before the accepted point is not an activation after it"
+    );
+    // The settle drains the queue through the accepted point, which is what
+    // makes its earliest remaining event the next activation.
+    circuit
+        .xspice_event_queue
+        .make_mut()
+        .run_due_events(ACCEPTED, |_| {})
+        .expect("one event on one net settles");
+
+    circuit.xspice_event_queue.make_mut().schedule(
+        queued,
+        bus,
+        "out",
+        "aring",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::zero()),
+    );
+    let (owner, target) = circuit
+        .veriloga_scheduled_activation(ACCEPTED)
+        .map(|(owner, target)| (owner.map(|owner| owner.subject()), target))
+        .expect("a queued code-model event is a scheduled activation");
+    assert_eq!(target, queued, "the earliest activation owns the point");
+    assert_eq!(
+        owner.as_deref(),
+        Some("XSPICE code-model instance 'aring'"),
+        "the code model is named as a code model, not as a Verilog-A/AMS instance"
+    );
+}
+
 #[test]
 fn coupled_circuit_probe_retains_adc_gate_feedback_then_restores_all_owners_and_resources() {
     let (mut circuit, mut matrix, mut solution, resource) =

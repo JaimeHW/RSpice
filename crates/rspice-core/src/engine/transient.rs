@@ -315,8 +315,15 @@ fn landed_veriloga_event_time(
 }
 
 /// How many consecutive accepted points may advance by no more than the
-/// solver's hard minimum, against a Verilog-A/AMS schedule that is still
-/// asking for the next one inside that same window, before the run says so.
+/// solver's hard minimum, against a schedule that is still asking for the next
+/// one inside that same window, before the run says so.
+///
+/// "A schedule" is any of the three the stepper lands points for, because they
+/// pin it the same way and the bound may not depend on which one is asking: a
+/// Verilog-A/AMS instance, a code model sharing an event net with one, and a
+/// generated built-in device's timer. One count, one message, and the subject
+/// named as the kind of thing it is
+/// (`CircuitData::veriloga_scheduled_activation`).
 ///
 /// A digital schedule finer than the analog solver's minimum step is legal:
 /// [`landed_veriloga_event_time`] coalesces such an activation onto
@@ -5958,7 +5965,11 @@ impl Engine {
                                         .join(", ")
                                 ),
                             },
-                            |instance| format!("Verilog-A/AMS instance '{instance}'"),
+                            // The noun travels with the name: a code model on
+                            // a shared event net and a generated device queue
+                            // activations the stepper lands exactly as a mixed
+                            // instance does, and each is named as what it is.
+                            |instance| instance.subject(),
                         );
                     let next_activation = activation.map_or(t, |(_, target)| target);
                     // The floor is `1e-11 * tmax`, so the maximum timestep is
@@ -5968,7 +5979,7 @@ impl Engine {
                     // own delay and the interval follow.
                     let levers = format!(
                         "Reduce the requested maximum timestep tmax={:.3e}s, which the minimum \
-                         is derived from (delmin = 1e-11 x tmax); widen the module's finest \
+                         is derived from (delmin = 1e-11 x tmax); widen the instance's finest \
                          scheduled delay past the resulting minimum; or shorten the analysis \
                          interval",
                         hinted_max_step
