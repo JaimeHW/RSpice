@@ -55,9 +55,12 @@ const EMIT_ENV: &str = "RSPICE_TRI_FAMILY_EMIT";
 /// and are asserted only in that configuration.
 const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 
-/// Deck A's accepted grid, re-measured after R2.14 ended two of the three
-/// retry ladders the deck carried. 1458 points before, 1270 after, and the 188
-/// the deck stopped taking are accounted for instant by instant in the trace:
+/// Deck A's accepted grid, re-measured after R2.24 ended the last of the three
+/// retry ladders the deck carried. 1458 points before R2.14, 1270 after it and
+/// 1132 now, and every point either change stopped taking is accounted for
+/// instant by instant in the trace.
+///
+/// R2.14 ended two of the ladders:
 ///
 /// * the mixed module's D/A output left the voltage-LTE norm, which ended the
 ///   six ladders at its own edges (0.05, 10.05 … 50.05 ns; 54/73/56/73/55/73
@@ -67,20 +70,32 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 ///   which ended the twelve ladders at the far end of each `y` ramp (x.x65 ns;
 ///   51-68 rejections and 54 more sub-femtosecond points).
 ///
-/// The one class still open owns every point below ten femtoseconds that
-/// remains: a `y` ramp *leaving* zero volts, where the estimator's reference
-/// degenerates to `abstol/reltol` and the demand becomes 6.1e-17 s. It is
-/// R2.24, it was 54 points before this change and is 78 after — the restart
-/// hands it 24 more at the model-interval breakpoint 2.4 ps into each ramp,
-/// where history that was tracking the ramp is discarded and the same abstol
-/// demand reappears on a node 40 mV from ground.
+/// R2.24 ended the third, which was that restart's own first step: one point of
+/// history predicts a constant at any width, so the estimate there was the
+/// step's own increment and the width that satisfied it was
+/// `(abstol + reltol·|v|)/slope` rather than anything the physics asked for.
+/// All 1035 rejections the deck had left were that one step, all of them on
+/// `p`, and they split by the level the `y` ramp left:
 ///
-/// Nothing else in this file moved: deck C, C2 and C3 keep their point counts
-/// exactly, deck E its sampled voltages, and deck A its pinned analog solution
-/// at every digital instant.
-const DECK_A_POINTS: usize = 1270;
-const DECK_A_GRID_HASH: u64 = 0x7e98_da9f_82f6_198b;
-const DECK_A_VOLT_HASH: u64 = 0xf928_70ad_27e0_4778;
+/// * 458 on a ramp leaving 3.3 V, where `|v|` is 1.65 V and the demand is
+///   1.0006e-13 s. One timepoint spent 46 retries walking 2.42e-13 s down to
+///   it, because the resize law aimed at the tolerance instead of inside it,
+///   and left 3 accepted points per ramp — 18 over the run.
+/// * 577 on a ramp leaving 0 V, where `|curr − pred|` and the reference
+///   `max(|curr|, |pred|)` are the same number, so the reference floors at
+///   `abstol/reltol` and the demand is `abstol/slope` = 6.07e-17 s. These were
+///   every one of the 78 accepted steps below ten femtoseconds, and left 20
+///   accepted points per ramp — 120 over the run.
+///
+/// Both corners are now taken at the controller's own proposal, 2.42e-13 s and
+/// 1.70e-13 s, and 1.697e-13 s is the smallest step the whole run accepts.
+///
+/// Nothing else in this file moved: deck C2 keeps its pinned point count, deck
+/// E its sampled voltages, and deck A its pinned analog solution at every
+/// digital instant.
+const DECK_A_POINTS: usize = 1132;
+const DECK_A_GRID_HASH: u64 = 0x9485_9e98_f8c7_6df9;
+const DECK_A_VOLT_HASH: u64 = 0x5cda_4227_0d10_7925;
 const DECK_C2_POINTS: usize = 265;
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
@@ -466,27 +481,28 @@ fn deck_a_tri_family_transient_sequence_golden() {
 /// deck's hard floor and twenty-five times below the smallest legitimate
 /// restart it takes, so it separates a ladder from a policy cleanly.
 ///
-/// # What is still open, measured on this deck
+/// # The three mechanisms this bound has caught, measured on this deck
 ///
-/// Three mechanisms have put sub-femtosecond steps here, and two are closed;
+/// Two were node- and history-scoped, and
 /// `deck_a_takes_a_controller_sized_step_after_every_digital_edge` pins both
-/// live. The third owns every one of the 78 accepted steps that remain, and
-/// all of them are at a `y` ramp *leaving* zero volts — 6.55, 16.55 … 56.55 ns,
-/// thirteen each:
+/// live: the mixed module's D/A output inside the voltage-LTE norm, and
+/// predictor history carried across a breakpoint.
 ///
-/// there the predictor holds `p` at 0 V and the candidate has `p` = 1.65e10·dt,
-/// so `|curr − pred|` and the reference are the same number and the reference
-/// floors at `abstol/reltol` = 1e-3 V. The estimate is `x/(1 + x)` with
-/// `x` = 1.65e10·dt/1e-3, which reaches `reltol` at dt = 6.07e-17 s — thirteen
-/// doublings below this bound, and the estimator's own arithmetic rather than a
-/// stale-history artefact: at a corner out of zero volts the relative measure
-/// has nothing to be relative to, and the demand becomes `abstol/slope`. Any
-/// native `PULSE` into a divider crosses the same regime, so the answer is the
-/// controller's rather than this deck's. R2.24 owns it; it was 54 steps before
-/// R2.14 and is 78 after, the 24 being the breakpoint 2.4 ps into each ramp,
-/// where the predictor restart hands the same demand a node 40 mV from ground.
+/// The third was the first step after that breakpoint restart, and it owned all
+/// 78 of the accepted steps this case used to find, every one of them at a `y`
+/// ramp *leaving* zero volts — 6.55, 16.55 … 56.55 ns, thirteen each. There the
+/// predictor is the single point it restarted from, so it holds `p` at 0 V at
+/// every width while the candidate has `p` = 1.65e10·dt: `|curr − pred|` and
+/// the reference are the same number, the reference floors at `abstol/reltol`
+/// = 1e-3 V, and the estimate is `x/(1 + x)` with `x` = 1.65e10·dt/1e-3, which
+/// reaches `reltol` at dt = 6.07e-17 s — thirteen doublings below this bound.
+/// It was the estimator's own arithmetic rather than a stale-history artefact,
+/// and any native `PULSE` into a divider crosses the same regime: a constant
+/// predictor cannot agree with a ramp at any width, so the number it produces
+/// bounds nothing. R2.24 stopped forming it, and the step after a restart is
+/// now accepted on Newton convergence and the ngspice device truncation limits
+/// instead — which is what `CKTterr` does, charge and flux states only.
 #[test]
-#[ignore = "R2.24: a ramp leaving zero volts demands abstol/slope = 6.1e-17 s, which is 78 accepted steps below this bound"]
 fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
     const FLOOR_LADDER_BOUND: f64 = 1e-14;
     let result = run_deck_a();
@@ -574,10 +590,13 @@ fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
         );
     }
 
-    // Every step still below the floor bound belongs to the one class that is
-    // open (R2.24): a `y` ramp leaving zero volts. A returning edge on `q`, or
-    // the far end of a `y` ramp, would land here and fail — both are flat 50 ps
-    // later, and the rising ramp is at 1.65 V by then.
+    // Since R2.24 no step is below the floor bound at all, and
+    // `deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge`
+    // asserts exactly that. This loop is the shape check that outlives it: if
+    // the set ever refills, a returning edge on `q` or the far end of a `y`
+    // ramp lands here and fails, because both are flat 50 ps later while the
+    // one class that used to live here — a ramp leaving zero volts — is at
+    // 1.65 V by then.
     for (index, times) in result.time.windows(2).enumerate() {
         if times[1] - times[0] >= FLOOR_LADDER_BOUND {
             continue;
