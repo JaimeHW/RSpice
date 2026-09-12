@@ -514,7 +514,14 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
         .filter(|name| !name.is_empty())
         .map(|name| name.to_ascii_lowercase())
         .collect::<HashSet<_>>();
+    // A digital-only net contributes no voltage spelling at all. Inserting its
+    // empty column would make `V(q)` resolve to a signal with no samples,
+    // which fails later with a row complaint instead of saying what is wrong.
+    let digital_only = result.digital_only_node_mask();
     for (index, waveform) in result.voltages.iter().enumerate() {
+        if digital_only.get(index).copied().unwrap_or(false) {
+            continue;
+        }
         let fallback = (index + 1).to_string();
         let raw = if let Some(name) = result.node_names.get(index).filter(|name| !name.is_empty()) {
             name.clone()
@@ -1906,6 +1913,36 @@ fn frontend_output_error(error: OutputProjectionError) -> SimulationError {
             SimulationError::Netlist(error.to_string())
         }
     }
+}
+
+/// The refusal an authored voltage operand naming a digital-only net gets,
+/// rendered in the same card-and-operand shape as every other operand failure.
+///
+/// The namespace build is the one place that can refuse this before a run
+/// starts, and it reports through `SimulationError`, so the error is rendered
+/// to a string here rather than returned as a projection error: the shape is
+/// what makes the card and the operand visible, and the sentence is the
+/// engine's single wording for the refusal.
+pub(crate) fn digital_only_voltage_operand_refusal(
+    request: &OutputRequest,
+    analysis: OutputAnalysisKind,
+    operand: String,
+    node: &str,
+) -> String {
+    let operand_index = request
+        .operands
+        .iter()
+        .position(|authored| authored.trim().eq_ignore_ascii_case(operand.trim()))
+        .unwrap_or(0);
+    OutputProjectionError::Operand {
+        analysis,
+        origin: request.origin.clone(),
+        operand_index,
+        operand,
+        row: None,
+        detail: crate::analysis::transient::digital_only_voltage_refusal(node),
+    }
+    .to_string()
 }
 
 fn output_request_error(
@@ -5926,10 +5963,35 @@ pub fn evaluate_transient_probe_with_abort(
     match evaluate_output_operand(trimmed, &kind, &result.time, &index, params, abort) {
         Ok(column) => Ok(column.into_parts().2),
         Err(OutputOperandEvaluationError::Aborted) => Err(SimulationError::Aborted),
-        Err(OutputOperandEvaluationError::Detail { .. }) => Err(
-            SimulationError::requested_signal_unavailable(trimmed, "TRAN", None),
-        ),
+        Err(OutputOperandEvaluationError::Detail { .. }) => {
+            // A miss on a net the result carries as logic is not an unknown
+            // signal: the net exists and was recorded, in the only domain that
+            // resolves it. Saying so beats "unavailable", which reads as a
+            // retention problem the author could fix with a `.SAVE`.
+            if let Some(node) = digital_only_probe_node(&kind, result) {
+                return Err(SimulationError::Netlist(
+                    crate::analysis::transient::digital_only_voltage_refusal(&node),
+                ));
+            }
+            Err(SimulationError::requested_signal_unavailable(
+                trimmed, "TRAN", None,
+            ))
+        }
     }
+}
+
+/// The digital-only net a failed voltage probe named, if that is what it was.
+///
+/// Only a single-node voltage operand qualifies. A differential probe spans
+/// two nets and a raw name may have missed for any number of reasons, so
+/// neither is turned into this refusal on a guess.
+fn digital_only_probe_node(kind: &OutputOperandKind, result: &TransientResult) -> Option<String> {
+    let OutputOperandKind::Probe(SaveSignal::Voltage(node)) = kind else {
+        return None;
+    };
+    result
+        .is_digital_only_node_named(node)
+        .then(|| node.clone())
 }
 
 /// Evaluate the netlist's transient .MEAS statements against a result.

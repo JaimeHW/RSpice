@@ -11,7 +11,7 @@ use crate::analysis::measure::MeasureResult;
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Stable wire spelling of one XSPICE digital logic state.
 ///
@@ -734,6 +734,24 @@ impl TransientPostResults {
     }
 }
 
+/// The one sentence every surface renders when a voltage of a digital-only
+/// net is asked for.
+///
+/// A net that only the event domain resolves has no `V()`: the MNA row it owns
+/// is a placeholder the assembly closes with `v = 0` to restore rank, so
+/// publishing it as a voltage publishes 0 V for a net that carries logic. The
+/// carriers that do exist are named in the sentence, so a reader never has to
+/// guess which spelling replaces the one that was refused. One function
+/// because the namespace build, the post-run resolvers and the bindings all
+/// have to say the same thing.
+pub fn digital_only_voltage_refusal(name: &str) -> String {
+    format!(
+        "V({name}) names '{name}', a digital-only net: it carries four-state logic, not a \
+         voltage. Read it as D({name}), its logic level on the analysis grid, or through its \
+         digital event trace."
+    )
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -1096,6 +1114,47 @@ impl TransientResult {
             .iter()
             .find(|trace| trace.node_name.eq_ignore_ascii_case(name))
             .map(|trace| trace.points.as_slice())
+    }
+
+    /// Whether a named node reached this result as logic and not as a voltage.
+    ///
+    /// The run leaves a digital-only net's name in `node_names` — the digital
+    /// traces are named through it and every consumer is aligned by MNA index
+    /// — and leaves its voltage column empty, which is what "no channel"
+    /// already means at every reader. A node whose column is empty while its
+    /// digital trace is present is therefore exactly a digital-only net, and
+    /// no save shape can produce that pair by accident: a raw `.SAVE name`
+    /// retains `V(name)` as well as the trace, so a hybrid node never keeps
+    /// its trace while losing its voltage.
+    pub fn is_digital_only_node_named(&self, name: &str) -> bool {
+        self.node_index_named(name)
+            .filter(|node| *node > 0)
+            .and_then(|node| self.try_voltage_waveform(node))
+            .is_some_and(|waveform| waveform.is_empty())
+            && self.digital_trace_named(name).is_some()
+    }
+
+    /// [`Self::is_digital_only_node_named`] for every node at once, aligned
+    /// with `node_names`.
+    ///
+    /// The document and channel builders walk the whole namespace, so they ask
+    /// this once instead of resolving a name per node.
+    pub(crate) fn digital_only_node_mask(&self) -> Vec<bool> {
+        if self.digital_traces.is_empty() {
+            return vec![false; self.node_names.len()];
+        }
+        let traced: HashSet<String> = self
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.to_ascii_lowercase())
+            .collect();
+        self.node_names
+            .iter()
+            .zip(&self.voltages)
+            .map(|(name, waveform)| {
+                waveform.is_empty() && traced.contains(&name.to_ascii_lowercase())
+            })
+            .collect()
     }
 
     /// Append committed XSPICE real event values at an accepted transient time.

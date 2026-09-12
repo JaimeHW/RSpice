@@ -908,7 +908,17 @@ impl AnalysisResultDocument {
         )?;
 
         let mut signals = Vec::with_capacity(result.voltages.len() + result.branch_currents.len());
-        for (name, waveform) in result.node_names.iter().zip(&result.voltages) {
+        // A digital-only net gets no voltage descriptor at all, not an
+        // unprojected one: `NotProjected` promises that the descriptor is
+        // evidence the signal exists and this run chose not to keep it, and
+        // the voltage of a logic net does not exist. The net reaches the
+        // document through `payload.digitalTraces`, which is its carrier.
+        let digital_only = result.digital_only_node_mask();
+        for (index, (name, waveform)) in result.node_names.iter().zip(&result.voltages).enumerate()
+        {
+            if digital_only.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             signals.push(projected_real_series(
                 LOCATION,
                 voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
@@ -1109,7 +1119,24 @@ impl AnalysisResultDocument {
         let mut store_traces = Vec::new();
         let mut device_columns: BTreeMap<String, Vec<DeviceParameterSeries>> = BTreeMap::new();
         let mut device_order: Vec<String> = Vec::new();
+        // The same rule the uncompressed builder applies: a node whose voltage
+        // is unretained while its digital trace is present is a digital-only
+        // net and gets no voltage descriptor. The channel itself stays in the
+        // container, because that inventory is the compressed result's node
+        // namespace and has to keep its MNA alignment.
+        let digital_only_node = |node: &str| {
+            compressed
+                .digital_traces
+                .iter()
+                .any(|trace| trace.node_name.eq_ignore_ascii_case(node))
+        };
         for channel in &compressed.channels {
+            if let TransientChannelRole::NodeVoltage { node, .. } = channel.descriptor.role()
+                && channel.availability == TransientChannelAvailability::NotProjected
+                && digital_only_node(node)
+            {
+                continue;
+            }
             let samples = compressed_channel_samples(channel, point_count);
             let availability = match channel.availability {
                 TransientChannelAvailability::Available => SeriesAvailability::Available,
