@@ -5593,7 +5593,9 @@ endmodule"#;
             StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
         let mut rhs = vec![0.0];
 
-        circuit.stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0]);
+        circuit
+            .stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0])
+            .expect("finite code-model outputs stamp");
         circuit
             .accept_xspice_transient_timestep_with_coefficients(
                 1.0e-9,
@@ -6123,13 +6125,9 @@ endmodule"#;
         let mut matrix =
             StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
         let mut rhs = vec![0.0];
-        circuit.stamp_xspice_transient_trial(
-            &mut matrix,
-            &mut rhs,
-            1.0e-9,
-            1.0e-9,
-            &[0.0, 0.0, 0.0],
-        );
+        circuit
+            .stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0, 0.0, 0.0])
+            .expect("finite code-model outputs stamp");
         circuit
             .accept_xspice_transient_timestep_with_coefficients(
                 2.0e-9,
@@ -6395,13 +6393,9 @@ endmodule"#;
         let mut matrix =
             StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
         let mut rhs = vec![0.0];
-        circuit.stamp_xspice_transient_trial(
-            &mut matrix,
-            &mut rhs,
-            1.0e-9,
-            1.0e-9,
-            &[0.0, 0.0, 0.0],
-        );
+        circuit
+            .stamp_xspice_transient_trial(&mut matrix, &mut rhs, 1.0e-9, 1.0e-9, &[0.0, 0.0, 0.0])
+            .expect("finite code-model outputs stamp");
         circuit
             .accept_xspice_transient_timestep_with_coefficients(
                 2.0e-9,
