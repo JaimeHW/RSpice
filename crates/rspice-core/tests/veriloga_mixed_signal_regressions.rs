@@ -484,3 +484,148 @@ endmodule
         "an include wrapper must not silently discard the selected connect rules"
     );
 }
+
+/// A mixed module whose continuous half is one conductance and whose discrete
+/// half toggles one bit. Two halves, one instance, so `m=` has something to
+/// scale and something to leave alone.
+const MIXED_MULTIPLICITY_MODEL: &str = r#"
+module mres_toggle(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    parameter real r = 1000.0 from (0:inf);
+    initial begin q = 0; #1 q = 1; end
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#;
+
+/// One transient run of [`MIXED_MULTIPLICITY_MODEL`] on a locked grid.
+///
+/// Returns the divider node the module loads and the whole trace of the node
+/// its bridged output drives. The grid is locked so two runs sample the same
+/// times and their digital traces can be compared point by point; the analog
+/// half is DC, so its node is returned as the single value the run held.
+fn mixed_multiplicity_run(model: &ModelFile, instances: &str) -> (f64, Vec<f64>) {
+    use rspice_core::SimulationConfig;
+    use std::sync::Arc;
+
+    let deck = Netlist::parse(&format!(
+        "* mixed instance multiplicity\n\
+         V1 in 0 dc 1\n\
+         Rs in a 1k\n\
+         Rload q 0 1k\n\
+         {instances}\
+         .va \"{}\" mres_toggle\n\
+         .end\n",
+        model.path()
+    ))
+    .unwrap_or_else(|error| panic!("{instances}: {error}"));
+    let grid: Arc<Vec<f64>> = Arc::new((0..=20).map(|index| index as f64 * 1e-10).collect());
+    let result = Engine::new(SimulationConfig {
+        locked_time_grid: Some(grid.clone()),
+        ..Default::default()
+    })
+    .run_tran(&deck, 2e-9, 1e-10)
+    .unwrap_or_else(|error| panic!("{instances}: {error}"));
+    assert_eq!(result.time, *grid);
+    let trace = |name: &str| {
+        result.voltages[result
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("node {name} in {:?}", result.node_names))]
+        .clone()
+    };
+    let divider = trace("a");
+    assert!(
+        divider
+            .iter()
+            .all(|value| (value - divider[0]).abs() < 1e-12),
+        "{instances}: the divider is DC and must not move: {divider:?}"
+    );
+    (divider[0], trace("q"))
+}
+
+/// `m=` on a mixed Verilog-AMS instance is the reserved instance parameter it
+/// already is on a plain Verilog-A instance: the module's continuous half
+/// stamps as m parallel copies. Its discrete half has no multiplicity, and
+/// neither does the D/A bridge that carries that half onto a net.
+#[test]
+fn m_scales_the_analog_half_of_a_mixed_instance_and_leaves_its_digital_half_alone() {
+    let model = ModelFile::new(MIXED_MULTIPLICITY_MODEL);
+
+    let (plain, plain_q) = mixed_multiplicity_run(&model, "X1 a 0 q mres_toggle r=1k\n");
+    let (multiplied, multiplied_q) =
+        mixed_multiplicity_run(&model, "X1 a 0 q mres_toggle r=1k m=2\n");
+    let (explicit, _) = mixed_multiplicity_run(
+        &model,
+        "Xa a 0 q mres_toggle r=1k\nXb a 0 qb mres_toggle r=1k\nRloadb qb 0 1k\n",
+    );
+
+    // 1 V over a 1 kohm series resistor into the module: one copy halves it,
+    // two parallel copies leave a third.
+    assert!((plain - 0.5).abs() < 1e-12, "1k over 1k: {plain}");
+    assert!(
+        (multiplied - 1.0 / 3.0).abs() < 1e-12,
+        "1k over two parallel 1k: {multiplied}"
+    );
+    assert!(
+        (multiplied - explicit).abs() < 1e-12,
+        "m=2 must equal two explicit instances: {multiplied} vs {explicit}"
+    );
+
+    // The current the series resistor carries, over the voltage the module's
+    // own terminals see: the module's conductance, exactly doubled.
+    let conductance = |divider: f64| (1.0 - divider) / (1000.0 * divider);
+    let (single, doubled) = (conductance(plain), conductance(multiplied));
+    assert!(
+        (doubled - 2.0 * single).abs() < 1e-12,
+        "m=2 must double the mixed module's conductance: {doubled} vs 2*{single}"
+    );
+
+    // The 1 kohm load on `q` is what makes this comparison read the bridge's
+    // own source conductance rather than only the level it drives, so a
+    // bridge scaled by m would move the trace by about a percent.
+    assert_eq!(plain_q.len(), multiplied_q.len());
+    let worst = plain_q
+        .iter()
+        .zip(&multiplied_q)
+        .map(|(plain, multiplied)| (plain - multiplied).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        worst < 1e-9,
+        "m must touch neither the digital trace nor its bridge: worst {worst:e}"
+    );
+    assert!(
+        *plain_q.first().unwrap() < 0.5 && *plain_q.last().unwrap() > 1.0,
+        "the discrete half must actually toggle: {plain_q:?}"
+    );
+}
+
+/// An X-line `m` composes onto the instances inside the subcircuit it names,
+/// and a mixed X-card is one of those instances like any other.
+#[test]
+fn m_reaches_a_mixed_instance_through_a_subcircuit_wrapper() {
+    let model = ModelFile::new(MIXED_MULTIPLICITY_MODEL);
+
+    let (direct, direct_q) = mixed_multiplicity_run(&model, "X1 a 0 q mres_toggle r=1k m=2\n");
+    let (wrapped, wrapped_q) = mixed_multiplicity_run(
+        &model,
+        "Xw a 0 q wrap m=2\n.subckt wrap p n d\nX1 p n d mres_toggle r=1k\n.ends\n",
+    );
+
+    assert!(
+        (wrapped - direct).abs() < 1e-12,
+        "an X-line m must reach the mixed X inside it: {wrapped} vs {direct}"
+    );
+    let worst = direct_q
+        .iter()
+        .zip(&wrapped_q)
+        .map(|(direct, wrapped)| (direct - wrapped).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        worst < 1e-9,
+        "the wrapper must not change the digital trace: worst {worst:e}"
+    );
+}
