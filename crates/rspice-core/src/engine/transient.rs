@@ -312,6 +312,31 @@ fn xyce_nox_recovered_update_norm(
     }
 }
 
+/// Terminal error for a timepoint whose whole recovery budget was spent
+/// rejecting non-finite device trials.
+///
+/// The rejection itself is silent by design, so this is the only place the
+/// user learns which instance, which operator and which terminal voltages
+/// defeated the step; the device's own diagnostic is carried through verbatim.
+fn exhausted_nonfinite_trial_error(failure: (String, Value, Value)) -> SimulationError {
+    let (detail, time, dt) = failure;
+    SimulationError::Circuit(format!(
+        "Transient recovery exhausted at t={time:.6e} (last rejected step dt={dt:.3e}): {detail}"
+    ))
+}
+
+/// A rescue that could not evaluate a device finitely has not rescued the
+/// step: it rejected its own trial, and the caller's dt cut is the next move.
+/// Any other rescue failure still ends the run.
+fn rescued_or_rejected_nonfinite(
+    rescue: Result<Option<Vec<Value>>, SimulationError>,
+) -> Result<Option<Vec<Value>>, SimulationError> {
+    match rescue {
+        Err(error) if error.nonfinite_trial_detail().is_some() => Ok(None),
+        other => other,
+    }
+}
+
 fn capture_direct_xyce_histories(
     circuit: &crate::circuit::CircuitData,
     solution: &[Value],
@@ -6404,6 +6429,44 @@ impl Engine {
             }
             let mut nonlinear_state_matches_new_solution = false;
             let mut had_solver_candidate = false;
+            // Diagnostic of the trial this attempt refused to evaluate
+            // finitely, with the time and step it was tried at. A rejected
+            // trial costs the run nothing while a retry remains, so the
+            // message only surfaces once the recovery budget is exhausted --
+            // and then it must surface, because "convergence failed" alone
+            // hides the instance and the voltages that produced NaN.
+            let mut nonfinite_trial_failure: Option<(String, Value, Value)> = None;
+            // A device that cannot evaluate finitely at a Newton TRIAL point
+            // has rejected that iterate, not the run: Spectre and ngspice cut
+            // dt and try again, exactly as they do for a failed linear solve
+            // (the `Err(e)` arm at the bottom of the Newton loop). Expanding
+            // at a trial stamp leaves `converged` false, so the shared
+            // recovery path below shrinks the step, rolls the device state
+            // back, and retries. Every other stamping failure is structural
+            // and still ends the run where it happens.
+            macro_rules! stamp_trial_or_reject {
+                ($stamp:expr) => {
+                    match $stamp {
+                        Ok(value) => value,
+                        Err(error) => {
+                            let Some(detail) =
+                                error.nonfinite_trial_detail().map(str::to_owned)
+                            else {
+                                return Err(error);
+                            };
+                            log::debug!(
+                                "Rejecting a non-finite device trial iterate at t={:.6e}, dt={:.3e}: {}",
+                                step_time,
+                                dt,
+                                detail
+                            );
+                            nonfinite_trial_failure = Some((detail, step_time, dt));
+                            had_solver_candidate = false;
+                            break;
+                        }
+                    }
+                };
+            }
             // Merit-gated Newton globalization state: the true nonlinear
             // residual norm of the previously stamped iterate, the iterate
             // itself, and any backtracking search currently walking a
@@ -6529,46 +6592,48 @@ impl Engine {
                     if reuse_classic_mos_terms {
                         let reusable_static_terms = capture_classic_mos_candidate_static_terms
                             .then_some(mosfet_static_terms_scratch.as_slice());
-                        self.stamp_classic_mos_transient_system_from_cache(
-                            cache,
-                            &mut circuit,
-                            &mut matrix,
-                            &mut rhs,
-                            &new_solution,
-                            dt,
-                            &transient_system_context,
-                            false,
-                            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
-                            Some(mosfet_companion_terms_scratch.as_slice()),
-                            reusable_static_terms,
-                            None,
-                            None,
-                            None,
-                        )?;
+                        stamp_trial_or_reject!(self
+                            .stamp_classic_mos_transient_system_from_cache(
+                                cache,
+                                &mut circuit,
+                                &mut matrix,
+                                &mut rhs,
+                                &new_solution,
+                                dt,
+                                &transient_system_context,
+                                false,
+                                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                                Some(mosfet_companion_terms_scratch.as_slice()),
+                                reusable_static_terms,
+                                None,
+                                None,
+                                None,
+                            ));
                     } else {
-                        self.stamp_classic_mos_transient_system_from_cache(
-                            cache,
-                            &mut circuit,
-                            &mut matrix,
-                            &mut rhs,
-                            &new_solution,
-                            dt,
-                            &transient_system_context,
-                            refresh_classic_mos_nonlinear,
-                            crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
-                            None,
-                            None,
-                            Some(&mut mosfet_companion_terms_scratch),
-                            Some(&mut mosfet_static_terms_scratch),
-                            None,
-                        )?;
+                        stamp_trial_or_reject!(self
+                            .stamp_classic_mos_transient_system_from_cache(
+                                cache,
+                                &mut circuit,
+                                &mut matrix,
+                                &mut rhs,
+                                &new_solution,
+                                dt,
+                                &transient_system_context,
+                                refresh_classic_mos_nonlinear,
+                                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                                None,
+                                None,
+                                Some(&mut mosfet_companion_terms_scratch),
+                                Some(&mut mosfet_static_terms_scratch),
+                                None,
+                            ));
                         mosfet_companion_terms_valid = reuse_sequential_classic_mos_newton_terms
                             && refresh_classic_mos_nonlinear
                             && mosfet_companion_terms_scratch.len()
                                 == circuit.mosfets.devices.len();
                     }
                 } else {
-                    self.stamp_transient_system(
+                    stamp_trial_or_reject!(self.stamp_transient_system(
                         &mut circuit,
                         &mut matrix,
                         &mut rhs,
@@ -6579,7 +6644,7 @@ impl Engine {
                         &mut vbic_snapshot_cache,
                         !nonlinear_state_matches_new_solution,
                         0.0,
-                    )?;
+                    ));
                 }
                 nonlinear_state_matches_new_solution = true;
 
@@ -7034,19 +7099,20 @@ impl Engine {
                             // must observe the same evaluation mode as the
                             // canonical Xyce Newton loop.
                             new_solution.copy_from_slice(sol);
-                            self.stamp_transient_system_with_generated_mode(
-                                &mut circuit,
-                                &mut matrix,
-                                &mut rhs,
-                                &new_solution,
-                                step_time,
-                                dt,
-                                &transient_system_context,
-                                &mut vbic_snapshot_cache,
-                                true,
-                                0.0,
-                                crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
-                            )?;
+                            stamp_trial_or_reject!(self
+                                .stamp_transient_system_with_generated_mode(
+                                    &mut circuit,
+                                    &mut matrix,
+                                    &mut rhs,
+                                    &new_solution,
+                                    step_time,
+                                    dt,
+                                    &transient_system_context,
+                                    &mut vbic_snapshot_cache,
+                                    true,
+                                    0.0,
+                                    crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                                ));
                             nonlinear_state_matches_new_solution = true;
                             let (residual_inf_norm, residual_l2_norm) = if uses_direct_xyce_dae {
                                 let vectors = xyce_direct_vectors.as_mut().expect(
@@ -7544,7 +7610,8 @@ impl Engine {
                     && !xyce_level1_core_only
                     && !uses_direct_xyce_dae
                     && circuit.has_nonlinear_devices()
-                    && let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
+                    && let Some(rescued) = rescued_or_rejected_nonfinite(self
+                        .rescue_transient_step_with_gmin_continuation(
                         &mut circuit,
                         &mut matrix,
                         &mut rhs,
@@ -7579,7 +7646,7 @@ impl Engine {
                         },
                         &mut vbic_snapshot_cache,
                         abort,
-                    )?
+                    ))?
                 {
                     static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
@@ -7675,7 +7742,10 @@ impl Engine {
                             dt,
                             retry_count
                         );
-                        let error = SimulationError::ConvergenceFailed(total_step_attempts);
+                        let error = match nonfinite_trial_failure.take() {
+                            Some(failure) => exhausted_nonfinite_trial_error(failure),
+                            None => SimulationError::ConvergenceFailed(total_step_attempts),
+                        };
                         #[cfg(feature = "veriloga")]
                         let error = circuit.annotate_mixed_convergence_failure(error, step_time);
                         return Err(error);
@@ -7725,7 +7795,10 @@ impl Engine {
                         dt,
                         retry_count
                     );
-                    let error = SimulationError::ConvergenceFailed(total_step_attempts);
+                    let error = match nonfinite_trial_failure.take() {
+                        Some(failure) => exhausted_nonfinite_trial_error(failure),
+                        None => SimulationError::ConvergenceFailed(total_step_attempts),
+                    };
                     #[cfg(feature = "veriloga")]
                     let error = circuit.annotate_mixed_convergence_failure(error, step_time);
                     restore_rejected_transient_nonlinear_state!();

@@ -1777,3 +1777,73 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 }
+
+/// A Verilog-A evaluation that returns NaN at a Newton TRIAL iterate is a
+/// rejected iterate, not a run-ending fault.
+///
+/// `ln(V(p,n)+0.1)` is defined at every accepted point of this deck: the
+/// operating point sits at V(p) ~ 0.505 V and the driven endpoint at
+/// V(p) ~ -0.0926 V. It is undefined only at the iterate plain Newton
+/// proposes when the whole -5 V edge lands inside one step, which is exactly
+/// the iterate Spectre and ngspice throw away before cutting dt and retrying.
+#[test]
+fn a_nonfinite_verilog_a_transient_trial_is_rejected_and_the_step_retried() {
+    let model = write_model(
+        "nonfinite_trial",
+        r#"
+module nonfinite_trial(p, n);
+    inout p, n; electrical p, n;
+    analog I(p,n) <+ 1.0e-3*ln(V(p,n) + 0.1);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* a Newton trial overshoots a log singularity\n\
+         V1 in 0 PWL(0 0 1e-9 -5)\n\
+         R1 in p 1k\n\
+         X1 p 0 nonfinite_trial\n\
+         .va \"{}\" nonfinite_trial\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    // The configured first step spans the whole source edge, so the first
+    // Newton iterate is V(p) ~ -1.4 V and ln() leaves its domain. One dt cut
+    // puts the same timepoint back on the physical branch.
+    let engine = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(1.0e-9),
+        ..Default::default()
+    });
+    let result = engine
+        .run_tran(&netlist, 3.0e-9, 1.0e-9)
+        .expect("a non-finite trial iterate must reject the iterate, not the run");
+
+    let output = node_series(&result.node_names, &result.voltages, "p");
+    let source = |time: f64| -> f64 {
+        if time >= 1.0e-9 {
+            -5.0
+        } else {
+            -5.0 * time / 1.0e-9
+        }
+    };
+    for (&time, &voltage) in result.time.iter().zip(output) {
+        assert!(
+            voltage > -0.1,
+            "t={time}: accepted V(p)={voltage} is outside the model's domain"
+        );
+        // The deck is resistive, so every accepted point solves
+        // (V - Vin)/1k + 1e-3*ln(V + 0.1) = 0 exactly.
+        let residual = (voltage - source(time)) * 1.0e-3 + 1.0e-3 * (voltage + 0.1).ln();
+        assert!(
+            residual.abs() < 1.0e-6,
+            "t={time}: V(p)={voltage} leaves KCL residual {residual}"
+        );
+    }
+    assert!(
+        result.time.last().copied().unwrap_or(0.0) >= 3.0e-9 - 1.0e-18,
+        "the run must reach tstop: {:?}",
+        result.time.last()
+    );
+
+    let _ = std::fs::remove_file(model);
+}
