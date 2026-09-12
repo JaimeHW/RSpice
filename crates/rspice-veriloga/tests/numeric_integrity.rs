@@ -745,7 +745,18 @@ endmodule
     let error = device
         .try_stamp_reactive(&[0.0], |_, _, _| {})
         .expect_err("infinite reactive derivative must be a runtime diagnostic");
-    assert_numeric_error(error, "reactive Jacobian 0:0");
+    // What both routes must agree on is the class: an infinite derivative at
+    // this bias is a non-finite model result, not a structural refusal, and a
+    // DC solve treats the two oppositely. They name different sites because
+    // they refuse at different ones — the interpreter evaluates the entry and
+    // labels it, while the native image refuses inside the `ddt` derivative
+    // helper the entry is built from, before the entry exists to be named.
+    let site = if cfg!(feature = "native") {
+        "ddt derivative"
+    } else {
+        "reactive Jacobian 0:0"
+    };
+    assert_numeric_error(error, site);
 }
 
 #[test]

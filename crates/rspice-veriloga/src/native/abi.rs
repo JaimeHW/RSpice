@@ -1780,6 +1780,31 @@ fn invalid_native_integration_context(
     0.0
 }
 
+/// The same refusal, for the cases the *value* is responsible for rather than
+/// the program: an operand the module's arithmetic on this iterate made
+/// non-finite, or a candidate the shared runtime could not evaluate from it.
+///
+/// The interpreter classifies every one of these as
+/// [`VmError::InvalidNumericResult`](crate::vm::VmError::InvalidNumericResult)
+/// — `vm::executor`'s `DdtState`, `DdtDerivativeState`, `IdtState` and
+/// `IdtDerivativeState` arms — and the native route has to agree, because the
+/// two classes mean opposite things to a solve: a rejectable trial sends the
+/// DC solve to the next point on its ladder, while a structural refusal ends
+/// it at the first stamp. A bias that made a derivative infinite is exactly the
+/// case another bias can still converge.
+fn nonfinite_native_integration_value(
+    ctx: &EvalContext,
+    operator: &str,
+    state_id: usize,
+    detail: &str,
+) -> f64 {
+    ctx.record_classified(
+        true,
+        format!("native {operator} state {state_id} {detail}; no interpreter fallback"),
+    );
+    0.0
+}
+
 unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> bool {
     state_id < ctx.state_values_len
         && state_id < ctx.state_prev_len
@@ -1831,7 +1856,7 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
         || (matches!(ctx.analysis_type, 1 | 3) && !ctx.analysis_phase.is_equilibrium())
     {
         if !value.is_finite() {
-            return invalid_native_integration_context(ctx, "ddt", state_id, "input is not finite");
+            return nonfinite_native_integration_value(ctx, "ddt", state_id, "input is not finite");
         }
         return 0.0;
     }
@@ -1850,7 +1875,7 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
     ) {
         Ok(candidate) => candidate,
         Err(error) => {
-            return invalid_native_integration_context(ctx, "ddt", state_id, &error.to_string());
+            return nonfinite_native_integration_value(ctx, "ddt", state_id, &error.to_string());
         }
     };
     unsafe {
@@ -1892,7 +1917,7 @@ pub unsafe extern "C" fn rspice_ddt_derivative_native(
     }
     let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
     if operands.iter().any(|value| !value.is_finite()) {
-        return invalid_native_integration_context(
+        return nonfinite_native_integration_value(
             ctx,
             operator,
             state_id,
@@ -1919,7 +1944,7 @@ pub unsafe extern "C" fn rspice_ddt_derivative_native(
     ) {
         Ok(value) => value,
         Err(error) => {
-            invalid_native_integration_context(ctx, operator, state_id, &error.to_string())
+            nonfinite_native_integration_value(ctx, operator, state_id, &error.to_string())
         }
     }
 }
@@ -2017,7 +2042,7 @@ unsafe fn rspice_integral_state_native(
                 (candidate.value, candidate.previous)
             }
             Err(error) => {
-                return invalid_native_integration_context(
+                return nonfinite_native_integration_value(
                     ctx,
                     operator,
                     state_id,
@@ -2036,7 +2061,7 @@ unsafe fn rspice_integral_state_native(
                 },
             ),
             Err(error) => {
-                return invalid_native_integration_context(
+                return nonfinite_native_integration_value(
                     ctx,
                     operator,
                     state_id,
@@ -2058,7 +2083,7 @@ unsafe fn rspice_integral_state_native(
         return if retained.is_finite() {
             retained
         } else {
-            invalid_native_integration_context(
+            nonfinite_native_integration_value(
                 ctx,
                 operator,
                 state_id,
@@ -2138,7 +2163,7 @@ unsafe fn rspice_integral_derivative_native(
     }
     let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 6 } else { 3 }) };
     if operands.iter().any(|value| !value.is_finite()) {
-        return invalid_native_integration_context(
+        return nonfinite_native_integration_value(
             ctx,
             operator,
             state_id,
@@ -2190,7 +2215,7 @@ unsafe fn rspice_integral_derivative_native(
     };
     match result {
         Ok(value) => value,
-        Err(error) => invalid_native_integration_context(ctx, operator, state_id, &error),
+        Err(error) => nonfinite_native_integration_value(ctx, operator, state_id, &error),
     }
 }
 
@@ -3204,8 +3229,22 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
                 dynamic_variable_bounds_error(index, lower, len_i64)
             }
         } else {
+            // Neither of these is a declared-bounds violation, and reporting
+            // one as if it were names the wrong cause: the declared bounds are
+            // not what an index outside the representable range fell foul of.
+            // `vm::executor::array_slot` separates the two and this is the same
+            // separation, in the same words, so one module reads the same on
+            // either route.
             iterate_dependent = !raw_index.is_finite();
-            dynamic_variable_bounds_error(raw_index, lower, len_i64)
+            if iterate_dependent {
+                format!(
+                    "native dynamic variable access: runtime array index must be finite, got {raw_index}; no interpreter fallback"
+                )
+            } else {
+                format!(
+                    "native dynamic variable access: runtime array index {raw_index} rounds outside the signed 64-bit index range; no interpreter fallback"
+                )
+            }
         }
     } else {
         "native dynamic variable length exceeds native bounds range; no interpreter fallback".into()
