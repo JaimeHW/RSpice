@@ -37,9 +37,6 @@ const OUTPUT_NOISE: f64 = 4.144e-18;
 
 /// Accepted transient points for a native 1 pF capacitor at each reltol.
 const NATIVE_CAP_POINTS: [usize; 3] = [135, 217, 598];
-/// The same for an authored `ddt` charge of the same size. Today these are all
-/// equal, which is the R1.3 defect signature rather than a physical result.
-const VA_CAP_POINTS: [usize; 3] = [120, 120, 120];
 const RELTOLS: [&str; 3] = ["1e-2", "1e-3", "1e-5"];
 
 //=============================================================================
@@ -419,34 +416,15 @@ fn a_native_capacitor_tightens_its_grid_as_reltol_tightens() {
     );
 }
 
-/// Today an authored charge accepts the same number of points at every
-/// reltol, which is the signature of the missing truncation-error authority
-/// rather than a property worth having. Pinning it keeps the defect visible
-/// and makes the repair land as a deliberate change to this file.
 #[test]
-fn an_authored_charge_ignores_reltol_today() {
-    let model = ModelFile::new(&one_port(CHARGED));
-    let points = charge_step_points(Some(&model));
-    for (index, reltol) in RELTOLS.iter().enumerate() {
-        pin_usize(
-            &format!("va_cap_points_reltol_{reltol}"),
-            points[index],
-            VA_CAP_POINTS[index],
-        );
-    }
-    assert!(
-        points[0] == points[1] && points[1] == points[2],
-        "R1.3 has landed: the authored charge now tracks reltol ({points:?}); \
-         delete this case and un-ignore the one below"
-    );
-}
-
-#[test]
-#[ignore = "R1.3: Verilog-A charges have no truncation-error authority"]
 fn an_authored_charge_carries_the_same_truncation_authority_as_a_native_one() {
     let model = ModelFile::new(&one_port(CHARGED));
     let authored = charge_step_points(Some(&model));
     let native = charge_step_points(None);
+    assert!(
+        authored[0] < authored[1] && authored[1] < authored[2],
+        "a tighter reltol must accept more points, got {authored:?}"
+    );
     for (index, reltol) in RELTOLS.iter().enumerate() {
         let (a, n) = (authored[index] as f64, native[index] as f64);
         assert!(
