@@ -66,10 +66,27 @@ pub(super) fn strip_inline_semicolon_comment_with_non_semicolon_comments(
     line
 }
 
+/// Every directive spelling that compiles a Verilog-A source into a deck.
+///
+/// `.va` and `.veriloga` are RSpice's own; `.hdl`, `.vams` and `.verilog` are
+/// what decks written for other tools call the same card. All five take the
+/// same fields, produce the same directive and resolve through the same chain,
+/// so a deck can be read without being rewritten. The set is closed: a near
+/// miss like `.vams2` stays an unknown card rather than silently importing a
+/// model.
+const VERILOGA_SOURCE_COMMANDS: [&str; 5] = [".va", ".veriloga", ".hdl", ".vams", ".verilog"];
+
+/// Whether a directive head names a Verilog-A source, in any letter case.
+pub(super) fn is_veriloga_source_command(command: &str) -> bool {
+    VERILOGA_SOURCE_COMMANDS
+        .iter()
+        .any(|spelling| command.eq_ignore_ascii_case(spelling))
+}
+
 pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
     let mut parts = line.trim().splitn(2, char::is_whitespace);
     let command = parts.next()?;
-    if !command.eq_ignore_ascii_case(".veriloga") && !command.eq_ignore_ascii_case(".va") {
+    if !is_veriloga_source_command(command) {
         return None;
     }
 
@@ -921,6 +938,49 @@ mod tests {
             );
             let deck = format!("* malformed Verilog-A include\n{line}\n.end\n");
             assert!(crate::Netlist::parse_validated(&deck).is_err(), "{line}");
+        }
+    }
+
+    /// Five spellings, one directive; nothing outside the five.
+    #[test]
+    fn every_veriloga_source_spelling_parses_and_no_other_does() {
+        for spelling in [".va", ".veriloga", ".hdl", ".vams", ".verilog"] {
+            for cased in [
+                spelling.to_ascii_lowercase(),
+                spelling.to_ascii_uppercase(),
+                format!(".{}", capitalize(&spelling[1..])),
+            ] {
+                let include = crate::netlist::parse_veriloga_source_directive(&format!(
+                    "{cased} model.va Amp"
+                ))
+                .unwrap_or_else(|| panic!("{cased} names a Verilog-A source"));
+                assert_eq!(include.file_path, std::path::PathBuf::from("model.va"));
+                assert_eq!(include.model_name.as_deref(), Some("Amp"), "{cased}");
+            }
+        }
+        for spelling in [
+            ".v",
+            ".vam",
+            ".vams2",
+            ".vamsx",
+            ".hdlx",
+            ".verilogams",
+            ".vaa",
+            ".verilogaa",
+        ] {
+            assert!(
+                crate::netlist::parse_veriloga_source_directive(&format!("{spelling} model.va"))
+                    .is_none(),
+                "{spelling} must not name a Verilog-A source"
+            );
+        }
+    }
+
+    fn capitalize(word: &str) -> String {
+        let mut characters = word.chars();
+        match characters.next() {
+            Some(first) => first.to_ascii_uppercase().to_string() + characters.as_str(),
+            None => String::new(),
         }
     }
 

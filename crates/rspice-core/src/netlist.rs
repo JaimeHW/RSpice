@@ -1243,7 +1243,8 @@ pub struct ControlCommandRecord {
 /// Verilog-A model include directive
 ///
 /// References an external Verilog-A file to be compiled and used as a model.
-/// Usage: `.VERILOGA filename.va [MODELNAME] [module=MODULE]`.
+/// Usage: `.VA filename.va [MODELNAME] [module=MODULE]`, spelled `.va`,
+/// `.veriloga`, `.hdl`, `.vams` or `.verilog`.
 #[derive(Debug, Clone)]
 pub struct VerilogAInclude {
     /// Path to the Verilog-A source file.

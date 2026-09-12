@@ -84,8 +84,9 @@ use state::*;
 use tlines::*;
 use values::*;
 
-/// Parse one `.veriloga`/`.va` directive without mutating parser state.
+/// Parse one Verilog-A source directive without mutating parser state.
 ///
+/// `.va`, `.veriloga`, `.hdl`, `.vams` and `.verilog` all name this directive.
 /// Library acquisition uses the same tokenizer as executable-netlist parsing
 /// so authenticated AHDL dependency edges cannot disagree with execution.
 pub fn parse_veriloga_source_directive(line: &str) -> Option<VerilogAInclude> {
@@ -853,8 +854,9 @@ fn parse_netlist_impl(
             .into());
         }
 
-        // Handle .VERILOGA directive directly (before continuation handling)
-        if head.eq_ignore_ascii_case(".veriloga") || head.eq_ignore_ascii_case(".va") {
+        // Handle a Verilog-A source directive directly, in any of its
+        // spellings, before continuation handling.
+        if is_veriloga_source_command(head) {
             let mut include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
                 line: line_num,
                 message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] with closed quotes and no extra fields".to_owned(),
