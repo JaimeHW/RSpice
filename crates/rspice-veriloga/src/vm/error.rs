@@ -21,7 +21,22 @@ pub enum VmError {
     /// Structurally invalid or corrupted compiled-model artifact.
     InvalidModel(String),
     /// A model expression produced NaN or infinity at a solver boundary.
+    ///
+    /// This is a property of the *point* the solver handed the device, not of
+    /// the model: `ln(V(p,n)+0.1)` is finite at every accepted operating point
+    /// of a well-posed deck and undefined at an overshooting Newton iterate.
+    /// A consumer may therefore reject the iterate and retry from a smaller
+    /// step or a stepped source. Every refusal that would fail identically at
+    /// every other iterate belongs in [`VmError::InvalidRuntimeOperation`].
     InvalidNumericResult(String),
+    /// A runtime refusal that shares the shape of an invalid numeric result
+    /// but does not depend on the values of this iterate.
+    ///
+    /// A compiled layout the runtime will not execute, or an index that is
+    /// finite and still outside the representable range, fails the same way at
+    /// every point. Retrying such a refusal spends the whole convergence
+    /// ladder to report the message it already had.
+    InvalidRuntimeOperation(String),
     /// Invalid simulator-to-device runtime configuration.
     InvalidRuntimeConfiguration(String),
     /// An analog system task could not be staged or delivered.
@@ -45,6 +60,9 @@ impl std::fmt::Display for VmError {
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
             VmError::InvalidModel(msg) => write!(f, "invalid compiled model: {msg}"),
             VmError::InvalidNumericResult(msg) => write!(f, "invalid numeric result: {msg}"),
+            VmError::InvalidRuntimeOperation(msg) => {
+                write!(f, "invalid runtime operation: {msg}")
+            }
             VmError::InvalidRuntimeConfiguration(msg) => {
                 write!(f, "invalid runtime configuration: {msg}")
             }

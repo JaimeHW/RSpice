@@ -58,7 +58,7 @@ pub(crate) fn observe_zi_state(
     derivative: bool,
 ) -> Result<f64, VmError> {
     let count = layout.validate_operand_budget().map_err(|error| {
-        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+        VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
     })?;
     if operands.len() != count {
         return Err(VmError::InvalidInstruction(
@@ -102,7 +102,7 @@ pub(crate) fn execute_zi_state(
     operands: &[f64],
 ) -> Result<f64, VmError> {
     let operand_count = layout.validate_operand_budget().map_err(|error| {
-        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+        VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
     })?;
     if operands.len() != operand_count {
         return Err(VmError::InvalidInstruction("invalid zi operand count"));
@@ -147,7 +147,7 @@ pub(crate) fn execute_zi_state_derivative(
     operands: &[f64],
 ) -> Result<f64, VmError> {
     let operand_count = layout.validate_operand_budget().map_err(|error| {
-        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+        VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
     })?;
     if operands.len() != operand_count {
         return Err(VmError::InvalidInstruction(
@@ -286,9 +286,9 @@ impl<'a> Vm<'a> {
             ArrayIndexError::NonFinite { raw } => VmError::InvalidNumericResult(format!(
                 "runtime array index must be finite, got {raw}"
             )),
-            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidNumericResult(format!(
-                "runtime array index {raw} rounds outside the signed 64-bit index range"
-            )),
+            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidRuntimeOperation(
+                format!("runtime array index {raw} rounds outside the signed 64-bit index range"),
+            ),
             ArrayIndexError::OutOfBounds { index } => VmError::IndexOutOfBounds {
                 index,
                 lower,
@@ -409,7 +409,7 @@ impl<'a> Vm<'a> {
             }
             Instruction::ZiState(layout) => {
                 let operand_count = layout.validate_operand_budget().map_err(|error| {
-                    VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+                    VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
                 })?;
                 if self.stack.len() < operand_count {
                     return Err(VmError::StackUnderflow("ZiState"));
@@ -421,7 +421,7 @@ impl<'a> Vm<'a> {
             }
             Instruction::ZiStateDerivative(layout) => {
                 let operand_count = layout.validate_operand_budget().map_err(|error| {
-                    VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+                    VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
                 })?;
                 if self.stack.len() < operand_count {
                     return Err(VmError::StackUnderflow("ZiStateDerivative"));
@@ -1811,9 +1811,11 @@ mod tests {
             assert!(matches!(error, VmError::InvalidNumericResult(_)));
         }
 
+        // A finite index outside the representable range is the same refusal
+        // at every iterate: it is structural, not a rejectable trial.
         let error = Vm::array_slot(9_223_372_036_854_775_808.0, 0, 1, 0)
             .expect_err("unrepresentable rounded array indices must fail closed");
-        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(matches!(error, VmError::InvalidRuntimeOperation(_)));
     }
 
     #[test]
@@ -1886,7 +1888,9 @@ mod tests {
         let error = execute(vec![Instruction::ZiState(layout)])
             .expect_err("a tampered over-budget Zi instruction must fail closed");
 
-        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        // The layout is rejected by its own shape, at every iterate alike, so
+        // no Newton retry can make it executable.
+        assert!(matches!(error, VmError::InvalidRuntimeOperation(_)));
         assert!(error.to_string().contains("platform-uniform maximum 1024"));
     }
 

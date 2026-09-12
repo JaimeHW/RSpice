@@ -620,9 +620,9 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
             ArrayIndexError::NonFinite { raw } => VmError::InvalidNumericResult(format!(
                 "runtime array index must be finite, got {raw}"
             )),
-            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidNumericResult(format!(
-                "runtime array index {raw} rounds outside the signed 64-bit index range"
-            )),
+            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidRuntimeOperation(
+                format!("runtime array index {raw} rounds outside the signed 64-bit index range"),
+            ),
             ArrayIndexError::OutOfBounds { index } => VmError::IndexOutOfBounds {
                 index,
                 lower,
@@ -742,7 +742,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
 
     fn execute_zi(&mut self, layout: ZiRuntimeLayout, derivative: bool) -> Result<(), VmError> {
         let operand_count = layout.validate_operand_budget().map_err(|error| {
-            VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+            VmError::InvalidRuntimeOperation(format!("Zi runtime layout rejected: {error}"))
         })?;
         if self.stack.len() < operand_count {
             return Err(VmError::StackUnderflow(if derivative {
