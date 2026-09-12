@@ -174,9 +174,14 @@ fn shared_discrete_inputs_reject_dual_writers_and_unrepresentable_widths() {
             "module dual(p); inout p; electrical p; reg state; initial state=0; analog begin state=1; I(p)<+state; end endmodule",
             "cannot be written by the analog body",
         ),
+        // VAMS-2023 Table 7-1 separates an `integer` variable from a packed
+        // bit grouping: the grouping is zero-extended into the analog domain
+        // and carries at most 31 bits, whatever its signedness in a discrete
+        // expression. A 64-bit `reg` names no analog value, so the refusal is
+        // the width and it says which spelling does carry a signed 32-bit one.
         (
             "module wide(p); inout p; electrical p; reg [63:0] state; initial state=0; analog I(p)<+state; endmodule",
-            "32-bit signed integer range",
+            "exceeds the 31-bit grouping limit",
         ),
     ] {
         let error = compiler
