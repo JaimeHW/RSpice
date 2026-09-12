@@ -1647,10 +1647,15 @@ pub unsafe extern "C" fn rspice_zi_step_native(
                         *current = current.min(event_time);
                     }
                     Err(error) => {
-                        ctx.record_classified(
-                            error.is_iterate_dependent(),
-                            format!("native zi filter {filter_id} breakpoint failed: {error}"),
-                        );
+                        // The interpreter's twin (`Context::transient_event_time`)
+                        // makes this unconditionally structural, and it is:
+                        // a breakpoint request is scheduling, not evaluation,
+                        // so no other iterate answers it differently. Spending
+                        // a rejection ladder on it only delays the same
+                        // refusal.
+                        ctx.record_runtime_error(format!(
+                            "native zi filter {filter_id} breakpoint failed: {error}"
+                        ));
                         return 0.0;
                     }
                 }
