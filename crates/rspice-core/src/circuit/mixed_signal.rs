@@ -149,6 +149,16 @@ impl<'a> MixedHostTrialGroup<'a> {
             None => digital.advance(self.hosts, voltages),
         }
         .map_err(shared_error)?;
+        if digital.digital_activity() {
+            // The coordinator ran the wheel for every enrolled instance at
+            // once, and an instance reads that wheel through a view it cannot
+            // question. Tell each of them before their bridges are sampled:
+            // a boundary that moves in a step the discrete half acted inside
+            // was moved by the event, not by a root inside the interval.
+            for host in self.hosts.iter_mut() {
+                host.note_shared_digital_activity();
+            }
+        }
         digital.synchronize(self.hosts).map_err(shared_error)?;
         for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
             let mut moved = false;
@@ -813,11 +823,22 @@ impl CircuitData {
         if self.mixed_signal_hosts.is_empty() {
             return Ok((None, false));
         }
+        let shared_digital_activity = match &self.mixed_digital_coordinator {
+            Some(coordinator) => coordinator
+                .digital_activity_within(time)
+                .map_err(shared_error)?,
+            None => false,
+        };
         let mut boundary_root: Option<Value> = None;
         for host in &self.mixed_signal_hosts {
             if let Some(target) = named(
                 host,
-                host.analog_boundary_refinement_time(time, voltages, minimum_timestep),
+                host.analog_boundary_refinement_time(
+                    time,
+                    voltages,
+                    minimum_timestep,
+                    shared_digital_activity,
+                ),
             )? {
                 boundary_root = Some(boundary_root.map_or(target, |current| current.min(target)));
             }

@@ -679,6 +679,20 @@ struct MixedState {
 #[derive(Clone)]
 struct ActiveTrial {
     start_digital: bool,
+    /// Whether the discrete half ran inside this trial's interval — the
+    /// wheel had an activation due at or before the trial's tick, the trial
+    /// started the digital world, or the circuit's shared wheel advanced.
+    ///
+    /// A trial that ran the discrete half can have moved a D/A bridge, and a
+    /// D/A bridge that moves at the tick ending the step steps the analog
+    /// solution at that instant. An A/D threshold that the step then crosses
+    /// was crossed *by that event*, at the tick it happened on, and is not a
+    /// root the analog solver can go back and find inside the interval: the
+    /// interval's own solution never passed through the threshold. So the
+    /// crossing is dated at the trial's endpoint and no refinement is asked
+    /// for; interpolation is kept for an interval the discrete half was
+    /// quiet through, where the voltage moved because the circuit moved it.
+    digital_activity: bool,
     /// The digital host as it stood when the trial opened — the whole of what
     /// a rejected trial has to put back.
     ///
@@ -1817,6 +1831,14 @@ impl MixedSignalHost {
             }
         }
 
+        // Read before anything in this function can advance the wheel: the
+        // first advance consumes the pending tick, so asking afterwards would
+        // always answer no.
+        let wheel_due = self
+            .state
+            .digital
+            .next_tick()
+            .is_some_and(|next| next <= tick);
         let rollback = self.state.digital.clone();
         let previous_inputs = self.analog_inputs;
         self.analog
@@ -1900,6 +1922,7 @@ impl MixedSignalHost {
             .resize(self.state.bridges.dac.len(), false);
         self.trial = Some(ActiveTrial {
             start_digital,
+            digital_activity: start_digital || wheel_due,
             rollback,
             analog_inputs: previous_inputs,
             tick,
@@ -1916,6 +1939,35 @@ impl MixedSignalHost {
     /// Whether a trial is open.
     pub(crate) fn trial_active(&self) -> bool {
         self.trial.is_some()
+    }
+
+    /// Record that the circuit's shared wheel ran inside this trial.
+    ///
+    /// An enrolled instance reads the wheel through a view, and a view has no
+    /// queue of its own to ask — the coordinator owns it and advances it once
+    /// for every instance. This is how the answer reaches the instance whose
+    /// bridges are about to be sampled.
+    pub(crate) fn note_shared_digital_activity(&mut self) {
+        if let Some(trial) = self.trial.as_mut() {
+            trial.digital_activity = true;
+        }
+    }
+
+    /// Whether a trial ending at `time_seconds` would run the discrete half,
+    /// asked of an idle host — the same question [`Self::begin_trial`] answers
+    /// for itself when it opens one.
+    ///
+    /// An enrolled instance answers `false` here whatever the circuit's wheel
+    /// holds, because its view has no queue; the coordinator answers for it.
+    fn own_digital_activity(&self, time_seconds: f64) -> Result<bool, MixedSignalError> {
+        let Some(next) = self.state.digital.next_tick() else {
+            return Ok(false);
+        };
+        let tick = self
+            .resolution
+            .seconds_to_floor_ticks(time_seconds)
+            .map_err(DigitalRunError::from)?;
+        Ok(next <= tick)
     }
 
     fn advance_trial_digital(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
@@ -2173,15 +2225,24 @@ impl MixedSignalHost {
     /// Ask the transient controller to solve at the earliest A/D crossing
     /// before publishing this candidate's digital consequences. Only accepted
     /// values are read; neither process state nor analog operators are evaluated.
+    ///
+    /// `shared_digital_activity` is the circuit's answer to whether the shared
+    /// wheel runs inside this interval; an unenrolled instance decides for
+    /// itself. Either way a step the discrete half acted inside has no
+    /// interior A/D root to solve for — see [`ActiveTrial::digital_activity`].
     pub(crate) fn analog_boundary_refinement_time(
         &self,
         time: f64,
         voltages: &[f64],
         minimum_timestep: f64,
+        shared_digital_activity: bool,
     ) -> Result<Option<f64>, MixedSignalError> {
         self.require_idle("inspect analog boundary roots")?;
         self.validate_solution(voltages)?;
         if !self.state.started || time <= self.state.accepted_time {
+            return Ok(None);
+        }
+        if shared_digital_activity || self.own_digital_activity(time)? {
             return Ok(None);
         }
         if !minimum_timestep.is_finite() || minimum_timestep <= 0.0 {
@@ -2316,6 +2377,10 @@ impl MixedSignalHost {
     ) -> Result<bool, MixedSignalError> {
         read_dac_bits(&self.state, &mut scratch.dac_before)?;
         fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
+        let digital_activity = self
+            .trial
+            .as_ref()
+            .is_some_and(|trial| trial.digital_activity);
         let start = self.trial.as_ref().is_some_and(|trial| trial.start_digital);
         if start
             || self
@@ -2362,24 +2427,40 @@ impl MixedSignalHost {
             {
                 continue;
             }
-            let crossing = threshold_crossing_time(
-                time_seconds,
-                time_seconds - timestep_seconds,
-                timestep_seconds,
-                self.state.accepted_adc_voltages[index],
-                voltage,
-                threshold,
-            );
+            // A step the discrete half acted inside moved this node itself,
+            // at the tick it acted on, so there is no interior root to
+            // interpolate towards: the transition is this endpoint's own.
+            let crossing = if digital_activity {
+                time_seconds
+            } else {
+                threshold_crossing_time(
+                    time_seconds,
+                    time_seconds - timestep_seconds,
+                    timestep_seconds,
+                    self.state.accepted_adc_voltages[index],
+                    voltage,
+                    threshold,
+                )
+            };
             // Verilog-AMS LRM 2.4 section 7.3.6.1: an analog event crossing
             // into the digital domain lands on the *nearest* digital time
             // tick. This is the transition's own timestamp being quantized,
             // which is not the mapping `begin_trial` applies to the trial's
             // timestamp — see this module's "two time bases".
-            let crossing_tick = self
-                .resolution
-                .seconds_to_ticks(crossing)
-                .map_err(DigitalRunError::from)?;
-            publish_tick = publish_tick.max(crossing_tick);
+            //
+            // An endpoint-dated transition is exempt, and must be: rounding
+            // the trial's own timestamp would publish into the tick *after*
+            // the one the trial is running, which is the digital world being
+            // run past an instant the integrator has accepted. The trial's
+            // floored tick is where this transition belongs, because the
+            // event that caused it happened on that tick.
+            if !digital_activity {
+                let crossing_tick = self
+                    .resolution
+                    .seconds_to_ticks(crossing)
+                    .map_err(DigitalRunError::from)?;
+                publish_tick = publish_tick.max(crossing_tick);
+            }
             scratch.bit_drives.push((index, bit));
             scratch.crossings.push((index, crossing));
         }
@@ -4213,6 +4294,78 @@ endmodule
         assert!(
             crossing < 1.0e-9,
             "an uninterpolated sampler would have dated this at the step's end"
+        );
+    }
+
+    /// A step the discrete half acted inside carries no interior A/D root.
+    ///
+    /// The voltage moved because the event moved it, at the tick the event
+    /// happened on, so there is nothing for the analog solver to go back and
+    /// find: the interval's own solution never passed through the threshold.
+    /// Asking for one is the refinement storm — the solver rejects the step,
+    /// halves it, lands on the same event again, and repeats until it reaches
+    /// its own floor.
+    #[test]
+    fn a_step_the_discrete_half_acted_in_has_no_interior_boundary_root() {
+        let mut host = host();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        assert_eq!(
+            host.next_event_time().expect("the wheel is readable"),
+            None,
+            "this interval has to start with an empty wheel to be a control"
+        );
+
+        // A rising crossing inside (1 ns, 2 ns] with nothing digital due: an
+        // interior root, and the solver is asked to land on it.
+        let rising = [0.0, 0.0, 1.0, 0.0];
+        let target = host
+            .analog_boundary_refinement_time(2.0e-9, &rising, 1.0e-20, false)
+            .expect("the inspection succeeds")
+            .expect("a crossing with no digital activity is an interior root");
+        assert!(
+            target > 1.0e-9 && target < 2.0e-9,
+            "the root must be inside the step, got {target:e}"
+        );
+        // The circuit's answer suppresses it without this host's own wheel
+        // knowing anything: an enrolled instance reads a view with no queue.
+        assert_eq!(
+            host.analog_boundary_refinement_time(2.0e-9, &rising, 1.0e-20, true)
+                .expect("the inspection succeeds"),
+            None,
+            "a shared wheel that ran inside the step leaves no interior root"
+        );
+
+        // Publish that crossing. The woken process suspends on its `#2`, so
+        // the wheel is due at tick 4 and at nothing before it.
+        begin(&mut host, 2);
+        settle_and_accept(&mut host, &rising);
+        let resume = host
+            .next_event_time()
+            .expect("the wheel is readable")
+            .expect("the crossing woke the edge process onto its `#2`");
+        assert_eq!(
+            (resume / 1.0e-9).round() as u64,
+            2 + EDGE_PROCESS_DELAY_TICKS,
+            "the resume must be the `#2` after the publication tick, got {resume:e}"
+        );
+
+        // One falling crossing, two endpoints: inside tick 3, where nothing is
+        // due, and inside tick 4, where the module's own timer runs.
+        let falling = [0.0; 4];
+        assert!(
+            host.analog_boundary_refinement_time(3.5e-9, &falling, 1.0e-20, false)
+                .expect("the inspection succeeds")
+                .is_some(),
+            "a falling crossing before the wheel is due is still an interior root"
+        );
+        assert_eq!(
+            host.analog_boundary_refinement_time(4.5e-9, &falling, 1.0e-20, false)
+                .expect("the inspection succeeds"),
+            None,
+            "the module's own timer runs inside this step, so its boundary moved with it"
         );
     }
 
