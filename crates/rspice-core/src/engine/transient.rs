@@ -325,6 +325,32 @@ fn exhausted_nonfinite_trial_error(failure: (String, Value, Value)) -> Simulatio
     ))
 }
 
+/// The failure a timepoint reports once its recovery budget is gone.
+///
+/// `nonconvergence` is what the attempt that ended the step did: it spent its
+/// Newton budget without converging. `carried` is the last non-finite trial
+/// anything rejected at this timepoint and `rejected_this_attempt` says
+/// whether that was this same attempt.
+///
+/// The attempt that ended the step owns the headline either way -- Spectre
+/// reports the step that failed, not the one before it. A non-finite trial the
+/// earlier, larger steps walked away from is appended as context instead,
+/// because an iteration count alone hides that the step spent its retries
+/// against a domain edge rather than against a stiff but evaluable system.
+fn exhausted_step_failure(
+    nonconvergence: SimulationError,
+    rejected_this_attempt: bool,
+    carried: Option<(String, Value, Value)>,
+) -> SimulationError {
+    match carried {
+        Some(failure) if rejected_this_attempt => exhausted_nonfinite_trial_error(failure),
+        Some((detail, time, dt)) => SimulationError::Circuit(format!(
+            "{nonconvergence}; an earlier attempt at this timepoint (t={time:.6e}, dt={dt:.3e}) rejected a non-finite device trial: {detail}"
+        )),
+        None => nonconvergence,
+    }
+}
+
 /// A rescue that could not evaluate a device finitely has not rescued the
 /// step: it rejected its own trial, and the caller's dt cut is the next move.
 /// Any other rescue failure still ends the run.
@@ -5195,6 +5221,20 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
+        // Diagnostic of a trial this STEP refused to evaluate finitely, with
+        // the time and step it was tried at. A rejected trial costs the run
+        // nothing while a retry remains, so the message only surfaces once the
+        // recovery budget is exhausted -- and then it must surface, because
+        // "convergence failed" alone hides the instance and the voltages that
+        // produced NaN.
+        //
+        // It outlives the attempt that recorded it. A step whose first
+        // attempts hit a domain edge and whose last one merely ran out of
+        // Newton iterations was still fighting that edge, and which retry
+        // finally shrank dt past it is exactly what an iteration count cannot
+        // say. Cleared when a step is accepted, beside the retry budget whose
+        // lifetime it shares.
+        let mut nonfinite_trial_failure: Option<(String, Value, Value)> = None;
         let mut veriloga_event_refinement_count = 0_usize;
         // The step the controller was proposing when a Verilog-A event root
         // first rejected a candidate, held until a step is accepted that is
@@ -6429,13 +6469,11 @@ impl Engine {
             }
             let mut nonlinear_state_matches_new_solution = false;
             let mut had_solver_candidate = false;
-            // Diagnostic of the trial this attempt refused to evaluate
-            // finitely, with the time and step it was tried at. A rejected
-            // trial costs the run nothing while a retry remains, so the
-            // message only surfaces once the recovery budget is exhausted --
-            // and then it must surface, because "convergence failed" alone
-            // hides the instance and the voltages that produced NaN.
-            let mut nonfinite_trial_failure: Option<(String, Value, Value)> = None;
+            // Whether THIS attempt is the one that refused a trial, as opposed
+            // to an earlier attempt at the same timepoint whose diagnostic the
+            // step is still carrying. It decides which of the two the
+            // exhausted step reports as its headline.
+            let mut attempt_rejected_nonfinite_trial = false;
             // A device that cannot evaluate finitely at a Newton TRIAL point
             // has rejected that iterate, not the run: Spectre and ngspice cut
             // dt and try again, exactly as they do for a failed linear solve
@@ -6461,6 +6499,7 @@ impl Engine {
                                 detail
                             );
                             nonfinite_trial_failure = Some((detail, step_time, dt));
+                            attempt_rejected_nonfinite_trial = true;
                             had_solver_candidate = false;
                             break;
                         }
@@ -7742,12 +7781,14 @@ impl Engine {
                             dt,
                             retry_count
                         );
-                        let error = match nonfinite_trial_failure.take() {
-                            Some(failure) => exhausted_nonfinite_trial_error(failure),
-                            None => SimulationError::ConvergenceFailed(total_step_attempts),
-                        };
+                        let error = SimulationError::ConvergenceFailed(total_step_attempts);
                         #[cfg(feature = "veriloga")]
                         let error = circuit.annotate_mixed_convergence_failure(error, step_time);
+                        let error = exhausted_step_failure(
+                            error,
+                            attempt_rejected_nonfinite_trial,
+                            nonfinite_trial_failure.take(),
+                        );
                         return Err(error);
                     }
                     restore_rejected_transient_nonlinear_state!();
@@ -7795,12 +7836,14 @@ impl Engine {
                         dt,
                         retry_count
                     );
-                    let error = match nonfinite_trial_failure.take() {
-                        Some(failure) => exhausted_nonfinite_trial_error(failure),
-                        None => SimulationError::ConvergenceFailed(total_step_attempts),
-                    };
+                    let error = SimulationError::ConvergenceFailed(total_step_attempts);
                     #[cfg(feature = "veriloga")]
                     let error = circuit.annotate_mixed_convergence_failure(error, step_time);
+                    let error = exhausted_step_failure(
+                        error,
+                        attempt_rejected_nonfinite_trial,
+                        nonfinite_trial_failure.take(),
+                    );
                     restore_rejected_transient_nonlinear_state!();
                     return Err(error);
                 }
@@ -9087,6 +9130,7 @@ impl Engine {
                             ));
                     }
                     retry_count = 0;
+                    nonfinite_trial_failure = None;
                     xyce_step_failure_count = 0;
                     accepted_interval_count =
                         accepted_interval_count.checked_add(1).ok_or_else(|| {
@@ -9283,6 +9327,7 @@ impl Engine {
             // Success - reset retry counter only after event-root refinement
             // has had the opportunity to reject this candidate endpoint.
             retry_count = 0;
+            nonfinite_trial_failure = None;
 
             // Accept this timestep
             t = step_time;
