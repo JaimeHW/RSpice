@@ -65,10 +65,41 @@
 
 use crate::xspice::event_scheduler::SchedulerLimits;
 use crate::xspice::verilog::{BoundaryBus, MixedSignalHost};
-use crate::{CircuitData, SimulationError};
+use crate::{CircuitData, ElaborationError, ElaborationErrorKind, SimulationError};
 
 use super::connect_modules::{self, DesignConnectRules};
 use super::veriloga_cache::CachedVerilogAModel;
+
+/// Every refusal this module raises is about one X-card bound to one master,
+/// so it is built once here rather than formatted at each site: the instance
+/// and the master are the subject the rendering prints, and the `detail` each
+/// site passes is the reason alone.
+fn refuse(
+    instance: &str,
+    module: &str,
+    kind: ElaborationErrorKind,
+    detail: impl Into<String>,
+) -> SimulationError {
+    ElaborationError::new(kind, detail)
+        .instance(instance)
+        .module(module)
+        .into()
+}
+
+/// Which binding step a host construction or update failure belongs to.
+///
+/// `MixedSignalError` already separates a source the compiler would not build
+/// from a bridge declaration it will not execute, and both are the author's to
+/// fix; everything else it can return at elaboration time is the engine
+/// failing a step it expected to complete.
+fn host_failure_kind(error: &crate::xspice::verilog::MixedSignalError) -> ElaborationErrorKind {
+    use crate::xspice::verilog::MixedSignalError as Error;
+    match error {
+        Error::Compile { .. } => ElaborationErrorKind::CompileRefusal,
+        Error::InvalidBridge { .. } => ElaborationErrorKind::PortDiscipline,
+        _ => ElaborationErrorKind::Internal,
+    }
+}
 
 /// The Thevenin source resistance a D/A boundary drives through.
 ///
@@ -180,18 +211,22 @@ pub(super) fn try_build_mixed_signal_instance(
             crate::netlist::ParametricValue::Expression(expression) => {
                 crate::netlist::expr::eval_expression(expression, &netlist.params).map_err(
                     |error| {
-                        SimulationError::Circuit(format!(
-                            "mixed instance '{}' parameter '{name}': {error}",
-                            element.name
-                        ))
+                        refuse(
+                            &element.name,
+                            subckt_name,
+                            ElaborationErrorKind::ParameterValue,
+                            format!("parameter '{name}': {error}"),
+                        )
                     },
                 )?
             }
             _ => {
-                return Err(SimulationError::Circuit(format!(
-                    "mixed instance '{}' parameter '{name}' requires a numeric value",
-                    element.name
-                )));
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::ParameterValue,
+                    format!("parameter '{name}' requires a numeric value"),
+                ));
             }
         };
         // `m` is the one reserved instance parameter the analog Verilog-A
@@ -208,19 +243,23 @@ pub(super) fn try_build_mixed_signal_instance(
         // route.
         if name.eq_ignore_ascii_case("m") && entry.model.parameter_index(name).is_none() {
             if !value.is_finite() || value <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "mixed instance '{}' multiplicity must be a positive finite value, got {value}",
-                    element.name
-                )));
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::ParameterValue,
+                    format!("multiplicity must be a positive finite value, got {value}"),
+                ));
             }
             multiplicity = Some(value);
             continue;
         }
         let index = entry.model.parameter_index(name).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "unknown mixed instance '{}' parameter '{name}'",
-                element.name
-            ))
+            refuse(
+                &element.name,
+                subckt_name,
+                ElaborationErrorKind::ParameterUnknown,
+                format!("unknown parameter '{name}'"),
+            )
         })?;
         overrides.push((entry.model.parameters[index].name.as_str(), value));
     }
@@ -254,10 +293,12 @@ pub(super) fn try_build_mixed_signal_instance(
                     if abort.is_aborted() {
                         SimulationError::Aborted
                     } else {
-                        SimulationError::Circuit(format!(
-                            "mixed instance '{}' parameter elaboration failed: {error}",
-                            element.name
-                        ))
+                        refuse(
+                            &element.name,
+                            subckt_name,
+                            ElaborationErrorKind::CompileRefusal,
+                            format!("parameter elaboration failed: {error}"),
+                        )
                     }
                 })?;
             let specialized = (
@@ -294,12 +335,12 @@ pub(super) fn try_build_mixed_signal_instance(
                 model.num_terminals
             )
         };
-        return Err(SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' connects {} nodes to model '{}', {shape}",
-            element.name,
-            element.nodes.len(),
+        return Err(refuse(
+            &element.name,
             subckt_name,
-        )));
+            ElaborationErrorKind::PortCount,
+            format!("connects {} nodes to a master {shape}", element.nodes.len()),
+        ));
     }
 
     let mut terminal_nodes = Vec::with_capacity(element.nodes.len());
@@ -332,10 +373,12 @@ pub(super) fn try_build_mixed_signal_instance(
         if abort.is_aborted() {
             return SimulationError::Aborted;
         }
-        SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' of model '{}' could not be constructed: {error}",
-            element.name, subckt_name
-        ))
+        refuse(
+            &element.name,
+            subckt_name,
+            host_failure_kind(&error),
+            format!("could not be constructed: {error}"),
+        )
     })?;
 
     // After the setup closure has bound this instance's solver unknowns and
@@ -343,18 +386,22 @@ pub(super) fn try_build_mixed_signal_instance(
     // same factor to its own device.
     if let Some(multiplicity) = multiplicity {
         host.set_multiplicity(multiplicity).map_err(|error| {
-            SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' multiplicity update failed: {error}",
-                element.name
-            ))
+            refuse(
+                &element.name,
+                subckt_name,
+                host_failure_kind(&error),
+                format!("multiplicity update failed: {error}"),
+            )
         })?;
     }
 
     host.set_temperature(temperature).map_err(|error| {
-        SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' temperature update failed: {error}",
-            element.name
-        ))
+        refuse(
+            &element.name,
+            subckt_name,
+            host_failure_kind(&error),
+            format!("temperature update failed: {error}"),
+        )
     })?;
 
     let node_names = circuit.node_names_sorted();
@@ -388,7 +435,13 @@ pub(super) fn try_build_mixed_signal_instance(
             Some(selected) => {
                 connect_modules::check_delegable(selected, kind, &node_label)?;
                 let folded = connect_modules::delegated_parameters(selected, kind, vcc)?;
-                refuse_timed_connect_parameters(&element.name, &port.signal, selected, &folded)?;
+                refuse_timed_connect_parameters(
+                    &element.name,
+                    subckt_name,
+                    &port.signal,
+                    selected,
+                    &folded,
+                )?;
                 log::info!(
                     "Mixed module port '{}' on node '{}' bridges through connect module '{}' as \
                      instance '{}'",
@@ -422,20 +475,24 @@ pub(super) fn try_build_mixed_signal_instance(
             }
         }
         .map_err(|error| {
-            SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' could not bridge port '{}': {error}",
-                element.name, port.signal
-            ))
+            refuse(
+                &element.name,
+                subckt_name,
+                host_failure_kind(&error),
+                format!("could not bridge port '{}': {error}", port.signal),
+            )
         })?;
     }
 
     for bus in layout.buses {
         let name = bus.name.clone();
         host.declare_boundary_bus(bus).map_err(|error| {
-            SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' could not declare boundary bus '{name}': {error}",
-                element.name
-            ))
+            refuse(
+                &element.name,
+                subckt_name,
+                host_failure_kind(&error),
+                format!("could not declare boundary bus '{name}': {error}"),
+            )
         })?;
     }
 
@@ -533,50 +590,67 @@ fn classify_boundary_ports(
             continue;
         };
         if signal.kind.is_real() {
-            return Err(SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' of model '{}' declares real-valued port '{}'. A \
-                 `wreal` boundary carries a real number rather than a discipline's potential and \
-                 flow, so it is not the A/D or D/A boundary this route bridges",
-                element.name, subckt_name, port.name
-            )));
+            return Err(refuse(
+                &element.name,
+                subckt_name,
+                ElaborationErrorKind::PortDiscipline,
+                format!(
+                    "declares real-valued port '{}'. A `wreal` boundary carries a real number \
+                     rather than a discipline's potential and flow, so it is not the A/D or D/A \
+                     boundary this route bridges",
+                    port.name
+                ),
+            ));
         }
         let direction = match port.direction.as_str() {
             "input" => BoundaryDirection::AnalogToDiscrete,
             "output" => BoundaryDirection::DiscreteToAnalog,
             other => {
-                return Err(SimulationError::Circuit(format!(
-                    "mixed Verilog-AMS instance '{}' of model '{}' declares discrete port '{}' as \
-                     `{other}`; a bidirectional discrete boundary needs a bridge that arbitrates \
-                     which side is driving, and this route has an analog-to-discrete and a \
-                     discrete-to-analog bridge and no third kind",
-                    element.name, subckt_name, port.name
-                )));
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "declares discrete port '{}' as `{other}`; a bidirectional discrete \
+                         boundary needs a bridge that arbitrates which side is driving, and this \
+                         route has an analog-to-discrete and a discrete-to-analog bridge and no \
+                         third kind",
+                        port.name
+                    ),
+                ));
             }
         };
         let bits = boundary_bit_order(signal).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{}' of model '{}' declares discrete port '{}' as \
-                 `[{}:{}]`, a range naming {} bit(s), and carries a value {} bit(s) wide; the \
-                 plan the boundary was handed contradicts itself",
-                element.name,
+            refuse(
+                &element.name,
                 subckt_name,
-                port.name,
-                signal.bounds.map_or(0, |(msb, _)| msb),
-                signal.bounds.map_or(0, |(_, lsb)| lsb),
-                signal.declared_range().width(),
-                signal.width,
-            ))
+                ElaborationErrorKind::Internal,
+                format!(
+                    "declares discrete port '{}' as `[{}:{}]`, a range naming {} bit(s), and \
+                     carries a value {} bit(s) wide; the plan the boundary was handed contradicts \
+                     itself",
+                    port.name,
+                    signal.bounds.map_or(0, |(msb, _)| msb),
+                    signal.bounds.map_or(0, |(_, lsb)| lsb),
+                    signal.declared_range().width(),
+                    signal.width,
+                ),
+            )
         })?;
         for (offset, bit) in bits.iter().copied().enumerate() {
             let deck_index = first + offset;
             let node = terminal_nodes[deck_index];
             if node == 0 {
-                return Err(SimulationError::Circuit(format!(
-                    "mixed Verilog-AMS instance '{}' connects discrete port '{}' to ground; a \
-                     boundary net carries a logic value and ground is the voltage reference, not \
-                     a net",
-                    element.name, port.name
-                )));
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "connects discrete port '{}' to ground; a boundary net carries a logic \
+                         value and ground is the voltage reference, not a net",
+                        port.name
+                    ),
+                ));
             }
             layout.ports.push(BoundaryPort {
                 signal: port.name.to_string(),
@@ -653,6 +727,7 @@ fn parameter_or(
 /// accepting a request and not honouring it.
 fn refuse_timed_connect_parameters(
     instance: &str,
+    module: &str,
     signal: &str,
     selected: &connect_modules::PlannedConnectModule,
     folded: &[(String, crate::Value)],
@@ -660,13 +735,18 @@ fn refuse_timed_connect_parameters(
     const TIMED: &[&str] = &["rise_delay", "fall_delay", "t_rise", "t_fall"];
     for (name, _) in folded {
         if TIMED.iter().any(|timed| name.eq_ignore_ascii_case(timed)) {
-            return Err(SimulationError::Circuit(format!(
-                "mixed Verilog-AMS instance '{instance}' port '{signal}' selects connect module \
-                 '{}', whose connect statement sets a transition time. The mixed boundary drives \
-                 through a source resistance and samples against a threshold, with no transition \
-                 or delay stage to apply one to",
-                selected.name
-            )));
+            return Err(refuse(
+                instance,
+                module,
+                ElaborationErrorKind::ConnectRule,
+                format!(
+                    "port '{signal}' selects connect module '{}', whose connect statement sets a \
+                     transition time. The mixed boundary drives through a source resistance and \
+                     samples against a threshold, with no transition or delay stage to apply one \
+                     to",
+                    selected.name
+                ),
+            ));
         }
     }
     Ok(())
