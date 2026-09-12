@@ -260,6 +260,19 @@ impl Engine {
         force_accept_cooldown > 0
     }
 
+    /// Spend one unit of the force-accept recovery budget.
+    ///
+    /// See [`FORCE_ACCEPT_COOLDOWN_RETRIES`] for the rule: an accepted point
+    /// and a Newton retry that the cooldown holds the step width for are the
+    /// same kind of recovery event, so the caps disarm two events after the
+    /// force-accept instead of outliving a run that never fails Newton again.
+    #[inline]
+    pub(super) fn force_accept_cooldown_after_recovery_event(
+        force_accept_cooldown: usize,
+    ) -> usize {
+        force_accept_cooldown.saturating_sub(1)
+    }
+
     #[inline]
     pub(super) fn node_voltage(solution: &[Value], node: usize) -> Value {
         if node == 0 {
@@ -289,5 +302,75 @@ impl Engine {
             .iter()
             .map(|&node| Self::node_voltage(solution, node) - reference_voltage)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cooldown is a budget of recovery events, not of Newton failures.
+    /// `run_transient` spends a unit at every accepted point, so a timepoint
+    /// force-accepted out of LTE exhaustion disarms the recovery caps two
+    /// accepted points later even when Newton never fails again — which is the
+    /// only thing that used to decrement it, so the caps outlived the run.
+    #[test]
+    fn the_force_accept_cooldown_is_spent_by_accepted_points_not_only_newton_failures() {
+        let mut cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
+        assert!(Engine::should_apply_active_source_recovery_cap(cooldown));
+
+        cooldown = Engine::force_accept_cooldown_after_recovery_event(cooldown);
+        assert_eq!(cooldown, 1);
+        assert!(
+            Engine::should_apply_active_source_recovery_cap(cooldown),
+            "the first accepted point after the force-accept is still inside the recovery window"
+        );
+
+        cooldown = Engine::force_accept_cooldown_after_recovery_event(cooldown);
+        assert_eq!(cooldown, 0);
+        assert!(
+            !Engine::should_apply_active_source_recovery_cap(cooldown),
+            "two accepted points with no Newton failure must disarm the recovery caps"
+        );
+
+        cooldown = Engine::force_accept_cooldown_after_recovery_event(cooldown);
+        assert_eq!(cooldown, 0, "a spent budget saturates instead of wrapping");
+        assert!(!Engine::should_apply_active_source_recovery_cap(cooldown));
+    }
+
+    /// What that budget actually gates on the proposal side: while it is armed
+    /// a step over a moving source is cut to `preferred_min_dt / 8`, and once
+    /// it is spent the controller's own proposal stands.
+    #[test]
+    fn the_active_source_recovery_cap_follows_the_cooldown_budget() {
+        let proposal_for = |cooldown: usize| {
+            Engine::bias_transient_step_for_source_activity(
+                1.0e-3,
+                1.0,
+                false,
+                SourceActivityDeltas {
+                    expected_source_delta: 1.0,
+                    interior_source_delta: 1.0,
+                    source_ramp_tracking_delta: Value::INFINITY,
+                },
+                StepBiasFloors {
+                    practical_min_dt: 1.0e-9,
+                    preferred_min_dt: 1.0e-4,
+                    recovery_cap_enabled: Engine::should_apply_active_source_recovery_cap(cooldown),
+                    nonlinear_source_ramp_cap_enabled: false,
+                },
+            )
+        };
+
+        let armed = proposal_for(FORCE_ACCEPT_COOLDOWN_RETRIES);
+        assert!(
+            (armed - 1.25e-5).abs() <= 1.0e-20,
+            "armed proposal {armed:e} is not preferred_min_dt / 8"
+        );
+        let spent = proposal_for(0);
+        assert!(
+            (spent - 1.0e-3).abs() <= 1.0e-18,
+            "spent proposal {spent:e} must be the controller's own step"
+        );
     }
 }

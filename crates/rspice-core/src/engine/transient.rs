@@ -5582,12 +5582,13 @@ impl Engine {
         let mut xyce_step_failure_count = 0_usize;
         let mut total_step_attempts = 0_usize;
         let mut stale_accept_count = 0;
-        let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
+        // Recovery events left before the force-accept caps disarm; see
+        // `FORCE_ACCEPT_COOLDOWN_RETRIES`.
+        let mut force_accept_cooldown = 0_usize;
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
         // Xyce OneStep/Gear12 start at order 1; every native Gear2 path remains order 2.
         const MAX_RETRIES: usize = 200; // Maximum recovery retries per timepoint
         const MAX_VERILOGA_EVENT_REFINEMENTS: usize = 64;
-        const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
@@ -8315,8 +8316,11 @@ impl Engine {
                         max_step,
                     ));
                 } else if force_accept_cooldown > 0 {
-                    force_accept_cooldown -= 1;
-                    // During cooldown, keep timestep at current level (don't shrink)
+                    // During cooldown, keep timestep at current level (don't
+                    // shrink); holding it is the other recovery event the
+                    // budget counts.
+                    force_accept_cooldown =
+                        Self::force_accept_cooldown_after_recovery_event(force_accept_cooldown);
                 } else {
                     let retry_dt = Self::apply_retry_timestep_floor(
                         Self::nonconvergence_retry_timestep(dt, max_step),
@@ -9734,6 +9738,10 @@ impl Engine {
                         }
                         quality.record_force_accept(result.time.len().saturating_sub(1))
                     });
+                    // A force-accepted point arms the recovery budget; it does
+                    // not spend it. Consecutive force-accepts re-arm it here,
+                    // so the caps stay on for the whole burst and the two
+                    // accepted points that follow it.
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     timestep
                         .force_step(next_force_dt.min(model_restart_dt.unwrap_or(Value::INFINITY)));
@@ -10365,6 +10373,14 @@ impl Engine {
             }
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
+            // An accepted point is one of the recovery events the force-accept
+            // budget counts, and spending it here is what disarms the recovery
+            // caps after an LTE-exhaustion force-accept in a run that never
+            // fails Newton again — the Newton retry arm alone kept them on to
+            // `tstop`. The force-accept path above re-arms the budget instead
+            // of reaching this line, so a force-accepted point never spends it.
+            force_accept_cooldown =
+                Self::force_accept_cooldown_after_recovery_event(force_accept_cooldown);
             accepted_point_guards!(
                 dt,
                 accepted_point_schedule(

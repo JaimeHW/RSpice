@@ -38,6 +38,25 @@ pub(super) const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 /// Minimum failed retries required at the effective minimum timestep before a
 /// timepoint may be force-accepted.
 pub(super) const MIN_RETRIES_AT_MINIMUM_TIMESTEP: usize = 1;
+/// Recovery events a force-accepted timepoint keeps the conservative
+/// step-recovery caps armed for.
+///
+/// One rule governs the whole budget: a force-accept arms it to this value,
+/// and every *recovery event* after that point spends exactly one unit — a
+/// Newton retry the cooldown holds the step width steady for, and every
+/// ordinarily accepted point. A force-accepted point re-arms the budget
+/// instead of spending it, so a burst of them keeps the caps armed for the
+/// burst and the two accepted points that follow it. Counting Newton retries
+/// alone left the budget armed to
+/// `tstop` whenever the force-accept came from LTE exhaustion in a run that
+/// never failed Newton again, and the caps it gates
+/// (`Engine::should_apply_active_source_recovery_cap`: the
+/// `preferred_min_dt / 8` proposal cap over a moving source and the 1.5x
+/// instead of 2x accepted-step growth limit) then held the whole tail of the
+/// run to recovery-sized steps. The checkpointed field carries whatever budget
+/// is left at the accepted boundary, which `MAX_FORCE_ACCEPT_COOLDOWN` in
+/// `transient/checkpoint.rs` clamps a restored value to.
+pub(super) const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
 /// Failed Newton retries at a timepoint before the gmin-continuation rescue
 /// is attempted (see `transient/rescue.rs`). The first retries stay on the
 /// plain dt-cut path so ordinary stiffness keeps ngspice-parity stepping;
