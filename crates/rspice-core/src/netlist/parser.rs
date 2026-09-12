@@ -718,6 +718,10 @@ fn parse_netlist_impl(
     let mut deferred_source_boundaries = Vec::new();
     let mut termination = None;
     let mut root_eof = None;
+    // The line a Verilog-A source directive was taken from, while it is still
+    // the line immediately before. A directive is consumed whole and leaves no
+    // card open, so a `+` line here continues nothing.
+    let mut veriloga_directive_line: Option<usize> = None;
 
     process_source_events_at(
         source_schedule.as_mut(),
@@ -814,12 +818,28 @@ fn parse_netlist_impl(
 
         // Handle line continuation (+ at start of line)
         if let Some(rest) = trimmed.strip_prefix('+') {
+            // A Verilog-A source directive is taken whole and closes no card,
+            // so the continuation machinery has nothing to attach this to: it
+            // would open a fresh logical line whose first character is the
+            // continuation's own text, and the deck would silently gain a card
+            // the author never wrote.
+            if let Some(directive_line) = veriloga_directive_line {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "continuation line has nothing to continue: the Verilog-A source \
+                         directive on line {directive_line} takes no '+' continuation"
+                    ),
+                }
+                .into());
+            }
             continuation_line.get_or_insert(line_num);
             continuation_origin.get_or_insert_with(|| origin.clone());
             continuation.push(' ');
             continuation.push_str(rest);
             continue;
         }
+        veriloga_directive_line = None;
 
         // Check for .END
         if trimmed.eq_ignore_ascii_case(".end") {
@@ -857,15 +877,47 @@ fn parse_netlist_impl(
         // Handle a Verilog-A source directive directly, in any of its
         // spellings, before continuation handling.
         if is_veriloga_source_command(head) {
+            // The directive is taken here rather than through `process_line`,
+            // so the conditional stack has to be honoured explicitly. A card
+            // inside a false `.IF` branch does not exist, and a source
+            // directive is no different: collecting it would bind masters the
+            // deck deliberately switched off, and an instance beside it would
+            // resolve against a module the author excluded.
+            if state.conditionals_suppress() {
+                veriloga_directive_line = Some(line_num);
+                continue;
+            }
             let mut include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
                 line: line_num,
                 message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] with closed quotes and no extra fields".to_owned(),
             })?;
+            // A Verilog-A source names a global instance master, the way
+            // Spectre's `ahdl_include` does, so writing one inside a
+            // `.SUBCKT` body does not scope it to that subcircuit. Keep the
+            // global scope — a deck that relies on it still works — and say
+            // once, naming the subcircuit, that the scope is not what the
+            // placement suggests.
+            let enclosing_subcircuit = state
+                .subckt_stack
+                .last()
+                .map(|frame| frame.qualified_name.clone());
+            if let Some(subcircuit) = enclosing_subcircuit {
+                state.diagnostics.push(ParseDiagnostic::warning_at(
+                    origin.clone(),
+                    "veriloga-directive-hoisted",
+                    format!(
+                        "Verilog-A source directive inside subcircuit '{subcircuit}' at line \
+                         {line_num} is hoisted to the top level; the master it defines is \
+                         visible to the whole deck"
+                    ),
+                ));
+            }
             // The file that wrote the directive owns the directory a relative
             // source path resolves against, exactly as it does for `.include`.
             include.origin = origin.clone();
             log::debug!("Found .VERILOGA include: {:?}", include.file_path);
             state.push_veriloga_include(include);
+            veriloga_directive_line = Some(line_num);
             continue; // Skip normal processing
         }
 
