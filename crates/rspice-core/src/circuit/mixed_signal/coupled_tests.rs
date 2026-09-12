@@ -746,3 +746,339 @@ endmodule
     );
 }
 
+/// A coupled deck whose HDL wheel holds a timer and whose code-model queue can
+/// be given one beside it, for the questions the analog stepper asks the
+/// discrete half.
+///
+/// `xtick`'s initial block schedules an activation at tick 3 and nothing else,
+/// so the wheel's answer is a fixed, exactly representable instant. `ainv`
+/// reads the module's discrete output and drives the net the module reads
+/// back, which is what makes the whole code-model queue a lane the stepper
+/// lands points for.
+fn activation_fixture() -> crate::CircuitData {
+    let engine = crate::Engine::new(crate::SimulationConfig::default());
+    let deck = crate::Netlist::parse("activation lanes\nRp p 0 1k\n.end\n").unwrap();
+    let mut circuit = engine.build_circuit(&deck).unwrap();
+    let p = circuit.get_node_by_name("p").unwrap();
+    let q = circuit.get_or_create_node("q");
+    let inverted = circuit.get_or_create_node("inverted");
+    let mut host = compile_unstarted(
+        r#"
+module ticker(p,q,back);
+ inout p; electrical p; output q; reg q; input back; wire back; reg spun;
+ initial begin q=1'b0; spun=1'b0; #3 spun=1'b1; end
+ analog I(p)<+V(p)*1e-6;
+endmodule
+"#,
+        None,
+        "xtick",
+        &[p],
+        SchedulerLimits::default(),
+    )
+    .unwrap();
+    host.add_dac_bridge("q", 0, (q, 0), 0.0, 3.3, 20.0).unwrap();
+    host.add_adc_bridge("back", 0, (inverted, 0), 0.4, 0.6)
+        .unwrap();
+    circuit.add_mixed_signal_host(host).unwrap();
+    let mut instance = XspiceInstance::new(
+        "ainv",
+        Arc::new(crate::xspice::models::DigitalInverter),
+        vec![
+            PortConnection::Digital(q),
+            PortConnection::Digital(inverted),
+        ],
+        &[],
+        &[],
+        &[],
+        &[],
+    )
+    .unwrap();
+    instance.init().unwrap();
+    circuit.add_xspice_instance(instance);
+    circuit
+        .finalize_mixed_digital(
+            &[q, inverted].into_iter().collect(),
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    circuit.begin_veriloga_analysis(2).unwrap();
+    circuit.start_mixed_digital_execution().unwrap();
+    circuit
+}
+
+/// The scheduler answers "what is next" the way the three callers each used to
+/// fold it for themselves, on every lane and every tie.
+///
+/// Three folds read the same two queues before this: the landing target in
+/// `engine::transient::accepted_veriloga_event_time`, the runtime breakpoint
+/// list in `engine::transient::breakpoints`, and the sub-minimum schedule
+/// bound in `CircuitData::veriloga_scheduled_activation`. They disagreed on
+/// purpose — one filters the wheel by the solver's floor, one takes the
+/// code-model queue coupled or not, one names the owner — and a single answer
+/// is only legitimate if each of those differences survives as a stated rule
+/// rather than as three copies of the fold. So this asserts the rules: the
+/// earliest wins, a tie goes to the wheel, the floor filter drops only the
+/// wheel's lane, an uncoupled queue is not an activation at all, and every
+/// owner is named as the kind of thing it is.
+#[test]
+fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
+    use crate::circuit::ActivationLanes;
+
+    let mut circuit = activation_fixture();
+    assert!(
+        circuit.has_coupled_event_nets(),
+        "the inverter shares an event net with the module"
+    );
+    let inverted = circuit.get_node_by_name("inverted").unwrap();
+
+    // The wheel alone: the tick-3 activation, named by the instance whose
+    // process holds it. This is the runtime breakpoint list's HDL entry.
+    // Rendered on the spot rather than held: an owner borrows the circuit the
+    // lines below have to schedule into.
+    let (wheel_owner, wheel) = {
+        let activation = circuit
+            .next_hdl_activation()
+            .expect("the wheel is readable")
+            .expect("the initial block scheduled its tick-3 activation");
+        (
+            activation.owner.map(|owner| owner.subject()),
+            activation.seconds(),
+        )
+    };
+    assert_eq!(
+        (wheel / 1.0e-9).round() as u64,
+        3,
+        "the module scheduled at tick 3, got {wheel:e}"
+    );
+    assert_eq!(
+        wheel_owner.as_deref(),
+        Some("Verilog-A/AMS instance 'xtick'"),
+        "the wheel names the instance that owns the process"
+    );
+    assert_eq!(
+        circuit.next_xspice_activation().map(|a| a.seconds()),
+        None,
+        "no code model has queued anything yet"
+    );
+    // The one fold, rendered so that two answers can be compared.
+    fn folded(
+        circuit: &crate::CircuitData,
+        lanes: crate::circuit::ActivationLanes,
+    ) -> Option<(Option<String>, f64)> {
+        circuit
+            .next_activation(lanes)
+            .expect("both lanes are readable")
+            .map(|activation| {
+                (
+                    activation.owner.map(|owner| owner.subject()),
+                    activation.seconds(),
+                )
+            })
+    }
+
+    // The sub-minimum schedule bound's own question, which folds the analog
+    // lanes beside the two discrete ones.
+    fn bound(circuit: &crate::CircuitData) -> Option<(Option<String>, f64)> {
+        circuit
+            .veriloga_scheduled_activation(0.0)
+            .map(|(owner, target)| (owner.map(|owner| owner.subject()), target))
+    }
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        bound(&circuit),
+        "one wheel activation and an empty queue fold to the same answer"
+    );
+
+    // The landing question, on the wheel alone: an activation the stepper has
+    // no legal interval to is left to the module that is coalescing it, and
+    // the test is `due - accepted >= floor` rather than a strict inequality.
+    assert_eq!(
+        folded(&circuit, ActivationLanes::landing(0.0, wheel)).map(|(_, at)| at),
+        Some(wheel),
+        "an activation exactly one floor away is still one to land on"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::landing(0.0, wheel * 1.5)),
+        None,
+        "an activation inside the floor is no landing target"
+    );
+
+    // A code-model event after it: the wheel still owns the point.
+    let later = wheel * 2.0;
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
+        later,
+        inverted,
+        "out",
+        "alate",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one()),
+    );
+    assert_eq!(
+        circuit.next_xspice_activation().map(|a| a.seconds()),
+        Some(later),
+        "the code-model lane reaches the breakpoint list on its own"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        Some((Some("Verilog-A/AMS instance 'xtick'".to_string()), wheel)),
+        "the earliest activation owns the point, whichever queue holds it"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        bound(&circuit)
+    );
+
+    // A code-model event at exactly the wheel's instant: the tie goes to the
+    // wheel, which is the landed same-instant order across the two kernels.
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
+        wheel,
+        inverted,
+        "out",
+        "atie",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::zero()),
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        Some((Some("Verilog-A/AMS instance 'xtick'".to_string()), wheel)),
+        "HDL events run before the code models' wave at one instant"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        bound(&circuit)
+    );
+
+    // A code-model event before it: the code model owns the point, and is
+    // named as a code model rather than as a Verilog-A module.
+    let earlier = wheel / 2.0;
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
+        earlier,
+        inverted,
+        "out",
+        "aring",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one()),
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        Some((
+            Some("XSPICE code-model instance 'aring'".to_string()),
+            earlier
+        )),
+        "the earliest activation owns the point, and carries its own noun"
+    );
+    assert_eq!(
+        folded(&circuit, ActivationLanes::scheduled()),
+        bound(&circuit)
+    );
+
+    // The landing question drops the wheel's lane when the stepper has no
+    // legal interval to it, and only that lane: the coupled queue is landed
+    // whatever the floor is.
+    assert_eq!(
+        folded(&circuit, ActivationLanes::landing(0.0, wheel * 4.0)),
+        Some((
+            Some("XSPICE code-model instance 'aring'".to_string()),
+            earlier
+        )),
+        "the floor filter drops the wheel's lane and only the wheel's lane: a \
+         coupled code model's event is landed whatever the floor is"
+    );
+}
+
+/// An uncoupled code-model queue is not an activation, but is still a lane.
+///
+/// The two answers are different questions about the same queue: coupling is
+/// what makes an event *landed*, and only a landed activation paces an
+/// accepted point, while the runtime breakpoint list carries every queue's
+/// next event whether or not anything lands on it.
+#[test]
+fn an_uncoupled_code_model_queue_is_a_breakpoint_lane_and_not_an_activation() {
+    use crate::circuit::ActivationLanes;
+
+    let mut circuit = crate::CircuitData::new();
+    let node = circuit.get_or_create_node("out");
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
+        1.0e-12,
+        node,
+        "out",
+        "aring",
+        0,
+        crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one()),
+    );
+
+    assert!(!circuit.has_coupled_event_nets());
+    assert_eq!(
+        circuit.next_xspice_activation().map(|a| a.seconds()),
+        Some(1.0e-12),
+        "the queue reaches the stepper through the breakpoint list"
+    );
+    assert_eq!(
+        circuit
+            .next_activation(ActivationLanes::scheduled())
+            .expect("both lanes are readable")
+            .map(|activation| activation.seconds()),
+        None,
+        "an uncoupled code-model event paces no accepted point"
+    );
+    assert_eq!(
+        circuit
+            .next_activation(ActivationLanes::landing(0.0, 0.0))
+            .expect("both lanes are readable")
+            .map(|activation| activation.seconds()),
+        None,
+        "and the stepper lands no point for one either"
+    );
+}
+
+/// The analog step floor is one stored value that every lane reads.
+///
+/// Invariant 7 of the scheduler design: the coordinator, every mixed module
+/// and the coupled code-model participant measure a stepped-past activation
+/// against the *same* interval, or the two halves disagree about what "stepped
+/// past an activation" means and a schedule the analog side merely cannot
+/// resolve is reported as a lost breakpoint. There is one setter, it
+/// normalizes once, and the copies the wheel and the modules hold are that one
+/// value — including the normalization, which is what a second `if
+/// floor > 0.0` written somewhere else would eventually get wrong.
+///
+/// `CircuitScheduler::analog_step_floor` is read back here as the participant
+/// itself reads it: it is the expression
+/// `XspiceDigitalParticipant::event_was_reachable` evaluates.
+#[test]
+fn the_analog_step_floor_is_one_stored_value_every_lane_reads() {
+    let (mut circuit, _matrix, _solution, _resource) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    assert_eq!(circuit.mixed_signal_hosts.len(), 2);
+
+    for floor in [2.5e-12, 1.0e-9, 0.0, -1.0e-12, f64::NAN, f64::INFINITY] {
+        circuit.set_analog_step_floor(floor);
+        let stored = circuit.scheduler.analog_step_floor();
+        let expected = if floor.is_finite() && floor > 0.0 {
+            floor
+        } else {
+            0.0
+        };
+        assert_eq!(
+            stored, expected,
+            "a request of {floor:e} is normalized once, to {expected:e}"
+        );
+        assert_eq!(
+            circuit
+                .scheduler
+                .mixed_digital_coordinator
+                .as_ref()
+                .expect("the fixture enrolls its modules")
+                .analog_step_floor(),
+            stored,
+            "the wheel measures against the circuit's one floor"
+        );
+        for host in &circuit.mixed_signal_hosts {
+            assert_eq!(
+                host.analog_step_floor(),
+                stored,
+                "every module measures against the circuit's one floor"
+            );
+        }
+    }
+}
