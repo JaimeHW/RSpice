@@ -9471,9 +9471,25 @@ impl Engine {
                     }
                     lte_estimator.record(&new_solution, dt);
                     if hit_breakpoint {
-                        if lte_estimator.uses_accepted_solution_reference() {
-                            lte_estimator.restart_history_from(&new_solution);
-                        }
+                        // `trapgear.restart_from` just above forgot the
+                        // interval this breakpoint ended; the predictor has to
+                        // forget it too, and until now only the Xyce arm did.
+                        // Predictor-local history is the last three accepted
+                        // points, all on the far side of the discontinuity the
+                        // breakpoint exists to announce, and extrapolating them
+                        // through it predicts a solution the step never had —
+                        // a D/A edge continuing to fall, a ramp continuing past
+                        // its corner. The estimator reads that as truncation
+                        // error, and because the prediction is an extrapolation
+                        // the error shrinks in proportion to the candidate
+                        // width instead of with its cube, so halving the step
+                        // halves the estimate and the controller keeps halving.
+                        // The ladder ends only where `|curr - pred|` reaches
+                        // abstol, tens of decades below any width the physics
+                        // asks for. One accepted point of history predicts the
+                        // constant it just accepted, which is exactly what the
+                        // first step after a restart is entitled to assume.
+                        lte_estimator.restart_history_from(&new_solution);
                         xyce_lte_restart_first_step =
                             lte_estimator.uses_accepted_solution_reference();
                     }
@@ -9942,6 +9958,15 @@ impl Engine {
                 // Commit predictor-local history after XSPICE has projected
                 // accepted voltage outputs into the solution vector.
                 lte_estimator.record(&new_solution, dt);
+                if hit_breakpoint {
+                    // Restart the predictor with the integrator, for the reason
+                    // spelled out at the force-accepted acceptance above: history
+                    // from before a discontinuity predicts a solution the next
+                    // step never had, and the estimate that follows falls with
+                    // the candidate width rather than with its cube, so the
+                    // controller answers it by shrinking to the solver floor.
+                    lte_estimator.restart_history_from(&new_solution);
+                }
                 lte_estimator
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
             }
