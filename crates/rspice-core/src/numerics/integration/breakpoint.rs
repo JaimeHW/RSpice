@@ -669,17 +669,29 @@ mod breakpoint_manager_tests {
     /// the ladder this exists to prevent.
     #[test]
     fn a_refinement_chase_restarts_from_the_step_it_interrupted() {
-        let mut breakpoints = BreakpointManager::new();
-        breakpoints.add(10.0);
+        /// The approach the breakpoint interrupted, and the width the chase
+        /// had shrunk to by the time it reached the breakpoint.
+        fn chased_to_the_breakpoint() -> BreakpointManager {
+            let mut breakpoints = BreakpointManager::new();
+            breakpoints.add(10.0);
+            let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+            assert_eq!(dt, 6.0);
+            assert!(lands_on_breakpoint);
+            // Each refinement re-proposes the interval it is refining, and the
+            // last of them is what `limit_step` saves as the approach.
+            breakpoints.limit_step(9.999, 1.0e-3);
+            breakpoints
+        }
 
-        // The approach: the controller wanted 6.0 and was cut to the
-        // breakpoint. Then the chase re-proposes its way down to 1e-15.
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-        let (_, chased) = breakpoints.limit_step(10.0 - 1.0e-15, 1.0e-15);
-        assert!(chased, "the chase's last proposal reaches the breakpoint");
+        // Vacuity: the chase has to have actually replaced the approach, or
+        // restoring it proves nothing.
+        let poisoned = chased_to_the_breakpoint().mark_breakpoint_solved(10.0);
+        assert!(
+            poisoned < 1.0e-3,
+            "the chase must leave its own width as the approach, got {poisoned:e}"
+        );
 
+        let mut breakpoints = chased_to_the_breakpoint();
         breakpoints.restore_approach_step(6.0);
         let restart = breakpoints.mark_breakpoint_solved(10.0);
         assert!(
