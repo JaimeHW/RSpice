@@ -4307,20 +4307,21 @@ impl CircuitData {
                     .flatten()
                     .map(move |target| (Some(veriloga_schedule_owner(instance)), target))
             });
-            // The shared process queue every enrolled instance schedules into,
-            // and the code-model queue coupled to it: the two discrete lanes,
-            // folded by their own owner. The wheel is one queue for every
-            // instance, but the kernel still knows which process drew the
-            // earliest event and the linker knows which instance owns that
-            // process, so a deck with several mixed modules is attributed as
-            // precisely as a deck with one; a coupled code model's events are
-            // landed on the same contract a mixed activation is, so a point
-            // landed at the floor for one is paced by a schedule exactly as a
-            // mixed tick is.
             for candidate in analog.chain(mixed) {
                 fold_scheduled_activation(&mut owner, Some(candidate), accepted_time);
             }
         }
+        // The shared process queue every enrolled instance schedules into, and
+        // the code-model queue coupled to it: the two discrete lanes, folded by
+        // their own owner. The wheel is one queue for every instance, but the
+        // kernel still knows which process drew the earliest event and the
+        // linker knows which instance owns that process, so a deck with several
+        // mixed modules is attributed as precisely as a deck with one; a
+        // coupled code model's events are landed on the same contract a mixed
+        // activation is, so a point landed at the floor for one is paced by a
+        // schedule exactly as a mixed tick is. Asked in every build: a circuit
+        // without the Verilog-A/AMS route has no wheel and no coupling, and the
+        // scheduler answers `None` for both lanes there.
         fold_scheduled_activation(
             &mut owner,
             self.scheduler
