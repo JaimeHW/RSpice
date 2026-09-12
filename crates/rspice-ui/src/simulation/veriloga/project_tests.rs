@@ -177,7 +177,7 @@ endmodule
     assert_controlled_conductance(&runtime, 250.0);
 
     let mut tampered = sealed.veriloga_artifacts.clone();
-    tampered[0].source.push_str("\n");
+    tampered[0].source.push('\n');
     let error = compile_signed_pdk_source_runtime(
         &sealed.binding,
         sealed.archive_digest,
