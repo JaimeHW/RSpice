@@ -231,7 +231,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # its backend-neutral integration instead and activate only wgpu's WebGPU path
 # below, so unreachable renderers cannot enter either browser image.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu_no_default_features", "persistence", "web_screen_reader"] }
-wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
+wgpu = { version = "30.0", default-features = false, features = ["webgpu"] }
 
 # Dalek's `fast` feature changes only verification throughput: it selects a
 # precomputed basepoint table, not a different Ed25519 algorithm or policy.
