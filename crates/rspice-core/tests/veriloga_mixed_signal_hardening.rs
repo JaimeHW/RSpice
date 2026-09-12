@@ -2675,6 +2675,298 @@ fn a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into() {
     );
 }
 
+/// [`FEEDBACK_DECK`] split across two instances: one carries the feedback, the
+/// other senses what it moved.
+///
+/// `posedge ca` writes `gain` in this one, and `gain` sets the source its
+/// analog block pushes into `p`.
+const FEEDBACK_SOURCE: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module feedback_source(p, n, ca, ya);
+    inout p, n;
+    electrical p, n;
+    input ca;
+    output ya;
+    wire ca;
+    reg ya;
+    integer gain;
+    initial begin ya = 1'b0; gain = 1; end
+    always @(posedge ca) begin gain = 2; #1 ya = 1'b1; end
+    analog I(p, n) <+ (V(p, n) - gain * 1.0) / 1000.0;
+endmodule
+"#;
+
+/// The other half of [`FEEDBACK_SOURCE`]: it senses `q`, and nothing it holds
+/// reaches any analog equation anywhere.
+const FEEDBACK_SENSE: &str = r#"
+`timescale 1ns/1ns
+module feedback_sense(cb, yb);
+    input cb;
+    output yb;
+    wire cb;
+    reg yb;
+    initial yb = 1'b0;
+    always @(posedge cb) #1 yb = 1'b1;
+endmodule
+"#;
+
+/// The crossing carried into the module that reads `gain`, with a process that
+/// reports *which* value of `gain` it was woken beside.
+///
+/// `seen` is latched by the `posedge cb` process before any delay, so `yb`
+/// rises only if that process ran after the `posedge ca` process wrote 2.
+const FEEDBACK_ORDER: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module feedback_order(p, n, ca, cb, ya, yb);
+    inout p, n;
+    electrical p, n;
+    input ca, cb;
+    output ya, yb;
+    wire ca, cb;
+    reg ya, yb;
+    integer gain;
+    integer seen;
+    initial begin ya = 1'b0; yb = 1'b0; gain = 1; seen = 0; end
+    always @(posedge ca) begin gain = 2; #1 ya = 1'b1; end
+    always @(posedge cb) begin seen = gain; #1 yb = (seen == 2); end
+    analog I(p, n) <+ (V(p, n) - gain * 1.0) / 1000.0;
+endmodule
+"#;
+
+/// **Property 5, case d‴.** The same landing, with the feedback and the bridge
+/// that senses it in two different instances.
+///
+/// The dating decision belongs to the *circuit*, not to an instance: one
+/// module's discrete variable steers the current its analog block pushes into a
+/// node any other module may sense, which is the whole reason the coordinator
+/// reports feedback as a disjunction over every enrolled instance rather than
+/// per host. Here `xa` reads `ca` and writes `gain`; the deck divides what that
+/// moves onto `q`; and `xb` — which holds no analog equation at all and reads
+/// nothing the write touched — is the instance whose bridge crosses on the
+/// re-solve.
+///
+/// A rule that read one host's own crossings would see, at `xb`, a single
+/// crossing on a trial that ended on nothing, treat it as the circuit's own
+/// interior root, and walk the controller into it exactly as before. The latch
+/// is armed from the fact the coordinator publishes to every instance, so this
+/// deck lands the crossing once, like the single-instance form.
+#[test]
+fn a_crossing_carried_between_two_instances_is_landed_on_once() {
+    /// The instant `ca`'s ramp reaches half the supply.
+    const CROSSING: f64 = 10.6e-9;
+
+    let source = ModelFile::new("feedback_source", FEEDBACK_SOURCE);
+    let sense = ModelFile::new("feedback_sense", FEEDBACK_SENSE);
+    let deck = format!(
+        "* one instance carries the feedback, another senses what it moved\n\
+         vramp ca 0 pwl(0 0 21.2n 3.3)\n\
+         xa p 0 ca ya feedback_source\n\
+         xb q yb feedback_sense\n\
+         rfb p q 1k\n\
+         rq q 0 1meg\n\
+         rya ya 0 10k\n\
+         ryb yb 0 10k\n\
+         .va \"{}\" feedback_source\n\
+         .va \"{}\" feedback_sense\n\
+         .tran 1n 20n\n\
+         .end\n",
+        source.deck_path(),
+        sense.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    let accepted: Vec<f64> = result
+        .time
+        .iter()
+        .copied()
+        .filter(|time| *time > 9.5e-9 && *time < 11.5e-9)
+        .collect();
+    println!("accepted timepoints around the crossing: {accepted:?}");
+
+    assert!(
+        accepted.len() <= 8,
+        "one crossing costs a handful of accepted points, not a ladder: {} of them, \
+         {accepted:?}",
+        accepted.len()
+    );
+    assert!(
+        accepted
+            .iter()
+            .any(|time| (time - CROSSING).abs() <= 1.0e-20),
+        "the crossing itself must be one of the accepted points: {accepted:?}"
+    );
+    let closest = accepted
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        closest > 1.0e-12,
+        "the nearest two accepted points are {closest:e} s apart, which is a \
+         bisection rung rather than a step: {accepted:?}"
+    );
+}
+
+/// **Property 5, case d⁗.** Cause before effect: the process a carried crossing
+/// wakes reads what the write that carried it left behind.
+///
+/// Dating `cb` at the endpoint and `ca` at its own interpolated instant makes
+/// them two instants, a few ulps apart, and therefore two publication groups in
+/// ascending order: `ca`'s bank publishes, its process writes `gain = 2`, and
+/// only then does `cb`'s bank publish and wake the process that reads `gain`.
+/// Collapsing the two onto one instant would compose them into a single bank at
+/// a single tick, where both processes wake in one delta cycle and which of
+/// them sees the write is decided by scheduler order rather than by physics.
+///
+/// `yb` rises only if the `posedge cb` process was woken after the write, so
+/// one rise is the ordering pinned. `ya` and `yb` are both a `#1` after their
+/// own publication, and both publications land on one tick — the effect is not
+/// a *later* event than its cause, it is a later event *of that tick*.
+#[test]
+fn a_carried_crossing_wakes_its_process_after_the_write_that_caused_it() {
+    let model = ModelFile::new("feedback_order", FEEDBACK_ORDER);
+    let deck = format!(
+        "* the process a carried crossing wakes reads the value that carried it\n\
+         vramp ca 0 pwl(0 0 21.2n 3.3)\n\
+         x1 p 0 ca q ya yb feedback_order\n\
+         rfb p q 1k\n\
+         rq q 0 1meg\n\
+         rya ya 0 10k\n\
+         ryb yb 0 10k\n\
+         .va \"{}\" feedback_order\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    let rises = |net: &str| -> Vec<f64> {
+        digital_points(&result, net)
+            .iter()
+            .filter(|(_, state)| state.as_str() == "One")
+            .map(|(time, _)| *time)
+            .collect()
+    };
+    let rose_a = rises("ya");
+    let rose_b = rises("yb");
+    println!("`ya` rose at {rose_a:?}, `yb` rose at {rose_b:?}");
+    assert_eq!(
+        rose_b.len(),
+        1,
+        "`yb` rises exactly when the `posedge cb` process read the `gain` the \
+         `posedge ca` process had already written: it rose at {rose_b:?}"
+    );
+    assert_eq!(
+        rose_a.first().map(|time| time.to_bits()),
+        rose_b.first().map(|time| time.to_bits()),
+        "cause and effect are one tick apart from nothing: `ya` at {rose_a:?}, \
+         `yb` at {rose_b:?}"
+    );
+}
+
+/// Two A/D inputs, one of them curved, and nothing digital fed back.
+///
+/// The near-race a clock and a data line produce, with the clock on a node the
+/// circuit bends. `clk` is `-cos(2π·1 GHz·t)` and rises through half the
+/// supply at exactly 1/3 ns; `ca` is a straight ramp that reaches the same
+/// threshold 0.67 ps later, at 0.334 ns. Neither edge writes anything an
+/// analog block reads, so neither crossing is carried: both are the circuit's
+/// own roots, and the engine has to land on each of them, in that order.
+///
+/// The order is only legible because a crossing is dated by a *chord* —
+/// `threshold_crossing_time` interpolates linearly between the accepted sample
+/// and the candidate one — and a chord across a concave rise lies later than
+/// the rise itself. Over the approach step the controller actually takes here,
+/// `[0.3274, 0.4024]` ns, the chord puts `clk` at 0.3345 ns, past `ca`'s
+/// 0.3340: the refinement lands the step on `ca` first. On the short interval
+/// that lands it, `[0.3274, 0.3340]` ns, the same chord puts `clk` back at
+/// 0.33335 ns — which is *behind* the crossing the trial ended on.
+///
+/// So a rule that reads "this crossing is behind the one the trial landed on"
+/// as "this crossing was carried by that landing" reads a genuine, earlier,
+/// physically-first edge as an effect of the later one: `clk` is dated at
+/// 0.334 ns, bit-for-bit with `ca`, published in the same bank as its supposed
+/// cause, and never landed on — a tick late on this deck's `1ps/1ps` grid, and
+/// a setup/hold-class error on a sampling edge.
+///
+/// A crossing is carried when the discrete half moved something the analog
+/// equations read before it was found, and by nothing else. This deck moves
+/// nothing, so both edges keep their own instants.
+#[test]
+fn two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one() {
+    /// `clk` rises through half the supply here: `-cos(2π·10⁹·t) = 0.5`.
+    const CURVED: f64 = 1.0e-9 / 3.0;
+    /// `ca`'s straight ramp reaches the same threshold here.
+    const STRAIGHT: f64 = 0.334e-9;
+
+    let model = ModelFile::new(
+        "two_input_sampler",
+        r#"
+`timescale 1ps/1ps
+module two_input_sampler(clk, ca, qa, qb);
+    input clk, ca; wire clk, ca;
+    output qa, qb; reg qa, qb;
+    initial begin qa=0; qb=0; end
+    always @(posedge clk) qa<=#25 1;
+    always @(posedge ca) qb<=#25 1;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* a curved clock and a straight ramp crossing 0.67 ps apart\n\
+         .param vcc=1\n\
+         Vclk clk 0 sin(0 1 1g 0 0 -90)\n\
+         Vramp ca 0 pwl(0 0 0.668n 1)\n\
+         X1 clk ca qa qb two_input_sampler\n\
+         Rqa qa 0 1k\n\
+         Rqb qb 0 1k\n\
+         .va \"{}\" two_input_sampler\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 1.0e-9, 75.0e-12);
+
+    let rising = |net: &str| -> f64 {
+        let points = digital_points(&result, net);
+        let time = points
+            .iter()
+            .find(|(_, state)| state.as_str() == "One")
+            .unwrap_or_else(|| panic!("`{net}` never rose: {points:?}"))
+            .0;
+        println!("`{net}` rose at {time:e} ({points:?})");
+        time
+    };
+    let curved = rising("clk");
+    let straight = rising("ca");
+
+    assert!(
+        (curved - CURVED).abs() < 2.0e-20,
+        "`clk`'s own root is {CURVED:e} s, and nothing carried it there: it was \
+         dated {curved:e} s, {:e} s late",
+        curved - CURVED
+    );
+    assert!(
+        (straight - STRAIGHT).abs() < 2.0e-20,
+        "`ca`'s own root is {STRAIGHT:e} s: it was dated {straight:e} s"
+    );
+    assert!(
+        curved < straight,
+        "the curved edge is physically first and must publish first: `clk` at \
+         {curved:e} s, `ca` at {straight:e} s"
+    );
+    for (net, instant) in [("clk", curved), ("ca", straight)] {
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|accepted| (accepted - instant).abs() <= 2.0e-20),
+            "the engine lands on a root it publishes: `{net}`'s {instant:e} s is \
+             not an accepted timepoint"
+        );
+    }
+}
+
 /// A five-nanosecond HDL clock, declared in nanoseconds.
 const CEIL_CLOCK: &str = r#"
 `timescale 1ns/1ps
