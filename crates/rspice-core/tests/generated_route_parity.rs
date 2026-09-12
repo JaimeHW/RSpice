@@ -495,21 +495,24 @@ fn r3_cmc_transient_agrees_across_routes() {
 #[test]
 fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
     use rspice_core::device::veriloga_builtins::GeneratedStamper;
-    use rspice_core::solver::StaticMatrix;
+    use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 
     let entries = (0..2)
         .flat_map(|row| (0..2).map(move |column| (row, column, 0.0)))
         .collect::<Vec<_>>();
     let voltages = [1.0, 2.0];
 
+    // A DC/transient stamper writes both sinks, and the equivalent source it
+    // builds is `value - dI/dV * V`: a non-finite derivative therefore poisons
+    // the right-hand side as well, which is why the two flags are reported
+    // together rather than as one bit.
     for (label, value, derivative, expected) in [
         ("finite", 1.0, 2.0, None),
         ("value", f64::NAN, 2.0, Some("right-hand-side contribution")),
-        ("derivative", 1.0, f64::INFINITY, Some("Jacobian entry")),
         (
-            "both",
-            f64::NAN,
-            f64::NAN,
+            "derivative",
+            1.0,
+            f64::INFINITY,
             Some("Jacobian entry and right-hand-side contribution"),
         ),
     ] {
@@ -526,17 +529,30 @@ fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
             "{label}: the stamper must report which sink saw a non-finite value"
         );
     }
+
+    // The AC-real stamper has no right-hand side, so it isolates the Jacobian.
+    let structure = StaticMatrix::from_triplets(2, 2, &entries).expect("dense 2x2");
+    let mut matrix = ComplexMatrix::from_real_structure(&structure);
+    let mut stamper = GeneratedStamper::new_ac_real(&mut matrix, &voltages, 2);
+    stamper.stamp_current_node1(Some(1), Some(2), 1.0, 1, f64::INFINITY);
+    stamper.stamp_current_node1(Some(1), Some(2), 3.0, 2, 4.0);
+    assert_eq!(stamper.non_finite_contribution(), Some("Jacobian entry"));
 }
 
-/// A generated device at an iterate its own arithmetic cannot survive is a
-/// rejectable trial naming the instance, not a silent NaN in the matrix.
+/// A generated device whose linearization at the offered iterate is not finite
+/// is a rejectable trial naming the instance, not a silent infinity in the
+/// matrix.
 ///
-/// `f64::MAX` on the anode is a point a diverging Newton step reaches: the
-/// equivalent source a contribution carries is `value - dI/dV * V`, so any
-/// nonzero conductance at that bias overflows the subtraction before the
-/// model's own exponentials are even asked. Before this audit the call below
-/// returned `Ok(())` and left infinities in the matrix and the right-hand
-/// side.
+/// The iterate here is what a singular or badly conditioned linear solve hands
+/// back — `±inf` on a node — and it is the case the model's own defences do
+/// *not* catch: DIODE_CMC's limited exponential and the Newton limiter between
+/// them keep the evaluation itself finite, but the equivalent source every
+/// contribution carries is `value - dI/dV * V` and the stamper computes that
+/// against the raw iterate. So the model is happy, the linearization is
+/// garbage, and before this audit nothing noticed: the call below returned
+/// `Ok(())`, having written infinities into the matrix and the right-hand
+/// side, and the transient read the failed solve that followed as a reason to
+/// cut dt while DC walked its whole ladder with no diagnostic at all.
 #[test]
 fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() {
     use rspice_core::device::StampError;
@@ -560,10 +576,19 @@ fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() 
     let mut rhs = vec![0.0; size];
     let mut voltages = vec![0.0; size];
     let anode = circuit.get_or_create_node("a");
-    voltages[anode - 1] = f64::MAX;
+    voltages[anode - 1] = f64::INFINITY;
 
+    // Generated devices are assembled by `stamp_behavioral`, not by
+    // `try_stamp_nonlinear`: `stamp_behavioral_with_generated_mode` is where
+    // `stamp_all_with_mode` and `generated_veriloga_stamp_error` live.
     let error = circuit
-        .try_stamp_nonlinear(&mut matrix, &mut rhs, &voltages)
+        .stamp_behavioral(
+            &mut matrix,
+            &mut rhs,
+            &voltages,
+            0.0,
+            rspice_core::xspice::AnalysisType::DcOp,
+        )
         .expect_err("a non-finite generated contribution must refuse the point");
     let StampError::NonFiniteTrial(trial) = &error else {
         panic!("a non-finite generated contribution must be a rejectable trial: {error}");
@@ -574,8 +599,16 @@ fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() 
         trial.instance
     );
     assert!(
-        trial.detail.contains("non-finite"),
-        "the refusal must say what went wrong: {}",
+        trial.detail.contains("generated Verilog-A") && trial.detail.contains("finite"),
+        "the refusal must come from the generated route and say what went wrong: {}",
         trial.detail
+    );
+    // The assembly is completed rather than abandoned half-written — the
+    // caller is about to clear this matrix and offer another point, and an
+    // early exit would make the diagnostic depend on emission order — so the
+    // infinities are still here. What has changed is that the solver is told.
+    assert!(
+        rhs.iter().any(|value| !value.is_finite()),
+        "the audit must observe rather than suppress the contribution: {rhs:?}"
     );
 }
