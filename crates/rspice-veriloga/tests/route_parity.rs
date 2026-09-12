@@ -339,6 +339,20 @@ fn assert_traces_agree(bytecode: &[Entry], canonical: &[Entry], ulps: u64) {
 
 /// Run one script on both lowerings of one compilation and compare it.
 fn compare_routes(source: &str, nodes: &[usize], ulps: u64, script: impl Fn(&mut Probe)) {
+    compare_routes_traced(source, nodes, ulps, script);
+}
+
+/// As [`compare_routes`], returning the agreed trace.
+///
+/// A row whose construct is a *behaviour* rather than a value — limiting is
+/// the one — needs to say something about the trace beyond "both routes wrote
+/// it": two routes that both dropped a limiter agree perfectly.
+fn compare_routes_traced(
+    source: &str,
+    nodes: &[usize],
+    ulps: u64,
+    script: impl Fn(&mut Probe),
+) -> Vec<Entry> {
     let fixture = DeviceFixture::compile(source);
     let bytecode = trace(
         &fixture,
@@ -351,6 +365,7 @@ fn compare_routes(source: &str, nodes: &[usize], ulps: u64, script: impl Fn(&mut
         &script,
     );
     assert_traces_agree(&bytecode, &canonical, ulps);
+    canonical
 }
 
 /// The scripts most rows use: a DC point, then three accepted transient steps.
@@ -729,20 +744,18 @@ endmodule
     );
 }
 
-/// `$limit` with a named user limiter does not exist on both routes at all.
+/// `$limit` with a named limiting function: the limiter body is the operator's
+/// value, on both lowerings.
 ///
-/// Measured on this fixture: the canonical route compiles and evaluates it (29
-/// observations), while the bytecode route refuses construction outright —
-/// "model route_limit: native JIT does not support canonical-only named
-/// limiter metadata in a bytecode entry; no interpreter fallback" — leaving one
-/// observation. That is a capability gap, not a numeric one, so the row states
-/// the comparison and stays ignored until the gap is closed or declared.
+/// This row is two statements, because a limiter is a *behaviour*: values
+/// agreeing route for route would also hold if both routes dropped the
+/// limiter, and dropping it changes only how Newton gets to the answer. So the
+/// script holds the proposal at 1.0 after an accepted 0.0 and re-evaluates
+/// without accepting, the way Newton does, and the row pins the ramp the body
+/// admits — a quarter of a volt per iterate — as well as the agreement.
 #[test]
-#[ignore = "R4.x-triage: the bytecode lowering refuses a canonical-only named \
-            limiter, so $limit has no bytecode route to compare (1 observation \
-            against the canonical route's 29)"]
 fn limit_agrees_across_lowerings() {
-    compare_routes(
+    let trace = compare_routes_traced(
         r#"
 `include "disciplines.vams"
 module route_limit(p, n);
@@ -750,19 +763,19 @@ module route_limit(p, n);
     electrical p, n;
     parameter real is_sat = 1.0e-14;
     parameter real vth = 0.025;
-    parameter real vmax = 0.4;
+    parameter real vstep = 0.25;
 
-    analog function real clampv;
-        input proposed, previous, ceiling;
-        real proposed, previous, ceiling;
+    analog function real bounded_step;
+        input proposed, previous, step;
+        real proposed, previous, step;
         begin
-            clampv = proposed > ceiling ? ceiling : proposed;
+            bounded_step = proposed > previous + step ? previous + step : proposed;
         end
     endfunction
 
     real vd;
     analog begin
-        vd = $limit(V(p, n), clampv, vmax);
+        vd = $limit(V(p, n), bounded_step, vstep);
         I(p, n) <+ is_sat * (exp(vd / vth) - 1.0);
     end
 endmodule
@@ -770,11 +783,31 @@ endmodule
         &[1, 0],
         0,
         |probe: &mut Probe| {
-            for (index, bias) in [0.1, 0.2, 0.4, 0.7].into_iter().enumerate() {
-                probe.dc(&format!("dc{index}"), &[bias]);
+            probe.dc("seed", &[0.0]);
+            probe.observe("seed", &["vd"]);
+            for index in 0..6 {
+                probe.dc(&format!("dc{index}"), &[1.0]);
                 probe.observe(&format!("dc{index}"), &["vd"]);
             }
         },
+    );
+
+    let iterates = trace
+        .iter()
+        .filter(|entry| entry.key.ends_with(".var.vd"))
+        .map(|entry| {
+            assert!(entry.text.is_none(), "{}: {:?}", entry.key, entry.text);
+            entry.value
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        iterates,
+        vec![0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "the body admits a quarter of a volt per limited evaluation and every point evaluates \
+         twice — the value pass and the stamp pass — so the iterate climbs half a volt per \
+         point until the remaining distance fits in one step. A lowering that dropped the \
+         limiter would report the proposal on the first point and still agree with a second \
+         lowering that dropped it too: {iterates:?}"
     );
 }
 
