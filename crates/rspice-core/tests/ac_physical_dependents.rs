@@ -62,6 +62,8 @@ fn parameter_ac_magnitude_sensitivity_reports_the_null_cusp() {
 
 #[test]
 fn parameter_ac_magnitude_sensitivity_respects_the_run_budget() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::analysis::AcSensitivityOutput;
     let netlist = Netlist::parse(
         "AC study budget\n.param gain=1\nV1 in 0 AC 1\nE1 out 0 in 0 {gain}\n.end\n",
     )
@@ -70,10 +72,36 @@ fn parameter_ac_magnitude_sensitivity_respects_the_run_budget() {
     config.resource_limits.max_batch_runs = 2;
     let engine = Engine::try_new(config).unwrap();
     let output = node_id(&engine, &netlist, "out");
+    // Since 6e36744f3 ("Propagate root parameter derivatives through linear DC
+    // and AC equations") this linear circuit is differentiated by one adjoint
+    // solve instead of a replayed finite-difference stencil, so a two-run
+    // budget no longer bounds it. That solve is still charged to the budget: a
+    // study that has already spent both runs cannot buy the sensitivity run.
     assert!(matches!(
-        engine.run_sensitivity_ac(&netlist, output, "gain", 1.0, &[1.0], None),
+        engine.run_output_sensitivity_ac_with_abort(
+            &netlist,
+            AcSensitivityOutput::Voltage {
+                positive: output,
+                negative: None,
+            },
+            "gain",
+            1.0,
+            &[1.0],
+            None,
+            &mut 2,
+            &NoAbort,
+        ),
         Err(rspice_core::SimulationError::ResourceLimit(_))
     ));
+    // Vout=gain*Vin with |Vin|=1, so d|Vout|/dgain is exactly one run's worth.
+    assert_relative(
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 1.0, &[1.0], None)
+            .unwrap()[0],
+        1.0,
+        1e-12,
+        "unit-gain AC magnitude sensitivity",
+    );
 }
 
 #[test]
@@ -91,27 +119,60 @@ fn sensitivity_refinement_rejects_a_hidden_parameter_kink() {
             .map(|values| values[0]),
     ] {
         let error = result.expect_err("opposing one-sided slopes must not masquerade as zero");
-        assert!(error.to_string().contains("gain"), "{error}");
+        // Since 97e921d4f ("Retain complex parameter directions through
+        // definition-time bindings") the cusp is refused at the binding site
+        // instead of by a disagreeing finite-difference stencil, and the
+        // replayed override names the parameter in its canonical upper case.
+        let message = error.to_string();
+        assert!(message.to_ascii_lowercase().contains("gain"), "{message}");
+        assert!(message.contains("no two-sided derivative"), "{message}");
     }
 }
 
 #[test]
 fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
-    let netlist = Netlist::parse(
-        "Nearby branch\n.param gain=0\nV1 in 0 DC 1 AC 1\n\
-         E1 out 0 in 0 {1+if(abs(gain)<=1e-12,gain,2*gain)}\n.end\n",
-    )
-    .unwrap();
+    let deck = |gain: &str| {
+        format!(
+            "Nearby branch\n.param gain={gain}\nV1 in 0 DC 1 AC 1\n\
+             E1 out 0 in 0 {{1+if(abs(gain)<=1e-12,gain,2*gain)}}\n.end\n"
+        )
+    };
+    let netlist = Netlist::parse(&deck("0")).unwrap();
     let engine = physical_engine();
     let output = node_id(&engine, &netlist, "out");
-    for result in [
-        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+    // Within |gain| <= 1e-12 the authored gain is exactly 1+gain, so the local
+    // slope is one; the distant branch's two must never replace it. The kink
+    // in the discarded condition belongs to a selection that does not switch
+    // here, so it leaves that slope defined. A central difference taken inside
+    // the nearby branch is the oracle.
+    let probe = |gain: &str| {
         engine
-            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
-            .map(|values| values[0]),
+            .run_dc_op(&Netlist::parse(&deck(gain)).unwrap())
+            .expect("the nearby branch solves")
+            .try_voltage_named("out")
+            .expect("out is solved")
+    };
+    assert_relative(
+        (probe("1e-13") - probe("-1e-13")) / 2e-13,
+        1.0,
+        1e-2,
+        "nearby branch finite-difference oracle",
+    );
+    for (derivative, quantity) in [
+        (
+            engine
+                .run_sensitivity(&netlist, output, "gain", 0.0, None)
+                .expect("the nearby branch has a local slope"),
+            "nearby branch DC sensitivity",
+        ),
+        (
+            engine
+                .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+                .expect("the nearby branch has a local slope")[0],
+            "nearby branch AC magnitude sensitivity",
+        ),
     ] {
-        let error = result.expect_err("a distant slope cannot replace unresolved local evidence");
-        assert!(error.to_string().contains("could not resolve"), "{error}");
+        assert_relative(derivative, 1.0, 1e-12, quantity);
     }
 }
 
@@ -341,8 +402,18 @@ fn sensitivity_refinement_rejects_unclassified_circuit_failures() {
     ] {
         let error = result.expect_err("an inconsistent circuit does not establish a domain bound");
         let message = error.to_string();
-        assert!(message.contains("could not resolve"), "{message}");
-        assert!(message.contains("last trial failure"), "{message}");
+        // RFAIL steps from 0 to 1 exactly at gain=0, so its value has no
+        // two-sided derivative there. Since 97e921d4f ("Retain complex
+        // parameter directions through definition-time bindings") that is
+        // refused at the owning card instead of being inferred from a replayed
+        // trial that fails to build; the refinement driver's own reading of an
+        // unclassified trial failure is covered by
+        // `refinement_does_not_treat_failed_trials_as_parameter_boundaries`.
+        assert!(message.contains("RFAIL"), "{message}");
+        assert!(
+            message.contains("no two-sided parameter derivative"),
+            "{message}"
+        );
     }
 }
 
