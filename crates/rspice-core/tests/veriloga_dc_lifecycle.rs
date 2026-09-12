@@ -2021,3 +2021,129 @@ fn a_cancelled_convergence_aid_reports_the_stop_not_the_device() {
 
     let _ = std::fs::remove_file(model);
 }
+
+/// One internal node and one named branch, wired as a series pair so both
+/// unknowns carry a value worth naming.
+const NAMED_UNKNOWNS: &str = "module named_unknowns(p,n); inout p,n; electrical p,n;
+    electrical inner;
+    branch (p,inner) bwire;
+    parameter real r1=1000.0;
+    parameter real r2=3000.0;
+    analog begin
+        V(bwire) <+ r1*I(bwire);
+        I(inner,n) <+ V(inner,n)/r2;
+    end endmodule";
+
+fn named_unknowns_op() -> rspice_core::solver::SimulationResult {
+    let model = write_model("named_unknowns", NAMED_UNKNOWNS);
+    let netlist = Netlist::parse_validated(&format!(
+        "* runtime verilog-a observable names\nV1 p 0 1\nX1 p 0 named_unknowns\n.va \"{}\" named_unknowns\n.op\n.end\n",
+        deck_path(&model)
+    ))
+    .expect("deck parses");
+    let result = Engine::default().run_dc_op(&netlist).expect("op solves");
+    let _ = std::fs::remove_file(model);
+    result
+}
+
+/// Spectre names an instance's internal net `X1.inner` and its branch current
+/// `X1:bwire`, and a workbench probes them by those names. A positional
+/// `__int1` is not a name anyone can type, and it moves the moment the module
+/// declares another net above it.
+#[test]
+fn runtime_solver_unknowns_take_the_modules_own_names() {
+    let result = named_unknowns_op();
+
+    assert!(
+        result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("x1.inner")),
+        "the internal node is absent from {:?}",
+        result.node_names
+    );
+    assert!(
+        result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("x1:bwire")),
+        "the branch unknown is absent from {:?}",
+        result.node_names
+    );
+    assert!(
+        !result
+            .node_names
+            .iter()
+            .any(|name| name.contains("__int") || name.contains("__br")),
+        "a positional unknown name survived: {:?}",
+        result.node_names
+    );
+
+    // 1 V across a 1k series branch into a 3k shunt: the internal node sits at
+    // three quarters of the supply and the branch carries a quarter milliamp.
+    let inner = node_voltage(&result, "x1.inner");
+    assert!((inner - 0.75).abs() < 1e-9, "internal node reads {inner}");
+    let branch = node_voltage(&result, "x1:bwire");
+    assert!(
+        (branch.abs() - 0.25e-3).abs() < 1e-12,
+        "branch current reads {branch}"
+    );
+}
+
+/// The observable spelling belongs to the route's output layer, not to the
+/// module: a probe written against a generated built-in keeps working when the
+/// same module is compiled at runtime instead.
+#[test]
+fn the_operating_point_publishes_runtime_unknowns_like_the_generated_route() {
+    let result = named_unknowns_op();
+
+    let inner = result
+        .try_dc_observable_named("N(X1_inner)")
+        .expect("the operating point publishes the internal node");
+    assert!((inner - 0.75).abs() < 1e-9, "N(X1_inner) reads {inner}");
+    let branch = result
+        .try_dc_observable_named("N(X1_bwire_BRANCH)")
+        .expect("the operating point publishes the branch current");
+    assert!(
+        (branch.abs() - 0.25e-3).abs() < 1e-12,
+        "N(X1_bwire_BRANCH) reads {branch}"
+    );
+}
+
+/// An unnamed potential source has no declaration to name, so it keeps a
+/// positional spelling rather than borrowing its endpoint names — those belong
+/// to nets that already exist.
+#[test]
+fn an_unnamed_branch_unknown_keeps_a_positional_name() {
+    let model = write_model(
+        "unnamed_branch",
+        "module unnamed_branch(p,n); inout p,n; electrical p,n;
+            parameter real r1=1000.0;
+            analog V(p,n) <+ r1*I(p,n);
+        endmodule",
+    );
+    let netlist = Netlist::parse_validated(&format!(
+        "* unnamed branch\nV1 p 0 1\nX1 p 0 unnamed_branch\n.va \"{}\" unnamed_branch\n.op\n.end\n",
+        deck_path(&model)
+    ))
+    .expect("deck parses");
+    let result = Engine::default().run_dc_op(&netlist).expect("op solves");
+    let _ = std::fs::remove_file(model);
+
+    assert!(
+        result
+            .node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("x1:__br1")),
+        "the unnamed branch lost its positional fallback: {:?}",
+        result.node_names
+    );
+    assert!(
+        result
+            .dc_observables
+            .iter()
+            .all(|(name, _)| !name.contains("__br")),
+        "an unnamed branch has no name to publish an observable under: {:?}",
+        result.dc_observables
+    );
+}

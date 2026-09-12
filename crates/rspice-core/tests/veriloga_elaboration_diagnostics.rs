@@ -418,6 +418,7 @@ fn the_two_kinds_no_deck_reaches_are_still_reported_as_engine_failures() {
         ElaborationErrorKind::PortDiscipline,
         ElaborationErrorKind::ConnectRule,
         ElaborationErrorKind::CompileRefusal,
+        ElaborationErrorKind::NameCollision,
     ] {
         let error = SimulationError::from(ElaborationError {
             instance: None,
@@ -487,6 +488,7 @@ fn every_kind_has_a_distinct_stable_token() {
         (ElaborationErrorKind::ConnectRule, "connect_rule"),
         (ElaborationErrorKind::CompileRefusal, "compile_refusal"),
         (ElaborationErrorKind::CacheCorrupt, "cache_corrupt"),
+        (ElaborationErrorKind::NameCollision, "name_collision"),
         (ElaborationErrorKind::Internal, "internal"),
     ];
     let mut seen = std::collections::BTreeSet::new();
@@ -494,5 +496,59 @@ fn every_kind_has_a_distinct_stable_token() {
         assert_eq!(kind.as_str(), token);
         assert!(seen.insert(token), "duplicate kind token: {token}");
     }
-    assert_eq!(seen.len(), 11);
+    assert_eq!(seen.len(), 12);
+}
+
+/// The module whose unknowns the collision decks collide with: one internal
+/// node `inner` and one named branch `bwire`.
+const NAMED_UNKNOWNS_SOURCE: &str = r#"
+module named_unknowns(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical inner;
+    branch (p, inner) bwire;
+    analog begin
+        V(bwire) <+ 1000.0 * I(bwire);
+        I(inner, n) <+ V(inner, n) / 3000.0;
+    end
+endmodule
+"#;
+
+/// A runtime instance brings its module's internal nodes and branch currents
+/// into the circuit under the instance's own namespace, so an authored net
+/// spelled the same way would be shorted to one of them by the node table
+/// without a word about it. `.PRINT`/`.SAVE` already fold `:` and `.` to one
+/// separator, so the branch spelling collides through that fold too.
+#[test]
+fn an_authored_net_that_collides_with_a_runtime_unknown_is_refused() {
+    for (authored, taken) in [("x1.inner", "x1.inner"), ("x1.bwire", "x1:bwire")] {
+        let model = ModelFile::new("collision", NAMED_UNKNOWNS_SOURCE);
+        let error = elaboration_error(&format!(
+            "* an authored net spelled like a module's own unknown\n\
+             v1 p 0 1\n\
+             x1 p 0 named_unknowns\n\
+             r9 {authored} 0 1meg\n\
+             .va \"{}\" named_unknowns\n\
+             .op\n\
+             .end\n",
+            model.deck_path()
+        ));
+        assert_eq!(
+            error.kind,
+            ElaborationErrorKind::NameCollision,
+            "{authored} was classified as {:?}",
+            error.kind
+        );
+        assert_eq!(error.instance.as_deref(), Some("x1"), "{authored}");
+        assert_eq!(
+            error.module.as_deref(),
+            Some("named_unknowns"),
+            "{authored}"
+        );
+        assert!(
+            error.detail.to_ascii_lowercase().contains(taken),
+            "the refusal does not name the net it wanted ({taken}): {}",
+            error.detail
+        );
+    }
 }

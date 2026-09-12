@@ -184,6 +184,9 @@ pub(super) fn try_build_mixed_signal_instance(
     connect_rules: &DesignConnectRules,
     supplies: &super::boundary_supply::BoundarySupplies,
     temperature: f64,
+    // Every net the flattened deck authors, for the one check that this
+    // instance's own unknowns are not about to take a name already in use.
+    authored_nets: &std::collections::HashSet<String>,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<bool, SimulationError> {
     let crate::netlist::ElementKind::Subcircuit {
@@ -354,6 +357,25 @@ pub(super) fn try_build_mixed_signal_instance(
 
     let layout = classify_boundary_ports(artifact, element, subckt_name, &terminal_nodes)?;
     let boundary = &layout.ports;
+    // The continuous half of a mixed instance brings the same internal nodes
+    // and branch currents into the same circuit, so it takes the same names
+    // and is checked against the same deck nets. A deck author moving a module
+    // across the two routes by adding a process must not have to rewrite the
+    // probes that read it.
+    let internal_names = super::veriloga_internal_node_names(Some(artifact), model.internal_nodes);
+    let branch_names = super::veriloga_branch_unknown_names(model);
+    let unknown_names = super::VerilogAUnknownNames {
+        internal: &internal_names,
+        branches: &branch_names,
+    };
+    unknown_names
+        .check_free(
+            &element.name,
+            model.internal_nodes,
+            model.branch_sources.len(),
+            authored_nets,
+        )
+        .map_err(|(kind, detail)| refuse(&element.name, subckt_name, kind, detail))?;
     // Event connections may be declared by a later A-card or a generated
     // bridge. The completed circuit validates this boundary after all of
     // them are registered; querying a partial node table here is order dependent.
@@ -367,7 +389,9 @@ pub(super) fn try_build_mixed_signal_instance(
         SchedulerLimits::default(),
         circuit.generated_simulation_parameters,
         &super::veriloga_cache::VerilogACompileControl { abort },
-        &mut |device| super::bind_veriloga_solver_unknowns(circuit, &element.name, device),
+        &mut |device| {
+            super::bind_veriloga_solver_unknowns(circuit, &element.name, device, &unknown_names)
+        },
     )
     .map_err(|error| {
         if abort.is_aborted() {

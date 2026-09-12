@@ -331,6 +331,10 @@ pub enum ElaborationErrorKind {
     CompileRefusal,
     /// A compiled or cached artifact failed its own integrity contract.
     CacheCorrupt,
+    /// An unknown the instance brings into the circuit — an internal node or a
+    /// branch current — would take a net name that is already in use. The deck
+    /// author fixes it by renaming one of the two.
+    NameCollision,
     /// A binding step the engine expected to succeed did not. Not the deck's
     /// fault, and the only kind that is a defect report rather than an edit.
     Internal,
@@ -350,6 +354,7 @@ impl ElaborationErrorKind {
             Self::ConnectRule => "connect_rule",
             Self::CompileRefusal => "compile_refusal",
             Self::CacheCorrupt => "cache_corrupt",
+            Self::NameCollision => "name_collision",
             Self::Internal => "internal",
         }
     }
@@ -367,6 +372,7 @@ impl ElaborationErrorKind {
             Self::ConnectRule => "the connect rules do not settle this boundary",
             Self::CompileRefusal => "the Verilog-A compiler refused this source",
             Self::CacheCorrupt => "a compiled Verilog-A artifact failed its integrity contract",
+            Self::NameCollision => "an unknown this instance brings in takes a name already in use",
             Self::Internal => "the engine could not complete this binding",
         }
     }
@@ -388,6 +394,7 @@ impl ElaborationErrorKind {
             | Self::PortCount
             | Self::PortDiscipline
             | Self::ConnectRule
+            | Self::NameCollision
             | Self::CompileRefusal => (
                 SimulationErrorCode::NetlistError,
                 SimulationErrorCategory::Netlist,

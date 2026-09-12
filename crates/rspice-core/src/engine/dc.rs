@@ -534,6 +534,28 @@ impl Engine {
             }
         }
 
+        // A runtime-compiled instance publishes the same observables under the
+        // same spellings: the route a module takes is a build and caching
+        // detail, and a probe a workbench wrote against one must not have to
+        // be rewritten for the other. Its branch-current unknowns follow the
+        // MNA branch convention above — the canonical name with `_BRANCH` —
+        // even though this route carries them in the nodal prefix.
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices.iter() {
+            for (internal_name, node) in device.internal_nodes() {
+                result.push_dc_observable(
+                    format!("N({}_{internal_name})", device.name),
+                    node_voltage(node),
+                );
+            }
+            for (branch_name, node) in device.named_branch_unknowns() {
+                result.push_dc_observable(
+                    format!("N({}_{branch_name}_BRANCH)", device.name),
+                    node_voltage(node),
+                );
+            }
+        }
+
         // A nodal resistor has no MNA branch unknown, so evaluate its lead
         // current directly from the converged terminal voltages and the
         // conductance actually installed in this circuit instance.

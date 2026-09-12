@@ -195,22 +195,144 @@ fn check_build_abort(abort: &dyn AbortSignal) -> Result<(), SimulationError> {
     }
 }
 
+/// The names a runtime Verilog-A instance's solver unknowns take in the
+/// circuit.
+///
+/// The compiled bytecode keeps only a count of internal nodes, because nothing
+/// it executes needs a name; the names live in the canonical artifact the same
+/// compilation produced. Branch sources carry their declaration name in the
+/// compiled model itself.
+#[cfg(feature = "veriloga")]
+pub(super) struct VerilogAUnknownNames<'a> {
+    /// One entry per internal node, in solver order. Empty when the artifact
+    /// that carries the names is absent, which is when the positional spelling
+    /// is used instead.
+    pub(super) internal: &'a [String],
+    /// One entry per branch unknown, in solver order; `None` for a source the
+    /// module never named.
+    pub(super) branches: &'a [Option<String>],
+}
+
+/// A net name as the output layer compares it: case-insensitive, and with `:`
+/// and `.` the same separator.
+///
+/// `.PRINT`/`.SAVE` already treat the two spellings as aliases (`netlist::ast`
+/// folds them before matching a selection), so `x1:b` and `x1.b` select each
+/// other and two unknowns that differ only there are one name to every reader
+/// downstream.
+#[cfg(feature = "veriloga")]
+fn canonical_observable_name(name: &str) -> String {
+    name.replace(':', ".").to_ascii_uppercase()
+}
+
+/// Every net the flattened deck authors, folded for that comparison.
+#[cfg(feature = "veriloga")]
+pub(super) fn authored_net_name_set(
+    elements: &[crate::netlist::Element],
+) -> std::collections::HashSet<String> {
+    elements
+        .iter()
+        .flat_map(|element| element.nodes.iter())
+        .map(|node| canonical_observable_name(node))
+        .collect()
+}
+
+#[cfg(feature = "veriloga")]
+impl VerilogAUnknownNames<'_> {
+    /// Spectre names an instance's internal net `X1.inner`, and a workbench
+    /// probes it by that name. The separator is the flattener's own
+    /// (`FlattenerConfig::hierarchy_separator`, `.` by default), so a
+    /// Verilog-A instance's internal net reads exactly like a
+    /// subcircuit-internal net one level down.
+    pub(super) fn internal_node(&self, instance: &str, index: usize) -> String {
+        match self.internal.get(index) {
+            Some(name) => format!("{instance}.{name}"),
+            None => format!("{instance}.__int{}", index + 1),
+        }
+    }
+
+    /// And its branch currents `X1:b`, in the separate namespace Spectre gives
+    /// them. A source the module never named has no name to take, so it keeps
+    /// its ordinal.
+    pub(super) fn branch_unknown(&self, instance: &str, index: usize) -> String {
+        match self.branches.get(index).and_then(Option::as_ref) {
+            Some(name) => format!("{instance}:{name}"),
+            None => format!("{instance}:__br{}", index + 1),
+        }
+    }
+
+    /// Refuse before any unknown is created, rather than letting
+    /// `get_or_create_node` alias a module's own net onto a deck net that
+    /// happens to be spelled the same way.
+    pub(super) fn check_free(
+        &self,
+        instance: &str,
+        internal_count: usize,
+        branch_count: usize,
+        authored: &std::collections::HashSet<String>,
+    ) -> Result<(), (crate::ElaborationErrorKind, String)> {
+        let mut claimed: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let candidates = (0..internal_count)
+            .map(|index| ("internal node", self.internal_node(instance, index)))
+            .chain(
+                (0..branch_count)
+                    .map(|index| ("branch current", self.branch_unknown(instance, index))),
+            );
+        for (kind, candidate) in candidates {
+            let canonical = canonical_observable_name(&candidate);
+            if authored.contains(&canonical) {
+                return Err((
+                    crate::ElaborationErrorKind::NameCollision,
+                    format!(
+                        "the master's {kind} takes circuit net '{candidate}', which the deck \
+                         already authors; rename the deck net or the module's own declaration"
+                    ),
+                ));
+            }
+            if let Some(previous) = claimed.insert(canonical, candidate.clone()) {
+                return Err((
+                    crate::ElaborationErrorKind::NameCollision,
+                    format!(
+                        "the master's {kind} takes circuit net '{candidate}', which this \
+                         instance already uses for '{previous}'; rename the module's own \
+                         declaration"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(feature = "veriloga")]
 fn bind_veriloga_solver_unknowns(
     circuit: &mut CircuitData,
     instance: &str,
     device: &mut rspice_veriloga::device::VerilogADevice,
+    names: &VerilogAUnknownNames<'_>,
 ) -> Result<(), String> {
     let internal_nodes: Vec<_> = (0..device.num_internal_nodes())
-        .map(|index| circuit.get_or_create_node(&format!("{instance}.__int{}", index + 1)))
+        .map(|index| circuit.get_or_create_node(&names.internal_node(instance, index)))
         .collect();
     if !internal_nodes.is_empty() {
         device
             .try_set_internal_node_indices(&internal_nodes)
             .map_err(|error| error.to_string())?;
     }
+    if !names.internal.is_empty() {
+        device
+            .try_set_internal_node_names(
+                names
+                    .internal
+                    .iter()
+                    .map(|name| name.as_str().into())
+                    .collect(),
+            )
+            .map_err(|error| error.to_string())?;
+    }
     let branch_nodes: Vec<_> = (0..device.num_branch_unknowns())
-        .map(|index| circuit.get_or_create_node(&format!("{instance}.__br{}", index + 1)))
+        .map(|index| circuit.get_or_create_node(&names.branch_unknown(instance, index)))
         .collect();
     if !branch_nodes.is_empty() {
         device
@@ -221,6 +343,38 @@ fn bind_veriloga_solver_unknowns(
         .non_electrical_state_nodes
         .extend(device.non_electrical_node_indices());
     Ok(())
+}
+
+/// The internal-node names a cached compilation carries, or an empty list when
+/// it carries none.
+#[cfg(feature = "veriloga")]
+pub(super) fn veriloga_internal_node_names(
+    artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    expected: usize,
+) -> Vec<String> {
+    artifact
+        .map(|artifact| {
+            artifact
+                .hir
+                .internal_nodes
+                .iter()
+                .map(|node| node.name.to_string())
+                .collect::<Vec<_>>()
+        })
+        .filter(|names| names.len() == expected)
+        .unwrap_or_default()
+}
+
+/// The declaration name of each branch-current unknown, in solver order.
+#[cfg(feature = "veriloga")]
+pub(super) fn veriloga_branch_unknown_names(
+    model: &rspice_veriloga::CompiledModel,
+) -> Vec<Option<String>> {
+    model
+        .branch_sources
+        .iter()
+        .map(|source| source.declared_name.as_ref().map(|name| name.to_string()))
+        .collect()
 }
 
 fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> SimulationError {
@@ -5056,6 +5210,13 @@ impl Engine {
             abort,
         )
         .map_err(SimulationError::from)?;
+        // Every net the flattened deck authors, for the one check that a
+        // runtime Verilog-A instance's own unknowns are not about to take a
+        // name the deck already uses. Built at most once per build, and only
+        // when an instance actually reaches the runtime route.
+        #[cfg(feature = "veriloga")]
+        let authored_net_names: std::cell::OnceCell<std::collections::HashSet<String>> =
+            std::cell::OnceCell::new();
         if !self.config.device_voltage_limiting {
             for element in &flat_elements {
                 let family = match &element.kind {
@@ -7838,6 +7999,8 @@ impl Engine {
                                 &design_connect_rules,
                                 &boundary_supplies,
                                 self.config.temperature,
+                                authored_net_names
+                                    .get_or_init(|| authored_net_name_set(&flat_elements)),
                                 abort,
                             )? {
                                 continue;
@@ -7947,16 +8110,52 @@ impl Engine {
                                 )
                             })?;
 
-                            // Allocate global circuit node indices for internal Verilog-A nodes.
-                            bind_veriloga_solver_unknowns(&mut circuit, &element.name, &mut device)
-                                .map_err(|error| {
+                            // Allocate global circuit node indices for the
+                            // instance's internal nodes and branch currents,
+                            // under the module's own names for them. The
+                            // internal names live in the canonical artifact,
+                            // which the bytecode-only path may not carry; a
+                            // count without names falls back to the
+                            // positional spelling.
+                            let internal_names = veriloga_internal_node_names(
+                                entry.canonical_ir.as_deref(),
+                                model.internal_nodes,
+                            );
+                            let branch_names = veriloga_branch_unknown_names(model);
+                            let names = VerilogAUnknownNames {
+                                internal: &internal_names,
+                                branches: &branch_names,
+                            };
+                            names
+                                .check_free(
+                                    &element.name,
+                                    model.internal_nodes,
+                                    model.branch_sources.len(),
+                                    authored_net_names
+                                        .get_or_init(|| authored_net_name_set(&flat_elements)),
+                                )
+                                .map_err(|(kind, detail)| {
                                     refuse_veriloga_instance(
                                         &element.name,
                                         subckt_name,
-                                        crate::ElaborationErrorKind::Internal,
-                                        error,
+                                        kind,
+                                        detail,
                                     )
                                 })?;
+                            bind_veriloga_solver_unknowns(
+                                &mut circuit,
+                                &element.name,
+                                &mut device,
+                                &names,
+                            )
+                            .map_err(|error| {
+                                refuse_veriloga_instance(
+                                    &element.name,
+                                    subckt_name,
+                                    crate::ElaborationErrorKind::Internal,
+                                    error,
+                                )
+                            })?;
                             if let Some(multiplicity) = multiplicity {
                                 device.set_multiplicity(multiplicity);
                             }
