@@ -764,11 +764,16 @@ impl<'a> ExprConverter<'a> {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
                 Ok(arena.push(Node::Temperature))
             }
+            // `$abstime` and nothing else. `$realtime` is a count of the
+            // declaring module's time units, and semantic analysis rewrites it
+            // into `$abstime` over that unit while the unit is still in scope —
+            // the only place it is. Taking the spelling here as a synonym would
+            // answer in seconds, which is the right number divided by the time
+            // unit, so an unrewritten one falls through to the
+            // unsupported-system-function refusal and is loud instead of wrong.
+            // Pinned by `module_timing.rs`,
+            // `every_lowering_route_reads_realtime_through_the_module_time_unit`.
             "$abstime" => {
-                validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
-                Ok(arena.push(Node::Time))
-            }
-            "$realtime" => {
                 validate_arg_range(&func.name, func.args.len(), 0, Some(0))?;
                 Ok(arena.push(Node::Time))
             }

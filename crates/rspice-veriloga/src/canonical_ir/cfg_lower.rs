@@ -3198,9 +3198,14 @@ impl<'a> CfgLowerer<'a> {
                 CfgValueType::Real,
                 CfgValueKind::Temperature,
             ),
-            ("$abstime" | "$realtime", 0) => {
-                self.leaf(LeafKey::Time, CfgValueType::Real, CfgValueKind::Time)
-            }
+            // `$abstime` and nothing else: `$realtime` counts the declaring
+            // module's time units, and semantic analysis rewrites it into
+            // `$abstime` over that unit while the unit is in scope. Reading the
+            // spelling here as a synonym would answer in seconds instead, so an
+            // unrewritten one falls through to the unsupported-system-function
+            // refusal. Pinned by `module_timing.rs`,
+            // `every_lowering_route_reads_realtime_through_the_module_time_unit`.
+            ("$abstime", 0) => self.leaf(LeafKey::Time, CfgValueType::Real, CfgValueKind::Time),
             ("$mfactor", 0) => self.leaf(
                 LeafKey::Multiplicity,
                 CfgValueType::Real,

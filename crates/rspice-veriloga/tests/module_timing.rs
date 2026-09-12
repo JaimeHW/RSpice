@@ -225,3 +225,192 @@ fn timescale_delays_round_before_rescaling_and_never_clamp() {
         );
     }
 }
+
+/// `$realtime` is one rewrite, not four lowerings.
+///
+/// Semantic analysis rewrites `$realtime` into `$abstime / <the module's time
+/// unit>` while that module's own `` `timescale `` is in scope
+/// (`SemanticAnalyzer::lower_module_time_function`). Everything below it — the
+/// bytecode the interpreter executes, the canonical CFG the JITs compile, and
+/// the direct generated Rust — therefore only ever sees `$abstime`, and none
+/// of them carries a time unit to scale by.
+///
+/// This is the probe that makes that a measurement rather than a reading. The
+/// module declares a `1us` time unit, so a route that took `$realtime` for
+/// plain seconds is wrong by a factor of a million, and it reads `$realtime`
+/// from the places a rewrite could plausibly miss: a contribution, a
+/// statically unrolled loop body, a guarded branch, and the body of an analog
+/// function that is inlined into the block. Every route is measured against
+/// the same module with the division spelled out by hand, which is the only
+/// oracle that separates "scaled" from "scaled the same way twice".
+#[test]
+fn every_lowering_route_reads_realtime_through_the_module_time_unit() {
+    use rspice_veriloga::canonical_ir::{CfgEvalInputs, CfgModel, evaluate_cfg};
+    use rspice_veriloga::rust_backend::RustTranspiler;
+
+    /// The module's own time unit, in seconds.
+    const UNIT: f64 = 1.0e-6;
+
+    fn probe(time: &str) -> String {
+        format!(
+            "`timescale 1us/1ns\n\
+             module realtime_routes(p, n);\n\
+             inout p, n; electrical p, n;\n\
+             real held; integer i;\n\
+             analog function real elapsed;\n\
+             input k; real k;\n\
+             elapsed = k + {time};\n\
+             endfunction\n\
+             analog begin\n\
+             held = 0.0;\n\
+             for (i = 0; i < 2; i = i + 1) held = held + {time};\n\
+             if ({time} >= 0.0) held = held + elapsed(1.0);\n\
+             I(p, n) <+ V(p, n) * held;\n\
+             end\n\
+             endmodule\n"
+        )
+    }
+
+    fn artifact_of(source: &str) -> CanonicalIrArtifact {
+        VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect("the probe module compiles to canonical IR")
+    }
+
+    /// The Jacobian entry the bytecode route stamps, which is `held`: the
+    /// contribution is linear in `V(p, n)`, and `held` reads only the clock.
+    fn bytecode_held(fixture: &support::DeviceFixture, time: f64) -> f64 {
+        let mut device = fixture.device("routes", &[1, 2]);
+        device.try_set_time(time).unwrap();
+        let mut conductance = 0.0;
+        device
+            .try_stamp(
+                &[1.0, 0.0],
+                |row, column, value| {
+                    if (row, column) == (0, 0) {
+                        conductance += value;
+                    }
+                },
+                |_row, _value| {},
+            )
+            .unwrap();
+        conductance
+    }
+
+    /// The canonical route's own answer: the residual of the one contribution
+    /// at `V(p, n) = 1`, which is `held` up to the sign the node ordering
+    /// gives it.
+    fn canonical_held(artifact: &CanonicalIrArtifact, time: f64) -> f64 {
+        let cfg = CfgModel::from_hir(&artifact.hir, &artifact.mir)
+            .unwrap_or_else(|diagnostics| panic!("the probe module lowers: {diagnostics:?}"));
+        let inputs = CfgEvalInputs {
+            parameters: artifact
+                .mir
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default.unwrap_or(0.0))
+                .collect(),
+            parameter_given: vec![false; artifact.mir.parameters.len()],
+            port_connected: vec![true; artifact.hir.ports.len()],
+            node_potentials: (0..artifact.mir.nodes.len())
+                .map(|node| f64::from(u8::from(node == 0)))
+                .collect(),
+            branch_flows: vec![0.0; artifact.mir.branches.len()],
+            branch_unknown_flows: vec![0.0; artifact.mir.branch_unknowns.len()],
+            multiplicity: 1.0,
+            time,
+            ..Default::default()
+        };
+        let snapshot =
+            evaluate_cfg(&cfg.function, &inputs).expect("the probe module evaluates at this time");
+        snapshot
+            .value(cfg.residuals[0])
+            .expect("the contribution has a residual")
+    }
+
+    /// Every emitted line that reads the clock. This backend has no
+    /// interpreter to run here, so its answer is the code it wrote.
+    fn emitted_clock_reads(artifact: &CanonicalIrArtifact) -> Vec<String> {
+        RustTranspiler::default()
+            .transpile(artifact)
+            .expect("the probe module is within the direct generated-Rust backend")
+            .files
+            .iter()
+            .flat_map(|file| file.contents.lines())
+            .filter(|line| line.contains("self.time"))
+            .map(|line| line.trim().to_string())
+            .collect()
+    }
+
+    fn agree(what: &str, measured: f64, reference: f64) {
+        assert!(
+            (measured - reference).abs() <= 1.0e-9 * reference.abs().max(1.0),
+            "{what}: {measured}, expected {reference}"
+        );
+    }
+
+    let scaled = probe("$realtime");
+    let spelled = probe("($abstime / 1e-6)");
+    let scaled_fixture = support::DeviceFixture::compile(&scaled);
+    let spelled_fixture = support::DeviceFixture::compile(&spelled);
+    let scaled_artifact = artifact_of(&scaled);
+    let spelled_artifact = artifact_of(&spelled);
+
+    for time in [0.0, 2.0e-6, 7.25e-6] {
+        // Two reads in the unrolled loop, one through the inlined function,
+        // and that function's own `+ 1.0`.
+        let held = 3.0 * (time / UNIT) + 1.0;
+
+        let bytecode = bytecode_held(&scaled_fixture, time);
+        agree("bytecode $realtime", bytecode, held);
+        agree(
+            "bytecode $abstime/1e-6",
+            bytecode_held(&spelled_fixture, time),
+            bytecode,
+        );
+
+        let canonical = canonical_held(&scaled_artifact, time);
+        agree("canonical $realtime", canonical.abs(), held);
+        agree(
+            "canonical $abstime/1e-6",
+            canonical_held(&spelled_artifact, time),
+            canonical,
+        );
+    }
+
+    let emitted = emitted_clock_reads(&scaled_artifact);
+    assert!(
+        !emitted.is_empty(),
+        "the generated device must read the clock at all"
+    );
+    assert_eq!(
+        emitted,
+        emitted_clock_reads(&spelled_artifact),
+        "the generated Rust for `$realtime` must be the generated Rust for the division it means"
+    );
+
+    // The same question for an operator's argument, which reaches the lowering
+    // through the operator rather than through the expression tree it sits in.
+    // Compiling is the whole assertion: a route that kept its own `$realtime`
+    // spelling would answer in plain seconds, and a route that has none would
+    // refuse.
+    let inside_operator = "`timescale 1us/1ns\n\
+         module realtime_in_operator(p, n);\n\
+         inout p, n; electrical p, n;\n\
+         analog I(p, n) <+ V(p, n) * 1.0e-3 + ddt($realtime);\n\
+         endmodule\n";
+    support::DeviceFixture::compile(inside_operator);
+    let artifact = artifact_of(inside_operator);
+    CfgModel::from_hir(&artifact.hir, &artifact.mir)
+        .unwrap_or_else(|diagnostics| panic!("`ddt($realtime)` lowers: {diagnostics:?}"));
+    RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("`ddt($realtime)` is within the direct generated-Rust backend");
+    support::DeviceFixture::compile(
+        "`timescale 1us/1ns\n\
+         module realtime_in_filter(p, n);\n\
+         inout p, n; electrical p, n;\n\
+         analog I(p, n) <+ laplace_nd($realtime * V(p, n), '{1.0, 0.5}, '{1.0, 0.25});\n\
+         endmodule\n",
+    );
+}

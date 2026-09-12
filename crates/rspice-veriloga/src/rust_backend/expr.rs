@@ -572,7 +572,15 @@ impl ExprEmitter<'_> {
                 self.expect_system_arity(&normalized, args, 0)?;
                 "ctx.temperature()".to_string()
             }
-            "$abstime" | "$realtime" => {
+            // `$abstime` and nothing else: `$realtime` counts the declaring
+            // module's time units, and semantic analysis rewrites it into
+            // `$abstime` over that unit while the unit is in scope. Emitting
+            // `self.time` for the spelling would put seconds in the generated
+            // device, so an unrewritten one falls through to the
+            // unsupported-system-function refusal. Pinned by
+            // `module_timing.rs`,
+            // `every_lowering_route_reads_realtime_through_the_module_time_unit`.
+            "$abstime" => {
                 self.expect_system_arity(&normalized, args, 0)?;
                 "self.time".to_string()
             }
