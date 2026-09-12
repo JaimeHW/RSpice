@@ -3310,20 +3310,6 @@ impl MixedSignalHost {
     }
 }
 
-/// Fold one settle's moved bits into one whole-signal drive per signal.
-///
-/// `out` is cleared first and left holding the values [`DigitalHost::force_many`]
-/// will publish, in the order the first moved bit of each signal was found —
-/// which for a scalar-only boundary is bridge order, exactly what it was when
-/// every bridge published its own one-bit value.
-///
-/// Each signal starts from what it holds now rather than from `x`, because the
-/// bits this settle did not move have not changed and a whole-signal write
-/// would otherwise erase them. A signal the store cannot read is refused here
-/// rather than published as a guess: it is the same disappearance `stamp` and
-/// [`read_dac_bits`] refuse on.
-///
-/// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
 /// Put the bits one settle moved, and their crossing times, into ascending
 /// crossing order — the order the analog world produced them in.
 ///
@@ -3349,6 +3335,20 @@ fn order_publications_by_crossing(
     }
 }
 
+/// Fold one settle's moved bits into one whole-signal drive per signal.
+///
+/// `out` is cleared first and left holding the values [`DigitalHost::force_many`]
+/// will publish, in the order the first moved bit of each signal was found —
+/// which for a scalar-only boundary is bridge order, exactly what it was when
+/// every bridge published its own one-bit value.
+///
+/// Each signal starts from what it holds now rather than from `x`, because the
+/// bits this settle did not move have not changed and a whole-signal write
+/// would otherwise erase them. A signal the store cannot read is refused here
+/// rather than published as a guess: it is the same disappearance `stamp` and
+/// [`read_dac_bits`] refuse on.
+///
+/// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
 fn compose_bit_drives(
     state: &MixedState,
     bit_drives: &[(usize, FourStateBit)],
