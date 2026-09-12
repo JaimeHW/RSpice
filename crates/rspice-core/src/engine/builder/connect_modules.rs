@@ -56,7 +56,19 @@ use rspice_veriloga::connect::{
 };
 use rspice_veriloga::disciplines::DisciplineDb;
 
-use crate::SimulationError;
+use crate::{ElaborationError, ElaborationErrorKind, SimulationError};
+
+/// A clause-7 refusal about one boundary node.
+///
+/// Selection happens per boundary rather than per instance, and several of
+/// these run before any X-card is reached at all — choosing the deck's
+/// `connectrules` block is a design-level decision — so the subject is the
+/// node or the source rather than an instance. `ElaborationError` carries no
+/// instance for those, which is what tells a workbench it has nothing to mark
+/// on the schematic and should report against the deck instead.
+fn connect_refusal(detail: impl Into<String>) -> ElaborationError {
+    ElaborationError::new(ElaborationErrorKind::ConnectRule, detail)
+}
 
 /// The continuous discipline a SPICE deck node has.
 const DECK_DISCIPLINE: &str = "electrical";
@@ -169,13 +181,18 @@ pub(super) fn select_for_boundary(
         return Ok(None);
     };
     if insertion.direction != expected {
-        return Err(SimulationError::Circuit(format!(
-            "connect module selection for node '{node_label}' derived a {} bridge from the \
-             port direction while the bridge planner derived a {}; the two disagree about \
-             which side drives",
-            insertion.direction.label(),
-            expected.label()
-        )));
+        return Err(ElaborationError::new(
+            ElaborationErrorKind::Internal,
+            format!(
+                "connect module selection for node '{node_label}' derived a {} bridge from the \
+                 port direction while the bridge planner derived a {}; the two disagree about \
+                 which side drives",
+                insertion.direction.label(),
+                expected.label()
+            ),
+        )
+        .instance(instance_name)
+        .into());
     }
 
     let parameters = table
@@ -197,10 +214,11 @@ fn connect_error(
     node_label: &str,
     error: &rspice_veriloga::connect::ConnectError,
 ) -> SimulationError {
-    SimulationError::Circuit(format!(
+    connect_refusal(format!(
         "node '{node_label}' is a mixed-discipline connection and its connect rules do not \
          settle it: {error}"
     ))
+    .into()
 }
 
 /// What the delegation stamps on the XSPICE bridge code model for one selected
@@ -261,13 +279,15 @@ pub(super) fn delegated_parameters(
                 .iter()
                 .any(|(connect_parameter, _)| name.eq_ignore_ascii_case(connect_parameter));
         if !known {
-            return Err(SimulationError::Circuit(format!(
+            return Err(connect_refusal(format!(
                 "the connect statement for '{}' passes parameter '{name}', which this \
                  delegation does not carry to the {} bridge; the built-in connect modules \
                  take a supply and their transition times",
                 selected.name,
                 super::xspice_auto_bridge_kind_label(kind)
-            )));
+            ))
+            .module(selected.name.as_str())
+            .into());
         }
     }
 
@@ -309,7 +329,7 @@ pub(super) fn check_delegable(
     if expected.is_some_and(|expected| selected.name.eq_ignore_ascii_case(expected)) {
         return Ok(());
     }
-    Err(SimulationError::Circuit(format!(
+    Err(connect_refusal(format!(
         "node '{node_label}' selects connect module '{}' (instance '{}'), which RSpice cannot \
          execute: a connect module runs here by delegating to the XSPICE bridge code model \
          that implements it, and only the built-in library — a2d, d2a and bidir — has such a \
@@ -317,7 +337,9 @@ pub(super) fn check_delegable(
          host with executable connect-body elaboration and insertion, which this \
          boundary route does not yet implement",
         selected.name, selected.instance
-    )))
+    ))
+    .module(selected.name.as_str())
+    .into())
 }
 
 // ---------------------------------------------------------------------------
@@ -372,10 +394,11 @@ impl DesignConnectRules {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                return Err(SimulationError::Netlist(format!(
+                return Err(connect_refusal(format!(
                     "CONNECTRULES_SOURCE '{alias}' must identify exactly one explicitly aliased .VERILOGA source; found {} sources. Available imports: {available}",
                     paths.len()
-                )));
+                ))
+                .into());
             }
             selected.requested_source = Some((
                 alias.to_owned(),
@@ -424,10 +447,9 @@ impl DesignConnectRules {
                     .rules
                     .select_block(&block.name)
                     .map_err(|error| {
-                        SimulationError::Circuit(format!(
-                            "connectrules in '{}': {error}",
-                            path.display()
-                        ))
+                        SimulationError::from(
+                            connect_refusal(format!("connectrules block: {error}")).in_source(path),
+                        )
                     })?;
                 self.declared_in = Some(path.to_path_buf());
                 self.disciplines = specification.disciplines.clone();
@@ -475,7 +497,7 @@ impl DesignConnectRules {
                 path.display()
             ));
         }
-        Err(SimulationError::Netlist(message))
+        Err(connect_refusal(message).into())
     }
 
     pub(super) fn register_artifact(
@@ -498,10 +520,13 @@ impl DesignConnectRules {
         let specification = rspice_veriloga::VerilogACompiler::default()
             .connect_specification_from_preprocessed(source)
             .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "connect rules in compiled source '{}' could not be read: {error}",
-                    path.display()
-                ))
+                SimulationError::from(
+                    ElaborationError::new(
+                        ElaborationErrorKind::CacheCorrupt,
+                        format!("connect rules in this compiled source could not be read: {error}"),
+                    )
+                    .in_source(path),
+                )
             })?;
         self.register(path, specification)
     }
