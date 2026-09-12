@@ -48,9 +48,14 @@
 //! seconds become an accepted analog timepoint bit-exactly.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/determinism_fingerprint.rs"]
+mod determinism_fingerprint;
 #[path = "common/digital_trace_invariants.rs"]
 mod digital_trace_invariants;
 
+use determinism_fingerprint::{
+    Fingerprint, assert_fingerprints_survive_new_processes, fingerprint, pin_fingerprint,
+};
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
@@ -168,6 +173,209 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
         .iter()
         .map(|point| (point.time, format!("{:?}", point.value.state)))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Determinism fingerprints
+// ---------------------------------------------------------------------------
+
+/// Every fixture in this file whose transient is fingerprinted, as
+/// `(test name, key, fingerprint)`. All three hashes first measured
+/// 2026-09-13; none of them replaces an existing pin.
+///
+/// # What is in, and what is not
+///
+/// In: a case that runs ONE fixed mixed deck to `tstop` through [`run`] and
+/// keeps the whole result. That is the only shape whose grid is a property of
+/// the deck rather than of the case's own parameter loop, and therefore the
+/// only shape whose hash means anything when a second process recomputes it.
+///
+/// Out, and why:
+///
+/// * every refusal case, which has no transient to hash — the sub-minimum
+///   bounds, the zero-delay loops, the checkpoint entry points, the
+///   analysis-clone refusals;
+/// * the host-level probes, which drive `MixedSignalHost` directly and never
+///   build a circuit;
+/// * `a_swept_rerun_starts_the_module_from_its_initial_blocks_every_time` and
+///   `newton_work_never_reaches_the_module`, which run one deck many times
+///   under a changing configuration: the interesting object there is the
+///   relation between the runs, which each case already asserts;
+/// * `an_analog_only_veriloga_deck_still_resumes`, whose deck has no discrete
+///   half at all;
+/// * `a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into`
+///   and `a_resolved_boundary_is_not_mistaken_for_a_loop`, which re-run a deck
+///   already fingerprinted by another case — one deck, one hash;
+/// * the four heavy runs — the picosecond clock (ten thousand activations),
+///   the femtosecond follow-up (a 400 us horizon), the interrupted
+///   sub-minimum cadence (~30k counted points) and the ring bounded at the
+///   16384-point refusal. Each is re-run once per child by
+///   `mixed_fixture_hashes_are_identical_across_processes`, and any one of
+///   them would spend the whole cross-process budget by itself.
+///
+/// # Two entries below share a fingerprint, and both are facts
+///
+/// `hardening_feedback` and `hardening_feedback_order` agree on all three
+/// numbers. They are [`FEEDBACK_DECK`] and [`FEEDBACK_ORDER`] — the same
+/// circuit with the order of the module's two processes swapped — so the
+/// agreement says the swap reaches neither the accepted grid nor any node
+/// voltage. The case that owns the swap asserts it about the reaction's
+/// ordering; this says the same thing about the solution.
+/// `hardening_feedback_split` is the same circuit again across two
+/// instances: it lands on the same grid and a different analog solution,
+/// because the split gives the deck a node the joined version does not have.
+///
+/// `hardening_ring_1p` and `hardening_ring_10p` agree for the reason their
+/// own cases explain: a one-picosecond and a ten-picosecond cadence are both
+/// coalesced onto the same ten-picosecond floor grid, so the two runs accept
+/// the same fourteen points at the same levels and differ only in how many
+/// publications the trace keeps.
+const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
+    (
+        "a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_cannot_carry",
+        "hardening_external_toggle",
+        Fingerprint {
+            points: 508,
+            grid_hash: 0x4b39_7d58_993e_1a2a,
+            volt_hash: 0x4c8e_70bd_98cd_39d5,
+        },
+    ),
+    (
+        "every_digital_activation_becomes_a_bit_exact_accepted_timepoint",
+        "hardening_clock_divider",
+        Fingerprint {
+            points: 1607,
+            grid_hash: 0x9b79_51a1_df70_ef07,
+            volt_hash: 0x580c_c8e8_10b4_854c,
+        },
+    ),
+    (
+        "an_activation_inside_the_breakpoint_merge_tolerance_is_delivered",
+        "hardening_merge_window",
+        Fingerprint {
+            points: 334,
+            grid_hash: 0x6b0e_f6fd_36c7_66af,
+            volt_hash: 0x97a0_1311_2bfb_0170,
+        },
+    ),
+    (
+        "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
+        "hardening_feedback",
+        Fingerprint {
+            points: 36,
+            grid_hash: 0xde34_c01f_9d47_f6dd,
+            volt_hash: 0xee07_5c9b_cd38_f53f,
+        },
+    ),
+    (
+        "a_crossing_carried_between_two_instances_is_landed_on_once",
+        "hardening_feedback_split",
+        Fingerprint {
+            points: 36,
+            grid_hash: 0xde34_c01f_9d47_f6dd,
+            volt_hash: 0xea1b_78e7_8d12_a0e3,
+        },
+    ),
+    (
+        "a_carried_crossing_wakes_its_process_after_the_write_that_caused_it",
+        "hardening_feedback_order",
+        Fingerprint {
+            points: 36,
+            grid_hash: 0xde34_c01f_9d47_f6dd,
+            volt_hash: 0xee07_5c9b_cd38_f53f,
+        },
+    ),
+    (
+        "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
+        "hardening_two_crossings",
+        Fingerprint {
+            points: 88,
+            grid_hash: 0x7128_f749_178c_4a38,
+            volt_hash: 0xc781_f898_d407_8ce1,
+        },
+    ),
+    (
+        "an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it",
+        "hardening_ceil_wake",
+        Fingerprint {
+            points: 190,
+            grid_hash: 0x65d2_d612_1d71_429b,
+            volt_hash: 0x5aa4_5fdb_f382_38d5,
+        },
+    ),
+    (
+        "a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_points",
+        "hardening_ring_1p",
+        Fingerprint {
+            points: 14,
+            grid_hash: 0x68b0_e564_ff7c_89de,
+            volt_hash: 0x7395_ae1d_67b8_cd8b,
+        },
+    ),
+    (
+        "a_coupled_code_model_cadence_exactly_at_the_solver_floor_runs",
+        "hardening_ring_10p",
+        Fingerprint {
+            points: 14,
+            grid_hash: 0x68b0_e564_ff7c_89de,
+            volt_hash: 0x7395_ae1d_67b8_cd8b,
+        },
+    ),
+    (
+        "a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop",
+        "hardening_toggling_two_minimums",
+        Fingerprint {
+            points: 253,
+            grid_hash: 0xafa3_0bb3_a9bd_6ed8,
+            volt_hash: 0xa079_d0b7_6960_aed0,
+        },
+    ),
+    (
+        "a_clock_five_minimum_steps_wide_is_refused_by_neither_guard",
+        "hardening_toggling_five_minimums",
+        Fingerprint {
+            points: 407,
+            grid_hash: 0x0938_e26a_18bd_cc5f,
+            volt_hash: 0x9240_cc5e_db58_0b5a,
+        },
+    ),
+];
+
+/// Pin `result`'s fingerprint against [`FINGERPRINTED_FIXTURES`]'s entry.
+///
+/// Looked up by key rather than written out per case, so the table the
+/// cross-process comparison re-runs and the pins the cases assert cannot
+/// drift apart: a key with no entry fails here, and an entry whose test name
+/// or key no case matches fails in
+/// `mixed_fixture_hashes_are_identical_across_processes`.
+fn pin_fixture(key: &str, result: &TransientResult) {
+    let (_, _, expected) = FINGERPRINTED_FIXTURES
+        .iter()
+        .find(|(_, entry, _)| *entry == key)
+        .unwrap_or_else(|| panic!("no fingerprint table entry for {key}"));
+    pin_fingerprint(key, fingerprint(result), *expected);
+}
+
+/// Every hashed fixture, re-run in fresh processes.
+///
+/// Eight children, each running every fixture in the table serially with the
+/// emit variable set. The count is eight rather than one because what this
+/// looks for — an address, a hash iteration order, a cached module that
+/// reached the answer — does not reproduce reliably on a single fresh
+/// process, and eight is the count the audit's own determinism probe used.
+/// It fits: four children over these twelve decks measured 2.9 s, so eight is
+/// six seconds against the suite's own half-minute.
+#[test]
+fn mixed_fixture_hashes_are_identical_across_processes() {
+    let fixtures: Vec<&str> = FINGERPRINTED_FIXTURES
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect();
+    let pinned: Vec<(String, String)> = FINGERPRINTED_FIXTURES
+        .iter()
+        .flat_map(|(_, key, expected)| expected.records(key))
+        .collect();
+    assert_fingerprints_survive_new_processes("hardening", &fixtures, 8, &pinned);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +505,7 @@ fn a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_
     // the time a checkpoint was being asked for. That is the state a resume
     // would have restarted, so the refusal is protecting something real.
     let baseline = run(&deck, 200.0e-9, 1.0e-9);
+    pin_fixture("hardening_external_toggle", &baseline);
     let before: Vec<_> = digital_points(&baseline, "qs")
         .into_iter()
         .filter(|(time, _)| *time < 100.0e-9)
@@ -1519,6 +1728,7 @@ fn every_digital_activation_becomes_a_bit_exact_accepted_timepoint() {
         f64::from(TSTOP_NS) * 1.0e-9,
         1.0e-9,
     );
+    pin_fixture("hardening_clock_divider", &result);
 
     let events = u64::from(TSTOP_NS) / ACTIVATION_TICKS;
     assert!(
@@ -1859,6 +2069,7 @@ fn an_activation_inside_the_breakpoint_merge_tolerance_is_delivered() {
 
     let model = ModelFile::new("merge_window_follow", MERGE_WINDOW_FOLLOW);
     let result = run(&merge_window_deck(&model), TSTOP, MAX_STEP);
+    pin_fixture("hardening_merge_window", &result);
 
     let last = result.time.last().copied().unwrap_or(0.0);
     assert!(
@@ -2573,6 +2784,7 @@ fn the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing() {
         model.deck_path()
     );
     let result = run(&deck, 20.0e-9, 1.0e-9);
+    pin_fixture("hardening_feedback", &result);
 
     let accepted: Vec<f64> = result
         .time
@@ -2792,6 +3004,7 @@ fn a_crossing_carried_between_two_instances_is_landed_on_once() {
         sense.deck_path()
     );
     let result = run(&deck, 20.0e-9, 1.0e-9);
+    pin_fixture("hardening_feedback_split", &result);
 
     let accepted: Vec<f64> = result
         .time
@@ -2856,6 +3069,7 @@ fn a_carried_crossing_wakes_its_process_after_the_write_that_caused_it() {
         model.deck_path()
     );
     let result = run(&deck, 20.0e-9, 1.0e-9);
+    pin_fixture("hardening_feedback_order", &result);
 
     let rises = |net: &str| -> Vec<f64> {
         digital_points(&result, net)
@@ -2942,6 +3156,7 @@ endmodule
         model.deck_path()
     );
     let result = run(&deck, 1.0e-9, 75.0e-12);
+    pin_fixture("hardening_two_crossings", &result);
 
     let rising = |net: &str| -> f64 {
         let points = digital_points(&result, net);
@@ -3059,6 +3274,7 @@ fn an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it() {
         divider.deck_path()
     );
     let result = run(&deck, 41.0e-9, 1.0e-9);
+    pin_fixture("hardening_ceil_wake", &result);
 
     // The HDL-to-XSPICE half: every clock edge reaches the model at the exact
     // instant its tick names, so every inverter output edge is one of those
@@ -3630,6 +3846,7 @@ fn a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_poi
     let enable = ModelFile::new("ring_enable", RING_ENABLE);
     let deck = code_model_ring_deck(&enable, "1p", TSTOP, MAX_STEP);
     let result = run(&deck, TSTOP, MAX_STEP);
+    pin_fixture("hardening_ring_1p", &result);
     assert_ring_lands_on_the_floor_grid(&result, TSTOP, 1);
 }
 
@@ -3661,6 +3878,7 @@ fn a_coupled_code_model_cadence_exactly_at_the_solver_floor_runs() {
     let enable = ModelFile::new("ring_enable", RING_ENABLE);
     let deck = code_model_ring_deck(&enable, "10p", TSTOP, MAX_STEP);
     let result = run(&deck, TSTOP, MAX_STEP);
+    pin_fixture("hardening_ring_10p", &result);
     assert_ring_lands_on_the_floor_grid(&result, TSTOP, 5);
 }
 
@@ -3755,6 +3973,7 @@ fn a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop() {
 
     let result = toggling_clock_run("0.02", TSTOP, MAX_STEP)
         .unwrap_or_else(|error| panic!("a twenty-femtosecond clock must run: {error}"));
+    pin_fixture("hardening_toggling_two_minimums", &result);
     assert_boundary_moved_past_the_flip_ceiling(&result, TSTOP);
 }
 
@@ -3776,6 +3995,7 @@ fn a_clock_five_minimum_steps_wide_is_refused_by_neither_guard() {
 
     let result = toggling_clock_run("0.05", TSTOP, MAX_STEP)
         .unwrap_or_else(|error| panic!("a fifty-femtosecond clock must run: {error}"));
+    pin_fixture("hardening_toggling_five_minimums", &result);
     assert_boundary_moved_past_the_flip_ceiling(&result, TSTOP);
 }
 
