@@ -9,10 +9,7 @@ use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
-use crate::xspice::{
-    CodeModelRegistry, SharedXspiceEventQueue, SharedXspiceEventValues, SharedXspiceInstance,
-    XspiceInstance,
-};
+use crate::xspice::{CodeModelRegistry, SharedXspiceInstance, XspiceInstance};
 use crate::{NodeId, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -49,6 +46,8 @@ mod magnetic;
 #[cfg(feature = "veriloga")]
 mod mixed_signal;
 mod net_kind;
+mod scheduler;
+pub(crate) use scheduler::{Activation, ActivationLanes};
 mod xspice_dispatch;
 pub(crate) use net_kind::{NetKind, NetKinds};
 mod nonlinear;
@@ -621,38 +620,25 @@ pub struct CircuitData {
     // Behavioral sources (expression-based B-elements)
     pub(crate) behavioral_sources: BehavioralSources,
 
+    /// Every discrete-event lane, and the questions the analog stepper asks
+    /// them: what activation is next, and what interval it may not advance
+    /// below.
+    ///
+    /// The HDL process wheel and the code-model event queue are one owner
+    /// because they are one clock's followers. See [`scheduler`].
+    pub(crate) scheduler: scheduler::CircuitScheduler,
+
     // XSPICE code model instances
     /// XSPICE instance storage for code model evaluation
     pub(crate) xspice_instances: Vec<SharedXspiceInstance>,
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
-    /// Resolved event-node values, per-driver state, and event times, shared
-    /// with rollback snapshots until an event writes through them.
-    pub(crate) xspice_event_values: SharedXspiceEventValues,
     /// ngspice-style total LOAD() contribution per event node.
     pub(crate) xspice_event_loads: HashMap<NodeId, Value>,
-    /// Circuit-level XSPICE digital event queue, shared with rollback
-    /// snapshots until an event is scheduled or drained.
-    pub(crate) xspice_event_queue: SharedXspiceEventQueue,
-    /// Smallest interval the analog solver may advance by, or zero when
-    /// nothing has declared one.
-    ///
-    /// The coupled code-model half of the same floor
-    /// [`CircuitData::set_mixed_analog_step_floor`] publishes to every mixed
-    /// module: one floor, both kernels. Read by
-    /// `circuit::external_models::coupled`'s missed-breakpoint guard, which is
-    /// the only place a queued code-model event is measured against an
-    /// interval the stepper could have taken.
-    #[cfg(feature = "veriloga")]
-    pub(crate) xspice_analog_step_floor: Value,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.
     pub(crate) xspice_touched_real_nodes: Vec<NodeId>,
-    /// Net-to-instance sensitivity for the settle loop, built on first use.
-    /// Derived from port directions and connections, so it is not part of any
-    /// rollback snapshot.
-    pub(crate) xspice_event_dispatch: Option<xspice_dispatch::XspiceEventDispatch>,
     /// Instances the current settle pass still owes an evaluation, indexed by
     /// registration order. Scratch, reused across calls.
     pub(crate) xspice_dispatch_pending: Vec<bool>,
@@ -695,12 +681,6 @@ pub struct CircuitData {
     /// the transactional idiom, not the storage.
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_signal_hosts: Vec<crate::xspice::verilog::MixedSignalHost>,
-    /// One process, driver and event-queue authority for every mixed HDL instance.
-    #[cfg(feature = "veriloga")]
-    pub(crate) mixed_digital_coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
-    /// Original XSPICE drivers attached to the coordinator's event-bit groups.
-    #[cfg(feature = "veriloga")]
-    mixed_xspice_bindings: Option<Arc<external_models::XspiceDigitalBindings>>,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not

@@ -252,7 +252,7 @@ impl<'a> XspiceDigitalParticipant<'a> {
     /// `xspice::verilog::mixed::shared::MixedDigitalCoordinator::activation_was_reachable`
     /// and `MixedSignalHost::begin_trial_with_integration_rules`' contract
     /// state it for HDL activations, against the same floor
-    /// `CircuitData::set_mixed_analog_step_floor` publishes to both. A zero
+    /// `CircuitScheduler::set_analog_step_floor` stores for both. A zero
     /// floor means no solver has declared one — a directly driven participant,
     /// or an analysis that never set it — and then every event stepped past is
     /// a fault, as it was before either half had a floor.
@@ -263,7 +263,7 @@ impl<'a> XspiceDigitalParticipant<'a> {
     /// stepper chose, and there is no earlier instant for an event to have
     /// been landed on.
     fn event_was_reachable(&self, due: Value) -> bool {
-        let floor = self.circuit.xspice_analog_step_floor;
+        let floor = self.circuit.scheduler.analog_step_floor();
         !floor.is_finite() || floor <= 0.0 || due - (self.time - self.timestep) >= floor
     }
 }
@@ -291,7 +291,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             }
             // See `Self::event_was_reachable`: only an event the stepper had a
             // legal interval to and skipped anyway is a lost breakpoint.
-            if let Some(due) = self.circuit.xspice_event_queue.next_event_time()
+            if let Some(due) = self.circuit.scheduler.xspice_event_queue.next_event_time()
                 && due < physical
                 && self.event_was_reachable(due)
             {
@@ -337,6 +337,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             for (&node, &net) in &self.bindings.by_node {
                 if !self
                     .circuit
+                    .scheduler
                     .xspice_event_values
                     .digital_values
                     .contains_key(&node)

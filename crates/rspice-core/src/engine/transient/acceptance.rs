@@ -699,7 +699,7 @@ mod tests {
             assert_eq!(host.read_digital("later").unwrap(), "0");
         }
         assert!(
-            (circuit.next_mixed_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20,
+            (circuit.next_hdl_activation().unwrap().unwrap().seconds() - 2e-9).abs() < 1e-20,
             "the circuit owner retains the pending event after rollback"
         );
         assert_eq!(

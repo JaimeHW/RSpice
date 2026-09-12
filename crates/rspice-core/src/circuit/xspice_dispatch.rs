@@ -271,15 +271,16 @@ impl CircuitData {
     /// Called wherever the instance list grows or the node numbering moves,
     /// which are the only two things the map depends on.
     pub(crate) fn invalidate_xspice_event_dispatch(&mut self) {
-        self.xspice_event_dispatch = None;
+        self.scheduler.xspice_event_dispatch = None;
     }
 
     /// Build the sensitivity map if it is not cached, so that later code can
     /// hold it by shared reference alongside mutable borrows of sibling
     /// fields.
     pub(crate) fn ensure_xspice_event_dispatch(&mut self) {
-        if self.xspice_event_dispatch.is_none() {
-            self.xspice_event_dispatch = Some(XspiceEventDispatch::build(&self.xspice_instances));
+        if self.scheduler.xspice_event_dispatch.is_none() {
+            self.scheduler.xspice_event_dispatch =
+                Some(XspiceEventDispatch::build(&self.xspice_instances));
         }
     }
 }

@@ -117,6 +117,7 @@ impl DigitalActiveParticipant for Inverter {
             })?;
         let value = self
             .circuit
+            .scheduler
             .xspice_event_values
             .digital_drivers
             .get(&2)
@@ -461,10 +462,10 @@ endmodule
         "native XSPICE fanout must see HDL contention"
     );
     assert_eq!(
-        circuit.xspice_event_values.digital_values[&2].state,
+        circuit.scheduler.xspice_event_values.digital_values[&2].state,
         DigitalState::Unknown
     );
-    let original = &circuit.xspice_event_values.digital_drivers[&2];
+    let original = &circuit.scheduler.xspice_event_values.digital_drivers[&2];
     assert_eq!(
         original.len(),
         1,
@@ -495,7 +496,7 @@ endmodule
         "XSPICE fanout settles before inactive reads"
     );
     assert_eq!(
-        circuit.xspice_event_values.digital_values[&2],
+        circuit.scheduler.xspice_event_values.digital_values[&2],
         DigitalValue::one()
     );
     let (mut retry, mut retried_circuit) = accepted;
@@ -509,8 +510,8 @@ endmodule
         .unwrap();
     assert_eq!(bit(&retry, "sampled"), bit(&digital, "sampled"));
     assert_eq!(
-        retried_circuit.xspice_event_values.digital_values,
-        circuit.xspice_event_values.digital_values
+        retried_circuit.scheduler.xspice_event_values.digital_values,
+        circuit.scheduler.xspice_event_values.digital_values
     );
 }
 
@@ -555,7 +556,11 @@ endmodule
             &mut routed_participant(&mut circuit, &bindings, physical, physical),
         )
         .unwrap();
-    let due = circuit.xspice_event_queue.next_event_time().unwrap();
+    let due = circuit
+        .scheduler
+        .xspice_event_queue
+        .next_event_time()
+        .unwrap();
     assert!((due - (physical + 1e-12)).abs() < 1e-25);
     assert_eq!(bit(&digital, "unrelated"), "0");
     let grid_time = TimeResolution::new(-12)
@@ -597,7 +602,10 @@ endmodule
         "0",
         "external event must not consume the 102 ps timer"
     );
-    assert_eq!(circuit.xspice_event_values.digital_event_times[&2], due);
+    assert_eq!(
+        circuit.scheduler.xspice_event_values.digital_event_times[&2],
+        due
+    );
     let (mut retry, mut retried_circuit) = accepted;
     retry
         .force_many_from_analog_with(
@@ -609,8 +617,11 @@ endmodule
         .unwrap();
     assert_eq!(bit(&retry, "captured"), "0");
     assert_eq!(
-        retried_circuit.xspice_event_queue.next_event_time(),
-        circuit.xspice_event_queue.next_event_time()
+        retried_circuit
+            .scheduler
+            .xspice_event_queue
+            .next_event_time(),
+        circuit.scheduler.xspice_event_queue.next_event_time()
     );
 }
 
@@ -668,6 +679,7 @@ endmodule
         )
         .unwrap();
     let due = circuit
+        .scheduler
         .xspice_event_queue
         .next_event_time()
         .expect("the gate queued its clamped 1 ps output");
@@ -696,7 +708,7 @@ fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
     );
     let past = due + 0.1e-12;
 
-    circuit.set_mixed_analog_step_floor(interval * 0.5);
+    circuit.set_analog_step_floor(interval * 0.5);
     let error = digital
         .force_many_from_analog_with(
             &[],
@@ -712,7 +724,7 @@ fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
 
     let (mut digital, mut circuit, bindings, accepted, due) = a_pending_coupled_event();
     let past = due + 0.1e-12;
-    circuit.set_mixed_analog_step_floor((due - accepted) * 2.0);
+    circuit.set_analog_step_floor((due - accepted) * 2.0);
     digital
         .force_many_from_analog_with(
             &[],
@@ -722,7 +734,7 @@ fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
         )
         .expect("an event no analog step can reach is delivered here, not refused");
     assert_eq!(
-        circuit.xspice_event_values.digital_event_times[&2], past,
+        circuit.scheduler.xspice_event_values.digital_event_times[&2], past,
         "the coalesced event is dated at the timepoint the stepper landed on — the shared \
          net's resolved value is observed inside this wave — rather than at the sub-floor \
          instant the gate asked for, which no analog step reached"
@@ -839,7 +851,10 @@ endmodule
         )
         .unwrap();
     assert_eq!(bit(&digital, "bus"), "x");
-    assert_eq!(circuit.xspice_event_values.digital_drivers[&2].len(), 2);
+    assert_eq!(
+        circuit.scheduler.xspice_event_values.digital_drivers[&2].len(),
+        2
+    );
     let trigger = [(
         digital.signal("trigger").unwrap(),
         FourStateValue::splat(1, rspice_veriloga::four_state::FourStateBit::One),
@@ -859,7 +874,7 @@ endmodule
         bit(&digital, "glitches"),
         "00000000000000000000000000000000"
     );
-    let drivers = &circuit.xspice_event_values.digital_drivers[&2];
+    let drivers = &circuit.scheduler.xspice_event_values.digital_drivers[&2];
     assert_eq!(
         drivers[&("Avec".into(), "out".into(), 0)],
         DigitalValue::high_z()

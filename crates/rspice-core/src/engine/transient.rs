@@ -217,18 +217,11 @@ fn accepted_veriloga_event_time(
     let mut target = circuit
         .veriloga_transient_event_time(accepted_time)
         .map_err(SimulationError::Circuit)?;
-    // Shared code-model events have the same exact landing contract as HDL
-    // timers. The general breakpoint manager may coalesce nearby times; that
-    // tolerance must not consume or move a distinct shared-net activation.
-    if circuit.has_coupled_event_nets()
-        && let Some(event) = circuit.next_xspice_event_time()
-    {
-        target = Some(target.map_or(event, |target| target.min(event)));
-    }
-    // A mixed module's digital queue is the third scheduler with that same
-    // contract, and the fold above cannot see it: its activations belong to the
-    // discrete half rather than to any analog device. Reaching the stepper only
-    // through the breakpoint manager is what made them droppable.
+    // The two discrete lanes have the same exact landing contract as an analog
+    // device's event target, and the fold above cannot see either: a shared
+    // code model's events and a mixed module's digital queue belong to the
+    // discrete half rather than to any analog device. Reaching the stepper
+    // only through the breakpoint manager is what made them droppable.
     // `mark_breakpoint_solved` discards every runtime breakpoint within the
     // merge tolerance — ten times `delmin` — of the point just solved, and an
     // activation the accepted point itself scheduled into that window was
@@ -239,17 +232,13 @@ fn accepted_veriloga_event_time(
     // owns, so delivering it no longer depends on a tolerance whose job is to
     // merge coincident times rather than to move events.
     //
-    // Only an activation the module itself calls reachable is folded, on the
-    // same `>= hard_min_dt` test its missed-breakpoint guard applies. One
-    // closer than that has no analog instant between the accepted point and
-    // it: the module coalesces it onto the next timepoint and never reports it
-    // as missed, so a landing target for it would buy nothing — it would only
-    // spend accepted points marching at the floor on a schedule the module is
-    // already coalescing for itself.
-    #[cfg(feature = "veriloga")]
-    if let Some(event) = circuit.next_mixed_event_time()?
-        && event - accepted_time >= hard_min_dt
-    {
+    // The scheduler answers for both lanes on one rule, which is where the
+    // reachability filter and the coupling test now live: see
+    // `circuit::ActivationLanes::landing`.
+    if let Some(activation) = circuit.next_activation(
+        crate::circuit::ActivationLanes::landing(accepted_time, hard_min_dt),
+    )? {
+        let event = activation.seconds();
         target = Some(target.map_or(event, |target| target.min(event)));
     }
     let Some(target) = target else {
@@ -4728,7 +4717,7 @@ impl Engine {
         // side can resolve so an activation inside that window is landed
         // instead of reported as a breakpoint the stepper skipped.
         #[cfg(feature = "veriloga")]
-        circuit.set_mixed_analog_step_floor(hard_min_dt);
+        circuit.set_analog_step_floor(hard_min_dt);
         let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
@@ -6351,7 +6340,7 @@ impl Engine {
                 // Xyce's floor moves with the clock, so the mixed modules'
                 // copy of it moves with every accepted point.
                 #[cfg(feature = "veriloga")]
-                circuit.set_mixed_analog_step_floor(timestep.hard_min_dt());
+                circuit.set_analog_step_floor(timestep.hard_min_dt());
                 let breakpoint_tolerance = 2.0 * dialect_min_dt;
                 circuit
                     .voltage_sources

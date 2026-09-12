@@ -1499,7 +1499,7 @@ fn a_long_chain_of_crossings_accumulates_no_quantization_drift() {
 ///
 /// This is D5 clause 2 — `tests/sync_contract.rs` pins it on one awkward event
 /// time, through the XSPICE path — exercised here over two hundred consecutive
-/// events of a mixed module instead. The chain is `next_mixed_event_time` →
+/// events of a mixed module instead. The chain is `next_hdl_activation` →
 /// `collect_transient_runtime_breakpoints` → `BreakpointManager::limit_step` →
 /// `snap_to_breakpoint`, and the last of those is what makes `t + dt` land on
 /// the stored breakpoint's own `f64` rather than a neighbour of it.

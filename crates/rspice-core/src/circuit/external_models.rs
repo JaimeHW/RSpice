@@ -16,10 +16,12 @@ mod coupled;
 #[cfg(feature = "veriloga")]
 pub(crate) use coupled::{XspiceDigitalBindings, XspiceDigitalParticipant};
 
+use super::scheduler;
 use super::*;
 use crate::analysis::transient::EventOnlyNetKind;
 use crate::xspice::{
-    EventInputKind, ResourceTransaction, XspiceEventInputs, XspiceInstanceCheckpoint,
+    EventInputKind, ResourceTransaction, SharedXspiceEventQueue, SharedXspiceEventValues,
+    XspiceEventInputs, XspiceInstanceCheckpoint,
 };
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
@@ -46,7 +48,36 @@ pub(crate) struct ScheduleOwner<'a> {
     name: &'a str,
 }
 
-impl ScheduleOwner<'_> {
+impl<'a> ScheduleOwner<'a> {
+    /// A standalone device, a mixed instance's analog half, and the process
+    /// queue its discrete half schedules into are one kind of thing to the
+    /// reader of a refusal.
+    pub(super) fn veriloga(name: &'a str) -> Self {
+        Self {
+            kind: "Verilog-A/AMS instance",
+            name,
+        }
+    }
+
+    /// A code model, named as a code model: a refusal that called one a
+    /// Verilog-A module would send its reader to the wrong half of a coupled
+    /// deck.
+    pub(super) fn code_model(name: &'a str) -> Self {
+        Self {
+            kind: "XSPICE code-model instance",
+            name,
+        }
+    }
+
+    /// A generated built-in device's timer.
+    #[cfg(feature = "veriloga-builtins-base")]
+    fn generated(name: &'a str) -> Self {
+        Self {
+            kind: "generated Verilog-A device",
+            name,
+        }
+    }
+
     /// The subject of a diagnostic about this owner's schedule.
     pub(crate) fn subject(self) -> String {
         let Self { kind, name } = self;
@@ -60,10 +91,7 @@ impl ScheduleOwner<'_> {
 /// refusal.
 #[cfg(feature = "veriloga")]
 fn veriloga_schedule_owner(name: &str) -> ScheduleOwner<'_> {
-    ScheduleOwner {
-        kind: "Verilog-A/AMS instance",
-        name,
-    }
+    ScheduleOwner::veriloga(name)
 }
 
 /// Keep the earlier of the activation held so far and one more candidate.
@@ -636,14 +664,7 @@ impl CircuitData {
     }
 
     pub(crate) fn has_coupled_event_nets(&self) -> bool {
-        #[cfg(feature = "veriloga")]
-        {
-            self.mixed_xspice_bindings.is_some()
-        }
-        #[cfg(not(feature = "veriloga"))]
-        {
-            false
-        }
+        self.scheduler.has_coupled_event_nets()
     }
 
     /// Coupled event nets are evaluated with the mixed circuit trial.
@@ -711,7 +732,7 @@ impl CircuitData {
             }
         }
         #[cfg(feature = "veriloga")]
-        if let Some(digital) = &self.mixed_digital_coordinator {
+        if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
             for node in digital.event_nodes() {
                 self.net_kinds.register(node, NetKind::Digital);
             }
@@ -1213,6 +1234,7 @@ impl CircuitData {
         }
         self.ensure_xspice_event_dispatch();
         let dispatch = self
+            .scheduler
             .xspice_event_dispatch
             .as_ref()
             .expect("prepared event dispatch");
@@ -1236,17 +1258,23 @@ impl CircuitData {
             if node == 0 {
                 continue;
             }
-            if self.xspice_event_values.digital_values.get(&node) == Some(&value)
-                && self.xspice_event_values.digital_event_times.get(&node) == Some(&wave.time)
+            if self.scheduler.xspice_event_values.digital_values.get(&node) == Some(&value)
+                && self
+                    .scheduler
+                    .xspice_event_values
+                    .digital_event_times
+                    .get(&node)
+                    == Some(&wave.time)
             {
                 continue;
             }
-            let observed = self.xspice_event_values.make_mut();
+            let observed = self.scheduler.xspice_event_values.make_mut();
             observed.digital_values.insert(node, value);
             observed.digital_event_times.insert(node, wave.time);
             self.xspice_touched_digital_nodes.push(node);
         }
         let dispatch = self
+            .scheduler
             .xspice_event_dispatch
             .as_ref()
             .expect("prepared event wave");
@@ -1297,6 +1325,7 @@ impl CircuitData {
         let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
         let dispatch = self
+            .scheduler
             .xspice_event_dispatch
             .as_ref()
             .expect("prepared event wave");
@@ -1306,8 +1335,8 @@ impl CircuitData {
         // Shared handles, not mutable views of their contents: a pass that
         // drains nothing and schedules nothing must leave the event world
         // still shared with the rollback snapshot.
-        let event_values = &mut self.xspice_event_values;
-        let event_queue = &mut self.xspice_event_queue;
+        let event_values = &mut self.scheduler.xspice_event_values;
+        let event_queue = &mut self.scheduler.xspice_event_queue;
         let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
         let touched_real_nodes = &mut self.xspice_touched_real_nodes;
         let instances = &mut self.xspice_instances;
@@ -1547,22 +1576,27 @@ impl CircuitData {
         snapshot: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
     ) {
         snapshot.clear();
-        snapshot.extend(self.xspice_event_values.digital_values.iter().filter_map(
-            |(&node_id, &value)| {
-                if node_id == 0 {
-                    return None;
-                }
-                #[cfg(feature = "veriloga")]
-                if self
-                    .mixed_xspice_bindings
-                    .as_ref()
-                    .is_some_and(|bindings| bindings.contains_node(node_id))
-                {
-                    return None;
-                }
-                Some((node_id, value))
-            },
-        ));
+        snapshot.extend(
+            self.scheduler
+                .xspice_event_values
+                .digital_values
+                .iter()
+                .filter_map(|(&node_id, &value)| {
+                    if node_id == 0 {
+                        return None;
+                    }
+                    #[cfg(feature = "veriloga")]
+                    if self
+                        .scheduler
+                        .mixed_xspice_bindings
+                        .as_ref()
+                        .is_some_and(|bindings| bindings.contains_node(node_id))
+                    {
+                        return None;
+                    }
+                    Some((node_id, value))
+                }),
+        );
         #[cfg(feature = "veriloga")]
         self.append_mixed_digital_snapshot(snapshot);
         // Stable and then deduplicated, so the snapshot is a function from node
@@ -1582,7 +1616,8 @@ impl CircuitData {
     pub(crate) fn fill_xspice_real_snapshot(&self, snapshot: &mut Vec<(NodeId, Value)>) {
         snapshot.clear();
         snapshot.extend(
-            self.xspice_event_values
+            self.scheduler
+                .xspice_event_values
                 .real_values
                 .iter()
                 .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
@@ -1591,8 +1626,13 @@ impl CircuitData {
     }
 
     /// Time of the next pending XSPICE digital event, if any.
+    ///
+    /// The code-model lane's activation read as a plain time, for the locked
+    /// grid's replay arithmetic; everything that folds the lanes asks
+    /// [`Self::next_activation`] instead.
     pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
-        self.xspice_event_queue.next_event_time()
+        self.next_xspice_activation()
+            .map(scheduler::Activation::seconds)
     }
 
     /// Drain absolute transient breakpoint requests emitted by XSPICE models.
@@ -1712,23 +1752,23 @@ impl CircuitData {
     pub(crate) fn capture_xspice_trial_state(&self) -> XspiceTrialState {
         XspiceTrialState {
             instances: self.xspice_instances.clone(),
-            values: self.xspice_event_values.clone(),
-            queue: self.xspice_event_queue.clone(),
+            values: self.scheduler.xspice_event_values.clone(),
+            queue: self.scheduler.xspice_event_queue.clone(),
         }
     }
 
     /// Put back what a trial evaluation wrote.
     pub(crate) fn restore_xspice_trial_state(&mut self, trial: XspiceTrialState) {
         self.xspice_instances = trial.instances;
-        self.xspice_event_values = trial.values;
-        self.xspice_event_queue = trial.queue;
+        self.scheduler.xspice_event_values = trial.values;
+        self.scheduler.xspice_event_queue = trial.queue;
     }
 
     pub(crate) fn capture_xspice_acceptance(&self) -> XspiceAcceptanceRollback {
         XspiceAcceptanceRollback {
             instances: self.xspice_instances.clone(),
-            values: self.xspice_event_values.clone(),
-            queue: self.xspice_event_queue.clone(),
+            values: self.scheduler.xspice_event_values.clone(),
+            queue: self.scheduler.xspice_event_queue.clone(),
             error: self.xspice_evaluation_error.clone(),
             resources: ResourceTransaction::default(),
         }
@@ -1739,8 +1779,8 @@ impl CircuitData {
         rollback: XspiceAcceptanceRollback,
     ) -> crate::xspice::CmResult<()> {
         self.xspice_instances = rollback.instances;
-        self.xspice_event_values = rollback.values;
-        self.xspice_event_queue = rollback.queue;
+        self.scheduler.xspice_event_values = rollback.values;
+        self.scheduler.xspice_event_queue = rollback.queue;
         self.xspice_evaluation_error = rollback.error;
         // The iterates belonged to the attempt this undoes.
         self.xspice_output_iterates.clear();
@@ -3687,7 +3727,8 @@ impl CircuitData {
             }
             self.veriloga_devices = runtime;
             self.mixed_signal_hosts = mixed;
-            self.mixed_digital_coordinator = self
+            self.scheduler.mixed_digital_coordinator = self
+                .scheduler
                 .mixed_digital_coordinator
                 .as_ref()
                 .map(|digital| digital.fresh());
@@ -4272,44 +4313,23 @@ impl CircuitData {
                     .flatten()
                     .map(move |target| (Some(veriloga_schedule_owner(instance)), target))
             });
-            // The shared process queue every enrolled instance schedules into.
-            // It is one queue for all of them, but the kernel still knows which
-            // process drew the earliest event, and the linker knows which
-            // instance owns that process — so a deck with several mixed
-            // modules is attributed as precisely as a deck with one. The
-            // single-host fallback stands in for the wakeups that belong to no
-            // process of the design.
-            let shared = self
-                .mixed_digital_coordinator
-                .as_ref()
-                .and_then(|coordinator| coordinator.next_event_time().ok().flatten())
-                .map(|(instance, target)| {
-                    let instance = instance.or(match self.mixed_signal_hosts.as_slice() {
-                        [only] => Some(only.instance_name()),
-                        _ => None,
-                    });
-                    (instance.map(veriloga_schedule_owner), target)
-                });
-            // A code model whose event net is shared with a mixed module.
-            // Those events are landed by `accepted_veriloga_event_time` on the
-            // same contract a mixed activation is — the breakpoint manager's
-            // coalescing may not move them — so a point landed at the floor
-            // for one is paced by a schedule exactly as a mixed tick is, and
-            // the kernel hands back the driver that queued it.
-            let coupled = self
-                .has_coupled_event_nets()
-                .then(|| self.xspice_event_queue.next_event_instance())
+            // The shared process queue every enrolled instance schedules into,
+            // and the code-model queue coupled to it: the two discrete lanes,
+            // folded by their own owner. The wheel is one queue for every
+            // instance, but the kernel still knows which process drew the
+            // earliest event and the linker knows which instance owns that
+            // process, so a deck with several mixed modules is attributed as
+            // precisely as a deck with one; a coupled code model's events are
+            // landed on the same contract a mixed activation is, so a point
+            // landed at the floor for one is paced by a schedule exactly as a
+            // mixed tick is.
+            let scheduled = self
+                .scheduler
+                .next_activation(scheduler::ActivationLanes::scheduled())
+                .ok()
                 .flatten()
-                .map(|(instance, target)| {
-                    (
-                        Some(ScheduleOwner {
-                            kind: "XSPICE code-model instance",
-                            name: instance,
-                        }),
-                        target,
-                    )
-                });
-            for candidate in analog.chain(mixed).chain(shared).chain(coupled) {
+                .map(|activation| (activation.owner, activation.seconds()));
+            for candidate in analog.chain(mixed).chain(scheduled) {
                 fold_scheduled_activation(&mut owner, Some(candidate), accepted_time);
             }
         }
@@ -4322,19 +4342,22 @@ impl CircuitData {
             &mut owner,
             self.generated_veriloga_devices
                 .scheduled_timer_activation()
-                .map(|(instance, target)| {
-                    (
-                        Some(ScheduleOwner {
-                            kind: "generated Verilog-A device",
-                            name: instance,
-                        }),
-                        target,
-                    )
-                }),
+                .map(|(instance, target)| (Some(ScheduleOwner::generated(instance)), target)),
             accepted_time,
         );
         #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
         let _ = accepted_time;
+        // The single-host fallback, for the wakeups the shared wheel holds
+        // that belong to no process of the design: its own nonblocking-update
+        // wakeup, external bit drivers. Every other lane names an owner, so
+        // this can only reach an unattributed wheel activation, and only on a
+        // deck where there is exactly one module it could belong to.
+        #[cfg(feature = "veriloga")]
+        if let Some((instance @ None, _)) = owner.as_mut()
+            && let [only] = self.mixed_signal_hosts.as_slice()
+        {
+            *instance = Some(veriloga_schedule_owner(only.instance_name()));
+        }
         owner
     }
 
@@ -4584,7 +4607,7 @@ mod tests {
     fn an_uncoupled_code_model_queue_is_not_a_scheduled_activation() {
         let mut circuit = CircuitData::new();
         let node = circuit.get_or_create_node("out");
-        circuit.xspice_event_queue.make_mut().schedule(
+        circuit.scheduler.xspice_event_queue.make_mut().schedule(
             1.0e-12,
             node,
             "out",
@@ -5812,7 +5835,7 @@ endmodule"#;
     #[test]
     fn fill_xspice_digital_snapshot_reuses_buffer_and_sorts_nodes() {
         let mut circuit = CircuitData::new();
-        let event_values = circuit.xspice_event_values.make_mut();
+        let event_values = circuit.scheduler.xspice_event_values.make_mut();
         event_values.digital_values.insert(3, DigitalValue::one());
         event_values.digital_values.insert(1, DigitalValue::zero());
 
@@ -6709,8 +6732,8 @@ endmodule"#;
         *const crate::xspice::XspiceEventScheduler,
     ) {
         (
-            std::ptr::from_ref(&*circuit.xspice_event_values),
-            std::ptr::from_ref(&*circuit.xspice_event_queue),
+            std::ptr::from_ref(&*circuit.scheduler.xspice_event_values),
+            std::ptr::from_ref(&*circuit.scheduler.xspice_event_queue),
         )
     }
 
@@ -6718,8 +6741,8 @@ endmodule"#;
     /// scheduler's full structural rendering.
     fn event_world_image(circuit: &CircuitData) -> (crate::xspice::XspiceEventValues, String) {
         (
-            (*circuit.xspice_event_values).clone(),
-            format!("{:?}", *circuit.xspice_event_queue),
+            (*circuit.scheduler.xspice_event_values).clone(),
+            format!("{:?}", *circuit.scheduler.xspice_event_queue),
         )
     }
 
@@ -6759,7 +6782,7 @@ endmodule"#;
         // one queued, schedules and supersedes more, and rewrites the resolved
         // node values.
         settle_at(&mut circuit, 3.0e-9);
-        circuit.xspice_event_queue.make_mut().schedule(
+        circuit.scheduler.xspice_event_queue.make_mut().schedule(
             9.0e-9,
             2,
             "out",
@@ -6823,7 +6846,7 @@ endmodule"#;
             let at_capture = event_world_addresses(&circuit);
 
             settle_at(&mut circuit, time);
-            circuit.xspice_event_queue.make_mut().schedule(
+            circuit.scheduler.xspice_event_queue.make_mut().schedule(
                 time + 5.0e-9,
                 1,
                 "out",
@@ -6904,7 +6927,7 @@ endmodule"#;
         // output is still several analog steps away must not pay a copy at
         // every step in between.
         let mut circuit = mixed_event_and_time_driven_circuit();
-        circuit.xspice_event_queue.make_mut().schedule(
+        circuit.scheduler.xspice_event_queue.make_mut().schedule(
             5.0e-7,
             2,
             "out",
@@ -6912,7 +6935,7 @@ endmodule"#;
             0,
             EventValue::Digital(DigitalValue::one()),
         );
-        assert!(!circuit.xspice_event_queue.is_empty());
+        assert!(!circuit.scheduler.xspice_event_queue.is_empty());
 
         let captured = circuit.transient_trial_state_snapshot();
         let at_capture = event_world_addresses(&circuit);
@@ -6926,7 +6949,7 @@ endmodule"#;
              be drained and nothing may be copied"
         );
         assert_eq!(
-            circuit.xspice_event_queue.len(),
+            circuit.scheduler.xspice_event_queue.len(),
             1,
             "and it must still be pending for the step that reaches its time"
         );

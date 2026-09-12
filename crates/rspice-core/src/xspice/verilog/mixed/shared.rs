@@ -652,6 +652,12 @@ impl MixedDigitalCoordinator {
         };
     }
 
+    /// The published copy of the circuit's one floor this wheel measures a
+    /// stepped-past activation against.
+    pub(crate) fn analog_step_floor(&self) -> f64 {
+        self.analog_step_floor
+    }
+
     /// Whether an activation the analog side stepped past was one it could
     /// have landed on.
     ///

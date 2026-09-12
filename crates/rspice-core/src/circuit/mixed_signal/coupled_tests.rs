@@ -225,7 +225,7 @@ endmodule
             &rspice_veriloga::NoPipelineControl,
         )
         .unwrap();
-    assert!(circuit.mixed_xspice_bindings.is_some());
+    assert!(circuit.scheduler.mixed_xspice_bindings.is_some());
     circuit.begin_veriloga_analysis(2).unwrap();
     circuit.start_mixed_digital_execution().unwrap();
     let size = circuit.matrix_size();
@@ -297,7 +297,7 @@ fn a_coupled_code_model_event_is_a_scheduled_activation_named_as_a_code_model() 
         ACCEPTED + (target - ACCEPTED) / 2.0
     });
 
-    circuit.xspice_event_queue.make_mut().schedule(
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
         ACCEPTED - 1.0e-12,
         bus,
         "out",
@@ -315,12 +315,13 @@ fn a_coupled_code_model_event_is_a_scheduled_activation_named_as_a_code_model() 
     // The settle drains the queue through the accepted point, which is what
     // makes its earliest remaining event the next activation.
     circuit
+        .scheduler
         .xspice_event_queue
         .make_mut()
         .run_due_events(ACCEPTED, |_| {})
         .expect("one event on one net settles");
 
-    circuit.xspice_event_queue.make_mut().schedule(
+    circuit.scheduler.xspice_event_queue.make_mut().schedule(
         queued,
         bus,
         "out",
@@ -379,9 +380,21 @@ fn coupled_circuit_probe_retains_adc_gate_feedback_then_restores_all_owners_and_
                 .unwrap(),
             before
         );
-        assert!(circuit.xspice_event_values.digital_drivers.is_empty());
-        assert!(circuit.xspice_event_queue.next_event_time().is_none());
-        assert!(circuit.mixed_digital_coordinator.is_some());
+        assert!(
+            circuit
+                .scheduler
+                .xspice_event_values
+                .digital_drivers
+                .is_empty()
+        );
+        assert!(
+            circuit
+                .scheduler
+                .xspice_event_queue
+                .next_event_time()
+                .is_none()
+        );
+        assert!(circuit.scheduler.mixed_digital_coordinator.is_some());
     }
     solution[bad] = 2.0;
     assert!(
@@ -396,7 +409,13 @@ fn coupled_circuit_probe_retains_adc_gate_feedback_then_restores_all_owners_and_
             .unwrap(),
         before
     );
-    assert!(circuit.xspice_event_values.digital_drivers.is_empty());
+    assert!(
+        circuit
+            .scheduler
+            .xspice_event_values
+            .digital_drivers
+            .is_empty()
+    );
     solution[bad] = 0.0;
     let rhs = stamp(&mut circuit, &mut matrix, &solution).unwrap();
     assert!(rhs[p].abs() < 1e-15);
@@ -446,7 +465,7 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
         );
         assert_eq!(resource.captures.load(Ordering::Relaxed), captures + 1);
         assert_eq!(circuit.mixed_signal_hosts.len(), 2);
-        assert!(circuit.mixed_digital_coordinator.is_some());
+        assert!(circuit.scheduler.mixed_digital_coordinator.is_some());
         if refuse {
             assert!(
                 result
@@ -465,8 +484,20 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
                     .unwrap(),
                 before
             );
-            assert!(circuit.xspice_event_values.digital_drivers.is_empty());
-            assert!(circuit.xspice_event_queue.next_event_time().is_none());
+            assert!(
+                circuit
+                    .scheduler
+                    .xspice_event_values
+                    .digital_drivers
+                    .is_empty()
+            );
+            assert!(
+                circuit
+                    .scheduler
+                    .xspice_event_queue
+                    .next_event_time()
+                    .is_none()
+            );
         } else {
             result.unwrap();
             rollback.resources().commit();
@@ -714,3 +745,4 @@ endmodule
         "the module's analog terminal is solved for, not imposed"
     );
 }
+

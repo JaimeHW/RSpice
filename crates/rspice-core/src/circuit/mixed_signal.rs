@@ -26,6 +26,7 @@ use super::external_models::{
     VerilogACompanionRules, XspiceAcceptanceRollback, XspiceCompanionPolicy, XspiceDigitalBindings,
     XspiceDigitalParticipant,
 };
+use super::scheduler::shared_error;
 use crate::circuit::CircuitData;
 use crate::xspice::verilog::host::DigitalActiveParticipant;
 use crate::{SimulationError, Value};
@@ -311,10 +312,6 @@ impl Drop for MixedHostTrialGroup<'_> {
     }
 }
 
-fn shared_error(error: MixedSignalError) -> SimulationError {
-    SimulationError::Circuit(format!("mixed circuit digital execution: {error}"))
-}
-
 /// Temporarily split the circuit's digital owner/views from its code-model
 /// storage. All exits put the owners back. XSPICE probes retain state across
 /// Active waves and restore their COW model/queue images and external resources
@@ -328,11 +325,15 @@ struct MixedCircuitOwner<'a> {
 }
 impl<'a> MixedCircuitOwner<'a> {
     fn begin(circuit: &'a mut CircuitData, capture_xspice: bool) -> Result<Self, SimulationError> {
-        let coordinator = circuit.mixed_digital_coordinator.take().ok_or_else(|| {
-            SimulationError::Circuit(
-                "mixed circuit digital execution has not been elaborated".into(),
-            )
-        })?;
+        let coordinator = circuit
+            .scheduler
+            .mixed_digital_coordinator
+            .take()
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "mixed circuit digital execution has not been elaborated".into(),
+                )
+            })?;
         let hosts = std::mem::take(&mut circuit.mixed_signal_hosts);
         let xspice = (capture_xspice && circuit.has_coupled_event_nets())
             .then(|| circuit.capture_xspice_acceptance());
@@ -359,7 +360,7 @@ impl Drop for MixedCircuitOwner<'_> {
         if let Err(error) = self.restore_xspice() {
             log::error!("{error}");
         }
-        self.circuit.mixed_digital_coordinator = self.coordinator.take();
+        self.circuit.scheduler.mixed_digital_coordinator = self.coordinator.take();
         self.circuit.mixed_signal_hosts = std::mem::take(&mut self.hosts);
     }
 }
@@ -430,7 +431,7 @@ impl CircuitData {
         &mut self,
         mut host: MixedSignalHost,
     ) -> Result<(), SimulationError> {
-        if self.mixed_digital_coordinator.is_some() {
+        if self.scheduler.mixed_digital_coordinator.is_some() {
             return Err(SimulationError::Circuit(
                 "mixed instances cannot be added after circuit digital elaboration".into(),
             ));
@@ -445,7 +446,8 @@ impl CircuitData {
         event_nodes: &std::collections::BTreeSet<usize>,
         control: &dyn rspice_veriloga::PipelineControl,
     ) -> Result<(), SimulationError> {
-        if !self.mixed_signal_hosts.is_empty() && self.mixed_digital_coordinator.is_none() {
+        if !self.mixed_signal_hosts.is_empty() && self.scheduler.mixed_digital_coordinator.is_none()
+        {
             // Elaboration can refuse a connection after creating the linked
             // runtime. Preserve the previous owners until every attachment has
             // validated; a partial link must not leave standalone models as views.
@@ -468,8 +470,8 @@ impl CircuitData {
                     return Err(error);
                 }
             };
-            self.mixed_digital_coordinator = Some(coordinator);
-            self.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
+            self.scheduler.mixed_digital_coordinator = Some(coordinator);
+            self.scheduler.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
             for &node in event_nodes {
                 self.net_kinds.register(node, super::NetKind::Digital);
             }
@@ -524,7 +526,7 @@ impl CircuitData {
             let started = host.start_digital_execution();
             named(host, started)?;
         }
-        if let Some(digital) = &mut self.mixed_digital_coordinator {
+        if let Some(digital) = &mut self.scheduler.mixed_digital_coordinator {
             digital.start().map_err(shared_error)?;
         }
         Ok(())
@@ -632,7 +634,7 @@ impl CircuitData {
             return Ok(());
         }
         let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.mixed_xspice_bindings.clone();
+        let bindings = self.scheduler.mixed_xspice_bindings.clone();
         self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
             let mut digital = coordinator.begin_trial(time, true).map_err(shared_error)?;
             let mut group = MixedHostTrialGroup::begin(hosts, time, dt, integration, analysis_step, true)?;
@@ -734,7 +736,7 @@ impl CircuitData {
         ) -> Result<T, SimulationError>,
     ) -> Result<(bool, T), SimulationError> {
         let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.mixed_xspice_bindings.clone();
+        let bindings = self.scheduler.mixed_xspice_bindings.clone();
         if bindings.is_some() && resources.is_none() {
             return Err(SimulationError::Circuit(
                 "shared acceptance requires its resource transaction".into(),
@@ -888,6 +890,7 @@ impl CircuitData {
         let mut discontinuity = self.veriloga_discontinuity_rising();
         if !self.mixed_signal_hosts.is_empty() {
             let mut digital = self
+                .scheduler
                 .mixed_digital_coordinator
                 .as_mut()
                 .ok_or_else(|| {
@@ -948,7 +951,7 @@ impl CircuitData {
             return Ok((None, false));
         }
         let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.mixed_xspice_bindings.clone();
+        let bindings = self.scheduler.mixed_xspice_bindings.clone();
         self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
             let mut refinement: Option<Value> = None;
             let mut discontinuity = false;
@@ -1028,52 +1031,6 @@ impl CircuitData {
         })
     }
 
-    /// Publish the transient stepper's hard minimum timestep to every mixed
-    /// module, and to the coupled code-model queue beside them.
-    ///
-    /// A module's digital half schedules on its own declared precision, which
-    /// can be finer than any interval the analog solver is allowed to advance
-    /// by. Without this the two halves disagree about what "stepped past an
-    /// activation" means, and a schedule the analog side merely cannot resolve
-    /// is reported as a lost breakpoint. With it, such an activation keeps its
-    /// exact digital tick and coalesces onto the next analog timepoint.
-    ///
-    /// One floor, both kernels. A code model sharing an event net with a mixed
-    /// module schedules on the same picosecond-and-finer grid — ngspice clamps
-    /// a gate delay at 1 ps, which is a tenth of the minimum a one-second
-    /// maximum timestep leaves the solver — and
-    /// `engine::transient::accepted_veriloga_event_time` lands its events by
-    /// the same contract as an HDL tick. So its own guard needs the same
-    /// interval to measure against, and gets it here rather than from a second
-    /// knob: see `circuit::external_models::coupled`'s `event_was_reachable`.
-    pub(crate) fn set_mixed_analog_step_floor(&mut self, floor: Value) {
-        if let Some(digital) = self.mixed_digital_coordinator.as_mut() {
-            digital.set_analog_step_floor(floor);
-        }
-        for host in &mut self.mixed_signal_hosts {
-            host.set_analog_step_floor(floor);
-        }
-        self.xspice_analog_step_floor = if floor.is_finite() && floor > 0.0 {
-            floor
-        } else {
-            0.0
-        };
-    }
-
-    /// Earliest scheduled digital activation across every mixed module.
-    pub(crate) fn next_mixed_event_time(&self) -> Result<Option<Value>, SimulationError> {
-        self.mixed_digital_coordinator
-            .as_ref()
-            .map(|digital| {
-                digital
-                    .next_event_time()
-                    .map(|next| next.map(|(_, seconds)| seconds))
-                    .map_err(shared_error)
-            })
-            .transpose()
-            .map(Option::flatten)
-    }
-
     /// Append every mixed module's committed boundary values to a digital
     /// snapshot, one value per deck node.
     ///
@@ -1131,7 +1088,7 @@ impl CircuitData {
         }
 
         let mut claims: Vec<(crate::circuit::NodeId, Claim, DigitalValue)> = Vec::new();
-        if let Some(digital) = &self.mixed_digital_coordinator {
+        if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
             claims.extend(
                 digital
                     .event_values()

@@ -2125,6 +2125,12 @@ impl MixedSignalHost {
         };
     }
 
+    /// The published copy of the circuit's one floor this module measures a
+    /// stepped-past activation against.
+    pub(crate) fn analog_step_floor(&self) -> f64 {
+        self.analog_step_floor
+    }
+
     /// The last accepted analog time, or zero before the first acceptance.
     fn accepted_analog_time(&self) -> f64 {
         if self.state.started {

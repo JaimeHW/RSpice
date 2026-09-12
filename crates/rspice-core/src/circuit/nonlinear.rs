@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::device::StampError;
+use crate::xspice::{SharedXspiceEventQueue, SharedXspiceEventValues};
 
 /// Classify a behavioral source's stamping failure.
 ///
@@ -933,8 +934,8 @@ impl CircuitData {
             generic_switches: self.generic_switches.clone(),
             behavioral_sources: self.behavioral_sources.clone(),
             xspice_instances: self.xspice_instances.clone(),
-            xspice_event_values: self.xspice_event_values.clone(),
-            xspice_event_queue: self.xspice_event_queue.clone(),
+            xspice_event_values: self.scheduler.xspice_event_values.clone(),
+            xspice_event_queue: self.scheduler.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
             #[cfg(feature = "veriloga-builtins-base")]
@@ -1015,10 +1016,10 @@ impl CircuitData {
         snapshot.xspice_instances.clone_from(&self.xspice_instances);
         snapshot
             .xspice_event_values
-            .clone_from(&self.xspice_event_values);
+            .clone_from(&self.scheduler.xspice_event_values);
         snapshot
             .xspice_event_queue
-            .clone_from(&self.xspice_event_queue);
+            .clone_from(&self.scheduler.xspice_event_queue);
         #[cfg(feature = "veriloga")]
         snapshot.veriloga_devices.clone_from(&self.veriloga_devices);
         #[cfg(feature = "veriloga-builtins-base")]
@@ -1159,8 +1160,8 @@ impl CircuitData {
         }
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
-        self.xspice_event_values = snapshot.xspice_event_values;
-        self.xspice_event_queue = snapshot.xspice_event_queue;
+        self.scheduler.xspice_event_values = snapshot.xspice_event_values;
+        self.scheduler.xspice_event_queue = snapshot.xspice_event_queue;
         // The recorded iterates were the rejected attempt's, and the attempt
         // that replaces it starts with no previous iterate of its own.
         self.xspice_output_iterates.clear();
@@ -1969,7 +1970,7 @@ mod tests {
         use crate::xspice::DigitalValue;
 
         fn queue_two_events(circuit: &mut CircuitData) {
-            let queue = circuit.xspice_event_queue.make_mut();
+            let queue = circuit.scheduler.xspice_event_queue.make_mut();
             queue.schedule(
                 2.0e-9,
                 1,
@@ -2007,24 +2008,25 @@ mod tests {
 
             // The rejected attempt executes both events.
             circuit
+                .scheduler
                 .xspice_event_queue
                 .make_mut()
                 .run_due_events(4.0e-9, |_| {})
                 .expect("a queue nothing feeds back into settles");
             assert!(
-                circuit.xspice_event_queue.is_empty(),
+                circuit.scheduler.xspice_event_queue.is_empty(),
                 "{label}: the attempt must actually consume the queue, or this proves nothing"
             );
 
             circuit.restore_nonlinear_state(accepted);
 
             assert_eq!(
-                circuit.xspice_event_queue.len(),
+                circuit.scheduler.xspice_event_queue.len(),
                 2,
                 "{label}: a rejected step must leave every event pending again"
             );
             assert_eq!(
-                circuit.xspice_event_queue.next_event_time(),
+                circuit.scheduler.xspice_event_queue.next_event_time(),
                 Some(2.0e-9),
                 "{label}: the restored queue must present the same next event time, \
                  which is what the retry's breakpoint is placed from"

@@ -271,15 +271,21 @@ impl Engine {
         tstop: Value,
     ) -> Result<(), crate::engine::SimulationError> {
         let mut runtime_breakpoints = Vec::new();
-        if let Some(event_time) = circuit.next_xspice_event_time()
+        // Each lane's own next activation, not the earliest of the two: this
+        // list carries both so that neither is hidden behind the other, and it
+        // is where an uncoupled code-model queue reaches the stepper at all.
+        if let Some(event_time) = circuit
+            .next_xspice_activation()
+            .map(crate::circuit::Activation::seconds)
             && event_time.is_finite()
             && event_time >= 0.0
             && event_time <= tstop
         {
             runtime_breakpoints.push(event_time);
         }
-        #[cfg(feature = "veriloga")]
-        if let Some(event_time) = circuit.next_mixed_event_time()?
+        if let Some(event_time) = circuit
+            .next_hdl_activation()?
+            .map(crate::circuit::Activation::seconds)
             && event_time.is_finite()
             && event_time >= 0.0
             && event_time <= tstop

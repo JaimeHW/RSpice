@@ -81,17 +81,13 @@ impl CircuitData {
             xyce_core_transient_residuals: Vec::new(),
             transient_max_step_hint: None,
             behavioral_sources: BehavioralSources::new(),
+            scheduler: super::scheduler::CircuitScheduler::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),
             xspice_has_event_driven_devices: false,
-            xspice_event_values: SharedXspiceEventValues::default(),
             xspice_event_loads: HashMap::new(),
-            xspice_event_queue: SharedXspiceEventQueue::new(),
-            #[cfg(feature = "veriloga")]
-            xspice_analog_step_floor: 0.0,
             xspice_touched_digital_nodes: Vec::new(),
             xspice_touched_real_nodes: Vec::new(),
-            xspice_event_dispatch: None,
             xspice_dispatch_pending: Vec::new(),
             xspice_dispatch_next_pending: Vec::new(),
             xspice_output_iterates: XspiceOutputIterates::default(),
@@ -104,10 +100,6 @@ impl CircuitData {
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
             #[cfg(feature = "veriloga")]
             mixed_signal_hosts: Vec::new(),
-            #[cfg(feature = "veriloga")]
-            mixed_digital_coordinator: None,
-            #[cfg(feature = "veriloga")]
-            mixed_xspice_bindings: None,
             #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices:
                 crate::device::veriloga_builtins::BuiltinVerilogADevices::new(),
@@ -576,10 +568,10 @@ impl CircuitData {
             for host in &mut self.mixed_signal_hosts {
                 host.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
             }
-            if let Some(digital) = &mut self.mixed_digital_coordinator {
+            if let Some(digital) = &mut self.scheduler.mixed_digital_coordinator {
                 digital.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
             }
-            if let Some(bindings) = &mut self.mixed_xspice_bindings {
+            if let Some(bindings) = &mut self.scheduler.mixed_xspice_bindings {
                 Arc::make_mut(bindings).remap_nodes(|node| Self::remap_node_id(node, old_node_id));
             }
         }

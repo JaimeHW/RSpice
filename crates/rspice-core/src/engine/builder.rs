@@ -11978,6 +11978,7 @@ apull [mix] pull
                 .unwrap_or_else(|| panic!("{label}: the deck named node {probe}"));
 
             let classified = circuit
+                .scheduler
                 .mixed_digital_coordinator
                 .as_ref()
                 .is_some_and(|digital| digital.event_nodes().any(|event| event == node));

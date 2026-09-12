@@ -993,7 +993,6 @@ impl EventQueues {
     /// [`Self::slot_min_instant`] with the driver that event names, for a
     /// diagnostic that has to say whose activation it is. Ties on the instant
     /// go to the lower sequence, which is the one the slot would run first.
-    #[cfg(feature = "veriloga")]
     fn slot_min_event(&self) -> Option<(Instant, TargetId)> {
         if self.slot_is_empty() {
             return None;
@@ -1006,7 +1005,6 @@ impl EventQueues {
     }
 
     /// [`Self::future_min_instant`] with the driver that event names.
-    #[cfg(feature = "veriloga")]
     fn future_min_event(&self) -> Option<(Instant, TargetId)> {
         self.future
             .peek()
@@ -1240,7 +1238,6 @@ impl EventScheduler {
     /// diagnostic has to name to say *whose* schedule is holding a run. Ties
     /// between the tiers go to the slot, which is where the earlier sequence
     /// sits.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn next_instant_target(&self) -> Option<(Instant, TargetId)> {
         let slot = self.queues.slot_min_event();
         let future = self.queues.future_min_event();
@@ -1256,7 +1253,6 @@ impl EventScheduler {
     /// nothing outside it; the instance name is what a diagnostic prints. A
     /// caller that has no target table of its own — the XSPICE queue, whose
     /// drivers *are* code-model instances — asks for the name directly.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn next_instant_instance(&self) -> Option<(Instant, &str)> {
         let (at, target) = self.next_instant_target()?;
         Some((at, self.queues.target(target).instance.as_str()))

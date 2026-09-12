@@ -237,7 +237,6 @@ impl XspiceEventScheduler {
     /// process queue next door, which also holds wakeups belonging to no
     /// module. What asks is the diagnostic that has to say whose schedule is
     /// holding a run at the solver's minimum step.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn next_event_instance(&self) -> Option<(&str, Value)> {
         self.inner
             .next_instant_instance()

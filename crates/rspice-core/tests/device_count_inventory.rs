@@ -63,13 +63,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "branch residuals retained from the current Core stamp",
     ),
     (
-        "xspice_event_values",
-        "resolved event-node values and the per-output drive state behind them, \
-         all of it belonging to the counted XSPICE instances",
-    ),
-    (
-        "xspice_event_queue",
-        "pending XSPICE events, not the devices that raise them",
+        "scheduler",
+        "the discrete-event lanes: resolved event-node values and the \
+         per-output drive state behind them, the pending event queue, the HDL \
+         process wheel and the analog step floor -- state about when the \
+         counted XSPICE instances and mixed hosts run, not a device of its own",
     ),
     // Node, topology, and solver facts with no element behind them.
     (
