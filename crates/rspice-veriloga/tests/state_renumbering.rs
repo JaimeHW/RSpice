@@ -63,7 +63,8 @@ fn integration_slots(model: &CompiledModel) -> Vec<usize> {
                 | Instruction::IdtState(slot)
                 | Instruction::IdtModState(slot)
                 | Instruction::LimitState(slot)
-                | Instruction::CanonicalLimitState(slot) => out.push(*slot),
+                | Instruction::NamedLimiterPrevious(slot)
+                | Instruction::NamedLimiterStore(slot) => out.push(*slot),
                 _ => {}
             }
         }

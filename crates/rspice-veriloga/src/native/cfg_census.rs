@@ -1328,7 +1328,7 @@ enum EmittedOperator {
     Idt,
     IdtMod,
     Limit,
-    CanonicalLimit,
+    NamedLimit,
 }
 
 /// One slot the generator's integration counter handed out.
@@ -1348,7 +1348,9 @@ fn integration_emissions(program: &BytecodeProgram) -> impl Iterator<Item = Emit
             Instruction::IdtState(_) => Some(EmittedOperator::Idt),
             Instruction::IdtModState(_) => Some(EmittedOperator::IdtMod),
             Instruction::LimitState(_) => Some(EmittedOperator::Limit),
-            Instruction::CanonicalLimitState(_) => Some(EmittedOperator::CanonicalLimit),
+            // The publish, not the previous-iterate read: one emission per
+            // named limiter, as every other family counts one per site.
+            Instruction::NamedLimiterStore(_) => Some(EmittedOperator::NamedLimit),
             _ => None,
         })
 }
@@ -1626,7 +1628,7 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
                  sites[statements={statement_sites} contributions={contribution_sites}] \
                  contexts[parameters={} assignments={} noise_assignments={} equation_primal={} \
                  equation_derivative={} noise_sources={}] \
-                 reemitted[ddt={} idt={} idtmod={} limit={} canonical_limit={}] \
+                 reemitted[ddt={} idt={} idtmod={} limit={} named_limit={}] \
                  hir[parameters={} statements={} contributions={} noise={}] noise_sources={}",
             breakdown(EmissionContext::Parameter),
             breakdown(EmissionContext::Assignment),
@@ -1638,7 +1640,7 @@ fn the_two_state_slot_numberings_are_censused_over_the_shipped_corpus() {
             reemitted(EmittedOperator::Idt),
             reemitted(EmittedOperator::IdtMod),
             reemitted(EmittedOperator::Limit),
-            reemitted(EmittedOperator::CanonicalLimit),
+            reemitted(EmittedOperator::NamedLimit),
             contexts.parameters,
             contexts.statements,
             contexts.contributions,

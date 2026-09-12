@@ -1518,7 +1518,11 @@ impl DeviceIR {
                 Node::Unary(_, inner)
                 | Node::Limexp(inner)
                 | Node::IdtCompanion(inner)
-                | Node::CanonicalLimit(inner) => contains_ddt(arena, inner),
+                | Node::LimiterPrevious(inner) => contains_ddt(arena, inner),
+                Node::NamedLimit {
+                    proposed,
+                    candidate,
+                } => contains_ddt(arena, proposed) || contains_ddt(arena, candidate),
                 Node::Idt(inner, second) | Node::Limit(inner, second) => {
                     contains_ddt(arena, inner) || contains_ddt_opt(arena, second)
                 }
@@ -2379,7 +2383,14 @@ pub mod autodiff {
                 let (ic, _) = arena.optional_pair(payload);
                 recurse(inner) | recurse(modulus) | optional(ic)
             }
-            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => recurse(inner),
+            // The slope chains through the proposal, not the limiter body: an
+            // axis only the body can reach is a structural zero.
+            Node::Limit(inner, _)
+            | Node::NamedLimit {
+                proposed: inner, ..
+            } => recurse(inner),
+            // The previous Newton iterate is frozen history.
+            Node::LimiterPrevious(_) => 0,
             Node::Call { func, a, b, .. } => match func {
                 IrFunction::Floor | IrFunction::Ceil => 0,
                 _ => optional(a) | optional(b),
@@ -3459,12 +3470,17 @@ pub mod autodiff {
                     collect!(ic);
                 }
             }
-            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => {
+            Node::Limit(inner, _)
+            | Node::NamedLimit {
+                proposed: inner, ..
+            } => {
                 collect!(inner);
                 if family == AuxiliaryAxes::LimiterCorrection {
                     axes.insert(DerivativeWrt::LimiterCorrection);
                 }
             }
+            // Frozen history: no auxiliary axis reaches through it.
+            Node::LimiterPrevious(_) => {}
             Node::IdtMod {
                 expr: inner,
                 modulus,
@@ -4761,7 +4777,10 @@ pub mod autodiff {
 
             // Physical/noise tangents pass through the proposal. The separate
             // affine direction also carries the local limiter displacement.
-            Node::Limit(inner, _) | Node::CanonicalLimit(inner) => {
+            Node::Limit(inner, _)
+            | Node::NamedLimit {
+                proposed: inner, ..
+            } => {
                 let base = differentiate!(inner);
                 if *wrt == DerivativeWrt::LimiterCorrection {
                     let displacement = binary!(BinaryOp::Sub, expr, inner);
@@ -4770,6 +4789,9 @@ pub mod autodiff {
                     base
                 }
             }
+
+            // The previous Newton iterate is history the solve cannot move.
+            Node::LimiterPrevious(_) => arena.push(Node::Const(0.0)),
 
             // Table lookup: slope of the active segment times the inner
             // derivative

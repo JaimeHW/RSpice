@@ -29,7 +29,8 @@ fn bytecode_family(instruction: &Instruction) -> Option<(CanonicalStateFamily, u
         | Instruction::IdtState(slot)
         | Instruction::IdtModState(slot)
         | Instruction::LimitState(slot)
-        | Instruction::CanonicalLimitState(slot) => (CanonicalStateFamily::Integration, *slot),
+        | Instruction::NamedLimiterPrevious(slot)
+        | Instruction::NamedLimiterStore(slot) => (CanonicalStateFamily::Integration, *slot),
         Instruction::AbsDelayState(slot)
         | Instruction::AbsDelayStateMax(slot)
         | Instruction::AbsDelayStateDerivative(slot)

@@ -181,6 +181,7 @@ impl CodeGenerator {
             laplace_sites: std::cell::RefCell::new(HashMap::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
             limit_state_count: std::cell::Cell::new(0),
+            named_limiter_slots: std::cell::RefCell::new(Vec::new()),
             delay_buffer_count: std::cell::Cell::new(0),
             absdelay_sites: std::cell::RefCell::new(HashMap::new()),
             transition_filter_count: std::cell::Cell::new(0),
@@ -1494,12 +1495,37 @@ impl CodeGenerator {
                     let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
                     program.instructions.push(Instruction::LimitState(state_id));
                 }
-                Node::CanonicalLimit(inner) => {
-                    self.emit_expr(arena, inner, emit_ctx, program)?;
+                Node::NamedLimit {
+                    proposed,
+                    candidate,
+                } => {
+                    // $limit(expr, <limiting function>, ...) - the body decides
+                    // what this Newton iterate may be, and it reads the
+                    // proposal and the previous iterate of this very slot, so
+                    // the slot is allocated before the body is emitted.
                     let state_id = emit_ctx.integration_slot(id, &self.limit_state_count);
+                    self.emit_expr(arena, proposed, emit_ctx, program)?;
+                    self.named_limiter_slots.borrow_mut().push(state_id);
+                    let body = self.emit_expr(arena, candidate, emit_ctx, program);
+                    self.named_limiter_slots.borrow_mut().pop();
+                    body?;
                     program
                         .instructions
-                        .push(Instruction::CanonicalLimitState(state_id));
+                        .push(Instruction::NamedLimiterStore(state_id));
+                }
+                Node::LimiterPrevious(proposed) => {
+                    let Some(state_id) = self.named_limiter_slots.borrow().last().copied() else {
+                        return Err(CompileError::CodeGen(CodeGenError::new(
+                            CodeGenErrorKind::InvalidExpression(
+                                "named $limit implicit previous argument escaped its limiter body"
+                                    .into(),
+                            ),
+                        )));
+                    };
+                    self.emit_expr(arena, proposed, emit_ctx, program)?;
+                    program
+                        .instructions
+                        .push(Instruction::NamedLimiterPrevious(state_id));
                 }
                 Node::TableLookup { input, table } => {
                     // $table_model lookup with linear interpolation

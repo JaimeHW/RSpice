@@ -1758,11 +1758,26 @@ impl NativeProgram {
                     depth -= 1;
                     ops.push(NativeOp::LimitState(*index));
                 }
-                Instruction::CanonicalLimitState(_) => {
-                    return Err(JitError::unsupported_native_coverage(
+                Instruction::NamedLimiterPrevious(index) => {
+                    require_stack(
                         model.clone(),
-                        "canonical-only named limiter metadata in a bytecode entry",
-                    ));
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::LimiterPrevious(*index));
+                }
+                Instruction::NamedLimiterStore(index) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::LimiterStore(*index));
                 }
                 Instruction::LaplaceState(filter_id) => {
                     validate_index(
@@ -9829,7 +9844,8 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",
         Instruction::LimitState(_) => "LimitState",
-        Instruction::CanonicalLimitState(_) => "CanonicalLimitState",
+        Instruction::NamedLimiterPrevious(_) => "NamedLimiterPrevious",
+        Instruction::NamedLimiterStore(_) => "NamedLimiterStore",
         Instruction::TableLookup(_) => "TableLookup",
         Instruction::AbsDelayState(_) => "AbsDelayState",
         Instruction::AbsDelayStateMax(_) => "AbsDelayStateMax",

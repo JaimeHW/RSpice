@@ -10,7 +10,7 @@
 use crate::ast::AccessKind;
 use crate::ast::{
     AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CallExpr, Expression, Identifier,
-    NumberLit, SystemFunction,
+    LimiterArgument, NumberLit, SystemFunction,
 };
 use crate::branch_identity::BranchIdentity;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
@@ -477,6 +477,11 @@ impl ConversionContext {
 pub struct ExprConverter<'a> {
     ctx: &'a ConversionContext,
     direct_zi_assignment: bool,
+    /// Oriented proposals of the named limiters whose bodies are being
+    /// converted, innermost last. A limiter body reads its implicit arguments
+    /// from the enclosing call, and nested limiters accumulate, so the
+    /// conversion carries the enclosing proposals rather than a single one.
+    limiters: std::cell::RefCell<Vec<NodeId>>,
 }
 
 impl<'a> ExprConverter<'a> {
@@ -485,6 +490,7 @@ impl<'a> ExprConverter<'a> {
         Self {
             ctx,
             direct_zi_assignment: false,
+            limiters: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -499,6 +505,7 @@ impl<'a> ExprConverter<'a> {
         Self {
             ctx: self.ctx,
             direct_zi_assignment: true,
+            limiters: std::cell::RefCell::new(Vec::new()),
         }
         .convert(arena, expr)
     }
@@ -2148,20 +2155,16 @@ impl<'a> ExprConverter<'a> {
         arena: &mut ExprArena,
         op: &AnalogOperator,
     ) -> CompileResult<NodeId> {
-        // Portable-only builds refuse every arm; the JIT builds also write
-        // the metadata node below.
-        let _ = &arena;
         match op {
-            #[cfg(any(feature = "native", feature = "wasm-jit"))]
             AnalogOperator::Limit {
                 proposed,
+                candidate,
                 type_metadata,
                 ..
             } => {
-                // Both JITs consume CompiledModel for topology and state slots,
-                // with executable expressions supplied by canonical IR. This
-                // instruction reserves the matching slot and deliberately
-                // cannot execute as an interpreter fallback.
+                // The limiter body is the operator's value, so the bytecode
+                // carries it: every lowering applies the same limiting
+                // function during Newton, and none of them drops it.
                 let proposed = self.convert(arena, proposed)?;
                 let proposed = if let Some(polarity) = type_metadata {
                     let polarity = self.convert(arena, polarity)?;
@@ -2169,20 +2172,29 @@ impl<'a> ExprConverter<'a> {
                 } else {
                     proposed
                 };
-                Ok(arena.push(Node::CanonicalLimit(proposed)))
+                // The body's implicit arguments resolve against this call, so
+                // the enclosing operator has to be on the stack while it is
+                // converted.
+                self.limiters.borrow_mut().push(proposed);
+                let candidate = self.convert(arena, candidate);
+                self.limiters.borrow_mut().pop();
+                let candidate = candidate?;
+                Ok(arena.push(Node::NamedLimit {
+                    proposed,
+                    candidate,
+                }))
             }
-            #[cfg(not(any(feature = "native", feature = "wasm-jit")))]
-            AnalogOperator::Limit { selector, .. } => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!(
-                    "stateful named $limit selector '{selector}' requires the canonical backend"
-                )),
-            )
-            .into()),
-            AnalogOperator::LimiterArgument { .. } => {
-                Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                    "named $limit implicit argument escaped its limiter body".into(),
-                ))
-                .into())
+            AnalogOperator::LimiterArgument { argument, .. } => {
+                let Some(proposed) = self.limiters.borrow().last().copied() else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "named $limit implicit argument escaped its limiter body".into(),
+                    ))
+                    .into());
+                };
+                Ok(match argument {
+                    LimiterArgument::Proposed => proposed,
+                    LimiterArgument::Previous => arena.push(Node::LimiterPrevious(proposed)),
+                })
             }
         }
     }

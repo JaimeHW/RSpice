@@ -205,7 +205,9 @@ impl NativeRequiredStorage {
                     | Instruction::IdtModDerivativeState(index) => {
                         update_max(&mut max_state, *index)
                     }
-                    Instruction::LimitState(index) | Instruction::CanonicalLimitState(index) => {
+                    Instruction::LimitState(index)
+                    | Instruction::NamedLimiterPrevious(index)
+                    | Instruction::NamedLimiterStore(index) => {
                         update_max(&mut max_state, *index);
                     }
                     Instruction::TransitionState(index)

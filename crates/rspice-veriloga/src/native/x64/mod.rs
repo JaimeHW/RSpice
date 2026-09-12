@@ -6386,7 +6386,8 @@ endmodule
                     | Instruction::IdtDerivativeState(idx)
                     | Instruction::IdtModDerivativeState(idx)
                     | Instruction::LimitState(idx)
-                    | Instruction::CanonicalLimitState(idx) => {
+                    | Instruction::NamedLimiterPrevious(idx)
+                    | Instruction::NamedLimiterStore(idx) => {
                         update_max_slot(&mut max_state, *idx);
                     }
                     Instruction::AbsDelayState(idx)

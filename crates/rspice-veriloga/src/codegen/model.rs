@@ -23,6 +23,10 @@ pub struct CodeGenerator {
     pub(super) lookup_tables: std::cell::RefCell<Vec<LookupTable>>,
     /// Stateful slot allocator for `$limit`.
     pub(super) limit_state_count: std::cell::Cell<usize>,
+    /// State slots of the named limiters whose bodies are being emitted,
+    /// innermost last. A body's implicit previous-iterate read addresses the
+    /// record of the call it belongs to, and limiters nest.
+    pub(super) named_limiter_slots: std::cell::RefCell<Vec<usize>>,
     /// Stateful slot allocator for `absdelay`.
     pub(super) delay_buffer_count: std::cell::Cell<usize>,
     /// Stable logical absdelay site to transactional delay-buffer slot.
@@ -841,9 +845,6 @@ pub enum Instruction {
     /// $limit function: bounds value change per iteration for convergence
     /// Uses state index to track previous value
     LimitState(usize),
-    /// Named-limiter state-slot metadata for canonical native compilation.
-    /// This instruction is deliberately non-executable.
-    CanonicalLimitState(usize),
     /// Lookup table interpolation: uses table_id to reference stored table
     /// Pops input value from stack, pushes interpolated result
     TableLookup(usize),
@@ -923,6 +924,18 @@ pub enum Instruction {
     /// Validate the primal and derivative, retaining failures through comparisons.
     /// Stack: `[primal, derivative] -> [derivative]`.
     CheckedValue,
+    /// A named limiter's previous Newton iterate, seeded from the oriented
+    /// proposal before the limiter has produced a candidate.
+    /// Stack: `[oriented proposed] -> [previous]`.
+    ///
+    /// Appended to preserve every preceding serialized discriminant.
+    NamedLimiterPrevious(usize),
+    /// Publish a named limiter's candidate as the iterate the next evaluation
+    /// reads back, returning what the limiter admitted.
+    /// Stack: `[oriented proposed, candidate] -> [limited]`.
+    ///
+    /// Appended to preserve every preceding serialized discriminant.
+    NamedLimiterStore(usize),
 }
 
 impl CompiledModel {

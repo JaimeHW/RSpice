@@ -1177,9 +1177,14 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 let input = self.pop("LimitState input")?;
                 self.stack.push(input);
             }
-            Instruction::CanonicalLimitState(_) => {
-                // Canonical named limiting is inactive in small-signal
-                // analysis, so its metadata opcode is the identity here.
+            // Named limiting is inactive in small-signal analysis, exactly as
+            // it is under a bypassed evaluation mode: the previous iterate is
+            // the proposal, and the publish returns the proposal rather than
+            // what the body admitted. The pair is therefore the identity on
+            // the proposal, whatever the limiter body computes.
+            Instruction::NamedLimiterPrevious(_) => {}
+            Instruction::NamedLimiterStore(_) => {
+                let _candidate = self.pop("NamedLimiterStore candidate")?;
             }
             Instruction::TableLookup(table_id) => {
                 let input = self.pop_real("TableLookup")?;

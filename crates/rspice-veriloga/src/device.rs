@@ -3110,7 +3110,8 @@ impl VerilogADevice {
                     | Instruction::IdtDerivativeState(idx)
                     | Instruction::IdtModDerivativeState(idx)
                     | Instruction::LimitState(idx)
-                    | Instruction::CanonicalLimitState(idx) => update_max(&mut max_state, *idx),
+                    | Instruction::NamedLimiterPrevious(idx)
+                    | Instruction::NamedLimiterStore(idx) => update_max(&mut max_state, *idx),
                     Instruction::AbsDelayState(idx)
                     | Instruction::AbsDelayStateMax(idx)
                     | Instruction::AbsDelayStateDerivative(idx)
@@ -10373,6 +10374,87 @@ endmodule
     }
 }
 
+/// A named `$limit` applied by whichever backend the build has.
+///
+/// Ungated on purpose. In a portable build this constructor interprets the
+/// bytecode entry, which is the route that refused a named limiter outright
+/// before its limiting function was carried there; in a native build it is the
+/// canonical JIT image. `tests/route_parity.rs` is what requires the two to
+/// produce the same trace — this is what pins the numbers.
+#[cfg(test)]
+mod named_limiter_tests {
+    use super::VerilogADevice;
+    use crate::codegen::Instruction;
+    use crate::vm::VerilogAEvaluationMode as Mode;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    #[test]
+    fn a_named_limiter_admits_its_bodys_candidate_per_newton_iterate() {
+        let source = r#"
+`include "disciplines.vams"
+module named_limiter_route(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real bounded_step;
+        input proposed, previous, step;
+        real proposed, previous, step;
+        begin
+            bounded_step = proposed > previous + step ? previous + step : proposed;
+        end
+    endfunction
+    analog I(p, n) <+ $limit(V(p, n), bounded_step, 0.25);
+endmodule
+"#;
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(source, None)
+            .expect("compile the named-limiter module");
+        assert!(
+            runtime.model.stamp_programs.iter().any(|program| {
+                let mut previous = false;
+                let mut store = false;
+                for instruction in &program.value_program.instructions {
+                    previous |= matches!(instruction, Instruction::NamedLimiterPrevious(_));
+                    store |= matches!(instruction, Instruction::NamedLimiterStore(_));
+                }
+                previous && store
+            }),
+            "a named limiter's bytecode entry carries both its previous-iterate read and its \
+             candidate publish"
+        );
+
+        let mut device = VerilogADevice::try_new_with_canonical_ir(
+            "LIMITROUTE1",
+            runtime.model,
+            &runtime.canonical_ir,
+            &[1, 0],
+        )
+        .expect("build the named-limiter device");
+        let stamp = |device: &mut VerilogADevice, voltage: f64, mode| {
+            device
+                .try_stamp_with_mode(&[voltage], |_, _, _| {}, |_, _| {}, mode)
+                .expect("named limiter stamp");
+            device.context.currents[0]
+        };
+        // The first iterate has no history, so the limiter seeds from the
+        // proposal and admits it whole.
+        assert_eq!(stamp(&mut device, 0.5, Mode::NewtonLimited), 0.5);
+        assert!(device.limiter_converged());
+        // Then a jump the body refuses: a quarter of a volt per iterate.
+        for expected in [0.75, 1.0, 1.25] {
+            assert_eq!(
+                stamp(&mut device, 2.0, Mode::NewtonLimited),
+                expected,
+                "the limiting function decides the iterate, not the proposal"
+            );
+            assert!(!device.limiter_converged());
+        }
+        // A bypassed evaluation reads the proposal and leaves the history.
+        let history = device.context.state_values.clone();
+        assert_eq!(stamp(&mut device, 2.0, Mode::StaticProbe), 2.0);
+        assert_eq!(device.context.state_values, history);
+    }
+}
+
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::*;
@@ -11223,41 +11305,6 @@ endmodule
             device.limiter_converged(),
             "a new limited stamp must clear active once before its value and Jacobian passes"
         );
-    }
-
-    #[cfg(feature = "native-bytecode-contract-tests")]
-    #[test]
-    fn named_limiter_bytecode_contract_construction_fails_closed() {
-        let source = r#"
-`include "disciplines.vams"
-module named_limiter_requires_canonical(p, n);
-    inout p, n;
-    electrical p, n;
-    analog function real force_value;
-        input proposed, previous, forced;
-        real proposed, previous, forced;
-        begin
-            force_value = forced;
-        end
-    endfunction
-    analog I(p, n) <+ $limit(V(p, n), "force_value", 0.1);
-endmodule
-"#;
-        let model = compile(source);
-        assert!(
-            model.stamp_programs.iter().any(|program| {
-                program
-                    .value_program
-                    .instructions
-                    .iter()
-                    .any(|instruction| matches!(instruction, Instruction::CanonicalLimitState(_)))
-            }),
-            "named limiter must carry an explicit non-executable canonical state marker"
-        );
-
-        let err = VerilogADevice::try_new("LIMITBYTECODE1", model, &[1, 0])
-            .expect_err("named limiter bytecode construction must fail closed");
-        assert_native_hard_fail(err, "canonical-only named limiter metadata");
     }
 
     #[cfg(feature = "native-bytecode-contract-tests")]

@@ -331,6 +331,23 @@ impl<'a> Vm<'a> {
         })
     }
 
+    /// Make sure a limiter slot's runtime storage exists before it is read or
+    /// published. Every limiter instruction addresses all eight state arrays,
+    /// so one short array is as unusable as an absent slot.
+    fn allocate_limiter_state(&mut self, index: usize) {
+        if self.context.state_values.len() <= index
+            || self.context.state_values_prev.len() <= index
+            || self.context.state_values_older.len() <= index
+            || self.context.state_derivatives.len() <= index
+            || self.context.state_derivatives_prev.len() <= index
+            || self.context.state_initialized.len() <= index
+            || self.context.state_candidate_valid.len() <= index
+            || self.context.state_older_candidate.len() <= index
+        {
+            self.context.allocate_states(index + 1);
+        }
+    }
+
     /// Execute a single instruction.
     #[inline]
     pub(crate) fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
@@ -887,26 +904,44 @@ impl<'a> Vm<'a> {
                     ));
                 }
 
-                if self.context.state_values.len() <= *idx
-                    || self.context.state_values_prev.len() <= *idx
-                    || self.context.state_values_older.len() <= *idx
-                    || self.context.state_derivatives.len() <= *idx
-                    || self.context.state_derivatives_prev.len() <= *idx
-                    || self.context.state_initialized.len() <= *idx
-                    || self.context.state_candidate_valid.len() <= *idx
-                    || self.context.state_older_candidate.len() <= *idx
-                {
-                    self.context.allocate_states(*idx + 1);
-                }
-
+                self.allocate_limiter_state(*idx);
                 self.context.publish_limiter(*idx, new_value, limited_value);
                 self.stack.push(limited_value);
             }
 
-            Instruction::CanonicalLimitState(_) => {
-                return Err(VmError::InvalidInstruction(
-                    "canonical-only named limiter metadata is non-executable; no interpreter fallback",
-                ));
+            // A named limiter's previous Newton iterate. Probe and
+            // small-signal evaluation bypass limiting, and then the previous
+            // value *is* the proposal: the body computes with no history and
+            // the publish below returns the proposal unchanged.
+            Instruction::NamedLimiterPrevious(idx) => {
+                let proposed = self.pop()?;
+                if !self.context.evaluation_mode.limiting_enabled() {
+                    self.stack.push(proposed);
+                    return Ok(());
+                }
+                self.allocate_limiter_state(*idx);
+                let previous = self.context.limiter_previous(*idx, proposed)?;
+                self.stack.push(previous);
+            }
+
+            // Publish what the named limiter's body admitted for this
+            // iterate. The proposal is kept underneath the candidate so a
+            // bypassed limiter can return it without reading state.
+            Instruction::NamedLimiterStore(idx) => {
+                let candidate = self.pop()?;
+                let proposed = self.pop()?;
+                if !self.context.evaluation_mode.limiting_enabled() {
+                    self.stack.push(proposed);
+                    return Ok(());
+                }
+                if !proposed.is_finite() || !candidate.is_finite() {
+                    return Err(VmError::InvalidNumericResult(
+                        "$limit proposed value and candidate must be finite".into(),
+                    ));
+                }
+                self.allocate_limiter_state(*idx);
+                self.context.publish_limiter(*idx, proposed, candidate);
+                self.stack.push(candidate);
             }
 
             // TableLookup: linear interpolation in lookup table

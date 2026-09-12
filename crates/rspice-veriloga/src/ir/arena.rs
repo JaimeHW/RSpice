@@ -49,7 +49,7 @@
 //! 4. **Hash-consing, if it comes, applies to pure kinds only.** Never to a
 //!    site-bearing node (`AbsDelay`, `Transition`, `Slew`, the Laplace and Zi
 //!    filters, the noise processes) and never to a state-allocating one
-//!    (`Ddt`, `Idt`, `IdtMod`, `Limit`, `CanonicalLimit`, `Cross`, `Above`,
+//!    (`Ddt`, `Idt`, `IdtMod`, `Limit`, `NamedLimit`, `Cross`, `Above`,
 //!    `LastCrossing`, `Timer`): merging two of those merges two slots, two
 //!    candidates or two ordinals into one. That is why [`ExprArena::push`]
 //!    deduplicates nothing.
@@ -246,8 +246,21 @@ pub enum Node {
     Limexp(NodeId),
     /// `$limit` and its optional step limit.
     Limit(NodeId, Option<NodeId>),
-    /// Non-executable carrier that allocates a named limiter's state slot.
-    CanonicalLimit(NodeId),
+    /// A named `$limit`: the oriented proposal and the inlined limiter body
+    /// that decides what this Newton iterate is allowed to be. The body reads
+    /// the proposal directly and the previous iterate through
+    /// [`Node::LimiterPrevious`], and both address the state record this node
+    /// allocates, which is keyed by `proposed`.
+    NamedLimit {
+        /// The proposal, already multiplied by any typed-limiter polarity.
+        proposed: NodeId,
+        /// What the limiter body admits for this iterate.
+        candidate: NodeId,
+    },
+    /// The previous Newton iterate of the named limiter whose oriented
+    /// proposal this operand is, seeded from that proposal before the limiter
+    /// has published a candidate.
+    LimiterPrevious(NodeId),
     /// `$table_model` lookup.
     TableLookup {
         /// Input expression.
@@ -862,7 +875,7 @@ impl ExprArena {
         self.chunks
             .iter()
             .flatten()
-            .any(|node| matches!(node, Node::Limit(..) | Node::CanonicalLimit(..)))
+            .any(|node| matches!(node, Node::Limit(..) | Node::NamedLimit { .. }))
     }
 }
 
@@ -924,6 +937,10 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::DdtDerivative {
             primal: left,
             input_derivative: right,
+        }
+        | Node::NamedLimit {
+            proposed: left,
+            candidate: right,
         } => {
             f(*left);
             f(*right);
@@ -946,7 +963,7 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         Node::Ddt(inner)
         | Node::FreezeDerivative(inner)
         | Node::Limexp(inner)
-        | Node::CanonicalLimit(inner)
+        | Node::LimiterPrevious(inner)
         | Node::Ddx { expr: inner, .. }
         | Node::TableLookup { input: inner, .. }
         | Node::VarIndexed { index: inner, .. } => f(*inner),
@@ -1267,6 +1284,20 @@ pub fn rebuild_children(
                 input_derivative: new_input,
             })
         }
+        Node::NamedLimit {
+            proposed,
+            candidate,
+        } => {
+            let new_proposed = descend(arena, proposed);
+            let new_candidate = descend(arena, candidate);
+            if new_proposed == proposed && new_candidate == candidate {
+                return id;
+            }
+            arena.push(Node::NamedLimit {
+                proposed: new_proposed,
+                candidate: new_candidate,
+            })
+        }
         Node::Unary(op, inner) => {
             let new_inner = descend(arena, inner);
             if new_inner == inner {
@@ -1312,8 +1343,8 @@ pub fn rebuild_children(
             rebuild_unary(arena, id, inner, Node::FreezeDerivative, descend)
         }
         Node::Limexp(inner) => rebuild_unary(arena, id, inner, Node::Limexp, descend),
-        Node::CanonicalLimit(inner) => {
-            rebuild_unary(arena, id, inner, Node::CanonicalLimit, descend)
+        Node::LimiterPrevious(inner) => {
+            rebuild_unary(arena, id, inner, Node::LimiterPrevious, descend)
         }
         Node::Ddx { expr, axis } => {
             rebuild_unary(arena, id, expr, |expr| Node::Ddx { expr, axis }, descend)
@@ -1751,7 +1782,11 @@ mod tests {
         out.push(arena.push(Node::Idt(one, None)));
         out.push(arena.push(Node::Limexp(one)));
         out.push(arena.push(Node::Limit(one, Some(two))));
-        out.push(arena.push(Node::CanonicalLimit(one)));
+        out.push(arena.push(Node::NamedLimit {
+            proposed: one,
+            candidate: two,
+        }));
+        out.push(arena.push(Node::LimiterPrevious(one)));
         out.push(arena.push(Node::TableLookup { input: one, table }));
         out.push(arena.push(Node::TableDerivative { input: one, table }));
         out.push(arena.push(Node::Ddx { expr: one, axis }));
