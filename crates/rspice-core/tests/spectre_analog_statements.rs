@@ -16,6 +16,56 @@ fn spectre_root(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rspice_spectre_statements_{name}.scs"))
 }
 
+/// A Verilog-A source that is really on disk, under a name of the test's
+/// choosing.
+///
+/// `ahdl_include` resolves its path while the deck is read, against the file
+/// that named it. A deck whose subject is what the adapter does with the
+/// declaration therefore has to name a source that exists, or the parse ends
+/// before the adapter's behaviour is visible at all.
+struct DeclaredSource {
+    path: PathBuf,
+    directory: PathBuf,
+}
+
+impl DeclaredSource {
+    fn write(stem: &str, module: &str) -> Self {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows the Unix epoch")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "rspice_spectre_source_{}_{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create the Verilog-A source directory");
+        let path = directory.join(format!("{stem}.va"));
+        std::fs::write(
+            &path,
+            format!(
+                "module {module}(a, k);\n\
+                 \x20   inout a, k;\n\
+                 \x20   electrical a, k;\n\
+                 \x20   analog I(a, k) <+ V(a, k) / 1000.0;\n\
+                 endmodule\n"
+            ),
+        )
+        .expect("write the Verilog-A source");
+        Self { path, directory }
+    }
+
+    fn quoted(&self) -> String {
+        self.path.display().to_string().replace('\\', "/")
+    }
+}
+
+impl Drop for DeclaredSource {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
 fn adapt(name: &str, source: &str) -> Netlist {
     Netlist::parse_with_path(source, &spectre_root(name))
         .unwrap_or_else(|error| panic!("Spectre source '{name}' must lower: {error}"))
@@ -504,11 +554,15 @@ fn lowered_transient_and_ac_analyses_match_their_spice_equivalents() {
 
 #[test]
 fn a_module_source_makes_its_masters_instantiable_and_nothing_else_does() {
+    let source = DeclaredSource::write("r31_device", "r31_device");
     let declared = adapt(
         "ahdl-include-master",
-        "simulator lang=spectre\n\
-         ahdl_include \"r31_device.va\"\n\
-         x1 (a k) my_diode is=1e-14\n",
+        &format!(
+            "simulator lang=spectre\n\
+             ahdl_include \"{}\"\n\
+             x1 (a k) my_diode is=1e-14\n",
+            source.quoted()
+        ),
     );
     let instance = declared
         .elements
@@ -565,7 +619,7 @@ fn spectre_instance_multiplicity_lowers_to_the_canonical_m_parameter() {
 /// solve to the same bits.
 #[cfg(feature = "veriloga")]
 mod ahdl_include_masters {
-    use super::{Netlist, adapt, engine};
+    use super::{Netlist, adapt, engine, refuse};
     use std::path::PathBuf;
 
     /// A linear conductance whose value is an instance parameter, so the
@@ -700,7 +754,10 @@ endmodule
 
     #[test]
     fn an_ahdl_include_path_that_does_not_exist_is_refused_by_path() {
-        let netlist = adapt(
+        // The path is resolved while the deck is read, so the refusal names
+        // the file — and every directory searched for it — before a circuit is
+        // built, rather than at the first attempt to compile the source.
+        let message = refuse(
             "ahdl-include-missing",
             "simulator lang=spectre\n\
              ahdl_include \"r31_absent_library.va\"\n\
@@ -708,11 +765,11 @@ endmodule
              R1 (in 0) resistor r=1k\n\
              op1 dc\n",
         );
-        let message = engine()
-            .run_dc_op(&netlist)
-            .expect_err("a Verilog-A source that is not there must fail closed")
-            .to_string();
         assert!(message.contains("r31_absent_library.va"), "{message}");
+        assert!(
+            message.contains("Verilog-A source file not found"),
+            "{message}"
+        );
     }
 
     #[test]
