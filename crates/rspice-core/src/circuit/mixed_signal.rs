@@ -616,7 +616,9 @@ impl CircuitData {
                 // The same settled code-model candidate supplies its stamps.
                 // Dropping the participant ends its borrow, not the trial.
                 drop(participant);
-                circuit.stamp_xspice(matrix, rhs);
+                circuit
+                    .stamp_xspice(matrix, rhs)
+                    .map_err(SimulationError::from)?;
             } else {
                 group.settle(&mut digital, voltages)?;
             }
@@ -760,9 +762,16 @@ impl CircuitData {
                 group.settle_with(&mut digital, solution, Some(&mut participant))?;
                 wave = participant.into_wave();
                 let num_nodes = owner.circuit.num_nodes();
-                let updates = owner
+                let (updates, refusal) = owner
                     .circuit
                     .project_xspice_voltage_outputs(solution, num_nodes);
+                let updates = match refusal {
+                    Ok(()) => updates,
+                    Err(error) => {
+                        projected.extend(updates);
+                        return Err(SimulationError::from(error));
+                    }
+                };
                 if updates.is_empty() {
                     projected_quiet = true;
                     break;

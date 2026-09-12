@@ -1731,17 +1731,19 @@ impl Engine {
         }
 
         if circuit.has_xspice_devices() {
-            circuit.stamp_xspice_transient_trial_with_coefficients(
-                matrix,
-                rhs,
-                time,
-                dt,
-                solution,
-                XspiceCompanionPolicy {
-                    coefficients: &companion_coeff,
-                    xyce_one_step_order2: ctx.xyce_one_step_order2,
-                },
-            );
+            circuit
+                .stamp_xspice_transient_trial_with_coefficients(
+                    matrix,
+                    rhs,
+                    time,
+                    dt,
+                    solution,
+                    XspiceCompanionPolicy {
+                        coefficients: &companion_coeff,
+                        xyce_one_step_order2: ctx.xyce_one_step_order2,
+                    },
+                )
+                .map_err(SimulationError::from)?;
         }
         // The mixed Verilog-AMS boundary, on the same terms and in the same
         // place: the module's continuous equations and its D/A levels reach the

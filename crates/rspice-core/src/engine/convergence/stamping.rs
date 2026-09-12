@@ -187,7 +187,9 @@ impl Engine {
         .map_err(SimulationError::from)?;
         if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
-            circuit.stamp_xspice(matrix, rhs);
+            circuit
+                .stamp_xspice(matrix, rhs)
+                .map_err(SimulationError::from)?;
         }
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {

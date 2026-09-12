@@ -211,7 +211,13 @@ impl Engine {
                         ))
                     })?;
                 let num_nodes = circuit.num_nodes();
-                projected = circuit.project_xspice_voltage_outputs(solution, num_nodes);
+                let (writes, refusal) = circuit.project_xspice_voltage_outputs(solution, num_nodes);
+                projected = writes;
+                // There is no iterate left to reject at acceptance: a code
+                // model that publishes a non-finite output for the point the
+                // solver just accepted ends the run, naming the instance and
+                // the port.
+                refusal.map_err(SimulationError::from)?;
             }
             #[cfg(feature = "veriloga")]
             if circuit.has_mixed_signal_hosts() {

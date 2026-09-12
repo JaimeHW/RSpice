@@ -1478,7 +1478,7 @@ impl CircuitData {
         time: Value,
         timestep: Value,
         voltages: &[Value],
-    ) {
+    ) -> Result<(), crate::device::StampError> {
         self.stamp_xspice_transient_trial_with_coefficients(
             matrix,
             rhs,
@@ -1490,7 +1490,7 @@ impl CircuitData {
                 ),
                 xyce_one_step_order2: false,
             },
-        );
+        )
     }
 
     /// Evaluate and stamp a transient trial using the engine's companion
@@ -1503,9 +1503,9 @@ impl CircuitData {
         timestep: Value,
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
-    ) {
+    ) -> Result<(), crate::device::StampError> {
         if !self.has_independent_xspice_evaluation() {
-            return;
+            return Ok(());
         }
         let XspiceCompanionPolicy {
             coefficients,
@@ -1525,8 +1525,9 @@ impl CircuitData {
         ) {
             self.warn_xspice_evaluation(time, &e);
         }
-        self.stamp_xspice(matrix, rhs);
+        let stamped = self.stamp_xspice(matrix, rhs);
         self.restore_xspice_trial_state(snapshot);
+        stamped
     }
 
     /// Evaluate XSPICE for an accepted transient timepoint without advancing
@@ -1645,11 +1646,15 @@ impl CircuitData {
     /// After evaluation, analog code models produce conductance and current
     /// contributions that must be stamped into the MNA system.
     ///
-    /// A non-finite partial derivative is dropped from the Jacobian rather
-    /// than refused, and one such drop per assembly is warned about here; see
-    /// `note_skipped_partial` for why that is a diagnostic and not yet a
-    /// decision.
-    pub fn stamp_xspice(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
+    /// A non-finite output value, self-conductance or input partial is a
+    /// rejectable iterate for the instance that produced it: see
+    /// `note_non_finite_output` for why, and for what the `cm_` ABI can and
+    /// cannot say about it.
+    pub fn stamp_xspice(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) -> Result<(), crate::device::StampError> {
         let num_nodes = self.num_nodes;
 
         #[inline]
@@ -1971,37 +1976,67 @@ impl CircuitData {
             instance: &'b crate::xspice::XspiceInstance,
             port: &'b crate::xspice::PortSpec,
             num_nodes: usize,
-            /// The first non-finite output partial this assembly dropped, if
-            /// any: see [`note_skipped_partial`].
-            skipped: &'a mut Option<String>,
+            /// The first non-finite quantity this assembly saw, if any: see
+            /// [`note_non_finite_output`].
+            skipped: &'a mut Option<(String, String)>,
         }
 
-        /// Record the first non-finite output partial dropped from the
-        /// Jacobian, so the assembly is not silent about it.
+        /// Record the first non-finite quantity an XSPICE output produced, and
+        /// the instance that produced it.
         ///
-        /// A code model that hands back a NaN derivative gets that term left
-        /// out rather than refused — the `cm_` ABI has no channel to refuse a
-        /// point — which means the Newton system it is solved in is not the
-        /// one the model described. Whether this should instead reject the
-        /// iterate is open (R1.15); until it is decided, the one thing that
-        /// must not happen is that it happens quietly.
+        /// The `cm_` ABI has no channel for a code model to refuse a point, so
+        /// what it hands back at an iterate its arithmetic could not survive
+        /// is NaN or infinity. The engine used to drop such a term from the
+        /// Jacobian and solve the system anyway, which is not the system the
+        /// model described, and (R1.14-fixes) then warn about it. It is a
+        /// rejectable iterate: a code model's output is a function of the
+        /// control inputs the solver handed it, exactly as `ln(V(p,n)+0.1)` is
+        /// in a Verilog-A module, and R1.14 made that class cut the timestep
+        /// or step the sources on every other device route. Ending the run
+        /// here instead would make XSPICE the one family that cannot survive
+        /// a Newton excursion.
+        ///
+        /// Only the first is kept: the Newton loop is about to throw this
+        /// assembly away, and the instance and port that refused are what the
+        /// exhausted-ladder message needs.
+        #[inline]
+        fn note_non_finite_output(
+            skipped: &mut Option<(String, String)>,
+            instance: &crate::xspice::XspiceInstance,
+            port: &crate::xspice::PortSpec,
+            quantity: &str,
+            value: Value,
+        ) {
+            if skipped.is_some() {
+                return;
+            }
+            *skipped = Some((
+                instance.name.clone(),
+                format!(
+                    "XSPICE instance '{}' output port '{}' evaluated {quantity} to {value} at a \
+                     trial iterate",
+                    instance.name, port.name
+                ),
+            ));
+        }
+
+        /// [`note_non_finite_output`] for an output's partial with respect to
+        /// one named control input.
         #[inline]
         fn note_skipped_partial(
-            skipped: &mut Option<String>,
+            skipped: &mut Option<(String, String)>,
             instance: &crate::xspice::XspiceInstance,
             port: &crate::xspice::PortSpec,
             control_port: &str,
             partial: Value,
         ) {
-            if skipped.is_some() {
-                return;
-            }
-            *skipped = Some(format!(
-                "XSPICE instance '{}' output port '{}' has a non-finite derivative \
-                 ({partial}) with respect to input '{control_port}' at this iterate; \
-                 that term was left out of the Jacobian",
-                instance.name, port.name
-            ));
+            note_non_finite_output(
+                skipped,
+                instance,
+                port,
+                &format!("its derivative with respect to input '{control_port}'"),
+                partial,
+            );
         }
 
         fn stamp_current_output_port(
@@ -2057,12 +2092,31 @@ impl CircuitData {
                     );
                 }
             }
+            let self_conductance = current_output_self_conductance(port, conductance);
+            if !equivalent_current.is_finite() || !self_conductance.is_finite() {
+                note_non_finite_output(
+                    skipped,
+                    instance,
+                    port,
+                    if self_conductance.is_finite() {
+                        "its current"
+                    } else {
+                        "its self-conductance"
+                    },
+                    if self_conductance.is_finite() {
+                        equivalent_current
+                    } else {
+                        self_conductance
+                    },
+                );
+                return;
+            }
             stamp_current_output_source(
                 matrix,
                 rhs,
                 pos,
                 neg,
-                current_output_self_conductance(port, conductance),
+                self_conductance,
                 equivalent_current,
             );
         }
@@ -2124,12 +2178,31 @@ impl CircuitData {
                     );
                 }
             }
+            let self_conductance = current_output_self_conductance(port, conductance);
+            if !equivalent_current.is_finite() || !self_conductance.is_finite() {
+                note_non_finite_output(
+                    skipped,
+                    instance,
+                    port,
+                    if self_conductance.is_finite() {
+                        "its current"
+                    } else {
+                        "its self-conductance"
+                    },
+                    if self_conductance.is_finite() {
+                        equivalent_current
+                    } else {
+                        self_conductance
+                    },
+                );
+                return;
+            }
             stamp_current_output_source(
                 matrix,
                 rhs,
                 pos,
                 neg,
-                current_output_self_conductance(port, conductance),
+                self_conductance,
                 equivalent_current,
             );
         }
@@ -2225,6 +2298,10 @@ impl CircuitData {
                 }
             }
 
+            if !branch_rhs.is_finite() {
+                note_non_finite_output(skipped, instance, port, "its voltage", branch_rhs);
+                return;
+            }
             stamp_voltage_output_branch(
                 matrix,
                 rhs,
@@ -2236,7 +2313,7 @@ impl CircuitData {
             );
         }
 
-        let mut skipped_partial: Option<String> = None;
+        let mut skipped_partial: Option<(String, String)> = None;
         let skipped = &mut skipped_partial;
         for slot in &mut self.xspice_instances {
             let instance = &**slot;
@@ -2256,6 +2333,17 @@ impl CircuitData {
                             for (index, node) in nodes.iter().copied().enumerate() {
                                 let (conductance, current) =
                                     instance.analog_vector_contribution_at(port_idx, index);
+                                if !current.is_finite() || !conductance.is_finite() {
+                                    let (quantity, value) = if current.is_finite() {
+                                        ("its conductance", conductance)
+                                    } else {
+                                        ("its value", current)
+                                    };
+                                    note_non_finite_output(
+                                        skipped, instance, port, quantity, value,
+                                    );
+                                    continue;
+                                }
                                 match port.default_type {
                                     crate::xspice::PortType::Voltage
                                     | crate::xspice::PortType::DifferentialVoltage
@@ -2309,6 +2397,17 @@ impl CircuitData {
                             for (index, element) in elements.iter().enumerate() {
                                 let (conductance, current) =
                                     instance.analog_vector_contribution_at(port_idx, index);
+                                if !current.is_finite() || !conductance.is_finite() {
+                                    let (quantity, value) = if current.is_finite() {
+                                        ("its conductance", conductance)
+                                    } else {
+                                        ("its value", current)
+                                    };
+                                    note_non_finite_output(
+                                        skipped, instance, port, quantity, value,
+                                    );
+                                    continue;
+                                }
                                 match element {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
                                         match port.default_type {
@@ -2446,6 +2545,18 @@ impl CircuitData {
                     let Some(port) = ports.get(port_idx) else {
                         continue;
                     };
+                    // One place for every output shape below — current output,
+                    // voltage branch, legacy nodal: the value the model just
+                    // published is what all of them stamp.
+                    if !current.is_finite() || !conductance.is_finite() {
+                        let (quantity, value) = if current.is_finite() {
+                            ("its conductance", conductance)
+                        } else {
+                            ("its value", current)
+                        };
+                        note_non_finite_output(skipped, instance, port, quantity, value);
+                        continue;
+                    }
                     if let crate::xspice::PortConnection::CurrentOutput { pos, neg } = connection {
                         stamp_current_output_port(
                             XspiceOutputStamp {
@@ -2534,6 +2645,16 @@ impl CircuitData {
                                             num_nodes,
                                         );
                                     }
+                                }
+                                if !branch_rhs.is_finite() {
+                                    note_non_finite_output(
+                                        skipped,
+                                        instance,
+                                        port,
+                                        "its linearized voltage",
+                                        branch_rhs,
+                                    );
+                                    continue;
                                 }
                                 match connection {
                                     crate::xspice::PortConnection::Analog(node) => {
@@ -2634,8 +2755,11 @@ impl CircuitData {
                 }
             }
         }
-        if let Some(line) = skipped_partial {
-            self.warn_xspice_once(line);
+        match skipped_partial {
+            Some((instance, detail)) => {
+                Err(crate::device::StampError::nonfinite_trial(instance, detail))
+            }
+            None => Ok(()),
         }
     }
 
@@ -2685,16 +2809,22 @@ impl CircuitData {
     /// solution vector after event-driven models settle. The returned writes
     /// restore the original candidate when replayed in reverse order.
     ///
-    /// A port whose value is not finite is skipped rather than written, which
-    /// leaves the candidate holding the previous value for that node with no
-    /// trace that the model asked for another. That silence is what the
-    /// warning below ends; whether a non-finite code-model OUTPUT should
-    /// instead reject the iterate is open (R1.15).
+    /// A port whose value is not finite refuses, naming the instance, the port
+    /// and the value, rather than being skipped: skipping leaves the candidate
+    /// holding the previous value for that node with no trace that the model
+    /// asked for another, which is a solution the deck does not describe. It
+    /// is classified the same way `stamp_xspice` classifies a non-finite
+    /// output — a rejectable iterate for that instance — so a settle inside a
+    /// Newton trial cuts the step; at acceptance, where there is no iterate
+    /// left to reject, the caller's `?` ends the run.
+    ///
+    /// Writes already applied are still returned, so the caller's rollback
+    /// restores the candidate whether this refuses or not.
     pub(crate) fn project_xspice_voltage_outputs(
         &mut self,
         solution: &mut [Value],
         num_nodes: usize,
-    ) -> Vec<(usize, Value)> {
+    ) -> (Vec<(usize, Value)>, Result<(), crate::device::StampError>) {
         #[inline]
         fn set_node(
             solution: &mut [Value],
@@ -2751,23 +2881,25 @@ impl CircuitData {
 
         let mut rollback = Vec::new();
         if num_nodes == 0 || solution.is_empty() {
-            return rollback;
+            return (rollback, Ok(()));
         }
 
-        let mut non_finite_output: Option<String> = None;
-        let mut note_non_finite_output =
-            |instance: &crate::xspice::XspiceInstance,
-             port: &crate::xspice::PortSpec,
-             value: Value| {
-                if value.is_finite() || non_finite_output.is_some() {
-                    return;
-                }
-                non_finite_output = Some(format!(
-                    "XSPICE instance '{}' output port '{}' evaluated to {value} at this iterate; \
-                     the projection of that port into the candidate solution was skipped",
+        let mut non_finite_output: Option<(String, String)> = None;
+        let mut note_non_finite_output = |instance: &crate::xspice::XspiceInstance,
+                                          port: &crate::xspice::PortSpec,
+                                          value: Value| {
+            if value.is_finite() || non_finite_output.is_some() {
+                return;
+            }
+            non_finite_output = Some((
+                instance.name.clone(),
+                format!(
+                    "XSPICE instance '{}' output port '{}' evaluated to {value} at a trial \
+                         iterate; it has no projection into the candidate solution",
                     instance.name, port.name
-                ));
-            };
+                ),
+            ));
+        };
 
         for instance in &self.xspice_instances {
             let ports = instance.ports();
@@ -2870,10 +3002,13 @@ impl CircuitData {
                 }
             }
         }
-        if let Some(line) = non_finite_output {
-            self.warn_xspice_once(line);
-        }
-        rollback
+        let refusal = match non_finite_output {
+            Some((instance, detail)) => {
+                Err(crate::device::StampError::nonfinite_trial(instance, detail))
+            }
+            None => Ok(()),
+        };
+        (rollback, refusal)
     }
 
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
@@ -4714,6 +4849,50 @@ endmodule"#;
         }
     }
 
+    /// A code model whose output is not finite at the point it was asked
+    /// about.
+    ///
+    /// The `cm_` ABI has no channel for a model to refuse a point, so this is
+    /// what a division by a control input the iterate drove to zero, or an
+    /// exponential of a control input the iterate drove too far, actually
+    /// looks like from the engine's side.
+    struct NonFiniteOutputModel {
+        ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    impl NonFiniteOutputModel {
+        fn new(port_type: PortType) -> Self {
+            Self {
+                ports: OutputModel::new(port_type).ports,
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for NonFiniteOutputModel {
+        fn name(&self) -> &str {
+            "non_finite_output_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            ctx.set_output("out", f64::NAN);
+            Ok(())
+        }
+    }
+
     struct ControlledVoltageModel {
         ports: Vec<PortSpec>,
         params: Vec<ParamSpec>,
@@ -5278,11 +5457,105 @@ endmodule"#;
         let mut rhs = vec![0.0];
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            circuit.stamp_xspice(&mut matrix, &mut rhs);
+            circuit
+                .stamp_xspice(&mut matrix, &mut rhs)
+                .expect("finite code-model outputs stamp");
         }));
 
         result.expect("out-of-range XSPICE output node must not panic");
         assert_eq!(rhs, vec![0.0]);
+    }
+
+    /// A non-finite code-model output is a rejectable iterate for the instance
+    /// that produced it, not a term quietly dropped from the Newton system.
+    ///
+    /// Before this, `stamp_xspice` returned `()`: the NaN current reached the
+    /// right-hand side and the solve carried it, and a NaN *partial* was
+    /// dropped from the Jacobian so the system solved was not the one the
+    /// model described. The classification is the same one every other device
+    /// route got in R1.14 — cut the timestep or step the sources — because a
+    /// code model's output is a function of the control inputs the solver
+    /// handed it, exactly as `ln(V(p,n)+0.1)` is inside a Verilog-A module.
+    #[test]
+    fn a_non_finite_xspice_output_refuses_the_stamp_naming_the_instance_and_port() {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.add_xspice_instance(
+            XspiceInstance::new(
+                "Anan",
+                Arc::new(NonFiniteOutputModel::new(PortType::Current)),
+                vec![PortConnection::Analog(1)],
+                &[],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("non-finite output instance should construct"),
+        );
+        circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &[0.0], AnalysisType::Transient);
+
+        let mut matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        let mut rhs = vec![0.0];
+        let error = circuit
+            .stamp_xspice(&mut matrix, &mut rhs)
+            .expect_err("a non-finite code-model output must refuse the point");
+
+        let crate::device::StampError::NonFiniteTrial(trial) = &error else {
+            panic!("a non-finite code-model output must be a rejectable trial: {error}");
+        };
+        assert_eq!(trial.instance, "Anan");
+        assert!(
+            trial.detail.contains("Anan") && trial.detail.contains("'out'"),
+            "the refusal must name the instance and the port: {}",
+            trial.detail
+        );
+        assert!(
+            rhs.iter().all(|value| value.is_finite()),
+            "the refused contribution must not have reached the right-hand side: {rhs:?}"
+        );
+    }
+
+    /// The same class on the other path a code-model output takes into the
+    /// solver: projection of an ideal voltage output into the candidate.
+    #[test]
+    fn a_non_finite_xspice_output_refuses_its_projection_into_the_candidate() {
+        let mut instance = XspiceInstance::new(
+            "Anan",
+            Arc::new(NonFiniteOutputModel::new(PortType::Voltage)),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("non-finite output instance should construct");
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("out");
+        let branch = circuit.allocate_branch_named("Anan#out");
+        instance
+            .set_output_branch(0, branch)
+            .expect("test instance should accept branch assignment");
+        circuit.add_xspice_instance(instance);
+
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
+        let num_nodes = circuit.num_nodes;
+        let (rollback, refusal) = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes);
+
+        let error = refusal.expect_err("a non-finite projected output must refuse");
+        assert!(
+            error.to_string().contains("Anan") && error.to_string().contains("'out'"),
+            "the refusal must name the instance and the port: {error}"
+        );
+        assert!(
+            rollback.is_empty(),
+            "nothing may have been written for the refused port: {rollback:?}"
+        );
+        assert!(
+            solution.iter().all(|value| value.is_finite()),
+            "the candidate must not hold a non-finite projection: {solution:?}"
+        );
     }
 
     #[test]
@@ -5363,7 +5636,9 @@ endmodule"#;
         let mut rhs = vec![0.0];
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            circuit.stamp_xspice(&mut matrix, &mut rhs);
+            circuit
+                .stamp_xspice(&mut matrix, &mut rhs)
+                .expect("finite code-model outputs stamp");
         }));
 
         result.expect("out-of-range XSPICE branch row must not panic");
@@ -5429,7 +5704,9 @@ endmodule"#;
         let mut rhs = vec![0.0; circuit.matrix_size()];
         matrix.add(in_row, in_row, 1.0);
         rhs[in_row] = 3.0;
-        circuit.stamp_xspice(&mut matrix, &mut rhs);
+        circuit
+            .stamp_xspice(&mut matrix, &mut rhs)
+            .expect("finite code-model outputs stamp");
 
         let solution = matrix.solve(&rhs).expect("linearized matrix solves");
         assert!(
@@ -5483,7 +5760,9 @@ endmodule"#;
         matrix.add(in_row, in_row, 1.0);
         rhs[in_row] = 3.0;
         matrix.add(out_row, out_row, 1.0);
-        circuit.stamp_xspice(&mut matrix, &mut rhs);
+        circuit
+            .stamp_xspice(&mut matrix, &mut rhs)
+            .expect("finite code-model outputs stamp");
 
         let solution = matrix.solve(&rhs).expect("linearized matrix solves");
         assert!(
@@ -5540,7 +5819,9 @@ endmodule"#;
         matrix.add(in0_row, in0_row, 1.0);
         matrix.add(in1_row, in1_row, 1.0);
         rhs[in1_row] = 2.0;
-        circuit.stamp_xspice(&mut matrix, &mut rhs);
+        circuit
+            .stamp_xspice(&mut matrix, &mut rhs)
+            .expect("finite code-model outputs stamp");
 
         let solution = matrix.solve(&rhs).expect("linearized matrix solves");
         assert!(
@@ -5608,7 +5889,9 @@ endmodule"#;
         matrix.add(in1_row, in1_row, 1.0);
         rhs[in0_row] = 1.0;
         rhs[in1_row] = 2.0;
-        circuit.stamp_xspice(&mut matrix, &mut rhs);
+        circuit
+            .stamp_xspice(&mut matrix, &mut rhs)
+            .expect("finite code-model outputs stamp");
 
         let solution = matrix.solve(&rhs).expect("linearized matrix solves");
         assert!(
