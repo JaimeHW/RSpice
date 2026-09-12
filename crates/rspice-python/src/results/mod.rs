@@ -89,6 +89,10 @@ use access::*;
 use document::DocumentEvidence;
 use event_state::*;
 use export_bridge::*;
+/// Which result class a refusal is being rendered for. Imported here because
+/// both transient families raise the event-only refusal and each must name its
+/// own accessor.
+use rspice_core::analysis::transient::EventTraceSurface;
 use state::*;
 
 pub(crate) use ac::{PyAcResult, PyComplexValue, validated_ac_schema};

@@ -180,6 +180,7 @@ impl PyCompressedTransientResult {
             return Err(PyErr::from(event_only_node_error(
                 channel.descriptor.owner_name(),
                 kind,
+                EventTraceSurface::Compressed,
             )));
         }
         Ok(channel)
@@ -745,7 +746,11 @@ impl PyCompressedTransientResult {
         let values = match self.node_index(&node)? {
             Some(index) => {
                 if let Some((name, kind)) = self.event_only_node(index) {
-                    return Err(PyErr::from(event_only_node_error(&name, kind)));
+                    return Err(PyErr::from(event_only_node_error(
+                        &name,
+                        kind,
+                        EventTraceSurface::Compressed,
+                    )));
                 }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
@@ -769,7 +774,11 @@ impl PyCompressedTransientResult {
         match self.node_index(&node)? {
             Some(index) => {
                 if let Some((name, kind)) = self.event_only_node(index) {
-                    return Err(PyErr::from(event_only_node_error(&name, kind)));
+                    return Err(PyErr::from(event_only_node_error(
+                        &name,
+                        kind,
+                        EventTraceSurface::Compressed,
+                    )));
                 }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
@@ -803,7 +812,11 @@ impl PyCompressedTransientResult {
         }
         let resolved = self.node_index(&node)?;
         if let Some((name, kind)) = resolved.and_then(|index| self.event_only_node(index)) {
-            return Err(PyErr::from(event_only_node_error(&name, kind)));
+            return Err(PyErr::from(event_only_node_error(
+                &name,
+                kind,
+                EventTraceSurface::Compressed,
+            )));
         }
         match resolved {
             Some(index) => self
@@ -991,6 +1004,58 @@ ainv [d] [q] inv
                 "d".to_string(),
                 rspice_core::analysis::transient::EventOnlyNetKind::Digital
             ))
+        );
+    }
+    /// The accessor this class's refusal recommends is one THIS class has.
+    ///
+    /// `TransientResult` spells the digital history `digital_events`; this
+    /// class spells it `digital_trace`. A refusal rendered for a compressed
+    /// container that named `digital_events` would send the caller to a method
+    /// the object does not have — the same defect as the `D(clk)` hint the
+    /// sentence replaced, one class over. Both halves are checked against the
+    /// published stub, scoped to this class's own block so a method that only
+    /// exists on the sibling cannot satisfy it.
+    #[test]
+    fn the_compressed_refusals_python_accessor_is_one_this_class_publishes() {
+        use rspice_core::analysis::transient::{
+            EventOnlyNetKind, EventTraceSurface, event_only_voltage_refusal,
+        };
+
+        let stub = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/rspice.pyi"))
+            .expect("the published type stub is beside the crate manifest");
+        let block = stub
+            .split_once("class CompressedTransientResult:")
+            .expect("the stub declares this class")
+            .1;
+        let block = block.split_once("\nclass ").map_or(block, |(head, _)| head);
+
+        let digital = event_only_voltage_refusal(
+            "q",
+            EventOnlyNetKind::Digital,
+            EventTraceSurface::Compressed,
+        );
+        assert!(digital.contains("digital_trace('q')"), "{digital}");
+        assert!(
+            !digital.contains("digital_events("),
+            "the sibling class's spelling must not appear here: {digital}"
+        );
+        assert!(block.contains("def digital_trace("), "{block}");
+
+        let real = event_only_voltage_refusal(
+            "watched",
+            EventOnlyNetKind::Real,
+            EventTraceSurface::Compressed,
+        );
+        assert!(real.contains("real_trace('watched')"), "{real}");
+        assert!(block.contains("def real_trace("), "{block}");
+
+        // And the run's own container really answers to the digital spelling
+        // for the net whose voltage it refuses, so the sentence is a hint a
+        // caller can act on rather than a claim about the stub alone.
+        let result = compressed_event_run();
+        assert!(
+            result.digital_trace("d").is_ok(),
+            "the digital accessor the refusal names answers for that net"
         );
     }
 }

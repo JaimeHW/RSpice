@@ -810,19 +810,23 @@ use rspice_core::analysis::harmonic_balance::{
 // and cannot be narrowed while those signatures stay public. They replace a
 // crate-private marker string that cost this ratchet nothing, which is why
 // this is growth rather than a swap.
-// 2026-09-12, +3 (4,996 -> 4,999): the event-only result namespace. A net only
+// 2026-09-12, +4 (4,996 -> 5,000): the event-only result namespace. A net only
 // the event domain resolves owns an MNA placeholder row, not a voltage, so it
-// is absent from the analog namespace and `V()` of it is refused. Three items
+// is absent from the analog namespace and `V()` of it is refused. Four items
 // carry that across a crate boundary and none can be narrowed:
 // `EventOnlyNetKind`, the domain a refusal has to name because digital and
-// real publish under different spellings; `event_only_voltage_refusal`, the one
-// producer of the sentence, which the Python bindings render for
-// `voltage_waveform`/`signal`; and `TransientResult::event_only_node_kind`, the
-// post-run predicate those bindings and the measurement resolver both decide
-// through. The two private helpers that render the sentence's carriers
-// (`column_label`, `python_accessor`) cost this ratchet nothing, and the
-// convenience boolean over the predicate was dropped rather than published.
-const MAX_PUBLIC_ITEMS: usize = 4999;
+// real publish under different spellings; `EventTraceSurface`, the result
+// CLASS it is naming, because `TransientResult` spells the digital accessor
+// `digital_events` and `CompressedTransientResult` spells it `digital_trace`,
+// and a sentence that names one on the other recommends a method that object
+// does not have; `event_only_voltage_refusal`, the one producer of the
+// sentence, which the Python bindings render for `voltage_waveform`/`signal`;
+// and `TransientResult::event_only_node_kind`, the post-run predicate those
+// bindings and the measurement resolver both decide through. The private
+// helpers that render the sentence's carriers (`column_label`,
+// `python_accessor`) cost this ratchet nothing, and the convenience boolean
+// over the predicate was dropped rather than published.
+const MAX_PUBLIC_ITEMS: usize = 5000;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

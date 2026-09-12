@@ -42,10 +42,14 @@ pub(super) enum ResultAccessError {
     /// resolves it. Telling a caller "unknown node" would send them looking
     /// for a typo. The kind travels with the name because the refusal names
     /// the carrier, and the two event domains publish under different
-    /// spellings.
+    /// spellings; the surface travels with it because the two result classes
+    /// do too — `TransientResult.digital_events` against
+    /// `CompressedTransientResult.digital_trace` — and naming one class's
+    /// method on the other is the same defect as naming no method at all.
     EventOnlyNode {
         name: String,
         kind: rspice_core::analysis::transient::EventOnlyNetKind,
+        surface: rspice_core::analysis::transient::EventTraceSurface,
     },
 }
 
@@ -82,8 +86,12 @@ impl From<ResultAccessError> for PyErr {
             ResultAccessError::UnknownBranchName { name } => {
                 crate::errors::key_error(format!("unknown branch '{name}'"))
             }
-            ResultAccessError::EventOnlyNode { name, kind } => crate::errors::key_error(
-                rspice_core::analysis::transient::event_only_voltage_refusal(&name, kind),
+            ResultAccessError::EventOnlyNode {
+                name,
+                kind,
+                surface,
+            } => crate::errors::key_error(
+                rspice_core::analysis::transient::event_only_voltage_refusal(&name, kind, surface),
             ),
         }
     }
@@ -134,10 +142,12 @@ pub(super) fn unknown_node_name_error(name: &str) -> ResultAccessError {
 pub(super) fn event_only_node_error(
     name: &str,
     kind: rspice_core::analysis::transient::EventOnlyNetKind,
+    surface: rspice_core::analysis::transient::EventTraceSurface,
 ) -> ResultAccessError {
     ResultAccessError::EventOnlyNode {
         name: name.to_string(),
         kind,
+        surface,
     }
 }
 

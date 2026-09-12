@@ -248,6 +248,7 @@ mod tests {
         let expected = ResultAccessError::EventOnlyNode {
             name: "d".to_string(),
             kind: rspice_core::analysis::transient::EventOnlyNetKind::Digital,
+            surface: EventTraceSurface::Result,
         };
 
         assert_eq!(result.event_only_probe_refusal("v(d)"), Some(expected));

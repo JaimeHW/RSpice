@@ -749,13 +749,32 @@ pub enum EventOnlyNetKind {
     Real,
 }
 
+/// Which result object a refusal is being rendered for.
+///
+/// The two Python result classes spell the digital accessor differently —
+/// `TransientResult.digital_events` against
+/// `CompressedTransientResult.digital_trace` — so a sentence that names one of
+/// them on the other recommends a method that class does not have, which is
+/// the defect this whole refusal exists to stop making. The surface travels
+/// with the refusal rather than the wording being duplicated per binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventTraceSurface {
+    /// The engine's own result, and the `TransientResult` binding over it.
+    /// This is what a deck-side refusal names: a run has no decimated
+    /// container until a caller asks for one.
+    Result,
+    /// The decimated `CompressedTransientResult` binding.
+    Compressed,
+}
+
 impl EventOnlyNetKind {
     /// The column label an exported table gives this net's event trace.
     ///
     /// `D(..)` for digital is what the flattened projection writes
     /// ([`crate::execution::transient_projection_signals`]) and what the
     /// rawfile event plot declares; `E(..)` for real is the rawfile event
-    /// plot's spelling, which the workbench event sheet reads back.
+    /// plot's spelling, which the workbench event sheet reads back. Neither
+    /// depends on which result object was asked.
     fn column_label(self, name: &str) -> String {
         match self {
             Self::Digital => format!("D({name})"),
@@ -763,12 +782,16 @@ impl EventOnlyNetKind {
         }
     }
 
-    /// The Python accessor on a transient result that returns this net's
-    /// event trace.
-    fn python_accessor(self, name: &str) -> String {
-        match self {
-            Self::Digital => format!("digital_events('{name}')"),
-            Self::Real => format!("real_trace('{name}')"),
+    /// The Python accessor that returns this net's event trace, as the class
+    /// being addressed spells it.
+    ///
+    /// Only the digital accessor differs between the two classes; both spell
+    /// the real one `real_trace`.
+    fn python_accessor(self, name: &str, surface: EventTraceSurface) -> String {
+        match (self, surface) {
+            (Self::Digital, EventTraceSurface::Result) => format!("digital_events('{name}')"),
+            (Self::Digital, EventTraceSurface::Compressed) => format!("digital_trace('{name}')"),
+            (Self::Real, _) => format!("real_trace('{name}')"),
         }
     }
 }
@@ -784,10 +807,15 @@ impl EventOnlyNetKind {
 /// as what it is, a column an export publishes and an accessor a binding
 /// answers, rather than as another operand to write on a card. One function
 /// because the namespace build, the post-run resolvers and the bindings all
-/// have to say the same thing.
-pub fn event_only_voltage_refusal(name: &str, kind: EventOnlyNetKind) -> String {
+/// have to say the same thing — `surface` picks which class's accessor is
+/// named, not which sentence is said.
+pub fn event_only_voltage_refusal(
+    name: &str,
+    kind: EventOnlyNetKind,
+    surface: EventTraceSurface,
+) -> String {
     let label = kind.column_label(name);
-    let accessor = kind.python_accessor(name);
+    let accessor = kind.python_accessor(name, surface);
     format!(
         "V({name}) names '{name}', an event-only net: it carries event values, not a voltage. \
          Its values are published as its event trace ({label}; {accessor}), not as an \

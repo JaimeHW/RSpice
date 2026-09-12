@@ -2000,7 +2000,11 @@ pub(crate) fn event_only_voltage_operand_refusal(
         operand_index,
         operand,
         row: None,
-        detail: crate::analysis::transient::event_only_voltage_refusal(node, kind),
+        detail: crate::analysis::transient::event_only_voltage_refusal(
+            node,
+            kind,
+            crate::analysis::transient::EventTraceSurface::Result,
+        ),
     }
     .to_string()
 }
@@ -6030,7 +6034,11 @@ pub fn evaluate_transient_probe_with_abort(
             // retention problem the author could fix with a `.SAVE`.
             if let Some((node, net_kind)) = event_only_probe_node(&kind, result) {
                 return Err(SimulationError::Netlist(
-                    crate::analysis::transient::event_only_voltage_refusal(&node, net_kind),
+                    crate::analysis::transient::event_only_voltage_refusal(
+                        &node,
+                        net_kind,
+                        crate::analysis::transient::EventTraceSurface::Result,
+                    ),
                 ));
             }
             Err(SimulationError::requested_signal_unavailable(
@@ -6116,9 +6124,13 @@ fn event_only_signal_miss(error: &str, result: &TransientResult) -> Option<Strin
         .or_else(|| name.trim().strip_prefix("v("))
         .and_then(|inner| inner.strip_suffix(')'))
         .unwrap_or(name.trim());
-    result
-        .event_only_node_kind(bare)
-        .map(|kind| crate::analysis::transient::event_only_voltage_refusal(bare, kind))
+    result.event_only_node_kind(bare).map(|kind| {
+        crate::analysis::transient::event_only_voltage_refusal(
+            bare,
+            kind,
+            crate::analysis::transient::EventTraceSurface::Result,
+        )
+    })
 }
 
 /// Re-evaluate the netlist's transient `.MEAS` statements over a serialized

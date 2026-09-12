@@ -1,7 +1,7 @@
 //! Native XSPICE digital code models pinned against ngspice code-model semantics.
 
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
-use rspice_core::analysis::transient::EventOnlyNetKind;
+use rspice_core::analysis::transient::{EventOnlyNetKind, EventTraceSurface};
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
@@ -4227,10 +4227,12 @@ fn the_refusals_carriers_are_spellings_the_export_surfaces_really_publish() {
     let digital = rspice_core::analysis::transient::event_only_voltage_refusal(
         "q",
         EventOnlyNetKind::Digital,
+        EventTraceSurface::Result,
     );
     let real = rspice_core::analysis::transient::event_only_voltage_refusal(
         "watched",
         EventOnlyNetKind::Real,
+        EventTraceSurface::Result,
     );
     assert!(digital.contains("D(q)"), "{digital}");
     assert!(real.contains("E(watched)"), "{real}");

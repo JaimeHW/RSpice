@@ -461,10 +461,14 @@ mod tests {
     /// who is told to read `D(clk)` writes `.PRINT TRAN D(clk)` and gets
     /// "Unknown function: D". So each half of the sentence is checked against
     /// the surface it names — the published type stub, which `stubtest` holds
-    /// to the real class, and the body the accessor resolves through.
+    /// to the real class, and the body the accessor resolves through. This is
+    /// the `TransientResult` surface; `CompressedTransientResult` spells the
+    /// digital accessor differently and has its own pin beside that class.
     #[test]
     fn the_refusals_python_accessor_is_one_this_binding_publishes() {
-        use rspice_core::analysis::transient::{EventOnlyNetKind, event_only_voltage_refusal};
+        use rspice_core::analysis::transient::{
+            EventOnlyNetKind, EventTraceSurface, event_only_voltage_refusal,
+        };
 
         let stub = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/rspice.pyi"))
             .expect("the published type stub is beside the crate manifest");
@@ -485,7 +489,8 @@ mod tests {
             fft_results: Vec::new(),
         };
 
-        let digital = event_only_voltage_refusal("clk", EventOnlyNetKind::Digital);
+        let digital =
+            event_only_voltage_refusal("clk", EventOnlyNetKind::Digital, EventTraceSurface::Result);
         assert!(digital.contains("digital_events('clk')"), "{digital}");
         assert!(stub.contains("def digital_events("), "the stub declares it");
         assert!(
@@ -493,7 +498,8 @@ mod tests {
             "and the accessor's own lookup answers for that net"
         );
 
-        let real = event_only_voltage_refusal("ctrl", EventOnlyNetKind::Real);
+        let real =
+            event_only_voltage_refusal("ctrl", EventOnlyNetKind::Real, EventTraceSurface::Result);
         assert!(real.contains("real_trace('ctrl')"), "{real}");
         assert!(stub.contains("def real_trace("), "the stub declares it");
         assert_eq!(

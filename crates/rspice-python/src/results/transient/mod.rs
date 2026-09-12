@@ -146,7 +146,11 @@ impl PyTransientResult {
         // honest answer for one. An event-only net is not that: it has no
         // voltage to retain in the first place, so it is refused by name.
         if let Some((name, kind)) = self.event_only_node(node) {
-            return Err(event_only_node_error(&name, kind));
+            return Err(event_only_node_error(
+                &name,
+                kind,
+                EventTraceSurface::Result,
+            ));
         }
         Ok(waveform.to_vec())
     }
@@ -180,7 +184,11 @@ impl PyTransientResult {
             return None;
         };
         let kind = self.inner.event_only_node_kind(&node)?;
-        Some(event_only_node_error(&node, kind))
+        Some(event_only_node_error(
+            &node,
+            kind,
+            EventTraceSurface::Result,
+        ))
     }
 
     fn checked_waveform_named(&self, name: &str) -> AccessResult<Vec<f64>> {
@@ -388,7 +396,11 @@ impl PyTransientResult {
         }
 
         if let Some((name, kind)) = self.event_only_node(node) {
-            return Err(PyErr::from(event_only_node_error(&name, kind)));
+            return Err(PyErr::from(event_only_node_error(
+                &name,
+                kind,
+                EventTraceSurface::Result,
+            )));
         }
         self.inner
             .try_voltage_at(node, time_index)
