@@ -147,6 +147,23 @@ const MAX_INSTANCE_DEEP_COPIES: u64 = 13_800;
 /// not a formality.
 const MAX_EVENT_WORLD_DEEP_COPIES: u64 = 1_800;
 
+/// Ceiling on whole-circuit nonlinear device images captured over the run.
+///
+/// Measured at 38. This deck holds no nonlinear native device at all — it is
+/// 72 NAND code models, a supply and its loads — so every image the engine
+/// takes of the device tables here is an image of nothing that moved; what is
+/// left is the transient stepper's own, taken once at the top and refreshed in
+/// place thereafter, and the step-rejection captures.
+///
+/// The regression this exists for is the XSPICE trial stamp undoing its
+/// code-model evaluation with a clone of every device family in the circuit —
+/// capacitors, inductors, diodes, BJTs, each MOSFET table, the behavioural
+/// sources, the Verilog-A devices — rather than with the three XSPICE cells it
+/// had actually written. That is one image per Newton iteration of every step
+/// of every deck carrying a code model, and it took this deck to 15,110: a
+/// factor of 400, and on a deck with real devices in it a copy of all of them.
+const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 40;
+
 /// How far under its ceiling a count may sit before the ceiling is considered
 /// stale and must be lowered, as a percentage of the ceiling.
 ///
@@ -180,6 +197,10 @@ fn measure() -> XspiceSettleCounts {
          counters and the work are no longer on the same thread, not that the \
          work was free"
     );
+
+    // Printed so that re-measuring a ceiling is a `--nocapture` run rather
+    // than a deliberately failing assertion read for its message.
+    eprintln!("pinned settle-cost deck: {counts:?}");
 
     counts
 }
@@ -237,6 +258,12 @@ fn settle_cost_stays_within_its_ceilings() {
         counts.event_world_deep_copies(),
         MAX_EVENT_WORLD_DEEP_COPIES,
         "MAX_EVENT_WORLD_DEEP_COPIES",
+    );
+    assert_ratchet(
+        "whole-circuit device state snapshots",
+        counts.device_state_snapshots,
+        MAX_DEVICE_STATE_SNAPSHOTS,
+        "MAX_DEVICE_STATE_SNAPSHOTS",
     );
 }
 

@@ -74,6 +74,34 @@ impl XspiceAcceptanceRollback {
     }
 }
 
+/// Everything one XSPICE trial evaluation can write, and nothing else.
+///
+/// A Newton trial stamp evaluates code models at a point the solver may
+/// discard, so what it wrote has to be put back. The set it writes is this
+/// triple: the instances and their contexts, the six resolved-value maps, and
+/// the event scheduler. Each of the three is copy-on-write, so capturing them
+/// is three reference-count bumps and costs a real copy only where the trial
+/// actually writes.
+///
+/// The trial used to undo itself with a whole-circuit device image
+/// ([`CircuitData::nonlinear_state_snapshot`]) instead — every capacitor,
+/// inductor, diode, BJT, MOSFET table, behavioural source and Verilog-A
+/// device, cloned outright once per Newton iteration of every step of every
+/// deck holding a code model, to restore three fields none of those devices
+/// appear in. The trial cannot reach them: it early-returns unless XSPICE
+/// evaluation is independent of the shared event nets, and the only thing it
+/// calls between capture and restore is the code-model evaluation and the
+/// XSPICE matrix stamp.
+///
+/// `xspice_evaluation_error` is deliberately not part of this: the image the
+/// device snapshot restored did not carry it either, so an evaluation failure
+/// inside a trial stays reported rather than being swallowed with the state.
+pub(crate) struct XspiceTrialState {
+    instances: Vec<SharedXspiceInstance>,
+    values: SharedXspiceEventValues,
+    queue: SharedXspiceEventQueue,
+}
+
 /// Accepted Verilog-A state carried between circuits rebuilt for adjacent DC
 /// sweep points.
 ///
@@ -1306,7 +1334,7 @@ impl CircuitData {
             coefficients,
             xyce_one_step_order2,
         } = companion;
-        let snapshot = self.nonlinear_state_snapshot();
+        let snapshot = self.capture_xspice_trial_state();
         if let Err(e) = self.try_evaluate_xspice_with_analysis_phase_and_coefficients(
             time,
             timestep,
@@ -1321,7 +1349,7 @@ impl CircuitData {
             log::warn!("XSPICE evaluation error: {e}");
         }
         self.stamp_xspice(matrix, rhs);
-        self.restore_nonlinear_state(snapshot);
+        self.restore_xspice_trial_state(snapshot);
     }
 
     /// Evaluate XSPICE for an accepted transient timepoint without advancing
@@ -1346,6 +1374,22 @@ impl CircuitData {
             companion,
             resources,
         )
+    }
+
+    /// Capture the state a trial evaluation can write. See [`XspiceTrialState`].
+    pub(crate) fn capture_xspice_trial_state(&self) -> XspiceTrialState {
+        XspiceTrialState {
+            instances: self.xspice_instances.clone(),
+            values: self.xspice_event_values.clone(),
+            queue: self.xspice_event_queue.clone(),
+        }
+    }
+
+    /// Put back what a trial evaluation wrote.
+    pub(crate) fn restore_xspice_trial_state(&mut self, trial: XspiceTrialState) {
+        self.xspice_instances = trial.instances;
+        self.xspice_event_values = trial.values;
+        self.xspice_event_queue = trial.queue;
     }
 
     pub(crate) fn capture_xspice_acceptance(&self) -> XspiceAcceptanceRollback {
