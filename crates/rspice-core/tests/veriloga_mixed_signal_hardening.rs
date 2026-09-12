@@ -2600,6 +2600,81 @@ fn the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing() {
     );
 }
 
+/// **Property 5, case d″.** The engine lands a feedback-carried crossing once
+/// instead of bisecting into it.
+///
+/// The same deck as the case above, read for its accepted *timeline* rather
+/// than for its reactions. The refinement lands the step on `ca`'s root at
+/// 10.6 ns, the `posedge ca` process writes `gain`, and the Newton loop feeds
+/// that back before the candidate is inspected — so `cb` is found crossing on
+/// the landing itself. Interpolated over the whole step, that crossing dates a
+/// fifth of the way in, and the refinement then asked the controller for a
+/// root *behind* the point it had just reached. The controller re-solved short
+/// of the crossing, accepted that point, found the crossing again from the
+/// nearer start, and walked in.
+///
+/// Measured on the tip and at R2.2's own landing (de5d125f6), the identical
+/// ladder: 59 accepted timepoints inside one nanosecond of the crossing —
+/// twenty-four rungs converging on 1.06e-8 s down to the solver's 1e-20 s
+/// floor, then a geometric expansion back out of it. What is pinned here is
+/// that the crossing costs a handful of accepted points and that none of them
+/// is a bisection rung; the tick assertions of the case above pin that the
+/// dating the fix rests on is still the one the deck sees.
+#[test]
+fn a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into() {
+    /// The instant `ca`'s ramp reaches half the supply.
+    const CROSSING: f64 = 10.6e-9;
+
+    let model = ModelFile::new("feedback_deck", FEEDBACK_DECK);
+    let deck = format!(
+        "* a crossing carried across by the module's own digital feedback\n\
+         vramp ca 0 pwl(0 0 21.2n 3.3)\n\
+         x1 p 0 ca q ya yb feedback_deck\n\
+         rfb p q 1k\n\
+         rq q 0 1meg\n\
+         rya ya 0 10k\n\
+         ryb yb 0 10k\n\
+         .va \"{}\" feedback_deck\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    let accepted: Vec<f64> = result
+        .time
+        .iter()
+        .copied()
+        .filter(|time| *time > 9.5e-9 && *time < 11.5e-9)
+        .collect();
+    println!("accepted timepoints around the crossing: {accepted:?}");
+
+    assert!(
+        accepted.len() <= 8,
+        "one crossing costs a handful of accepted points, not a ladder: {} of them, \
+         {accepted:?}",
+        accepted.len()
+    );
+    assert!(
+        accepted
+            .iter()
+            .any(|time| (time - CROSSING).abs() <= 1.0e-20),
+        "the crossing itself must be one of the accepted points: {accepted:?}"
+    );
+    // A rung is what a bisection leaves behind: two accepted points a fraction
+    // of the interval apart, each one nearer the same root. The approach and
+    // the restart after the landing are both whole steps of the controller.
+    let closest = accepted
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        closest > 1.0e-12,
+        "the nearest two accepted points are {closest:e} s apart, which is a \
+         bisection rung rather than a step: {accepted:?}"
+    );
+}
+
 /// A five-nanosecond HDL clock, declared in nanoseconds.
 const CEIL_CLOCK: &str = r#"
 `timescale 1ns/1ps
