@@ -296,7 +296,12 @@ use super::*;
 // Version 87 validates and retains nature inheritance and physical declaration closures.
 // Version 88 retains indirect-equation absolute tolerances.
 // Version 89 preserves real-valued last_crossing results and runtime direction operands.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 89;
+// Version 90 binds analog block-local declarations that shadow a module integer or
+// real signal to the local, and retains per-site ddt tangent history. It also
+// drops the persisted `Instruction::DdtJacobian` and `CfgValueKind::DdtScale`,
+// so a record that carries either no longer deserializes at all and is
+// discarded as unreadable rather than at the version check.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 90;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
