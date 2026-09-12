@@ -28,21 +28,39 @@ VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     ),
 }
 
-# The two routes a Verilog-A module can reach the solver through, and the step
-# that runs the gated core suites on each. Both lower the same modules, so a
+# The two routes a Verilog-A module can reach the solver through, and the steps
+# that run the gated core suites on each. Both lower the same modules, so a
 # suite passing on one says nothing about the other.
+#
+# Each route takes two cargo invocations, not one. The tri-family and
+# generated-route suites need `veriloga-model-diode-cmc` compiled in, and that
+# feature reroutes cards the other suites assert about through the generated
+# device, so the two sets cannot share a feature list. A gated file may be
+# named by either invocation; what is checked is the union.
 VERILOGA_GATED_CORE_TEST_STEPS = (
     (
         "test-linux-veriloga",
-        "Test Verilog-A-gated core suites through the bytecode interpreter",
         "veriloga",
+        (
+            "Test Verilog-A-gated core suites through the bytecode interpreter",
+            "Test the tri-family and generated-route suites through the bytecode interpreter",
+        ),
     ),
     (
         "test-linux-native",
-        "Test Verilog-A-gated core suites through the native JIT (Linux x64)",
         "veriloga-native",
+        (
+            "Test Verilog-A-gated core suites through the native JIT (Linux x64)",
+            "Test the tri-family and generated-route suites through the native JIT (Linux x64)",
+        ),
     ),
 )
+
+# `#[cfg(...)]` and `#![cfg(...)]`, but deliberately NOT the `cfg!(...)` macro:
+# `qualification_baseline` records `cfg!(feature = "veriloga")` as a fact inside
+# the baseline document and is not gated by it, so a scan that read the macro
+# would demand a lane for a suite the feature makes fail.
+_CFG_ATTRIBUTE = re.compile(r"#!?\[\s*cfg(?:_attr)?\s*\(")
 
 
 def read_text(relative_path: str) -> str:
@@ -65,6 +83,64 @@ def workflow_step_body(job: str, name: str) -> str:
     return body[1].split("- name:", 1)[0]
 
 
+def folded_run_command(step: str) -> str:
+    """The command in a step's `run: >-` scalar, without what follows the block.
+
+    The block ends at a blank line, a dedent, or a comment. Splitting on the
+    next `- name:` instead leaves any comment written above the following step
+    inside the text, and one apostrophe in such a comment is enough to make
+    `shlex` report an unterminated quote over the whole command.
+    """
+    tail = step.split("run: >-", 1)[1].split("\n")[1:]
+    indent = None
+    collected = []
+    for line in tail:
+        if not line.strip() or line.lstrip().startswith("#"):
+            break
+        width = len(line) - len(line.lstrip())
+        if indent is None:
+            indent = width
+        if width < indent:
+            break
+        collected.append(line.strip())
+    return " ".join(collected)
+
+
+def cfg_predicates(source: str) -> list[str]:
+    """The predicate text of every `cfg` attribute in a Rust source file.
+
+    Parentheses are balanced rather than matched with a regex, because the
+    gates that matter are nested: `generated_route_parity` is gated on
+    `all(feature = "veriloga", feature = "veriloga-model-diode-cmc")`, and a
+    scan that only recognised the flat spelling would have missed it.
+    """
+    predicates = []
+    for match in _CFG_ATTRIBUTE.finditer(source):
+        depth = 1
+        index = match.end()
+        while index < len(source) and depth:
+            if source[index] == "(":
+                depth += 1
+            elif source[index] == ")":
+                depth -= 1
+            index += 1
+        predicates.append(source[match.end() : index - 1])
+    return predicates
+
+
+def targets_gated_on(directory: Path, feature: str) -> set[str]:
+    """Integration targets in `directory` that a `cfg` attribute gates on `feature`."""
+    wanted = re.compile(r'feature\s*=\s*"%s"' % re.escape(feature))
+    return {
+        path.stem
+        for path in sorted(directory.glob("*.rs"))
+        if any(
+            wanted.search(predicate)
+            for predicate in cfg_predicates(path.read_text(encoding="utf-8"))
+        )
+    }
+
+
 def veriloga_gated_core_test_targets() -> set[str]:
     """Every rspice-core integration target `--features veriloga` switches on.
 
@@ -73,12 +149,19 @@ def veriloga_gated_core_test_targets() -> set[str]:
     default feature set but runs a shorter suite there, which is exactly the
     silent coverage hole this scan exists to close.
     """
-    directory = ROOT / "crates" / "rspice-core" / "tests"
-    return {
-        path.stem
-        for path in sorted(directory.glob("*.rs"))
-        if 'cfg(feature = "veriloga")' in path.read_text(encoding="utf-8")
-    }
+    return targets_gated_on(ROOT / "crates" / "rspice-core" / "tests", "veriloga")
+
+
+def contract_gated_veriloga_test_targets() -> set[str]:
+    """rspice-veriloga integration targets gated on the contract-test feature.
+
+    These exist only under `native-bytecode-contract-tests`, so no default
+    `cargo test -p rspice-veriloga` links them at all.
+    """
+    return targets_gated_on(
+        ROOT / "crates" / "rspice-veriloga" / "tests",
+        "native-bytecode-contract-tests",
+    )
 
 
 def cargo_tree_for_target(package: str, target: str) -> str:
@@ -722,6 +805,7 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("connect_module_insertion", gated)
         self.assertIn("transient_checkpoint", gated)
+        self.assertIn("generated_route_parity", gated)
 
         for name, reason in VERILOGA_GATED_CORE_TEST_EXCLUSIONS.items():
             self.assertIn(
@@ -732,52 +816,102 @@ class CiConfigurationTests(unittest.TestCase):
             self.assertGreater(len(reason), 40, f"{name} needs a written reason")
         expected = gated - set(VERILOGA_GATED_CORE_TEST_EXCLUSIONS)
 
-        for job_name, step_name, feature in VERILOGA_GATED_CORE_TEST_STEPS:
-            with self.subTest(step=step_name):
-                job = workflow_job_body(workflow, job_name)
-                step = workflow_step_body(job, step_name)
-                command = shlex.split(step.split("run: >-", 1)[1])
+        for job_name, feature, step_names in VERILOGA_GATED_CORE_TEST_STEPS:
+            job = workflow_job_body(workflow, job_name)
+            covered: list[str] = []
+            for step_name in step_names:
+                with self.subTest(step=step_name):
+                    step = workflow_step_body(job, step_name)
+                    command = shlex.split(folded_run_command(step))
 
-                self.assertEqual(
-                    command[:5],
-                    ["cargo", "test", "--locked", "-p", "rspice-core"],
-                )
-                features = command[command.index("--features") + 1].split(",")
-                self.assertIn(
-                    feature,
-                    features,
-                    f"{step_name} must select {feature}, got {features}",
-                )
-                # One broken suite must not hide the findings of the
-                # independent ones behind it.
-                self.assertIn("--no-fail-fast", command)
+                    self.assertEqual(
+                        command[:5],
+                        ["cargo", "test", "--locked", "-p", "rspice-core"],
+                    )
+                    features = command[command.index("--features") + 1].split(",")
+                    self.assertIn(
+                        feature,
+                        features,
+                        f"{step_name} must select {feature}, got {features}",
+                    )
+                    # One broken suite must not hide the findings of the
+                    # independent ones behind it.
+                    self.assertIn("--no-fail-fast", command)
+                    covered.extend(
+                        command[index + 1]
+                        for index, word in enumerate(command)
+                        if word == "--test"
+                    )
 
-                targets = [
-                    command[index + 1]
-                    for index, word in enumerate(command)
-                    if word == "--test"
-                ]
+            with self.subTest(route=feature):
                 self.assertEqual(
-                    len(targets),
-                    len(set(targets)),
-                    f"{step_name} names a target twice: {sorted(targets)}",
+                    len(covered),
+                    len(set(covered)),
+                    f"{job_name} compiles a target twice: {sorted(covered)}",
                 )
                 self.assertEqual(
-                    set(targets),
+                    set(covered),
                     expected,
-                    f"{step_name} does not run every Verilog-A-gated core "
-                    f"suite; missing={sorted(expected - set(targets))}, "
-                    f"unexpected={sorted(set(targets) - expected)}",
+                    f"{job_name} does not run every Verilog-A-gated core "
+                    f"suite; missing={sorted(expected - set(covered))}, "
+                    f"unexpected={sorted(set(covered) - expected)}",
                 )
 
         # The native lane serializes its harness because the JIT maps
         # executable pages per process; the interpreter lane has no such
         # constraint and pays nothing for parallelism.
-        native = workflow_step_body(
-            workflow_job_body(workflow, "test-linux-native"),
-            VERILOGA_GATED_CORE_TEST_STEPS[1][1],
+        native_job = workflow_job_body(workflow, "test-linux-native")
+        for step_name in VERILOGA_GATED_CORE_TEST_STEPS[1][2]:
+            step = workflow_step_body(native_job, step_name)
+            self.assertIn("-- --test-threads=1", " ".join(step.split()), step_name)
+
+    def test_contract_gated_veriloga_suites_have_an_executing_lane(self) -> None:
+        """A suite that exists only under a feature needs a step naming it.
+
+        `native-bytecode-contract-tests` reaches constructors production native
+        callers cannot use, so these targets link in no default build and no
+        `--all-targets` lint reaches them either. `route_parity` -- which holds
+        the bytecode and x64 lowerings of one model to each other -- landed with
+        no lane at all, which is the same shape of hole as the `veriloga`-gated
+        core suites above.
+        """
+        import shlex
+
+        workflow = read_text(".github/workflows/ci.yml")
+        gated = contract_gated_veriloga_test_targets()
+        self.assertEqual(
+            gated,
+            {"native_contract", "route_parity"},
+            "the contract-gated target scan found an unexpected set",
         )
-        self.assertIn("-- --test-threads=1", " ".join(native.split()))
+
+        named: set[str] = set()
+        for line in workflow.splitlines():
+            stripped = line.strip()
+            if "cargo test" not in stripped or "-p rspice-veriloga" not in stripped:
+                continue
+            text = stripped.split("run:", 1)[1] if stripped.startswith("run:") else stripped
+            try:
+                command = shlex.split(text)
+            except ValueError:
+                continue
+            if "--features" not in command:
+                continue
+            if "native-bytecode-contract-tests" not in command[
+                command.index("--features") + 1
+            ].split(","):
+                continue
+            named.update(
+                command[index + 1]
+                for index, word in enumerate(command)
+                if word == "--test"
+            )
+
+        self.assertEqual(
+            gated - named,
+            set(),
+            f"contract-gated suites that no step runs: {sorted(gated - named)}",
+        )
 
     def test_digital_verilog_suites_are_named_in_the_fast_tier(self) -> None:
         """Every digital Verilog conformance target runs on every push.
