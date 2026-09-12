@@ -3033,6 +3033,137 @@ fn a_sub_minimum_schedule_is_attributed_among_several_mixed_instances() {
     );
 }
 
+/// A module that does nothing but arm a code-model ring, once, at 1 ns.
+///
+/// Digital-only and quiet after that single activation: its whole job is to
+/// put an HDL event net in the deck for a code model to read, which is what
+/// couples the two event domains, and to give the ring below a starting edge.
+/// A gate's first output is emitted with zero delay (XSPICE dates it at time
+/// zero), so a ring armed at time zero would be a delta-cycle loop rather than
+/// a schedule; one ns of quiet analog time first is what makes it a schedule.
+const RING_ENABLE: &str = r#"
+`timescale 1ns/1ps
+module ring_enable(en); output en; reg en; initial begin en = 1'b0; #1 en = 1'b1; end endmodule
+"#;
+
+/// A code-model ring at the tightest cadence XSPICE permits, beside a quiet
+/// analog circuit.
+///
+/// `d_xor` with one input tied to its own output is a one-gate oscillator: once
+/// `en` is high the output is the inverse of the net it drives, so every event
+/// it publishes schedules the next one a propagation delay later, for as long
+/// as the analysis runs. That delay is the *smallest an XSPICE code model can
+/// ask for*: `rise_delay`/`fall_delay` are clamped to ngspice's official lower
+/// limit of 1 ps (`OFFICIAL_DIGITAL_DELAY_MIN`), so a picosecond is the finest
+/// schedule this path can produce at all.
+///
+/// Which makes the `.tran` line the other half of the fixture. A schedule is
+/// under the solver's minimum step only when that minimum is coarser than it,
+/// and the minimum is `1e-11 * tmax` — so a one-second maximum timestep, six
+/// orders of magnitude above `tstop`, is what puts a 1 ps cadence a tenth of a
+/// step wide. That is the same shape [`free_running_deck`] documents for the
+/// mixed fixtures and it is not a user-facing configuration; it is the region
+/// the sub-minimum activation bound exists to end.
+fn code_model_ring_deck(enable: &ModelFile, tstop: f64, max_step: f64) -> String {
+    format!(
+        "* a code-model ring at the official gate-delay floor, coupled to a mixed module\n\
+         xenable en ring_enable\n\
+         aring [en rb] rb ringxor\n\
+         .model ringxor d_xor (rise_delay=1p fall_delay=1p)\n\
+         rload load 0 1k\n\
+         cload load 0 10p\n\
+         .va \"{}\" ring_enable\n\
+         .tran {:e} {tstop:e} 0 {max_step:e}\n\
+         .end\n",
+        enable.deck_path(),
+        tstop / 10.0,
+    )
+}
+
+/// **Property 5, case e.** What actually happens to a coupled code-model
+/// schedule finer than the solver's minimum step, and why the schedule bound
+/// is not what it meets.
+///
+/// The sub-minimum activation bound now classifies a shared code-model event
+/// alongside a mixed one — `CircuitData::veriloga_scheduled_activation` folds
+/// the XSPICE queue whenever the deck has coupled event nets, and names the
+/// code-model instance the kernel says queued it — because
+/// `accepted_veriloga_event_time` lands both on the same contract and a run
+/// pinned at the floor by one is the same fact about the same stepper.
+///
+/// The classification is nonetheless unreachable from a deck today, and this
+/// fixture is what says so. Two contracts disagree about an activation inside
+/// the floor:
+///
+/// * `landed_veriloga_event_time` coalesces it onto `accepted + hard_min`,
+///   deliberately — there is no analog instant between the accepted point and
+///   it — which steps the solver *past* it;
+/// * the coupled Active participant
+///   (`circuit::external_models::coupled`, `settle_active`) refuses any queued
+///   XSPICE event earlier than the physical time its wave opens at, with no
+///   reachability tolerance at all.
+///
+/// So the first event the ring schedules — one picosecond after the enable,
+/// a tenth of the ten-picosecond minimum this `.tran` line leaves the solver —
+/// ends the run at the *second* accepted point, long before any schedule is
+/// counted. The mixed half of the same engine already has the rule the XSPICE
+/// half is missing: `SharedDigitalRuntime::activation_was_reachable` refuses
+/// only an activation at least one hard minimum after the accepted time, and
+/// documents that refusing a closer one "would end a run over a schedule the
+/// analog side is simply too coarse to resolve".
+///
+/// The assertions below are therefore about the *interval*, not the wording:
+/// the refused event is one the stepper had no legal interval to, which is
+/// what makes the refusal wrong. When that tolerance is carried across, this
+/// fixture's subject becomes the schedule bound naming `aring` after 16384
+/// points — re-point it then; the deck is already the right deck.
+#[test]
+fn a_coupled_code_model_schedule_inside_the_floor_is_refused_before_it_is_classified() {
+    const TSTOP: f64 = 1.0e-6;
+    const MAX_STEP: f64 = 1.0;
+    /// `delmin = 1e-11 * tmax`, restated because the controller's floor is not
+    /// observable from a result.
+    const SOLVER_FLOOR: f64 = MAX_STEP * 1.0e-11;
+
+    let enable = ModelFile::new("ring_enable", RING_ENABLE);
+    let error = error_for(
+        &code_model_ring_deck(&enable, TSTOP, MAX_STEP),
+        TSTOP,
+        MAX_STEP,
+    );
+    let lowered = error.to_lowercase();
+    assert!(
+        lowered.contains("missed xspice breakpoint"),
+        "the coupled participant is what ends this run today: {error}"
+    );
+    assert!(
+        !lowered.contains("ill-conditioned") && !lowered.contains("at or closer together"),
+        "neither the livelock detector nor the schedule bound is reached: {error}"
+    );
+
+    let number_after = |marker: &str| -> f64 {
+        error
+            .split(marker)
+            .nth(1)
+            .and_then(|rest| rest.split('s').next())
+            .and_then(|number| number.trim().parse().ok())
+            .unwrap_or_else(|| panic!("no time after '{marker}' in {error}"))
+    };
+    let due = number_after("breakpoint at ");
+    let physical = number_after("Active work at ");
+    assert!(
+        physical > due,
+        "the refusal is about an event the solver stepped past, {due:e}s against {physical:e}s"
+    );
+    assert!(
+        physical - due < SOLVER_FLOOR,
+        "the refused event is {:e}s behind the wave, which is inside the {SOLVER_FLOOR:e}s \
+         minimum step: the stepper had no legal interval to it and coalesced it exactly as \
+         the landing contract says, so refusing it is the defect this fixture pins",
+        physical - due
+    );
+}
+
 //=============================================================================
 // 6 — a clock on the boundary is a schedule, not a loop
 //=============================================================================
