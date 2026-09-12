@@ -167,6 +167,30 @@ pub(crate) fn foundation_subcircuits() -> &'static [SubcircuitDef] {
     })
 }
 
+/// Instance masters the build-time generated Verilog-A catalog claims, keyed
+/// by their canonical (upper-case) spelling and carrying the spelling the
+/// catalog authored.
+///
+/// The generated registry is an engine-neutral catalog. Reading its names
+/// here keeps master-namespace questions below the device adapter layer
+/// instead of reaching upward through it. Indexed once, because hierarchy
+/// flattening asks per netlist and so does the shadowing check.
+pub(crate) fn generated_builtin_masters() -> &'static std::collections::HashMap<String, &'static str>
+{
+    static MASTERS: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> =
+        std::sync::OnceLock::new();
+    MASTERS.get_or_init(|| {
+        #[cfg(feature = "veriloga-builtins-base")]
+        let masters = rspice_veriloga_models::registry::builtin_names()
+            .iter()
+            .map(|name| (name.to_ascii_uppercase(), *name))
+            .collect();
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let masters = std::collections::HashMap::new();
+        masters
+    })
+}
+
 /// Exact physical location in one netlist source.
 ///
 /// In-memory parses have no path. File-backed parses retain the top-level or

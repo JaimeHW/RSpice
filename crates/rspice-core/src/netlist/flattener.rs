@@ -938,15 +938,7 @@ impl<'a> Flattener<'a> {
         for include in &netlist.veriloga_includes {
             names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
         }
-        #[cfg(feature = "veriloga-builtins-base")]
-        {
-            // The generated registry is an engine-neutral catalog. Reading
-            // its names directly keeps netlist flattening below the device
-            // adapter layer instead of reaching upward through it.
-            for name in rspice_veriloga_models::registry::builtin_names() {
-                names.insert(name.to_ascii_uppercase());
-            }
-        }
+        names.extend(super::generated_builtin_masters().keys().cloned());
         names
     }
 
