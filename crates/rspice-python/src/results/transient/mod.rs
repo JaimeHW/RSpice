@@ -138,10 +138,25 @@ impl PyTransientResult {
             return Ok(vec![0.0; self.inner.num_points()]);
         }
 
-        self.inner
+        let waveform = self
+            .inner
             .try_voltage_waveform(node)
-            .map(|waveform| waveform.to_vec())
-            .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))
+            .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))?;
+        // An empty column is an unretained channel, and an empty array is the
+        // honest answer for one. A digital-only net is not that: it has no
+        // voltage to retain in the first place, so it is refused by name.
+        if let Some(name) = self.digital_only_node_name(node) {
+            return Err(digital_only_node_error(&name));
+        }
+        Ok(waveform.to_vec())
+    }
+
+    /// The node's name when the result carries it as logic and not a voltage.
+    fn digital_only_node_name(&self, node: usize) -> Option<String> {
+        let name = self.inner.node_names.get(node.checked_sub(1)?)?;
+        self.inner
+            .is_digital_only_node_named(name)
+            .then(|| name.clone())
     }
 
     fn checked_waveform_named(&self, name: &str) -> AccessResult<Vec<f64>> {
@@ -208,7 +223,9 @@ impl PyTransientResult {
     ///
     /// Raises:
     ///     IndexError: If the node index is out of range
-    ///     KeyError: If the node name does not exist
+    ///     KeyError: If the node name does not exist, or names a digital-only
+    ///         net, which carries four-state logic rather than a voltage and
+    ///         is read through `digital_trace` instead
     ///
     /// Example:
     ///     >>> v_out = result.voltage_waveform(2)
@@ -335,12 +352,17 @@ impl PyTransientResult {
     ///
     /// Raises:
     ///     IndexError: If the node or time index is out of range
+    ///     KeyError: If the node is a digital-only net, which carries
+    ///         four-state logic rather than a voltage
     pub fn voltage_at(&self, node: usize, time_index: usize) -> PyResult<f64> {
         self.checked_time_index(time_index).map_err(PyErr::from)?;
         if node == 0 {
             return Ok(0.0);
         }
 
+        if let Some(name) = self.digital_only_node_name(node) {
+            return Err(PyErr::from(digital_only_node_error(&name)));
+        }
         self.inner
             .try_voltage_at(node, time_index)
             .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))

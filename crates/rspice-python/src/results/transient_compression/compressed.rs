@@ -77,6 +77,25 @@ impl PyCompressedTransientResult {
         }
     }
 
+    /// The node's name when the container carries it as logic, not a voltage.
+    ///
+    /// The channel stays in the inventory because that inventory is this
+    /// container's node namespace, so the pair "unretained voltage plus a
+    /// digital trace under the same name" is what identifies the net — the
+    /// same test the uncompressed result uses.
+    fn digital_only_node_name(&self, index: usize) -> Option<String> {
+        let channel = self.inner.node_voltage_channel(index)?;
+        if channel.availability != rspice_core::engine::TransientChannelAvailability::NotProjected {
+            return None;
+        }
+        let name = channel.descriptor.owner_name();
+        self.inner
+            .digital_traces
+            .iter()
+            .any(|trace| trace.node_name.eq_ignore_ascii_case(name))
+            .then(|| name.to_string())
+    }
+
     /// Dense retained samples of one channel, refusing to invent a number for
     /// a sample the producing run recorded as absent.
     fn dense_channel_values(
@@ -660,6 +679,9 @@ impl PyCompressedTransientResult {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let values = match self.node_index(&node)? {
             Some(index) => {
+                if let Some(name) = self.digital_only_node_name(index) {
+                    return Err(PyErr::from(digital_only_node_error(&name)));
+                }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
                 })?;
@@ -681,6 +703,9 @@ impl PyCompressedTransientResult {
         }
         match self.node_index(&node)? {
             Some(index) => {
+                if let Some(name) = self.digital_only_node_name(index) {
+                    return Err(PyErr::from(digital_only_node_error(&name)));
+                }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
                 })?;
@@ -711,7 +736,11 @@ impl PyCompressedTransientResult {
         if num_points < 2 {
             return Err(crate::errors::value_error("num_points must be at least 2"));
         }
-        match self.node_index(&node)? {
+        let resolved = self.node_index(&node)?;
+        if let Some(name) = resolved.and_then(|index| self.digital_only_node_name(index)) {
+            return Err(PyErr::from(digital_only_node_error(&name)));
+        }
+        match resolved {
             Some(index) => self
                 .inner
                 .node_voltage_channel(index)

@@ -35,6 +35,15 @@ pub(super) enum ResultAccessError {
     UnknownBranchName {
         name: String,
     },
+    /// A named net the result carries as logic, asked for as a voltage.
+    ///
+    /// Distinct from [`Self::UnknownNodeName`] because the net is not unknown:
+    /// it exists, it was recorded, and it was recorded in the only domain that
+    /// resolves it. Telling a caller "unknown node" would send them looking
+    /// for a typo.
+    DigitalOnlyNode {
+        name: String,
+    },
 }
 
 impl From<ResultAccessError> for PyErr {
@@ -70,6 +79,9 @@ impl From<ResultAccessError> for PyErr {
             ResultAccessError::UnknownBranchName { name } => {
                 crate::errors::key_error(format!("unknown branch '{name}'"))
             }
+            ResultAccessError::DigitalOnlyNode { name } => crate::errors::key_error(
+                rspice_core::analysis::transient::digital_only_voltage_refusal(&name),
+            ),
         }
     }
 }
@@ -112,6 +124,12 @@ pub(super) fn invalid_freq_index_error(index: usize, available_points: usize) ->
 
 pub(super) fn unknown_node_name_error(name: &str) -> ResultAccessError {
     ResultAccessError::UnknownNodeName {
+        name: name.to_string(),
+    }
+}
+
+pub(super) fn digital_only_node_error(name: &str) -> ResultAccessError {
+    ResultAccessError::DigitalOnlyNode {
         name: name.to_string(),
     }
 }
