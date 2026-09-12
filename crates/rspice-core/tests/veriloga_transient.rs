@@ -1415,11 +1415,29 @@ endmodule
     }
     #[cfg(not(feature = "veriloga-native"))]
     {
+        // The seam reports through one typed refusal, so this branches on the
+        // kind rather than on the word "Verilog-A": the prose no longer has to
+        // repeat the subject the rendering already prints, and a rename of it
+        // is not a regression. A compiled artifact whose dependent default the
+        // bytecode cannot evaluate is the engine failing a binding step it
+        // expected to complete — there is no deck edit that fixes it — so the
+        // kind is `Internal`, and the runtime's own reason still rides in the
+        // detail where a bug report can read it.
         let err = result.expect_err("dependent default runtime error must be reported");
         let text = err.to_string();
+        let rspice_core::SimulationError::Elaboration(refusal) = &err else {
+            panic!("the seam must report a typed elaboration error, got: {text}");
+        };
+        assert_eq!(
+            refusal.kind,
+            rspice_core::ElaborationErrorKind::Internal,
+            "a dependent default the compiled artifact cannot evaluate is an engine \
+             failure, not a deck edit: {refusal:?}"
+        );
+        assert_eq!(refusal.instance.as_deref(), Some("XBAD"));
         assert!(
-            text.contains("Verilog-A") && text.contains("parameter"),
-            "diagnostic should identify the Verilog-A parameter default failure, got: {text}"
+            text.contains("missing parameter slot"),
+            "the refusal dropped the runtime's own reason: {text}"
         );
     }
 }
