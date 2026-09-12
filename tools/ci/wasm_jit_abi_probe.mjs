@@ -1,6 +1,6 @@
-// Independent ABI 14 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 15 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 14;
+const ABI = 15;
 const HEADER_BYTES = 168;
 const FRAME_BYTES = 8360; // Header plus the bounded 1,024-element operand region.
 const STACK_BYTES = 8368; // Preserve the WASM stack's 16-byte alignment.
@@ -77,9 +77,12 @@ export async function qualifyAbi(wasm) {
     return instance.exports.helper(frame, opcode, terms, 0, 0n,
       ...Array.from({ length: 5 }, (_, i) => operands[i] ?? 0));
   }
-  function invokeSlice(terms, operands, reserved = 0, count = operands.length) {
+  function invokeSliceOp(opcode, aux0, reserved, operands, count = operands.length) {
     operands.forEach((value, index) => view().setFloat64(HEADER_BYTES + index * 8, value, true));
-    return instance.exports.slice(frame, 251, terms, reserved, 0n, count);
+    return instance.exports.slice(frame, opcode, aux0, reserved, 0n, count);
+  }
+  function invokeSlice(terms, operands, reserved = 0, count = operands.length) {
+    return invokeSliceOp(251, terms, reserved, operands, count);
   }
   function expect(label, actual, expected, status = 0) {
     if (!Object.is(actual, expected) || view().getInt32(ERROR_OFFSET, true) !== status) {
@@ -125,6 +128,17 @@ export async function qualifyAbi(wasm) {
     expect("reserved quotient metadata", invokeSlice(3, sliceTerms, 1), 0, -2);
     reset();
     expect("oversized quotient slice", invokeSlice(3, sliceTerms, 0, 1025), 0, -1);
+    // ABI 15 integral derivatives. Both helpers carry per-site integration
+    // state, so without a runtime session they must refuse instead of
+    // returning a value, and the slice entry point must reject an operand
+    // count outside the bounded region before it consults that state.
+    const integralTerms = [1, 0.5, 0.25, 5, 0.25, 1];
+    reset();
+    expect("integral modulus derivative without a runtime session",
+      invokeSliceOp(481, 0, 0, integralTerms), 0, -2);
+    reset();
+    expect("oversized integral derivative slice",
+      invokeSliceOp(481, 0, 0, integralTerms, 1025), 0, -1);
     reset();
     expect("hypot", instance.exports.math2(202, 3, 4), 5);
     for (const [label, opcode, operands] of [
@@ -133,6 +147,7 @@ export async function qualifyAbi(wasm) {
       ["unknown operation", 249, [1]],
       ["query value without a runtime session", 470, []],
       ["query presence without a runtime session", 471, []],
+      ["integral derivative without a runtime session", 480, [1, 0.5, 0.25]],
     ]) {
       reset();
       expect(label, invoke(opcode, operands), 0, -2);

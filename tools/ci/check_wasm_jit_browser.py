@@ -19,10 +19,12 @@ EXPECTED_STAMPS = 20000
 # An independent release contract: changing the compiler ABI also requires
 # reviewing the worker qualification expectations.
 # ABI 10 integers, ABI 11 checked derivatives, ABI 12 product ratios,
-# ABI 13 simulator queries and ABI 14 sums
+# ABI 13 simulator queries, ABI 14 sums and ABI 15 integral derivatives
 # are exercised by an independent secondary module against the actual worker.
-EXPECTED_WASM_JIT_ABI_VERSION = 14
-EXPECTED_ABI_CHECKS = 33
+# ABI 15 reviewed 2026-09-11 against 6ad3a073f, which added the site-aware
+# integral derivative helpers: scalar opcode 480 and slice opcode 481.
+EXPECTED_WASM_JIT_ABI_VERSION = 15
+EXPECTED_ABI_CHECKS = 36
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
