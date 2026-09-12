@@ -301,7 +301,13 @@ use super::*;
 // drops the persisted `Instruction::DdtJacobian` and `CfgValueKind::DdtScale`,
 // so a record that carries either no longer deserializes at all and is
 // discarded as unreadable rather than at the version check.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 90;
+// Version 91 carries a named `$limit`'s limiting function in the bytecode
+// entry, as an executable previous-iterate read and candidate publish, so the
+// limiter is applied by every lowering instead of only the canonical one. It
+// drops the persisted `Instruction::CanonicalLimitState`, so a record that
+// carries one no longer deserializes at all and is discarded as unreadable
+// rather than at the version check.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 91;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
