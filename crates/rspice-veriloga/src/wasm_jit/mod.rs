@@ -52,7 +52,9 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// emitted modules and the browser worker.
 /// Version 13 adds simulation-parameter helper opcodes 470 and 471.
 /// Version 14 adds bounded range-protected sum-products quotient helpers.
-/// Version 15 adds site-aware integral derivative helpers 480 and 481.
+/// Version 15 adds site-aware integral derivative helpers 480 and 481, and
+/// the site-aware time-derivative helper 482 that replaced the retired ddt
+/// companion Jacobian.
 pub const WASM_JIT_ABI_VERSION: u32 = 15;
 
 /// Version of the deterministic encoder. It participates in cache identity
@@ -1359,6 +1361,109 @@ mod tests {
     fn verifier_rejects_oversized_artifacts_before_parsing() {
         let bytes = vec![0_u8; WASM_JIT_PROBE_SIZE_BUDGET_BYTES + 1];
         assert!(verify_architecture_probe(&bytes).is_err());
+    }
+
+    /// Opcodes a module hands to the scalar `eval_op_v1` capability.
+    ///
+    /// The emitter writes the same five-instruction prefix before every helper
+    /// call -- the frame local, the opcode, two auxiliary words and the 64-bit
+    /// auxiliary -- and the call that follows says which capability receives
+    /// it, so reading the module back is how the opcode a source construct
+    /// reaches is observed rather than assumed.
+    fn scalar_helper_opcodes(bytes: &[u8]) -> Vec<i32> {
+        use wasmparser::{Operator, Parser, Payload};
+
+        enum Step {
+            Frame,
+            I32(i32),
+            I64,
+            Call(u32),
+            Other,
+        }
+
+        let mut opcodes = Vec::new();
+        for payload in Parser::new(0).parse_all(bytes) {
+            let Payload::CodeSectionEntry(body) = payload.expect("parse the emitted module") else {
+                continue;
+            };
+            let mut operators = body
+                .get_operators_reader()
+                .expect("read an emitted function body");
+            let mut steps = Vec::new();
+            while !operators.eof() {
+                steps.push(
+                    match operators.read().expect("decode an emitted operator") {
+                        Operator::LocalGet { local_index: 0 } => Step::Frame,
+                        Operator::I32Const { value } => Step::I32(value),
+                        Operator::I64Const { .. } => Step::I64,
+                        Operator::Call { function_index } => Step::Call(function_index),
+                        _ => Step::Other,
+                    },
+                );
+            }
+            let mut pending = None;
+            for (index, step) in steps.iter().enumerate() {
+                if let (Step::Frame, Some(Step::I32(opcode))) = (step, steps.get(index + 1))
+                    && matches!(steps.get(index + 2), Some(Step::I32(_)))
+                    && matches!(steps.get(index + 3), Some(Step::I32(_)))
+                    && matches!(steps.get(index + 4), Some(Step::I64))
+                {
+                    pending = Some(*opcode);
+                }
+                if let Step::Call(function_index) = step
+                    && let Some(opcode) = pending.take()
+                    && *function_index == super::codegen::HELPER_FUNCTION_INDEX
+                {
+                    opcodes.push(opcode);
+                }
+            }
+        }
+        opcodes.sort_unstable();
+        opcodes.dedup();
+        opcodes
+    }
+
+    /// A `ddt` or `idt` tangent lowers to a site-aware state helper, so the
+    /// browser reaches those sites through the scalar capability and the
+    /// primary module's dispatch predicate has to classify their opcodes.
+    /// This pins the chain the predicate is keyed on: renumbering a helper
+    /// here without reclassifying it there fails in a browser and nowhere
+    /// else.
+    ///
+    /// The integral carries an initial condition deliberately. A
+    /// one-argument `idt` is materialized into a solver unknown whose
+    /// equation integrates with `ddt`, so it reaches 440 and 482 and never
+    /// the integral helpers; two arguments keep the explicit integration
+    /// site, which is the only shape that emits 480.
+    #[test]
+    fn integration_tangents_reach_the_site_aware_scalar_helpers() {
+        let mut observed = Vec::new();
+        for (module_name, integral, opcode) in [
+            ("wasm_idt_tangent", "idt(V(p, n), V(c, n) * V(c, n))", 480),
+            ("wasm_ddt_tangent", "ddt(V(p, n))", 482),
+        ] {
+            let source = format!(
+                r#"
+`include "disciplines.vams"
+module {module_name}(p, n, c);
+  inout p, n, c;
+  electrical p, n, c;
+  analog I(p, n) <+ {integral};
+endmodule
+"#
+            );
+            let report = VerilogACompiler::new(CompilerOptions::default())
+                .compile_runtime(&source, Some(module_name))
+                .expect("compile an integration tangent");
+            let module = compile_model_value_module(&report.model, &report.canonical_ir)
+                .expect("compile an integration tangent module");
+            let emitted = scalar_helper_opcodes(module.module().bytes());
+            observed.push((module_name, opcode, emitted.contains(&opcode), emitted));
+        }
+        assert!(
+            observed.iter().all(|(_, _, present, _)| *present),
+            "an integration tangent did not reach its scalar helper opcode: {observed:?}"
+        );
     }
 
     /// A module whose assignment pass has no steps emits no kernel for it, and
