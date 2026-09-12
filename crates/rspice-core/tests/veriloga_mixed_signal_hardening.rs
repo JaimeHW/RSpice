@@ -3032,3 +3032,161 @@ fn a_sub_minimum_schedule_is_attributed_among_several_mixed_instances() {
          not the subject: {error}"
     );
 }
+
+//=============================================================================
+// 6 — a clock on the boundary is a schedule, not a loop
+//=============================================================================
+
+/// A clock whose toggles cross a D/A bridge, at a cadence the caller chooses
+/// in units of the solver's minimum step.
+///
+/// The declared precision is a femtosecond, so `delay_ps` spells a cadence
+/// anywhere from a tenth of the ten-femtosecond minimum a millisecond maximum
+/// step leaves the solver up to many times it. Nothing else in the module
+/// touches the boundary and the analog half is one linear resistor: every
+/// movement of `q` is the schedule's, which is what makes the refusals below
+/// attributable.
+fn toggling_clock_source(delay_ps: &str) -> String {
+    format!(
+        r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module toggling_clock(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    initial q = 1'b0;
+    always #{delay_ps} q = ~q;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#
+    )
+}
+
+/// Run a toggling-clock deck at one cadence, or return the refusal.
+fn toggling_clock_run(
+    delay_ps: &str,
+    tstop: f64,
+    max_step: f64,
+) -> Result<TransientResult, String> {
+    let model = ModelFile::new("toggling_clock", &toggling_clock_source(delay_ps));
+    let deck = free_running_deck(&model, "toggling_clock", tstop, max_step);
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, tstop, max_step)
+        .map_err(|error| error.to_string())
+}
+
+/// Assert a finished run crossed the flip ceiling with the boundary moving at
+/// essentially every accepted point, which is what makes it the case the
+/// ceiling used to refuse.
+fn assert_boundary_moved_past_the_flip_ceiling(result: &TransientResult, tstop: f64) {
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= tstop - 1.0e-15,
+        "the run must reach tstop {tstop:e}s, it stopped at {last:e}s"
+    );
+    assert!(
+        result.time.len() > 128,
+        "the run must accept more timepoints than the 128-point flip ceiling, saw {}",
+        result.time.len()
+    );
+    let transitions = digital_points(result, "q");
+    assert!(
+        transitions.len() > 128,
+        "and the boundary must have moved at more of them than the ceiling, or the case \
+         never reaches the guard at all: {} transitions",
+        transitions.len()
+    );
+}
+
+/// **Property 6, case a.** A clock whose period is a few minimum steps moves
+/// its D/A bridge at every accepted timepoint, and that is a schedule rather
+/// than a zero-delay loop.
+///
+/// The interleave used to refuse this deck at its 129th accepted point as
+/// `the analog/digital boundary moved on 128 consecutive accepted timepoints`,
+/// naming a zero-delay loop and asking for a delay, a `connectrules`
+/// transition time or analog hysteresis — with the analog half a single
+/// resistor that takes no part in any of it. The cause is the step controller:
+/// the step after a landed activation restarts at a tenth of the gap to the
+/// next one and the floor clamps it back up, so at this cadence the stepper
+/// lands on every tick and on nothing else, and the boundary moves at every
+/// point it accepts. There is nothing wrong with the deck — twenty femtoseconds
+/// per point crosses five picoseconds in two hundred and fifty of them.
+#[test]
+fn a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop() {
+    // Two minimum steps per toggle (`delmin = 1e-11 * tmax` = 10 fs here), and
+    // an interval short enough to be crossed at that rate.
+    const TSTOP: f64 = 5.0e-12;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let result = toggling_clock_run("0.02", TSTOP, MAX_STEP)
+        .unwrap_or_else(|error| panic!("a twenty-femtosecond clock must run: {error}"));
+    assert_boundary_moved_past_the_flip_ceiling(&result, TSTOP);
+}
+
+/// **Property 6, case b.** The same clock at five minimum steps — inside the
+/// window where the flip ceiling and the sub-minimum schedule bound were
+/// thought to overlap — is refused by neither.
+///
+/// It is worth pinning because the overlap is not where reading the two guards
+/// suggests. This cadence trips the flip ceiling on the base for the same
+/// reason case (a) does, one accepted point per tick; but the schedule bound
+/// keys on the *realized advance* of a point, and five minimum steps of
+/// advance is progress, so it never counts one. With the flip ceiling no
+/// longer counting a scheduled move, the deck simply runs, which is the right
+/// answer: it reaches any horizon at five minimum steps per point.
+#[test]
+fn a_clock_five_minimum_steps_wide_is_refused_by_neither_guard() {
+    const TSTOP: f64 = 2.0e-11;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let result = toggling_clock_run("0.05", TSTOP, MAX_STEP)
+        .unwrap_or_else(|error| panic!("a fifty-femtosecond clock must run: {error}"));
+    assert_boundary_moved_past_the_flip_ceiling(&result, TSTOP);
+}
+
+/// **Property 6, case c.** A toggling clock *below* the solver's minimum is
+/// still bounded — by the bound that belongs to a schedule, with the schedule's
+/// wording, rather than by the flip ceiling.
+///
+/// This is the deck the flip ceiling was answering before: one femtosecond per
+/// toggle against a ten-femtosecond minimum, which no horizon is reachable at.
+/// It is refused, and it has to be; what changes is the subject. The refusal
+/// names the instance, the minimum, the maximum timestep the minimum is
+/// derived from and the rate — and it no longer tells the author to break a
+/// feedback loop that does not exist.
+///
+/// See [`free_running_deck`] for why the `.tran` line carries a maximum
+/// timestep orders of magnitude above `tstop`.
+#[test]
+fn a_sub_minimum_toggling_clock_is_bounded_by_its_schedule_and_not_by_the_flip_ceiling() {
+    // A tenth of the minimum per toggle; the schedule bound refuses after
+    // 16384 such points, which is 1.6e-11 s of simulated time at this rate.
+    const TSTOP: f64 = 2.0e-11;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let error = toggling_clock_run("0.001", TSTOP, MAX_STEP)
+        .err()
+        .expect("a schedule ten times finer than the solver's minimum must be refused");
+    let lowered = error.to_lowercase();
+    assert!(
+        lowered.contains("instance 'x1'"),
+        "the module that owns the schedule must be named: {error}"
+    );
+    assert!(
+        lowered.contains("at or closer together") && lowered.contains("16384"),
+        "the schedule bound's own wording and count are what must end this run: {error}"
+    );
+    assert!(
+        lowered.contains("1.000e-14") && lowered.contains("tmax=1.000e-3"),
+        "with the minimum it is under and the lever that moves it: {error}"
+    );
+    assert!(
+        !lowered.contains("consecutive accepted timepoints")
+            && !lowered.contains("no consistent value"),
+        "the boundary is not the subject: a clock is not a zero-delay loop: {error}"
+    );
+}
