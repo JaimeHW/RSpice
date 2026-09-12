@@ -43,8 +43,13 @@ fn node(netlist: &Netlist, name: &str) -> usize {
 
 #[test]
 fn harmonic_balance_refuses_a_device_it_cannot_stamp() {
-    // Exact HB does not represent the complete Gummel-Poon equations, so a
-    // BJT is a device HB understands and declines rather than a bad card.
+    // Exact HB stamps the Gummel-Poon electrical equations -- a plain NPN
+    // card solves -- so the device it declines is narrower than "a BJT": the
+    // legacy excess-phase extension delays transport current in time, and the
+    // harmonic residual carries no such state. The card is a device HB
+    // understands and declines rather than a bad card. `LEVEL=1` is
+    // load-bearing: `TD` on its own selects VBIC, whose excess phase IS
+    // represented, and the deck would then be accepted.
     let netlist = parse(
         "hb capability\n\
          V1 in 0 SIN(0 0.5 1e6)\n\
@@ -52,16 +57,18 @@ fn harmonic_balance_refuses_a_device_it_cannot_stamp() {
          R1 in b 1k\n\
          Rc vcc c 1k\n\
          Q1 c b 0 npnmod\n\
-         .model npnmod NPN IS=1e-16 BF=100\n\
+         .model npnmod NPN LEVEL=1 IS=1e-16 BF=100 TD=1n\n\
          .end\n",
     );
     let error = Engine::default()
         .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
         .expect_err("HB must refuse a device it has no stamp for");
-    let token = capability_token(&error);
+    // The exact token, not a prefix: a refusal from some other HB gate would
+    // satisfy the namespace and hide the day this stamp arrives.
+    assert_eq!(capability_token(&error), "analysis.hb.device");
     assert!(
-        token.starts_with("analysis.hb."),
-        "HB refusals must be namespaced under their analysis: {token}"
+        error.to_string().contains("excess-phase"),
+        "the refusal must name the equations HB cannot stamp: {error}"
     );
 }
 
