@@ -586,12 +586,27 @@ impl CircuitData {
         // event identities into the cached net-kind table.
         self.rebuild_net_kinds();
         // The analog-touch classification is keyed by node id, so a
-        // renumbering invalidates it. Dropping it rather than remapping it
-        // fails in the safe direction: an unclassified circuit claims no
-        // digital-only net, so no analog row can lose its voltage to a stale
-        // answer. The build classifies after every remap, which is why this
-        // is never the answer a run actually uses.
-        self.analog_touched_nodes = None;
+        // renumbering invalidates it — but the build classifies BEFORE this
+        // point, not after, so dropping the vector here does not "fail safe":
+        // it leaves a deck with no explicit ground unclassified, which makes
+        // every event-only net claim a 0 V analog channel again and makes the
+        // assembly's debug assertion vacuous. Renumbering the vector is what
+        // keeps the one classification true through the one remap the build
+        // performs. The former ground identity is folded onto row 0, which is
+        // the reference and is never asked.
+        if let Some(touched) = self.analog_touched_nodes.take() {
+            let mut remapped = vec![false; touched.len().saturating_sub(1).max(1)];
+            for (node, reached) in touched.into_iter().enumerate() {
+                if !reached {
+                    continue;
+                }
+                let target = Self::remap_node_id(node, old_node_id);
+                if let Some(slot) = remapped.get_mut(target) {
+                    *slot = true;
+                }
+            }
+            self.analog_touched_nodes = Some(remapped);
+        }
 
         #[cfg(feature = "veriloga")]
         self.veriloga_devices

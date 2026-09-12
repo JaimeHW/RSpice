@@ -496,8 +496,10 @@ pub struct CircuitData {
     /// analog ports of every code model, auto-bridges included.
     ///
     /// `None` until a netlist build classifies them. A circuit assembled by
-    /// hand therefore claims no digital-only net and its analog namespace
-    /// keeps every row it has always kept.
+    /// hand therefore claims no event-only net and its analog namespace
+    /// keeps every row it has always kept. A ground remap renumbers the
+    /// vector rather than dropping it: the build classifies before the remap,
+    /// so dropping it would unclassify every deck that names no ground.
     pub(crate) analog_touched_nodes: Option<Vec<bool>>,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
