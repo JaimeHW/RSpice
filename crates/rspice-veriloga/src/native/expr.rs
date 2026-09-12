@@ -3313,6 +3313,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         this.lower_third_derivative(id, first, second, third)
                     })
                 }
+                "CheckedValue" => self.lower_third_derivative(*right, first, second, third),
                 "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
                 | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor"
                 | "Shl" | "Shr" => self.push(NativeOp::Const(0.0)),
@@ -3444,6 +3445,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
+                // The checked primal is not part of the returned value, so it
+                // cannot contribute a slope either.
+                "CheckedValue" => self.expr_derivative_is_zero(*right, wrt),
                 "Add" | "Sub" | "Mul" | "Div" | "Mod" => Ok(self
                     .expr_derivative_is_zero(*left, wrt)?
                     && self.expr_derivative_is_zero(*right, wrt)?),
@@ -3500,6 +3504,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
+                "CheckedValue" => self.expr_second_derivative_is_zero(*right, first, second),
                 "Add" | "Sub" | "Mod" => Ok(self
                     .expr_second_derivative_is_zero(*left, first, second)?
                     && self.expr_second_derivative_is_zero(*right, first, second)?),
@@ -4224,6 +4229,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     this.lower_derivative(id, wrt)
                 })
             }
+            // `CheckedValue(primal, value)` validates the primal and returns
+            // the value, so the quantity being differentiated is the value
+            // alone and the check is an assertion about a number this node
+            // never returns. Both other differentiators state exactly that:
+            // the bytecode autodiff (`ir.rs`, `BinaryOp::CheckedValue => dr`)
+            // and the canonical AD (`canonical_ir/ad.rs`,
+            // `CfgBinaryOp::CheckedValue => d_right`).
+            "CheckedValue" => self.lower_derivative(right, wrt),
             "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
             | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
             | "Shr" => self.push(NativeOp::Const(0.0)),
@@ -4318,6 +4331,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     this.lower_second_derivative(id, first, second)
                 })
             }
+            "CheckedValue" => self.lower_second_derivative(right, first, second),
             "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
             | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
             | "Shr" => self.push(NativeOp::Const(0.0)),

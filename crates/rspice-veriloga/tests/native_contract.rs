@@ -1600,6 +1600,105 @@ endmodule
     );
 }
 
+/// A reactive switch branch is the smallest module whose *derivative* reaches
+/// `CheckedValue`.
+///
+/// Semantic analysis rewrites the retained contribution of a switch branch as
+/// `CheckedValue(value, same_kind ? value : 0)` (`semantic/switch_branches.rs`),
+/// and a charge contributed through one arm makes that retained value carry the
+/// device's capacitance: the native route builds its derivative shadow by
+/// differentiating the assignment itself (`jit/plan_builder.rs`,
+/// `lower_canonical_shadow_program`), which is the only site that asks for the
+/// operator's derivative. Until the lowering carried a rule for it, the model
+/// was refused outright — DIODE_CMC's
+/// `if (corecovery > 0 && depnqs > 0.0) I(depl_a) <+ ...ddt(W_nqs_A); else V(depl_a) <+ 0;`
+/// is the same shape, and it is why the native CI job was red.
+///
+/// The condition must be parameter-only: `ddt` under runtime control flow is
+/// refused by semantic analysis before any of this (VAMS-2023 4.5.15).
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_device_differentiates_a_switch_branch_retained_value_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_switch_branch(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 0.5;
+    parameter real nqs = 1.0;
+    real qn;
+    analog begin
+        qn = c * V(p, n) * V(p, n);
+        if (nqs > 0.0)
+            I(p, n) <+ ddt(qn);
+        else
+            V(p, n) <+ 0.0;
+    end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("SWITCH1", model, &artifact, &[1, 0])
+            .expect("a reactive switch branch compiles to native code without fallback");
+    assert!(device.is_using_native());
+    device.set_internal_node_indices(&[2]);
+
+    // c = 0.5, so the retained charge is v*v/2 and dQ/dV is v: a derivative
+    // that varies with the bias. Three transient points either side of zero
+    // must each stamp finitely, and the stamps must differ from one another —
+    // a lowering that dropped the retained value's slope would produce the same
+    // matrix at every bias. `route_parity.rs` pins the values themselves
+    // against the bytecode lowering, entry for entry.
+    let mut stamps = Vec::new();
+    for (step, bias) in [-0.75_f64, 0.5, 1.5].into_iter().enumerate() {
+        let time = 1.0e-9 * (step as f64 + 1.0);
+        let matrix = transient_stamp(&mut device, time, 1.0e-9, &[bias, 0.0]);
+        assert!(
+            matrix.values().all(|value| value.is_finite()),
+            "reactive switch-branch stamp at {bias} must be finite: {matrix:?}"
+        );
+        assert!(
+            matrix.values().any(|value| *value != 0.0),
+            "reactive switch-branch stamp at {bias} must not be empty: {matrix:?}"
+        );
+        stamps.push((bias, matrix));
+    }
+    for window in stamps.windows(2) {
+        let [(left_bias, left), (right_bias, right)] = window else {
+            unreachable!("windows(2) yields pairs");
+        };
+        assert!(
+            left != right,
+            "the switch-branch stamp must follow the retained charge's slope, \
+             but {left_bias} and {right_bias} stamp the same matrix: {left:?}"
+        );
+    }
+}
+
+/// One accepted transient step, returning the conductance stamp it produced.
+#[cfg(target_arch = "x86_64")]
+fn transient_stamp(
+    device: &mut VerilogADevice,
+    time: f64,
+    timestep: f64,
+    voltages: &[f64],
+) -> HashMap<(usize, usize), f64> {
+    device
+        .try_set_analysis_type(2)
+        .expect("transient analysis type");
+    device.try_set_time(time).expect("transient time");
+    device.try_set_timestep(timestep).expect("transient step");
+    device.try_update_voltages(voltages).expect("bias update");
+    device.try_evaluate().expect("transient evaluation");
+    let (matrix, _rhs) = stamp_device(device, voltages);
+    device.try_advance_state().expect("accept the step");
+    matrix
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_device_with_canonical_ir_stamps_named_branch_voltage_without_fallback() {
