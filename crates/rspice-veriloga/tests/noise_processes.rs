@@ -493,9 +493,16 @@ fn assert_noise_transfer(
                 )
                 .unwrap_or_else(|error| panic!("{case}: {error}"));
             assert_eq!(report.abi.noise_source_count, 1, "{case}");
-            // Ordinary idt now uses the generated frequency expansion; the
-            // remaining stateful operators still require implementations.
-            assert_eq!(report.generated_rust.is_some(), operator == "idt", "{case}");
+            // The generated Rust backend owns the frequency expansion of both
+            // integrators: `idtmod` joined ordinary `idt` with the generated
+            // circular integrator (8f6a36407). Coverage is asserted for the
+            // operators it generates rather than by excluding the rest, so a
+            // backend that learns absdelay, slew or a filter family does not
+            // fail this test: each of those refusals names itself at the site
+            // that raises it, which is where a closing gap has to be noticed.
+            if matches!(operator, "idt" | "idtmod") {
+                assert!(report.generated_rust.is_some(), "{case}");
+            }
             #[cfg(feature = "wasm-jit")]
             rspice_veriloga::wasm_jit::compile_model_value_module(
                 &report.model,
