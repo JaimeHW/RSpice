@@ -362,6 +362,58 @@ impl PyEngine {
         PyPoleZeroResult::from_core(&result)
     }
 
+    pub(super) fn sensitivity_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output_node: NodeIdentifier,
+        param_name: &str,
+        param_value: f64,
+        delta: Option<f64>,
+    ) -> PyResult<f64> {
+        validate_sensitivity_perturbation(param_value, delta)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
+        run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_sensitivity_with_abort(
+                &netlist.inner,
+                output,
+                param_name,
+                param_value,
+                delta,
+                abort,
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn sensitivity_ac_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output_node: NodeIdentifier,
+        param_name: &str,
+        param_value: f64,
+        frequencies: Vec<f64>,
+        delta: Option<f64>,
+    ) -> PyResult<Vec<f64>> {
+        validate_sensitivity_perturbation(param_value, delta)?;
+        validate_frequencies(&frequencies)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
+        run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_sensitivity_ac_with_abort(
+                &netlist.inner,
+                output,
+                param_name,
+                param_value,
+                &frequencies,
+                delta,
+                abort,
+            )
+        })
+    }
+
     pub(super) fn sensitivity_linearized_impl(
         &self,
         py: Python<'_>,

@@ -1592,30 +1592,7 @@ impl PyEngine {
         param_value: f64,
         delta: Option<f64>,
     ) -> PyResult<f64> {
-        if !param_value.is_finite() {
-            return Err(crate::errors::value_error(format!(
-                "param_value must be finite, got {param_value}"
-            )));
-        }
-        if let Some(d) = delta
-            && (!d.is_finite() || d <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "delta must be a positive finite number, got {d}"
-            )));
-        }
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
-        run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_sensitivity_with_abort(
-                &netlist.inner,
-                output,
-                param_name,
-                param_value,
-                delta,
-                abort,
-            )
-        })
+        self.sensitivity_impl(py, netlist, output_node, param_name, param_value, delta)
     }
 
     /// Run single-solve adjoint DC sensitivity for all eligible linear
@@ -1696,32 +1673,15 @@ impl PyEngine {
         delta: Option<f64>,
     ) -> PyResult<Bound<'py, numpy::PyArray1<f64>>> {
         use numpy::ToPyArray;
-        if !param_value.is_finite() {
-            return Err(crate::errors::value_error(format!(
-                "param_value must be finite, got {param_value}"
-            )));
-        }
-        if let Some(d) = delta
-            && (!d.is_finite() || d <= 0.0)
-        {
-            return Err(crate::errors::value_error(format!(
-                "delta must be a positive finite number, got {d}"
-            )));
-        }
-        validate_frequencies(&frequencies)?;
-        let engine = self.engine_for_netlist(&netlist.inner);
-        let output = self.resolve_node(py, &engine, &netlist.inner, &output_node, "output")?;
-        let values = run_interruptible(py, &self.active_runs, |abort| {
-            engine.run_sensitivity_ac_with_abort(
-                &netlist.inner,
-                output,
-                param_name,
-                param_value,
-                &frequencies,
-                delta,
-                abort,
-            )
-        })?;
+        let values = self.sensitivity_ac_impl(
+            py,
+            netlist,
+            output_node,
+            param_name,
+            param_value,
+            frequencies,
+            delta,
+        )?;
         Ok(values.to_pyarray(py))
     }
 

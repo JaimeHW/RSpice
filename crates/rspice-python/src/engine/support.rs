@@ -21,6 +21,31 @@ pub(super) fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
     Ok(())
 }
 
+/// Validate the nominal value and perturbation a finite-difference
+/// sensitivity will differentiate around.
+///
+/// A non-finite nominal value has no neighbourhood to difference over, and a
+/// non-positive step would divide by zero or walk backwards, so both are
+/// rejected before any solve is scheduled.
+pub(super) fn validate_sensitivity_perturbation(
+    param_value: f64,
+    delta: Option<f64>,
+) -> PyResult<()> {
+    if !param_value.is_finite() {
+        return Err(crate::errors::value_error(format!(
+            "param_value must be finite, got {param_value}"
+        )));
+    }
+    if let Some(d) = delta
+        && (!d.is_finite() || d <= 0.0)
+    {
+        return Err(crate::errors::value_error(format!(
+            "delta must be a positive finite number, got {d}"
+        )));
+    }
+    Ok(())
+}
+
 /// Build the `.MC` card a direct Monte Carlo request describes.
 pub(super) fn monte_carlo_card(
     num_runs: usize,
