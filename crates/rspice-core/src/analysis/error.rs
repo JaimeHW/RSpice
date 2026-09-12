@@ -444,6 +444,14 @@ pub struct ElaborationError {
     pub detail: String,
 }
 
+/// Gated with the `veriloga` feature because the seam that raises one is: a
+/// build without it compiles no `.VERILOGA` route and no mixed circuit, so no
+/// site in it constructs an `ElaborationError` and every builder here would be
+/// a dead-code error under the `-D warnings` check CI runs on default
+/// features. The type, its fields and the [`SimulationError`] variant stay
+/// unconditional, because a frontend reads them from a build it did not
+/// choose the features for.
+#[cfg(feature = "veriloga")]
 impl ElaborationError {
     pub(crate) fn new(kind: ElaborationErrorKind, detail: impl Into<String>) -> Self {
         Self {
@@ -467,14 +475,11 @@ impl ElaborationError {
         self
     }
 
-    /// Gated with the `veriloga` feature, and so are the two below it,
-    /// because a span is only ever a Verilog-A source file: the two refusals
-    /// this seam raises in a build without that feature — an unresolved
-    /// subcircuit master and a mixed host added after digital elaboration —
-    /// are both about a deck element, and a parsed element carries no source
-    /// location to point at. Declaring them unconditionally would be a
-    /// dead-code error in the default build, which is what CI checks.
-    #[cfg(feature = "veriloga")]
+    /// Point at where the offending construct was authored.
+    ///
+    /// An instance-side refusal does not call this and reports no span: a
+    /// parsed [`crate::netlist::Element`] carries no source location, so the
+    /// engine would have to invent one.
     #[must_use]
     pub(crate) fn at(mut self, span: NetlistSourceLocation) -> Self {
         self.span = Some(span);
@@ -485,7 +490,6 @@ impl ElaborationError {
     /// seam can be: the compiler reports its own offsets inside `detail`, and
     /// the deck line that authored the `.VERILOGA` card is not retained by the
     /// parsed netlist.
-    #[cfg(feature = "veriloga")]
     #[must_use]
     pub(crate) fn in_source(self, path: impl Into<std::path::PathBuf>) -> Self {
         let path = path.into();
@@ -494,7 +498,6 @@ impl ElaborationError {
             .module_if_unset(display)
     }
 
-    #[cfg(feature = "veriloga")]
     fn module_if_unset(mut self, module: String) -> Self {
         if self.module.is_none() {
             self.module = Some(module);
