@@ -7897,6 +7897,38 @@ mod fixed_lane_tests {
             evaluate_generated_above(initialized.candidate, 1.0, 1.0, 0.0, 0.0, 0.5, false,),
             Err(GeneratedEventControlError::NonIntegerEnable)
         );
+
+        // A non-finite operand is a different fact from a finite non-integer
+        // one: `0.5` is the module's source and no other point will fix it,
+        // NaN is the iterate the solver offered. The consumer rejects the
+        // point for one and refuses the run for the other, so the producer
+        // must not collapse them — the interpreter and the native route have
+        // always split them.
+        assert_eq!(
+            evaluate_generated_cross(
+                initialized.candidate,
+                1.0,
+                1.0,
+                Value::NAN,
+                0.0,
+                0.0,
+                1.0,
+                true,
+            ),
+            Err(GeneratedEventControlError::NonFiniteOperand)
+        );
+        assert_eq!(
+            evaluate_generated_above(
+                initialized.candidate,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                Value::INFINITY,
+                false,
+            ),
+            Err(GeneratedEventControlError::NonFiniteOperand)
+        );
     }
 
     #[test]

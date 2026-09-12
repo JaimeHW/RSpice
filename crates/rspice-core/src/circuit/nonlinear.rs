@@ -69,7 +69,11 @@ fn generated_veriloga_stamp_error(
             GeneratedIdtModCandidateError::Wrapping(_) => false,
         },
         GeneratedEvaluationError::EventControl { source, .. } => {
-            matches!(source, GeneratedEventControlError::NonFiniteExpression)
+            matches!(
+                source,
+                GeneratedEventControlError::NonFiniteExpression
+                    | GeneratedEventControlError::NonFiniteOperand
+            )
         }
         // The stamper's own audit: the module's arithmetic left the reals at
         // the point the solver offered, exactly as `ln(V(p,n)+0.1)` does on
@@ -2248,6 +2252,35 @@ mod tests {
             (
                 GeneratedEvaluationError::SimulationParameter { name: "gmin" },
                 false,
+            ),
+            // The event-control operand splits the same way the interpreter's
+            // `event_integer_operand` and the native twin's `record_classified`
+            // do: NaN belongs to the iterate, `1.5` belongs to the module.
+            (
+                GeneratedEvaluationError::EventControl {
+                    operator: "cross",
+                    slot: 0,
+                    source: rspice_veriloga_runtime::GeneratedEventControlError::NonFiniteOperand,
+                },
+                true,
+            ),
+            (
+                GeneratedEvaluationError::EventControl {
+                    operator: "cross",
+                    slot: 0,
+                    source:
+                        rspice_veriloga_runtime::GeneratedEventControlError::NonIntegerDirection,
+                },
+                false,
+            ),
+            (
+                GeneratedEvaluationError::EventControl {
+                    operator: "above",
+                    slot: 1,
+                    source:
+                        rspice_veriloga_runtime::GeneratedEventControlError::NonFiniteExpression,
+                },
+                true,
             ),
         ] {
             let rendered = format!("{source}");

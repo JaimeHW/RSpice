@@ -149,6 +149,15 @@ pub struct GeneratedCrossEvaluation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedEventControlError {
     NonFiniteExpression,
+    /// A direction or enable operand was not finite.
+    ///
+    /// Split from `NonIntegerDirection`/`NonIntegerEnable` because the two
+    /// are different facts: `1.5` is a property of the module's source and no
+    /// other point will fix it, while NaN is a property of the iterate the
+    /// solver offered. The interpreter and the native route have always split
+    /// these (`event_integer_operand`, `record_classified`); the generated
+    /// route answered "structural" for both.
+    NonFiniteOperand,
     InvalidTime,
     InvalidTimeTolerance,
     InvalidExpressionTolerance,
@@ -163,6 +172,7 @@ impl std::fmt::Display for GeneratedEventControlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             Self::NonFiniteExpression => "event expression must be finite",
+            Self::NonFiniteOperand => "event direction and enable operands must be finite",
             Self::InvalidTime => "event evaluation time must be finite and non-negative",
             Self::InvalidTimeTolerance => "event time tolerance must be finite and non-negative",
             Self::InvalidExpressionTolerance => {
@@ -187,11 +197,14 @@ fn generated_event_integer(
     value: Value,
     error: GeneratedEventControlError,
 ) -> Result<i32, GeneratedEventControlError> {
-    if !value.is_finite()
-        || value.fract() != 0.0
-        || value < i32::MIN as Value
-        || value > i32::MAX as Value
-    {
+    // A NaN or infinite operand is a property of the iterate, not of the
+    // module, so it is raised as its own variant: the consumer rejects the
+    // point instead of refusing the run, which is what the interpreter and
+    // the native route already do for the same input.
+    if !value.is_finite() {
+        return Err(GeneratedEventControlError::NonFiniteOperand);
+    }
+    if value.fract() != 0.0 || value < i32::MIN as Value || value > i32::MAX as Value {
         return Err(error);
     }
     Ok(value as i32)
