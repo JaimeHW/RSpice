@@ -800,9 +800,8 @@ impl SharedDigitalTrial<'_> {
             // wheel, and the reverse direction hands an HDL tick to XSPICE at
             // exactly the instant that tick names. The inverse of an exact map
             // is the least tick not before the instant — see this module's
-            // "three time bases". Rounding to nearest dates an instant in the
-            // lower half of a tick earlier than it happened, so a `#1` from
-            // the process it wakes elapses in less than one time unit.
+            // "three time bases", which also says why nearest-tick is the
+            // rejected alternative here rather than a forbidden one.
             let tick = coordinator
                 .resolution
                 .seconds_to_ceil_ticks(self.time)

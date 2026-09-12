@@ -44,10 +44,28 @@
 //! HDL to XSPICE is exact — an HDL tick `T` is delivered at precisely the
 //! instant `T` names, which is what `external_models.rs` stamps. The inverse
 //! of an exact map is "not before": an off-grid XSPICE instant is delivered at
-//! the least tick whose own instant is not before it. Nearest-tick would date
-//! an instant in the lower half of a tick *earlier* than it happened, and a
-//! `#1` from the process it woke would then elapse in less than one time unit,
-//! which IEEE 1364-2005 section 9.7 does not permit.
+//! the least tick whose own instant is not before it, so the HDL never labels
+//! a foreign-kernel event earlier than it happened. Exact one way,
+//! least-tick-not-before the other.
+//!
+//! Nearest-tick here would not violate any standard, and this document does
+//! not claim it would. A `#1` from a process dated at tick `T` fires at
+//! `T + 1` — one whole time unit later in the digital base, whatever the
+//! physical instant that woke it — and measuring that delay against the *other*
+//! kernel's clock instead is exactly what the LRM's own nearest-tick A/D rule
+//! does by design one paragraph above, where a crossing at `T·Δ + 0.49Δ` is
+//! published at `T` and its `#1` elapses `0.51Δ` after the crossing. The
+//! ceiling is an engineering choice for a boundary whose far side names exact
+//! seconds and has no declared precision to round to: it keeps the two halves
+//! of the map inverse to each other, and keeps `$realtime` from naming an
+//! instant before the event that caused the wake.
+//!
+//! "Exact" in the HDL-to-XSPICE direction is exact for an event the wheel
+//! itself timed — the stepper lands on a scheduled tick bit-exactly, through a
+//! breakpoint. An HDL edge that a *mid-step* A/D crossing caused reaches
+//! XSPICE at the trial's endpoint instead, because the continuous half has a
+//! solution only there and `XspiceDigitalParticipant::settle_active` refuses a
+//! wave assembled at any other instant.
 //!
 //! Either way the unquantized analog time is kept for everything that is
 //! answered in seconds: the trial's own bookkeeping, the interpolated instant
@@ -62,6 +80,17 @@
 //! precision means, and the host's monotonicity is enforced on the *analog*
 //! time rather than on the tick: a repeat of an accepted timepoint would
 //! advance the integrator twice.
+//!
+//! The RSpice guarantee those two quantities together amount to: **in a
+//! process woken by a boundary event — an A/D crossing, or a wake from the
+//! other event kernel — `$abstime` is that event's own physical instant, and
+//! it need not equal `$realtime` scaled by the time unit.** The tick answers
+//! "where on the wheel am I", `$abstime` answers "when did the cause happen",
+//! and at a sub-tick instant only one of them can be exact. They are reported
+//! apart rather than one being rounded onto the other. What is guaranteed
+//! across them is the ordering: within one trial the published tick never
+//! decreases, and nothing a woken process schedules can come due at a physical
+//! time before the instant that woke it.
 //!
 //! # Which node index is which
 //!

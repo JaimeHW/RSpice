@@ -302,9 +302,16 @@ impl TimeResolution {
     /// directions of that boundary are the two halves of one map: an HDL tick
     /// `T` reaches XSPICE as exactly [`Self::ticks_to_seconds`]`(T)`, and an
     /// off-grid XSPICE instant reaches the HDL at the least tick whose own
-    /// instant is not before it. Rounding to nearest would date an instant in
-    /// the lower half of a tick *earlier* than it happened, which is what
-    /// makes a `#1` from the woken process elapse in less than one time unit.
+    /// instant is not before it — the HDL never labels a foreign-kernel event
+    /// earlier than it happened.
+    ///
+    /// Rounding to nearest is a defensible alternative rather than a forbidden
+    /// one: a `#1` from a process dated at `T` still fires at `T + 1`, one
+    /// whole unit later on the wheel. What it costs is that `$realtime` names
+    /// an instant before the event that caused the wake, and that the delay,
+    /// measured against the far kernel's clock, comes out short of a unit —
+    /// which is what the nearest-tick rule for *analog* events accepts on
+    /// purpose and what a two-discrete-kernel boundary need not.
     ///
     /// Neither of the other two mappings may be rewritten into this one.
     /// [`Self::seconds_to_floor_ticks`] bounds how far the digital world may
@@ -1235,7 +1242,13 @@ impl EventScheduler {
     }
 
     /// Account for an immediate analog-caused activation without draining any
-    /// timer at its rounded reporting tick.
+    /// timer at the tick it is reported on.
+    ///
+    /// The two lanes that reach here quantize that tick differently, and
+    /// neither answer authorizes running a timer that is merely due at it: an
+    /// A/D crossing is rounded to the nearest tick and then clamped forward
+    /// onto the trial's high-water mark, a wake from the other event kernel
+    /// takes the least tick not before it.
     #[cfg(feature = "veriloga")]
     pub(crate) fn note_external_activation(
         &mut self,

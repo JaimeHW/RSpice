@@ -747,6 +747,14 @@ impl DigitalHost {
         )
     }
 
+    /// Publish an analog-caused bank whose event instant *is* the analog
+    /// candidate instant — [`Self::force_many_from_analog_at`] with the same
+    /// value passed twice.
+    ///
+    /// Its one production caller is the causal lane in `mixed/shared.rs`,
+    /// which hands the HDL a wake from the other event kernel at the trial's
+    /// own endpoint: that event happened there, so there is no interior
+    /// instant to carry apart from the candidate.
     pub(crate) fn force_many_from_analog_with(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
