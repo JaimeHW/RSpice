@@ -3,7 +3,7 @@
 //! Functions for stamping DC values into the matrix and RHS vector.
 
 use super::Engine;
-use crate::solver::StaticMatrix;
+use crate::solver::{ComplexMatrix, StaticMatrix};
 use crate::{CircuitData, Value};
 
 impl Engine {
@@ -86,6 +86,25 @@ impl Engine {
         }
     }
 
+    /// The event rows an assembly must pin: rows of pure event nets that no
+    /// analog stamp reached. Every analysis shares this rule so that a DC,
+    /// transient and small-signal assembly of the same circuit agree on which
+    /// placeholder rows exist.
+    ///
+    /// `deficient_rows` is the assembled matrix's own emptiness report, so a
+    /// row an analog device did stamp is never a candidate.
+    fn visit_unconstrained_xspice_event_rows(
+        circuit: &CircuitData,
+        deficient_rows: &[usize],
+        mut pin: impl FnMut(usize),
+    ) {
+        for row in circuit.xspice_event_node_matrix_rows() {
+            if deficient_rows.binary_search(&row).is_ok() {
+                pin(row);
+            }
+        }
+    }
+
     /// Pin only numerically empty event rows that carry no analog RHS.
     ///
     /// Event values live in the event runtimes, but their stable node IDs
@@ -102,14 +121,37 @@ impl Engine {
             return;
         }
         let deficient_rows = matrix.deficient_rows();
-        for row in circuit.xspice_event_node_matrix_rows() {
-            if deficient_rows.binary_search(&row).is_ok()
-                && rhs.get(row).is_some_and(|value| *value == 0.0)
-            {
+        Self::visit_unconstrained_xspice_event_rows(circuit, &deficient_rows, |row| {
+            if rhs.get(row).is_some_and(|value| *value == 0.0) {
                 matrix.add(row, row, 1.0);
                 rhs[row] = 0.0;
             }
+        });
+    }
+
+    /// The small-signal twin of [`Engine::pin_unconstrained_xspice_event_rows`].
+    ///
+    /// A pure event net carries no small signal: its value is frozen at the
+    /// operating point the event runtimes settled, exactly as Spectre and
+    /// ngspice freeze a digital net through an `.ac` sweep. Every small-signal
+    /// assembly therefore closes an otherwise empty event placeholder row with
+    /// the real identity equation `v = 0`, which restores rank without
+    /// contributing conductance or susceptance to any physical row.
+    ///
+    /// The stamp is deliberately real: pole-zero analysis reads the dynamic
+    /// descriptor out of the imaginary part alone, so a pinned row stays a
+    /// pure algebraic constraint and introduces no spurious pole.
+    pub(in crate::engine) fn pin_unconstrained_xspice_event_rows_small_signal(
+        circuit: &CircuitData,
+        matrix: &mut ComplexMatrix,
+    ) {
+        if circuit.xspice_event_node_matrix_rows().next().is_none() {
+            return;
         }
+        let deficient_rows = matrix.deficient_rows();
+        Self::visit_unconstrained_xspice_event_rows(circuit, &deficient_rows, |row| {
+            matrix.add_real(row, row, 1.0);
+        });
     }
 
     /// Conductance of the `.OPTIONS RSHUNT` node-to-ground shunt, or zero when

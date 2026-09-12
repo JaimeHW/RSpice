@@ -2671,6 +2671,13 @@ impl Engine {
         }
 
         Self::stamp_xspice_small_signal_ac(circuit, ac_matrix, frequency_hz);
+        // Every small-signal analysis is assembled here -- AC, noise, SP, TF,
+        // STB and pole-zero all reach this one fill -- so pinning the event
+        // placeholder rows last gives them the same rank the DC and transient
+        // assemblies already have. A bridge that publishes no small-signal
+        // stamp leaves its event row empty; closing it with `v = 0` holds the
+        // event-driven net at its operating point instead of failing the solve.
+        Self::pin_unconstrained_xspice_event_rows_small_signal(circuit, ac_matrix);
         Ok(())
     }
 
