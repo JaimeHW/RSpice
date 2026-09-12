@@ -425,14 +425,29 @@ fn evaluate_transient_measurements(
             interpolate_start,
         )
     };
+    // An empty column is a column the run deliberately did not retain — an
+    // unsaved node, or a net only the event domain resolves, which has no
+    // voltage to retain at all. It travels through this window as an empty
+    // column so the measurement table stays aligned with `node_names`; the
+    // core resolver then reports a measurement that names it as a missing
+    // spelling, which is the one operand's problem. Failing the whole
+    // conversion here failed every measurement of every mixed deck instead.
     let mut voltages = Vec::with_capacity(result.voltages.len());
     for values in &result.voltages {
         ensure_not_aborted(abort)?;
+        if values.is_empty() {
+            voltages.push(Vec::new());
+            continue;
+        }
         voltages.push(filter(values)?);
     }
     let mut branch_currents = Vec::with_capacity(result.branch_currents.len());
     for values in &result.branch_currents {
         ensure_not_aborted(abort)?;
+        if values.is_empty() {
+            branch_currents.push(Vec::new());
+            continue;
+        }
         branch_currents.push(filter(values)?);
     }
     let mut device_op_traces = Vec::with_capacity(result.device_op_traces.len());
@@ -463,9 +478,18 @@ fn evaluate_transient_measurements(
         num_nodes: result.num_nodes,
         node_names: result.node_names.clone(),
         branch_names: result.branch_names.clone(),
-        digital_traces: Vec::new(),
-        digital_buses: Vec::new(),
-        real_traces: Vec::new(),
+        // The event histories travel with the window for one reason: they are
+        // how the measurement resolver tells an event-only net — whose empty
+        // column is permanent, and which contributes no voltage spelling at
+        // all — from a column this window truncated. Dropping them made the
+        // resolver insert `d` as a zero-sample signal and fail every
+        // measurement of the deck with "signal 'D' has 0 samples". They are
+        // carried unwindowed because the resolver reads them for that
+        // decision and nothing else; the histories a viewer sees are the
+        // windowed ones `collect_event_history` builds.
+        digital_traces: result.digital_traces.clone(),
+        digital_buses: result.digital_buses.clone(),
+        real_traces: result.real_traces.clone(),
         device_op_traces,
         store_traces,
         fft_results: result.fft_results.clone(),
@@ -1006,5 +1030,88 @@ mod tests {
             &rspice_core::abort_signal::NoAbort,
         )
         .expect("Fourier consumes the exact interpolated start boundary");
+    }
+
+    /// A measurement deck whose result carries an unretained column converts,
+    /// and the measurement over a retained node evaluates.
+    ///
+    /// The measurement window used to refuse EVERY column that was empty, so a
+    /// single event-only net — which has no voltage to retain at all — failed
+    /// the whole `SimulationResult::Transient` conversion with "a transient
+    /// measurement operand waveform was not retained". That is every mixed
+    /// deck with a `.MEAS TRAN` in the workbench.
+    #[test]
+    fn a_measurement_deck_converts_when_a_column_was_not_retained() {
+        use rspice_core::engine::{DigitalTrace, DigitalTracePoint};
+        use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
+
+        let netlist = parse_netlist(
+            "mixed measurement deck\n\
+             V1 out 0 pulse(0 1 0 1n 1n 5n 10n)\n\
+             R1 out 0 1k\n\
+             .meas tran vmax max v(out)\n\
+             .end\n",
+        );
+        let time: Vec<f64> = (0..6).map(|index| index as f64 * 1.0e-9).collect();
+        let step_sizes: Vec<f64> = std::iter::once(0.0)
+            .chain(std::iter::repeat_n(1.0e-9, time.len() - 1))
+            .collect();
+        let tran_result = rspice_core::engine::TransientResult {
+            time: time.clone(),
+            step_sizes,
+            // `out` is retained; `d` is an event-only net, whose column the
+            // engine leaves empty while keeping its name for MNA alignment.
+            // A measurement deck retains every analog vector, so the branch
+            // is present: the empty column this pins is the one the deck
+            // cannot select, not one it declined to save.
+            voltages: vec![vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5], Vec::new()],
+            branch_currents: vec![vec![0.0, -0.25e-3, -0.5e-3, -0.75e-3, -1.0e-3, -0.5e-3]],
+            num_nodes: 2,
+            node_names: vec!["out".to_string(), "d".to_string()],
+            branch_names: vec!["V1".to_string()],
+            digital_traces: vec![DigitalTrace {
+                node_name: "d".to_string(),
+                points: vec![DigitalTracePoint {
+                    time: 1.0e-9,
+                    value: DigitalValue {
+                        state: DigitalState::One,
+                        strength: DigitalStrength::Strong,
+                    },
+                }],
+            }],
+            digital_buses: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+
+        let converted = convert_transient_result(
+            &netlist,
+            tran_result,
+            0.0,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("an unretained column must not fail the whole conversion");
+
+        let SimulationResult::Transient {
+            waveforms,
+            measurements,
+            ..
+        } = converted
+        else {
+            panic!("expected a transient result");
+        };
+        assert!(
+            !waveforms.contains_key("d"),
+            "an unretained column publishes no waveform, got {:?}",
+            waveforms.keys().collect::<Vec<_>>()
+        );
+        let vmax = measurements
+            .iter()
+            .find(|measurement| measurement.name.eq_ignore_ascii_case("vmax"))
+            .expect("the deck's measurement is reported");
+        assert_eq!(vmax.error, None, "the measurement must evaluate");
+        assert_eq!(vmax.value, Some(1.0));
     }
 }
