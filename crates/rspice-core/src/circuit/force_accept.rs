@@ -434,6 +434,18 @@ impl CircuitData {
             }
         }
 
+        // A mixed Verilog-AMS module's D/A bridge drives its deck node from the
+        // discrete half, which is the same claim an XSPICE voltage output makes
+        // above: the level at an edge is imposed, not solved for, so clipping
+        // the jump to the global delta limit would leave the node between the
+        // two levels the boundary can hold.
+        #[cfg(feature = "veriloga")]
+        for host in &self.mixed_signal_hosts {
+            for node in host.dac_bridge_nodes() {
+                Self::mark_force_accept_protected_node(&mut mask, node);
+            }
+        }
+
         // A terminal that belongs only to an independent current source and is
         // not connected to the grounded physical/transient network has a
         // gmin-only common-mode bias. Let it jump to that meaningless bias

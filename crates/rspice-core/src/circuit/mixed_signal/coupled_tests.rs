@@ -574,3 +574,62 @@ endmodule
         "a D/A bridge steps the analog solution at a digital edge"
     );
 }
+
+/// A mixed module's D/A output is outside the generic voltage-LTE norm and
+/// inside the force-accept protection, exactly as an XSPICE bridge output is.
+///
+/// The two sets answer the same question about the same node from opposite
+/// sides: the level at a digital edge is imposed by the discrete half, so the
+/// truncation estimator must not read the jump as error it can shrink a step
+/// out of, and the force-accept limiter must not clip it back toward the level
+/// it left. The analog terminal `p` is the control: it is solved for like any
+/// other node and must stay in both.
+#[test]
+fn a_mixed_hosts_dac_output_leaves_voltage_lte_and_joins_force_accept_protection() {
+    let engine = crate::Engine::new(crate::SimulationConfig::default());
+    let deck = crate::Netlist::parse("mixed boundary\nRp p 0 1k\nRq q 0 1k\n.end\n").unwrap();
+    let mut circuit = engine.build_circuit(&deck).unwrap();
+    let p = circuit.get_node_by_name("p").unwrap();
+    let q = circuit.get_node_by_name("q").unwrap();
+    assert!(
+        circuit.transient_voltage_lte_excluded_nodes().is_empty(),
+        "a resistor network owns no step-history semantics anywhere"
+    );
+    assert!(
+        !circuit.force_accept_protected_nodes()[q - 1],
+        "nothing imposes a level on q before the module is instantiated"
+    );
+
+    let mut host = compile_unstarted(
+        r#"
+module toggler(p,y);
+ inout p; electrical p; output y; reg y;
+ initial y=0;
+ always #5 y=~y;
+ analog I(p)<+V(p)*1e-6;
+endmodule
+"#,
+        None,
+        "xtoggle",
+        &[p],
+        SchedulerLimits::default(),
+    )
+    .unwrap();
+    host.add_dac_bridge("y", 0, (q, 0), 0.0, 3.3, 20.0).unwrap();
+    circuit.add_mixed_signal_host(host).unwrap();
+
+    assert_eq!(
+        circuit.transient_voltage_lte_excluded_nodes(),
+        vec![q - 1],
+        "the D/A output, and only it, leaves the voltage-LTE norm"
+    );
+    let protected = circuit.force_accept_protected_nodes();
+    assert!(
+        protected[q - 1],
+        "a force-accepted point must keep the level the D/A bridge imposes"
+    );
+    assert!(
+        !protected[p - 1],
+        "the module's analog terminal is solved for, not imposed"
+    );
+}

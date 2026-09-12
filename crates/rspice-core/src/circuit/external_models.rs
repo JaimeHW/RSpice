@@ -4022,11 +4022,26 @@ impl CircuitData {
     }
 
     /// Zero-based node-voltage entries excluded from generic transient LTE
-    /// because an XSPICE model owns explicit step-history semantics there.
-    pub(crate) fn xspice_transient_voltage_lte_excluded_nodes(&self) -> Vec<usize> {
+    /// because an external model owns explicit step-history semantics there.
+    ///
+    /// Two kinds of model do. An XSPICE code model says so per output port —
+    /// the `dac_bridge`'s `out` is the one this matters most for. A mixed
+    /// Verilog-AMS module says so through its own D/A bridges, which drive a
+    /// deck node from the discrete half on exactly the same terms; leaving them
+    /// in the norm made every edge a retry ladder down to the solver floor,
+    /// because the predictor extrapolating across the edge reports the step as
+    /// truncation error at every candidate width.
+    pub(crate) fn transient_voltage_lte_excluded_nodes(&self) -> Vec<usize> {
         let mut nodes = Vec::new();
         for instance in &self.xspice_instances {
             nodes.extend(instance.transient_voltage_lte_excluded_nodes());
+        }
+        #[cfg(feature = "veriloga")]
+        for host in &self.mixed_signal_hosts {
+            nodes.extend(
+                host.dac_bridge_nodes()
+                    .filter_map(|node| node.checked_sub(1)),
+            );
         }
         nodes.sort_unstable();
         nodes.dedup();

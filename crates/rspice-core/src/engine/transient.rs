@@ -4913,7 +4913,7 @@ impl Engine {
         ));
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
-        let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
+        let mut voltage_lte_excluded_nodes = circuit.transient_voltage_lte_excluded_nodes();
         let mut solution_lte_excluded = vec![false; size];
         fn mark_voltage_lte_excluded(mask: &mut [bool], node: usize) {
             if node == 0 {

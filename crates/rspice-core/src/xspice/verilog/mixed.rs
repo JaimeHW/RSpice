@@ -1710,6 +1710,37 @@ impl MixedSignalHost {
         nodes
     }
 
+    /// The deck nodes this module drives through a D/A bridge, ground aside.
+    ///
+    /// Both endpoints of each bridge, because the pair is what it stamps: a
+    /// bridge referenced to a named supply moves that node as hard as it moves
+    /// its output.
+    ///
+    /// Two callers need exactly this set, for the same reason and on the same
+    /// side of it as the XSPICE `dac_bridge`. Generic transient voltage LTE
+    /// cannot judge these nodes: at a scheduled edge the bridge's source moves
+    /// discontinuously, the predictor still carries the pre-edge slope, and the
+    /// difference it reports is the edge itself rather than truncation error —
+    /// no smaller step removes it, so the controller walks the step down to the
+    /// solver floor chasing it. And a force-accepted point must not have the
+    /// global voltage-delta limiter clip the same edge back toward the level it
+    /// just left. `xspice::models::bridges` answers both questions this way for
+    /// its own `out` port, and `xspice::XspiceInstance` publishes it through
+    /// `transient_voltage_lte_excluded_nodes`; a mixed module's D/A output is
+    /// the same object with the same step semantics.
+    ///
+    /// Only bridges that survived elaboration are here: a boundary that landed
+    /// on a pure event net has no analog node to speak of and
+    /// `strip_event_boundaries` has already removed it.
+    pub(crate) fn dac_bridge_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.state
+            .bridges
+            .dac
+            .iter()
+            .flat_map(|bridge| [bridge.positive, bridge.negative])
+            .filter(|node| *node > 0)
+    }
+
     /// The deck node each built-in boundary carries its bit on, ground aside.
     ///
     /// One entry per discrete port: `mixed_modules` gives a port exactly one
