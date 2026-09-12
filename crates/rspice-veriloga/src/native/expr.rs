@@ -3317,6 +3317,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_arithmetic(op.as_str())
                 }
                 "Mul" => self.lower_mul_third_derivative(*left, *right, first, second, third),
+                "Div" => self.lower_div_third_derivative(*left, *right, first, second, third),
                 "Mod" => {
                     let left_zero = self.expr_derivative_is_zero(*left, first)?
                         || self.expr_derivative_is_zero(*left, second)?
@@ -3430,6 +3431,41 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_third_derivative(right, first, second, third)?;
         self.append_arithmetic("Mul")?;
         self.append_arithmetic("Add")
+    }
+
+    /// A quotient's third derivative, for a divisor no axis moves.
+    ///
+    /// That is the quotient this order actually reaches: `$realtime` divides
+    /// `$abstime` by the module's time unit and `$vt()` divides by the electron
+    /// charge, both constants, and a third derivative of either arrives here
+    /// only because two `ddx` calls and a filter derivative stack up on the
+    /// numerator. With `r` independent of all three axes every derivative of it
+    /// vanishes and the quotient rule collapses to `l_abc / r`.
+    ///
+    /// [`Self::expr_derivative_is_zero`] is a structural independence test, so
+    /// a divisor it clears on an axis has no derivative of any order along it.
+    /// A divisor that does move still refuses by name, as it did before this
+    /// case existed.
+    fn lower_div_third_derivative(
+        &mut self,
+        left: ExprId,
+        right: ExprId,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+        third: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let divisor_is_constant = self.expr_derivative_is_zero(right, first)?
+            && self.expr_derivative_is_zero(right, second)?
+            && self.expr_derivative_is_zero(right, third)?;
+        if !divisor_is_constant {
+            return Err(self.unsupported(
+                "third derivative of binary operator Div with a solution-dependent divisor"
+                    .to_string(),
+            ));
+        }
+        self.lower_third_derivative(left, first, second, third)?;
+        self.lower(right)?;
+        self.append_arithmetic("Div")
     }
 
     fn expr_derivative_is_zero(
