@@ -1449,6 +1449,24 @@ impl MixedSignalHost {
         nodes
     }
 
+    /// The deck node each built-in boundary carries its bit on, ground aside.
+    ///
+    /// One entry per discrete port: `mixed_modules` gives a port exactly one
+    /// bridge, A/D or D/A, so this is what "how many discrete endpoints meet on
+    /// this net" has to count. [`Self::boundary_connections`] cannot serve that
+    /// question — it reports each bridge's reference endpoint as well, and a
+    /// deck that references a bridge to a named supply would count that port
+    /// twice.
+    pub(crate) fn boundary_port_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.state
+            .bridges
+            .adc
+            .iter()
+            .map(|bridge| bridge.positive)
+            .chain(self.state.bridges.dac.iter().map(|bridge| bridge.positive))
+            .filter(|node| *node > 0)
+    }
+
     /// Signal names and electrical endpoints of the built-in boundaries.
     /// Wiring is available before digital startup, so circuit elaboration can
     /// validate it against event ports declared by later instances.

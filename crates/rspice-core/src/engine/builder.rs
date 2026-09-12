@@ -2260,6 +2260,52 @@ fn collect_analog_connection_nodes(
     }
 }
 
+/// Count the event endpoints each code model puts on a node.
+///
+/// The counting mirror of `mark_xspice_event_connection_nets`: every connection
+/// that gives a net a discrete kind is one discrete endpoint on it. The mixed
+/// boundary classifier needs how MANY meet on a net, not merely whether any
+/// does, because one discrete endpoint alone leaves the net analog.
+#[cfg(feature = "veriloga")]
+fn count_discrete_connection_endpoints(
+    endpoints: &mut BTreeMap<usize, usize>,
+    connection: &crate::xspice::PortConnection,
+) {
+    use crate::xspice::PortConnection;
+
+    let mut count = |node: usize| {
+        if node > 0 {
+            *endpoints.entry(node).or_insert(0) += 1;
+        }
+    };
+    match connection {
+        PortConnection::Digital(node)
+        | PortConnection::DigitalInverted(node)
+        | PortConnection::Real(node) => count(*node),
+        PortConnection::DigitalVector(vector) | PortConnection::RealVector(vector) => {
+            for &node in vector {
+                count(node);
+            }
+        }
+        PortConnection::DigitalVectorMapped(vector) => {
+            for connection in vector {
+                count(connection.node);
+            }
+        }
+        PortConnection::Analog(_)
+        | PortConnection::Differential(_, _)
+        | PortConnection::AnalogVector(_)
+        | PortConnection::TypedAnalogVector(_)
+        | PortConnection::CurrentProbe { .. }
+        | PortConnection::CurrentOutput { .. }
+        | PortConnection::Hybrid { .. }
+        | PortConnection::BranchCurrent { .. }
+        | PortConnection::NamedBranchCurrent { .. }
+        | PortConnection::NamedCurrentSource { .. }
+        | PortConnection::Null => {}
+    }
+}
+
 fn register_explicit_digital_bridge_coverage(
     nodes: &mut BTreeMap<usize, XspiceExplicitDigitalBridgeCoverage>,
     connection: &crate::xspice::PortConnection,
@@ -8807,11 +8853,52 @@ impl Engine {
                     }
                 }
             }
-            let event_nodes: BTreeSet<_> = circuit
-                .mixed_signal_hosts
-                .iter()
-                .flat_map(|host| host.boundary_connections().map(|(_, node)| node))
-                .filter(|node| *node > 0 && !physical_nodes.contains(node))
+            // What makes a mixed boundary net *event-only*, and what a net with
+            // a single discrete endpoint is instead.
+            //
+            // A net is event-only when the discrete domain is the only domain
+            // that can resolve it: no analog element touches it, AND two or
+            // more discrete endpoints meet on it — another mixed module's
+            // boundary port, or a code model's digital or real port. Drivers
+            // and readers with no continuous law between them have no
+            // electrical question to answer, so the shared event store owns the
+            // net outright: `strip_event_boundaries` takes the bridges away and
+            // `coupled_nodes` stops claiming a matrix row for it.
+            //
+            // A net with exactly ONE discrete endpoint and nothing else is not
+            // that net. It is an analog node whose only driver happens to be a
+            // connect module. `X1 q t4` with nothing else on `q` is a digital
+            // output wired to open air, and what an author reads off that node
+            // is the connect module's analog level — the supply level for a
+            // driven output — which is what Spectre and AMS Designer show. It
+            // keeps its Thevenin bridge and it keeps its row. Classifying it as
+            // event-only deleted the bridge but not the row `mixed_modules`
+            // had already created, so the node sat in the analog system with no
+            // driver and `V(q)` read 0 V while its digital trace said One; a
+            // 1 GΩ resistor "fixed" it only by making the net physical. Counting
+            // endpoints is what stops a deck's load from deciding whether the
+            // boundary exists at all.
+            let mut discrete_endpoints: BTreeMap<usize, usize> = BTreeMap::new();
+            let mut boundary_nodes = BTreeSet::new();
+            for host in &circuit.mixed_signal_hosts {
+                for node in host.boundary_port_nodes() {
+                    boundary_nodes.insert(node);
+                    *discrete_endpoints.entry(node).or_insert(0) += 1;
+                }
+            }
+            for instance in &circuit.xspice_instances {
+                for index in 0..instance.ports().len() {
+                    if let Some(connection) = instance.connection_at(index) {
+                        count_discrete_connection_endpoints(&mut discrete_endpoints, connection);
+                    }
+                }
+            }
+            let event_nodes: BTreeSet<_> = boundary_nodes
+                .into_iter()
+                .filter(|node| {
+                    !physical_nodes.contains(node)
+                        && discrete_endpoints.get(node).copied().unwrap_or(0) >= 2
+                })
                 .collect();
             circuit.validate_mixed_event_connections(&event_nodes)?;
             circuit
@@ -11622,5 +11709,113 @@ set auto_bridge_parm_d = vdd
         assert_eq!(circuit.xyce_load_plan().current_sources(), &[2, 1, 0]);
         assert_eq!(circuit.xyce_load_plan().cores(), &[0]);
         assert!(circuit.xyce_load_plan().core_groups().is_empty());
+    }
+
+    /// Which mixed boundary nets are event-only, which keep their bridges, and
+    /// which keep a matrix row — over every topology a boundary net can have.
+    ///
+    /// Nothing else pins this classification, and each answer is a different
+    /// runtime. An event-only net is resolved entirely inside the shared
+    /// digital store: its bridges are stripped and it claims no row. A bridged
+    /// net is an ordinary analog node that the D/A source drives, and the deck
+    /// may load it or not. The first two rows are the ones that used to
+    /// disagree with each other — the same module, the same port, and a
+    /// resistor as the only difference between a net that read its supply level
+    /// and a net that read 0 V.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn mixed_boundary_topologies_classify_event_nodes_bridges_and_rows() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let write_model = |module: &str, source: &str| {
+            let path = std::env::temp_dir().join(format!(
+                "rspice-mixed-boundary-{module}-{}-{unique}.va",
+                std::process::id()
+            ));
+            std::fs::write(&path, source).expect("write the boundary model file");
+            (path.display().to_string().replace('\\', "/"), path)
+        };
+        let (driver, driver_path) = write_model(
+            "driver",
+            "module driver(q);\n output q; reg q;\n initial begin q=0; #4 q=1; end\nendmodule\n",
+        );
+        let (reader, reader_path) = write_model(
+            "reader",
+            "module reader(d);\n input d; wire d;\n reg seen;\n initial seen=0;\n \
+             always @(d) seen=1;\nendmodule\n",
+        );
+
+        // Cards added beside `X1 q driver`, then: is `q` event-only, how many
+        // boundary bridges still land on it, and does a host still claim its row.
+        for (label, cards, event_only, bridges, coupled) in [
+            ("a lone discrete port", String::new(), false, 1, true),
+            (
+                "a discrete port and a resistor",
+                "R1 q 0 1k\n".to_string(),
+                false,
+                1,
+                true,
+            ),
+            (
+                "two mixed boundary ports",
+                format!("X2 q reader\n.va \"{reader}\"\n"),
+                true,
+                0,
+                false,
+            ),
+            (
+                "a discrete port and an XSPICE digital port",
+                "apull [q] pull\n.model pull d_pullup()\n".to_string(),
+                true,
+                0,
+                false,
+            ),
+            (
+                "a discrete port and an XSPICE analog port",
+                "A1 q qo amp\n.model amp gain(gain=1)\nR2 qo 0 1k\n".to_string(),
+                false,
+                1,
+                true,
+            ),
+        ] {
+            let deck =
+                format!("* mixed boundary topology\nX1 q driver\n{cards}.va \"{driver}\"\n.end\n");
+            let netlist =
+                Netlist::parse(&deck).unwrap_or_else(|error| panic!("{label} parses: {error}"));
+            let circuit = Engine::default()
+                .build_circuit(&netlist)
+                .unwrap_or_else(|error| panic!("{label} builds: {error}"));
+            let node = circuit
+                .get_node_by_name("q")
+                .unwrap_or_else(|| panic!("{label}: the deck named node q"));
+
+            let classified = circuit
+                .mixed_digital_coordinator
+                .as_ref()
+                .is_some_and(|digital| digital.event_nodes().any(|event| event == node));
+            assert_eq!(classified, event_only, "{label}: event-only classification");
+
+            let remaining = circuit
+                .mixed_signal_hosts
+                .iter()
+                .flat_map(|host| host.boundary_port_nodes())
+                .filter(|candidate| *candidate == node)
+                .count();
+            assert_eq!(remaining, bridges, "{label}: bridges left on the net");
+
+            let claims_row = circuit
+                .mixed_signal_hosts
+                .iter()
+                .any(|host| host.coupled_nodes().contains(&node));
+            assert_eq!(
+                claims_row, coupled,
+                "{label}: matrix row claimed for the net"
+            );
+        }
+
+        std::fs::remove_file(&driver_path).expect("remove the driver model file");
+        std::fs::remove_file(&reader_path).expect("remove the reader model file");
     }
 }
