@@ -657,6 +657,19 @@ fn levenshtein(a: &str, b: &str) -> usize {
     previous[b_chars.len()]
 }
 
+/// Whether the deck defines masters in a file this lint never reads.
+///
+/// The reference scan sees only the buffer, so a card naming something the
+/// buffer does not spell is an unknown reference — unless the deck imports
+/// definitions from elsewhere, in which case reporting one is a false positive
+/// on every name the imported file supplies. `.include`/`.inc`/`.lib` bring in
+/// `.subckt` and `.model` cards; a Verilog-A source directive brings in the
+/// modules its file declares, which is the same claim on the master namespace.
+///
+/// The Verilog-A spellings come from the parser that owns them, so a spelling
+/// added there is honoured here rather than listed twice. A malformed
+/// directive parses as no directive at all, which costs nothing: this lint
+/// only runs once the deck has parsed.
 fn has_external_model_sources(buffer: &str) -> bool {
     buffer.lines().any(|line| {
         let trimmed = line.trim_start();
@@ -667,6 +680,7 @@ fn has_external_model_sources(buffer: &str) -> bool {
         head.eq_ignore_ascii_case(".include")
             || head.eq_ignore_ascii_case(".inc")
             || head.eq_ignore_ascii_case(".lib")
+            || rspice_core::netlist::parse_veriloga_source_directive(trimmed).is_some()
     })
 }
 
@@ -783,6 +797,37 @@ mod tests {
         let diagnostics = unknown_reference_diagnostics(src);
 
         assert!(diagnostics.is_empty());
+    }
+
+    /// A Verilog-A source directive declares masters the buffer never spells,
+    /// exactly as `.include` declares subcircuits it never spells. Every
+    /// spelling of it has to silence the unknown-master lint, or a deck that
+    /// compiles its own device reads as a deck full of typos.
+    #[test]
+    fn unknown_reference_lint_skips_decks_with_a_veriloga_source() {
+        let bare = "deck\nX1 a k my_diode\n.end\n";
+        assert_eq!(
+            unknown_reference_diagnostics(bare).len(),
+            1,
+            "a master nothing declares is still reported"
+        );
+
+        for directive in [".va", ".veriloga", ".hdl", ".vams", ".verilog"] {
+            for cased in [
+                directive.to_ascii_lowercase(),
+                directive.to_ascii_uppercase(),
+            ] {
+                let src = format!("deck\n{cased} \"models/dev.va\"\nX1 a k my_diode\n.end\n");
+                assert!(
+                    unknown_reference_diagnostics(&src).is_empty(),
+                    "{cased} declares the master"
+                );
+            }
+        }
+
+        // A card that only looks like one of them is not one.
+        let near_miss = "deck\n.vams2 \"models/dev.va\"\nX1 a k my_diode\n.end\n";
+        assert_eq!(unknown_reference_diagnostics(near_miss).len(), 1);
     }
 
     #[test]
