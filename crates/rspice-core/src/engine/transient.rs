@@ -8029,6 +8029,39 @@ impl Engine {
             } else {
                 None
             };
+            // The Verilog-A charge walk belongs here beside the native
+            // families, not only in the order trial below: a limit consulted
+            // only when the solver is deciding whether to promote to order two
+            // never rejects a candidate step and never caps the next one, so
+            // an authored charge could hold no authority over the grid at all
+            // while a function computing its limit existed.
+            #[cfg(feature = "veriloga-builtins-base")]
+            let veriloga_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && circuit.has_any_veriloga_devices()
+            {
+                Self::veriloga_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    TruncationStep {
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        dt,
+                    },
+                    mosfet_history.accepted_dt_prev,
+                    mosfet_history.accepted_dt_prev_prev,
+                    NgspiceTruncationTolerances {
+                        reltol: transient_lte_reltol,
+                        current_abstol: self.current_abstol(),
+                        charge_abstol: self.charge_abstol(),
+                        trtol: self.transient_trtol(),
+                    },
+                )
+            } else {
+                None
+            };
+            #[cfg(not(feature = "veriloga-builtins-base"))]
+            let veriloga_truncation_limit: Option<Value> = None;
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
@@ -8052,7 +8085,10 @@ impl Engine {
                     ),
                     b3soi_truncation_limit,
                 ),
-                Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
+                Self::min_truncation_limit(
+                    Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
+                    veriloga_truncation_limit,
+                ),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
                 Self::ltra_candidate_truncation_limit(&circuit, &new_solution, step_time)
@@ -8721,6 +8757,31 @@ impl Engine {
                     } else {
                         None
                     };
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    let force_accept_veriloga_truncation_limit =
+                        if circuit.has_any_veriloga_devices() {
+                            Self::veriloga_ngspice_truncation_limit(
+                                &circuit,
+                                &new_solution,
+                                TruncationStep {
+                                    method: current_method,
+                                    trap_order: accepted_step_trap_order,
+                                    dt,
+                                },
+                                mosfet_history.accepted_dt_prev,
+                                mosfet_history.accepted_dt_prev_prev,
+                                NgspiceTruncationTolerances {
+                                    reltol: transient_lte_reltol,
+                                    current_abstol: self.current_abstol(),
+                                    charge_abstol: self.charge_abstol(),
+                                    trtol: self.transient_trtol(),
+                                },
+                            )
+                        } else {
+                            None
+                        };
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
+                    let force_accept_veriloga_truncation_limit: Option<Value> = None;
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
@@ -8745,8 +8806,11 @@ impl Engine {
                             force_accept_b3soi_truncation_limit,
                         ),
                         Self::min_truncation_limit(
-                            force_accept_bsim3_truncation_limit,
-                            force_accept_bsim4_truncation_limit,
+                            Self::min_truncation_limit(
+                                force_accept_bsim3_truncation_limit,
+                                force_accept_bsim4_truncation_limit,
+                            ),
+                            force_accept_veriloga_truncation_limit,
                         ),
                     );
                     let capture_xyce_static_history = size > 0

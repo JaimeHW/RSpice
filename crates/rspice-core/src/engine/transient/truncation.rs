@@ -2529,6 +2529,39 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// Hold the step to the truncation error of every Verilog-A charge in the
+    /// deck, whichever implementation carries it.
+    ///
+    /// A `ddt` operand is the same state whether the module was compiled ahead
+    /// of time into the generated catalog, is being interpreted or JIT-compiled
+    /// by the runtime, or belongs to the continuous half of a mixed
+    /// Verilog-AMS instance. Which of the three serves a card is a build and
+    /// deck decision, not a statement about the physics, so one entry point
+    /// answers for all of them and the callers below never learn which route a
+    /// limit came from.
+    #[cfg(feature = "veriloga-builtins-base")]
+    pub(super) fn veriloga_ngspice_truncation_limit(
+        circuit: &crate::circuit::CircuitData,
+        candidate_solution: &[Value],
+        step: TruncationStep,
+        accepted_dt_prev: Value,
+        accepted_dt_prev_prev: Value,
+        tolerances: NgspiceTruncationTolerances,
+    ) -> Option<Value> {
+        if !circuit.has_generated_veriloga_devices() {
+            return None;
+        }
+        Self::generated_veriloga_ngspice_truncation_limit(
+            circuit,
+            candidate_solution,
+            step,
+            accepted_dt_prev,
+            accepted_dt_prev_prev,
+            tolerances,
+        )
+        .filter(|limit| limit.is_finite() && *limit > 0.0)
+    }
+
     /// Prepare the unique, non-excluded solution indices used by the
     /// nonlinear terminal-activity guard. Circuit topology is immutable
     /// during an analysis, so the accepted-step loop should not rediscover
@@ -2867,30 +2900,25 @@ impl Engine {
         // place the capacitor and inductor walks above take theirs: the step
         // geometry is the circuit's, not any one family's.
         #[cfg(feature = "veriloga-builtins-base")]
-        let generated_limit = if circuit.has_generated_veriloga_devices() {
-            Self::generated_veriloga_ngspice_truncation_limit(
-                circuit,
-                candidate_solution,
-                TruncationStep {
-                    method,
-                    trap_order,
-                    dt,
-                },
-                mosfet_history.accepted_dt_prev,
-                mosfet_history.accepted_dt_prev_prev,
-                NgspiceTruncationTolerances {
-                    reltol,
-                    current_abstol,
-                    charge_abstol,
-                    trtol,
-                },
-            )
-            .filter(|limit| limit.is_finite() && *limit > 0.0)
-        } else {
-            None
-        };
+        let veriloga_limit = Self::veriloga_ngspice_truncation_limit(
+            circuit,
+            candidate_solution,
+            TruncationStep {
+                method,
+                trap_order,
+                dt,
+            },
+            mosfet_history.accepted_dt_prev,
+            mosfet_history.accepted_dt_prev_prev,
+            NgspiceTruncationTolerances {
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            },
+        );
         #[cfg(not(feature = "veriloga-builtins-base"))]
-        let generated_limit: Option<Value> = None;
+        let veriloga_limit: Option<Value> = None;
         Self::min_truncation_limit(
             Self::min_truncation_limit(
                 Self::min_truncation_limit(
@@ -2907,7 +2935,7 @@ impl Engine {
             ),
             Self::min_truncation_limit(
                 Self::min_truncation_limit(vdmos_limit, ekv26_limit),
-                generated_limit,
+                veriloga_limit,
             ),
         )
     }
