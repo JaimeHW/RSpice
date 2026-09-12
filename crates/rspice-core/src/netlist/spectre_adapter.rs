@@ -2556,6 +2556,24 @@ fn adapt_include(rest: &str, line: usize) -> Result<String, SpectreModelAdapterE
     } else {
         take_token(rest).ok_or_else(|| error(line, "Spectre include has no path"))?
     };
+    // Spectre's `include` reads a netlist file. A behavioural source is the
+    // `ahdl_include` statement's job, and saying so is worth far more to a
+    // deck author than the include expander's "file not found" on a file that
+    // is right there but would never have parsed as SPICE.
+    if Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("va") || extension.eq_ignore_ascii_case("vams")
+        })
+    {
+        return Err(error(
+            line,
+            format!(
+                "Spectre include reads a netlist file, so it cannot compile the Verilog-A source '{path}'; declare it with ahdl_include instead"
+            ),
+        ));
+    }
     let section = remainder.split_whitespace().find_map(|token| {
         token
             .split_once('=')

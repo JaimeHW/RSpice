@@ -501,3 +501,13 @@ fn lowered_transient_and_ac_analyses_match_their_spice_equivalents() {
         "the lowered AC source magnitude must match the authored AC card"
     );
 }
+
+#[test]
+fn a_verilog_a_file_reached_through_include_is_refused_in_favour_of_ahdl_include() {
+    let message = refuse(
+        "include-verilog-a",
+        "simulator lang=spectre\ninclude \"r31_device.va\"\n",
+    );
+    assert!(message.contains("ahdl_include"), "{message}");
+    assert!(message.contains("r31_device.va"), "{message}");
+}
