@@ -70,6 +70,21 @@ pub(super) struct DynamicBreakpointSink<'a> {
 /// coalesce onto one analog point. `is_stop_time` keeps its established
 /// refusal: a horizon the integration floor overshoots is a configuration the
 /// caller has to see, not a discrete schedule to be folded.
+///
+/// # A mandatory time one floor away, measured by a subtraction that rounds
+///
+/// The mirror of that case, and the one a *run* of floor landings produces.
+/// `engine::transient::landed_veriloga_event_time` lands such an event on the
+/// floor grid `origin + k * minimum`, and two neighbouring points of that grid
+/// round independently: the interval between them measures a couple of ulps
+/// either side of `minimum`. A hair under is the case above. A hair over fits
+/// on the ordinary arithmetic as long as `candidate_maximum` is wider than it —
+/// but a module whose own `$bound_step` pins that bound at the floor leaves no
+/// step that reaches the target at all, because one interval count falls an ulp
+/// short of it and two overshoot it by a whole floor. The interval *is* the
+/// floor, so it is taken as one step rather than refused; `proposed` and both
+/// ceilings are otherwise respected exactly, and an interval genuinely wider
+/// than the bound can take still refuses.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fit_model_interval(
     time: Value,
@@ -115,6 +130,13 @@ pub(super) fn fit_model_interval(
             return Err(refuse());
         }
         return Ok(minimum);
+    }
+    // One floor, overshooting the bound by the ulps the grid rounds by. The
+    // stop time is excluded because its own rules above and below already cover
+    // both sides of the floor, and because `gap` there is the whole remaining
+    // interval rather than a scheduled instant.
+    if !is_stop_time && gap > candidate_maximum && gap - minimum <= roundoff {
+        return Ok(gap);
     }
     if is_stop_time && candidate_maximum == minimum {
         let count = (gap / minimum).round();
@@ -1334,6 +1356,50 @@ mod tests {
         assert_eq!(
             fit_model_interval(0.0, 100.0, 3.0, 1e-20, 5.0, 5.0, false).unwrap(),
             3.0
+        );
+    }
+
+    /// A floor landing one ulp past a bound that is the floor itself.
+    ///
+    /// Two neighbouring points of the landing grid round independently, so the
+    /// interval between them can measure a hair over `minimum`. While the
+    /// model's own bound is pinned at the floor that interval has no step at
+    /// all: one falls short of the target, two overshoot it by a whole floor.
+    #[test]
+    fn a_floor_interval_the_bound_rounds_short_of_is_one_step_not_a_refusal() {
+        const FLOOR: f64 = 1.0e-14;
+        let time = 2.0 * FLOOR;
+        let over = (time + FLOOR).next_up().next_up();
+        assert!(over - time > FLOOR, "the fixture must overshoot the floor");
+        assert_eq!(
+            fit_model_interval(time, over, FLOOR, FLOOR, 1.0e-3, FLOOR, false).unwrap(),
+            over - time,
+            "an interval that is the floor plus its own rounding is one step"
+        );
+        // The short side is the established rule, and is unchanged.
+        assert_eq!(
+            fit_model_interval(
+                time,
+                (time + FLOOR).next_down(),
+                FLOOR,
+                FLOOR,
+                1.0e-3,
+                FLOOR,
+                false
+            )
+            .unwrap(),
+            FLOOR
+        );
+        // Nothing wider: an interval the bound genuinely cannot take refuses.
+        assert!(
+            fit_model_interval(time, time + 1.5 * FLOOR, FLOOR, FLOOR, 1.0e-3, FLOOR, false)
+                .is_err()
+        );
+        // The stop time keeps its own established rule for the same shape,
+        // which fits the floor rather than the measured interval.
+        assert_eq!(
+            fit_model_interval(time, over, FLOOR, FLOOR, 1.0e-3, FLOOR, true).unwrap(),
+            FLOOR
         );
     }
 
