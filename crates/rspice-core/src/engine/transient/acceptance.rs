@@ -211,7 +211,8 @@ impl Engine {
                         ))
                     })?;
                 let num_nodes = circuit.num_nodes();
-                let (writes, refusal) = circuit.project_xspice_voltage_outputs(solution, num_nodes);
+                let (writes, refusal) =
+                    circuit.project_xspice_voltage_outputs(solution, num_nodes, Some(time));
                 projected = writes;
                 // There is no iterate left to reject at acceptance: a code
                 // model that publishes a non-finite output for the point the

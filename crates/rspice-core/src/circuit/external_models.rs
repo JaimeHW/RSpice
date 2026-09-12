@@ -2820,10 +2820,18 @@ impl CircuitData {
     ///
     /// Writes already applied are still returned, so the caller's rollback
     /// restores the candidate whether this refuses or not.
+    ///
+    /// `accepted_time` says which point the refusal happened at: `Some(t)` on
+    /// an acceptance path, where the solver has already committed to `t` and
+    /// the run ends, and `None` inside a Newton trial, where the iterate can
+    /// still be rejected. Both shipped callers are acceptance paths, and a
+    /// message that calls the accepted point "a trial iterate" sends the
+    /// reader looking for a step that was never cut.
     pub(crate) fn project_xspice_voltage_outputs(
         &mut self,
         solution: &mut [Value],
         num_nodes: usize,
+        accepted_time: Option<Value>,
     ) -> (Vec<(usize, Value)>, Result<(), crate::device::StampError>) {
         #[inline]
         fn set_node(
@@ -2891,11 +2899,15 @@ impl CircuitData {
             if value.is_finite() || non_finite_output.is_some() {
                 return;
             }
+            let point = match accepted_time {
+                Some(time) => format!("at the accepted point t={time:.16e}s"),
+                None => "at a trial iterate".to_string(),
+            };
             non_finite_output = Some((
                 instance.name.clone(),
                 format!(
-                    "XSPICE instance '{}' output port '{}' evaluated to {value} at a trial \
-                         iterate; it has no projection into the candidate solution",
+                    "XSPICE instance '{}' output port '{}' evaluated to {value} {point}; it has \
+                         no projection into the candidate solution",
                     instance.name, port.name
                 ),
             ));
@@ -5541,12 +5553,31 @@ endmodule"#;
         let mut solution = vec![0.0; circuit.matrix_size()];
         circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
         let num_nodes = circuit.num_nodes;
-        let (rollback, refusal) = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes);
+        let (rollback, refusal) =
+            circuit.project_xspice_voltage_outputs(&mut solution, num_nodes, Some(2.5e-9));
 
         let error = refusal.expect_err("a non-finite projected output must refuse");
         assert!(
             error.to_string().contains("Anan") && error.to_string().contains("'out'"),
             "the refusal must name the instance and the port: {error}"
+        );
+        // Both shipped callers are acceptance paths. Calling the accepted
+        // point "a trial iterate" sends the reader looking for a cut step.
+        assert!(
+            error.to_string().contains("at the accepted point t=2.5")
+                && !error.to_string().contains("trial iterate"),
+            "an acceptance-path refusal must name the accepted point: {error}"
+        );
+        let (trial_rollback, trial_refusal) =
+            circuit.project_xspice_voltage_outputs(&mut solution, num_nodes, None);
+        let trial_error = trial_refusal.expect_err("a non-finite projected output must refuse");
+        assert!(
+            trial_error.to_string().contains("at a trial iterate"),
+            "a trial-phase refusal still names the iterate: {trial_error}"
+        );
+        assert!(
+            trial_rollback.is_empty(),
+            "nothing may have been written for the refused port: {trial_rollback:?}"
         );
         assert!(
             rollback.is_empty(),
@@ -5661,7 +5692,7 @@ endmodule"#;
         let mut solution = vec![0.0; circuit.matrix_size()];
         circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
         let num_nodes = circuit.num_nodes;
-        let _ = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes);
+        let _ = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes, Some(1.0e-9));
 
         assert_eq!(solution[out_node - 1], 1.0);
     }

@@ -762,9 +762,10 @@ impl CircuitData {
                 group.settle_with(&mut digital, solution, Some(&mut participant))?;
                 wave = participant.into_wave();
                 let num_nodes = owner.circuit.num_nodes();
-                let (updates, refusal) = owner
-                    .circuit
-                    .project_xspice_voltage_outputs(solution, num_nodes);
+                let (updates, refusal) =
+                    owner
+                        .circuit
+                        .project_xspice_voltage_outputs(solution, num_nodes, Some(time));
                 let updates = match refusal {
                     Ok(()) => updates,
                     Err(error) => {
