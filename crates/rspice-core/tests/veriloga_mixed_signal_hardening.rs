@@ -3064,12 +3064,16 @@ module ring_enable(en); output en; reg en; initial begin en = 1'b0; #1 en = 1'b1
 /// step wide. That is the same shape [`free_running_deck`] documents for the
 /// mixed fixtures and it is not a user-facing configuration; it is the region
 /// the sub-minimum activation bound exists to end.
-fn code_model_ring_deck(enable: &ModelFile, tstop: f64, max_step: f64) -> String {
+///
+/// `delay` spells the cadence in the model card's own units, so the same deck
+/// serves a schedule well under the resulting minimum (`1p`) and one exactly
+/// at it (`10p` under a one-second maximum step).
+fn code_model_ring_deck(enable: &ModelFile, delay: &str, tstop: f64, max_step: f64) -> String {
     format!(
         "* a code-model ring at the official gate-delay floor, coupled to a mixed module\n\
          xenable en ring_enable\n\
          aring [en rb] rb ringxor\n\
-         .model ringxor d_xor (rise_delay=1p fall_delay=1p)\n\
+         .model ringxor d_xor (rise_delay={delay} fall_delay={delay})\n\
          rload load 0 1k\n\
          cload load 0 10p\n\
          .va \"{}\" ring_enable\n\
@@ -3080,88 +3084,201 @@ fn code_model_ring_deck(enable: &ModelFile, tstop: f64, max_step: f64) -> String
     )
 }
 
-/// **Property 5, case e.** What actually happens to a coupled code-model
-/// schedule finer than the solver's minimum step, and why the schedule bound
-/// is not what it meets.
+/// `delmin = 1e-11 * tmax` for the `.tran` lines below, restated because the
+/// controller's floor is not observable from a result.
+const RING_SOLVER_FLOOR: f64 = 1.0e-11;
+
+/// The instant [`RING_ENABLE`]'s single `` #1 `` arms the ring at, under its
+/// `` `timescale 1ns/1ps ``, and therefore the origin of the floor grid every
+/// landing after it stands on.
+const RING_ARMED_AT: f64 = 1.0e-9;
+
+/// **Property 5, case e.** A coupled code-model schedule finer than the
+/// solver's minimum step is landed like any other, and what bounds a ring that
+/// never widens is the schedule bound — naming the code model.
 ///
-/// The sub-minimum activation bound now classifies a shared code-model event
+/// The sub-minimum activation bound classifies a shared code-model event
 /// alongside a mixed one — `CircuitData::veriloga_scheduled_activation` folds
 /// the XSPICE queue whenever the deck has coupled event nets, and names the
 /// code-model instance the kernel says queued it — because
 /// `accepted_veriloga_event_time` lands both on the same contract and a run
 /// pinned at the floor by one is the same fact about the same stepper.
 ///
-/// The classification is nonetheless unreachable from a deck today, and this
-/// fixture is what says so. Two contracts disagree about an activation inside
-/// the floor:
+/// Reaching that classification took carrying one rule across the two kernels.
+/// `landed_veriloga_event_time` coalesces an activation inside the floor onto
+/// `accepted + hard_min` deliberately — there is no analog instant between the
+/// accepted point and it — which steps the solver *past* it, and the coupled
+/// Active participant used to refuse any queued XSPICE event earlier than the
+/// physical time its wave opened at, with no reachability tolerance at all. So
+/// the first event this ring schedules, one picosecond after the enable and a
+/// tenth of the ten-picosecond minimum this `.tran` line leaves the solver,
+/// ended the run at the *second* accepted point:
+/// `missed XSPICE breakpoint at 1.0010000000000002e-9s before shared Active
+/// work at 1.0100000000000000e-9s`. The mixed half had the rule already
+/// (`SharedDigitalRuntime::activation_was_reachable`); the coupled participant
+/// now states it for the code-model queue against the same floor
+/// (`XspiceDigitalParticipant::event_was_reachable`).
 ///
-/// * `landed_veriloga_event_time` coalesces it onto `accepted + hard_min`,
-///   deliberately — there is no analog instant between the accepted point and
-///   it — which steps the solver *past* it;
-/// * the coupled Active participant
-///   (`circuit::external_models::coupled`, `settle_active`) refuses any queued
-///   XSPICE event earlier than the physical time its wave opens at, with no
-///   reachability tolerance at all.
-///
-/// So the first event the ring schedules — one picosecond after the enable,
-/// a tenth of the ten-picosecond minimum this `.tran` line leaves the solver —
-/// ends the run at the *second* accepted point, long before any schedule is
-/// counted. The mixed half of the same engine already has the rule the XSPICE
-/// half is missing: `SharedDigitalRuntime::activation_was_reachable` refuses
-/// only an activation at least one hard minimum after the accepted time, and
-/// documents that refusing a closer one "would end a run over a schedule the
-/// analog side is simply too coarse to resolve".
-///
-/// The assertions below are therefore about the *interval*, not the wording:
-/// the refused event is one the stepper had no legal interval to, which is
-/// what makes the refusal wrong. When that tolerance is carried across, this
-/// fixture's subject becomes the schedule bound naming `aring` after 16384
-/// points — re-point it then; the deck is already the right deck.
+/// What is left is the fact about the deck, and it is not a defect: a gate
+/// whose output feeds its own input at ngspice's clamped 1 ps minimum asks for
+/// another activation from every point the solver lands, so progress is pinned
+/// at the floor for the rest of the interval. Sixteen thousand consecutive
+/// points of it is the bound, and the run before it is what the count proves.
 #[test]
-fn a_coupled_code_model_schedule_inside_the_floor_is_refused_before_it_is_classified() {
+fn a_coupled_code_model_ring_inside_the_floor_is_bounded_as_the_code_model_it_is() {
     const TSTOP: f64 = 1.0e-6;
     const MAX_STEP: f64 = 1.0;
-    /// `delmin = 1e-11 * tmax`, restated because the controller's floor is not
-    /// observable from a result.
-    const SOLVER_FLOOR: f64 = MAX_STEP * 1.0e-11;
 
     let enable = ModelFile::new("ring_enable", RING_ENABLE);
     let error = error_for(
-        &code_model_ring_deck(&enable, TSTOP, MAX_STEP),
+        &code_model_ring_deck(&enable, "1p", TSTOP, MAX_STEP),
         TSTOP,
         MAX_STEP,
     );
     let lowered = error.to_lowercase();
     assert!(
-        lowered.contains("missed xspice breakpoint"),
-        "the coupled participant is what ends this run today: {error}"
+        !lowered.contains("missed xspice breakpoint"),
+        "an activation the stepper had no legal interval to is landed, not refused: {error}"
     );
     assert!(
-        !lowered.contains("ill-conditioned") && !lowered.contains("at or closer together"),
-        "neither the livelock detector nor the schedule bound is reached: {error}"
+        !lowered.contains("ill-conditioned"),
+        "and the livelock detector stands aside from a schedule-paced point: {error}"
+    );
+    assert!(
+        lowered.contains("xspice code-model instance 'aring'"),
+        "the bound must name the code model that holds the stepper, as the kind of thing it \
+         is rather than as a Verilog-A module: {error}"
+    );
+    assert!(
+        lowered.contains("at or closer together than the transient solver's minimum timestep"),
+        "and it must be the sub-minimum activation bound that ends the run: {error}"
     );
 
-    let number_after = |marker: &str| -> f64 {
-        error
-            .split(marker)
-            .nth(1)
-            .and_then(|rest| rest.split('s').next())
-            .and_then(|number| number.trim().parse().ok())
-            .unwrap_or_else(|| panic!("no time after '{marker}' in {error}"))
-    };
-    let due = number_after("breakpoint at ");
-    let physical = number_after("Active work at ");
+    let count = error
+        .split("has scheduled ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|word| word.parse::<usize>().ok())
+        .unwrap_or_else(|| panic!("no consecutive-activation count in {error}"));
     assert!(
-        physical > due,
-        "the refusal is about an event the solver stepped past, {due:e}s against {physical:e}s"
+        count >= 1024,
+        "the run has to reach the bound's own reporting length to be bounded by it, not end \
+         at the second accepted point: {count} consecutive activations"
     );
+    let held_near = error
+        .split("near t=")
+        .nth(1)
+        .and_then(|rest| rest.split('s').next())
+        .and_then(|number| number.trim().parse::<f64>().ok())
+        .unwrap_or_else(|| panic!("no held-at time in {error}"));
     assert!(
-        physical - due < SOLVER_FLOOR,
-        "the refused event is {:e}s behind the wave, which is inside the {SOLVER_FLOOR:e}s \
-         minimum step: the stepper had no legal interval to it and coalesced it exactly as \
-         the landing contract says, so refusing it is the defect this fixture pins",
-        physical - due
+        held_near > RING_ARMED_AT + 1024.0 * RING_SOLVER_FLOOR,
+        "and the clock has to have advanced through those points rather than stopped at the \
+         {:e}s wave the participant used to refuse: held at {held_near:e}s",
+        RING_ARMED_AT + RING_SOLVER_FLOOR
     );
+}
+
+/// Assert that every ring publication after the enable sits on the floor grid
+/// the landing contract places it on, and that the run reached `tstop`.
+///
+/// `landed_veriloga_event_time` lands a run of sub-floor activations on
+/// `origin + k * hard_min` — the enable is the origin — so the ring's exact
+/// picosecond schedule is observable only as those points. That is the whole
+/// claim: the code model keeps its own times and its own ordering, and the
+/// analog side owes it a timepoint at or after each, which is the one it
+/// lands.
+fn assert_ring_lands_on_the_floor_grid(result: &TransientResult, tstop: f64, publications: usize) {
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= tstop - RING_SOLVER_FLOOR,
+        "the run must reach tstop {tstop:e}s, it stopped at {last:e}s"
+    );
+    let ring: Vec<f64> = digital_points(result, "rb")
+        .into_iter()
+        .map(|(time, _)| time)
+        .filter(|time| *time > RING_ARMED_AT)
+        .collect();
+    assert!(
+        ring.len() >= publications,
+        "the ring must publish at {publications} of the landed points between the enable and \
+         {tstop:e}s, saw {ring:?}"
+    );
+    for time in &ring {
+        let steps = ((time - RING_ARMED_AT) / RING_SOLVER_FLOOR).round();
+        assert!(
+            steps >= 1.0,
+            "no publication may be recorded inside the first landed step — the picosecond the \
+             gate asked for is not an analog instant: {ring:?}"
+        );
+        assert!(
+            (time - (RING_ARMED_AT + steps * RING_SOLVER_FLOOR)).abs()
+                <= RING_SOLVER_FLOOR * 1.0e-6,
+            "ring publication at {time:e}s is not on the floor grid the landing contract \
+             places it on ({RING_ARMED_AT:e}s + k x {RING_SOLVER_FLOOR:e}s): {ring:?}"
+        );
+    }
+}
+
+/// **Property 5, case f.** The events of a schedule inside the floor are
+/// delivered, at the timepoints the landing contract coalesces them onto, and
+/// the run finishes.
+///
+/// The same ring as case e over an interval a floor march crosses, so the
+/// delivery is readable from the trace instead of inferred from a count, and
+/// nothing else drives `rb`: every value in it is one the code model published
+/// inside a wave the stepper opened.
+///
+/// Which is also why the count of publications is one rather than five. Ten
+/// picosecond activations fall inside each ten-picosecond step, and coalescing
+/// is what the landing contract does with them: they are drained in queue
+/// order at the one analog timepoint, the gate re-evaluates after each, and
+/// what the accepted point commits is the net value of the whole window. An
+/// even number of inversions later that value is the one already standing, so
+/// the trace — a change list — holds the first publication and nothing after
+/// it. The observable claim is the one asserted: the run reaches `tstop`, and
+/// every value it does record sits on the floor grid rather than at a
+/// picosecond instant the solver never visited.
+#[test]
+fn a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_points() {
+    const TSTOP: f64 = 1.05e-9;
+    const MAX_STEP: f64 = 1.0;
+
+    let enable = ModelFile::new("ring_enable", RING_ENABLE);
+    let deck = code_model_ring_deck(&enable, "1p", TSTOP, MAX_STEP);
+    let result = run(&deck, TSTOP, MAX_STEP);
+    assert_ring_lands_on_the_floor_grid(&result, TSTOP, 1);
+}
+
+/// **Property 5, case g.** A cadence exactly at the solver's minimum step runs
+/// too, which it could not while the coupled guard measured an ulp.
+///
+/// Ten picoseconds is precisely the minimum a one-second maximum timestep
+/// leaves this deck, so nothing here is finer than the analog resolution — and
+/// yet the request measures under it: `(1e-9 + 1e-11) - 1e-9` is
+/// `9.99999999999996547e-12`, a hair below the floor, for every accepted point
+/// in the decade. The code model's next event is its own running sum of those
+/// additions while the stepper's landing is a grid point `origin + k * floor`,
+/// and after a few steps the two stand an ulp apart in whichever direction the
+/// rounding fell. Measured on the guard that refused it: the wave opened at
+/// `1.0500000000000001e-9`s with the event due at `1.0499999999999999e-9`s —
+/// two ulps of "missed breakpoint" on a schedule the solver was tracking
+/// exactly. The reachability rule answers it without an epsilon of its own: an
+/// interval that measures under one floor had no analog instant in it, whether
+/// it is a tenth of a floor or a hair under one.
+///
+/// One activation per step, so this is also where every landed point carries a
+/// publication and the grid is legible end to end: five toggles across the
+/// fifty picoseconds after the enable.
+#[test]
+fn a_coupled_code_model_cadence_exactly_at_the_solver_floor_runs() {
+    const TSTOP: f64 = 1.05e-9;
+    const MAX_STEP: f64 = 1.0;
+
+    let enable = ModelFile::new("ring_enable", RING_ENABLE);
+    let deck = code_model_ring_deck(&enable, "10p", TSTOP, MAX_STEP);
+    let result = run(&deck, TSTOP, MAX_STEP);
+    assert_ring_lands_on_the_floor_grid(&result, TSTOP, 5);
 }
 
 //=============================================================================
