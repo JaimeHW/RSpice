@@ -1569,20 +1569,33 @@ endmodule
 /// thousandth of the declared picosecond unit, one tick of the declared
 /// femtosecond precision — then asks for a second activation an interval later
 /// that no analog step is allowed to resolve.
+///
+/// `tick_kept` is what separates the two halves of the claim. The analog point
+/// the follow-up is *recorded* at moves — it has to, there is no analog time a
+/// femtosecond after the crossing — but the time the module *sees* must not:
+/// `$abstime` inside the resumed branch has to still be the activation's own
+/// tick, a femtosecond after the one that woke it, not the ten-femtosecond
+/// landing the stepper reached. Two ticks is the window, because an A/D
+/// crossing's seconds are the interpolated crossing rather than its floored
+/// tick; the landing is ten ticks away and cannot pass it.
 const FEMTOSECOND_FOLLOW: &str = r#"
 `timescale 1ps/1fs
 `include "disciplines.vams"
-module femtosecond_follow(p, n, sense, q, qd);
+module femtosecond_follow(p, n, sense, q, qd, tick_kept);
     inout p, n;
     electrical p, n;
     input sense;
-    output q, qd;
+    output q, qd, tick_kept;
     wire sense;
-    reg q, qd;
-    initial begin q = 1'b0; qd = 1'b0; end
+    reg q, qd, tick_kept;
+    real woke, held;
+    initial begin q = 1'b0; qd = 1'b0; tick_kept = 1'b0; woke = 0.0; held = 0.0; end
     always @(posedge sense) begin
+        woke = $abstime;
         q = ~q;
-        #0.001 qd = ~qd;
+        #0.001 held = $abstime;
+        qd = ~qd;
+        tick_kept = ((held - woke) > 0.0) && ((held - woke) < 2.0e-15);
     end
     analog I(p, n) <+ V(p, n) / 1000000.0;
 endmodule
@@ -1606,10 +1619,11 @@ fn femtosecond_follow_deck(model: &ModelFile) -> String {
     format!(
         "* a femtosecond follow-up chained onto an A/D crossing\n\
          vsense sense 0 pulse(0 3.3 100u 1u 1u 100u 200u)\n\
-         x1 p 0 sense q qd femtosecond_follow\n\
+         x1 p 0 sense q qd kept femtosecond_follow\n\
          rp p 0 1meg\n\
          rq q 0 10k\n\
          rqd qd 0 10k\n\
+         rkept kept 0 10k\n\
          .va \"{}\" femtosecond_follow\n\
          .tran 10u 400u\n\
          .end\n",
@@ -1617,7 +1631,8 @@ fn femtosecond_follow_deck(model: &ModelFile) -> String {
     )
 }
 
-/// **Property 4, case a.** A picosecond clock is simulated, not refused.
+/// **Property 4, case a.** A picosecond clock is simulated, not refused, and
+/// every edge of it is delivered.
 ///
 /// Every one of these activations is a mandatory analog time: the breakpoint
 /// manager holds it and the stepper must advance to it. What it must *not* do
@@ -1626,9 +1641,17 @@ fn femtosecond_follow_deck(model: &ModelFile) -> String {
 /// requested maximum is a nanosecond — and the whole run is spent landing on
 /// picosecond activations instead, which is the correct answer and the
 /// expensive one.
+///
+/// This one does not reach the landing contract: a nanosecond maximum step
+/// puts the solver hard minimum at `1e-11 * 1e-9 = 1e-20`, eight decades below
+/// a picosecond, so nothing here is unresolvable. It is the other half of the
+/// property — that a schedule this fine is *carried*, at full count — which is
+/// why the assertion is the edge count rather than the absence of an error.
+/// Ten nanoseconds is the horizon because each edge is an accepted analog
+/// point: the count is exact, and the run is ten thousand of them.
 #[test]
 fn a_picosecond_clock_runs_to_tstop_instead_of_ending_the_run() {
-    const TSTOP_NS: u32 = 100;
+    const TSTOP_NS: u32 = 10;
     const HALF_PERIOD: f64 = 1.0e-12;
 
     let tstop = f64::from(TSTOP_NS) * 1.0e-9;
@@ -1641,9 +1664,12 @@ fn a_picosecond_clock_runs_to_tstop_instead_of_ending_the_run() {
         "the run must reach tstop {tstop:e}s, it stopped at {last:e}s"
     );
     let points = digital_points(&result, "clk");
+    // One edge per half period, plus or minus whether the edge exactly at
+    // tstop is inside the run and whether the initial level is recorded.
+    let edges = (tstop / HALF_PERIOD).round() as usize;
     assert!(
-        points.len() > 1000,
-        "a picosecond clock over {TSTOP_NS} ns must produce thousands of transitions, saw {}",
+        points.len().abs_diff(edges) <= 1,
+        "a {HALF_PERIOD:e}s half period over {TSTOP_NS} ns is {edges} edges, saw {}",
         points.len()
     );
     for pair in points.windows(2).take(64) {
@@ -1669,6 +1695,12 @@ fn a_picosecond_clock_runs_to_tstop_instead_of_ending_the_run() {
 /// scheduler keeps that exact tick; the analog side owes it only a timepoint at
 /// or after it, so the two activations coalesce onto neighbouring analog points
 /// rather than ending the run.
+///
+/// Both halves are asserted, because the analog half alone is not the claim.
+/// The recorded times come from the accepted analog point, so a follow-up
+/// landed ten femtoseconds late looks the same there as one landed on time;
+/// `tick_kept` is the module's own reading of `$abstime` inside the resumed
+/// branch, and it is what says the digital tick survived the landing.
 #[test]
 fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
     const TSTOP: f64 = 400.0e-6;
@@ -1706,4 +1738,26 @@ fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
             qd_time - q_time
         );
     }
+
+    // The module's own clock reading. Two points and no more: low from the
+    // `initial` block, high at the first follow-up, and never falling back —
+    // a third point would mean the second activation read a different time
+    // from the first.
+    let kept = digital_points(&result, "kept");
+    assert_eq!(
+        kept.len(),
+        2,
+        "every resumed branch must read its own tick, not the analog landing: {kept:?}"
+    );
+    assert_ne!(
+        kept[1].1, kept[0].1,
+        "the tick check must go high, and it stayed at {:?}",
+        kept[0].1
+    );
+    let first_follow_up = qd.get(1).expect("a follow-up was recorded").0;
+    assert_eq!(
+        kept[1].0, first_follow_up,
+        "the tick check is assigned in the branch it measures, so it lands on that \
+         branch's analog point"
+    );
 }
