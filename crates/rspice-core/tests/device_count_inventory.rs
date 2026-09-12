@@ -92,6 +92,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "the same flags accumulated for the next settle pass",
     ),
     (
+        "xspice_output_iterates",
+        "the two most recent Newton iterates of the counted XSPICE instances' \
+         outputs, which is convergence history rather than a device",
+    ),
+    (
         "branch_name_by_ordinal",
         "canonical branch names, one per MNA branch unknown",
     ),
