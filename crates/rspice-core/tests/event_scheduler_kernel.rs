@@ -14,7 +14,7 @@ use std::env;
 use std::process::Command;
 
 use rspice_core::xspice::event_scheduler::{
-    EventScheduler, EventTarget, OscillationCause, SchedulerContext, SchedulerError,
+    EventScheduler, EventTarget, Instant, OscillationCause, SchedulerContext, SchedulerError,
     SchedulerLimits, SchedulerRegion, TimeResolution, TimeSlotReport,
 };
 use rspice_core::xspice::{DigitalValue, EventValue};
@@ -43,7 +43,29 @@ fn digital(value: u8) -> EventValue {
 }
 
 fn scheduler() -> EventScheduler {
-    EventScheduler::new(TimeResolution::default(), SchedulerLimits::default())
+    EventScheduler::new(SchedulerLimits::default())
+}
+
+/// The grid this suite reads the kernel's instants on.
+///
+/// The kernel declares none: it is keyed on an exact [`Instant`], and the
+/// ordering these tests pin is the ordering of instants. A test that wants to
+/// speak of "tick 7" names the grid it means, and 1 fs is the finest a
+/// `timescale` can declare, so every tick used here embeds exactly and reads
+/// back as itself. The pair [`at`]/[`tick_of`] is the seam a digital host has,
+/// exercised here on every operation.
+fn grid() -> TimeResolution {
+    TimeResolution::default()
+}
+
+/// The instant a tick of [`grid`] names.
+fn at(tick: u64) -> Instant {
+    Instant::from_tick(tick, grid()).expect("a schedulable tick")
+}
+
+/// The tick an instant this suite scheduled is on. Exact, by construction.
+fn tick_of(at: Instant) -> u64 {
+    at.floor_tick(grid()).expect("a tick this suite scheduled")
 }
 
 fn region_tag(region: SchedulerRegion) -> &'static str {
@@ -216,7 +238,7 @@ fn regions_run_active_then_inactive_then_nba_then_monitor() {
         SchedulerRegion::Active,
     ] {
         scheduler
-            .schedule_at(7, region, target("dut", "out", 1, 0), digital(1))
+            .schedule_at(at(7), region, target("dut", "out", 1, 0), digital(1))
             .expect("schedule");
     }
 
@@ -227,13 +249,13 @@ fn regions_run_active_then_inactive_then_nba_then_monitor() {
         .expect("a slot ran");
 
     assert_eq!(order, vec!["A", "I", "N", "M"]);
-    assert_eq!(report.tick, 7);
+    assert_eq!(tick_of(report.at), 7);
     assert_eq!(report.events_executed, 4);
     // Three promotions: active -> inactive -> NBA -> monitor.
     assert_eq!(report.delta_cycles, 3);
     assert_eq!(scheduler.pending(), 0);
-    assert_eq!(scheduler.current_tick(), 7);
-    assert_eq!(scheduler.next_tick(), None);
+    assert_eq!(scheduler.current_instant(), at(7));
+    assert_eq!(scheduler.next_instant(), None);
 }
 
 #[test]
@@ -247,7 +269,7 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
     // same-delta active reader.
     scheduler
         .schedule_at(
-            0,
+            at(0),
             SchedulerRegion::Active,
             target("dut", "seed", 0, 0),
             digital(1),
@@ -259,6 +281,7 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
             "seed" => {
                 ctx.schedule_after(
                     0,
+                    grid(),
                     SchedulerRegion::NonBlockingAssign,
                     target("dut", "nba_update", 1, 0),
                     digital(1),
@@ -266,6 +289,7 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
                 .expect("queue the nonblocking update");
                 ctx.schedule_after(
                     0,
+                    grid(),
                     SchedulerRegion::Active,
                     target("dut", "same_delta_reader", 1, 0),
                     digital(0),
@@ -279,6 +303,7 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
                 state.insert(1, 1);
                 ctx.schedule_after(
                     0,
+                    grid(),
                     SchedulerRegion::Active,
                     target("dut", "next_delta_reader", 1, 0),
                     digital(0),
@@ -308,7 +333,7 @@ fn monitor_region_observes_a_settled_slot() {
 
     scheduler
         .schedule_at(
-            3,
+            at(3),
             SchedulerRegion::Monitor,
             target("dut", "monitor", 9, 0),
             digital(0),
@@ -316,7 +341,7 @@ fn monitor_region_observes_a_settled_slot() {
         .expect("schedule");
     scheduler
         .schedule_at(
-            3,
+            at(3),
             SchedulerRegion::Active,
             target("dut", "write", 1, 0),
             digital(1),
@@ -332,6 +357,7 @@ fn monitor_region_observes_a_settled_slot() {
                 if writes == 1 {
                     ctx.schedule_after(
                         0,
+                        grid(),
                         SchedulerRegion::Inactive,
                         target("dut", "write", 2, 0),
                         digital(1),
@@ -362,7 +388,7 @@ fn a_bounded_delta_chain_settles_and_reports_its_cycles() {
     let mut scheduler = scheduler();
     scheduler
         .schedule_at(
-            0,
+            at(0),
             SchedulerRegion::Active,
             target("dut", "step", 0, 0),
             digital(0),
@@ -376,6 +402,7 @@ fn a_bounded_delta_chain_settles_and_reports_its_cycles() {
                 remaining -= 1;
                 ctx.schedule_after(
                     0,
+                    grid(),
                     SchedulerRegion::Inactive,
                     target("dut", "step", 0, 0),
                     digital(0),
@@ -401,10 +428,10 @@ fn a_zero_delay_active_loop_is_diagnosed_with_its_drivers() {
         max_events_per_tick: 500,
         max_reported_oscillating_entities: 4,
     };
-    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+    let mut scheduler = EventScheduler::new(limits);
     scheduler
         .schedule_at(
-            0,
+            at(0),
             SchedulerRegion::Active,
             target("loop_a", "q", 1, 0),
             digital(0),
@@ -415,7 +442,7 @@ fn a_zero_delay_active_loop_is_diagnosed_with_its_drivers() {
     // fires once. The report must name the loop, not the bystander.
     scheduler
         .schedule_at(
-            0,
+            at(0),
             SchedulerRegion::Active,
             target("quiet", "q", 3, 0),
             digital(0),
@@ -431,6 +458,7 @@ fn a_zero_delay_active_loop_is_diagnosed_with_its_drivers() {
             };
             ctx.schedule_after(
                 0,
+                grid(),
                 SchedulerRegion::Active,
                 target(next, "q", 2, 0),
                 digital(1),
@@ -443,7 +471,10 @@ fn a_zero_delay_active_loop_is_diagnosed_with_its_drivers() {
         panic!("wrong error for a zero-delay loop: {error}");
     };
     assert_eq!(diagnostic.cause, OscillationCause::EventLimit);
-    assert_eq!(diagnostic.tick, 0);
+    assert_eq!(diagnostic.at, at(0));
+    // The kernel declares no grid, so it names no tick; whoever does — a
+    // digital host with a declared precision — fills it in on the way out.
+    assert_eq!(diagnostic.tick, None);
     assert_eq!(diagnostic.event_limit, 500);
     assert!(diagnostic.events_executed > 500);
     assert!(
@@ -473,10 +504,10 @@ fn region_ping_pong_trips_the_delta_cycle_limit() {
         max_events_per_tick: u64::MAX,
         max_reported_oscillating_entities: 8,
     };
-    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+    let mut scheduler = EventScheduler::new(limits);
     scheduler
         .schedule_at(
-            0,
+            at(0),
             SchedulerRegion::Active,
             target("ping", "q", 1, 0),
             digital(0),
@@ -489,6 +520,7 @@ fn region_ping_pong_trips_the_delta_cycle_limit() {
         .run_time_slot(|_, ctx| {
             ctx.schedule_after(
                 0,
+                grid(),
                 SchedulerRegion::Inactive,
                 target("ping", "q", 1, 0),
                 digital(0),
@@ -515,7 +547,7 @@ fn region_ping_pong_trips_the_delta_cycle_limit() {
 #[test]
 fn an_empty_scheduler_runs_no_slot() {
     let mut scheduler = scheduler();
-    assert_eq!(scheduler.next_tick(), None);
+    assert_eq!(scheduler.next_instant(), None);
     assert_eq!(scheduler.pending(), 0);
     let report = scheduler
         .run_time_slot(|_, _| panic!("no event should execute"))
@@ -538,20 +570,25 @@ fn future_events_run_in_tick_then_region_then_sequence_order() {
     ];
     for (index, (tick, region)) in plan.iter().enumerate() {
         scheduler
-            .schedule_at(*tick, *region, target("dut", "out", index, 0), digital(1))
+            .schedule_at(
+                at(*tick),
+                *region,
+                target("dut", "out", index, 0),
+                digital(1),
+            )
             .expect("schedule");
     }
     assert_eq!(scheduler.pending(), plan.len());
-    assert_eq!(scheduler.next_tick(), Some(10));
+    assert_eq!(scheduler.next_instant(), Some(at(10)));
 
     let mut observed = Vec::new();
     while let Some(report) = scheduler
         .run_time_slot(|event, _| {
-            observed.push((event.tick, region_tag(event.region), event.sequence))
+            observed.push((tick_of(event.at), region_tag(event.region), event.sequence))
         })
         .expect("slots settle")
     {
-        assert!(report.tick >= 10);
+        assert!(tick_of(report.at) >= 10);
     }
 
     // Two events share tick 10 in the active region; the earlier-scheduled one
@@ -576,7 +613,7 @@ fn scheduling_into_a_tick_already_left_is_refused() {
     let mut scheduler = scheduler();
     scheduler
         .schedule_at(
-            5,
+            at(5),
             SchedulerRegion::Active,
             target("dut", "out", 1, 0),
             digital(1),
@@ -589,7 +626,7 @@ fn scheduling_into_a_tick_already_left_is_refused() {
 
     let error = scheduler
         .schedule_at(
-            5,
+            at(5),
             SchedulerRegion::Active,
             target("dut", "out", 1, 0),
             digital(1),
@@ -598,15 +635,20 @@ fn scheduling_into_a_tick_already_left_is_refused() {
     assert_eq!(
         error,
         SchedulerError::ScheduleInThePast {
-            current_tick: 5,
-            requested_tick: 5,
+            reached: at(5),
+            requested: at(5),
         }
     );
-    assert!(error.to_string().contains("has reached tick 5"));
+    assert!(
+        error
+            .to_string()
+            .contains(&format!("has reached {} s", at(5))),
+        "the refusal must name the instant reached: {error}"
+    );
 
     scheduler
         .schedule_at(
-            6,
+            at(6),
             SchedulerRegion::Active,
             target("dut", "out", 1, 0),
             digital(1),
@@ -619,7 +661,7 @@ fn an_executing_event_cannot_schedule_into_the_past() {
     let mut scheduler = scheduler();
     scheduler
         .schedule_at(
-            4,
+            at(4),
             SchedulerRegion::Active,
             target("dut", "out", 1, 0),
             digital(1),
@@ -630,7 +672,7 @@ fn an_executing_event_cannot_schedule_into_the_past() {
     scheduler
         .run_time_slot(|_, ctx| {
             refused = Some(ctx.schedule_at(
-                ctx.current_tick() - 1,
+                at(tick_of(ctx.current_instant()) - 1),
                 SchedulerRegion::Active,
                 target("dut", "out", 1, 0),
                 digital(1),
@@ -642,21 +684,23 @@ fn an_executing_event_cannot_schedule_into_the_past() {
     assert_eq!(
         refused,
         Some(Err(SchedulerError::ScheduleInThePast {
-            current_tick: 4,
-            requested_tick: 3,
+            reached: at(4),
+            requested: at(3),
         }))
     );
 }
 
 #[test]
-fn the_last_representable_tick_is_scheduled_into_the_future_tier() {
-    // A sentinel tick standing in for "no slot is open" would route an event
-    // scheduled at that tick into whichever slot was running. `u64::MAX` is a
-    // schedulable tick, so it must reach the future tier like any other.
+fn the_last_representable_instant_is_scheduled_into_the_future_tier() {
+    // A sentinel instant standing in for "no slot is open" would route an
+    // event scheduled at that instant into whichever slot was running. The
+    // largest finite time is a schedulable instant, so it must reach the
+    // future tier like any other.
+    let far = Instant::from_seconds(f64::MAX).expect("the largest finite time");
     let mut scheduler = scheduler();
     scheduler
         .schedule_at(
-            u64::MAX,
+            far,
             SchedulerRegion::Active,
             target("dut", "far", 1, 0),
             digital(1),
@@ -664,29 +708,29 @@ fn the_last_representable_tick_is_scheduled_into_the_future_tier() {
         .expect("schedule");
     scheduler
         .schedule_at(
-            1,
+            at(1),
             SchedulerRegion::Active,
             target("dut", "near", 1, 0),
             digital(1),
         )
         .expect("schedule");
 
-    assert_eq!(scheduler.next_tick(), Some(1));
+    assert_eq!(scheduler.next_instant(), Some(at(1)));
 
     let mut order = Vec::new();
     while scheduler
-        .run_time_slot(|event, _| order.push((event.tick, event.target.port_name.clone())))
+        .run_time_slot(|event, _| order.push((event.at, event.target.port_name.clone())))
         .expect("slots settle")
         .is_some()
     {}
 
     assert_eq!(
         order,
-        vec![(1, "near".to_string()), (u64::MAX, "far".to_string())]
+        vec![(at(1), "near".to_string()), (far, "far".to_string())]
     );
-    // The far tick has no exact seconds image, which is a conversion concern
-    // and not a scheduling one: it still orders correctly.
-    assert!(scheduler.resolution().ticks_to_seconds(u64::MAX).is_err());
+    // That instant is on no declared grid, which is a conversion concern and
+    // not a scheduling one: it still orders correctly.
+    assert!(far.floor_tick(grid()).is_err());
 }
 
 //=============================================================================
@@ -694,11 +738,15 @@ fn the_last_representable_tick_is_scheduled_into_the_future_tier() {
 //=============================================================================
 
 /// Run every event due at or before `bound`, returning `(tick, port, value)`.
-fn drain_due(scheduler: &mut EventScheduler, bound: u64) -> Vec<(u64, String, EventValue)> {
+fn drain_due(scheduler: &mut EventScheduler, bound: Instant) -> Vec<(u64, String, EventValue)> {
     let mut seen = Vec::new();
     scheduler
         .run_due_events(bound, |event, _| {
-            seen.push((event.tick, event.target.port_name.clone(), event.value))
+            seen.push((
+                tick_of(event.at),
+                event.target.port_name.clone(),
+                event.value,
+            ))
         })
         .expect("a due slot with no feedback settles");
     seen
@@ -709,11 +757,11 @@ fn a_later_output_supersedes_this_driver_but_not_a_co_driver() {
     let mut scheduler = scheduler();
     let driver = target("a_driver", "out", 1, 0);
 
-    scheduler.schedule_superseding_at(5, SchedulerRegion::Active, driver.clone(), digital(0));
-    scheduler.schedule_superseding_at(20, SchedulerRegion::Active, driver.clone(), digital(1));
+    scheduler.schedule_superseding_at(at(5), SchedulerRegion::Active, driver.clone(), digital(0));
+    scheduler.schedule_superseding_at(at(20), SchedulerRegion::Active, driver.clone(), digital(1));
     // Same node, different port: a co-driver, so untouched by the supersede.
     scheduler.schedule_superseding_at(
-        20,
+        at(20),
         SchedulerRegion::Active,
         target("a_driver", "other", 1, 0),
         digital(2),
@@ -722,12 +770,16 @@ fn a_later_output_supersedes_this_driver_but_not_a_co_driver() {
     // Deciding on 10 cancels the driver's own event at 20 and leaves the one
     // at 5, which is already committed to a tick this one does not reach back
     // to.
-    let cancelled =
-        scheduler.schedule_superseding_at(10, SchedulerRegion::Active, driver.clone(), digital(2));
+    let cancelled = scheduler.schedule_superseding_at(
+        at(10),
+        SchedulerRegion::Active,
+        driver.clone(),
+        digital(2),
+    );
     assert_eq!(cancelled, 1, "only this driver's event at 20 is cancelled");
     assert_eq!(scheduler.pending(), 3);
 
-    let drained = drain_due(&mut scheduler, 20);
+    let drained = drain_due(&mut scheduler, at(20));
     let values: Vec<_> = drained.iter().map(|(_, _, value)| *value).collect();
     assert!(values.contains(&digital(0)), "the event at 5 survives");
     assert!(values.contains(&digital(2)), "the superseding event runs");
@@ -760,7 +812,7 @@ fn superseding_cancels_every_pending_event_at_or_after_the_tick_and_no_other() {
     for (tick, value) in [(5u64, 0u8), (12, 1), (18, 2), (25, 1), (31, 0)] {
         scheduler
             .schedule_at(
-                tick,
+                at(tick),
                 SchedulerRegion::Active,
                 driver.clone(),
                 digital(value),
@@ -769,13 +821,22 @@ fn superseding_cancels_every_pending_event_at_or_after_the_tick_and_no_other() {
     }
     for tick in [12u64, 25] {
         scheduler
-            .schedule_at(tick, SchedulerRegion::Active, bystander.clone(), digital(2))
+            .schedule_at(
+                at(tick),
+                SchedulerRegion::Active,
+                bystander.clone(),
+                digital(2),
+            )
             .expect("nothing has run");
     }
     assert_eq!(scheduler.pending(), 7);
 
-    let cancelled =
-        scheduler.schedule_superseding_at(12, SchedulerRegion::Active, driver.clone(), digital(2));
+    let cancelled = scheduler.schedule_superseding_at(
+        at(12),
+        SchedulerRegion::Active,
+        driver.clone(),
+        digital(2),
+    );
     assert_eq!(
         cancelled, 4,
         "the events at 12, 18, 25 and 31 are cancelled"
@@ -787,7 +848,7 @@ fn superseding_cancels_every_pending_event_at_or_after_the_tick_and_no_other() {
          co-driver's events are left"
     );
 
-    let drained = drain_due(&mut scheduler, 40);
+    let drained = drain_due(&mut scheduler, at(40));
     assert_eq!(
         drained,
         vec![
@@ -802,7 +863,7 @@ fn superseding_cancels_every_pending_event_at_or_after_the_tick_and_no_other() {
     // And the driver's index is left consistent by the cancellation: deciding
     // again after everything has run cancels nothing.
     assert_eq!(
-        scheduler.schedule_superseding_at(41, SchedulerRegion::Active, driver, digital(1)),
+        scheduler.schedule_superseding_at(at(41), SchedulerRegion::Active, driver, digital(1)),
         0
     );
 }
@@ -812,13 +873,17 @@ fn superseding_at_the_same_tick_replaces_the_pending_value() {
     let mut scheduler = scheduler();
     let driver = target("a_driver", "out", 1, 0);
 
-    scheduler.schedule_superseding_at(7, SchedulerRegion::Active, driver.clone(), digital(0));
-    let cancelled =
-        scheduler.schedule_superseding_at(7, SchedulerRegion::Active, driver.clone(), digital(1));
+    scheduler.schedule_superseding_at(at(7), SchedulerRegion::Active, driver.clone(), digital(0));
+    let cancelled = scheduler.schedule_superseding_at(
+        at(7),
+        SchedulerRegion::Active,
+        driver.clone(),
+        digital(1),
+    );
 
     assert_eq!(cancelled, 1);
     assert_eq!(
-        drain_due(&mut scheduler, 7),
+        drain_due(&mut scheduler, at(7)),
         vec![(7, "out".to_string(), digital(1))]
     );
 }
@@ -828,12 +893,16 @@ fn an_executed_event_is_no_longer_superseded() {
     let mut scheduler = scheduler();
     let driver = target("a_driver", "out", 1, 0);
 
-    scheduler.schedule_superseding_at(3, SchedulerRegion::Active, driver.clone(), digital(0));
-    assert_eq!(drain_due(&mut scheduler, 3).len(), 1);
+    scheduler.schedule_superseding_at(at(3), SchedulerRegion::Active, driver.clone(), digital(0));
+    assert_eq!(drain_due(&mut scheduler, at(3)).len(), 1);
 
     // Nothing is left to cancel: the value is already in the world.
-    let cancelled =
-        scheduler.schedule_superseding_at(3, SchedulerRegion::Active, driver.clone(), digital(1));
+    let cancelled = scheduler.schedule_superseding_at(
+        at(3),
+        SchedulerRegion::Active,
+        driver.clone(),
+        digital(1),
+    );
     assert_eq!(cancelled, 0);
     assert_eq!(scheduler.pending(), 1);
 }
@@ -843,14 +912,14 @@ fn a_due_slot_runs_several_ticks_in_one_call_in_total_order() {
     let mut scheduler = scheduler();
     for tick in [30u64, 10, 20] {
         scheduler.schedule_superseding_at(
-            tick,
+            at(tick),
             SchedulerRegion::Active,
             target("dut", "p", 1, tick as usize),
             digital(1),
         );
     }
 
-    let ticks: Vec<u64> = drain_due(&mut scheduler, 25)
+    let ticks: Vec<u64> = drain_due(&mut scheduler, at(25))
         .into_iter()
         .map(|(tick, _, _)| tick)
         .collect();
@@ -859,7 +928,7 @@ fn a_due_slot_runs_several_ticks_in_one_call_in_total_order() {
         vec![10, 20],
         "everything at or under the bound, in order"
     );
-    assert_eq!(scheduler.next_tick(), Some(30));
+    assert_eq!(scheduler.next_instant(), Some(at(30)));
 }
 
 #[test]
@@ -870,16 +939,16 @@ fn a_due_slot_delivers_an_event_dated_before_the_bound_it_already_reached() {
     // schedule admits it and the next drain delivers it.
     let mut scheduler = scheduler();
     scheduler.schedule_superseding_at(
-        100,
+        at(100),
         SchedulerRegion::Active,
         target("dut", "seed", 1, 0),
         digital(1),
     );
-    assert_eq!(drain_due(&mut scheduler, 100).len(), 1);
+    assert_eq!(drain_due(&mut scheduler, at(100)).len(), 1);
 
     assert!(matches!(
         scheduler.schedule_at(
-            60,
+            at(60),
             SchedulerRegion::Active,
             target("dut", "back", 1, 0),
             digital(0)
@@ -888,13 +957,13 @@ fn a_due_slot_delivers_an_event_dated_before_the_bound_it_already_reached() {
     ));
 
     scheduler.schedule_superseding_at(
-        60,
+        at(60),
         SchedulerRegion::Active,
         target("dut", "back", 1, 0),
         digital(0),
     );
     assert_eq!(
-        drain_due(&mut scheduler, 100),
+        drain_due(&mut scheduler, at(100)),
         vec![(60, "back".to_string(), digital(0))]
     );
 }
@@ -906,36 +975,36 @@ fn an_outer_settle_loop_that_will_not_quiet_is_diagnosed_with_its_drivers() {
         max_events_per_tick: 1_000_000,
         max_reported_oscillating_entities: 4,
     };
-    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+    let mut scheduler = EventScheduler::new(limits);
 
     // The shape the XSPICE settle loop has: drain, evaluate, schedule again at
     // the same timepoint, mark a delta, repeat. Nothing here ever quiets.
     let mut error = None;
     for cycle in 0..1_000 {
         scheduler.schedule_superseding_at(
-            9,
+            at(9),
             SchedulerRegion::Active,
             target("osc_a", "q", 1, 0),
             digital((cycle % 2) as u8),
         );
         scheduler.schedule_superseding_at(
-            9,
+            at(9),
             SchedulerRegion::Active,
             target("osc_b", "q", 2, 0),
             digital((cycle % 2) as u8),
         );
         if cycle == 0 {
             scheduler.schedule_superseding_at(
-                9,
+                at(9),
                 SchedulerRegion::Active,
                 target("quiet", "q", 3, 0),
                 digital(1),
             );
         }
         scheduler
-            .run_due_events(9, |_, _| {})
+            .run_due_events(at(9), |_, _| {})
             .expect("draining never oscillates on its own here");
-        if let Err(reported) = scheduler.note_delta_cycle(9) {
+        if let Err(reported) = scheduler.note_delta_cycle(at(9)) {
             error = Some(reported);
             break;
         }
@@ -944,7 +1013,8 @@ fn an_outer_settle_loop_that_will_not_quiet_is_diagnosed_with_its_drivers() {
     let Some(SchedulerError::Oscillation(diagnostic)) = error else {
         panic!("an outer loop that never quiets must be diagnosed, got {error:?}");
     };
-    assert_eq!(diagnostic.tick, 9);
+    assert_eq!(diagnostic.at, at(9));
+    assert_eq!(diagnostic.tick, None);
     assert_eq!(diagnostic.cause, OscillationCause::DeltaCycleLimit);
     assert_eq!(diagnostic.delta_cycles, 33);
     let named: Vec<&str> = diagnostic
@@ -966,21 +1036,23 @@ fn moving_the_due_bound_opens_a_fresh_slot() {
         max_delta_cycles_per_tick: 4,
         ..SchedulerLimits::default()
     };
-    let mut scheduler = EventScheduler::new(TimeResolution::default(), limits);
+    let mut scheduler = EventScheduler::new(limits);
 
     for _ in 0..4 {
-        scheduler.note_delta_cycle(1).expect("under the ceiling");
+        scheduler
+            .note_delta_cycle(at(1))
+            .expect("under the ceiling");
     }
     // A retried analog step settles a different timepoint, so its budget is
     // its own — including a bound that moved backwards.
-    scheduler.note_delta_cycle(0).expect("a fresh slot");
+    scheduler.note_delta_cycle(at(0)).expect("a fresh slot");
     for _ in 0..3 {
         scheduler
-            .note_delta_cycle(0)
+            .note_delta_cycle(at(0))
             .expect("still under the ceiling");
     }
     assert!(matches!(
-        scheduler.note_delta_cycle(0),
+        scheduler.note_delta_cycle(at(0)),
         Err(SchedulerError::Oscillation(_))
     ));
 }
@@ -992,7 +1064,7 @@ fn a_cloned_scheduler_keeps_the_ordering_of_the_original() {
     let mut scheduler = scheduler();
     for tick in [4u64, 1, 9] {
         scheduler.schedule_superseding_at(
-            tick,
+            at(tick),
             SchedulerRegion::Active,
             target("dut", "p", 1, tick as usize),
             digital(1),
@@ -1001,14 +1073,14 @@ fn a_cloned_scheduler_keeps_the_ordering_of_the_original() {
 
     let mut restored = scheduler.clone();
     scheduler.schedule_superseding_at(
-        1,
+        at(1),
         SchedulerRegion::Active,
         target("dut", "p", 1, 1),
         digital(0),
     );
 
     assert_eq!(
-        drain_due(&mut restored, 9)
+        drain_due(&mut restored, at(9))
             .into_iter()
             .map(|(tick, _, value)| (tick, value))
             .collect::<Vec<_>>(),
@@ -1025,14 +1097,11 @@ fn a_cloned_scheduler_keeps_the_ordering_of_the_original() {
 /// ticks, all four regions, repeated drivers, and events created during
 /// execution.
 fn ordering_fingerprint() -> Vec<String> {
-    let mut scheduler = EventScheduler::new(
-        TimeResolution::default(),
-        SchedulerLimits {
-            max_delta_cycles_per_tick: 4_096,
-            max_events_per_tick: 200_000,
-            max_reported_oscillating_entities: 8,
-        },
-    );
+    let mut scheduler = EventScheduler::new(SchedulerLimits {
+        max_delta_cycles_per_tick: 4_096,
+        max_events_per_tick: 200_000,
+        max_reported_oscillating_entities: 8,
+    });
     let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15);
 
     for index in 0..400usize {
@@ -1042,7 +1111,7 @@ fn ordering_fingerprint() -> Vec<String> {
         let port = format!("p{}", rng.below(5));
         scheduler
             .schedule_at(
-                tick,
+                at(tick),
                 region,
                 target(&instance, &port, index % 17, index % 3),
                 digital((index % 3) as u8),
@@ -1056,7 +1125,7 @@ fn ordering_fingerprint() -> Vec<String> {
         .run_time_slot(|event, ctx| {
             order.push(format!(
                 "{}|{}|{}|{}|{}|{}|{}",
-                event.tick,
+                tick_of(event.at),
                 region_tag(event.region),
                 event.sequence,
                 event.target.instance,
@@ -1072,6 +1141,7 @@ fn ordering_fingerprint() -> Vec<String> {
                 let region = SchedulerRegion::ORDERED[(roll as usize) % 4];
                 ctx.schedule_after(
                     delay,
+                    grid(),
                     region,
                     target(&event.target.instance, "spawned", event.target.node_id, 1),
                     digital(1),
@@ -1166,7 +1236,7 @@ fn several_thousand_events_drain_in_total_order() {
         let region = SchedulerRegion::ORDERED[(rng.below(4)) as usize];
         let sequence = scheduler
             .schedule_at(
-                tick,
+                at(tick),
                 region,
                 target(&format!("inst{}", index % 64), "out", index % 128, 0),
                 digital((index % 3) as u8),
@@ -1181,7 +1251,7 @@ fn several_thousand_events_drain_in_total_order() {
     let mut slots = 0usize;
     let mut executed_total = 0u64;
     while let Some(report) = scheduler
-        .run_time_slot(|event, _| observed.push((event.tick, event.region, event.sequence)))
+        .run_time_slot(|event, _| observed.push((tick_of(event.at), event.region, event.sequence)))
         .expect("slots settle")
     {
         slots += 1;
@@ -1223,10 +1293,10 @@ fn the_next_tick_dates_a_part_settled_slot_by_its_events_not_by_the_bound() {
         max_delta_cycles_per_tick: 0,
         ..SchedulerLimits::default()
     };
-    let mut scheduler = EventScheduler::new(TimeResolution::new(-9).expect("1 ns"), limits);
+    let mut scheduler = EventScheduler::new(limits);
     scheduler
         .schedule_at(
-            2,
+            at(2),
             SchedulerRegion::Active,
             target("a", "out", 1, 0),
             digital(1),
@@ -1234,7 +1304,7 @@ fn the_next_tick_dates_a_part_settled_slot_by_its_events_not_by_the_bound() {
         .expect("schedule");
     scheduler
         .schedule_at(
-            2,
+            at(2),
             SchedulerRegion::NonBlockingAssign,
             target("b", "out", 2, 0),
             digital(1),
@@ -1242,13 +1312,13 @@ fn the_next_tick_dates_a_part_settled_slot_by_its_events_not_by_the_bound() {
         .expect("schedule");
 
     let error = scheduler
-        .run_due_events(40, |_, _| {})
+        .run_due_events(at(40), |_, _| {})
         .expect_err("the delta-cycle ceiling stops the slot part-settled");
     assert!(matches!(error, SchedulerError::Oscillation(_)));
 
     assert_eq!(
-        scheduler.next_tick(),
-        Some(2),
+        scheduler.next_instant(),
+        Some(at(2)),
         "an event still in the slot is dated where it was scheduled, not at the bound"
     );
 }
@@ -1259,10 +1329,10 @@ fn the_next_tick_is_unchanged_for_a_settled_slot() {
     // slot that settled is empty in every region, so the answer comes from the
     // future tier exactly as it always did.
     let mut scheduler = scheduler();
-    assert_eq!(scheduler.next_tick(), None);
+    assert_eq!(scheduler.next_instant(), None);
     scheduler
         .schedule_at(
-            4,
+            at(4),
             SchedulerRegion::Active,
             target("a", "out", 1, 0),
             digital(1),
@@ -1270,23 +1340,25 @@ fn the_next_tick_is_unchanged_for_a_settled_slot() {
         .expect("schedule");
     scheduler
         .schedule_at(
-            9,
+            at(9),
             SchedulerRegion::Active,
             target("b", "out", 2, 0),
             digital(0),
         )
         .expect("schedule");
-    assert_eq!(scheduler.next_tick(), Some(4));
+    assert_eq!(scheduler.next_instant(), Some(at(4)));
 
-    scheduler.run_due_events(4, |_, _| {}).expect("settles");
+    scheduler.run_due_events(at(4), |_, _| {}).expect("settles");
     assert_eq!(
-        scheduler.next_tick(),
-        Some(9),
+        scheduler.next_instant(),
+        Some(at(9)),
         "the settled slot is empty, so the future tier answers"
     );
 
-    scheduler.run_due_events(20, |_, _| {}).expect("settles");
-    assert_eq!(scheduler.next_tick(), None);
+    scheduler
+        .run_due_events(at(20), |_, _| {})
+        .expect("settles");
+    assert_eq!(scheduler.next_instant(), None);
 }
 
 //=============================================================================
@@ -1487,8 +1559,8 @@ impl ReferenceKernel {
         };
         if tick < horizon {
             return Err(SchedulerError::ScheduleInThePast {
-                current_tick: self.current_tick,
-                requested_tick: tick,
+                reached: at(self.current_tick),
+                requested: at(tick),
             });
         }
         Ok(self.insert(None, tick, region, target, value))
@@ -1635,8 +1707,8 @@ impl ReferenceKernel {
         budget.set(budget.get() - 1);
         if tick < context_tick {
             return Some(Err(SchedulerError::ScheduleInThePast {
-                current_tick: context_tick,
-                requested_tick: tick,
+                reached: at(context_tick),
+                requested: at(tick),
             }));
         }
         Some(Ok(self.insert(
@@ -1692,7 +1764,7 @@ impl ReferenceKernel {
             });
         }
         Ok(TimeSlotReport {
-            tick: bound,
+            at: at(bound),
             delta_cycles: self.delta_cycles,
             events_executed: self.events_executed,
         })
@@ -1745,7 +1817,7 @@ impl ReferenceKernel {
             });
         }
         Ok(Some(TimeSlotReport {
-            tick,
+            at: at(tick),
             delta_cycles,
             events_executed,
         }))
@@ -1769,9 +1841,9 @@ fn kernel_spawn(
                 return None;
             }
             budget.set(budget.get() - 1);
-            let tick = spawn_tick(context.current_tick(), offset);
+            let tick = spawn_tick(tick_of(context.current_instant()), offset);
             Some(context.schedule_at(
-                tick,
+                at(tick),
                 model_region(region),
                 model_target(driver),
                 model_value(value),
@@ -1789,6 +1861,7 @@ fn kernel_spawn(
             budget.set(budget.get() - 1);
             Some(context.schedule_after(
                 delay,
+                grid(),
                 model_region(region),
                 model_target(driver),
                 model_value(value),
@@ -1832,7 +1905,7 @@ fn draw_spawn(rng: &mut Rng) -> Spawn {
 /// leave exactly that state behind for the operations that follow.
 fn compare_against_the_reference(seed: u64, operations: usize, limits: SchedulerLimits) {
     let mut rng = Rng::new(seed);
-    let mut kernel = EventScheduler::new(TimeResolution::default(), limits);
+    let mut kernel = EventScheduler::new(limits);
     let mut model = ReferenceKernel::new(limits);
     let program = Program {
         spawns: (0..512).map(|_| draw_spawn(&mut rng)).collect(),
@@ -1862,7 +1935,8 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
 
         match rng.below(100) {
             0..=33 => {
-                let kernel_answer = kernel.schedule_at(tick, region, model_target(driver), value);
+                let kernel_answer =
+                    kernel.schedule_at(at(tick), region, model_target(driver), value);
                 let model_answer = model.schedule_at(tick, region, model_target(driver), value);
                 assert_eq!(
                     kernel_answer, model_answer,
@@ -1871,7 +1945,7 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
             }
             34..=53 => {
                 let kernel_answer =
-                    kernel.schedule_superseding_at(tick, region, model_target(driver), value);
+                    kernel.schedule_superseding_at(at(tick), region, model_target(driver), value);
                 let model_answer =
                     model.schedule_superseding_at(tick, region, model_target(driver), value);
                 assert_eq!(
@@ -1891,12 +1965,12 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
                 let mut kernel_executed = Vec::new();
                 let budget = Cell::new(MODEL_SPAWN_BUDGET);
                 let mut ran = 0usize;
-                let kernel_report = kernel.run_due_events(tick, |event, context| {
+                let kernel_report = kernel.run_due_events(at(tick), |event, context| {
                     let spawn = program.spawn(spawn_base + ran);
                     ran += 1;
                     let outcome = kernel_spawn(spawn, &budget, context);
                     kernel_executed.push(Executed {
-                        tick: event.tick,
+                        tick: tick_of(event.at),
                         region: event.region,
                         sequence: event.sequence,
                         target: event.target,
@@ -1930,7 +2004,7 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
                     ran += 1;
                     let outcome = kernel_spawn(spawn, &budget, context);
                     kernel_executed.push(Executed {
-                        tick: event.tick,
+                        tick: tick_of(event.at),
                         region: event.region,
                         sequence: event.sequence,
                         target: event.target,
@@ -1955,7 +2029,7 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
                 }
             }
             _ => {
-                let kernel_answer = kernel.note_delta_cycle(tick);
+                let kernel_answer = kernel.note_delta_cycle(at(tick));
                 let model_answer = model.note_delta_cycle(tick);
                 assert_eq!(
                     kernel_answer.map_err(|_| ModelOscillation),
@@ -1971,12 +2045,12 @@ fn compare_against_the_reference(seed: u64, operations: usize, limits: Scheduler
             "seed {seed} step {step}: pending"
         );
         assert_eq!(
-            kernel.next_tick(),
+            kernel.next_instant().map(tick_of),
             model.next_tick(),
             "seed {seed} step {step}: next_tick"
         );
         assert_eq!(
-            kernel.current_tick(),
+            tick_of(kernel.current_instant()),
             model.current_tick,
             "seed {seed} step {step}: current_tick"
         );
@@ -2108,7 +2182,7 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
         max_reported_oscillating_entities: 16,
     };
     let mut rng = Rng::new(seed);
-    let mut kernel = EventScheduler::new(TimeResolution::default(), limits);
+    let mut kernel = EventScheduler::new(limits);
 
     // Every event scheduled and not yet executed or cancelled. A flat list:
     // the reference is a sort of it, so it holds no order of its own.
@@ -2130,7 +2204,7 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
 
         match rng.below(100) {
             0..=29 => {
-                let answer = kernel.schedule_at(tick, region, target.clone(), value);
+                let answer = kernel.schedule_at(at(tick), region, target.clone(), value);
                 let horizon = if started {
                     current_tick.saturating_add(1)
                 } else {
@@ -2140,8 +2214,8 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
                     assert_eq!(
                         answer,
                         Err(SchedulerError::ScheduleInThePast {
-                            current_tick,
-                            requested_tick: tick,
+                            reached: at(current_tick),
+                            requested: at(tick),
                         }),
                         "seed {seed} step {step}: schedule_at({tick}) below the horizon"
                     );
@@ -2168,7 +2242,8 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
                 if started && tick <= current_tick {
                     back_dated += 1;
                 }
-                let answer = kernel.schedule_superseding_at(tick, region, target.clone(), value);
+                let answer =
+                    kernel.schedule_superseding_at(at(tick), region, target.clone(), value);
                 let mut cancelled = 0usize;
                 live.retain(|event| {
                     if event.target == target && event.tick >= tick {
@@ -2210,9 +2285,9 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
                 }
                 let mut ran: Vec<ModelEvent> = Vec::new();
                 kernel
-                    .run_due_events(tick, |event, _| {
+                    .run_due_events(at(tick), |event, _| {
                         ran.push(ModelEvent {
-                            tick: event.tick,
+                            tick: tick_of(event.at),
                             region: event.region,
                             sequence: event.sequence,
                             target: event.target,
@@ -2246,7 +2321,7 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
                 let report = kernel
                     .run_time_slot(|event, _| {
                         ran.push(ModelEvent {
-                            tick: event.tick,
+                            tick: tick_of(event.at),
                             region: event.region,
                             sequence: event.sequence,
                             target: event.target,
@@ -2259,7 +2334,7 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
                     "seed {seed} step {step}: run_time_slot is the sorted order"
                 );
                 assert_eq!(
-                    report.map(|report| report.tick),
+                    report.map(|report| tick_of(report.at)),
                     due,
                     "seed {seed} step {step}: run_time_slot ran the earliest tick"
                 );
@@ -2278,12 +2353,12 @@ fn the_specification_orders_a_quiet_drain(seed: u64, operations: usize) {
             "seed {seed} step {step}: pending"
         );
         assert_eq!(
-            kernel.next_tick(),
+            kernel.next_instant().map(tick_of),
             live.iter().map(|event| event.tick).min(),
             "seed {seed} step {step}: next_tick"
         );
         assert_eq!(
-            kernel.current_tick(),
+            tick_of(kernel.current_instant()),
             current_tick,
             "seed {seed} step {step}: current_tick"
         );

@@ -69,7 +69,8 @@ use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::BreakpointManager;
 use rspice_core::xspice::event_scheduler::{
-    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TimeResolution,
+    EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
+    TimeResolution,
 };
 use rspice_core::xspice::{DigitalValue, EventValue};
 use std::fs;
@@ -80,7 +81,27 @@ use std::path::PathBuf;
 //=============================================================================
 
 fn scheduler() -> EventScheduler {
-    EventScheduler::new(TimeResolution::default(), SchedulerLimits::default())
+    EventScheduler::new(SchedulerLimits::default())
+}
+
+/// The grid this suite's abstract ticks are read on.
+///
+/// The kernel declares none — it is keyed on an exact [`Instant`] — so a test
+/// that wants to talk about "tick 10" names the grid it means. 1 fs is the
+/// finest a `timescale` can declare, so every small tick below has an exact
+/// instant and reads back as itself.
+fn grid() -> TimeResolution {
+    TimeResolution::default()
+}
+
+/// The instant a tick of [`grid`] names.
+fn at(tick: u64) -> Instant {
+    Instant::from_tick(tick, grid()).expect("a schedulable tick")
+}
+
+/// The tick an instant this suite scheduled is on. Exact, by construction.
+fn tick_of(at: Instant) -> u64 {
+    at.floor_tick(grid()).expect("a tick this suite scheduled")
 }
 
 fn target(instance: &str, port: &str, node_id: usize, driver_index: usize) -> EventTarget {
@@ -102,28 +123,23 @@ fn digital(value: u8) -> EventValue {
 
 /// Drain everything due at or before `bound`, reporting `(tick, sequence)` for
 /// each executed event in execution order.
-fn drain(scheduler: &mut EventScheduler, bound: u64) -> Vec<(u64, u64)> {
+fn drain(scheduler: &mut EventScheduler, bound: Instant) -> Vec<(u64, u64)> {
     let mut executed = Vec::new();
     scheduler
         .run_due_events(bound, |event, _| {
-            executed.push((event.tick, event.sequence))
+            executed.push((tick_of(event.at), event.sequence))
         })
         .expect("a queue nothing feeds back into settles");
     executed
 }
 
-/// The XSPICE tick encoding, mirrored from `xspice::event`.
+/// The instant an XSPICE event time is.
 ///
-/// That module is crate-private, so this suite re-states the encoding it
-/// depends on rather than reaching into it. The mirror is not a duplication
-/// risk: `xspice_event_tick_encoding_is_the_ieee_bit_pattern` below fails if
-/// the two ever disagree about a time an XSPICE deck actually produces.
-fn xspice_tick(seconds: f64) -> u64 {
-    assert!(
-        seconds.is_finite() && seconds >= 0.0,
-        "only schedulable times have ticks"
-    );
-    if seconds == 0.0 { 0 } else { seconds.to_bits() }
+/// There is no encoding step left to mirror: the kernel's key *is* the exact
+/// time, so a code model's seconds become an [`Instant`] and nothing is
+/// rounded on the way in or out.
+fn xspice_instant(seconds: f64) -> Instant {
+    Instant::from_seconds(seconds).expect("only schedulable times have instants")
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
@@ -216,19 +232,19 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     // Three events on one node/port/instance, distinguished only by driver
     // index, so the restored image has to preserve that field to behave.
     live.schedule_superseding_at(
-        10,
+        at(10),
         SchedulerRegion::Active,
         target("u1", "q", 7, 0),
         digital(1),
     );
     live.schedule_superseding_at(
-        20,
+        at(20),
         SchedulerRegion::Active,
         target("u1", "q", 7, 1),
         digital(0),
     );
     live.schedule_superseding_at(
-        30,
+        at(30),
         SchedulerRegion::Active,
         target("u1", "q", 7, 2),
         digital(1),
@@ -236,28 +252,28 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
 
     // Settle one timepoint, so the snapshot is taken mid-run rather than from
     // a virgin scheduler: `current_tick` and the sequence counter have moved.
-    assert_eq!(drain(&mut live, 10), vec![(10, 0)]);
-    assert_eq!(live.current_tick(), 10);
+    assert_eq!(drain(&mut live, at(10)), vec![(10, 0)]);
+    assert_eq!(live.current_instant(), at(10));
     assert_eq!(live.pending(), 2);
 
     let accepted_image = live.clone();
 
     // The rejected attempt: it drains everything and schedules more.
-    let rejected_order = drain(&mut live, 40);
+    let rejected_order = drain(&mut live, at(40));
     assert_eq!(rejected_order, vec![(20, 1), (30, 2)]);
     live.schedule_superseding_at(
-        50,
+        at(50),
         SchedulerRegion::Active,
         target("u1", "q", 7, 0),
         digital(0),
     );
-    assert_eq!(live.current_tick(), 40);
+    assert_eq!(live.current_instant(), at(40));
 
     // Now retry from the image, and check each observable separately.
     let mut restored = accepted_image.clone();
     assert_eq!(
-        restored.current_tick(),
-        10,
+        restored.current_instant(),
+        at(10),
         "the open due slot must be the accepted one, not the rejected attempt's"
     );
     assert_eq!(
@@ -268,7 +284,7 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     assert_eq!(
         restored
             .schedule_at(
-                60,
+                at(60),
                 SchedulerRegion::Active,
                 target("u2", "d", 8, 0),
                 digital(1)
@@ -284,7 +300,7 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     let mut by_driver = accepted_image.clone();
     assert_eq!(
         by_driver.schedule_superseding_at(
-            20,
+            at(20),
             SchedulerRegion::Active,
             target("u1", "q", 7, 1),
             digital(1)
@@ -297,7 +313,7 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
     // And the retry executes exactly what the rejected attempt did.
     let mut replayed = accepted_image;
     assert_eq!(
-        drain(&mut replayed, 40),
+        drain(&mut replayed, at(40)),
         rejected_order,
         "the retry must reproduce the discarded attempt's execution exactly"
     );
@@ -307,18 +323,19 @@ fn d5_c1_a_rejected_step_rolls_the_event_world_back_completely() {
 // Clause 2 — exact stopping
 //=============================================================================
 
-/// **D5 clause 2, encoding half.** XSPICE event times are carried as the IEEE
-/// bit pattern of the `f64`, so a scheduled time comes back out unchanged.
+/// **D5 clause 2, encoding half.** XSPICE event times are the kernel's own
+/// key, carried as the IEEE bit pattern of the `f64`, so a scheduled time
+/// comes back out unchanged.
 ///
 /// This matters because `next_event_time` feeds the transient breakpoint
 /// manager *unrounded*: an event time is not a point on any declared grid, it
-/// is whatever the code model and the step controller produced. The kernel's
-/// decimal [`TimeResolution`] is deliberately **not** on this path — quantizing
-/// would move the time the analog step stops at, and `MAX_EXACT_TICKS` would
-/// cap event time at 2.25 s at 1 fs resolution besides.
+/// is whatever the code model and the step controller produced. A decimal
+/// [`TimeResolution`] is deliberately **not** on this path — quantizing would
+/// move the time the analog step stops at, and `MAX_EXACT_TICKS` would cap
+/// event time at 2.25 s at 1 fs resolution besides.
 ///
-/// The encoding mirrored in [`xspice_tick`] is monotone (so it orders) and
-/// exactly invertible (so it converts back), which is all the kernel asks.
+/// [`Instant`] is monotone (so it orders) and exactly invertible (so it
+/// converts back), which is all the kernel asks.
 #[test]
 fn d5_c2_xspice_event_tick_encoding_is_the_ieee_bit_pattern() {
     // Times a transient run actually produces: awkward, off-grid, spanning
@@ -336,8 +353,8 @@ fn d5_c2_xspice_event_tick_encoding_is_the_ieee_bit_pattern() {
     // Monotone: the encoding orders times the way the times order.
     for pair in awkward.windows(2) {
         assert!(
-            xspice_tick(pair[0]) < xspice_tick(pair[1]),
-            "the tick encoding must be strictly monotone over schedulable times"
+            xspice_instant(pair[0]) < xspice_instant(pair[1]),
+            "the instant encoding must be strictly monotone over schedulable times"
         );
     }
 
@@ -345,7 +362,7 @@ fn d5_c2_xspice_event_tick_encoding_is_the_ieee_bit_pattern() {
     let mut sched = scheduler();
     for (index, time) in awkward.iter().enumerate() {
         sched.schedule_superseding_at(
-            xspice_tick(*time),
+            xspice_instant(*time),
             SchedulerRegion::Active,
             target("driver", "out", index + 1, index),
             EventValue::Real(*time),
@@ -353,8 +370,8 @@ fn d5_c2_xspice_event_tick_encoding_is_the_ieee_bit_pattern() {
     }
     let mut recovered = Vec::new();
     sched
-        .run_due_events(xspice_tick(1.0e9), |event, _| {
-            recovered.push(f64::from_bits(event.tick))
+        .run_due_events(xspice_instant(1.0e9), |event, _| {
+            recovered.push(event.at.seconds())
         })
         .expect("a queue nothing feeds back into settles");
 
@@ -485,38 +502,38 @@ fn d5_c3_every_due_event_runs_exactly_once_in_tick_order() {
 
     // Settle a first timepoint so a slot is open at tick 100.
     sched.schedule_superseding_at(
-        100,
+        at(100),
         SchedulerRegion::Active,
         target("clk", "q", 1, 0),
         digital(1),
     );
-    assert_eq!(drain(&mut sched, 100), vec![(100, 0)]);
-    assert_eq!(sched.current_tick(), 100);
+    assert_eq!(drain(&mut sched, at(100)), vec![(100, 0)]);
+    assert_eq!(sched.current_instant(), at(100));
 
     // Now, while settling the same timepoint, two models produce output: one a
     // zero-delay output dated at the bound, the other an interpolated crossing
     // dated behind it. This is the configuration whose order used to depend on
     // which tier each event happened to land in.
     sched.schedule_superseding_at(
-        100,
+        at(100),
         SchedulerRegion::Active,
         target("gate", "y", 2, 0),
         digital(0),
     );
     sched.schedule_superseding_at(
-        60,
+        at(60),
         SchedulerRegion::Active,
         target("bridge", "d", 3, 0),
         digital(1),
     );
     sched.schedule_superseding_at(
-        80,
+        at(80),
         SchedulerRegion::Active,
         target("bridge", "d", 4, 0),
         digital(0),
     );
 
-    let executed = drain(&mut sched, 100);
+    let executed = drain(&mut sched, at(100));
     assert_eq!(
         executed,
         vec![(60, 2), (80, 3), (100, 1)],
@@ -531,7 +548,7 @@ fn d5_c3_every_due_event_runs_exactly_once_in_tick_order() {
 
     // Exactly once: a second drain at the same bound executes nothing.
     assert_eq!(
-        drain(&mut sched, 100),
+        drain(&mut sched, at(100)),
         vec![],
         "an executed event must not run a second time"
     );
@@ -549,19 +566,19 @@ fn d5_c3_every_due_event_runs_exactly_once_in_tick_order() {
 fn d5_c3_a_back_dated_output_is_delivered_not_refused() {
     let mut sched = scheduler();
     sched.schedule_superseding_at(
-        400,
+        at(400),
         SchedulerRegion::Active,
         target("u1", "out", 1, 0),
         digital(1),
     );
-    assert_eq!(drain(&mut sched, 400).len(), 1);
+    assert_eq!(drain(&mut sched, at(400)).len(), 1);
 
     // Past the horizon `schedule_at` would enforce. The refusal is total: it
     // costs no sequence number, so the ordering of the events that *are*
     // accepted does not depend on how many were refused.
     assert!(matches!(
         sched.schedule_at(
-            300,
+            at(300),
             SchedulerRegion::Active,
             target("u2", "out", 2, 0),
             digital(0)
@@ -571,13 +588,13 @@ fn d5_c3_a_back_dated_output_is_delivered_not_refused() {
 
     // Superseding scheduling takes no horizon, and the due slot delivers it.
     sched.schedule_superseding_at(
-        300,
+        at(300),
         SchedulerRegion::Active,
         target("u2", "out", 2, 0),
         digital(0),
     );
     assert_eq!(
-        drain(&mut sched, 400),
+        drain(&mut sched, at(400)),
         vec![(300, 1)],
         "an interpolated crossing dated inside the settled step must still fire"
     );
@@ -601,43 +618,47 @@ fn d5_c3_a_back_dated_output_is_delivered_not_refused() {
 fn d5_c4_a_backwards_bound_opens_a_fresh_slot() {
     let mut sched = scheduler();
     sched.schedule_superseding_at(
-        10,
+        at(10),
         SchedulerRegion::Active,
         target("u1", "a", 1, 0),
         digital(1),
     );
     sched.schedule_superseding_at(
-        90,
+        at(90),
         SchedulerRegion::Active,
         target("u2", "b", 2, 0),
         digital(0),
     );
 
     // The attempt reaches out to tick 100 and consumes both.
-    assert_eq!(drain(&mut sched, 100), vec![(10, 0), (90, 1)]);
-    assert_eq!(sched.current_tick(), 100);
+    assert_eq!(drain(&mut sched, at(100)), vec![(10, 0), (90, 1)]);
+    assert_eq!(sched.current_instant(), at(100));
 
     // Rejected: the engine restores the pre-attempt image and retries smaller.
     let mut retried = scheduler();
     retried.schedule_superseding_at(
-        10,
+        at(10),
         SchedulerRegion::Active,
         target("u1", "a", 1, 0),
         digital(1),
     );
     retried.schedule_superseding_at(
-        90,
+        at(90),
         SchedulerRegion::Active,
         target("u2", "b", 2, 0),
         digital(0),
     );
 
     assert_eq!(
-        drain(&mut retried, 50),
+        drain(&mut retried, at(50)),
         vec![(10, 0)],
         "the smaller retry bound must execute only what it actually reaches"
     );
-    assert_eq!(retried.current_tick(), 50, "the bound moved backwards");
+    assert_eq!(
+        retried.current_instant(),
+        at(50),
+        "the bound moved backwards"
+    );
     assert_eq!(
         retried.pending(),
         1,
@@ -646,7 +667,7 @@ fn d5_c4_a_backwards_bound_opens_a_fresh_slot() {
 
     // And when the integrator gets there, it fires — exactly once.
     assert_eq!(
-        drain(&mut retried, 100),
+        drain(&mut retried, at(100)),
         vec![(90, 1)],
         "the event beyond the retry bound must still fire when the bound reaches it"
     );
@@ -668,36 +689,36 @@ fn d5_c4_oscillation_accounting_does_not_leak_across_retries() {
         max_delta_cycles_per_tick: 8,
         ..SchedulerLimits::default()
     };
-    let mut sched = EventScheduler::new(TimeResolution::default(), limits);
+    let mut sched = EventScheduler::new(limits);
 
     // Spend most of one slot's delta budget at the attempted bound.
     for _ in 0..8 {
         sched
-            .note_delta_cycle(100)
+            .note_delta_cycle(at(100))
             .expect("eight cycles is within the ceiling");
     }
     assert!(
-        sched.note_delta_cycle(100).is_err(),
+        sched.note_delta_cycle(at(100)).is_err(),
         "the ninth cycle at one bound must trip the ceiling, or this test proves nothing"
     );
 
     // The step is rejected and retried at a smaller bound. The retry gets the
     // whole budget again.
-    let mut retried = EventScheduler::new(TimeResolution::default(), limits);
+    let mut retried = EventScheduler::new(limits);
     for _ in 0..8 {
         retried
-            .note_delta_cycle(100)
+            .note_delta_cycle(at(100))
             .expect("eight cycles is within the ceiling");
     }
     for cycle in 0..8 {
-        retried.note_delta_cycle(50).unwrap_or_else(|error| {
+        retried.note_delta_cycle(at(50)).unwrap_or_else(|error| {
             panic!("a fresh slot owes a full delta budget, failed at cycle {cycle}: {error}")
         });
     }
 
     // Growing the bound again is likewise a fresh slot, not a continuation.
     for cycle in 0..8 {
-        retried.note_delta_cycle(100).unwrap_or_else(|error| {
+        retried.note_delta_cycle(at(100)).unwrap_or_else(|error| {
             panic!("re-opening a bound must reset its accounting, failed at cycle {cycle}: {error}")
         });
     }

@@ -89,8 +89,8 @@ use super::store::{
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
 use crate::xspice::event_scheduler::{
-    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TargetId,
-    TimeResolution,
+    EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
+    TargetId, TimeResolution,
 };
 
 /// Why a digital run stopped.
@@ -407,12 +407,36 @@ struct ProcessSlot {
     remaining_events: DigitalEventCount,
 }
 
+/// Name the tick an oscillating instant sits on, for the sentence the
+/// diagnostic renders.
+///
+/// The kernel declares no grid, so it reports the instant and leaves the tick
+/// unnamed; the host is what knows the design's precision. An instant with no
+/// tick on that grid keeps `None`, and the sentence then names its seconds.
+fn name_oscillating_tick(resolution: TimeResolution, error: SchedulerError) -> SchedulerError {
+    match error {
+        SchedulerError::Oscillation(mut diagnostic) => {
+            diagnostic.tick = diagnostic.at.floor_tick(resolution).ok();
+            SchedulerError::Oscillation(diagnostic)
+        }
+        other => other,
+    }
+}
+
 /// A compiled digital plan, running.
 #[derive(Clone)]
 pub(crate) struct DigitalHost {
     plan: Arc<CanonicalDigitalPlan>,
     store: DigitalSignalStore,
     scheduler: EventScheduler,
+    /// The design's declared precision: the grid this host's ticks are on.
+    ///
+    /// It lives here rather than in the kernel because the kernel is keyed on
+    /// an exact [`Instant`] and declares no grid at all. This host is the seam
+    /// between the two — a tick goes in as [`Instant::from_tick`] and comes
+    /// back as [`Instant::floor_tick`] — and the round trip is exact, so every
+    /// tick this host puts in is the tick it gets out.
+    resolution: TimeResolution,
     /// One stable wakeup identity, with captured payloads owned by their due tick.
     /// No process slot or driver identity is allocated per delayed assignment.
     nba_target: TargetId,
@@ -507,7 +531,7 @@ impl DigitalHost {
         resolution: TimeResolution,
         limits: SchedulerLimits,
     ) -> Self {
-        let mut scheduler = EventScheduler::new(resolution, limits);
+        let mut scheduler = EventScheduler::new(limits);
         // Interned in process order, once, so that queueing an activation is
         // an index rather than two `String` allocations and a string-keyed map
         // probe. The reverse map is what a drained driver is turned back into
@@ -543,6 +567,7 @@ impl DigitalHost {
             event_candidates: Vec::new(),
             store: DigitalSignalStore::from_plan(Arc::clone(&plan)),
             scheduler,
+            resolution,
             slots: vec![
                 ProcessSlot {
                     status: ProcessStatus::Queued,
@@ -571,6 +596,25 @@ impl DigitalHost {
         self.scheduler.limits()
     }
 
+    /// The instant one of this host's ticks names, exactly.
+    ///
+    /// Every tick reaching the kernel goes through here, and every instant
+    /// coming back out goes through [`Self::tick_of`]. The pair is the whole
+    /// seam between the design's declared grid and the kernel's exact key.
+    fn instant_of(&self, tick: u64) -> Result<Instant, DigitalRunError> {
+        Instant::from_tick(tick, self.resolution).map_err(DigitalRunError::from)
+    }
+
+    /// The tick an instant this host scheduled is on.
+    ///
+    /// Exact rather than approximate: `floor_tick(from_tick(T)) == T` for
+    /// every tick a run can reach, which is what lets this host keep speaking
+    /// in ticks while the kernel orders instants.
+    fn tick_of(&self, at: Instant) -> Result<u64, DigitalRunError> {
+        at.floor_tick(self.resolution)
+            .map_err(DigitalRunError::from)
+    }
+
     pub(crate) fn connect_bits(
         &mut self,
         nets: &[Vec<super::store::DigitalBitConnection>],
@@ -597,7 +641,7 @@ impl DigitalHost {
     pub(crate) fn fresh(&self) -> Self {
         let mut fresh = Self::from_plan(
             Arc::clone(&self.plan),
-            self.scheduler.resolution(),
+            self.resolution,
             self.scheduler.limits(),
         );
         fresh.store.inherit_bit_connections(&self.store);
@@ -655,7 +699,9 @@ impl DigitalHost {
     /// Earliest scheduled activation, used by the analog transient driver as
     /// an exact breakpoint.
     pub(crate) fn next_tick(&self) -> Option<u64> {
-        self.scheduler.next_tick()
+        self.scheduler
+            .next_instant()
+            .and_then(|at| at.floor_tick(self.resolution).ok())
     }
 
     /// [`Self::next_tick`], with the process whose activation it is.
@@ -666,9 +712,9 @@ impl DigitalHost {
     /// module behind a tick gets `None` for those rather than a process index
     /// that happens to sit at the same interned slot.
     pub(crate) fn next_tick_process(&self) -> Option<(u64, Option<usize>)> {
-        let (tick, target) = self.scheduler.next_tick_target()?;
+        let (at, target) = self.scheduler.next_instant_target()?;
         Some((
-            tick,
+            at.floor_tick(self.resolution).ok()?,
             self.process_of_target.get(usize::from(target)).copied(),
         ))
     }
@@ -872,10 +918,12 @@ impl DigitalHost {
         tick: u64,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
-        while let Some(next) = self.scheduler.next_tick() {
-            if next > tick {
+        let bound = self.instant_of(tick)?;
+        while let Some(next) = self.scheduler.next_instant() {
+            if next > bound {
                 break;
             }
+            let next = self.tick_of(next)?;
             self.settle_with(next, participant)?;
         }
         Ok(())
@@ -908,15 +956,21 @@ impl DigitalHost {
         fired: &mut Vec<TargetId>,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
+        let bound = self.instant_of(tick)?;
+        let resolution = self.resolution;
         loop {
             fired.clear();
             if let Some(ready) = self.analog_ready.as_mut() {
                 fired.append(ready);
                 for target in fired.iter() {
-                    self.scheduler.note_external_activation(tick, *target)?;
+                    self.scheduler
+                        .note_external_activation(bound, *target)
+                        .map_err(|error| name_oscillating_tick(resolution, error))?;
                 }
             } else {
-                self.scheduler.run_due_event_targets(tick, fired)?;
+                self.scheduler
+                    .run_due_event_targets(bound, fired)
+                    .map_err(|error| name_oscillating_tick(resolution, error))?;
             }
 
             if !fired.is_empty() {
@@ -951,9 +1005,7 @@ impl DigitalHost {
             // The participant's own time base, not the event clock's: it is
             // assembling a continuous candidate, and the only instant it has a
             // solution for is the analog endpoint.
-            let physical_seconds = self
-                .analog_exchange_seconds
-                .unwrap_or(self.scheduler.resolution().ticks_to_seconds(tick)?);
+            let physical_seconds = self.analog_exchange_seconds.unwrap_or(bound.seconds());
             let more = participant.settle_active(&mut DigitalActiveExchange {
                 host: self,
                 tick,
@@ -962,7 +1014,10 @@ impl DigitalHost {
             self.dispatch(tick)?;
             let active = match &self.analog_ready {
                 Some(ready) => !ready.is_empty(),
-                None => self.scheduler.next_tick().is_some_and(|next| next <= tick),
+                None => self
+                    .scheduler
+                    .next_instant()
+                    .is_some_and(|next| next <= bound),
             };
             if fired.is_empty() && !more && !active {
                 if !self.analog_waiters.is_empty() {
@@ -980,7 +1035,9 @@ impl DigitalHost {
             // One call per settle iteration, which is the reading
             // `note_delta_cycle` documents: the ceiling measures the depth of
             // the settling, not the size of the design.
-            self.scheduler.note_delta_cycle(tick)?;
+            self.scheduler
+                .note_delta_cycle(bound)
+                .map_err(|error| name_oscillating_tick(resolution, error))?;
         }
     }
 
@@ -1008,9 +1065,12 @@ impl DigitalHost {
             // whatever the signal holds at this moment.
             let due = self.store.take_deferred_in(region);
             if !due.is_empty() {
+                let at = self.instant_of(tick)?;
+                let resolution = self.resolution;
                 for update in &due {
                     self.scheduler
-                        .note_external_activation(tick, self.nba_target)?;
+                        .note_external_activation(at, self.nba_target)
+                        .map_err(|error| name_oscillating_tick(resolution, error))?;
                     apply_deferred_update(&self.plan, &mut self.store, update).map_err(
                         |error| DigitalRunError::Evaluation {
                             process: format!("a {} update", region.name()),
@@ -1036,7 +1096,7 @@ impl DigitalHost {
     ) -> Result<(), DigitalRunError> {
         let absolute_seconds = match physical_seconds.or(self.analog_activation_seconds) {
             Some(seconds) => seconds,
-            None => self.scheduler.resolution().ticks_to_seconds(tick)?,
+            None => self.instant_of(tick)?.seconds(),
         };
         self.store
             .set_activation_clock(rspice_veriloga::canonical_ir::DigitalClock {
@@ -1117,8 +1177,9 @@ impl DigitalHost {
                 .filter(|tick| *tick <= TimeResolution::MAX_EXACT_TICKS)
                 .ok_or(DigitalRunError::TickOverflow)?;
             if !self.delayed_updates.contains_key(&due) {
+                let at = self.instant_of(due)?;
                 self.scheduler.schedule_id_at(
-                    due,
+                    at,
                     SchedulerRegion::Active,
                     self.nba_target,
                     EventValue::Digital(DigitalValue::default()),
@@ -1365,8 +1426,9 @@ impl DigitalHost {
             return Ok(());
         }
         self.slots[index].status = ProcessStatus::Queued;
+        let at = self.instant_of(tick)?;
         self.scheduler.schedule_id_superseding_at(
-            tick,
+            at,
             SchedulerRegion::Active,
             self.targets[index],
             EventValue::Digital(DigitalValue::default()),

@@ -114,10 +114,13 @@ impl DigitalActiveExchange<'_> {
             .store
             .check_external_drives(drives)
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
+        let at = self.host.instant_of(self.tick)?;
+        let resolution = self.host.resolution;
         for (driver, _) in drives {
             self.host
                 .scheduler
-                .note_external_activation(self.tick, self.host.external_targets[driver.index()])?;
+                .note_external_activation(at, self.host.external_targets[driver.index()])
+                .map_err(|error| super::name_oscillating_tick(resolution, error))?;
         }
         self.host.store.publish_external_drives(drives);
         Ok(())

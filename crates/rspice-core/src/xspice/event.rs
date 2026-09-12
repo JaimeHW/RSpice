@@ -1,14 +1,15 @@
 //! Event scheduling for XSPICE event-driven simulation.
 //!
 //! [`EventValue`] is what a digital or real code-model output carries.
-//! [`XspiceEventScheduler`] is the analog-seconds face of the discrete-event
-//! kernel next door: the XSPICE path speaks in seconds because the analog
-//! spine does, and the kernel speaks in integer ticks because an event order
-//! has to be exact.
+//! [`XspiceEventScheduler`] is the XSPICE face of the discrete-event kernel
+//! next door. Both speak in seconds: the kernel is keyed on an
+//! [`Instant`](super::event_scheduler::Instant), which is one exact physical
+//! time, so a code model's event instant crosses into the kernel and back with
+//! nothing done to it.
 
 use super::digital::DigitalValue;
 use super::event_scheduler::{
-    EventScheduler, EventTarget, SchedulerError, SchedulerLimits, SchedulerRegion, TimeResolution,
+    EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
 };
 use crate::{NodeId, Value};
 use std::collections::HashMap;
@@ -29,8 +30,8 @@ pub enum EventValue {
 
 /// One executed event, in the terms the analog side works in.
 ///
-/// The kernel hands out a `ScheduledEvent` keyed by tick and target; this is
-/// the same thing with the tick converted back to seconds and the target
+/// The kernel hands out a `ScheduledEvent` keyed by instant and target; this
+/// is the same thing with the instant read back as its seconds and the target
 /// flattened, so the drain can move the driver's names straight into its
 /// driver key without copying them.
 #[derive(Debug, Clone)]
@@ -50,37 +51,8 @@ pub(crate) struct XspiceEvent {
 }
 
 //=============================================================================
-// Seconds <-> ticks
+// Times
 //=============================================================================
-
-/// Analog seconds as a scheduler tick.
-///
-/// The kernel's decimal [`TimeResolution`] is not what this path uses, and the
-/// reason is worth stating: XSPICE event times are seconds chosen by code
-/// models and by the analog step controller, not points on a declared grid.
-/// `next_event_time` hands them straight to the transient breakpoint manager,
-/// so quantizing them would move the times events fire at. A decimal grid also
-/// bounds event time — 1 fs ticks stop being exactly invertible past 2.25 s,
-/// which is far inside the range a transient run uses.
-///
-/// For a non-negative finite `f64` the IEEE-754 bit pattern read as a `u64` is
-/// strictly monotone in the value and exactly invertible, which is everything
-/// the kernel asks of a tick: it orders, and it converts back. `None` is the
-/// answer for a time that cannot be scheduled at all, which is the same set
-/// the queue has always dropped: negative, infinite, or NaN.
-fn event_tick(seconds: Value) -> Option<u64> {
-    if !seconds.is_finite() || seconds < 0.0 {
-        return None;
-    }
-    // Positive and negative zero are one instant with two bit patterns, and
-    // the negative one does not compare below the positive one as a `u64`.
-    Some(if seconds == 0.0 { 0 } else { seconds.to_bits() })
-}
-
-/// The inverse of [`event_tick`] over the ticks it produces.
-fn tick_seconds(tick: u64) -> Value {
-    Value::from_bits(tick)
-}
 
 /// Absolute output time for a delay measured from `current_time`.
 ///
@@ -106,8 +78,10 @@ fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
 /// The event queue of one circuit.
 ///
 /// Ordering, supersession and the settling diagnostics all belong to the
-/// kernel; what lives here is the seconds/tick conversion and the shape the
-/// XSPICE call sites expect.
+/// kernel; what lives here is the shape the XSPICE call sites expect. There is
+/// no conversion left to do — a code model's event time *is* the kernel's key,
+/// which is why an off-grid delay reaches the transient breakpoint manager
+/// exactly where the model dated it.
 #[derive(Debug, Clone)]
 pub(crate) struct XspiceEventScheduler {
     inner: EventScheduler,
@@ -123,11 +97,7 @@ impl XspiceEventScheduler {
     /// Create a new empty scheduler.
     pub(crate) fn new() -> Self {
         Self {
-            // The resolution is inert on this path: ticks come from
-            // `event_tick`, not from a decimal grid, and nothing here calls
-            // the kernel's seconds conversions. It is passed because the
-            // kernel takes one resolution for a whole run.
-            inner: EventScheduler::new(TimeResolution::default(), SchedulerLimits::default()),
+            inner: EventScheduler::new(SchedulerLimits::default()),
         }
     }
 
@@ -142,11 +112,11 @@ impl XspiceEventScheduler {
         driver_index: usize,
         value: EventValue,
     ) {
-        let Some(tick) = event_tick(time) else {
+        let Some(at) = Instant::from_seconds(time) else {
             return;
         };
         self.inner.schedule_superseding_at(
-            tick,
+            at,
             // Every XSPICE output is a blocking assignment: the value is
             // computed and written in the same pass. None of the deferred
             // regions has a spelling in a code model.
@@ -257,7 +227,7 @@ impl XspiceEventScheduler {
 
     /// Time of the next pending event.
     pub(crate) fn next_event_time(&self) -> Option<Value> {
-        self.inner.next_tick().map(tick_seconds)
+        self.inner.next_instant().map(Instant::seconds)
     }
 
     /// [`Self::next_event_time`], with the code-model instance that queued it.
@@ -270,15 +240,15 @@ impl XspiceEventScheduler {
     #[cfg(feature = "veriloga")]
     pub(crate) fn next_event_instance(&self) -> Option<(&str, Value)> {
         self.inner
-            .next_tick_instance()
-            .map(|(tick, instance)| (instance, tick_seconds(tick)))
+            .next_instant_instance()
+            .map(|(at, instance)| (instance, at.seconds()))
     }
 
     /// Whether an event is pending at or before the given time.
     pub(crate) fn has_event_at_or_before(&self, time: Value) -> bool {
         self.inner
-            .next_tick()
-            .is_some_and(|tick| tick_seconds(tick) <= time)
+            .next_instant()
+            .is_some_and(|at| at.seconds() <= time)
     }
 
     /// Execute every event due at or before `time`, in event order.
@@ -293,12 +263,12 @@ impl XspiceEventScheduler {
     where
         F: FnMut(XspiceEvent),
     {
-        let Some(bound) = event_tick(time) else {
+        let Some(bound) = Instant::from_seconds(time) else {
             return Ok(());
         };
         self.inner.run_due_events(bound, |event, _| {
             sink(XspiceEvent {
-                time: tick_seconds(event.tick),
+                time: event.at.seconds(),
                 node_id: event.target.node_id,
                 port_name: event.target.port_name,
                 driver_index: event.target.driver_index,
@@ -315,7 +285,7 @@ impl XspiceEventScheduler {
     /// into an [`SchedulerError::Oscillation`] naming its busiest drivers
     /// rather than a hang.
     pub(crate) fn note_delta_cycle(&mut self, time: Value) -> Result<(), SchedulerError> {
-        let Some(bound) = event_tick(time) else {
+        let Some(bound) = Instant::from_seconds(time) else {
             return Ok(());
         };
         self.inner.note_delta_cycle(bound)
@@ -836,8 +806,12 @@ mod tests {
             panic!("a network that never quiets must be diagnosed, got {reported:?}");
         };
         assert_eq!(
-            diagnostic.tick,
-            event_tick(1.0e-9).expect("a schedulable time")
+            diagnostic.at,
+            Instant::from_seconds(1.0e-9).expect("a schedulable time")
+        );
+        assert_eq!(
+            diagnostic.tick, None,
+            "an XSPICE instant sits on no declared grid, so it names no tick"
         );
         assert_eq!(diagnostic.entities[0].0.instance, "an_oscillator");
     }

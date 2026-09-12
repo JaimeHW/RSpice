@@ -20,9 +20,14 @@
 //! three are stated; a call site states which of them it is using and why, and
 //! never invents a fourth base.**
 //!
+//! All three are read off one exact time. The event kernel is keyed on an
+//! [`Instant`](crate::xspice::event_scheduler::Instant) — the physical time
+//! itself, quantized by nothing — so these three are the rules for reading an
+//! instant *as a tick*, and none of them is a separate clock.
+//!
 //! *How far may the digital world be advanced?* is answered from the trial's
 //! own timestamp, **floored** onto the tick grid — see
-//! [`TimeResolution::seconds_to_floor_ticks`](crate::xspice::event_scheduler::TimeResolution::seconds_to_floor_ticks)
+//! [`Instant::floor_tick`](crate::xspice::event_scheduler::Instant::floor_tick)
 //! for why flooring rather than rounding. Rounding up here would run the
 //! digital world past an analog instant the integrator has not accepted, which
 //! is the one thing conservative lockstep forbids.
@@ -37,7 +42,7 @@
 //!
 //! *Which tick does a wake from the other event kernel land on?* is answered
 //! by the **ceiling** —
-//! [`TimeResolution::seconds_to_ceil_ticks`](crate::xspice::event_scheduler::TimeResolution::seconds_to_ceil_ticks).
+//! [`Instant::ceil_tick`](crate::xspice::event_scheduler::Instant::ceil_tick).
 //! This one is not an analog event and the LRM's nearest-tick rule does not
 //! reach it: XSPICE and the HDL are two discrete kernels on two time bases,
 //! and the two directions of that boundary are the two halves of *one* map.
@@ -152,9 +157,28 @@ use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 use super::host::DigitalHost;
 use super::{DigitalRunError, parse_four_state};
-use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
+use crate::xspice::event_scheduler::{Instant, SchedulerError, SchedulerLimits, TimeResolution};
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::threshold_crossing_time;
+
+/// Read an analog time as an HDL-visible tick, through the instant it is.
+///
+/// An analog time is an [`Instant`] before anything asks which tick it is on:
+/// that is the kernel's key, and it is exact. This is the one direction that
+/// quantizes, and *which* of the three rules applies is the caller's question
+/// — advance floors, an A/D crossing takes the nearest, a wake from the other
+/// event kernel takes the ceiling — so the caller names the rule and this
+/// names the refusal. A time that is no instant at all (negative, infinite,
+/// NaN) is refused here, with exactly the error the rounding rules report for
+/// it.
+fn hdl_tick(
+    seconds: f64,
+    rule: impl FnOnce(Instant) -> Result<u64, SchedulerError>,
+) -> Result<u64, DigitalRunError> {
+    let at = Instant::from_seconds(seconds)
+        .ok_or(SchedulerError::SecondsNotRepresentable { seconds })?;
+    rule(at).map_err(DigitalRunError::from)
+}
 
 /// Which half of a boundary a reported bit came from.
 ///
@@ -2159,10 +2183,7 @@ impl MixedSignalHost {
                     .into(),
             });
         }
-        let tick = self
-            .resolution
-            .seconds_to_floor_ticks(time_seconds)
-            .map_err(DigitalRunError::from)?;
+        let tick = hdl_tick(time_seconds, |at| at.floor_tick(self.resolution))?;
         // Monotonicity is enforced on the analog time, not on the tick. Many
         // trials share one tick once the step controller is in charge, and all
         // of them are legitimate; what is not legitimate is repeating or
@@ -3007,9 +3028,7 @@ impl MixedSignalHost {
             {
                 tick
             } else {
-                self.resolution
-                    .seconds_to_ticks(crossing)
-                    .map_err(DigitalRunError::from)?
+                hdl_tick(crossing, |at| at.nearest_tick(self.resolution))?
             };
             published_tick = published_tick.max(crossing_tick);
             if let Some(trial) = self.trial.as_mut() {

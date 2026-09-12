@@ -49,7 +49,7 @@
 //! Not here yet, and the boundary's rulings are recorded here because they
 //! have a right answer worth writing down before somebody guesses one. The
 //! mixed host above now implements the time half of them —
-//! [`TimeResolution::seconds_to_floor_ticks`](super::event_scheduler::TimeResolution::seconds_to_floor_ticks)
+//! [`Instant::floor_tick`](super::event_scheduler::Instant::floor_tick)
 //! is the floor, and the crossing an A/D bridge is dated by is interpolated
 //! inside the accepted step rather than snapped to the tick. That host applies
 //! a *second* time mapping the ruling below does not cover, because it is not

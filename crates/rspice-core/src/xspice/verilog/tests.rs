@@ -9,7 +9,7 @@
 //! values are worked out from that clause rather than read off a run.
 
 use super::*;
-use crate::xspice::event_scheduler::{OscillationCause, SchedulerError, SchedulerLimits};
+use crate::xspice::event_scheduler::{Instant, OscillationCause, SchedulerError, SchedulerLimits};
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 
 fn port(name: &str, width: u32) -> DigitalPort {
@@ -780,7 +780,10 @@ fn a_combinational_loop_reports_the_kernels_oscillation_diagnostic() {
     };
     assert_eq!(diagnostic.cause, OscillationCause::DeltaCycleLimit);
     assert_eq!(diagnostic.delta_cycle_limit, 64);
-    assert_eq!(diagnostic.tick, 0);
+    // The kernel reports the instant; the host names the tick of it on the
+    // design's own grid, which is what the sentence prints.
+    assert_eq!(diagnostic.at, Instant::ZERO);
+    assert_eq!(diagnostic.tick, Some(0));
     // The report names the process that kept firing, which is the evidence
     // needed to find the loop.
     let (busiest, count) = diagnostic

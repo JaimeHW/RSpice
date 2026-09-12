@@ -693,10 +693,7 @@ impl MixedDigitalCoordinator {
                 detail: "circuit digital execution must start before a trial".into(),
             });
         }
-        let tick = self
-            .resolution
-            .seconds_to_floor_ticks(time)
-            .map_err(DigitalRunError::from)?;
+        let tick = hdl_tick(time, |at| at.floor_tick(self.resolution))?;
         if !probe && self.accepted_time.is_some_and(|accepted| time <= accepted) {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "circuit digital acceptance must advance time".into(),
@@ -860,10 +857,7 @@ impl SharedDigitalTrial<'_> {
             // is the least tick not before the instant — see this module's
             // "three time bases", which also says why nearest-tick is the
             // rejected alternative here rather than a forbidden one.
-            let tick = coordinator
-                .resolution
-                .seconds_to_ceil_ticks(self.time)
-                .map_err(DigitalRunError::from)?;
+            let tick = hdl_tick(self.time, |at| at.ceil_tick(coordinator.resolution))?;
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
             let advanced =
@@ -927,10 +921,7 @@ impl SharedDigitalTrial<'_> {
                 let tick = if endpoint_dated {
                     trial_tick
                 } else {
-                    coordinator
-                        .resolution
-                        .seconds_to_ticks(crossing)
-                        .map_err(DigitalRunError::from)?
+                    hdl_tick(crossing, |at| at.nearest_tick(coordinator.resolution))?
                 };
                 coordinator.publications.push(AdcPublication {
                     crossing,

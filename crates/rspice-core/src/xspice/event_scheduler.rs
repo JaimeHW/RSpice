@@ -23,23 +23,28 @@
 //!
 //! # Time base
 //!
-//! Event time is an unsigned integer tick count. The kernel takes one
-//! resolution for the whole run, fixed at construction: a Verilog design
-//! declares `timescale`/`timeprecision` per module, and the resolution that
-//! serves all of them is the finest one, which [`TimeResolution::finest`]
-//! computes. Decimal resolutions make that a minimum of exponents rather than a
-//! general GCD.
+//! Event time is an [`Instant`]: one exact physical instant, held as the
+//! IEEE-754 bit pattern of a non-negative finite `f64` number of seconds. It
+//! is the only time base the kernel has, and it quantizes nothing — the analog
+//! spine is `f64` seconds and every event the kernel orders is at a time the
+//! analog spine can name bit for bit.
 //!
-//! The analog spine stays `f64` seconds and is not retrofitted. The two meet at
-//! [`TimeResolution::ticks_to_seconds`], which is what feeds analog breakpoints,
-//! so the conversion has to be exactly invertible rather than merely close.
-//! It is, up to [`TimeResolution::MAX_EXACT_TICKS`] — see that constant for why
-//! the bound is `2^51 - 1` and not `2^53`.
+//! A Verilog design still declares `timescale`/`timeprecision` per module, and
+//! the resolution that serves all of them is the finest one, which
+//! [`TimeResolution::finest`] computes. That grid is a *sublattice* of the
+//! instants rather than a second time base: an HDL tick `T` embeds exactly,
+//! as [`Instant::from_tick`], because [`TimeResolution::ticks_to_seconds`] is
+//! exactly invertible up to [`TimeResolution::MAX_EXACT_TICKS`] — see that
+//! constant for why the bound is `2^51 - 1` and not `2^53`. Reading an instant
+//! back as an HDL-visible tick is [`Instant::floor_tick`],
+//! [`Instant::nearest_tick`] or [`Instant::ceil_tick`], and which of the three
+//! a caller wants is a property of the question it is asking, not of the
+//! instant; the three are stated together on that type.
 //!
-//! A caller whose event times are not on a declared grid supplies its own
-//! monotone tick encoding instead; the XSPICE path does, because its times
-//! come from code models and the analog step controller and feed transient
-//! breakpoints unrounded. See `super::event`.
+//! A caller whose event times are not on any declared grid needs no encoding of
+//! its own. The XSPICE path is that caller: its times come from code models and
+//! the analog step controller and feed transient breakpoints unrounded, and it
+//! schedules them as the instants they are. See `super::event`.
 //!
 //! # Ordering
 //!
@@ -47,7 +52,7 @@
 //! sequence number unique within its scheduler, and events sort by
 //!
 //! ```text
-//! (tick, region, sequence)
+//! (instant, region, sequence)
 //! ```
 //!
 //! No two events compare equal, so the order does not depend on queue
@@ -258,15 +263,10 @@ impl TimeResolution {
     /// the multiplication makes `seconds_to_floor_ticks(ticks_to_seconds(t))`
     /// exactly `t` for every representable `t`.
     ///
-    /// Crate-visible rather than public: the mixed interleave is the only
-    /// caller, and the rest of this type is published because a caller outside
-    /// the crate actually reaches for it. This becomes `pub` when one does.
-    ///
-    /// Gated with that caller too. `xspice::verilog` is a `veriloga` module, so
-    /// a build without the feature has no caller at all and `-D warnings` says
-    /// so; the gate is what keeps the default build's warning budget honest
-    /// rather than an `allow` that would also hide a real orphan later.
-    #[cfg(feature = "veriloga")]
+    /// Crate-visible rather than public, and reached through
+    /// [`Instant::floor_tick`] rather than directly: an analog time is an
+    /// [`Instant`] before anything asks which tick it is in, so the seconds
+    /// this takes are always an instant's own seconds.
     pub(crate) fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
@@ -326,10 +326,8 @@ impl TimeResolution {
     /// construction: an instant that sits exactly on a tick converts to that
     /// tick in both directions, and only a strictly interior one moves up.
     ///
-    /// Gated with its caller for the same reason the floor conversion is: the
-    /// mixed interleave is a `veriloga` module, and a build without the
-    /// feature would otherwise carry an orphan that `-D warnings` reports.
-    #[cfg(feature = "veriloga")]
+    /// Crate-visible and reached through [`Instant::ceil_tick`], for the same
+    /// reason the floor conversion is.
     pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         let ticks = self.seconds_to_floor_ticks(seconds)?;
         if (ticks as f64) * self.seconds_per_tick() >= seconds {
@@ -339,6 +337,104 @@ impl TimeResolution {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
         }
         Ok(ticks + 1)
+    }
+}
+
+/// One exact physical instant: the IEEE-754 bit pattern of a non-negative
+/// finite `f64` number of seconds.
+///
+/// This is the kernel's whole time key, and it is the *analog* spine's time
+/// with nothing done to it. For a non-negative finite `f64` the bit pattern
+/// read as a `u64` is strictly monotone in the value and exactly invertible,
+/// which is everything an event key has to be: it orders, and it converts
+/// back. A time that cannot be scheduled at all — negative, infinite, or NaN —
+/// has no instant, which is the same set the queue has always dropped.
+///
+/// # Why not a tick count
+///
+/// The two worlds that schedule here name their times differently and both are
+/// right. An HDL process names a tick on its module's declared grid; an XSPICE
+/// code model and the analog step controller name a `f64` second chosen by
+/// interpolation, a delay, or a step controller, on no grid at all. A shared
+/// decimal grid would have to quantize the second kind — a 100.4 ps output on
+/// a 1 ns grid would fire at 1 ns — and a grid fine enough not to (1 fs) caps
+/// event time at 2.25 s, which is inside the range a transient run uses.
+///
+/// The exact key refuses both losses. The HDL grid does not disappear: it
+/// embeds, because [`TimeResolution::ticks_to_seconds`] is exact and exactly
+/// invertible below [`TimeResolution::MAX_EXACT_TICKS`], so
+/// [`Self::floor_tick`]`(res)` of [`Self::from_tick`]`(T, res)` is `T` for
+/// every tick a run can reach.
+///
+/// # Reading an instant as a tick
+///
+/// Three rules, and a caller may not substitute one for another — they answer
+/// different questions and each has its own landed ruling:
+///
+/// * [`Self::floor_tick`] — how far the digital world may be advanced for an
+///   analog timepoint. Monotone, and never past an instant the integrator has
+///   accepted.
+/// * [`Self::nearest_tick`] — where an A/D transition's own timestamp lands,
+///   which Verilog-AMS LRM 2.4 section 7.3.6.1 fixes at the nearest tick.
+/// * [`Self::ceil_tick`] — where an event crossing in from another event
+///   kernel lands, so the HDL never labels a foreign event earlier than it
+///   happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Instant(u64);
+
+impl Instant {
+    /// The start of an analysis.
+    pub const ZERO: Instant = Instant(0);
+
+    /// The instant a number of seconds names, or `None` if it names none.
+    ///
+    /// Negative, infinite and NaN seconds have no instant. Positive and
+    /// negative zero are one instant with two bit patterns, and the negative
+    /// one does not compare below the positive one as a `u64`, so zero is
+    /// normalized here rather than left to compare wrongly later.
+    pub fn from_seconds(seconds: f64) -> Option<Self> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return None;
+        }
+        Some(Self(if seconds == 0.0 { 0 } else { seconds.to_bits() }))
+    }
+
+    /// The seconds this instant is. The exact inverse of [`Self::from_seconds`].
+    pub fn seconds(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+
+    /// The instant an HDL tick names, exactly.
+    ///
+    /// A tick past [`TimeResolution::MAX_EXACT_TICKS`] is refused rather than
+    /// rounded, for the reason [`TimeResolution::ticks_to_seconds`] gives: a
+    /// breakpoint that does not land where the event is scheduled is a
+    /// synchronization fault, not an accuracy loss.
+    pub fn from_tick(tick: u64, resolution: TimeResolution) -> Result<Self, SchedulerError> {
+        let seconds = resolution.ticks_to_seconds(tick)?;
+        Self::from_seconds(seconds)
+            .ok_or(SchedulerError::TickNotExactlyRepresentable { ticks: tick })
+    }
+
+    /// The HDL tick at or before this instant.
+    pub fn floor_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+        resolution.seconds_to_floor_ticks(self.seconds())
+    }
+
+    /// The HDL tick nearest this instant, ties going to the later one.
+    pub fn nearest_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+        resolution.seconds_to_ticks(self.seconds())
+    }
+
+    /// The HDL tick at or after this instant.
+    pub fn ceil_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+        resolution.seconds_to_ceil_ticks(self.seconds())
+    }
+}
+
+impl fmt::Display for Instant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.seconds())
     }
 }
 
@@ -395,9 +491,9 @@ impl From<TargetId> for usize {
 /// One scheduled event, carrying its position in the total order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduledEvent {
-    /// Tick the event is scheduled for.
-    pub tick: u64,
-    /// Region of that tick's slot.
+    /// Instant the event is scheduled at.
+    pub at: Instant,
+    /// Region of that instant's slot.
     pub region: SchedulerRegion,
     /// Per-scheduler sequence number; unique, and the final tie-break.
     pub sequence: u64,
@@ -425,13 +521,21 @@ pub enum OscillationCause {
 /// descending activation order, which is the evidence needed to name the loop.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OscillationDiagnostic {
-    /// Tick that failed to settle.
-    pub tick: u64,
+    /// Instant that failed to settle.
+    pub at: Instant,
+    /// That instant as an HDL-visible tick of the resolution the reporting
+    /// caller named, when it has one.
+    ///
+    /// A design's author names a time by its tick, so that is what the
+    /// sentence this renders into prints. `None` is the honest answer for an
+    /// instant with no tick on that grid — past the exactly representable
+    /// range — and the sentence then names the instant's seconds instead.
+    pub tick: Option<u64>,
     /// Which limit tripped.
     pub cause: OscillationCause,
-    /// Delta cycles completed at `tick` before the abort.
+    /// Delta cycles completed at `at` before the abort.
     pub delta_cycles: u32,
-    /// Events executed at `tick` before the abort.
+    /// Events executed at `at` before the abort.
     pub events_executed: u64,
     /// The configured delta-cycle ceiling.
     pub delta_cycle_limit: u32,
@@ -461,14 +565,14 @@ pub enum SchedulerError {
         /// The offending exponent.
         exponent: i8,
     },
-    /// An event was scheduled at a tick the scheduler has already left.
+    /// An event was scheduled at an instant the scheduler has already left.
     ScheduleInThePast {
-        /// Tick the scheduler has reached.
-        current_tick: u64,
-        /// Tick the caller asked for.
-        requested_tick: u64,
+        /// Instant the scheduler has reached.
+        reached: Instant,
+        /// Instant the caller asked for.
+        requested: Instant,
     },
-    /// A tick did not settle within its limits.
+    /// An instant did not settle within its limits.
     Oscillation(OscillationDiagnostic),
 }
 
@@ -486,12 +590,9 @@ impl fmt::Display for SchedulerError {
             SchedulerError::UnsupportedResolution { exponent } => {
                 write!(f, "unsupported time resolution 1e{exponent} s")
             }
-            SchedulerError::ScheduleInThePast {
-                current_tick,
-                requested_tick,
-            } => write!(
+            SchedulerError::ScheduleInThePast { reached, requested } => write!(
                 f,
-                "event scheduled at tick {requested_tick}, but the scheduler has reached tick {current_tick}"
+                "event scheduled at {requested} s, but the scheduler has reached {reached} s"
             ),
             SchedulerError::Oscillation(diagnostic) => {
                 let cause = match diagnostic.cause {
@@ -502,11 +603,23 @@ impl fmt::Display for SchedulerError {
                         format!("{} events", diagnostic.event_limit)
                     }
                 };
-                write!(
-                    f,
-                    "event network did not settle at tick {} within {cause}",
-                    diagnostic.tick
-                )?;
+                // A design's author names a time by its tick, so the tick is
+                // what this prints when the reporting caller named a grid to
+                // read the instant on. Without one — the XSPICE lane, whose
+                // times sit on no grid — the instant's own seconds are the
+                // only honest answer, and that lane renders its own sentence
+                // anyway.
+                match diagnostic.tick {
+                    Some(tick) => write!(
+                        f,
+                        "event network did not settle at tick {tick} within {cause}"
+                    )?,
+                    None => write!(
+                        f,
+                        "event network did not settle at {} s within {cause}",
+                        diagnostic.at
+                    )?,
+                }
                 if let Some((target, count)) = diagnostic.entities.first() {
                     write!(
                         f,
@@ -546,14 +659,14 @@ impl Default for SchedulerLimits {
     }
 }
 
-/// What one settled tick did.
+/// What one settled instant did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeSlotReport {
-    /// The tick that ran.
-    pub tick: u64,
+    /// The instant that ran.
+    pub at: Instant,
     /// Delta cycles it took to settle.
     pub delta_cycles: u32,
-    /// Events executed at that tick.
+    /// Events executed at that instant.
     pub events_executed: u64,
 }
 
@@ -568,7 +681,7 @@ pub struct TimeSlotReport {
 /// where a caller's closure is about to see one.
 #[derive(Debug, Clone, PartialEq)]
 struct PendingEvent {
-    tick: u64,
+    at: Instant,
     region: SchedulerRegion,
     sequence: u64,
     target: TargetId,
@@ -578,7 +691,7 @@ struct PendingEvent {
 /// One event in the future tier, ordered by the total order and by nothing
 /// else.
 ///
-/// The comparison *is* the ordering specification: `(tick, region, sequence)`,
+/// The comparison *is* the ordering specification: `(instant, region, sequence)`,
 /// with the sequence unique across the scheduler, so no two entries compare
 /// equal and the heap's shape can never decide which of two events runs first.
 /// Deliberately not derived — a derived `Ord` would order by whatever fields
@@ -588,8 +701,8 @@ struct PendingEvent {
 struct Queued(PendingEvent);
 
 impl Queued {
-    fn key(&self) -> (u64, SchedulerRegion, u64) {
-        (self.0.tick, self.0.region, self.0.sequence)
+    fn key(&self) -> (Instant, SchedulerRegion, u64) {
+        (self.0.at, self.0.region, self.0.sequence)
     }
 }
 
@@ -685,40 +798,41 @@ struct EventQueues {
     driver_events: Vec<Vec<PendingRef>>,
 }
 
-/// One of a driver's unexecuted events: the tick that decides whether a
+/// One of a driver's unexecuted events: the instant that decides whether a
 /// supersession reaches it, and the sequence that identifies it.
 ///
 /// The region is not carried. Cancellation names an event by its sequence,
 /// which is unique across the scheduler, and the region a promoted event was
 /// scheduled into no longer says which queue it is sitting in.
-type PendingRef = (u64, u64);
+type PendingRef = (Instant, u64);
 
 impl EventQueues {
     /// Place an event, routing it to the current slot or the future tier.
     ///
-    /// `open_slot` is the tick whose slot is running, if one is; an event at
-    /// that same tick joins it as a delta event. It is an `Option` rather than
-    /// a sentinel tick because `u64::MAX` is a schedulable tick, and a sentinel
-    /// would route an event scheduled there into whatever slot was open.
+    /// `open_slot` is the instant whose slot is running, if one is; an event at
+    /// that same instant joins it as a delta event. It is an `Option` rather
+    /// than a sentinel instant because every instant is schedulable, and a
+    /// sentinel would route an event scheduled there into whatever slot was
+    /// open.
     fn insert(
         &mut self,
-        open_slot: Option<u64>,
-        tick: u64,
+        open_slot: Option<Instant>,
+        at: Instant,
         region: SchedulerRegion,
         target: TargetId,
         value: EventValue,
     ) -> u64 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
-        self.driver_events[target.index()].push((tick, sequence));
+        self.driver_events[target.index()].push((at, sequence));
         let event = PendingEvent {
-            tick,
+            at,
             region,
             sequence,
             target,
             value,
         };
-        if open_slot == Some(tick) {
+        if open_slot == Some(at) {
             self.push_slot(event);
         } else {
             self.future.push(Reverse(Queued(event)));
@@ -732,8 +846,8 @@ impl EventQueues {
     /// hand over events whose sequences ascend, so the queue's last entry is
     /// already lower. The ordered branch exists for the one state that breaks
     /// that — a region still holding events from a slot a ceiling stopped
-    /// mid-settle, refilled when a later call opens an earlier tick — where an
-    /// append would run a lower sequence after a higher one.
+    /// mid-settle, refilled when a later call opens an earlier instant — where
+    /// an append would run a lower sequence after a higher one.
     fn push_slot(&mut self, event: PendingEvent) {
         let queue = &mut self.slot[event.region.index()];
         match queue.back() {
@@ -794,7 +908,7 @@ impl EventQueues {
     /// else on the event path.
     fn render(&self, event: PendingEvent) -> ScheduledEvent {
         ScheduledEvent {
-            tick: event.tick,
+            at: event.at,
             region: event.region,
             sequence: event.sequence,
             target: self.target(event.target).clone(),
@@ -822,52 +936,53 @@ impl EventQueues {
         self.slot.iter().all(VecDeque::is_empty)
     }
 
-    /// Earliest tick any event still sitting in the slot is dated at.
+    /// Earliest instant any event still sitting in the slot is dated at.
     ///
-    /// The slot is ordered by sequence, not by tick, because within one tick
-    /// sequence is the whole tie-break after the region — so the tick has to
-    /// be read off the events themselves. That scan is why the empty case
-    /// returns first: an empty slot is the steady state between
+    /// The slot is ordered by sequence, not by instant, because within one
+    /// instant sequence is the whole tie-break after the region — so the
+    /// instant has to be read off the events themselves. That scan is why the
+    /// empty case returns first: an empty slot is the steady state between
     /// [`EventScheduler::run_due_events`] calls, which is where the hot
     /// predicates ask, and it must stay as cheap as the region-emptiness
     /// check it already was.
     ///
     /// A non-empty slot is only observable from inside a due-slot run or after
     /// one returned an oscillation, and neither is a per-evaluation path.
-    fn slot_min_tick(&self) -> Option<u64> {
+    fn slot_min_instant(&self) -> Option<Instant> {
         if self.slot_is_empty() {
             return None;
         }
-        self.slot.iter().flatten().map(|event| event.tick).min()
+        self.slot.iter().flatten().map(|event| event.at).min()
     }
 
-    /// Earliest tick the future tier holds, which is the tick of its top: the
-    /// top is the least entry by `(tick, region, sequence)` and is live.
-    fn future_min_tick(&self) -> Option<u64> {
-        self.future.peek().map(|Reverse(top)| top.0.tick)
+    /// Earliest instant the future tier holds, which is the instant of its
+    /// top: the top is the least entry by `(instant, region, sequence)` and is
+    /// live.
+    fn future_min_instant(&self) -> Option<Instant> {
+        self.future.peek().map(|Reverse(top)| top.0.at)
     }
 
-    /// [`Self::slot_min_tick`] with the driver that event names, for a
-    /// diagnostic that has to say whose activation it is. Ties on the tick go
-    /// to the lower sequence, which is the one the slot would run first.
+    /// [`Self::slot_min_instant`] with the driver that event names, for a
+    /// diagnostic that has to say whose activation it is. Ties on the instant
+    /// go to the lower sequence, which is the one the slot would run first.
     #[cfg(feature = "veriloga")]
-    fn slot_min_event(&self) -> Option<(u64, TargetId)> {
+    fn slot_min_event(&self) -> Option<(Instant, TargetId)> {
         if self.slot_is_empty() {
             return None;
         }
         self.slot
             .iter()
             .flatten()
-            .min_by_key(|event| (event.tick, event.sequence))
-            .map(|event| (event.tick, event.target))
+            .min_by_key(|event| (event.at, event.sequence))
+            .map(|event| (event.at, event.target))
     }
 
-    /// [`Self::future_min_tick`] with the driver that event names.
+    /// [`Self::future_min_instant`] with the driver that event names.
     #[cfg(feature = "veriloga")]
-    fn future_min_event(&self) -> Option<(u64, TargetId)> {
+    fn future_min_event(&self) -> Option<(Instant, TargetId)> {
         self.future
             .peek()
-            .map(|Reverse(top)| (top.0.tick, top.0.target))
+            .map(|Reverse(top)| (top.0.at, top.0.target))
     }
 
     /// Number of events not yet executed.
@@ -929,9 +1044,9 @@ impl EventQueues {
         self.prune_future();
     }
 
-    /// Cancel every unexecuted event of `target` at or after `tick`, and
+    /// Cancel every unexecuted event of `target` at or after `at`, and
     /// report how many were cancelled.
-    fn supersede_driver(&mut self, target: TargetId, tick: u64) -> usize {
+    fn supersede_driver(&mut self, target: TargetId, at: Instant) -> usize {
         if self.driver_events[target.index()].is_empty() {
             return 0;
         }
@@ -943,7 +1058,7 @@ impl EventQueues {
         let mut cancelled = 0;
         let mut position = 0;
         while position < pending.len() {
-            if pending[position].0 < tick {
+            if pending[position].0 < at {
                 position += 1;
                 continue;
             }
@@ -980,27 +1095,27 @@ impl EventQueues {
         false
     }
 
-    /// Move the earliest pending tick at or before `bound` into the slot
+    /// Move the earliest pending instant at or before `bound` into the slot
     /// queues, reporting whether anything moved.
     ///
-    /// One tick at a time, never a range: a slot queue is ordered by sequence
-    /// alone, because within one tick sequence is the whole tie-break after
-    /// the region. Emptying a span of ticks into it at once would order them
-    /// by creation instead of by time, so the due-slot mode opens the next
-    /// tick only once the current one has gone quiet.
+    /// One instant at a time, never a range: a slot queue is ordered by
+    /// sequence alone, because within one instant sequence is the whole
+    /// tie-break after the region. Emptying a span of instants into it at once
+    /// would order them by creation instead of by time, so the due-slot mode
+    /// opens the next instant only once the current one has gone quiet.
     ///
-    /// The tier's top is live and least, so it names the due tick; the events
-    /// at that tick are exactly the run of pops that follows, and they arrive
-    /// ascending in `(region, sequence)`, which is the order the region queues
-    /// want them in.
-    fn open_next_due_tick(&mut self, bound: u64) -> bool {
-        let Some(due) = self.future_min_tick() else {
+    /// The tier's top is live and least, so it names the due instant; the
+    /// events at that instant are exactly the run of pops that follows, and
+    /// they arrive ascending in `(region, sequence)`, which is the order the
+    /// region queues want them in.
+    fn open_next_due_instant(&mut self, bound: Instant) -> bool {
+        let Some(due) = self.future_min_instant() else {
             return false;
         };
         if due > bound {
             return false;
         }
-        while self.future_min_tick() == Some(due) {
+        while self.future_min_instant() == Some(due) {
             let Some(Reverse(entry)) = self.future.pop() else {
                 break;
             };
@@ -1014,46 +1129,45 @@ impl EventQueues {
     }
 }
 
-/// Two-tier discrete-event scheduler over integer ticks.
+/// Two-tier discrete-event scheduler over exact instants.
 ///
-/// One tier is the current tick's stratified slot, iterated until quiescent;
-/// the other is every later tick, ordered by the total order. Advancing is
-/// [`Self::run_time_slot`], which jumps straight to the next tick that has an
-/// event rather than stepping through empty ones.
+/// One tier is the current instant's stratified slot, iterated until
+/// quiescent; the other is every later instant, ordered by the total order.
+/// Advancing is [`Self::run_time_slot`], which jumps straight to the next
+/// instant that has an event rather than stepping through empty ones.
+///
+/// No grid is declared here. An [`Instant`] is an exact time, and a caller
+/// that thinks in HDL ticks converts at its own seam — which is what lets one
+/// kernel order a module's `#5` and a code model's 100.4 ps output against
+/// each other without either one being rounded onto the other's grid.
 #[derive(Debug, Clone)]
 pub struct EventScheduler {
     queues: EventQueues,
-    resolution: TimeResolution,
     limits: SchedulerLimits,
-    /// Tick of the slot currently running or most recently run.
-    current_tick: u64,
-    /// Whether any slot has run. Until one has, tick 0 is still schedulable.
+    /// Instant of the slot currently running or most recently run.
+    current: Instant,
+    /// Whether any slot has run. Until one has, [`Instant::ZERO`] is still
+    /// schedulable.
     started: bool,
     /// Delta cycles counted against the open due slot. Only the due-slot mode
-    /// uses this; [`Self::run_time_slot`] settles a tick inside one call and
-    /// counts in a local.
+    /// uses this; [`Self::run_time_slot`] settles an instant inside one call
+    /// and counts in a local.
     slot_delta_cycles: u32,
     /// Events executed against the open due slot, for the same reason.
     slot_events_executed: u64,
 }
 
 impl EventScheduler {
-    /// Build a scheduler at the given resolution.
-    pub fn new(resolution: TimeResolution, limits: SchedulerLimits) -> Self {
+    /// Build a scheduler under the given ceilings.
+    pub fn new(limits: SchedulerLimits) -> Self {
         Self {
             queues: EventQueues::default(),
-            resolution,
             limits,
-            current_tick: 0,
+            current: Instant::ZERO,
             started: false,
             slot_delta_cycles: 0,
             slot_events_executed: 0,
         }
-    }
-
-    /// The resolution ticks are measured in.
-    pub fn resolution(&self) -> TimeResolution {
-        self.resolution
     }
 
     #[cfg(feature = "veriloga")]
@@ -1061,43 +1175,45 @@ impl EventScheduler {
         self.limits
     }
 
-    /// Tick of the slot most recently run, or 0 before the first slot.
-    pub fn current_tick(&self) -> u64 {
-        self.current_tick
+    /// Instant of the slot most recently run, or [`Instant::ZERO`] before the
+    /// first slot.
+    pub fn current_instant(&self) -> Instant {
+        self.current
     }
 
-    /// Earliest tick holding an event, if any.
+    /// Earliest instant holding an event, if any.
     ///
     /// Both tiers are consulted and the earlier answer wins. The slot is
     /// asked what its events are *dated*, which is not the same question as
-    /// which slot is open: `Self::open_due_slot` sets `current_tick` to the
-    /// caller's bound, and `open_next_due_tick` then fills the slot from the
-    /// earliest pending tick at or before that bound. So a slot observed
-    /// part-settled holds events dated before `current_tick`, and answering
-    /// with the bound would date them late — as a breakpoint, by however far
-    /// the bound overshot.
+    /// which slot is open: `Self::open_due_slot` sets `current` to the
+    /// caller's bound, and `open_next_due_instant` then fills the slot from
+    /// the earliest pending instant at or before that bound. So a slot
+    /// observed part-settled holds events dated before `current`, and
+    /// answering with the bound would date them late — as a breakpoint, by
+    /// however far the bound overshot.
     ///
     /// A slot is only observable part-settled from inside a due-slot run or
     /// after one returned an oscillation. Every XSPICE reader asks between
     /// runs, where a settled slot is empty in every region, so this reads the
     /// future tier for them exactly as it always did.
-    pub fn next_tick(&self) -> Option<u64> {
-        let slot = self.queues.slot_min_tick();
-        let future = self.queues.future_min_tick();
+    pub fn next_instant(&self) -> Option<Instant> {
+        let slot = self.queues.slot_min_instant();
+        let future = self.queues.future_min_instant();
         match (slot, future) {
             (Some(slot), Some(future)) => Some(slot.min(future)),
             (slot, future) => slot.or(future),
         }
     }
 
-    /// [`Self::next_tick`], with the driver the earliest event belongs to.
+    /// [`Self::next_instant`], with the driver the earliest event belongs to.
     ///
-    /// The tick is the same one [`Self::next_tick`] answers with — both tiers
-    /// consulted, the earlier winning — and the driver is the one a diagnostic
-    /// has to name to say *whose* schedule is holding a run. Ties between the
-    /// tiers go to the slot, which is where the earlier sequence sits.
+    /// The instant is the same one [`Self::next_instant`] answers with — both
+    /// tiers consulted, the earlier winning — and the driver is the one a
+    /// diagnostic has to name to say *whose* schedule is holding a run. Ties
+    /// between the tiers go to the slot, which is where the earlier sequence
+    /// sits.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn next_tick_target(&self) -> Option<(u64, TargetId)> {
+    pub(crate) fn next_instant_target(&self) -> Option<(Instant, TargetId)> {
         let slot = self.queues.slot_min_event();
         let future = self.queues.future_min_event();
         match (slot, future) {
@@ -1106,16 +1222,16 @@ impl EventScheduler {
         }
     }
 
-    /// [`Self::next_tick_target`], resolved to the driver's own identity.
+    /// [`Self::next_instant_target`], resolved to the driver's own identity.
     ///
     /// The interned id is an index into this scheduler's table and means
     /// nothing outside it; the instance name is what a diagnostic prints. A
     /// caller that has no target table of its own — the XSPICE queue, whose
     /// drivers *are* code-model instances — asks for the name directly.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn next_tick_instance(&self) -> Option<(u64, &str)> {
-        let (tick, target) = self.next_tick_target()?;
-        Some((tick, self.queues.target(target).instance.as_str()))
+    pub(crate) fn next_instant_instance(&self) -> Option<(Instant, &str)> {
+        let (at, target) = self.next_instant_target()?;
+        Some((at, self.queues.target(target).instance.as_str()))
     }
 
     /// Number of events not yet executed.
@@ -1126,18 +1242,18 @@ impl EventScheduler {
     /// Schedule an event from outside a running slot.
     ///
     /// Returns the event's sequence number, which is its place in the total
-    /// order. A tick the scheduler has already left is refused: silently
+    /// order. An instant the scheduler has already left is refused: silently
     /// re-dating it would let an event appear to run before something that
     /// already ran.
     pub fn schedule_at(
         &mut self,
-        tick: u64,
+        at: Instant,
         region: SchedulerRegion,
         target: EventTarget,
         value: EventValue,
     ) -> Result<u64, SchedulerError> {
         let target = self.queues.intern(target);
-        self.schedule_id_at(tick, region, target, value)
+        self.schedule_id_at(at, region, target, value)
     }
 
     /// The identity of a driver, interned once so that everything after can
@@ -1159,30 +1275,25 @@ impl EventScheduler {
     /// [`Self::schedule_at`] for a driver already interned.
     pub(crate) fn schedule_id_at(
         &mut self,
-        tick: u64,
+        at: Instant,
         region: SchedulerRegion,
         target: TargetId,
         value: EventValue,
     ) -> Result<u64, SchedulerError> {
-        let horizon = if self.started {
-            self.current_tick.saturating_add(1)
-        } else {
-            0
-        };
-        if tick < horizon {
+        if self.started && at <= self.current {
             return Err(SchedulerError::ScheduleInThePast {
-                current_tick: self.current_tick,
-                requested_tick: tick,
+                reached: self.current,
+                requested: at,
             });
         }
         // No slot is open outside `run_time_slot`, so everything lands in the
-        // future tier and is picked up when its tick opens.
-        Ok(self.queues.insert(None, tick, region, target, value))
+        // future tier and is picked up when its instant opens.
+        Ok(self.queues.insert(None, at, region, target, value))
     }
 
     /// Schedule an event that replaces this driver's own pending output.
     ///
-    /// Every unexecuted event of `target` at a tick at or after `tick` is
+    /// Every unexecuted event of `target` at an instant at or after `at` is
     /// cancelled first; the returned count is how many were. A co-driver on
     /// the same node is untouched, because [`EventTarget`] identity includes
     /// the instance and the port, so two drivers of one node are two targets.
@@ -1202,7 +1313,7 @@ impl EventScheduler {
     /// it here would drop output the analog path has always seen.
     ///
     /// Like [`Self::schedule_at`], the event lands in the future tier and is
-    /// picked up when its tick opens, because this method is reachable only
+    /// picked up when its instant opens, because this method is reachable only
     /// from outside a running slot: an event executing inside one schedules
     /// through [`SchedulerContext`], which does not offer supersession. Placing
     /// an event straight into the open slot from out here would put it ahead of
@@ -1211,38 +1322,38 @@ impl EventScheduler {
     /// [`Self::run_due_events`] promises cannot happen.
     pub fn schedule_superseding_at(
         &mut self,
-        tick: u64,
+        at: Instant,
         region: SchedulerRegion,
         target: EventTarget,
         value: EventValue,
     ) -> usize {
         let target = self.queues.intern(target);
-        self.schedule_id_superseding_at(tick, region, target, value)
+        self.schedule_id_superseding_at(at, region, target, value)
     }
 
     /// [`Self::schedule_superseding_at`] for a driver already interned.
     pub(crate) fn schedule_id_superseding_at(
         &mut self,
-        tick: u64,
+        at: Instant,
         region: SchedulerRegion,
         target: TargetId,
         value: EventValue,
     ) -> usize {
-        let cancelled = self.queues.supersede_driver(target, tick);
-        self.queues.insert(None, tick, region, target, value);
+        let cancelled = self.queues.supersede_driver(target, at);
+        self.queues.insert(None, at, region, target, value);
         cancelled
     }
 
-    /// Execute every event due at or before `bound_tick`.
+    /// Execute every event due at or before `bound`.
     ///
     /// This is the mode for an event world driven by an outer loop rather than
     /// by its own clock: the analog engine names the timepoint being settled,
     /// and everything dated at or before it is due now. Events at several
-    /// distinct ticks can therefore run in one call; they still run in
-    /// `(tick, region, sequence)` order, so the result is the order they would
-    /// have had if each tick had run its own slot.
+    /// distinct instants can therefore run in one call; they still run in
+    /// `(instant, region, sequence)` order, so the result is the order they
+    /// would have had if each instant had run its own slot.
     ///
-    /// Successive calls with the same `bound_tick` continue one slot and
+    /// Successive calls with the same `bound` continue one slot and
     /// accumulate its accounting, which is what makes the oscillation
     /// diagnostic meaningful when the settling is driven from outside: the
     /// caller marks each iteration with [`Self::note_delta_cycle`]. A
@@ -1251,19 +1362,19 @@ impl EventScheduler {
     /// fresh slot too.
     pub fn run_due_events<F>(
         &mut self,
-        bound_tick: u64,
+        bound: Instant,
         mut execute: F,
     ) -> Result<TimeSlotReport, SchedulerError>
     where
         F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
-        self.drain_due(bound_tick, |queues, event, tick| {
+        self.drain_due(bound, |queues, event, at| {
             // Rendered before the context takes the queues, which is what
             // keeps the two `String` clones off every other event path.
             let event = queues.render(event);
             let mut context = SchedulerContext {
                 queues,
-                current_tick: tick,
+                current: at,
             };
             execute(event, &mut context);
         })
@@ -1286,32 +1397,32 @@ impl EventScheduler {
     #[cfg(feature = "veriloga")]
     pub(crate) fn run_due_event_targets(
         &mut self,
-        bound_tick: u64,
+        bound: Instant,
         fired: &mut Vec<TargetId>,
     ) -> Result<TimeSlotReport, SchedulerError> {
-        self.drain_due(bound_tick, |_, event, _| fired.push(event.target))
+        self.drain_due(bound, |_, event, _| fired.push(event.target))
     }
 
     /// Account for an immediate analog-caused activation without draining any
-    /// timer at the tick it is reported on.
+    /// timer at the instant it is reported on.
     ///
-    /// The two lanes that reach here quantize that tick differently, and
+    /// The two lanes that reach here date that instant differently, and
     /// neither answer authorizes running a timer that is merely due at it: an
-    /// A/D crossing is rounded to the nearest tick and then clamped forward
-    /// onto the trial's high-water mark, a wake from the other event kernel
-    /// takes the least tick not before it.
+    /// A/D crossing is rounded to the nearest HDL tick and then clamped
+    /// forward onto the trial's high-water mark, a wake from the other event
+    /// kernel takes the least tick not before it.
     #[cfg(feature = "veriloga")]
     pub(crate) fn note_external_activation(
         &mut self,
-        tick: u64,
+        at: Instant,
         target: TargetId,
     ) -> Result<(), SchedulerError> {
-        self.open_due_slot(tick);
+        self.open_due_slot(at);
         self.slot_events_executed += 1;
         self.queues.note_activation(target);
         if self.slot_events_executed > self.limits.max_events_per_tick {
             return Err(self.oscillation(
-                tick,
+                at,
                 OscillationCause::EventLimit,
                 self.slot_delta_cycles,
                 self.slot_events_executed,
@@ -1323,13 +1434,13 @@ impl EventScheduler {
     /// The one drain loop both due-slot modes run.
     fn drain_due<F>(
         &mut self,
-        bound_tick: u64,
+        bound: Instant,
         mut execute: F,
     ) -> Result<TimeSlotReport, SchedulerError>
     where
-        F: FnMut(&mut EventQueues, PendingEvent, u64),
+        F: FnMut(&mut EventQueues, PendingEvent, Instant),
     {
-        self.open_due_slot(bound_tick);
+        self.open_due_slot(bound);
 
         loop {
             let Some(event) = self.queues.pop_active() else {
@@ -1337,7 +1448,7 @@ impl EventScheduler {
                     self.slot_delta_cycles += 1;
                     if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
                         return Err(self.oscillation(
-                            bound_tick,
+                            bound,
                             OscillationCause::DeltaCycleLimit,
                             self.slot_delta_cycles,
                             self.slot_events_executed,
@@ -1345,11 +1456,11 @@ impl EventScheduler {
                     }
                     continue;
                 }
-                // The current tick has gone quiet in every region, so the next
-                // one under the bound may open. This is also what picks up an
-                // event `execute` back-dated below the bound, which
+                // The current instant has gone quiet in every region, so the
+                // next one under the bound may open. This is also what picks
+                // up an event `execute` back-dated below the bound, which
                 // `SchedulerContext` routes to the future tier.
-                if self.queues.open_next_due_tick(bound_tick) {
+                if self.queues.open_next_due_instant(bound) {
                     continue;
                 }
                 break;
@@ -1358,24 +1469,24 @@ impl EventScheduler {
             self.slot_events_executed += 1;
             if self.slot_events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
-                    bound_tick,
+                    bound,
                     OscillationCause::EventLimit,
                     self.slot_delta_cycles,
                     self.slot_events_executed,
                 ));
             }
             self.queues.note_activation(event.target);
-            execute(&mut self.queues, event, bound_tick);
+            execute(&mut self.queues, event, bound);
         }
 
         Ok(TimeSlotReport {
-            tick: bound_tick,
+            at: bound,
             delta_cycles: self.slot_delta_cycles,
             events_executed: self.slot_events_executed,
         })
     }
 
-    /// Record one delta cycle of the due slot bounded by `bound_tick`.
+    /// Record one delta cycle of the due slot bounded by `bound`.
     ///
     /// An outer settle loop calls this once per iteration. Delta settling is
     /// unbounded in the standard, so a zero-delay loop is a hang rather than a
@@ -1387,12 +1498,12 @@ impl EventScheduler {
     /// walks its processes and once after each of them — and counting a delta
     /// per drain would make the ceiling depend on how many processes the
     /// design has rather than on how deep the settling is.
-    pub fn note_delta_cycle(&mut self, bound_tick: u64) -> Result<(), SchedulerError> {
-        self.open_due_slot(bound_tick);
+    pub fn note_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
+        self.open_due_slot(bound);
         self.slot_delta_cycles += 1;
         if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
             return Err(self.oscillation(
-                bound_tick,
+                bound,
                 OscillationCause::DeltaCycleLimit,
                 self.slot_delta_cycles,
                 self.slot_events_executed,
@@ -1401,26 +1512,26 @@ impl EventScheduler {
         Ok(())
     }
 
-    /// Open the due slot at `bound_tick`, resetting per-slot accounting when
+    /// Open the due slot at `bound`, resetting per-slot accounting when
     /// the bound moves. Continuing the same bound keeps it.
-    fn open_due_slot(&mut self, bound_tick: u64) {
-        if self.started && self.current_tick == bound_tick {
+    fn open_due_slot(&mut self, bound: Instant) {
+        if self.started && self.current == bound {
             return;
         }
-        self.current_tick = bound_tick;
+        self.current = bound;
         self.started = true;
         self.slot_delta_cycles = 0;
         self.slot_events_executed = 0;
         self.queues.clear_activations();
     }
 
-    /// Run the next tick that has events, to quiescence.
+    /// Run the next instant that has events, to quiescence.
     ///
-    /// Returns `Ok(None)` when nothing is pending. Otherwise the tick's slot is
-    /// iterated per IEEE 1364-2005: drain the active region, promote the first
-    /// non-empty later region when it empties, and stop when every region is
-    /// empty. `execute` sees each event in total order and may schedule more
-    /// through its [`SchedulerContext`].
+    /// Returns `Ok(None)` when nothing is pending. Otherwise that instant's
+    /// slot is iterated per IEEE 1364-2005: drain the active region, promote
+    /// the first non-empty later region when it empties, and stop when every
+    /// region is empty. `execute` sees each event in total order and may
+    /// schedule more through its [`SchedulerContext`].
     pub fn run_time_slot<F>(
         &mut self,
         mut execute: F,
@@ -1428,16 +1539,16 @@ impl EventScheduler {
     where
         F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
-        let Some(tick) = self.next_tick() else {
+        let Some(at) = self.next_instant() else {
             return Ok(None);
         };
 
-        self.current_tick = tick;
+        self.current = at;
         self.started = true;
-        self.queues.open_next_due_tick(tick);
+        self.queues.open_next_due_instant(at);
         self.queues.clear_activations();
 
-        // A tick settles inside this call, so the counters are local. The
+        // An instant settles inside this call, so the counters are local. The
         // per-slot fields are cleared so that a scheduler driven both ways
         // does not carry one mode's accounting into the other's.
         self.slot_delta_cycles = 0;
@@ -1453,7 +1564,7 @@ impl EventScheduler {
                 delta_cycles += 1;
                 if delta_cycles > self.limits.max_delta_cycles_per_tick {
                     return Err(self.oscillation(
-                        tick,
+                        at,
                         OscillationCause::DeltaCycleLimit,
                         delta_cycles,
                         events_executed,
@@ -1465,7 +1576,7 @@ impl EventScheduler {
             events_executed += 1;
             if events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
-                    tick,
+                    at,
                     OscillationCause::EventLimit,
                     delta_cycles,
                     events_executed,
@@ -1475,13 +1586,13 @@ impl EventScheduler {
             let event = self.queues.render(event);
             let mut context = SchedulerContext {
                 queues: &mut self.queues,
-                current_tick: tick,
+                current: at,
             };
             execute(event, &mut context);
         }
 
         Ok(Some(TimeSlotReport {
-            tick,
+            at,
             delta_cycles,
             events_executed,
         }))
@@ -1489,7 +1600,7 @@ impl EventScheduler {
 
     fn oscillation(
         &self,
-        tick: u64,
+        at: Instant,
         cause: OscillationCause,
         delta_cycles: u32,
         events_executed: u64,
@@ -1510,7 +1621,11 @@ impl EventScheduler {
         entities.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
         entities.truncate(self.limits.max_reported_oscillating_entities);
         SchedulerError::Oscillation(OscillationDiagnostic {
-            tick,
+            at,
+            // The kernel declares no grid, so it names no tick. Whoever does
+            // declare one fills this in on the way out — see
+            // `DigitalHost::name_oscillating_tick`.
+            tick: None,
             cause,
             delta_cycles,
             events_executed,
@@ -1528,65 +1643,75 @@ impl EventScheduler {
 #[derive(Debug)]
 pub struct SchedulerContext<'a> {
     queues: &'a mut EventQueues,
-    current_tick: u64,
+    current: Instant,
 }
 
 impl SchedulerContext<'_> {
-    /// The tick whose slot is running.
-    pub fn current_tick(&self) -> u64 {
-        self.current_tick
+    /// The instant whose slot is running.
+    pub fn current_instant(&self) -> Instant {
+        self.current
     }
 
-    /// Schedule at an absolute tick, which may be the running one.
+    /// Schedule at an absolute instant, which may be the running one.
     ///
-    /// A tick before the running one is refused for the same reason as
+    /// An instant before the running one is refused for the same reason as
     /// [`EventScheduler::schedule_at`].
     pub fn schedule_at(
         &mut self,
-        tick: u64,
+        at: Instant,
         region: SchedulerRegion,
         target: EventTarget,
         value: EventValue,
     ) -> Result<u64, SchedulerError> {
-        if tick < self.current_tick {
+        if at < self.current {
             return Err(SchedulerError::ScheduleInThePast {
-                current_tick: self.current_tick,
-                requested_tick: tick,
+                reached: self.current,
+                requested: at,
             });
         }
         let target = self.queues.intern(target);
         Ok(self
             .queues
-            .insert(Some(self.current_tick), tick, region, target, value))
+            .insert(Some(self.current), at, region, target, value))
     }
 
-    /// Schedule `delay` ticks from the running tick. A zero delay is a delta
-    /// event at the current tick.
+    /// Schedule `delay` ticks of `resolution` after the running instant. A
+    /// zero delay is a delta event at the current instant.
+    ///
+    /// The grid is an argument because the kernel has none: a `#d` is a delay
+    /// on the design's own declared precision, and which precision that is
+    /// belongs to the caller. The running instant is read back onto that grid
+    /// with [`Instant::floor_tick`], the delay is added there, and the result
+    /// is embedded again — so a design whose events all sit on its grid stays
+    /// on it exactly.
     pub fn schedule_after(
         &mut self,
         delay: u64,
+        resolution: TimeResolution,
         region: SchedulerRegion,
         target: EventTarget,
         value: EventValue,
     ) -> Result<u64, SchedulerError> {
-        let Some(tick) = self.current_tick.checked_add(delay) else {
+        let Some(tick) = self.current.floor_tick(resolution)?.checked_add(delay) else {
             return Err(SchedulerError::TickNotExactlyRepresentable { ticks: u64::MAX });
         };
-        self.schedule_at(tick, region, target, value)
+        self.schedule_at(Instant::from_tick(tick, resolution)?, region, target, value)
     }
 }
 
 /// The kernel's conformance tests live in `tests/event_scheduler_kernel.rs`,
-/// against the published API. These are here because
-/// [`TimeResolution::seconds_to_floor_ticks`] is crate-visible and so has no
-/// published API to be tested against.
-///
-/// Gated on `veriloga` with the method itself, which is gated with its only
-/// caller: `xspice::verilog`'s mixed interleave is a `veriloga` module, so a
-/// build without the feature has neither the method nor anything to test it.
-#[cfg(all(test, feature = "veriloga"))]
+/// against the published API. These are here because they pin the three
+/// rounding rules of [`Instant`] against the crate-visible conversions they
+/// are implemented by, which no published API reaches.
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The instant a time names, for a test that only passes times an instant
+    /// exists for.
+    fn instant(seconds: f64) -> Instant {
+        Instant::from_seconds(seconds).expect("a schedulable time")
+    }
 
     #[test]
     fn flooring_maps_an_off_grid_analog_time_to_the_tick_at_or_before_it() {
@@ -1597,11 +1722,11 @@ mod tests {
         // to the tick it is inside, not to the one it is closest to. Rounding
         // here would run the digital world a quarter of a nanosecond past an
         // instant the integrator has accepted.
-        assert_eq!(resolution.seconds_to_ticks(2.75e-9), Ok(3));
-        assert_eq!(resolution.seconds_to_floor_ticks(2.75e-9), Ok(2));
-        assert_eq!(resolution.seconds_to_floor_ticks(2.25e-9), Ok(2));
-        assert_eq!(resolution.seconds_to_floor_ticks(0.0), Ok(0));
-        assert_eq!(resolution.seconds_to_floor_ticks(0.999e-9), Ok(0));
+        assert_eq!(instant(2.75e-9).nearest_tick(resolution), Ok(3));
+        assert_eq!(instant(2.75e-9).floor_tick(resolution), Ok(2));
+        assert_eq!(instant(2.25e-9).floor_tick(resolution), Ok(2));
+        assert_eq!(Instant::ZERO.floor_tick(resolution), Ok(0));
+        assert_eq!(instant(0.999e-9).floor_tick(resolution), Ok(0));
 
         // Monotone: a non-decreasing sequence of analog times gives a
         // non-decreasing sequence of ticks, which is what lets `advance_to` be
@@ -1609,9 +1734,7 @@ mod tests {
         let mut previous = 0u64;
         let mut seconds = 0.0f64;
         while seconds < 5.0e-9 {
-            let tick = resolution
-                .seconds_to_floor_ticks(seconds)
-                .expect("in range");
+            let tick = instant(seconds).floor_tick(resolution).expect("in range");
             assert!(
                 tick >= previous,
                 "flooring must be monotone: {seconds:e} s gave {tick} after {previous}"
@@ -1635,29 +1758,27 @@ mod tests {
         let resolution = TimeResolution::new(-9).expect("1 ns");
 
         // Below the half: both mappings answer with the tick the time is in.
-        assert_eq!(resolution.seconds_to_ticks(2.4e-9), Ok(2));
-        assert_eq!(resolution.seconds_to_floor_ticks(2.4e-9), Ok(2));
+        assert_eq!(instant(2.4e-9).nearest_tick(resolution), Ok(2));
+        assert_eq!(instant(2.4e-9).floor_tick(resolution), Ok(2));
 
         // Exactly the half: `f64::round` is half-away-from-zero, so a tie goes
         // to the later tick. Stated rather than discovered, because the
         // direction of the tie is what decides which slot a transition landing
         // dead centre is published into.
-        assert_eq!(resolution.seconds_to_ticks(2.5e-9), Ok(3));
-        assert_eq!(resolution.seconds_to_floor_ticks(2.5e-9), Ok(2));
+        assert_eq!(instant(2.5e-9).nearest_tick(resolution), Ok(3));
+        assert_eq!(instant(2.5e-9).floor_tick(resolution), Ok(2));
 
         // Above the half: rounding moves on, flooring does not.
-        assert_eq!(resolution.seconds_to_ticks(2.6e-9), Ok(3));
-        assert_eq!(resolution.seconds_to_floor_ticks(2.6e-9), Ok(2));
+        assert_eq!(instant(2.6e-9).nearest_tick(resolution), Ok(3));
+        assert_eq!(instant(2.6e-9).floor_tick(resolution), Ok(2));
 
         // And the rounding never lands more than one tick from the floor, in
         // either direction, which is what bounds how far forward a transition's
         // publication can move.
         let mut seconds = 0.0f64;
         while seconds < 5.0e-9 {
-            let floor = resolution
-                .seconds_to_floor_ticks(seconds)
-                .expect("in range");
-            let nearest = resolution.seconds_to_ticks(seconds).expect("in range");
+            let floor = instant(seconds).floor_tick(resolution).expect("in range");
+            let nearest = instant(seconds).nearest_tick(resolution).expect("in range");
             assert!(
                 nearest == floor || nearest == floor + 1,
                 "{seconds:e} s floored to {floor} but rounded to {nearest}"
@@ -1674,9 +1795,9 @@ mod tests {
         for exponent in [-9i8, -12, -15] {
             let resolution = TimeResolution::new(exponent).expect("declared precision");
             for tick in [0u64, 1, 2, 3, 7, 999, 1_000, 1_001, 123_456_789] {
-                let seconds = resolution.ticks_to_seconds(tick).expect("in range");
+                let at = Instant::from_tick(tick, resolution).expect("in range");
                 assert_eq!(
-                    resolution.seconds_to_floor_ticks(seconds),
+                    at.floor_tick(resolution),
                     Ok(tick),
                     "exponent {exponent} tick {tick} round trip"
                 );
@@ -1687,12 +1808,14 @@ mod tests {
     #[test]
     fn flooring_refuses_what_rounding_refuses() {
         let resolution = TimeResolution::new(-9).expect("1 ns");
-        assert!(resolution.seconds_to_floor_ticks(-1.0e-9).is_err());
-        assert!(resolution.seconds_to_floor_ticks(f64::NAN).is_err());
-        assert!(resolution.seconds_to_floor_ticks(f64::INFINITY).is_err());
+        // Negative, NaN and infinite times have no instant at all, which is
+        // where the refusal now sits.
+        assert_eq!(Instant::from_seconds(-1.0e-9), None);
+        assert_eq!(Instant::from_seconds(f64::NAN), None);
+        assert_eq!(Instant::from_seconds(f64::INFINITY), None);
         assert!(
-            resolution
-                .seconds_to_floor_ticks(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+            instant(TimeResolution::MAX_EXACT_TICKS as f64 * 1.0e-9 * 2.0)
+                .floor_tick(resolution)
                 .is_err()
         );
     }
