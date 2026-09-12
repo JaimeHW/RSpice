@@ -326,8 +326,11 @@ impl TimeResolution {
     /// construction: an instant that sits exactly on a tick converts to that
     /// tick in both directions, and only a strictly interior one moves up.
     ///
-    /// Crate-visible and reached through [`Instant::ceil_tick`], for the same
-    /// reason the floor conversion is.
+    /// Crate-visible and reached through [`Instant::ceil_tick`], and gated
+    /// with it: that method's only caller is the mixed interleave, which is a
+    /// `veriloga` module, so a build without the feature would carry an orphan
+    /// that `-D warnings` reports.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         let ticks = self.seconds_to_floor_ticks(seconds)?;
         if (ticks as f64) * self.seconds_per_tick() >= seconds {
@@ -384,7 +387,10 @@ pub struct Instant(u64);
 
 impl Instant {
     /// The start of an analysis.
-    pub const ZERO: Instant = Instant(0);
+    ///
+    /// Crate-visible: nothing outside names it, because an out-of-crate caller
+    /// builds an instant from the time it has rather than from the origin.
+    pub(crate) const ZERO: Instant = Instant(0);
 
     /// The instant a number of seconds names, or `None` if it names none.
     ///
@@ -422,12 +428,23 @@ impl Instant {
     }
 
     /// The HDL tick nearest this instant, ties going to the later one.
-    pub fn nearest_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+    ///
+    /// Crate-visible and gated with its callers, the way the conversion behind
+    /// it is: an A/D crossing is dated by `xspice::verilog`'s mixed
+    /// interleave, which is a `veriloga` module, so a build without the
+    /// feature has no caller and `-D warnings` would report an orphan.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn nearest_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_ticks(self.seconds())
     }
 
     /// The HDL tick at or after this instant.
-    pub fn ceil_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+    ///
+    /// Crate-visible and gated for the same reason [`Self::nearest_tick`] is:
+    /// the only caller is the wake the mixed interleave dates when an event
+    /// crosses in from the other event kernel.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn ceil_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_ceil_ticks(self.seconds())
     }
 }
@@ -1703,7 +1720,12 @@ impl SchedulerContext<'_> {
 /// against the published API. These are here because they pin the three
 /// rounding rules of [`Instant`] against the crate-visible conversions they
 /// are implemented by, which no published API reaches.
-#[cfg(test)]
+///
+/// Gated on `veriloga` with two of those three rules, which are gated with
+/// their only callers: `xspice::verilog`'s mixed interleave is a `veriloga`
+/// module, so a build without the feature has neither the methods nor
+/// anything to test them with.
+#[cfg(all(test, feature = "veriloga"))]
 mod tests {
     use super::*;
 
