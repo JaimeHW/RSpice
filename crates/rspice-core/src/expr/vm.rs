@@ -176,6 +176,45 @@ impl CompiledExpr {
     }
 }
 
+/// How `ln`, `log` and `log10` treat an argument outside their domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum LogarithmDomain {
+    /// SPICE's guarded logarithm: raise the argument to
+    /// [`LOGARITHM_MIN_ARGUMENT`] first, so the result is always finite.
+    ///
+    /// This is what `.param`, `.measure`, output expressions and source
+    /// waveforms get, and what ngspice and Xyce do everywhere. It is the
+    /// default because an expression evaluated once, outside any Newton loop,
+    /// has nothing to reject.
+    #[default]
+    Guarded,
+    /// Guard only the removable singularity at zero; evaluate a negative
+    /// argument as IEEE does, which is NaN.
+    ///
+    /// A circuit equation is solved by Newton, and Newton offers points the
+    /// equation need not be defined at. `ln(0)` is the boundary of the domain
+    /// approached from inside it and is worth a finite stand-in; `ln(-4.9)` is
+    /// outside the domain, and clamping it both fabricates a value and hands
+    /// the solver a `1/1e-38` slope, which pins the node and makes the
+    /// convergence check pass on an unchanged iterate at a point that does not
+    /// satisfy KCL. Spectre evaluates IEEE here and rejects the iterate;
+    /// R1.14's non-finite trial classification is the channel that does it.
+    Ieee,
+}
+
+impl LogarithmDomain {
+    /// The argument to hand the logarithm, or NaN when the point is outside
+    /// its domain.
+    #[inline]
+    fn argument(self, value: Value) -> Value {
+        match self {
+            Self::Guarded => value.max(LOGARITHM_MIN_ARGUMENT),
+            Self::Ieee if value < 0.0 => Value::NAN,
+            Self::Ieee => value.max(LOGARITHM_MIN_ARGUMENT),
+        }
+    }
+}
+
 /// Execution context for VM
 pub struct Context<'a> {
     /// Node voltages (indexed by node_map)
@@ -192,6 +231,13 @@ pub struct Context<'a> {
     pub gmin: Value,
     /// Dialect-specific expression-function semantics.
     pub expression_dialect: ExpressionDialect,
+    /// Whether a logarithm outside its domain is guarded or left to IEEE.
+    ///
+    /// Crate-visible rather than public: the choice belongs to the evaluator
+    /// that owns the expression — a circuit equation or a one-shot parameter —
+    /// and not to anything outside this crate, which has no way to know which
+    /// it is holding.
+    pub(crate) logarithm_domain: LogarithmDomain,
 }
 
 impl<'a> Context<'a> {
@@ -205,6 +251,7 @@ impl<'a> Context<'a> {
             temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
+            logarithm_domain: LogarithmDomain::Guarded,
         }
     }
 
@@ -218,6 +265,7 @@ impl<'a> Context<'a> {
             temperature: crate::constants::kelvin_to_celsius(crate::constants::TEMP_REFERENCE),
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
+            logarithm_domain: LogarithmDomain::Guarded,
         }
     }
 
@@ -242,6 +290,14 @@ impl<'a> Context<'a> {
     /// Set dialect-specific expression-function semantics.
     pub fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
         self.expression_dialect = dialect;
+        self
+    }
+
+    /// Evaluate this expression as a circuit equation rather than as a
+    /// one-shot parameter: a logarithm of a negative argument is NaN, which
+    /// the consumer rejects, instead of a fabricated value on the clamp.
+    pub(crate) fn with_ieee_logarithm(mut self) -> Self {
+        self.logarithm_domain = LogarithmDomain::Ieee;
         self
     }
 }
@@ -374,16 +430,23 @@ impl Vm {
                 Instruction::Exp => self.unary_op(|a| a.exp()),
                 Instruction::Log => {
                     let dialect = ctx.expression_dialect;
+                    let domain = ctx.logarithm_domain;
                     self.unary_op(|a| {
                         if dialect == ExpressionDialect::Xyce {
-                            a.max(LOGARITHM_MIN_ARGUMENT).log10()
+                            domain.argument(a).log10()
                         } else {
-                            a.max(LOGARITHM_MIN_ARGUMENT).ln()
+                            domain.argument(a).ln()
                         }
                     });
                 }
-                Instruction::Ln => self.unary_op(|a| a.max(LOGARITHM_MIN_ARGUMENT).ln()),
-                Instruction::Log10 => self.unary_op(|a| a.max(LOGARITHM_MIN_ARGUMENT).log10()),
+                Instruction::Ln => {
+                    let domain = ctx.logarithm_domain;
+                    self.unary_op(move |a| domain.argument(a).ln());
+                }
+                Instruction::Log10 => {
+                    let domain = ctx.logarithm_domain;
+                    self.unary_op(move |a| domain.argument(a).log10());
+                }
                 Instruction::Sin => self.unary_op(|a| a.sin()),
                 Instruction::Cos => self.unary_op(|a| a.cos()),
                 Instruction::Tan => self.unary_op(|a| a.tan()),

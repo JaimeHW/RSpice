@@ -45,14 +45,12 @@ fn source_cases(expression: &str) -> [(String, &'static str, &'static str); 2] {
 /// overflows at an overshooting Newton iterate is a rejected iterate, not a
 /// refused circuit.
 ///
-/// The obvious spelling of this fixture — `ln(v(a)+0.1)`, the expression R1.4
-/// pinned on the Verilog-A route — cannot be written here: `expr/vm.rs:385`
-/// clamps every logarithm argument to `LOGARITHM_MIN_ARGUMENT`, which is
-/// SPICE's own behaviour and means a `B` source's `ln` never produces a
-/// non-finite value at any iterate. `exp` is unlimited, so an exponential
-/// junction is the behavioral shape that does leave the reals: `exp(5/0.002)`
-/// overflows while `exp(0.0539/0.002)` is an ordinary number, and plain Newton
-/// from the zero guess proposes the former on its way to the latter.
+/// `exp` is the shape used here rather than `ln(v(a)+0.1)`, the expression
+/// R1.4 pinned on the Verilog-A route, because it overflows on the way up
+/// rather than at a domain edge: `exp(5/0.002)` overflows while
+/// `exp(0.0539/0.002)` is an ordinary number, and plain Newton from the zero
+/// guess proposes the former on its way to the latter. The logarithm has its
+/// own fixture below, on what the clamp used to do to it.
 ///
 /// Before R1.14 the behavioral route's non-finite refusal ended the run at
 /// that iterate while the runtime Verilog-A route retried the same shape. The
@@ -148,6 +146,81 @@ fn a_behavioral_domain_edge_at_a_transient_trial_is_rejected_and_the_step_retrie
         result.time.last().copied().unwrap_or(0.0) >= 3.0e-9 - 1.0e-18,
         "the run must reach tstop: {:?}",
         result.time.last()
+    );
+}
+
+/// A `B` source's logarithm is a circuit equation, so an iterate outside its
+/// domain is rejected instead of clamped.
+///
+/// The deck has one operating point, V(a) ~ 0.894 V, where
+/// `(V+5)/1k + ln(V+0.1) = 0`. It is not where the solver used to land. The
+/// first linear solve puts V(a) at the source, -5 V, and `ln(-4.9)` is
+/// undefined there — so `expr/vm.rs` clamped the argument to
+/// `LOGARITHM_MIN_ARGUMENT = 1e-38` and returned `ln(1e-38) = -87.5`, while
+/// the analytic slope beside it returned `1/1e-38 = 1e38`. A 1e38 conductance
+/// on that node makes the next Newton update ~5e-6 V, the voltage tolerance
+/// calls that converged, and the solve reported V(a) = -4.999995 V — a point
+/// that misses KCL by 87 A and is outside the deck's own expression's domain,
+/// with no diagnostic of any kind.
+///
+/// The clamp survives at zero, where the domain has a removable boundary and a
+/// finite stand-in costs nothing. Below zero the value is NaN, which R1.14's
+/// `StampError::NonFiniteTrial` turns into a rejected iterate: the solver
+/// steps the source and follows the branch from V1 = 0, where V(a) = 0 and the
+/// argument is 0.1, to the real answer.
+#[test]
+fn a_behavioral_logarithm_outside_its_domain_is_rejected_not_clamped() {
+    let deck = "behavioral logarithm at an iterate outside its domain\n\
+                V1 in 0 DC -5\n\
+                R1 in a 1k\n\
+                B1 a 0 I={ln(v(a)+0.1)}\n\
+                .OP\n\
+                .END\n";
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&parse(deck))
+        .expect("the deck has an operating point inside the logarithm's domain");
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a is absent from the operating point");
+    let voltage = result.node_voltages[index];
+    assert!(
+        voltage + 0.1 > 0.0,
+        "the reported operating point must be inside ln's domain, got V(a) = {voltage}"
+    );
+    let residual = (voltage + 5.0) * 1.0e-3 + (voltage + 0.1).ln();
+    assert!(
+        residual.abs() < 1.0e-7,
+        "V(a) = {voltage} leaves KCL residual {residual}"
+    );
+}
+
+/// The clamp is a circuit-equation rule, not a global one: a `.param` still
+/// gets SPICE's guarded logarithm, because a parameter is evaluated once and
+/// has no iterate to reject.
+#[test]
+fn a_parameter_logarithm_keeps_the_guarded_spice_value() {
+    let deck = "guarded parameter logarithm\n\
+                .param G={ln(-1)}\n\
+                V1 in 0 DC 1\n\
+                R1 in 0 {1k*abs(G)}\n\
+                .OP\n\
+                .END\n";
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&parse(deck))
+        .expect("a guarded parameter logarithm is an ordinary finite number");
+    let index = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("V1"))
+        .expect("the source branch is absent from the operating point");
+    // ln(1e-38) = -87.4982..., so the resistance is 87.498 kOhm.
+    let expected = -1.0 / (1.0e3 * (1.0e-38f64).ln().abs());
+    assert!(
+        (result.branch_currents[index] - expected).abs() < 1.0e-12,
+        "the guarded parameter value moved: {} vs {expected}",
+        result.branch_currents[index]
     );
 }
 

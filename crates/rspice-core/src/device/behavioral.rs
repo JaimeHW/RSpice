@@ -279,7 +279,8 @@ impl BehavioralVoltageSource {
                 .with_temperature(self.temperature)
                 .with_frequency(self.frequency)
                 .with_gmin(self.gmin)
-                .with_expression_dialect(self.expression_dialect),
+                .with_expression_dialect(self.expression_dialect)
+                .with_ieee_logarithm(),
         );
         // A one-sided expression branch may have a finite slope after a jump.
         // It is not a finite displacement current at the published value.
@@ -490,7 +491,8 @@ impl BehavioralVoltageSource {
             .with_frequency(self.frequency)
             .with_temperature(self.temperature)
             .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect);
+            .with_expression_dialect(self.expression_dialect)
+            .with_ieee_logarithm();
         let mut candidate = self.vm.clone();
         let value = candidate.execute(&self.program, &context);
         if !value.is_finite() {
@@ -540,7 +542,8 @@ impl BehavioralVoltageSource {
             .with_frequency(self.frequency)
             .with_temperature(self.temperature)
             .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect);
+            .with_expression_dialect(self.expression_dialect)
+            .with_ieee_logarithm();
         self.vm.execute(&self.program, &ctx)
     }
 
@@ -1216,6 +1219,32 @@ pub fn evaluate_parameter_directional_derivative(
     ))
 }
 
+/// The argument a `B` source's logarithm is evaluated at, and its slope.
+///
+/// A behavioral expression is a circuit equation, so this evaluator only ever
+/// runs at a point a Newton loop offered. The guard against `ln(0)` stays —
+/// zero is the boundary of the domain and a finite stand-in there costs
+/// nothing — but a strictly negative argument is outside the domain, and
+/// clamping it is what let the R1.14 deck `B1 a 0 I={ln(v(a)+0.1)}` report
+/// V(a) = -4.999995 as an operating point: the clamp fabricates
+/// `ln(1e-38) = -87.5` for the value and `1/1e-38 = 1e38` for the slope, and a
+/// 1e38 conductance pins the node so hard that the next Newton update is zero
+/// and the `vntol` check calls it converged. NaN here is what Spectre
+/// evaluates, and R1.14's `StampError::NonFiniteTrial` is what turns it into a
+/// rejected iterate rather than a refused run.
+///
+/// `expr::LogarithmDomain::Ieee` is the same rule for the bytecode VM; the two
+/// must agree, because a `B` source's value and its Jacobian entry come from
+/// these two evaluators respectively.
+#[inline]
+fn behavioral_logarithm_argument(value: Value) -> Value {
+    if value < 0.0 {
+        Value::NAN
+    } else {
+        value.max(crate::expr::LOGARITHM_MIN_ARGUMENT)
+    }
+}
+
 fn eval_behavioral_expr_with_derivative_at_boundary(
     expr: &Expr,
     context: &BehavioralDerivativeContext<'_>,
@@ -1476,7 +1505,7 @@ fn eval_function_with_derivative(
         Function::Exp => unary_derivative(eval_arg(0)?, |x| x.exp(), |x| x.exp()),
         Function::Log => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = x.max(1.0e-38);
+            let clamped = behavioral_logarithm_argument(x);
             if context.expression_dialect == ExpressionDialect::Xyce {
                 derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
             } else {
@@ -1485,12 +1514,12 @@ fn eval_function_with_derivative(
         }
         Function::Ln => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = x.max(1.0e-38);
+            let clamped = behavioral_logarithm_argument(x);
             derivative_pair(clamped.ln(), dx / clamped)
         }
         Function::Log10 => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = x.max(1.0e-38);
+            let clamped = behavioral_logarithm_argument(x);
             derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
         }
         Function::Sin => unary_derivative(eval_arg(0)?, |x| x.sin(), |x| x.cos()),
@@ -2227,7 +2256,8 @@ impl BehavioralCurrentSource {
             .with_frequency(self.frequency)
             .with_temperature(self.temperature)
             .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect);
+            .with_expression_dialect(self.expression_dialect)
+            .with_ieee_logarithm();
         let mut candidate = self.vm.clone();
         let value = candidate.execute(&self.program, &context);
         if !value.is_finite() {
@@ -2255,7 +2285,8 @@ impl BehavioralCurrentSource {
             .with_frequency(self.frequency)
             .with_temperature(self.temperature)
             .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect);
+            .with_expression_dialect(self.expression_dialect)
+            .with_ieee_logarithm();
         self.vm.execute(&self.program, &ctx)
     }
 
