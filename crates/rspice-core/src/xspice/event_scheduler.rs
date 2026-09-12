@@ -266,7 +266,9 @@ impl TimeResolution {
     /// Crate-visible rather than public, and reached through
     /// [`Instant::floor_tick`] rather than directly: an analog time is an
     /// [`Instant`] before anything asks which tick it is in, so the seconds
-    /// this takes are always an instant's own seconds.
+    /// this takes are always an instant's own seconds. Gated with that method,
+    /// whose callers are all in the `veriloga` mixed interleave.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn seconds_to_floor_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
         if !seconds.is_finite() || seconds < 0.0 {
             return Err(SchedulerError::SecondsNotRepresentable { seconds });
@@ -416,14 +418,23 @@ impl Instant {
     /// rounded, for the reason [`TimeResolution::ticks_to_seconds`] gives: a
     /// breakpoint that does not land where the event is scheduled is a
     /// synchronization fault, not an accuracy loss.
-    pub fn from_tick(tick: u64, resolution: TimeResolution) -> Result<Self, SchedulerError> {
+    ///
+    /// Crate-visible and gated with the only world that has ticks: a caller
+    /// outside the crate composes [`TimeResolution::ticks_to_seconds`] with
+    /// [`Self::from_seconds`], which is the same map written out.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn from_tick(tick: u64, resolution: TimeResolution) -> Result<Self, SchedulerError> {
         let seconds = resolution.ticks_to_seconds(tick)?;
         Self::from_seconds(seconds)
             .ok_or(SchedulerError::TickNotExactlyRepresentable { ticks: tick })
     }
 
     /// The HDL tick at or before this instant.
-    pub fn floor_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
+    ///
+    /// Crate-visible and gated with its callers, as [`Self::nearest_tick`] and
+    /// [`Self::ceil_tick`] are.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn floor_tick(self, resolution: TimeResolution) -> Result<u64, SchedulerError> {
         resolution.seconds_to_floor_ticks(self.seconds())
     }
 
@@ -1657,6 +1668,12 @@ impl EventScheduler {
 ///
 /// It exposes scheduling and nothing else, so an event cannot re-enter
 /// [`EventScheduler::run_time_slot`] from inside a slot.
+///
+/// It offers one absolute schedule and no relative one. A "delay" is a number
+/// of ticks on some declared grid, and the kernel declares none — so the
+/// caller that owns the grid does the arithmetic and names the instant it
+/// arrived at. A zero delay is [`Self::schedule_at`] at
+/// [`Self::current_instant`], which is a delta event at the running instant.
 #[derive(Debug)]
 pub struct SchedulerContext<'a> {
     queues: &'a mut EventQueues,
@@ -1690,29 +1707,6 @@ impl SchedulerContext<'_> {
         Ok(self
             .queues
             .insert(Some(self.current), at, region, target, value))
-    }
-
-    /// Schedule `delay` ticks of `resolution` after the running instant. A
-    /// zero delay is a delta event at the current instant.
-    ///
-    /// The grid is an argument because the kernel has none: a `#d` is a delay
-    /// on the design's own declared precision, and which precision that is
-    /// belongs to the caller. The running instant is read back onto that grid
-    /// with [`Instant::floor_tick`], the delay is added there, and the result
-    /// is embedded again — so a design whose events all sit on its grid stays
-    /// on it exactly.
-    pub fn schedule_after(
-        &mut self,
-        delay: u64,
-        resolution: TimeResolution,
-        region: SchedulerRegion,
-        target: EventTarget,
-        value: EventValue,
-    ) -> Result<u64, SchedulerError> {
-        let Some(tick) = self.current.floor_tick(resolution)?.checked_add(delay) else {
-            return Err(SchedulerError::TickNotExactlyRepresentable { ticks: u64::MAX });
-        };
-        self.schedule_at(Instant::from_tick(tick, resolution)?, region, target, value)
     }
 }
 

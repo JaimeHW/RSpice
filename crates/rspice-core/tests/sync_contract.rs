@@ -95,13 +95,24 @@ fn grid() -> TimeResolution {
 }
 
 /// The instant a tick of [`grid`] names.
+///
+/// Composed from the two published conversions rather than reaching for a
+/// tick-shaped constructor: the kernel's key is a time, and the grid belongs
+/// to the caller. `tick_seconds_round_trip_is_lossless_across_the_exact_range`
+/// is what holds the composition exact.
 fn at(tick: u64) -> Instant {
-    Instant::from_tick(tick, grid()).expect("a schedulable tick")
+    let seconds = grid()
+        .ticks_to_seconds(tick)
+        .expect("a tick inside the exactly-representable range");
+    Instant::from_seconds(seconds).expect("a schedulable time")
 }
 
-/// The tick an instant this suite scheduled is on. Exact, by construction.
+/// The tick an instant this suite scheduled is on. Exact, by construction:
+/// every instant here came from [`at`], so it sits on the grid.
 fn tick_of(at: Instant) -> u64 {
-    at.floor_tick(grid()).expect("a tick this suite scheduled")
+    grid()
+        .seconds_to_ticks(at.seconds())
+        .expect("a tick this suite scheduled")
 }
 
 fn target(instance: &str, port: &str, node_id: usize, driver_index: usize) -> EventTarget {

@@ -59,13 +59,34 @@ fn grid() -> TimeResolution {
 }
 
 /// The instant a tick of [`grid`] names.
+///
+/// Composed from the two published conversions rather than reaching for a
+/// tick-shaped constructor: the kernel's key is a time, and the grid belongs
+/// to the caller. [`tick_seconds_round_trip_is_lossless_across_the_exact_range`]
+/// is what holds the composition exact.
 fn at(tick: u64) -> Instant {
-    Instant::from_tick(tick, grid()).expect("a schedulable tick")
+    let seconds = grid()
+        .ticks_to_seconds(tick)
+        .expect("a tick inside the exactly-representable range");
+    Instant::from_seconds(seconds).expect("a schedulable time")
 }
 
-/// The tick an instant this suite scheduled is on. Exact, by construction.
+/// The tick an instant this suite scheduled is on. Exact, by construction:
+/// every instant here came from [`at`], so it sits on the grid.
 fn tick_of(at: Instant) -> u64 {
-    at.floor_tick(grid()).expect("a tick this suite scheduled")
+    grid()
+        .seconds_to_ticks(at.seconds())
+        .expect("a tick this suite scheduled")
+}
+
+/// `delay` ticks after the running instant.
+///
+/// The kernel offers no relative schedule, because a delay is a number of
+/// ticks on a grid it does not declare; this is the arithmetic a caller that
+/// owns a grid does for itself, and a zero delay is the running instant, which
+/// is a delta event.
+fn after(now: Instant, delay: u64) -> Instant {
+    at(tick_of(now) + delay)
 }
 
 fn region_tag(region: SchedulerRegion) -> &'static str {
@@ -279,17 +300,15 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
     scheduler
         .run_time_slot(|event, ctx| match event.target.port_name.as_str() {
             "seed" => {
-                ctx.schedule_after(
-                    0,
-                    grid(),
+                ctx.schedule_at(
+                    ctx.current_instant(),
                     SchedulerRegion::NonBlockingAssign,
                     target("dut", "nba_update", 1, 0),
                     digital(1),
                 )
                 .expect("queue the nonblocking update");
-                ctx.schedule_after(
-                    0,
-                    grid(),
+                ctx.schedule_at(
+                    ctx.current_instant(),
                     SchedulerRegion::Active,
                     target("dut", "same_delta_reader", 1, 0),
                     digital(0),
@@ -301,9 +320,8 @@ fn nonblocking_updates_become_visible_only_in_the_next_delta() {
             }
             "nba_update" => {
                 state.insert(1, 1);
-                ctx.schedule_after(
-                    0,
-                    grid(),
+                ctx.schedule_at(
+                    ctx.current_instant(),
                     SchedulerRegion::Active,
                     target("dut", "next_delta_reader", 1, 0),
                     digital(0),
@@ -355,9 +373,8 @@ fn monitor_region_observes_a_settled_slot() {
                 // Chain one more write through the inactive region; the monitor
                 // must still run after all of it.
                 if writes == 1 {
-                    ctx.schedule_after(
-                        0,
-                        grid(),
+                    ctx.schedule_at(
+                        ctx.current_instant(),
                         SchedulerRegion::Inactive,
                         target("dut", "write", 2, 0),
                         digital(1),
@@ -400,9 +417,8 @@ fn a_bounded_delta_chain_settles_and_reports_its_cycles() {
         .run_time_slot(|_, ctx| {
             if remaining > 0 {
                 remaining -= 1;
-                ctx.schedule_after(
-                    0,
-                    grid(),
+                ctx.schedule_at(
+                    ctx.current_instant(),
                     SchedulerRegion::Inactive,
                     target("dut", "step", 0, 0),
                     digital(0),
@@ -456,9 +472,8 @@ fn a_zero_delay_active_loop_is_diagnosed_with_its_drivers() {
                 "loop_b" => "loop_a",
                 _ => return,
             };
-            ctx.schedule_after(
-                0,
-                grid(),
+            ctx.schedule_at(
+                ctx.current_instant(),
                 SchedulerRegion::Active,
                 target(next, "q", 2, 0),
                 digital(1),
@@ -518,9 +533,8 @@ fn region_ping_pong_trips_the_delta_cycle_limit() {
     // each iteration and the tick advances one delta cycle at a time forever.
     let error = scheduler
         .run_time_slot(|_, ctx| {
-            ctx.schedule_after(
-                0,
-                grid(),
+            ctx.schedule_at(
+                ctx.current_instant(),
                 SchedulerRegion::Inactive,
                 target("ping", "q", 1, 0),
                 digital(0),
@@ -730,7 +744,7 @@ fn the_last_representable_instant_is_scheduled_into_the_future_tier() {
     );
     // That instant is on no declared grid, which is a conversion concern and
     // not a scheduling one: it still orders correctly.
-    assert!(far.floor_tick(grid()).is_err());
+    assert!(grid().seconds_to_ticks(far.seconds()).is_err());
 }
 
 //=============================================================================
@@ -1139,9 +1153,8 @@ fn ordering_fingerprint() -> Vec<String> {
             if roll < 3 && order.len() < 3_000 {
                 let delay = if roll == 0 { 0 } else { roll };
                 let region = SchedulerRegion::ORDERED[(roll as usize) % 4];
-                ctx.schedule_after(
-                    delay,
-                    grid(),
+                ctx.schedule_at(
+                    after(ctx.current_instant(), delay),
                     region,
                     target(&event.target.instance, "spawned", event.target.node_id, 1),
                     digital(1),
@@ -1416,7 +1429,8 @@ enum Spawn {
         driver: u64,
         value: u64,
     },
-    /// `SchedulerContext::schedule_after`, whose zero delay is a delta event.
+    /// `SchedulerContext::schedule_at` a whole number of ticks after the
+    /// running instant, whose zero delay is a delta event.
     After {
         delay: u64,
         region: u64,
@@ -1859,9 +1873,8 @@ fn kernel_spawn(
                 return None;
             }
             budget.set(budget.get() - 1);
-            Some(context.schedule_after(
-                delay,
-                grid(),
+            Some(context.schedule_at(
+                after(context.current_instant(), delay),
                 model_region(region),
                 model_target(driver),
                 model_value(value),
