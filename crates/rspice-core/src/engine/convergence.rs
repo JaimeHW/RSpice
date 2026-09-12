@@ -164,6 +164,66 @@ mod failure_attribution_tests {
             .collect()
     }
 
+    /// A device that is not finite at the linear seed assembly's all-zero
+    /// probe admits another startup seed; a model's own evaluation refusal
+    /// from a real solve still does not.
+    ///
+    /// The reachable shape is an `.IC`-constrained transient operating point
+    /// over a code model that divides by a control input: at the all-zero
+    /// probe the model publishes a non-finite output and the trial assembly
+    /// refuses. Before that refusal existed the same value went into the
+    /// solve and came back as `SolverError::SingularMatrix`, which
+    /// `is_recoverable_startup_error` has always answered `true` for — so
+    /// carrying a `NonFiniteTrial` out of the assembly would end a run the
+    /// base recovered.
+    ///
+    /// It is pinned here rather than through a deck because no shipped analog
+    /// code model is non-finite at V = 0 (`divide` clamps its denominator at
+    /// 1e-10) and a deck cannot register one. And it is pinned at the
+    /// assembly rather than by widening the predicate because the predicate
+    /// also guards the nodeset and DC startup ladders, where a model's
+    /// evaluation refusal must survive —
+    /// `nodeset_model_evaluation_errors_are_not_discarded_as_startup_nonconvergence`
+    /// is the deck that says so.
+    #[test]
+    fn a_non_finite_linear_seed_probe_admits_another_seed() {
+        let refusal = crate::device::StampError::nonfinite_trial(
+            "a1".to_string(),
+            "XSPICE instance 'a1' output port 'out' evaluated to NaN".to_string(),
+        );
+        let reported = Engine::linear_seed_probe_error(refusal);
+        assert!(
+            matches!(
+                reported,
+                SimulationError::Solver(crate::solver::SolverError::SingularMatrix)
+            ),
+            "the all-zero probe reports the unsolvable system, got {reported}"
+        );
+        assert!(
+            Engine::is_recoverable_startup_error(&reported),
+            "and that is what admits another startup seed: {reported}"
+        );
+
+        // Everything else the assembly can raise passes through unchanged,
+        // including a structural refusal that must end the run.
+        let structural = Engine::linear_seed_probe_error(crate::device::StampError::Structural(
+            "code model 'a1' has no output port 'out'".to_string(),
+        ));
+        assert!(
+            !Engine::is_recoverable_startup_error(&structural),
+            "a structural refusal is not a seed to retry: {structural}"
+        );
+        assert!(
+            !Engine::is_recoverable_startup_error(&SimulationError::NonFiniteTrial(Box::new(
+                crate::device::NonFiniteTrialError {
+                    instance: "x1".to_string(),
+                    detail: "a model evaluation refusal from a real iterate".to_string(),
+                }
+            ))),
+            "a model's own evaluation refusal must still survive the startup ladders"
+        );
+    }
+
     #[test]
     fn a_floating_current_drive_names_the_node_with_no_dc_path() {
         let netlist = parse(

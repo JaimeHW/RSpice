@@ -312,6 +312,31 @@ impl Engine {
         }
     }
 
+    /// How this assembly reports a device that is not finite at the all-zero
+    /// probe it evaluates every device at.
+    ///
+    /// A rejectable trial says "offer me another point", and every other
+    /// producer of that classification is answering about a point the solver
+    /// proposed. Here the point is a fixed zero vector that the seed path will
+    /// never vary, so there is nothing to reject — and the callers treat the
+    /// two answers very differently: the `.IC`-constrained transient
+    /// operating-point solve (`transient::startup`) deliberately lets a
+    /// model's own evaluation refusal end the run, so a `NonFiniteTrial` from
+    /// this probe would end a run that the base recovered by handing the
+    /// non-finite value to the factorization and reading back a singular
+    /// matrix. Reporting the unsolvable system directly is that same
+    /// behaviour, without the wasted solve.
+    pub(in crate::engine::convergence) fn linear_seed_probe_error(
+        error: impl Into<SimulationError>,
+    ) -> SimulationError {
+        match error.into() {
+            SimulationError::NonFiniteTrial(_) => {
+                SimulationError::Solver(crate::solver::SolverError::SingularMatrix)
+            }
+            other => other,
+        }
+    }
+
     /// Assemble the complete linear transient-startup system identified by an
     /// accepted operating-point contract. The solver and post-solve physical
     /// audit share this routine so behavioral and XSPICE contributions cannot
@@ -347,7 +372,7 @@ impl Engine {
             let zero_solution = vec![0.0; rhs.len()];
             circuit
                 .stamp_xspice_transient_trial(matrix, rhs, time, 0.0, &zero_solution)
-                .map_err(SimulationError::from)?;
+                .map_err(Self::linear_seed_probe_error)?;
         }
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {

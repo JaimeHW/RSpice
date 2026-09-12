@@ -341,6 +341,15 @@ impl Engine {
             SimulationError::ConvergenceFailed(_) => true,
             SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(_)) => false,
             SimulationError::Solver(_) => true,
+            // `NonFiniteTrial` is deliberately NOT recoverable here. It is how
+            // a model reports its own evaluation refusal, and the startup
+            // ladders this predicate guards must let that survive — including
+            // during a nodeset interval, which is what
+            // `nodeset_model_evaluation_errors_are_not_discarded_as_startup_nonconvergence`
+            // pins. The one place the classification was wrong is the linear
+            // seed assembly, where the "iterate" is a fixed all-zero probe
+            // rather than a point the solver proposed; that site reports the
+            // unsolvable system it produces instead (`Self::linear_seed_probe_error`).
             _ => false,
         }
     }
