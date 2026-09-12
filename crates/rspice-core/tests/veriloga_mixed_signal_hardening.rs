@@ -48,6 +48,8 @@
 //! seconds become an accepted analog timepoint bit-exactly.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::analysis::PssConfig;
+use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
     TransientCheckpointBlockerSource, TransientResult, TransientStartupMode,
 };
@@ -531,6 +533,107 @@ fn every_analysis_that_copies_the_circuit_refuses_a_mixed_module_first() {
             .run_distortion(&netlist, &frequencies, None)
             .err()
             .map(|error| error.to_string()),
+    );
+}
+
+/// **Attack 2, periodic half.** The periodic small-signal analyses refuse a
+/// mixed module too, and refuse it for the same reason and in the same words.
+///
+/// These are the routes the refusal was missing from. `ensure_no_mixed_signal_analysis`
+/// was called by AC, DC, distortion, HB, noise, PSS, PSS-noise, sensitivity and
+/// STB, but by nothing under `engine/hb/`. So a deck whose periodic operating
+/// point was solved by PAC or driven pnoise itself — no retained `.PSS` or
+/// `.HB` carrier in front of it — reached the harmonic solver with the mixed
+/// host's equations simply not stamped, and answered. The answer was a real
+/// spectrum for a circuit that is not the authored one: the module's analog
+/// half contributes nothing and its digital half drives nothing, so a d2a
+/// boundary node floats at whatever the rest of the deck puts there.
+///
+/// The two retained-carrier routes (`.PXF`, and `.PSP` in either of its
+/// `prepare_psp_from_*` forms) take a `PssOperatingPoint` or an
+/// `HbOperatingPoint` as an argument, and neither can be obtained for a mixed
+/// deck — `run_pss*` and `run_hb*` refuse it first. They are guarded all the
+/// same, in `prepare_periodic_ac`, because that is where the circuit first
+/// exists; there is no way to call them here to prove it.
+#[test]
+fn every_periodic_small_signal_analysis_refuses_a_mixed_module_first() {
+    let model = ModelFile::new("periodic_refusals", CLOCK_DIVIDER);
+    let deck = format!(
+        "* a mixed module asked for a periodic small-signal answer\n\
+         x1 p 0 qdiv clock_divider\n\
+         rp p 0 1meg\n\
+         vdrive p 0 SIN(0 0.1 1meg) AC 1\n\
+         rload qdiv 0 1k\n\
+         cload qdiv 0 1p\n\
+         .va \"{}\" clock_divider\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    // `route` is what the caller asked for; `analysis` is the name the refusal
+    // must carry, which for the oscillator route is the PSS solve it runs.
+    let refusal = |route: &str, analysis: &str, outcome: Result<String, SimulationError>| {
+        let error = match outcome {
+            Ok(answer) => panic!(
+                "{route} must refuse a mixed module rather than assemble the periodic \
+                 system without it; it answered with {answer}"
+            ),
+            Err(error) => error.to_string(),
+        };
+        let lowered = error.to_lowercase();
+        assert!(
+            lowered.contains(&analysis.to_lowercase()),
+            "the {route} refusal must name the analysis: {error}"
+        );
+        assert!(
+            lowered.contains("x1"),
+            "the {route} refusal must name the instance: {error}"
+        );
+        assert!(
+            lowered.contains("only `.tran` runs a mixed module"),
+            "the {route} refusal must say what does run one: {error}"
+        );
+    };
+
+    refusal(
+        "PAC",
+        "PAC analysis",
+        engine
+            .run_pac(
+                &netlist,
+                PacConfig::new()
+                    .with_sweep(1.0e3, 1.0e4, 2)
+                    .with_sidebands(-1, 1)
+                    .with_input_source("vdrive")
+                    .with_output_node("qdiv")
+                    .with_fundamental(1.0e6),
+            )
+            .map(|result| {
+                format!(
+                    "a PAC result at {} Hz (converged={})",
+                    result.fundamental_freq, result.converged
+                )
+            }),
+    );
+    refusal(
+        "driven pnoise",
+        "pnoise analysis",
+        engine
+            .run_pnoise(&netlist, 1.0e6, &[1.0e3], "p", None, None, 1)
+            .map(|_| "a driven pnoise spectrum".to_string()),
+    );
+    refusal(
+        "oscillator pnoise",
+        "PSS analysis",
+        engine
+            .run_pnoise_oscillator(
+                &netlist,
+                PssConfig::autonomous().with_period_guess(1.0e-6),
+                &[1.0e3],
+            )
+            .map(|_| "an oscillator phase-noise spectrum".to_string()),
     );
 }
 
