@@ -174,14 +174,16 @@ impl RSpiceApp {
                     },
             )
             .flush_body()
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
             .ghost_enabled(!pending)
             .primary_enabled(primary_enabled)
             .initial_focus(DialogInitialFocus::BodyControl);
+        if save_receipt.is_none() {
+            dialog = dialog.ghost(if discard_confirm {
+                "Discard changes"
+            } else {
+                "Cancel"
+            });
+        }
         if discard_confirm {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
