@@ -87,6 +87,13 @@ fn ddx_laplace_system_quantities_preserve_values_jacobians_and_readback() {
 
     let thermal_scale = 8.617333262145177e-5;
     let ambient_vt = 330.0 * thermal_scale;
+    // A `None` factor means the query reports the current time. `$abstime` is
+    // seconds-valued; `$realtime` reports the same instant in the owning
+    // module's time unit (VAMS-2023 9.10), which is the default 1 ns timing
+    // here because these sources declare no `timescale.
+    let default_time_unit = rspice_veriloga::time_scale::ModuleTimeScale::default()
+        .unit_seconds()
+        .expect("the default module timing is valid");
     for (input, factor) in [
         ("$abstime*V(p)*V(p)*V(p)", None),
         ("$realtime*V(p)*V(p)*V(p)", None),
@@ -130,7 +137,12 @@ fn ddx_laplace_system_quantities_preserve_values_jacobians_and_readback() {
                     older_value_scale: 0.0,
                     previous_derivative_scale: 0.0,
                 });
-                let scale = factor.unwrap_or(time) * (1.0 + 0.5 * a) / (1.0 + 0.25 * a);
+                let reported_time = if input.starts_with("$realtime") {
+                    time / default_time_unit
+                } else {
+                    time
+                };
+                let scale = factor.unwrap_or(reported_time) * (1.0 + 0.5 * a) / (1.0 + 0.25 * a);
                 let (expected, slope) = if order == 1 {
                     (3.0 * scale * voltage.powi(2), 6.0 * scale * voltage)
                 } else {
