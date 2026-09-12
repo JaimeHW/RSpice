@@ -54,7 +54,6 @@ impl rspice_core::abort_signal::AbortSignal for EditDuringCompilation {
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn connection_library_and_selected_modules_use_one_snapshot_then_refresh_changed_dependencies() {
     let tree = SourceTree::new();
     let header = tree.write("gain.vh", "`define GAIN 1e-3\n");
@@ -105,7 +104,6 @@ fn connection_library_and_selected_modules_use_one_snapshot_then_refresh_changed
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn virtual_models_share_active_included_connection_rules_after_transport_and_cache_hits() {
     let mut root = String::from("`define LOW_SUPPLY\n`include \"rules.vams\"\n");
     for name in ["first", "second"] {
@@ -225,7 +223,6 @@ fn connection_alternatives() -> String {
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn named_configuration_changes_file_cached_and_transported_virtual_boundaries() {
     let tree = SourceTree::new();
     let module = "`include \"rules.vams\"\nmodule driver(p,q); inout p; electrical p; output q; reg q; parameter real gain=1e-3; initial q=1; analog I(p)<+gain*V(p); endmodule\n";
@@ -306,7 +303,6 @@ fn named_configuration_changes_file_cached_and_transported_virtual_boundaries() 
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn named_configuration_selects_across_roots_independently_of_include_order() {
     let tree = SourceTree::new();
     let device = tree.write("driver.va", "module driver(p,q); inout p; electrical p; output q; reg q; initial q=1; analog I(p)<+0; endmodule\n");
@@ -350,7 +346,6 @@ fn named_configuration_selects_across_roots_independently_of_include_order() {
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remapping() {
     let tree = SourceTree::new();
     let compiler = VerilogACompiler::new(CompilerOptions {
@@ -446,7 +441,6 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
 }
 
 #[test]
-#[ignore = "unified-engine repair: the connect-rule-selected boundary drives 0 V, so every configuration this file distinguishes reads the same dead node"]
 fn standalone_virtual_connections_register_atomically_with_devices() {
     use rspice_core::{
         ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogASourceRegistration as Source,
