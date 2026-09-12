@@ -1623,15 +1623,6 @@ impl CircuitData {
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 
-    /// Time of the next pending XSPICE digital event, if any.
-    ///
-    /// The code-model lane's activation read as a plain time, for the locked
-    /// grid's replay arithmetic; everything that folds the lanes asks
-    /// [`Self::next_activation`] instead.
-    pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
-        self.scheduler.xspice_event_queue.next_event_time()
-    }
-
     /// Drain absolute transient breakpoint requests emitted by XSPICE models.
     #[cfg(test)]
     pub(crate) fn take_xspice_requested_breakpoints(&mut self) -> Vec<Value> {

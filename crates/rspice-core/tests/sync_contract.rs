@@ -36,7 +36,7 @@
 //! | Clause | Seam |
 //! |---|---|
 //! | 1 | `circuit::nonlinear`'s `NonlinearDeviceStateSnapshot`, which carries the scheduler, and the snapshot/restore bracket inside `stamp_xspice_transient_trial_with_coefficients` |
-//! | 2 | `next_xspice_event_time` → `BreakpointManager::replace_runtime_breakpoints` → `snap_to_breakpoint`, with the tick encoding in `xspice::event` keeping the `f64` exact |
+//! | 2 | `CircuitScheduler::next_xspice_activation` → `BreakpointManager::replace_runtime_breakpoints` → `snap_to_breakpoint`, with the tick encoding in `xspice::event` keeping the `f64` exact |
 //! | 3 | `EventScheduler::run_due_events`'s due-slot loop, plus `schedule_superseding_at` routing to the future tier |
 //! | 4 | `EventScheduler::open_due_slot` |
 //! | 5 | `xspice::models::digital_output`'s `input_transition_time` |
@@ -441,7 +441,7 @@ fn d5_c2_the_step_controller_snaps_back_to_the_exact_event_time() {
 /// awkward absolute time gets an accepted analog timepoint exactly there.
 ///
 /// This is the whole chain in one deck: the stimulus time parses to an `f64`,
-/// the scheduler carries it as a bit pattern, `next_xspice_event_time` hands it
+/// the scheduler carries it as a bit pattern, `next_xspice_activation` hands it
 /// to the breakpoint manager unrounded, and the accepted step lands on it.
 #[test]
 fn d5_c2_an_awkward_event_time_becomes_an_exact_accepted_timepoint() {

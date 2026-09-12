@@ -682,7 +682,7 @@ fn golden_decks_match_closed_form_expectations() {
 /// The structural half of I1: pure-analog decks must never touch the event
 /// machinery. A deck that starts constructing XSPICE instances, or a
 /// transient that starts emitting digital/real traces, gets the accepted-step
-/// sequence scheduled by `next_xspice_event_time()` instead of by LTE alone.
+/// sequence scheduled by `next_xspice_activation()` instead of by LTE alone.
 #[test]
 fn golden_decks_stay_free_of_event_driven_content() {
     let engine = Engine::new(SimulationConfig::default());

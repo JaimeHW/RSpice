@@ -6466,7 +6466,8 @@ impl Engine {
                     };
                     let tolerance = ((target - t).abs() * 1.0e-12).max(1.0e-18);
                     let mut step_target = circuit
-                        .next_xspice_event_time()
+                        .next_xspice_activation()
+                        .map(crate::circuit::Activation::seconds)
                         .filter(|event_time| {
                             *event_time > t + tolerance && *event_time < target - tolerance
                         })
@@ -6580,10 +6581,13 @@ impl Engine {
                 && let (Some(&target), Some(&scheduled_dt)) =
                     (grid.get(locked_cursor), steps.get(locked_cursor))
                 && !breakpoints.at_breakpoint(target)
-                && !circuit.next_xspice_event_time().is_some_and(|event_time| {
-                    let tolerance = (target.abs() * 1.0e-12).max(1.0e-18);
-                    (event_time - target).abs() <= tolerance
-                })
+                && !circuit
+                    .next_xspice_activation()
+                    .map(crate::circuit::Activation::seconds)
+                    .is_some_and(|event_time| {
+                        let tolerance = (target.abs() * 1.0e-12).max(1.0e-18);
+                        (event_time - target).abs() <= tolerance
+                    })
                 && scheduled_dt.is_finite()
                 && scheduled_dt > 0.0
                 && timestep.dt() > scheduled_dt * (1.0 + 1.0e-12)
