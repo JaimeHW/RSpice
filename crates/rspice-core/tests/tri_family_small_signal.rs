@@ -209,63 +209,115 @@ fn a_step_bound_does_not_change_the_small_signal_answer() {
 // XSPICE event nets under .ac
 //=============================================================================
 
+/// One deck whose event-driven half carries no small signal, together with
+/// the same analog half with every bridge deleted.
+struct EventNetAcDeck {
+    label: &'static str,
+    deck: String,
+    /// A D/A output node and the DC level it holds through the sweep.
+    dac_output: Option<(&'static str, f64)>,
+    /// An analog node a bridge observes, and the bridge-free deck whose
+    /// small-signal answer at that node the bridge must not move. An
+    /// `adc_bridge` input is a pure voltage sense with no input load, so the
+    /// two answers are equal, not merely close.
+    unloaded: (&'static str, String),
+}
+
 /// Three decks whose event-driven half carries no small signal at all: an
 /// A/D bridge on its own, a D/A bridge holding a constant digital level, and
 /// the two with an inverter between them.
-fn event_net_ac_decks() -> Vec<(&'static str, String, Option<(&'static str, f64)>)> {
+fn event_net_ac_decks() -> Vec<EventNetAcDeck> {
+    const RESISTIVE_HALF: &str = "* the analog half on its own\n\
+                                  vin in 0 dc 3.3 ac 1\n\
+                                  rs in x 1k\n\
+                                  rl x 0 9k\n\
+                                  .end\n";
     vec![
-        (
-            "adc alone",
-            "* an A/D bridge with no consumer\n\
-             vin in 0 dc 3.3 ac 1\n\
-             rs in x 1k\n\
-             rl x 0 9k\n\
-             a_adc [x] [dx] adc\n\
-             .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
-             .end\n"
+        EventNetAcDeck {
+            label: "adc alone",
+            deck: "* an A/D bridge with no consumer\n\
+                   vin in 0 dc 3.3 ac 1\n\
+                   rs in x 1k\n\
+                   rl x 0 9k\n\
+                   a_adc [x] [dx] adc\n\
+                   .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
+                   .end\n"
                 .to_string(),
-            None,
-        ),
-        (
-            "constant dac",
-            "* a D/A bridge holding a constant digital level\n\
-             vdig d0 0 dc 3.3\n\
-             a_adc [d0] [dq] adc\n\
-             .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
-             a_dac [dq] [y] dac\n\
-             .model dac dac_bridge(out_low=0 out_high=3.3)\n\
-             ry y 0 10k\n\
-             vin in 0 dc 0 ac 1\n\
-             rs in probe 1k\n\
-             rl probe 0 1k\n\
-             .end\n"
+            dac_output: None,
+            unloaded: ("x", RESISTIVE_HALF.to_string()),
+        },
+        EventNetAcDeck {
+            label: "constant dac",
+            deck: "* a D/A bridge holding a constant digital level\n\
+                   vdig d0 0 dc 3.3\n\
+                   a_adc [d0] [dq] adc\n\
+                   .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
+                   a_dac [dq] [y] dac\n\
+                   .model dac dac_bridge(out_low=0 out_high=3.3)\n\
+                   ry y 0 10k\n\
+                   vin in 0 dc 0 ac 1\n\
+                   rs in probe 1k\n\
+                   rl probe 0 1k\n\
+                   .end\n"
                 .to_string(),
-            Some(("y", 3.3 * 10000.0 / 10020.0)),
-        ),
-        (
-            "adc through an inverter into a dac",
-            "* an event path from an analog node back to one\n\
-             vin in 0 dc 3.3 ac 1\n\
-             rs in x 1k\n\
-             rl x 0 9k\n\
-             a_adc [x] [d1] adc\n\
-             .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
-             a_inv d1 d2 inv\n\
-             .model inv d_inverter\n\
-             a_dac [d2] [y] dac\n\
-             .model dac dac_bridge(out_low=0 out_high=3.3)\n\
-             ry y 0 10k\n\
-             .end\n"
+            // The XSPICE `dac_bridge` drives an ideal voltage output through
+            // its own branch unknown, so `ry` draws no divider drop and `y`
+            // sits exactly on `out_high`.
+            dac_output: Some(("y", 3.3)),
+            unloaded: (
+                "probe",
+                "* the untouched analog island on its own\n\
+                 vin in 0 dc 0 ac 1\n\
+                 rs in probe 1k\n\
+                 rl probe 0 1k\n\
+                 .end\n"
+                    .to_string(),
+            ),
+        },
+        EventNetAcDeck {
+            label: "adc through an inverter into a dac",
+            deck: "* an event path from an analog node back to one\n\
+                   vin in 0 dc 3.3 ac 1\n\
+                   rs in x 1k\n\
+                   rl x 0 9k\n\
+                   a_adc [x] [d1] adc\n\
+                   .model adc adc_bridge(in_low=1.6 in_high=1.7)\n\
+                   a_inv d1 d2 inv\n\
+                   .model inv d_inverter\n\
+                   a_dac [d2] [y] dac\n\
+                   .model dac dac_bridge(out_low=0 out_high=3.3)\n\
+                   ry y 0 10k\n\
+                   .end\n"
                 .to_string(),
-            Some(("y", 0.0)),
-        ),
+            dac_output: Some(("y", 0.0)),
+            unloaded: ("x", RESISTIVE_HALF.to_string()),
+        },
     ]
 }
 
+/// `V(node)` at 1 MHz.
+fn ac_response(label: &str, deck: &str, node: &str) -> num_complex::Complex64 {
+    let netlist = Netlist::parse(deck).expect("event net deck parses");
+    let ac = Engine::default()
+        .run_ac(&netlist, &[1e6])
+        .unwrap_or_else(|error| panic!("{label}: {error}"));
+    let index = ac[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("{label}: no node {node} in {:?}", ac[0].node_names));
+    ac[0].voltages[index]
+}
+
 #[test]
-#[ignore = "R1.2: small-signal assembly does not pin XSPICE event rows"]
 fn event_driven_nodes_hold_their_dc_level_through_an_ac_sweep() {
-    for (label, deck, dac_output) in event_net_ac_decks() {
+    for EventNetAcDeck {
+        label,
+        deck,
+        dac_output,
+        unloaded,
+    } in event_net_ac_decks()
+    {
         let netlist = Netlist::parse(&deck).expect("event net deck parses");
         let ac = Engine::default()
             .run_ac(&netlist, &[1e6])
@@ -278,6 +330,17 @@ fn event_driven_nodes_hold_their_dc_level_through_an_ac_sweep() {
             "{label}: the small-signal solution has a non-finite entry: {:?}",
             ac[0].voltages
         );
+
+        // The bridges observe the analog half without loading it.
+        let (sensed, bridge_free) = unloaded;
+        let observed = ac_response(label, &deck, sensed);
+        let reference = ac_response(label, &bridge_free, sensed);
+        assert!(
+            (observed - reference).norm() < 1e-12,
+            "{label}: a bridge must not load {sensed}; {observed:?} against {reference:?} \
+             without the bridges"
+        );
+
         let Some((node, dc_level)) = dac_output else {
             continue;
         };
