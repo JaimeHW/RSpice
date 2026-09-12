@@ -5844,17 +5844,18 @@ impl Engine {
             } else {
                 dt.min(remaining)
             };
+            // The step this iteration intended before any event cut it. Three
+            // things below can cut it to an event — the direct landing here,
+            // the model-interval fit, and the source-activity bias that undoes
+            // one — so the intent is taken once, and kept only if the step
+            // turns out to be a landing.
+            let proposal_before_event_cut = timestep.dt().max(dt);
             let mut exact_veriloga_event_time = None;
             if let Some(target) = pending_veriloga_event_time
                 && target > t
                 && target <= tstop
                 && target - t <= dt
             {
-                // Landing on an event is the other way this step gets cut, and
-                // a run of landings hands the restart the width of the last
-                // one exactly as a refinement chase does. Record the proposal
-                // the first landing of the run interrupted, before it is cut.
-                veriloga_refinement_approach_step.get_or_insert(timestep.dt().max(dt));
                 dt = target - t;
                 exact_veriloga_event_time = Some(target);
                 at_breakpoint = true;
@@ -5992,6 +5993,18 @@ impl Engine {
                 exact_veriloga_event_time,
             );
             let landed_veriloga_event = exact_veriloga_event_time.is_some();
+            if landed_veriloga_event {
+                // Landing on an event is the other way this step gets cut, and
+                // a run of landings hands the restart the width of the last
+                // one exactly as a refinement chase does. An event closer than
+                // the solver's hard minimum lands one hard minimum away, so
+                // without this the restart after it is a tenth of the floor —
+                // clamped back up to the floor, and doubled out of it one
+                // accepted point at a time. `get_or_insert` keeps the first
+                // proposal of a run of landings, which is the one an event
+                // actually interrupted.
+                veriloga_refinement_approach_step.get_or_insert(proposal_before_event_cut);
+            }
             let analysis_initial_step = false;
             let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
@@ -8935,8 +8948,15 @@ impl Engine {
                             tstop,
                         )?;
                     }
-                    let model_restart_dt = (veriloga_discontinuity && !hit_breakpoint)
-                        .then(|| breakpoints.mark_external_breakpoint_solved(t, dt));
+                    let model_restart_dt = (veriloga_discontinuity && !hit_breakpoint).then(|| {
+                        // Same rule as the breakpoint restarts below: a
+                        // discontinuity announced on a step an event had
+                        // already cut restarts from the step it interrupted,
+                        // not from the width of that cut.
+                        let interrupted =
+                            veriloga_refinement_approach_step.map_or(dt, |step| step.max(dt));
+                        breakpoints.mark_external_breakpoint_solved(t, interrupted)
+                    });
                     hit_breakpoint |= veriloga_discontinuity;
                     pending_veriloga_event_time =
                         accepted_veriloga_event_time(&circuit, t, timestep.hard_min_dt())?;
