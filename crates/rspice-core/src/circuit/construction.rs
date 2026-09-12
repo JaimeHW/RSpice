@@ -94,6 +94,7 @@ impl CircuitData {
             xspice_event_dispatch: None,
             xspice_dispatch_pending: Vec::new(),
             xspice_dispatch_next_pending: Vec::new(),
+            xspice_output_iterates: XspiceOutputIterates::default(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
             xspice_evaluation_warning: None,

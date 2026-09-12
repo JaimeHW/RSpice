@@ -187,6 +187,77 @@ pub(crate) struct XspiceTrialState {
     queue: SharedXspiceEventQueue,
 }
 
+/// The code-model outputs of the two most recent Newton iterates at one
+/// candidate point.
+///
+/// These are the operands of [`CircuitData::xspice_converged`], and they
+/// cannot live in the instances. Every transient Newton probe is evaluated and
+/// then rolled back to the pre-trial image ([`XspiceTrialState`]), so by the
+/// time anything asks, an instance's own `value`/`prev_value` pair is the
+/// accepted point compared against itself — a term that reads `true` at every
+/// iteration of every timepoint and can never certify that anything stopped
+/// moving. Holding the pair here, on the circuit and outside every rollback
+/// image, is what makes the question answerable.
+///
+/// `candidate_time` is the point the two iterates were evaluated at. A
+/// different candidate is a different question, so the pair is dropped rather
+/// than compared across timepoints; so does acceptance, and so does any
+/// wholesale restore of the instances.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct XspiceOutputIterates {
+    candidate_time: Value,
+    /// Outputs of the most recent iterate: instance by instance in
+    /// registration order, port by port in declaration order.
+    current: Vec<Value>,
+    /// The same, for the iterate before it at `candidate_time`.
+    previous: Vec<Value>,
+    have_current: bool,
+    have_previous: bool,
+}
+
+impl XspiceOutputIterates {
+    /// Forget both iterates, because the candidate they belong to is over.
+    pub(crate) fn clear(&mut self) {
+        self.current.clear();
+        self.previous.clear();
+        self.have_current = false;
+        self.have_previous = false;
+    }
+
+    /// Whether every recorded output moved less than `criteria` allows
+    /// between the last two iterates.
+    ///
+    /// The tolerance is ngspice's code-model rule, `MIFconvTest` in
+    /// `src/xspice/mif/mifconvt.c`: `reltol * max(|new|, |old|) + abstol`.
+    /// The absolute floor is the voltage tolerance rather than ngspice's
+    /// `CKTabstol`, because ngspice tests only the state variables a model
+    /// registers through `cm_analog_converge` while this tests every driven
+    /// port, and a port near zero needs a floor in the units it is stamped in.
+    ///
+    /// The first iterate at a candidate has nothing to be measured against and
+    /// contributes no veto: nothing has moved yet, and vetoing it would spend
+    /// one extra Newton iteration at every timepoint of every deck that holds
+    /// a code model.
+    fn converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        if !self.have_previous {
+            return true;
+        }
+        let reltol = criteria.relative_tolerance();
+        let abstol = criteria.voltage_tolerance();
+        // A vector output whose width changed between iterates has not settled
+        // by any reading of it.
+        self.current.len() == self.previous.len()
+            && self
+                .current
+                .iter()
+                .zip(&self.previous)
+                .all(|(&current, &previous)| {
+                    (current - previous).abs()
+                        <= reltol * current.abs().max(previous.abs()) + abstol
+                })
+    }
+}
+
 /// Accepted Verilog-A state carried between circuits rebuilt for adjacent DC
 /// sweep points.
 ///
@@ -1036,7 +1107,44 @@ impl CircuitData {
         }
         let mut wave = self.begin_xspice_active_wave(time, timestep, analysis, phase, companion)?;
         while self.step_xspice_active_wave(&mut wave, solution, resources)? {}
+        self.record_xspice_output_iterate(time, phase);
         Ok(())
+    }
+
+    /// Record this evaluation's code-model outputs as the newest Newton
+    /// iterate at `time`.
+    ///
+    /// This is the only writer of [`XspiceOutputIterates`], and it sits here
+    /// rather than at the trial stamp so that the criterion reads the same
+    /// operands whatever the analysis: a DC iterate is not rolled back and a
+    /// transient probe is, and neither difference is the criterion's business.
+    ///
+    /// Only the phases that *are* Newton iterates are recorded. An accepted
+    /// step's evaluation is the answer, not a candidate for it, and letting it
+    /// in would leave the next timepoint's first probe measuring itself
+    /// against the previous timepoint.
+    fn record_xspice_output_iterate(&mut self, time: Value, phase: crate::xspice::EvaluationPhase) {
+        if !matches!(
+            phase,
+            crate::xspice::EvaluationPhase::DirectEvaluation
+                | crate::xspice::EvaluationPhase::RollbackableProbe
+        ) {
+            return;
+        }
+        let iterates = &mut self.xspice_output_iterates;
+        if iterates.candidate_time.to_bits() != time.to_bits() {
+            iterates.candidate_time = time;
+            iterates.previous.clear();
+            iterates.have_previous = false;
+        } else if iterates.have_current {
+            std::mem::swap(&mut iterates.previous, &mut iterates.current);
+            iterates.have_previous = true;
+        }
+        iterates.current.clear();
+        for instance in &self.xspice_instances {
+            instance.collect_output_iterate(&mut iterates.current);
+        }
+        iterates.have_current = true;
     }
 
     pub(crate) fn begin_xspice_active_wave(
@@ -1634,6 +1742,8 @@ impl CircuitData {
         self.xspice_event_values = rollback.values;
         self.xspice_event_queue = rollback.queue;
         self.xspice_evaluation_error = rollback.error;
+        // The iterates belonged to the attempt this undoes.
+        self.xspice_output_iterates.clear();
         let failures = rollback.resources.rollback();
         if failures.is_empty() {
             return Ok(());
@@ -2849,6 +2959,9 @@ impl CircuitData {
             }
             instance.make_mut().accept_timestep();
         }
+        // The candidate these were taken at is now the answer, so they are no
+        // longer two iterates of anything.
+        self.xspice_output_iterates.clear();
     }
 
     /// Project evaluated ideal XSPICE voltage outputs into the candidate
@@ -4244,11 +4357,29 @@ impl CircuitData {
         names
     }
 
-    /// Check if all XSPICE instances have converged
-    pub fn xspice_converged(&self, tolerance: Value) -> bool {
-        self.xspice_instances
-            .iter()
-            .all(|inst| inst.is_converged(tolerance))
+    /// Whether every XSPICE code model's outputs stopped moving between the
+    /// last two Newton iterates at this candidate point.
+    ///
+    /// One rule, for every analysis: compare the outputs of two *consecutive
+    /// iterates*. That is ngspice's code-model criterion (`MIFconvTest`), and
+    /// it is the only reading under which the term says anything — a code
+    /// model's outputs reach the matrix as stamps, so the solution norm
+    /// already measures whatever moves with the solution, and what this adds
+    /// is the part that does not: an output that keeps moving from one
+    /// evaluation to the next at a fixed candidate is not a converged model,
+    /// however well the nodal equations balance.
+    ///
+    /// The iterates come from [`XspiceOutputIterates`] rather than from the
+    /// instances because the transient probe that produced them is rolled
+    /// back; see that type for what reading the instances would compare
+    /// instead.
+    ///
+    /// A circuit whose code models are enrolled in a mixed Verilog-AMS
+    /// boundary evaluates them through the joint candidate, which records no
+    /// iterate here; their settling is that boundary's criterion, and this one
+    /// abstains rather than answering from an image it never saw.
+    pub fn xspice_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        self.xspice_output_iterates.converged(criteria)
     }
 
     /// XSPICE instance-level reasons that prevent transient checkpoint resume.
@@ -5136,6 +5267,22 @@ endmodule"#;
         seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>,
     }
 
+    /// Drives one analog output from a caller-supplied script, one entry per
+    /// evaluation, and repeats the last entry once the script runs out.
+    ///
+    /// The script lives in the model rather than in the instance context, and
+    /// the trial rollback restores the instance, not the model — so successive
+    /// probes really do see successive values, which is the situation the
+    /// convergence criterion has to judge.
+    struct ScriptedOutputModel {
+        script: Arc<Mutex<std::collections::VecDeque<Value>>>,
+        last: Arc<Mutex<Value>>,
+    }
+
+    /// Computes `tanh(10 * in)` with its exact partial, which is the shipped
+    /// `sidiode` forward branch with `ron = 0.1` and `ilimit = 1`.
+    struct TanhModel;
+
     impl BreakpointModel {
         fn new() -> Self {
             Self {
@@ -5309,6 +5456,249 @@ endmodule"#;
             ctx.set_output("out", 0.0);
             Ok(())
         }
+    }
+
+    impl CodeModel for ScriptedOutputModel {
+        fn name(&self) -> &str {
+            "scripted_output_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| vec![PortSpec::output("out", PortType::Current)])
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            let mut last = self.last.lock().expect("scripted output lock");
+            if let Some(next) = self
+                .script
+                .lock()
+                .expect("scripted output lock")
+                .pop_front()
+            {
+                *last = next;
+            }
+            ctx.set_output("out", *last);
+            Ok(())
+        }
+    }
+
+    impl CodeModel for TanhModel {
+        fn name(&self) -> &str {
+            "tanh_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Voltage),
+                    PortSpec::output("out", PortType::Current),
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            let input = ctx.input("in");
+            let value = (10.0 * input).tanh();
+            ctx.set_output_with_partial("out", value, 10.0 * (1.0 - value * value));
+            Ok(())
+        }
+    }
+
+    fn scripted_output_instance(
+        script: Arc<Mutex<std::collections::VecDeque<Value>>>,
+    ) -> XspiceInstance {
+        XspiceInstance::new(
+            "Ascript",
+            Arc::new(ScriptedOutputModel {
+                script,
+                last: Arc::new(Mutex::new(0.0)),
+            }),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("scripted output instance should construct")
+    }
+
+    fn tanh_instance() -> XspiceInstance {
+        XspiceInstance::new(
+            "Atanh",
+            Arc::new(TanhModel),
+            vec![PortConnection::Analog(1), PortConnection::Analog(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("tanh instance should construct")
+    }
+
+    /// One node, one code model, and the matrix a trial stamp needs.
+    fn probe_bench(instance: XspiceInstance) -> (CircuitData, StaticMatrix, Vec<Value>) {
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("n1");
+        circuit.add_xspice_instance(instance);
+        let matrix =
+            StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).expect("1x1 matrix should construct");
+        (circuit, matrix, vec![0.0])
+    }
+
+    /// One Newton probe at the fixed candidate time, exactly as the transient
+    /// assembly takes one: evaluate, stamp, roll the instance image back.
+    fn probe_at(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltage: Value,
+    ) {
+        circuit
+            .stamp_xspice_transient_trial(matrix, rhs, 1.0e-9, 1.0e-9, &[voltage])
+            .expect("finite code-model outputs stamp");
+    }
+
+    #[test]
+    fn a_transient_probe_is_measured_against_the_previous_probe_not_the_accepted_image() {
+        let script = std::collections::VecDeque::from(vec![0.5, 0.5 + 1.0e-2, 0.5 + 1.0e-2]);
+        let (mut circuit, mut matrix, mut rhs) =
+            probe_bench(scripted_output_instance(Arc::new(Mutex::new(script))));
+        let criteria = NonlinearConvergenceCriteria::default();
+
+        probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+        assert!(
+            circuit.xspice_converged(criteria),
+            "the first probe at a candidate has no previous iterate and must \
+             contribute no veto"
+        );
+
+        probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+        assert!(
+            !circuit.xspice_converged(criteria),
+            "an output that moved 1e-2 between consecutive probes has not \
+             settled; reading the rolled-back instance image instead compares \
+             the accepted point with itself and always says it has"
+        );
+
+        probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+        assert!(
+            circuit.xspice_converged(criteria),
+            "a probe that reproduced the previous probe's output has settled"
+        );
+    }
+
+    #[test]
+    fn an_output_that_oscillates_between_probes_is_never_declared_converged() {
+        let script: std::collections::VecDeque<Value> =
+            (0..8i32).map(|index| Value::from(index % 2)).collect();
+        let (mut circuit, mut matrix, mut rhs) =
+            probe_bench(scripted_output_instance(Arc::new(Mutex::new(script))));
+        let criteria = NonlinearConvergenceCriteria::default();
+
+        probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+        for probe in 2..=8 {
+            probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+            assert!(
+                !circuit.xspice_converged(criteria),
+                "probe {probe} of an output alternating 0/1 must be refused, \
+                 however many times the alternation repeats"
+            );
+        }
+    }
+
+    #[test]
+    fn recording_probe_iterates_leaves_the_accepted_instance_image_untouched() {
+        let script = std::collections::VecDeque::from(vec![0.25, 0.75, 1.25]);
+        let (mut circuit, mut matrix, mut rhs) =
+            probe_bench(scripted_output_instance(Arc::new(Mutex::new(script))));
+        let at_rest = instance_addresses(&circuit);
+        let mut accepted = Vec::new();
+        circuit.xspice_instances[0].collect_output_iterate(&mut accepted);
+        assert_eq!(accepted, vec![0.0], "nothing has been evaluated yet");
+
+        for _ in 0..3 {
+            probe_at(&mut circuit, &mut matrix, &mut rhs, 0.0);
+        }
+
+        assert_eq!(
+            instance_addresses(&circuit),
+            at_rest,
+            "the iterate record must not keep a probe's instance alive: every \
+             instance comes back as the allocation the trial captured"
+        );
+        let mut after = Vec::new();
+        circuit.xspice_instances[0].collect_output_iterate(&mut after);
+        assert_eq!(
+            after,
+            vec![0.0],
+            "three probes moved the output to 1.25 and the accepted image must \
+             still read the accepted value"
+        );
+        assert!(
+            !circuit.xspice_converged(NonlinearConvergenceCriteria::default()),
+            "the criterion must have seen the movement the accepted image does \
+             not carry"
+        );
+    }
+
+    #[test]
+    fn a_tanh_code_model_certifies_at_its_ratcheted_probe_count() {
+        // The deck this stands in for is the shipped `sidiode` configured as
+        // tanh(10*v) — ron=0.1 (gon=10), ilimit=1 — loaded by a 1 ohm series
+        // resistor from a 1 V rail, so the solved point satisfies
+        // 1 - v = tanh(10 v). The probes below are that deck's Newton
+        // sequence from the accepted point v = 0.
+        //
+        // Five probes is the ratchet: the criterion may certify no later than
+        // this. Probes 2, 3 and 4 are refused on outputs that moved 1.23e-1,
+        // 2.28e-2 and 1.20e-3 against tolerances of 8.45e-4, 8.67e-4 and
+        // 8.69e-4, so every refusal is a model still moving, not a tolerance
+        // set too fine. Probe 5 moves 3.6e-6 and is certified.
+        let (mut circuit, mut matrix, mut rhs) = probe_bench(tanh_instance());
+        let criteria = NonlinearConvergenceCriteria::default();
+
+        let mut voltage: Value = 0.0;
+        let mut certified_at = None;
+        for probe in 1..=12usize {
+            let output = (10.0 * voltage).tanh();
+            let residual = 1.0 - voltage - output;
+            let derivative = -1.0 - 10.0 * (1.0 - output * output);
+            voltage -= residual / derivative;
+
+            probe_at(&mut circuit, &mut matrix, &mut rhs, voltage);
+            if probe > 1 && circuit.xspice_converged(criteria) {
+                certified_at = Some(probe);
+                break;
+            }
+        }
+
+        assert_eq!(
+            certified_at,
+            Some(5),
+            "the tanh model's outputs must stop moving by the fifth probe; a \
+             later count is this criterion spending Newton iterations on a \
+             model that has already settled"
+        );
     }
 
     fn output_instance(port_type: PortType, connection: PortConnection) -> XspiceInstance {

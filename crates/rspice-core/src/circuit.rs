@@ -38,7 +38,9 @@ mod analog_tasks;
 mod construction;
 pub(crate) mod dae;
 mod external_models;
-pub(crate) use external_models::{VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy};
+pub(crate) use external_models::{
+    VerilogADcAcceptedStateCarrier, XspiceCompanionPolicy, XspiceOutputIterates,
+};
 mod force_accept;
 mod introspection;
 pub use introspection::{DeviceOpEntry, DeviceOpReport};
@@ -656,6 +658,11 @@ pub struct CircuitData {
     pub(crate) xspice_dispatch_pending: Vec<bool>,
     /// The same, accumulated for the next pass.
     pub(crate) xspice_dispatch_next_pending: Vec<bool>,
+    /// Code-model outputs of the two most recent Newton iterates at one
+    /// candidate point, which is what the XSPICE convergence criterion
+    /// compares. Deliberately outside every rollback image, for the reason
+    /// [`XspiceOutputIterates`] gives.
+    pub(crate) xspice_output_iterates: XspiceOutputIterates,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.

@@ -1161,6 +1161,9 @@ impl CircuitData {
         self.xspice_instances = snapshot.xspice_instances;
         self.xspice_event_values = snapshot.xspice_event_values;
         self.xspice_event_queue = snapshot.xspice_event_queue;
+        // The recorded iterates were the rejected attempt's, and the attempt
+        // that replaces it starts with no previous iterate of its own.
+        self.xspice_output_iterates.clear();
         #[cfg(feature = "veriloga")]
         {
             self.veriloga_devices = snapshot.veriloga_devices;
@@ -1859,7 +1862,7 @@ impl CircuitData {
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))
-            && self.xspice_converged(criteria.voltage_tolerance())
+            && self.xspice_converged(criteria)
             && dynamic_veriloga_converged
             && generated_veriloga_converged
             && !self.xyce_core_trial_invalid

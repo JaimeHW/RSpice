@@ -53,7 +53,7 @@ impl Engine {
             && circuit.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && circuit.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && circuit.iswitches.iter().all(|sw| sw.is_converged(criteria))
-            && circuit.xspice_converged(criteria.voltage_tolerance())
+            && circuit.xspice_converged(criteria)
             && circuit.bjts.all_converged(criteria)
             && dynamic_veriloga_converged
             && generated_veriloga_converged

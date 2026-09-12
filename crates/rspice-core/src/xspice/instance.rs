@@ -3278,35 +3278,32 @@ impl XspiceInstance {
         self.context.advance_state();
     }
 
-    /// Check if the instance has converged
+    /// Append this instance's driven output values to `out`, port by port in
+    /// declaration order, as one Newton iterate's contribution to the XSPICE
+    /// convergence criterion.
     ///
-    /// Compares current output to previous iteration.
-    pub fn is_converged(&self, tolerance: Value) -> bool {
-        let tol = if tolerance.is_finite() && tolerance > 0.0 {
-            tolerance
-        } else {
-            1e-12
-        };
-
-        self.ports
-            .iter()
-            .filter(|port| {
-                port.direction == super::PortDirection::Out
-                    || port.direction == super::PortDirection::InOut
-            })
-            .all(|port| {
-                if port.is_vector {
-                    let width = self.context.port_width(&port.name);
-                    return (0..width).all(|index| {
-                        let curr = self.context.output_vector_value(&port.name, index);
-                        let prev = self.context.output_vector_prev_value(&port.name, index);
-                        (curr - prev).abs() <= tol + tol * curr.abs().max(prev.abs())
-                    });
-                }
-                let curr = self.context.output(&port.name);
-                let prev = self.context.output_prev(&port.name);
-                (curr - prev).abs() <= tol + tol * curr.abs().max(prev.abs())
-            })
+    /// The set is every port the model drives, which is the set that criterion
+    /// has always read. An event-valued output reads as zero through these
+    /// accessors and so contributes a constant: its settling is the event
+    /// kernel's question, not Newton's.
+    ///
+    /// The caller keeps the recorded vector outside the transient rollback
+    /// image; see `circuit::external_models::XspiceOutputIterates` for why the
+    /// instance cannot hold it itself.
+    pub(crate) fn collect_output_iterate(&self, out: &mut Vec<Value>) {
+        for port in self.ports.iter().filter(|port| {
+            port.direction == super::PortDirection::Out
+                || port.direction == super::PortDirection::InOut
+        }) {
+            if port.is_vector {
+                let width = self.context.port_width(&port.name);
+                out.extend(
+                    (0..width).map(|index| self.context.output_vector_value(&port.name, index)),
+                );
+            } else {
+                out.push(self.context.output(&port.name));
+            }
+        }
     }
 
     fn model_panic_error(&self, phase: &str, payload: Box<dyn Any + Send + 'static>) -> CmError {
@@ -4153,7 +4150,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_output_convergence_uses_element_accessors() {
+    fn vector_output_iterate_uses_element_accessors() {
         let model = model_with_ports(vec![PortSpec::vector_output("out", PortType::Voltage)]);
         let mut instance = XspiceInstance::new(
             "Avecout",
@@ -4170,17 +4167,26 @@ mod tests {
             .context
             .set_output_vector("out", vec![1.0, 2.0])
             .expect("set vector output");
-        instance
-            .context
-            .set_output_vector("out", vec![1.0 + 1.0e-13, 2.0 - 1.0e-13])
-            .expect("set vector output");
-        assert!(instance.is_converged(1.0e-12));
+        let mut iterate = Vec::new();
+        instance.collect_output_iterate(&mut iterate);
+        assert_eq!(
+            iterate,
+            vec![1.0, 2.0],
+            "a vector port must contribute one entry per element"
+        );
 
         instance
             .context
             .set_output_vector("out", vec![1.1, 2.0])
             .expect("set vector output");
-        assert!(!instance.is_converged(1.0e-12));
+        iterate.clear();
+        instance.collect_output_iterate(&mut iterate);
+        assert_eq!(
+            iterate,
+            vec![1.1, 2.0],
+            "the iterate must read the element the model just wrote, not the \
+             value it displaced"
+        );
     }
 
     #[test]
