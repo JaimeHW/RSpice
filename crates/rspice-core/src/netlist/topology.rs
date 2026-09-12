@@ -580,8 +580,11 @@ fn passive_short_pairs(element: &Element) -> Vec<(&str, &str)> {
         ElementKind::Resistor { .. }
         | ElementKind::Inductor { .. }
         | ElementKind::JilesAthertonInductor { .. } => pair(),
+        // A source stating zero volts is a short -- an ammeter, usually. A
+        // source stating anything else is a rail, and a rail is where the walk
+        // stops rather than a wire it crosses.
         ElementKind::VoltageSource(spec) => match constant_dc_level(spec) {
-            Some(level) if level == 0.0 => pair(),
+            Some(0.0) => pair(),
             _ => Vec::new(),
         },
         _ => Vec::new(),
