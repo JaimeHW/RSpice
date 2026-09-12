@@ -902,7 +902,25 @@ impl CircuitData {
     /// again would execute its accepted-phase side effects a second time.
     #[cfg(feature = "veriloga")]
     pub(crate) fn record_xspice_analog_input_dispatch(&mut self, nodes: &[NodeId]) {
-        if nodes.is_empty() || self.xspice_dispatch_pending.len() != self.xspice_instances.len() {
+        if nodes.is_empty() {
+            return;
+        }
+        // Whoever opened the wave these marks belong to sized the pending
+        // vector from the instance count, and that count is fixed once the
+        // circuit is built, so the two agree on every path that reaches here.
+        // They have to: a short vector cannot be indexed by instance, and
+        // returning instead would accept the candidate with the stale analog
+        // inputs the projection just invalidated -- no error, no log, no
+        // symptom but a wrong answer. Say it where a debug build can hear it,
+        // and keep the release build's harmless refusal to index out of range.
+        debug_assert_eq!(
+            self.xspice_dispatch_pending.len(),
+            self.xspice_instances.len(),
+            "XSPICE analog-input dispatch marks dropped: {} pending slot(s) for {} instance(s)",
+            self.xspice_dispatch_pending.len(),
+            self.xspice_instances.len()
+        );
+        if self.xspice_dispatch_pending.len() != self.xspice_instances.len() {
             return;
         }
         self.ensure_xspice_event_dispatch();
