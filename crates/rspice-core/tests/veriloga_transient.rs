@@ -1782,10 +1782,16 @@ endmodule
 /// rejected iterate, not a run-ending fault.
 ///
 /// `ln(V(p,n)+0.1)` is defined at every accepted point of this deck: the
-/// operating point sits at V(p) ~ 0.505 V and the driven endpoint at
+/// operating point sits at V(p) ~ 0.504 V and the driven endpoint at
 /// V(p) ~ -0.0926 V. It is undefined only at the iterate plain Newton
 /// proposes when the whole -5 V edge lands inside one step, which is exactly
 /// the iterate Spectre and ngspice throw away before cutting dt and retrying.
+///
+/// The edge has to outrun the stepper's own breakpoint spacing to get there.
+/// A 1 ns ramp does not: the stepper walks it in 80 ps steps whose Newton
+/// corrections never leave the domain, so that deck proves nothing. A 1 fs
+/// edge is the whole -5 V swing inside the first step the stepper offers, so
+/// its first trial iterate is V(p) ~ -1.38 V.
 #[test]
 fn a_nonfinite_verilog_a_transient_trial_is_rejected_and_the_step_retried() {
     let model = write_model(
@@ -1799,7 +1805,7 @@ endmodule
     );
     let deck = format!(
         "* a Newton trial overshoots a log singularity\n\
-         V1 in 0 PWL(0 0 1e-9 -5)\n\
+         V1 in 0 PULSE(0 -5 0 1e-15 1e-15 1 2)\n\
          R1 in p 1k\n\
          X1 p 0 nonfinite_trial\n\
          .va \"{}\" nonfinite_trial\n\
@@ -1808,7 +1814,7 @@ endmodule
     );
     let netlist = Netlist::parse(&deck).expect("parse");
     // The configured first step spans the whole source edge, so the first
-    // Newton iterate is V(p) ~ -1.4 V and ln() leaves its domain. One dt cut
+    // Newton iterate is V(p) ~ -1.38 V and ln() leaves its domain. Cutting dt
     // puts the same timepoint back on the physical branch.
     let engine = Engine::new(SimulationConfig {
         transient_initial_timestep: Some(1.0e-9),
@@ -1820,12 +1826,21 @@ endmodule
 
     let output = node_series(&result.node_names, &result.voltages, "p");
     let source = |time: f64| -> f64 {
-        if time >= 1.0e-9 {
+        if time >= 1.0e-15 {
             -5.0
         } else {
-            -5.0 * time / 1.0e-9
+            -5.0 * time / 1.0e-15
         }
     };
+    // The stepper first attempts the 1 fs edge itself, where the source has
+    // already swung the whole -5 V. The first point it accepts is 1.25e-16 s
+    // -- that step times the 0.125 rejection factor -- so a point finer than
+    // the edge is the timestep cut the rejected trial asked for.
+    assert!(
+        result.time.get(1).copied().unwrap_or(1.0) < 5.0e-16,
+        "the rejected trial must have cut the step: {:?}",
+        &result.time[..result.time.len().min(4)]
+    );
     for (&time, &voltage) in result.time.iter().zip(output) {
         assert!(
             voltage > -0.1,
