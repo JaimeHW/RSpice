@@ -46,6 +46,26 @@ pub(super) struct ChargeSamples {
     pub cq_prev: Value,
 }
 
+/// What one Verilog-A implementation route answers about the charges it owns.
+///
+/// The three cases are not interchangeable, and collapsing them into an
+/// `Option` is what makes a missing bound indistinguishable from an absent
+/// one: `min_truncation_limit` treats `None` as "no opinion" and lets the
+/// other route's answer stand, so a route that genuinely could not form its
+/// charges would have its refusal masked by a route that has no instances at
+/// all — and the deck would claim a charge-truncation shortcut for a step
+/// nobody estimated.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum VerilogaRouteBound {
+    /// The route carries no instance in this deck, so it bounds nothing and
+    /// withholds nothing.
+    Absent,
+    /// The route carries instances and bounded their charges.
+    Bounded(Value),
+    /// The route carries instances whose charge state could not be formed.
+    Unformed,
+}
+
 /// How the voltage-domain LTE estimator is configured for this circuit: the
 /// estimator itself and the two exclusion sets that keep unbounded nodes out
 /// of the norm.
@@ -2552,7 +2572,7 @@ impl Engine {
     ) -> Option<Value> {
         #[cfg(feature = "veriloga-builtins-base")]
         let generated = if circuit.has_generated_veriloga_devices() {
-            Self::generated_veriloga_ngspice_truncation_limit(
+            match Self::generated_veriloga_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
                 step,
@@ -2561,27 +2581,63 @@ impl Engine {
                 tolerances,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
+            {
+                Some(limit) => VerilogaRouteBound::Bounded(limit),
+                None => VerilogaRouteBound::Unformed,
+            }
         } else {
-            None
+            VerilogaRouteBound::Absent
         };
+        // A route that is not compiled in carries no instance, which is the
+        // same thing as a deck that instantiates none of its models.
         #[cfg(not(feature = "veriloga-builtins-base"))]
-        let generated: Option<Value> = None;
+        let generated = VerilogaRouteBound::Absent;
         #[cfg(feature = "veriloga")]
-        let runtime = Self::runtime_veriloga_ngspice_truncation_limit(
-            circuit,
-            step,
-            accepted_dt_prev,
-            accepted_dt_prev_prev,
-            tolerances,
-        )
-        .filter(|limit| limit.is_finite() && *limit > 0.0);
-        // No runtime route compiled in is no runtime charge, which is the same
-        // unconstraining answer the walk gives for a deck that carries none.
-        // A `None` would instead read as "the charges could not be formed" and
-        // deny a generated-only deck its charge-truncation coverage.
+        let runtime =
+            if circuit.veriloga_devices().is_empty() && circuit.mixed_signal_hosts.is_empty() {
+                VerilogaRouteBound::Absent
+            } else {
+                match Self::runtime_veriloga_ngspice_truncation_limit(
+                    circuit,
+                    step,
+                    accepted_dt_prev,
+                    accepted_dt_prev_prev,
+                    tolerances,
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+                {
+                    Some(limit) => VerilogaRouteBound::Bounded(limit),
+                    None => VerilogaRouteBound::Unformed,
+                }
+            };
         #[cfg(not(feature = "veriloga"))]
-        let runtime: Option<Value> = Some(2.0 * step.dt);
-        Self::min_truncation_limit(generated, runtime)
+        let runtime = VerilogaRouteBound::Absent;
+        Self::merge_veriloga_route_bounds(step.dt, generated, runtime)
+    }
+
+    /// Reduce the routes' answers to one bound, per route rather than per
+    /// value.
+    ///
+    /// A route that has instances and could not bound them refuses for the
+    /// whole deck: its charges are as unestimated as a native family whose
+    /// charge state could not be formed, and the deck must fall to voltage
+    /// LTE. A route with no instances withholds nothing and must not be able
+    /// to answer on another route's behalf. Only when neither route carries an
+    /// instance is the deck genuinely chargeless, and then the bound is
+    /// unconstraining rather than missing.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    pub(super) fn merge_veriloga_route_bounds(
+        dt: Value,
+        generated: VerilogaRouteBound,
+        runtime: VerilogaRouteBound,
+    ) -> Option<Value> {
+        match (generated, runtime) {
+            (VerilogaRouteBound::Unformed, _) | (_, VerilogaRouteBound::Unformed) => None,
+            (VerilogaRouteBound::Absent, VerilogaRouteBound::Absent) => Some(2.0 * dt),
+            (VerilogaRouteBound::Bounded(a), VerilogaRouteBound::Bounded(b)) => Some(a.min(b)),
+            (VerilogaRouteBound::Bounded(a), VerilogaRouteBound::Absent)
+            | (VerilogaRouteBound::Absent, VerilogaRouteBound::Bounded(a)) => Some(a),
+        }
     }
 
     /// The same walk over the instances the Verilog-A runtime executes: plain
@@ -4771,6 +4827,68 @@ R2 b 0 1k
             Some(2.0 * dt),
             "a deck with no runtime charge must bound nothing rather than refuse a bound"
         );
+    }
+
+    /// Coverage is decided per route, not per value. The table is the whole
+    /// contract: a route that cannot form its charges refuses for the deck,
+    /// and a route with no instances never answers on the other's behalf.
+    #[test]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn veriloga_route_bounds_merge_per_route_not_per_value() {
+        use VerilogaRouteBound::{Absent, Bounded, Unformed};
+
+        let dt = 1.0e-9;
+        for (generated, runtime, expected, why) in [
+            (
+                Absent,
+                Absent,
+                Some(2.0 * dt),
+                "neither route carries an instance, so nothing is estimated and nothing is refused",
+            ),
+            (
+                Bounded(3.0e-10),
+                Absent,
+                Some(3.0e-10),
+                "the only route with instances decides the bound",
+            ),
+            (
+                Absent,
+                Bounded(4.0e-10),
+                Some(4.0e-10),
+                "the only route with instances decides the bound, either way round",
+            ),
+            (
+                Bounded(3.0e-10),
+                Bounded(4.0e-10),
+                Some(3.0e-10),
+                "two bounded routes take the tighter bound",
+            ),
+            (
+                Unformed,
+                Absent,
+                None,
+                "an absent route must not mask a route that could not form its charges",
+            ),
+            (
+                Unformed,
+                Bounded(4.0e-10),
+                None,
+                "a bounded route must not mask a route that could not form its charges",
+            ),
+            (
+                Absent,
+                Unformed,
+                None,
+                "the refusal counts from either route",
+            ),
+            (Unformed, Unformed, None, "neither route formed its charges"),
+        ] {
+            assert_eq!(
+                Engine::merge_veriloga_route_bounds(dt, generated, runtime),
+                expected,
+                "{generated:?} + {runtime:?}: {why}"
+            );
+        }
     }
 
     #[test]
