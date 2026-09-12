@@ -482,3 +482,47 @@ fn coupled_acceptance_evaluates_each_model_once_across_a_voltage_projection() {
         );
     }
 }
+
+/// The linked digital host is deep-copied once per trial, and no more.
+///
+/// `mixed_trial_copy_ratchet` in `xspice::verilog::mixed` pins the standalone
+/// host, whose rollback image is copied only when something is due. The
+/// coordinator's is a different measurement: once an XSPICE instance is
+/// enrolled on a shared net every Newton trial runs the causal lane, and the
+/// causal lane writes the event clock and the delta-cycle tally whether or not
+/// the participant has anything to say — so the copy the trial image defers is
+/// taken every time. That is the cost pinned here: one image of the shared
+/// host per trial, plus one per model view whose published values moved. A
+/// change that makes it two per trial has doubled the per-iteration cost of
+/// every coupled deck, and nothing else in the suite would notice.
+#[test]
+fn coupled_trial_copy_ratchet() {
+    const TRIALS: u64 = 8;
+    // Measured, not chosen: three per trial on this fixture — one image of the
+    // coordinator's shared host, taken by the causal lane every trial runs,
+    // and one of each of the two instances' signal views, taken when
+    // `synchronize` copies a value the shared settle moved. Read the note
+    // above before moving it.
+    const EXPECTED_COPIES: u64 = 3 * TRIALS;
+
+    let (mut circuit, mut matrix, mut solution, _) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+    crate::xspice::settle_cost::reset();
+    for index in 0..TRIALS {
+        // Alternating, so the A/D bridge really publishes rather than pinning
+        // the cost of a boundary that never moves.
+        solution[stimulus] = if index % 2 == 0 { 0.0 } else { 1.0 };
+        stamp(&mut circuit, &mut matrix, &solution).unwrap();
+    }
+    let counts = crate::xspice::settle_cost::counts();
+    eprintln!("{TRIALS} coupled Newton trials: {counts:?}");
+    assert_eq!(
+        counts.mixed_trial_deep_copies, EXPECTED_COPIES,
+        "{TRIALS} coupled trials took {} mixed rollback deep copies, against \
+         {EXPECTED_COPIES}. A rise is a per-Newton-iteration cost regression on \
+         every coupled deck; a fall means either the trial genuinely stopped \
+         needing the image or the work moved somewhere nothing counts it.",
+        counts.mixed_trial_deep_copies
+    );
+}
