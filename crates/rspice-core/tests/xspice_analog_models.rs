@@ -4889,3 +4889,54 @@ r1 out 0 1k
         "malformed pwlts table error should identify both arrays, got {message}"
     );
 }
+
+#[test]
+fn sidiode_as_tanh_holds_its_kcl_identity_at_every_accepted_transient_point() {
+    // `ron=0.1` makes gon=10 and `ilimit=1` makes b2=gon/ilimit=10, so the
+    // forward branch of the shipped sidiode is exactly tanh(10*v) with its
+    // exact partial — the nonlinear analog code model the XSPICE transient
+    // convergence criterion is measured on. A one-ohm series resistor from a
+    // 0..1 V ramp sweeps the knee, so the run spends itself where the model's
+    // Jacobian is moving and Newton needs more than one iterate.
+    //
+    // What is pinned is the answer, not the iteration count: the criterion is
+    // a stopping rule, so a change to it may spend a different number of
+    // Newton iterates but must land on the same solved point. Each accepted
+    // sample has to satisfy the deck's own KCL, (vin - v) = tanh(10 v).
+    let deck = "\
+* XSPICE sidiode configured as tanh(10*v)
+vin in 0 pwl(0 0 1m 1)
+rs in out 1
+ad out 0 dmod
+.model dmod sidiode (ron=0.1 roff=1e12 vfwd=0 vrev=-1e30 ilimit=1 revilimit=-1e30 epsilon=0 revepsilon=0 rrev=0)
+.tran 10u 1m
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.0e-3, 1.0e-5)
+        .expect("tanh ramp transient solves");
+    let out = transient_node_series(&result, "out");
+    assert_eq!(
+        out.len(),
+        result.time.len(),
+        "the output waveform must be aligned with the accepted times"
+    );
+
+    for (time, value) in result.time.iter().zip(out.iter()) {
+        let ramp = (time / 1.0e-3).min(1.0);
+        let residual = (ramp - value) - (10.0 * value).tanh();
+        assert!(
+            residual.abs() <= 1.0e-6,
+            "accepted point t={time:e} v={value:e} leaves {residual:e} of KCL \
+             unsatisfied; the code model's output has not settled onto the \
+             node voltage it was accepted with"
+        );
+    }
+
+    let last = *out.last().expect("the run produces samples");
+    assert!(
+        (last - 1.323494807335958e-1).abs() <= 1.0e-9,
+        "the solved endpoint of the ramp must not move: got {last:e}"
+    );
+}
