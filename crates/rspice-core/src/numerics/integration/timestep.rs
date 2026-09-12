@@ -12,6 +12,31 @@ const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
 const TRAPGEAR_OSCILLATION_THRESHOLD: usize = 3;
 const TRAPGEAR_RECOVERY_STEPS: usize = 2;
 
+/// How far inside the tolerance a rejected step aims, and the widest resize it
+/// may propose.
+///
+/// Without a margin the resize law's fixed point is the acceptance boundary
+/// itself, approached from above, so a rejection ladder converges onto the
+/// boundary instead of crossing it. [`TimestepController::adjust`] is only
+/// reached from the native LTE rejection path, whose caller has already divided
+/// the estimate by the estimator's own order-aware scale: writing `u` for
+/// `lte / reltol`, the argument is `target * u^(1 + 1/(p+1))` and the raw factor
+/// is `u^(-(p+2)/(3(p+1)))`, which leaves the next attempt at
+/// `u^(1 - (p+2)/(3(p+1)))` — above one for every `u > 1` whenever the estimate
+/// falls in proportion to the candidate width rather than to a power of it.
+/// That is the shape a constant or first-order predictor produces at a source
+/// corner, and one timepoint on deck A's 16.5 V/ns ramp spent 46 retries
+/// walking 2.42e-13 s to 1.0006e-13 s, the last thirty of them re-proposing the
+/// same width with `lte` one ULP above `reltol`.
+///
+/// Xyce's rejected-step policy beside this one
+/// (`LteEstimator::xyce_rejected_step_scale`) uses the same exponent and does
+/// not stall, because it aims at half the tolerance and clamps a rejected ratio
+/// to at most 0.9. This constant is that margin and that ceiling: a rejected
+/// step lands strictly inside the tolerance, and never comes back wider than
+/// the step that was rejected.
+const LTE_REJECT_SHRINK_MARGIN: Value = 0.9;
+
 /// Xyce transient-step acceptance policy selected by `TIMEINT ERROPTION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransientErrorControl {
@@ -241,7 +266,14 @@ impl TimestepController {
         self.prev_dt = self.prev_dt.clamp(hard_min_dt, self.max_dt);
     }
 
-    /// Adjust timestep based on local truncation error estimate
+    /// Resize a rejected step from its local truncation error estimate.
+    ///
+    /// This is the native arm's rejected-step proposal and nothing else: the
+    /// engine calls it only after the LTE verdict on a converged candidate came
+    /// back negative, so the proposal it leaves behind has to be a width the
+    /// estimate would accept, not the boundary the estimate sits on. See
+    /// [`LTE_REJECT_SHRINK_MARGIN`] for why aiming at the tolerance itself
+    /// converges onto it from above instead.
     pub fn adjust(&mut self, lte_estimate: Value) -> Value {
         // Calculate new timestep using LTE estimate
         // For trapezoidal: LTE ~ O(dt^3), so dt_new = dt * (target_lte / lte_estimate)^(1/3)
@@ -252,10 +284,13 @@ impl TimestepController {
             self.current_dt = (self.current_dt * 2.0).clamp(self.hard_min_dt, self.max_dt);
         } else {
             let ratio = self.target_lte / lte_estimate;
-            let factor = ratio.powf(1.0 / 3.0);
 
-            // Limit growth/shrink rate
-            let factor = factor.clamp(0.5, 2.0);
+            // Aim `LTE_REJECT_SHRINK_MARGIN` inside the tolerance rather than
+            // at it, and keep the same factor as the ceiling: a rejected step
+            // always comes back at least that much narrower, whatever the
+            // deck's own `reltol` does to the estimate the caller scaled.
+            let factor = (LTE_REJECT_SHRINK_MARGIN * ratio.powf(1.0 / 3.0))
+                .clamp(0.5, LTE_REJECT_SHRINK_MARGIN);
 
             self.prev_dt = self.current_dt;
             self.current_dt = (self.current_dt * factor).clamp(self.hard_min_dt, self.max_dt);
@@ -296,6 +331,58 @@ impl TimestepController {
 mod timestep_controller_tests {
     use super::*;
     use crate::numerics::integration::{BreakpointManager, BreakpointStepPolicy};
+
+    /// A rejection ladder has to cross the tolerance, not converge onto it.
+    ///
+    /// The estimate modelled here is the one the native arm actually passes:
+    /// `lte / recommend_scale(lte)`, which for method order 1 and a deck whose
+    /// `reltol` equals the controller's target is `target * u^1.5` with
+    /// `u = dt / demand`, on a node whose estimate falls in proportion to the
+    /// candidate width. That is deck A's `p` at a `y` ramp corner, and before
+    /// the shrink margin the same ladder took 46 retries to walk 2.4x.
+    #[test]
+    fn a_rejected_ladder_crosses_the_tolerance_instead_of_converging_onto_it() {
+        const DEMAND: Value = 1.000_606e-13;
+        let mut controller =
+            TimestepController::new_with_preferred_min(2.424_242e-13, 1.0e-20, 1.0e-20, 1.0e-10);
+
+        let mut retries = 0;
+        while controller.dt() > DEMAND {
+            let ratio = controller.dt() / DEMAND;
+            controller.adjust(1.0e-3 * ratio.powf(1.5));
+            retries += 1;
+            assert!(
+                retries <= 5,
+                "the ladder is still above {DEMAND:e} after {retries} retries, at {:e}",
+                controller.dt()
+            );
+        }
+
+        assert!(
+            controller.dt() > DEMAND * 0.5,
+            "the ladder overshot the width the estimate implies: {:e} against {DEMAND:e}",
+            controller.dt()
+        );
+    }
+
+    /// A rejected step never comes back wider than the one that was rejected.
+    ///
+    /// The controller's target is a fixed 1e-3, so a deck with a tighter
+    /// `reltol` can reject a candidate whose scaled estimate is below that
+    /// target; the unclamped law would answer such a rejection by growing.
+    #[test]
+    fn a_rejected_step_never_proposes_a_wider_one() {
+        let mut controller =
+            TimestepController::new_with_preferred_min(1.0e-12, 1.0e-20, 1.0e-20, 1.0e-9);
+
+        controller.adjust(1.0e-4);
+
+        assert!(
+            controller.dt() <= 1.0e-12 * LTE_REJECT_SHRINK_MARGIN + 1.0e-30,
+            "a rejected step proposed {:e} against a rejected width of 1e-12",
+            controller.dt()
+        );
+    }
 
     #[test]
     fn maximum_step_respects_the_existing_hard_floor() {
