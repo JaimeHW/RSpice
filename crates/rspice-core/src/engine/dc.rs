@@ -863,7 +863,24 @@ impl Engine {
         self.run_dc_op_with_startup_and_lifecycle_report_and_abort(netlist, startup, None, abort)
     }
 
+    /// The operating point every public `.OP` entry and every sweep point
+    /// funnels through, and therefore the boundary at which a rejectable
+    /// iterate stops being one.
+    /// See [`SimulationError::into_exhausted_circuit_error`].
     fn run_dc_op_with_startup_and_lifecycle_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        startup: DcOpStartup<'_>,
+        lifecycle: Option<&mut DcSweepLifecycle>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
+            netlist, startup, lifecycle, abort,
+        )
+        .map_err(SimulationError::into_exhausted_circuit_error)
+    }
+
+    fn solved_dc_op_with_startup_and_lifecycle_report_and_abort(
         &self,
         netlist: &Netlist,
         startup: DcOpStartup<'_>,
@@ -1644,7 +1661,9 @@ impl Engine {
 
         sweep_source.restore(&mut circuit);
 
-        sweep_result
+        // The sweep solves its own points rather than going through the
+        // operating-point funnel, so it carries the same boundary.
+        sweep_result.map_err(SimulationError::into_exhausted_circuit_error)
     }
 
     fn run_dc_parameter_sweep_spec_with_report_and_abort(

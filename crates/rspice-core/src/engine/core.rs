@@ -1505,6 +1505,12 @@ impl Engine {
     }
 
     /// Solve the DC operating point with optional node-voltage hints and abort support.
+    ///
+    /// This is the bias seed every small-signal analysis starts from — AC,
+    /// noise, pole-zero, STB, distortion, sensitivity, PSS — and none of them
+    /// retries it, so a failure leaving here has the same status it has at the
+    /// DC analysis boundary itself (see
+    /// [`SimulationError::into_exhausted_circuit_error`]).
     pub(crate) fn solve_dc_operating_point_with_abort(
         &self,
         netlist: &Netlist,
@@ -1519,6 +1525,7 @@ impl Engine {
             DcOpStartup::Automatic { use_hints: true },
             abort,
         )
+        .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
     pub(in crate::engine) fn solve_dc_operating_point_with_startup_and_abort(

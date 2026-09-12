@@ -941,23 +941,22 @@ endmodule"#,
     ))
     .unwrap();
     // The point of this pin is that the model's own diagnostic survives
-    // instead of being flattened into a startup non-convergence. Since R1.14
-    // the non-finite half of that diagnostic is a variant of its own, so both
-    // spellings of "the device said why" are accepted and a convergence count
-    // is not.
-    let device_evaluation_failed = |error: &rspice_core::SimulationError| {
-        matches!(
-            error,
-            rspice_core::SimulationError::Circuit(_)
-                | rspice_core::SimulationError::NonFiniteTrial(_)
-        )
-    };
+    // instead of being flattened into a startup non-convergence. It is also
+    // what proves the rejectable classification stays inside the solver: both
+    // analyses spend their whole ladder here, and both report the exhausted
+    // result as an ordinary circuit error.
     let error = Engine::default().run_dc_op(&netlist).unwrap_err();
-    assert!(device_evaluation_failed(&error), "{error}");
+    assert!(
+        matches!(error, rspice_core::SimulationError::Circuit(_)),
+        "{error}"
+    );
     let error = Engine::default()
         .run_tran(&netlist, 1e-5, 1e-6)
         .unwrap_err();
-    assert!(device_evaluation_failed(&error), "{error}");
+    assert!(
+        matches!(error, rspice_core::SimulationError::Circuit(_)),
+        "{error}"
+    );
     let _ = std::fs::remove_file(model);
 }
 

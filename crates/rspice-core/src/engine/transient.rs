@@ -3653,6 +3653,33 @@ impl Engine {
         Ok(())
     }
 
+    /// Every transient entry point funnels through here, so this is where a
+    /// rejectable iterate stops being one.
+    ///
+    /// The Newton loop words its own exhaustion
+    /// (`exhausted_nonfinite_trial_error`), but the startup solve runs before
+    /// that loop exists and reports through the DC convergence ladder, which
+    /// keeps the classification. Both reach the caller here.
+    /// See [`SimulationError::into_exhausted_circuit_error`].
+    fn run_tran_resolved_with_resume(
+        &self,
+        netlist: &Netlist,
+        checkpoint_netlist: &Netlist,
+        window: TransientRunWindow,
+        abort: &dyn AbortSignal,
+        plan: TransientResumePlan<'_>,
+    ) -> Result<
+        (
+            TransientResult,
+            Option<TransientCheckpoint>,
+            Vec<ScheduledTransientCheckpoint>,
+        ),
+        SimulationError,
+    > {
+        self.solved_tran_resolved_with_resume(netlist, checkpoint_netlist, window, abort, plan)
+            .map_err(SimulationError::into_exhausted_circuit_error)
+    }
+
     /// Prepare transient construction before entering the integration frame.
     /// `resume` injects a checkpointed
     /// state (time, solution, reactive histories) instead of the fresh
@@ -3660,7 +3687,7 @@ impl Engine {
     /// checkpoint time. The final checkpoint is captured only when the public
     /// caller retains it; scheduled checkpoint APIs retain their scheduled
     /// snapshots without materializing an otherwise discarded endpoint copy.
-    fn run_tran_resolved_with_resume(
+    fn solved_tran_resolved_with_resume(
         &self,
         netlist: &Netlist,
         checkpoint_netlist: &Netlist,

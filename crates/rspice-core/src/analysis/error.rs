@@ -673,8 +673,13 @@ pub enum SimulationError {
     /// differently — the iterate is rejected and the step cut or the sources
     /// stepped — while a frontend does not: the descriptor, the category and
     /// the retryable flag are a circuit error's, and the display message is
-    /// the device's own diagnostic verbatim. A run that ends here reports
-    /// through [`Self::Circuit`] again, because by then no retry remains.
+    /// the device's own diagnostic verbatim.
+    ///
+    /// It does not leave the engine. Every analysis entry point turns it back
+    /// into [`Self::Circuit`] through
+    /// [`Self::into_exhausted_circuit_error`] once no retry remains, so a
+    /// frontend sees one spelling of a circuit error, with the
+    /// "Circuit error: " prefix the transparent variant would otherwise drop.
     #[error(transparent)]
     NonFiniteTrial(Box<crate::device::NonFiniteTrialError>),
 
@@ -841,6 +846,28 @@ impl SimulationError {
         match self {
             Self::NonFiniteTrial(trial) => Some(&**trial),
             _ => None,
+        }
+    }
+
+    /// The same failure as an analysis reports it once no retry remains.
+    ///
+    /// [`Self::NonFiniteTrial`] is a message to the solver: this iterate may
+    /// be thrown away. Everything that can act on it — the transient timestep
+    /// cut, the DC source/pseudo-transient/gmin ladder, the gmin rescue —
+    /// lives below the analysis entry points, so a failure that reaches one of
+    /// those has already been retried as far as the engine knows how.
+    /// Reporting it as anything but a circuit error would promise a frontend a
+    /// retry nobody is going to make, and would drop the "Circuit error: "
+    /// prefix that the transparent variant has no room for.
+    ///
+    /// Applied at the DC operating point, the DC sweep, the bias seed every
+    /// small-signal analysis takes from a DC solve, and the transient run —
+    /// which needs it for its startup solve, a phase that ends before the
+    /// Newton loop's own exhaustion wording can apply.
+    pub(crate) fn into_exhausted_circuit_error(self) -> Self {
+        match self {
+            Self::NonFiniteTrial(trial) => Self::Circuit(trial.detail),
+            other => other,
         }
     }
 
