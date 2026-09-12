@@ -703,14 +703,42 @@ fn deck_a_digital_instants_keep_their_pre_fix_analog_solution() {
     }
 }
 
+/// `.op` on the tri-family deck answers, and answers with the transient's own
+/// t = 0 point.
+///
+/// The two runs do not share an entry point, so this is not a tautology: the
+/// transient reaches its first accepted point through `run_tran`'s startup and
+/// `.op` through `run_dc_op`. What they share is the operating-point assembly
+/// underneath — `try_stamp_operating_point_devices`, which stamps the mixed
+/// host through `stamp_mixed_operating_point` on both paths — and the mixed
+/// startup, which `.op` now runs exactly as the transient does.
+///
+/// # Why the bound is relative and not bit-equality
+///
+/// The answer is not bit-exact, and the node it is furthest from bit-exact on
+/// says why. Deck A's rails, bridge levels and linear dividers are arithmetic
+/// on the same inputs either way. `A` is the deck's only node whose value is
+/// the root of a nonlinear system — a native diode, a Verilog-A conductance
+/// and, where the build has it, the generated `diode_cmc` card all meet there
+/// — and the two paths do not terminate Newton at the same iterate on it:
+/// `.op` finishes with `dc_static_probe_polished_solution` and the
+/// DC-path-to-ground check behind it, while the transient's startup stops at
+/// its own t = 0 convergence. The gap that leaves is 2.4e-12 V on a 0.676 V
+/// node, twice `abstol` — two iterates of one root rather than two roots, and
+/// the same value to fifteen significant figures. The
+/// bound below is thirty times that, and the measured figure is printed
+/// alongside a bit-exact count, so a change that starts to separate the two
+/// paths shows up as a moving number long before it trips the assertion.
 #[test]
-#[ignore = "R2.4: .op refuses mixed decks"]
 fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     let (_models, netlist) = deck_a();
     let operating_point = Engine::default()
         .run_dc_op(&netlist)
         .expect("a deck with a mixed Verilog-AMS instance must have an operating point");
     let transient = run_deck_a();
+    let mut worst: Option<(String, f64, f64, f64)> = None;
+    let mut exact = 0_usize;
+    let mut compared = 0_usize;
     for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
         let Some(index) = operating_point
             .node_names
@@ -723,11 +751,70 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
             );
         };
         let (op, first) = (operating_point.node_voltages[index], values[0]);
-        assert!(
-            (op - first).abs() < 1e-9,
-            "node {name}: operating point {op} differs from the first transient point {first}"
-        );
+        compared += 1;
+        if op.to_bits() == first.to_bits() {
+            exact += 1;
+        }
+        // A relative measure with a 1 nV floor: a node that settles at zero
+        // has no scale of its own to be relative to.
+        let scale = op.abs().max(first.abs()).max(1.0e-9);
+        let relative = (op - first).abs() / scale;
+        if worst
+            .as_ref()
+            .is_none_or(|(_, _, _, seen)| relative > *seen)
+        {
+            worst = Some((name.clone(), op, first, relative));
+        }
     }
+    let (node, op, first, relative) = worst.expect("deck A has nodes");
+    println!(
+        "TRIFAMILY deck_a_op_vs_first_point_worst_node={node} relative={relative:e} \
+         bit_exact={exact}/{compared}"
+    );
+    assert!(
+        relative < 1.0e-10,
+        "node {node}: operating point {op} differs from the first transient point {first} \
+         by {relative:e} relative, which is past two iterates of one root"
+    );
+}
+
+/// The `.op` voltage table names exactly the nodes the transient's does.
+///
+/// R2.1 gives an event-only net no MNA row and R2.15 keeps a digital-only net
+/// out of the analog result namespace, and both rules are decided on the
+/// circuit rather than per analysis: the two runs read the same
+/// `node_names_sorted`. So the statement that survives either rule changing is
+/// that the two namespaces agree — a `0 V` row that appears in one table and
+/// not the other is the defect, in whichever direction it appears.
+#[test]
+fn deck_a_operating_point_names_the_nodes_its_transient_names() {
+    let (_models, netlist) = deck_a();
+    let operating_point = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("a deck with a mixed Verilog-AMS instance must have an operating point");
+    let transient = run_deck_a();
+    assert_eq!(
+        operating_point.node_names.len(),
+        operating_point.node_voltages.len(),
+        "every name in the operating-point table must carry a value"
+    );
+    let upper = |names: &[String]| -> Vec<String> {
+        let mut names: Vec<String> = names.iter().map(|name| name.to_ascii_uppercase()).collect();
+        names.sort();
+        names
+    };
+    // The operating point prepends ground; the transient does not.
+    let mut op_names = upper(&operating_point.node_names);
+    let ground = op_names
+        .iter()
+        .position(|name| name == "0")
+        .expect("the operating-point table starts at ground");
+    op_names.remove(ground);
+    assert_eq!(
+        op_names,
+        upper(&transient.node_names),
+        "the operating point's analog namespace must be the transient's"
+    );
 }
 
 //=============================================================================

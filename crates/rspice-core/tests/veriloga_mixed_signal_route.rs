@@ -1,6 +1,7 @@
 //! What a deck gets when it instantiates a mixed Verilog-AMS module.
 //!
-//! It gets a transient. This file used to pin the opposite — that a `.va` whose
+//! It gets a transient, and an operating point at the state its initial blocks
+//! left. This file used to pin the opposite — that a `.va` whose
 //! module carried both an analog block and a process was refused at code
 //! generation, before a node was allocated — because nothing elaborated one
 //! into `CircuitData` and running the analog equations alone would have been a
@@ -1162,6 +1163,78 @@ fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
     assert!(
         lowered.contains("ac analysis") && lowered.contains("x1"),
         "the refusal must name the analysis and the instance: {error}"
+    );
+}
+
+/// A module whose analog conductance is scaled by an integer its discrete half
+/// owns. Verilog-AMS LRM 2.4 section 7.3 allows the read; the write belongs to
+/// the `initial` process, which is what makes the module mixed at all.
+///
+/// Nothing in the module is time-dependent, so `gain` never changes after the
+/// initial block sets it, and the module's whole analog law at any time is a
+/// `gain / 1 k` conductance.
+const OP_GAIN: &str = r#"
+`include "disciplines.vams"
+module op_gain(p, n);
+    inout p, n;
+    electrical p, n;
+    integer gain;
+    initial gain = 2;
+    analog I(p, n) <+ gain * V(p, n) / 1000.0;
+endmodule
+"#;
+
+/// **D3.** `.op` on a mixed deck runs the transient's t = 0 startup, so the
+/// module's initial block has executed by the time the analog equations are
+/// assembled and its value is in them.
+///
+/// The deck is a divider whose lower leg is the module, and the three
+/// candidate answers are far apart: a run that never started the discrete half
+/// leaves `gain` at zero and reads 1 V, one that started it but lost the
+/// assignment reads 0.5 V, and the authored circuit reads 1/3 V. So this does
+/// not merely assert that `.op` answered — it asserts *which* circuit it
+/// answered for, and the two wrong answers are the two ways of not running the
+/// startup.
+#[test]
+fn an_operating_point_carries_the_initial_blocks_value_into_the_analog_half() {
+    let model = ModelFile::new("op_gain", OP_GAIN);
+    let deck = format!(
+        "* a mixed module whose analog law reads a value its initial block set\n\
+         v1 in 0 dc 1\n\
+         rs in p 1k\n\
+         x1 p 0 op_gain\n\
+         .va \"{}\" op_gain\n\
+         .op\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|error| {
+            panic!("a mixed deck must have an operating point: {error}");
+        });
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("p"))
+        .unwrap_or_else(|| panic!("node p is absent from {:?}", result.node_names));
+    let voltage = result.node_voltages[index];
+    assert!(
+        (voltage - 1.0 / 3.0).abs() < 1e-9,
+        "V(p) is {voltage}; 1 V means the initial block never ran (gain=0), 0.5 V means it \
+         ran and its assignment was lost (gain=1), 1/3 V is the authored circuit (gain=2)"
+    );
+
+    // The same value the transient reaches at t = 0, from the same startup.
+    let transient = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 1e-9, 1e-10)
+        .expect("the same deck runs a transient");
+    let series = waveform(&transient, "p");
+    assert!(
+        (series[0] - voltage).abs() < 1e-9,
+        "the transient's t=0 point is {} where the operating point is {voltage}",
+        series[0]
     );
 }
 

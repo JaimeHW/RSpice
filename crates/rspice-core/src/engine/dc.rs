@@ -913,10 +913,34 @@ impl Engine {
         }
         .map_err(SimulationError::Circuit)?;
         let (analysis_initial_step, analysis_final_step) = if let Some(state) = &lifecycle {
+            // A sweep asks for a discrete state re-settled at every point, and
+            // a transient interleave produces no such state. `run_dc_sweep*`
+            // refuses a mixed deck before a lifecycle exists; this is that
+            // refusal's second line, on the per-point entry itself.
+            Self::ensure_no_mixed_signal_analysis(&circuit, "DC sweep")?;
             state.restore_rebuilt_point_start(&mut circuit, abort)?;
             state.flags()?
         } else {
             Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
+            // A mixed deck's operating point is the transient's t = 0 startup
+            // with the advance removed, and this is that startup: the same call
+            // `run_tran_prepared` makes, at the same point in the same order —
+            // after the analog initialization tasks, before the point is
+            // prepared. It runs every module's initial blocks and leaves each
+            // driver and bridge holding the value they set.
+            //
+            // Nothing after it advances time. The operating-point Newton
+            // assembly stamps the hosts through
+            // `CircuitData::stamp_mixed_operating_point`, which opens a *probe*
+            // trial at t = 0: the shared queue is drained only to tick zero, so
+            // a `#delay` or an `@(posedge)` scheduled for a later tick stays
+            // pending, and a probe trial rolls back rather than committing one.
+            // Those pending activations are discarded with the circuit when the
+            // run ends, which is the whole of the difference between this and a
+            // transient — an operating point is one point, and the deck asked
+            // for no other.
+            #[cfg(feature = "veriloga")]
+            circuit.start_mixed_digital_execution()?;
             (true, true)
         };
         circuit
@@ -927,7 +951,6 @@ impl Engine {
             )
             .map_err(SimulationError::Circuit)?;
 
-        Self::ensure_no_mixed_signal_analysis(&circuit, "DC operating point")?;
         if circuit.matrix_size() == 0 {
             if force_initial_conditions {
                 return Err(SimulationError::Circuit(
