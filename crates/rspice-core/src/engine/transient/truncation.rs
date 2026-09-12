@@ -2576,8 +2576,12 @@ impl Engine {
             tolerances,
         )
         .filter(|limit| limit.is_finite() && *limit > 0.0);
+        // No runtime route compiled in is no runtime charge, which is the same
+        // unconstraining answer the walk gives for a deck that carries none.
+        // A `None` would instead read as "the charges could not be formed" and
+        // deny a generated-only deck its charge-truncation coverage.
         #[cfg(not(feature = "veriloga"))]
-        let runtime: Option<Value> = None;
+        let runtime: Option<Value> = Some(2.0 * step.dt);
         Self::min_truncation_limit(generated, runtime)
     }
 
@@ -2606,8 +2610,12 @@ impl Engine {
         if !accepted_dt_prev.is_finite() || accepted_dt_prev <= 0.0 {
             return None;
         }
+        // A deck with no runtime instance has no runtime charge to bound, which
+        // is an unconstraining answer rather than a missing one. The difference
+        // decides whether the caller keeps charge-truncation coverage, so it is
+        // never expressed as `None`.
         if circuit.veriloga_devices().is_empty() && circuit.mixed_signal_hosts.is_empty() {
-            return None;
+            return Some(2.0 * dt);
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method_with_previous_step(
@@ -2623,17 +2631,22 @@ impl Engine {
             trap_order,
             tolerances,
         )?;
+        // Start unconstraining and tighten. A module that declares no `ddt`
+        // operand — a filter, a detector, a pure conductance — has no charge
+        // for a step to be held to, and must report that as an unconstraining
+        // bound rather than as a missing one. This is the same rule the native
+        // families follow for a chargeless instance, and it is load-bearing:
+        // `None` here means "this deck's charges could not be formed", which
+        // strips it of charge-truncation coverage and drops it onto voltage
+        // LTE. Reporting a chargeless module that way cost nine Verilog-A
+        // transient decks their convergence.
         let mut limit = 2.0 * dt;
-        let mut found_branch = false;
+        let mut probes_evaluated = true;
 
         let mut walk = |device: &crate::device::veriloga::VerilogADevice| {
-            // An instance whose probe will not evaluate at this candidate
-            // contributes no bound, exactly as a native family that cannot
-            // form its charge state contributes none. It is not swallowed:
-            // with no instance reporting a branch this returns `None`, and a
-            // `None` is what denies the deck charge-truncation coverage above
-            // and puts it back on the voltage-LTE rule.
-            let _ = device.visit_dynamic_charges_at(candidate_solution, &mut |charge| {
+            // An instance whose probe will not evaluate at this candidate is
+            // the real missing-charge case, and only that one returns `None`.
+            let probed = device.visit_dynamic_charges_at(candidate_solution, &mut |charge| {
                 let RuntimeDynamicCharge {
                     current: q_curr,
                     previous: q_prev,
@@ -2665,9 +2678,9 @@ impl Engine {
                 }) else {
                     return;
                 };
-                found_branch = true;
                 limit = limit.min(branch_limit);
             });
+            probes_evaluated &= probed.is_ok();
         };
 
         for device in circuit.veriloga_devices().iter() {
@@ -2677,7 +2690,7 @@ impl Engine {
             walk(host.analog_device());
         }
 
-        found_branch.then_some(limit)
+        probes_evaluated.then_some(limit)
     }
 
     /// Prepare the unique, non-excluded solution indices used by the
@@ -4723,6 +4736,47 @@ XD1 b 0 diode_cmc
                 Some(1.0e-9),
             ),
             "an estimated Verilog-A charge restores the charge-truncation shortcut"
+        );
+    }
+
+    /// A module with no `ddt` operand has no charge for a step to be held to.
+    /// Reporting that as a missing bound rather than an unconstraining one
+    /// denies the deck coverage it is entitled to and drops it onto voltage
+    /// LTE, which cost nine Verilog-A transient decks their convergence.
+    #[test]
+    #[cfg(feature = "veriloga")]
+    fn a_chargeless_veriloga_deck_reports_an_unconstraining_bound_not_a_missing_one() {
+        let chargeless = "\
+An authored one-port with no ddt operand
+V1 a 0 1
+R1 a b 1k
+R2 b 0 1k
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(chargeless);
+        let dt = 1.0e-9;
+        let limit = Engine::runtime_veriloga_ngspice_truncation_limit(
+            &circuit,
+            &[0.0, 1.0, 0.5],
+            TruncationStep {
+                method: IntegrationMethod::Trapezoidal,
+                trap_order: 1,
+                dt,
+            },
+            dt,
+            dt,
+            NgspiceTruncationTolerances {
+                reltol: 1.0e-3,
+                current_abstol: 1.0e-12,
+                charge_abstol: 1.0e-14,
+                trtol: 7.0,
+            },
+        );
+        assert_eq!(
+            limit,
+            Some(2.0 * dt),
+            "a deck with no runtime charge must bound nothing rather than refuse a bound"
         );
     }
 
