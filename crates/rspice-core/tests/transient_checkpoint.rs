@@ -512,7 +512,6 @@ fn mesfet_and_hfet_checkpoints_preserve_charge_and_inverse_state() {
 }
 
 #[test]
-#[ignore = "unified-engine repair: the VBIC self-heating and excess-phase states are not promoted, so Q1.__dt.internal / Q1.__rth.internal are absent from the result"]
 fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly() {
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
         let deck = format!(
@@ -562,23 +561,35 @@ fn promoted_vbic_thermal_and_excess_phase_checkpoints_resume_every_state_exactly
                         ..Default::default()
                     },
                 );
-                let thermal_state = if dialect == SpiceDialect::Xyce {
-                    "dt"
-                } else {
-                    "rth"
-                };
-                for state in [thermal_state, "xf1", "xf2"] {
+                // `assert_scheduled_deck_resumes_exactly` has already pinned
+                // every column of the resumed run bit-for-bit against the
+                // unbroken suffix, node names included, so naming the promoted
+                // states here is what makes that pin cover them. The identity
+                // is the reference one -- a temperature rise is `dt` on every
+                // dialect and whichever route built the device -- so a
+                // checkpoint written by one build resumes under the other.
+                for state in ["dt", "xf1", "xf2"] {
                     let name = format!("Q1.__{state}.internal");
                     let column = full
                         .node_names
                         .iter()
                         .position(|node| node.eq_ignore_ascii_case(&name))
-                        .unwrap_or_else(|| panic!("{name} must be present"));
+                        .unwrap_or_else(|| {
+                            panic!("{name} must be present in {:?}", full.node_names)
+                        });
                     assert!(
                         full.voltages[column].iter().any(|value| value.abs() > 1e-8),
                         "{kind} {dialect:?} {method:?}: {state} must be active"
                     );
                 }
+                assert!(
+                    !full
+                        .node_names
+                        .iter()
+                        .any(|node| node.to_ascii_lowercase().contains(".__rth.")),
+                    "{kind} {dialect:?} {method:?}: the self-heating state must not \
+                     also appear under the thermal-resistance parameter name"
+                );
             }
         }
     }
