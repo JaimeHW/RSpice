@@ -173,6 +173,56 @@ fn a_veriloga_file_stem_shadowing_a_generated_builtin_warns_and_still_binds_the_
     );
 }
 
+/// A misspelled master is refused the same way with and without a `.VERILOGA`
+/// include beside it. Before, the include made hierarchy expansion preserve
+/// the master for external binding and the refusal arrived later, as a
+/// different, untyped build error.
+#[test]
+fn a_misspelled_master_beside_a_veriloga_include_is_refused_like_a_va_free_deck() {
+    let library = Library::write("r34_case_c", "r34_unrelated");
+    let with_include = Netlist::parse(&format!(
+        "R3.4 misspelled master\n\
+         .va \"{}\"\n\
+         .subckt probe p n\n\
+         RS p n 3k\n\
+         .ends probe\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         X1 out 0 prob\n\
+         .op\n\
+         .end\n",
+        library.quoted()
+    ))
+    .expect("the misspelled deck parses");
+    let without_include = Netlist::parse(
+        "R3.4 misspelled master without an include\n\
+         .subckt probe p n\n\
+         RS p n 3k\n\
+         .ends probe\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         X1 out 0 prob\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("the .va-free misspelled deck parses");
+
+    let engine = engine();
+    let free = engine
+        .run_dc_op(&without_include)
+        .expect_err("the .va-free misspelled deck is refused")
+        .to_string();
+    let included = engine
+        .run_dc_op(&with_include)
+        .expect_err("the misspelled deck beside a .va include is refused")
+        .to_string();
+    assert_eq!(
+        free,
+        "Netlist error: subcircuit flattening error: Subcircuit PROB has not been defined for instance X1",
+    );
+    assert_eq!(included, free);
+}
+
 /// A deck whose masters are each defined once says nothing, however many
 /// namespaces exist.
 #[test]

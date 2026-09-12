@@ -7930,10 +7930,30 @@ impl Engine {
                         }
                     }
 
-                    return Err(SimulationError::Circuit(format!(
-                        "Unresolved subcircuit instance '{}' referencing '{}'",
-                        element.name, subckt_name
-                    )));
+                    // Every instance-master namespace has now answered: the
+                    // deck's own subcircuits during hierarchy expansion, the
+                    // Verilog-A artifacts this build resolved, and the
+                    // generated catalog above. A master in none of them is the
+                    // same authoring mistake a `.va`-free deck makes, so it is
+                    // refused with the same typed error rather than a
+                    // build-internal one — a `.VERILOGA` include must not cost
+                    // a deck its `UndefinedSubcircuit` diagnostic.
+                    return Err(map_build_parse_error(
+                        "subcircuit flattening",
+                        ParseError::UndefinedSubcircuit(Box::new(
+                            crate::netlist::UndefinedSubcircuitError {
+                                subcircuit_name: subckt_name.clone(),
+                                canonical_subcircuit_name: subckt_name.to_ascii_uppercase(),
+                                instance_name: element.name.clone(),
+                                canonical_instance_name: element.name.to_ascii_uppercase(),
+                                // Hierarchy expansion already qualified this
+                                // name, so the instance and its path are the
+                                // same string here.
+                                qualified_instance_name: element.name.clone(),
+                            },
+                        ))
+                        .into(),
+                    ));
                 }
 
                 // New element types
