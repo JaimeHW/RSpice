@@ -181,26 +181,67 @@ fn tied_bjt_terminals_preserve_dc_ac_and_transient_substrate_loading() {
         });
         for kind in ["NPN", "PNP"] {
             for substrate in ["0", "out"] {
-                let solve = |device: &str| {
+                // What the legacy Gummel-Poon substrate branch puts between
+                // `out` and ground on this deck. `3142c202a` ("Correct legacy
+                // BJT GMIN placement, scaling and substrate routing") routed
+                // that branch through GMIN; before it, the branch stamped
+                // nothing and the BJT and capacitor decks agreed on a flat 1 V.
+                // It is one junction GMIN when the substrate is ground, nothing
+                // when the substrate is `out` (the branch then spans a single
+                // node), and nothing under Xyce, whose Gummel-Poon omits the
+                // substrate parallel outright -- the `!self.xyce_compatibility`
+                // guard on `bjt::intrinsic::branches::ibcp_branch`.
+                //
+                // Zeroing `junction_gmin_target` to make the two decks agree
+                // again is not the fix: with no ISS on the card, that
+                // conductance is the only thing holding the BJT's substrate
+                // internal node, and the DC matrix is singular without it.
+                let substrate_gmin = if substrate == "0" && dialect != SpiceDialect::Xyce {
+                    rspice_core::engine::ConvergenceConfig::default().junction_gmin_target
+                } else {
+                    0.0
+                };
+                let solve = |device: &str, junction_leak: f64| {
                     let netlist = parse(&format!(
                         "tied BJT\nI1 0 out DC 1 PWL(0 1 2n 2) AC 1\nR1 out 0 1\n{device}\n.end\n"
                     ));
                     let dc = engine.run_dc_op(&netlist).unwrap();
-                    assert!((dc.try_voltage_named("out").unwrap() - 1.0).abs() < 1e-12);
+                    // 1 A into R1 = 1 ohm, in parallel with the conditioning
+                    // conductances between `out` and ground: the global nodal
+                    // floor, which every node of both decks carries, plus the
+                    // substrate branch above, which only the BJT has.
+                    let convergence = rspice_core::engine::ConvergenceConfig::default();
+                    let leak = convergence.gmin_target + junction_leak;
+                    let expected_dc = 1.0 / (1.0 + leak);
+                    let dc_out = dc.try_voltage_named("out").unwrap();
+                    assert!(
+                        (dc_out - expected_dc).abs() < 1e-14,
+                        "{dialect:?}, {kind}, sub={substrate}, {device}: \
+                         dc {dc_out:.17e} vs {expected_dc:.17e}"
+                    );
                     let ac = engine.run_ac(&netlist, &[1e6]).unwrap();
                     let tran = engine.run_tran(&netlist, 2e-9, 0.25e-9).unwrap();
                     assert_eq!(engine.convergence_quality().force_accepted_points, 0);
                     (voltage(&ac[0], "out"), tran)
                 };
-                let (expected_ac, expected_tran) = solve(&format!("C1 out {substrate} 1n"));
+                let (expected_ac, expected_tran) = solve(&format!("C1 out {substrate} 1n"), 0.0);
                 for isat in [1e-14, 1e20] {
                     let cjs = if substrate == "out" { 1e20 } else { 1e-9 };
-                    let (actual_ac, actual_tran) = solve(&format!(
-                        "Q1 out out out {substrate} qm\n.model qm {kind}(IS={isat} CJE=1e20 CJC=1e20 CJS={cjs} MJS=0)"
-                    ));
+                    let (actual_ac, actual_tran) = solve(
+                        &format!(
+                            "Q1 out out out {substrate} qm\n.model qm {kind}(IS={isat} CJE=1e20 CJC=1e20 CJS={cjs} MJS=0)"
+                        ),
+                        substrate_gmin,
+                    );
+                    // The same substrate GMIN, now as an admittance: the
+                    // reference solves 1/Y for Y = 1/R1 + jwC1 and the BJT
+                    // solves 1/(Y + g), so the two agree only after that load
+                    // is applied. The nodal floor is on both decks and cancels.
+                    let loaded_ac =
+                        expected_ac / (Complex64::new(1.0, 0.0) + expected_ac * substrate_gmin);
                     assert!(
-                        (actual_ac - expected_ac).norm() < 1e-12,
-                        "{dialect:?}, {kind}, {substrate}, IS={isat}: {actual_ac} vs {expected_ac}"
+                        (actual_ac - loaded_ac).norm() < 1e-14,
+                        "{dialect:?}, {kind}, {substrate}, IS={isat}: {actual_ac} vs {loaded_ac}"
                     );
                     assert_eq!(actual_tran.time, expected_tran.time);
                     for (actual, expected) in actual_tran
