@@ -4410,7 +4410,7 @@ impl VerilogADevice {
         use crate::canonical_ir::state::CanonicalStateOperator;
 
         let mut slots = Vec::new();
-        let mut scan_program = |program: &crate::codegen::BytecodeProgram| {
+        Self::for_each_bytecode_program(&self.model, true, &mut |program| {
             for instruction in &program.instructions {
                 // `DdtDerivativeState` addresses the same record as its
                 // primal site, so the dedup below keeps one entry for both.
@@ -4418,8 +4418,28 @@ impl VerilogADevice {
                     slots.push(slot);
                 }
             }
-        };
+        });
 
+        slots.sort_unstable();
+        slots.dedup();
+        self.dynamic_charge_third_back = vec![0.0; slots.len()];
+        self.dynamic_charge_rotation_scratch = vec![DynamicChargeRotation::default(); slots.len()];
+        self.dynamic_charge_slots = slots;
+    }
+
+    /// Visit every bytecode program a compiled model can execute.
+    ///
+    /// One walk answers both questions asked of the compiled program's state
+    /// vocabulary: which slots a `ddt` owns, and which non-rational operators
+    /// the analog body uses. `include_noise` is what separates them. A state
+    /// record inside the noise specialization still has to rotate on an
+    /// accepted step, so the charge walk takes it; nothing in it reaches a
+    /// small-signal descriptor, so the operator scan does not.
+    fn for_each_bytecode_program(
+        model: &CompiledModel,
+        include_noise: bool,
+        scan_program: &mut impl FnMut(&crate::codegen::BytecodeProgram),
+    ) {
         fn scan_steps(
             steps: &[AssignmentStep],
             scan_program: &mut impl FnMut(&crate::codegen::BytecodeProgram),
@@ -4441,9 +4461,11 @@ impl VerilogADevice {
             }
         }
 
-        scan_steps(&self.model.assignment_steps, &mut scan_program);
-        scan_steps(&self.model.noise_assignment_steps, &mut scan_program);
-        for stamp in &self.model.stamp_programs {
+        scan_steps(&model.assignment_steps, &mut *scan_program);
+        if include_noise {
+            scan_steps(&model.noise_assignment_steps, &mut *scan_program);
+        }
+        for stamp in &model.stamp_programs {
             if let Some(condition) = &stamp.static_condition {
                 scan_program(condition);
             }
@@ -4458,12 +4480,53 @@ impl VerilogADevice {
                 scan_program(&jacobian.program);
             }
         }
+    }
 
-        slots.sort_unstable();
-        slots.dedup();
-        self.dynamic_charge_third_back = vec![0.0; slots.len()];
-        self.dynamic_charge_rotation_scratch = vec![DynamicChargeRotation::default(); slots.len()];
-        self.dynamic_charge_slots = slots;
+    /// The non-rational analog operators this instance's small-signal response
+    /// carries, named as they are spelled in a source file.
+    ///
+    /// A caller that must export every dynamic state as an explicit finite
+    /// state in a rational `G + sC` descriptor — pole-zero extraction is the
+    /// one — cannot represent any of them. `absdelay` is a transport delay,
+    /// whose `exp(-s*td)` has no rational form at all; `laplace_*`, `zi_*`,
+    /// `idt` and `idtmod` each hold internal state that the runtime carries
+    /// privately and never exports as a descriptor column, so a linearization
+    /// sampled at one frequency is a two-point fit rather than the device's
+    /// response. `ddt` is deliberately absent: its charge derivative *is* the
+    /// descriptor's `C` contribution.
+    ///
+    /// Read off the same bytecode state vocabulary as the charge-slot walk, so
+    /// the answer is identical on the interpreter and on every JIT —
+    /// `codegen::state_renumbering` runs on every compiled model regardless of
+    /// which runtime executes it.
+    pub fn non_rational_analog_operators(&self) -> Vec<&'static str> {
+        use crate::canonical_ir::state::CanonicalStateOperator as Operator;
+
+        const NON_RATIONAL: [Operator; 5] = [
+            Operator::Absdelay,
+            Operator::Laplace,
+            Operator::Zi,
+            Operator::Idt,
+            Operator::IdtMod,
+        ];
+
+        let mut seen = [false; NON_RATIONAL.len()];
+        Self::for_each_bytecode_program(&self.model, false, &mut |program| {
+            for instruction in &program.instructions {
+                for (index, operator) in NON_RATIONAL.into_iter().enumerate() {
+                    if !seen[index] && operator.bytecode_slot(instruction).is_some() {
+                        seen[index] = true;
+                    }
+                }
+            }
+        });
+
+        NON_RATIONAL
+            .into_iter()
+            .zip(seen)
+            .filter(|(_, present)| *present)
+            .map(|(operator, _)| operator.name())
+            .collect()
     }
 
     /// Apply a commit only after all runtime instances in the circuit have
