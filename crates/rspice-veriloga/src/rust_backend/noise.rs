@@ -1768,14 +1768,13 @@ fn expr_is_instance_static(
             } => stack.extend([*condition, *then_expr, *else_expr]),
             HirExprKind::Call { args, .. } => stack.extend(args.iter().copied()),
             HirExprKind::SystemFunction { name, args } => {
+                // `$realtime` is not listed: semantic analysis rewrites it into
+                // `$abstime` over the module time unit before any backend reads
+                // the HIR, so the name cannot appear here. The `$abstime` it
+                // becomes is listed, and carries the same answer.
                 if matches!(
                     name.trim_start_matches('$'),
-                    "abstime"
-                        | "realtime"
-                        | "initial_step"
-                        | "final_step"
-                        | "analysis"
-                        | "frequency"
+                    "abstime" | "initial_step" | "final_step" | "analysis" | "frequency"
                 ) {
                     return false;
                 }

@@ -7346,7 +7346,13 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 NativeOp::LoadThermalVoltage,
                 |this, temperature| this.lower(temperature),
             ),
-            "abstime" | "realtime" => {
+            // `$realtime` is not spelled here. Semantic analysis rewrites it to
+            // `$abstime / <module time unit>` while the unit is still in scope,
+            // so the name never reaches a lowering route; an arm that answered
+            // it would answer in seconds and silently drop the unit. It falls
+            // through to the refusal below instead, which is what an
+            // unrewritten `$realtime` would mean.
+            "abstime" => {
                 self.require_intrinsic_arity(name, args, 0)?;
                 self.push(NativeOp::LoadTime)
             }
@@ -8423,16 +8429,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 /// Simulator and connectivity queries do not depend on node potentials or
 /// branch currents. Thermal voltage with an explicit argument is handled
 /// separately because that argument may depend on either electrical axis.
+///
+/// `$realtime` is absent for the reason it is absent from the intrinsic
+/// lowering: semantic analysis has already rewritten it into `$abstime` over
+/// the module time unit, so the name never reaches this classifier.
 fn electrically_independent_query(name: &str) -> bool {
     matches!(
         name,
-        "temperature"
-            | "abstime"
-            | "realtime"
-            | "mfactor"
-            | "param_given"
-            | "port_connected"
-            | "analysis"
+        "temperature" | "abstime" | "mfactor" | "param_given" | "port_connected" | "analysis"
     )
 }
 
