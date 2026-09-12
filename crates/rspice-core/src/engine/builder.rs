@@ -80,6 +80,8 @@ mod veriloga_sources;
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;
+#[cfg(all(test, feature = "veriloga"))]
+mod elaboration_scan;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
 
@@ -96,6 +98,42 @@ struct VerilogAModelBinding {
     priority: VerilogABindingPriority,
     /// None means multiple differing artifacts claim this name at this priority.
     model: Option<veriloga_cache::CachedVerilogAModel>,
+}
+
+/// Every refusal the analog Verilog-A X-card route raises, built once.
+///
+/// The mixed route has the same helper in `mixed_modules.rs`; the two agree
+/// deliberately, because a deck author moving a module from one route to the
+/// other by adding a process must not see the same mistake reported in a
+/// different vocabulary.
+#[cfg(feature = "veriloga")]
+fn refuse_veriloga_instance(
+    instance: &str,
+    module: &str,
+    kind: crate::ElaborationErrorKind,
+    detail: impl Into<String>,
+) -> SimulationError {
+    crate::ElaborationError::new(kind, detail)
+        .instance(instance)
+        .module(module)
+        .into()
+}
+
+/// Which binding step a compiled-model construction failure belongs to.
+///
+/// The runtime separates a rejected parameter value from a corrupt artifact
+/// and from a backend that would not build, and those are three different
+/// things to do next; everything else is the engine failing a step.
+#[cfg(feature = "veriloga")]
+fn veriloga_construction_kind(error: &rspice_veriloga::vm::VmError) -> crate::ElaborationErrorKind {
+    use crate::ElaborationErrorKind as Kind;
+    use rspice_veriloga::vm::VmError;
+    match error {
+        VmError::ParameterValue(_) => Kind::ParameterValue,
+        VmError::InvalidModel(_) => Kind::CacheCorrupt,
+        VmError::NativeJit(_) | VmError::WasmJit(_) => Kind::CompileRefusal,
+        _ => Kind::Internal,
+    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -7777,10 +7815,12 @@ impl Engine {
                             veriloga_models.get(&normalize_model_key(subckt_name))
                         {
                             let entry = binding.model.as_ref().ok_or_else(|| {
-                                SimulationError::Circuit(format!(
-                                    "Instance '{}' references ambiguous Verilog-A model '{}'; assign distinct explicit aliases in the .VERILOGA includes",
-                                    element.name, subckt_name
-                                ))
+                                refuse_veriloga_instance(
+                                    &element.name,
+                                    subckt_name,
+                                    crate::ElaborationErrorKind::ModuleNotSelected,
+                                    "this name is claimed by more than one Verilog-A artifact; assign distinct explicit aliases in the .VERILOGA includes",
+                                )
                             })?;
                             // A module whose canonical artifact carries a
                             // discrete plan is elaborated as a mixed instance:
@@ -7805,13 +7845,16 @@ impl Engine {
 
                             let model = &entry.model;
                             if element.nodes.len() > model.num_terminals {
-                                return Err(SimulationError::Circuit(format!(
-                                    "Verilog-A instance '{}' expects at most {} terminals for model '{}', found {}",
-                                    element.name,
-                                    model.num_terminals,
+                                return Err(refuse_veriloga_instance(
+                                    &element.name,
                                     subckt_name,
-                                    element.nodes.len()
-                                )));
+                                    crate::ElaborationErrorKind::PortCount,
+                                    format!(
+                                        "the master declares at most {} terminal(s) and the card connects {}",
+                                        model.num_terminals,
+                                        element.nodes.len()
+                                    ),
+                                ));
                             }
 
                             let mut node_ids = Vec::with_capacity(model.num_terminals);
@@ -7831,23 +7874,26 @@ impl Engine {
                                 let resolved = match value {
                                     crate::netlist::ParametricValue::Resolved(v) => *v,
                                     crate::netlist::ParametricValue::Expression(expr) => {
-                                        crate::netlist::expr::eval_expression(
-                                            expr,
-                                            &netlist.params,
-                                        )
-                                        .map_err(|e| {
-                                            SimulationError::Circuit(format!(
-                                                "Failed to resolve Verilog-A parameter '{}': {}",
-                                                name, e
-                                            ))
-                                        })?
+                                        crate::netlist::expr::eval_expression(expr, &netlist.params)
+                                            .map_err(|e| {
+                                                refuse_veriloga_instance(
+                                                    &element.name,
+                                                    subckt_name,
+                                                    crate::ElaborationErrorKind::ParameterValue,
+                                                    format!("parameter '{name}': {e}"),
+                                                )
+                                            })?
                                     }
                                     crate::netlist::ParametricValue::String(_)
                                     | crate::netlist::ParametricValue::StringExpression(_) => {
-                                        return Err(SimulationError::Circuit(format!(
-                                            "Verilog-A parameter '{}' expects a numeric value, got string value",
-                                            name
-                                        )));
+                                        return Err(refuse_veriloga_instance(
+                                            &element.name,
+                                            subckt_name,
+                                            crate::ElaborationErrorKind::ParameterValue,
+                                            format!(
+                                                "parameter '{name}' expects a numeric value, got string value"
+                                            ),
+                                        ));
                                     }
                                 };
                                 // Model-owned names and aliases take precedence over $mfactor.
@@ -7855,10 +7901,14 @@ impl Engine {
                                     && model.parameter_index(name).is_none()
                                 {
                                     if !resolved.is_finite() || resolved <= 0.0 {
-                                        return Err(SimulationError::Circuit(format!(
-                                            "Verilog-A device '{}' multiplicity must be a positive finite value, got {}",
-                                            element.name, resolved
-                                        )));
+                                        return Err(refuse_veriloga_instance(
+                                            &element.name,
+                                            subckt_name,
+                                            crate::ElaborationErrorKind::ParameterValue,
+                                            format!(
+                                                "multiplicity must be a positive finite value, got {resolved}"
+                                            ),
+                                        ));
                                     }
                                     multiplicity = Some(resolved);
                                 } else {
@@ -7869,10 +7919,12 @@ impl Engine {
                                 && model.noise_process_schema >= 1
                                 && !model.noise_sources.is_empty()
                             {
-                                return Err(SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' grouped-noise model '{}' requires canonical IR",
-                                    element.name, model.name
-                                )));
+                                return Err(refuse_veriloga_instance(
+                                    &element.name,
+                                    &model.name,
+                                    crate::ElaborationErrorKind::CacheCorrupt,
+                                    "this grouped-noise model requires canonical IR, and the artifact bound to it carries none",
+                                ));
                             }
                             let mut device = crate::device::veriloga::VerilogADevice::try_new_with_simulation_parameters_and_control(
                                 element.name.clone(),
@@ -7887,25 +7939,36 @@ impl Engine {
                                 if matches!(err, rspice_veriloga::vm::VmError::CompilationCancelled) {
                                     return SimulationError::Aborted;
                                 }
-                                SimulationError::Circuit(format!(
-                                    "Verilog-A device '{}' construction failed: {}",
-                                    element.name, err
-                                ))
+                                refuse_veriloga_instance(
+                                    &element.name,
+                                    subckt_name,
+                                    veriloga_construction_kind(&err),
+                                    format!("construction failed: {err}"),
+                                )
                             })?;
 
                             // Allocate global circuit node indices for internal Verilog-A nodes.
                             bind_veriloga_solver_unknowns(&mut circuit, &element.name, &mut device)
-                                .map_err(SimulationError::Circuit)?;
+                                .map_err(|error| {
+                                    refuse_veriloga_instance(
+                                        &element.name,
+                                        subckt_name,
+                                        crate::ElaborationErrorKind::Internal,
+                                        error,
+                                    )
+                                })?;
                             if let Some(multiplicity) = multiplicity {
                                 device.set_multiplicity(multiplicity);
                             }
                             device
                                 .try_set_temperature(self.config.temperature)
                                 .map_err(|err| {
-                                    SimulationError::Circuit(format!(
-                                        "Verilog-A device '{}' temperature update failed: {}",
-                                        element.name, err
-                                    ))
+                                    refuse_veriloga_instance(
+                                        &element.name,
+                                        subckt_name,
+                                        veriloga_construction_kind(&err),
+                                        format!("temperature update failed: {err}"),
+                                    )
                                 })?;
                             circuit.add_veriloga_device(device);
                             continue;

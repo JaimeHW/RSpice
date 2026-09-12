@@ -432,9 +432,12 @@ impl CircuitData {
         mut host: MixedSignalHost,
     ) -> Result<(), SimulationError> {
         if self.scheduler.mixed_digital_coordinator.is_some() {
-            return Err(SimulationError::Circuit(
-                "mixed instances cannot be added after circuit digital elaboration".into(),
-            ));
+            return Err(crate::ElaborationError::new(
+                crate::ElaborationErrorKind::Internal,
+                "mixed instances cannot be added after circuit digital elaboration",
+            )
+            .instance(host.instance_name())
+            .into());
         }
         host.set_simulation_parameters(self.generated_simulation_parameters);
         self.mixed_signal_hosts.push(host);
@@ -500,16 +503,18 @@ impl CircuitData {
                     .get(node - 1)
                     .map(String::as_str)
                     .unwrap_or("<unnamed>");
-                return Err(SimulationError::Circuit(format!(
-                    "mixed Verilog-AMS instance '{}' connects its discrete port '{}' to node '{}', \
-                     which carries {} event-driven XSPICE values. This connection requires \
-                     an explicit shared conversion contract for continuous loading or unlike \
-                     event domains; direct shared resolution currently requires a digital-only net",
-                    host.instance_name(),
-                    signal,
-                    node_name,
-                    kind.description(),
-                )));
+                return Err(crate::ElaborationError::new(
+                    crate::ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "connects its discrete port '{signal}' to node '{node_name}', \
+                         which carries {} event-driven XSPICE values. This connection requires \
+                         an explicit shared conversion contract for continuous loading or unlike \
+                         event domains; direct shared resolution currently requires a digital-only net",
+                        kind.description(),
+                    ),
+                )
+                .instance(host.instance_name())
+                .into());
             }
         }
         Ok(())
