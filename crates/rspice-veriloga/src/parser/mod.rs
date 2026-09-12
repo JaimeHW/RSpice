@@ -2488,7 +2488,7 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_additive()?;
 
         loop {
-            // `>>>` is not a `BinaryOp`. IEEE 1364-2005 section 4.1.12 gives it
+            // `>>>` is not a `BinaryOp`. IEEE 1364-2005 section 5.1.12 gives it
             // a fill rule the continuous domain has no operator for, so it is a
             // `DigitalExpr` — which is also what makes an analog expression
             // holding one refuse by name rather than shift the wrong bits in.
@@ -2655,7 +2655,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Consume a reduction operator if one opens the expression under the
-    /// cursor, IEEE 1364-2005 section 4.1.10.
+    /// cursor, IEEE 1364-2005 section 5.1.10.
     ///
     /// Every one of these spellings is also a *binary* operator, so the
     /// distinction is entirely positional: a reduction is what the token is
@@ -2666,11 +2666,11 @@ impl<'a> Parser<'a> {
     ///
     /// `~&` and `~|` stay two tokens and are recognized as a pair here rather
     /// than munched in the lexer, because `~` is also the bitwise negation of
-    /// section 4.1.9 and the lexer has no idea whether it is in a unary
+    /// section 5.1.9 and the lexer has no idea whether it is in a unary
     /// position. Reading the pair here is unambiguous *and* harmless: in a
     /// unary position `&` has no reading but a reduction, so `~&a` can only be
     /// reduction NAND — and `~(&a)`, the reading that would result from not
-    /// pairing them, is the same one-bit value by section 4.1.10's own
+    /// pairing them, is the same one-bit value by section 5.1.10's own
     /// definition of the operator.
     fn reduction_operator(&mut self) -> Option<ReductionOp> {
         let op = match self.current().kind {

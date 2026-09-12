@@ -244,7 +244,7 @@ pub enum TokenKind {
     // === Operators - Comparison ===
     Eq, // ==
     Ne, // !=
-    /// `===`, the case-equality operator of IEEE 1364-2005 section 4.1.8.
+    /// `===`, the case-equality operator of IEEE 1364-2005 section 5.1.8.
     ///
     /// A different operator from [`TokenKind::Eq`], not a spelling of it: `===`
     /// compares `x` and `z` as ordinary values and always yields a definite
@@ -266,7 +266,7 @@ pub enum TokenKind {
     BitAnd, // &
     BitOr,  // |
     BitXor, // ^
-    /// `~^` or `^~`, the bitwise XNOR of IEEE 1364-2005 section 4.1.9.
+    /// `~^` or `^~`, the bitwise XNOR of IEEE 1364-2005 section 5.1.9.
     ///
     /// One kind for both spellings because the standard defines them as one
     /// operator; the source text stays on the token for a diagnostic that has
@@ -275,7 +275,7 @@ pub enum TokenKind {
     BitNot, // ~
     Shl,    // <<
     Shr,    // >>
-    /// `>>>`, the arithmetic right shift of IEEE 1364-2005 section 4.1.12.
+    /// `>>>`, the arithmetic right shift of IEEE 1364-2005 section 5.1.12.
     ///
     /// `<<<` has no token of its own: the standard makes it the same operation
     /// as `<<`, so the lexer spells it [`Self::Shl`] and nothing downstream has
@@ -697,7 +697,7 @@ impl<'a> Lexer<'a> {
                     TokenKind::Le
                 } else if self.peek_char() == Some('<') {
                     self.advance();
-                    // IEEE 1364-2005 section 4.1.12 defines `<<<` as the same
+                    // IEEE 1364-2005 section 5.1.12 defines `<<<` as the same
                     // operation as `<<` — both fill the vacated positions with
                     // zero — so the third `<` is consumed and the two spellings
                     // become one token.

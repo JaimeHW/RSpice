@@ -1098,7 +1098,7 @@ pub enum CfgValueKind {
     /// [`VectorBounds::position_of`](crate::semantic::VectorBounds::position_of)
     /// by the lowering, which is the one place that knows what a source-level
     /// `x[7:4]` was written against. A position outside the input reads `x`,
-    /// IEEE 1364-2005 section 4.2.1.
+    /// IEEE 1364-2005 section 5.2.1.
     DigitalPartSelect {
         input: ValueId,
         msb: i64,

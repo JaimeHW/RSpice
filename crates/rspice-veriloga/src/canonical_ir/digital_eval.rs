@@ -769,7 +769,7 @@ pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 100_000;
 /// is a posedge and `1`→`x` is a negedge, while `x`→`z` is neither — nothing
 /// about it moved towards either rail.
 ///
-/// A table rather than a rule for the reason section 4.1's tables are tables:
+/// A table rather than a rule for the reason section 5.1's tables are tables:
 /// it can be read against the document, and the alternative is a chain of
 /// conditions nobody can check by eye.
 pub const EDGE_TABLE: [[Option<DigitalEdge>; 4]; 4] = {
@@ -894,7 +894,7 @@ fn target_width(signal: &DigitalSignal, select: &DigitalWriteSelect) -> u32 {
 /// is a read-modify-write of the whole signal, so the environment only ever
 /// sees whole values; bits the select does not name keep what they held, and
 /// bits the select names that lie outside the signal are dropped, which is IEEE
-/// 1364-2005 section 4.2.1's rule for an out-of-range select on the left-hand
+/// 1364-2005 section 5.2.1's rule for an out-of-range select on the left-hand
 /// side. It is not symmetric with the read side, where an out-of-range select
 /// yields `x` — reading a bit that does not exist has to produce *something*,
 /// and writing one does not.
@@ -2517,7 +2517,7 @@ mod tests {
         FourStateValue::from_bits_msb_first(&bits)
     }
 
-    /// The edge table and the section 4.1 truth tables must agree about which
+    /// The edge table and the section 5.1 truth tables must agree about which
     /// column is which bit, or a reordering of [`FourStateBit`] permutes one and
     /// not the other.
     #[test]
@@ -2725,7 +2725,7 @@ mod tests {
     }
 
     /// A partial write lands on the bit the declaration *names*, IEEE
-    /// 1364-2005 section 3.3.1 read together with section 5.2.1.
+    /// 1364-2005 section 4.3.1 read together with section 5.2.1.
     ///
     /// `reg [7:4] q` is four bits called 7, 6, 5 and 4. Before this rule
     /// existed, `q[7] = 1` wrote position 7 of a four-bit value and did

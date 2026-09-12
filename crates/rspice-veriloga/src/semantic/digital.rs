@@ -291,7 +291,7 @@ impl VectorBounds {
     /// Where the bit this range *names* `index` is stored, counting from the
     /// least significant end.
     ///
-    /// **This is the one statement of the rule.** IEEE 1364-2005 section 3.3.1
+    /// **This is the one statement of the rule.** IEEE 1364-2005 section 4.3.1
     /// makes the *left* bound the most significant bit whatever its value, so a
     /// declared index is a name and not an offset: the position of `index` is
     /// its distance from the *right* bound, measured in the declared direction.
@@ -304,7 +304,7 @@ impl VectorBounds {
     /// `[7:4]` reg lands at −1, `x[8]` at 4 — and both consumers already have
     /// the standard's answer for a position outside a value:
     /// [`part_select`](crate::canonical_ir::digital_value::part_select) reads
-    /// `x` (section 4.2.1) and a partial write drops the bit (section 5.2.1's
+    /// `x` (section 5.2.1) and a partial write drops the bit (section 5.2.1's
     /// out-of-range left-hand side). Folding the two cases into one affine map
     /// is what keeps a *partially* out-of-range part select right as well: on a
     /// `[7:4]` reg, `x[5:2]` reads two real bits and two `x`s rather than
@@ -1182,7 +1182,7 @@ impl SemanticAnalyzer {
 
     /// Resolve a packed range to constant bounds.
     ///
-    /// IEEE 1364-2005 section 4.2.1 requires both bounds to be constant
+    /// IEEE 1364-2005 section 5.2.1 requires both bounds to be constant
     /// expressions, and permits either direction.
     ///
     /// # Why a `parameter` counts as one here and not in the analog half
@@ -1838,14 +1838,14 @@ impl SemanticAnalyzer {
             )),
             SelectBound::Part => SemanticErrorKind::InvalidExpression(format!(
                 "a part select of `{name}` must have constant bounds; IEEE 1364-2005 section \
-                 4.2.1 makes both bounds of a part select constant expressions, because the \
+                 5.2.1 makes both bounds of a part select constant expressions, because the \
                  width they name is the select's type"
             )),
         };
         self.record_error_at(kind, expression.span());
     }
 
-    /// IEEE 1364-2005 section 4.2.1: a part select is written in the direction
+    /// IEEE 1364-2005 section 5.2.1: a part select is written in the direction
     /// its vector was declared in.
     ///
     /// `bus[0:3]` of a `reg [7:0]` is not a request for four bits in reverse;
@@ -1874,7 +1874,7 @@ impl SemanticAnalyzer {
         self.record_error_at(
             SemanticErrorKind::InvalidExpression(format!(
                 "part select `{name}[{high}:{low}]` runs against the direction `{name}` was \
-                 declared in, `{}`; IEEE 1364-2005 section 4.2.1 makes the left index of a \
+                 declared in, `{}`; IEEE 1364-2005 section 5.2.1 makes the left index of a \
                  part select the more significant of the two, so this names `{name}[{low}:{high}]` \
                  or nothing",
                 range.spelling()
@@ -2713,7 +2713,7 @@ mod tests {
     ///
     /// The map is affine and not an absolute distance for exactly this reason:
     /// `|3 − 4|` would put `x[3]` of a `reg [7:4]` at position 1, which is
-    /// `x[5]`. Off the end is what IEEE 1364-2005 section 4.2.1's `x` and
+    /// `x[5]`. Off the end is what IEEE 1364-2005 section 5.2.1's `x` and
     /// section 5.2.1's dropped write are both built on.
     #[test]
     fn an_index_the_declaration_does_not_name_lands_outside_the_value() {

@@ -116,7 +116,7 @@
 //! contribution.
 //!
 //! The distinction only shows itself on a range that is not anchored at zero.
-//! IEEE 1364-2005 section 3.3.1 lets a vector be declared over any two bounds,
+//! IEEE 1364-2005 section 4.3.1 lets a vector be declared over any two bounds,
 //! and makes the left one the most significant bit whatever its value, so
 //! `reg [7:4] x` is a *four-bit* value whose bits are named 7, 6, 5 and 4 —
 //! `x[4]` is its least significant bit and `x[7]` its most, and `x[3]` is not
@@ -343,7 +343,7 @@ pub struct DigitalSignal {
     /// no bits, and says so the same way a process-local `real` does.
     pub width: u32,
     /// Left and right bounds exactly as written, `None` for a scalar. Retained
-    /// because IEEE 1364-2005 section 4.2.1 makes `[7:0]` and `[0:7]` different
+    /// because IEEE 1364-2005 section 5.2.1 makes `[7:0]` and `[0:7]` different
     /// declarations, and a bit select has to agree with the one written.
     pub bounds: Option<(i64, i64)>,
     pub signed: bool,

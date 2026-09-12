@@ -1919,7 +1919,7 @@ impl ProcessLowerer<'_> {
     /// first. IEEE 1364-2005 section 5.2.1 makes the assignment context the
     /// whole left-hand side, so `{carry, sum} = src` with a one-bit `src`
     /// zero-extends and gives `carry` a 0. Slicing an unresized value instead
-    /// reads bits that are not there, and section 4.2.1 makes those `x` — so
+    /// reads bits that are not there, and section 5.2.1 makes those `x` — so
     /// the defect this fixes did not fail loudly, it wrote `x` into the top of
     /// every concatenation target narrower than the sum of its parts.
     fn write(&mut self, block: BlockId, target: &DigitalLValue, value: ValueId, nonblocking: bool) {
@@ -3119,7 +3119,7 @@ impl ProcessLowerer<'_> {
     ///
     /// A comparison's operands are lowered self-determined and are *not*
     /// resized to each other here, because they need no node to be: section
-    /// 4.1.7's equality, section 9.5's identity comparison and section 4.1.6's
+    /// 5.1.7's equality, section 9.5's identity comparison and section 5.1.6's
     /// relational operators each extend the narrower operand themselves, under
     /// the signedness the comparison node carries. Emitting the resize would
     /// state the rule twice and mean it once.
@@ -3520,7 +3520,7 @@ impl ProcessLowerer<'_> {
                 self.self_width(&shift.left)
             }
             // Section 4.1.8: an identity comparison is one bit, and so is a
-            // reduction of section 4.1.10.
+            // reduction of section 5.1.10.
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
             | Expression::Digital(crate::ast::DigitalExpr::Reduction(_)) => 1,
             Expression::Number(number) => match crate::four_state::decode(&number.raw) {
@@ -3612,7 +3612,7 @@ impl ProcessLowerer<'_> {
     /// The self-determined width one concatenation element contributes.
     ///
     /// A replication contributes its count times the width of what it repeats,
-    /// and nothing when the count is not the constant section 4.1.14 requires
+    /// and nothing when the count is not the constant section 5.1.14 requires
     /// — which is what the lowering contributes too, having refused it.
     fn element_width(&self, element: &ArrayLiteralElement) -> u32 {
         match element {
@@ -3646,7 +3646,7 @@ impl ProcessLowerer<'_> {
                 parts.push(self.expression(block, expression));
             }
             ArrayLiteralElement::Replication(replication) => {
-                // IEEE 1364-2005 section 4.1.14 requires a constant
+                // IEEE 1364-2005 section 5.1.14 requires a constant
                 // replication count, so the repetition is expanded here and
                 // the IR needs no replication node.
                 let Some(count) = self
@@ -3668,7 +3668,7 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    /// Lower `a === b` / `a !== b`, IEEE 1364-2005 section 4.1.8.
+    /// Lower `a === b` / `a !== b`, IEEE 1364-2005 section 5.1.8.
     ///
     /// Onto the node `case` already uses, because they are the same operator:
     /// section 9.5's case comparison is an identity comparison over all four
@@ -3709,12 +3709,12 @@ impl ProcessLowerer<'_> {
         )
     }
 
-    /// Lower a reduction operator, IEEE 1364-2005 section 4.1.10.
+    /// Lower a reduction operator, IEEE 1364-2005 section 5.1.10.
     ///
     /// # Why this is a desugaring rather than a node
     ///
     /// Section 4.1.10 does not define reduction as a new function. It defines
-    /// it as *the section 4.1.9 bitwise operator applied successively across
+    /// it as *the section 5.1.9 bitwise operator applied successively across
     /// the bits of one operand*, and the `nand`/`nor`/`xnor` forms as the
     /// `and`/`or`/`xor` fold with the single-bit result inverted. So the
     /// faithful lowering is that iteration written out — one bit select per
@@ -3759,7 +3759,7 @@ impl ProcessLowerer<'_> {
 
         // Least significant bit first, so the fold reads the way the value is
         // indexed. The operators are associative and commutative over the
-        // section 4.1.9 tables, so the direction is a readability choice.
+        // section 5.1.9 tables, so the direction is a readability choice.
         let mut folded = bit(self, 0);
         for index in 1..width {
             let next = bit(self, index);
@@ -4011,7 +4011,7 @@ impl ProcessLowerer<'_> {
     }
 
     /// Whether a comparison is made on signed numbers, IEEE 1364-2005 sections
-    /// 4.1.6 and 5.4.2.
+    /// 5.1.6 and 5.4.2.
     ///
     /// The operands are context-determined *with respect to each other* and to
     /// nothing outside, so the comparison forms its own context — and rule (j)
@@ -4129,7 +4129,7 @@ impl ProcessLowerer<'_> {
 
 /// Whether a numeric literal's source spelling is a *real* constant.
 ///
-/// IEEE 1364-2005 section 2.5.2: a real constant is written either with a
+/// IEEE 1364-2005 section 3.5.2: a real constant is written either with a
 /// decimal point between digits or with an exponent. Read from the raw
 /// spelling, not from the decoded value, because that is where the distinction
 /// survives — `2.0` and `2` decode to the same `f64` and are different

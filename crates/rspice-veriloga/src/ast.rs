@@ -979,7 +979,7 @@ pub enum DigitalExpr {
     /// The indexed forms `bus[base +: width]` and `bus[base -: width]` are not
     /// part of this wave and are refused by name.
     PartSelect(PartSelectExpr),
-    /// Bitwise XNOR: `a ~^ b`, `a ^~ b` (IEEE 1364-2005 section 4.1.9).
+    /// Bitwise XNOR: `a ~^ b`, `a ^~ b` (IEEE 1364-2005 section 5.1.9).
     ///
     /// Here rather than as a [`BinaryOp`] because the continuous half of the
     /// language has no XNOR: its bitwise operators run on machine integers and
@@ -989,19 +989,19 @@ pub enum DigitalExpr {
     /// discrete-domain one here, and the standard's own answer — `~(a ^ b)` — is
     /// already spellable there.
     Xnor(XnorExpr),
-    /// Case equality: `a === b`, `a !== b` (section 4.1.8).
+    /// Case equality: `a === b`, `a !== b` (section 5.1.8).
     CaseEquality(CaseEqualityExpr),
     /// A reduction operator: `&a`, `~&a`, `|a`, `~|a`, `^a`, `~^a` (section
-    /// 4.1.10).
+    /// 5.1.10).
     Reduction(ReductionExpr),
-    /// Arithmetic right shift: `a >>> b` (section 4.1.12).
+    /// Arithmetic right shift: `a >>> b` (section 5.1.12).
     ///
     /// Here rather than as a [`BinaryOp`] for the reason [`Self::Xnor`] gives.
     /// The continuous half of the language shifts machine integers through a
     /// bytecode instruction, a native encoding and a WebAssembly opcode; a
     /// [`BinaryOp`] variant would have to be given a meaning in each of those
     /// to gain a discrete-domain one here. There is no `<<<` variant, because
-    /// section 4.1.12 makes `<<<` the same operation as `<<` and the lexer
+    /// section 5.1.12 makes `<<<` the same operation as `<<` and the lexer
     /// spells them one token.
     ArithmeticShiftRight(ArithmeticShiftExpr),
 }
@@ -1087,7 +1087,7 @@ pub struct CaseEqualityExpr {
     pub left: Box<Expression>,
     pub right: Box<Expression>,
     /// `true` for `!==`. Carried as a flag rather than as two variants because
-    /// section 4.1.8 defines `!==` as the complement of `===` and nothing but
+    /// section 5.1.8 defines `!==` as the complement of `===` and nothing but
     /// the sense differs.
     pub negate: bool,
     pub span: Span,
@@ -1101,7 +1101,7 @@ pub struct ReductionExpr {
     pub span: Span,
 }
 
-/// Which reduction operator, IEEE 1364-2005 section 4.1.10.
+/// Which reduction operator, IEEE 1364-2005 section 5.1.10.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionOp {
     And,
@@ -1608,7 +1608,7 @@ impl Signedness {
 
 /// Packed vector range `[msb:lsb]`.
 ///
-/// Both bounds are retained as written. IEEE 1364-2005 section 4.2.1 permits
+/// Both bounds are retained as written. IEEE 1364-2005 section 5.2.1 permits
 /// either direction (`[7:0]` and `[0:7]` are both legal and are not the same
 /// declaration), so normalizing to an ascending pair here would discard the
 /// author's bit ordering.

@@ -1,4 +1,4 @@
-//! Two-plane four-state values and the IEEE 1364-2005 section 4.1 truth
+//! Two-plane four-state values and the IEEE 1364-2005 section 5.1 truth
 //! tables that operate on them.
 //!
 //! # Why two planes
@@ -48,7 +48,7 @@ use serde::{Deserialize, Serialize};
 /// Number of value bits carried by one plane word.
 pub const PLANE_WORD_BITS: u32 = 32;
 
-/// Index of a bit in the section 4.1 truth tables.
+/// Index of a bit in the section 5.1 truth tables.
 ///
 /// The tables are transcribed in the standard's own order, `0 1 x z`, which is
 /// also [`FourStateBit`]'s declaration order. Keeping the two aligned is what
@@ -85,11 +85,11 @@ pub const TABLE_ORDER: [FourStateBit; 4] = [
 ];
 
 // ============================================================================
-// IEEE 1364-2005 section 4.1 truth tables
+// IEEE 1364-2005 section 5.1 truth tables
 // ============================================================================
 //
 // Rows are the left operand, columns the right, both in `0 1 x z` order.
-// Transcribed from the tables in section 4.1.9 (bitwise operators). Note the
+// Transcribed from the tables in section 5.1.9 (bitwise operators). Note the
 // property that distinguishes these from a three-valued logic: the result of a
 // bitwise operator is never `z`. A `z` operand behaves as `x`, so `z` appears
 // in the inputs and never in the outputs.
@@ -98,7 +98,7 @@ const Z: FourStateBit = FourStateBit::Zero;
 const O: FourStateBit = FourStateBit::One;
 const X: FourStateBit = FourStateBit::Unknown;
 
-/// Bitwise AND (`&`), IEEE 1364-2005 section 4.1.9.
+/// Bitwise AND (`&`), IEEE 1364-2005 section 5.1.9.
 pub const AND_TABLE: [[FourStateBit; 4]; 4] = [
     //        0  1  x  z
     /* 0 */ [Z, Z, Z, Z],
@@ -107,7 +107,7 @@ pub const AND_TABLE: [[FourStateBit; 4]; 4] = [
     /* z */ [Z, X, X, X],
 ];
 
-/// Bitwise OR (`|`), IEEE 1364-2005 section 4.1.9.
+/// Bitwise OR (`|`), IEEE 1364-2005 section 5.1.9.
 pub const OR_TABLE: [[FourStateBit; 4]; 4] = [
     //        0  1  x  z
     /* 0 */ [Z, O, X, X],
@@ -116,7 +116,7 @@ pub const OR_TABLE: [[FourStateBit; 4]; 4] = [
     /* z */ [X, O, X, X],
 ];
 
-/// Bitwise XOR (`^`), IEEE 1364-2005 section 4.1.9.
+/// Bitwise XOR (`^`), IEEE 1364-2005 section 5.1.9.
 pub const XOR_TABLE: [[FourStateBit; 4]; 4] = [
     //        0  1  x  z
     /* 0 */ [Z, O, X, X],
@@ -125,7 +125,7 @@ pub const XOR_TABLE: [[FourStateBit; 4]; 4] = [
     /* z */ [X, X, X, X],
 ];
 
-/// Bitwise XNOR (`~^` / `^~`), IEEE 1364-2005 section 4.1.9.
+/// Bitwise XNOR (`~^` / `^~`), IEEE 1364-2005 section 5.1.9.
 ///
 /// The exact complement of [`XOR_TABLE`], which the table test proves rather
 /// than assumes — so `a ~^ b` and `~(a ^ b)` cannot disagree, whichever way a
@@ -138,16 +138,16 @@ pub const XNOR_TABLE: [[FourStateBit; 4]; 4] = [
     /* z */ [X, X, X, X],
 ];
 
-/// Bitwise negation (`~`), IEEE 1364-2005 section 4.1.9.
+/// Bitwise negation (`~`), IEEE 1364-2005 section 5.1.9.
 pub const NOT_TABLE: [FourStateBit; 4] = [
     //  0  1  x  z
     O, Z, X, X,
 ];
 
-/// The conditional operator's ambiguous merge, IEEE 1364-2005 section 4.1.13
+/// The conditional operator's ambiguous merge, IEEE 1364-2005 section 5.1.13
 /// table 4-6.
 ///
-/// Not a bitwise operator, and here anyway, because it is a section 4.1 truth
+/// Not a bitwise operator, and here anyway, because it is a section 5.1 truth
 /// table and the alternative is a private transcription in the interpreter that
 /// no test compares against the document.
 ///
@@ -605,7 +605,7 @@ impl FourStateValue {
     /// The bit in the sign position — the most significant one.
     ///
     /// `0` for a value of no width at all, which has no sign position and no
-    /// sign. That is reachable: IEEE 1364-2005 section 4.1.14 permits a
+    /// sign. That is reachable: IEEE 1364-2005 section 5.1.14 permits a
     /// replication count of zero, so `{0{a}}` is a concatenation of nothing.
     /// Such a value is unsigned by rule (f) and never reaches a signed
     /// extension, so this is a guard against an arithmetic underflow rather
@@ -808,7 +808,7 @@ pub fn bitwise_not(input: &FourStateValue) -> FourStateValue {
     out
 }
 
-/// The truth value of a whole value, IEEE 1364-2005 section 4.1.8.
+/// The truth value of a whole value, IEEE 1364-2005 section 5.1.8.
 ///
 /// A value is true when any bit is `1`, false when every bit is `0`, and
 /// ambiguous when it is neither — that is, when it has an `x`/`z` bit but no
@@ -836,7 +836,7 @@ pub enum LogicalOp {
     Or,
 }
 
-/// Apply a logical operator (`&&`, `||`), IEEE 1364-2005 section 4.1.8.
+/// Apply a logical operator (`&&`, `||`), IEEE 1364-2005 section 5.1.8.
 ///
 /// Defined on the operands' truth values, so it reuses the same tables: the
 /// standard's logical tables are the bitwise tables restricted to one bit.
@@ -849,7 +849,7 @@ pub fn logical(op: LogicalOp, left: &FourStateValue, right: &FourStateValue) -> 
     one_bit(bit)
 }
 
-/// Logical negation (`!`), IEEE 1364-2005 section 4.1.8.
+/// Logical negation (`!`), IEEE 1364-2005 section 5.1.8.
 pub fn logical_not(input: &FourStateValue) -> FourStateValue {
     one_bit(apply_unary(&NOT_TABLE, truth(input)))
 }
@@ -861,7 +861,7 @@ pub fn one_bit(bit: FourStateBit) -> FourStateValue {
     value
 }
 
-/// Logical equality (`==`) and inequality (`!=`), IEEE 1364-2005 section 4.1.7.
+/// Logical equality (`==`) and inequality (`!=`), IEEE 1364-2005 section 5.1.7.
 ///
 /// The result is `x` if either operand has any `x` or `z` bit. This is the
 /// rule that makes `==` unusable for testing whether a signal is unknown, and
@@ -929,12 +929,12 @@ impl DigitalCaseMatch {
 
 /// Match a `case` item against the selector, IEEE 1364-2005 sections 9.5 and
 /// 9.5.1 — and, with [`DigitalCaseMatch::Exact`], the `===` operator of
-/// section 4.1.8.
+/// section 5.1.8.
 ///
 /// One bit, and never an unknown one: a case item either matches or does not,
 /// which is what makes `case` usable where `==` is not. The comparison is an
 /// identity comparison at the wider of the two widths — section 9.5 extends
-/// every case expression to the width of the widest, section 4.1.8 zero-fills
+/// every case expression to the width of the widest, section 5.1.8 zero-fills
 /// the shorter operand of a `===`, and section 5.2.1's zero-fill is what both
 /// extensions do.
 ///
@@ -970,7 +970,7 @@ pub enum RelationalOp {
     Ge,
 }
 
-/// Apply a relational operator, IEEE 1364-2005 sections 4.1.6 and 5.4.2.
+/// Apply a relational operator, IEEE 1364-2005 sections 5.1.6 and 5.4.2.
 ///
 /// "If either operand contains an x or z, the result is a 1-bit unknown."
 ///
@@ -1030,7 +1030,7 @@ pub enum ArithmeticOp {
     Mod,
 }
 
-/// Apply an arithmetic operator, IEEE 1364-2005 sections 4.1.5 and 5.4.2.
+/// Apply an arithmetic operator, IEEE 1364-2005 sections 5.1.5 and 5.4.2.
 ///
 /// "If any operand bit value is the unknown value x, then the entire result
 /// value shall be x." The result keeps the operand width, so it is all-`x` of
@@ -1050,7 +1050,7 @@ pub enum ArithmeticOp {
 /// is worth more than one whose meaning rests on an invariant its reader has to
 /// rediscover.
 ///
-/// `/` and `%` are where it bites: section 4.1.5 truncates division toward zero
+/// `/` and `%` are where it bites: section 5.1.5 truncates division toward zero
 /// and gives the modulus the sign of its *first* operand, so `-7 / 2` is -3 and
 /// `-7 % 2` is -1 — neither of which the unsigned reading of those bits gives.
 pub fn arithmetic(
@@ -1089,7 +1089,7 @@ pub fn arithmetic(
             return FourStateValue::splat(width, FourStateBit::Unknown);
         }
         // Rust's `/` truncates toward zero and its `%` takes the sign of the
-        // left operand, which is section 4.1.5's rule exactly. `wrapping_`
+        // left operand, which is section 5.1.5's rule exactly. `wrapping_`
         // covers the one pair that has no representable quotient — the most
         // negative value over -1 — whose truncation to `width` bits is itself.
         ArithmeticOp::Div => left.wrapping_div(right),
@@ -1100,7 +1100,7 @@ pub fn arithmetic(
 
 /// Shift direction, and what fills the positions it vacates.
 ///
-/// Three rather than two, because IEEE 1364-2005 section 4.1.12 gives `>>>` a
+/// Three rather than two, because IEEE 1364-2005 section 5.1.12 gives `>>>` a
 /// fill rule of its own. There is no `ArithmeticLeft`: the standard makes
 /// `<<<` and `<<` the same operation, so the lowering spells one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1116,7 +1116,7 @@ pub enum ShiftOp {
     ArithmeticRight,
 }
 
-/// Apply a shift, IEEE 1364-2005 section 4.1.12.
+/// Apply a shift, IEEE 1364-2005 section 5.1.12.
 ///
 /// The result keeps the left operand's width, and the positions the shift
 /// vacates take the operator's fill: zero for `<<` and `>>`, and the sign bit
@@ -1162,7 +1162,7 @@ pub fn shift(op: ShiftOp, value: &FourStateValue, count: &FourStateValue) -> Fou
     out
 }
 
-/// The conditional operator (`?:`), IEEE 1364-2005 section 4.1.13.
+/// The conditional operator (`?:`), IEEE 1364-2005 section 5.1.13.
 ///
 /// A known condition selects an arm. An ambiguous one selects neither: both
 /// arms are evaluated and merged through [`CONDITIONAL_TABLE`], so a bit the
@@ -1200,7 +1200,7 @@ pub fn conditional(
 }
 
 /// Select the bits at positions `msb` down to `lsb` of a value, IEEE
-/// 1364-2005 section 4.2.1.
+/// 1364-2005 section 5.2.1.
 ///
 /// **Positions, counting from the least significant end — not declared
 /// indices.** A value has no declaration; the bit a declaration names `i`
@@ -1230,7 +1230,7 @@ pub fn part_select(value: &FourStateValue, msb: i64, lsb: i64) -> FourStateValue
     out
 }
 
-/// Concatenate values, IEEE 1364-2005 section 4.1.14.
+/// Concatenate values, IEEE 1364-2005 section 5.1.14.
 ///
 /// The first operand supplies the most significant bits, matching the source
 /// order in `{a, b}`.
@@ -1307,7 +1307,7 @@ pub fn real_arithmetic(op: RealArithmeticOp, left: f64, right: f64) -> f64 {
 /// A comparison between two real values.
 ///
 /// Equality is here rather than beside [`equality`] because the four-state one
-/// is a different operator: section 4.1.7's `==` can answer `x`, and this one
+/// is a different operator: section 5.1.7's `==` can answer `x`, and this one
 /// cannot — two reals are equal or they are not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RealCompareOp {
@@ -1387,7 +1387,7 @@ mod tests {
         }
     }
 
-    /// IEEE 1364-2005 section 4.1.9: a bitwise operator never yields `z`.
+    /// IEEE 1364-2005 section 5.1.9: a bitwise operator never yields `z`.
     #[test]
     fn no_bitwise_table_produces_high_impedance() {
         for table in [&AND_TABLE, &OR_TABLE, &XOR_TABLE, &XNOR_TABLE] {
@@ -1403,7 +1403,7 @@ mod tests {
     }
 
     /// `z` behaves exactly as `x` in every bitwise table: the two rows and the
-    /// two columns are identical. This is one statement of section 4.1.9's
+    /// two columns are identical. This is one statement of section 5.1.9's
     /// "z is treated as x" rule, checked against the transcription rather than
     /// assumed by it.
     #[test]
@@ -1533,7 +1533,7 @@ mod tests {
         assert_eq!(bitwise_not(&parse("10xz")).spelling(), "01xx");
     }
 
-    /// IEEE 1364-2005 section 4.1.8: truth is "any 1" / "all 0" / else `x`.
+    /// IEEE 1364-2005 section 5.1.8: truth is "any 1" / "all 0" / else `x`.
     #[test]
     fn truth_values_follow_the_standard() {
         assert_eq!(truth(&parse("0000")), FourStateBit::Zero);
@@ -1554,7 +1554,7 @@ mod tests {
         );
     }
 
-    /// IEEE 1364-2005 section 4.1.7: `==` is unknown if either side has an
+    /// IEEE 1364-2005 section 5.1.7: `==` is unknown if either side has an
     /// unknown bit, even when the two-state bits already disagree.
     #[test]
     fn equality_is_poisoned_by_unknown_bits() {
@@ -1601,7 +1601,7 @@ mod tests {
         );
     }
 
-    /// IEEE 1364-2005 section 4.1.5: one unknown bit makes the *whole* result
+    /// IEEE 1364-2005 section 5.1.5: one unknown bit makes the *whole* result
     /// unknown, at the operand width — not a one-bit `x`.
     #[test]
     fn arithmetic_poisons_the_entire_result() {
@@ -1628,7 +1628,7 @@ mod tests {
         );
     }
 
-    /// IEEE 1364-2005 section 4.1.12: zero-fill, keep the left width, and an
+    /// IEEE 1364-2005 section 5.1.12: zero-fill, keep the left width, and an
     /// unknown *count* poisons everything.
     #[test]
     fn shifts_zero_fill_and_keep_their_width() {
@@ -1668,7 +1668,7 @@ mod tests {
         assert_eq!(part_select(&value, 4, 3).spelling(), "x1");
     }
 
-    /// IEEE 1364-2005 section 4.1.13: a known condition selects an arm; an
+    /// IEEE 1364-2005 section 5.1.13: a known condition selects an arm; an
     /// ambiguous one merges both through table 4-6.
     #[test]
     fn the_conditional_operator_merges_its_arms_when_the_condition_is_unknown() {

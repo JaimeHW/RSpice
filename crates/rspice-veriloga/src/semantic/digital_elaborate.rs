@@ -684,7 +684,7 @@ impl SelectBounds<'_> {
                     return Err(semantic_error(
                         SemanticErrorKind::UnsupportedFeature(
                             "a part-select port connection whose bounds this compiler cannot \
-                             fold to constants; IEEE 1364-2005 section 4.2.1 requires constant \
+                             fold to constants; IEEE 1364-2005 section 5.2.1 requires constant \
                              bounds, and the width of the connection is what the port must \
                              agree with"
                                 .to_string(),
