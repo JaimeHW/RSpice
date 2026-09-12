@@ -1221,6 +1221,33 @@ impl MixedSignalHost {
             .map_err(analog_error)
     }
 
+    /// Set the instance multiplicity (`m=` / `$mfactor`) of the module's
+    /// continuous half: it stamps as m parallel copies, which is the same
+    /// factor a plain `VerilogADevice` beside it applies, applied by the same
+    /// device method. Every stamping entry — [`Self::stamp`], the prepared
+    /// path it takes when a process reads an analog variable, and
+    /// [`Self::stamp_static_dae`] — reaches the analog half through that
+    /// device, so there is one place to scale and this is it.
+    ///
+    /// What it does *not* scale is the boundary. The discrete half has no
+    /// multiplicity to begin with, and neither do the D/A bridges: a bridge
+    /// here is this route's stand-in for the connect module clause 7 would
+    /// insert on the net, built from the deck's supply and the XSPICE bridge
+    /// library's source resistance — the very numbers an explicit `d2a`
+    /// A-card instance beside it would use. That instance would not inherit
+    /// an X-card's `m`, and the analog route has no bridge to scale at all,
+    /// so scaling one here would be a rule the plain Verilog-A carve-out does
+    /// not have. It would also change only how stiffly the boundary is driven
+    /// rather than what it drives, which is not a module contribution.
+    pub(crate) fn set_multiplicity(&mut self, multiplicity: f64) -> Result<(), MixedSignalError> {
+        self.require_idle("configure multiplicity")?;
+        self.prepared_analog.invalidate();
+        self.analog
+            .make_mut()
+            .try_set_multiplicity(multiplicity)
+            .map_err(analog_error)
+    }
+
     pub(crate) fn visit_equation_abstols(
         &self,
         current_abstol: f64,

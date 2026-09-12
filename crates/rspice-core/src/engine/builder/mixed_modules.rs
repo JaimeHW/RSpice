@@ -166,6 +166,7 @@ pub(super) fn try_build_mixed_signal_instance(
     }
 
     let mut overrides = Vec::with_capacity(params.len());
+    let mut multiplicity = None;
     for (name, value) in params {
         let value = match value {
             crate::netlist::ParametricValue::Resolved(value) => *value,
@@ -186,6 +187,28 @@ pub(super) fn try_build_mixed_signal_instance(
                 )));
             }
         };
+        // `m` is the one reserved instance parameter the analog Verilog-A
+        // route carves out of the override list (`builder.rs`), and a mixed
+        // module's continuous half must scale exactly as that route's device
+        // does. The carve-out is that one name and no other. `dtemp` and
+        // `trise` are not reserved for a Verilog-A instance either: they are
+        // handed to the compiled model as ordinary overrides and refused
+        // there as unknown parameters, so mirroring the carve-out means
+        // leaving them to the refusal below, which says the same thing one
+        // step earlier. A module that declares `m` owns the name and scales
+        // itself, so the engine must not also apply it — the precedence
+        // `model_declared_m_parameter_takes_precedence` pins for the analog
+        // route.
+        if name.eq_ignore_ascii_case("m") && entry.model.parameter_index(name).is_none() {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "mixed instance '{}' multiplicity must be a positive finite value, got {value}",
+                    element.name
+                )));
+            }
+            multiplicity = Some(value);
+            continue;
+        }
         let index = entry.model.parameter_index(name).ok_or_else(|| {
             SimulationError::Circuit(format!(
                 "unknown mixed instance '{}' parameter '{name}'",
@@ -307,6 +330,18 @@ pub(super) fn try_build_mixed_signal_instance(
             element.name, subckt_name
         ))
     })?;
+
+    // After the setup closure has bound this instance's solver unknowns and
+    // before the analysis starts, which is where the analog route applies the
+    // same factor to its own device.
+    if let Some(multiplicity) = multiplicity {
+        host.set_multiplicity(multiplicity).map_err(|error| {
+            SimulationError::Circuit(format!(
+                "mixed Verilog-AMS instance '{}' multiplicity update failed: {error}",
+                element.name
+            ))
+        })?;
+    }
 
     host.set_temperature(temperature).map_err(|error| {
         SimulationError::Circuit(format!(
