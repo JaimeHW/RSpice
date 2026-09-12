@@ -103,7 +103,6 @@ pub struct EmitBindings {
     pub ddt_derivative: String,
     /// Dense generated state slots keyed by source operator id.
     pub ddt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
-    pub ddt_scale: String,
     pub idt: String,
     pub idt_slots: HashMap<crate::canonical_ir::ExprId, usize>,
     pub idt_scale: String,
@@ -162,7 +161,6 @@ impl Default for EmitBindings {
             ddt: "ddt".into(),
             ddt_derivative: "ddt_derivative".into(),
             ddt_slots: HashMap::new(),
-            ddt_scale: "ddt_scale".into(),
             idt: "idt".into(),
             idt_slots: HashMap::new(),
             idt_scale: "idt_scale".into(),
@@ -1699,7 +1697,6 @@ impl Emitter<'_> {
                 | CfgValueKind::Staged { .. }
                 | CfgValueKind::Ddt { .. }
                 | CfgValueKind::DdtDerivative { .. }
-                | CfgValueKind::DdtScale
                 | CfgValueKind::Idt { .. }
                 | CfgValueKind::IdtScale
                 | CfgValueKind::Limit { .. }
@@ -1877,7 +1874,6 @@ impl Emitter<'_> {
                     )
                 }
             }
-            CfgValueKind::DdtScale => format!("{}()", bindings.ddt_scale),
             CfgValueKind::Idt {
                 operator,
                 input,

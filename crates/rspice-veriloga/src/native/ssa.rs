@@ -3682,7 +3682,6 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
             | NativeOp::DdtState(_)
-            | NativeOp::DdtJacobian
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
@@ -3810,7 +3809,6 @@ fn op_reads_state(op: NativeOp) -> bool {
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
             | NativeOp::DdtState(_)
-            | NativeOp::DdtJacobian
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
@@ -3876,7 +3874,6 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
             | NativeOp::DdtState(_)
-            | NativeOp::DdtJacobian
             | NativeOp::IdtState(_)
             | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)

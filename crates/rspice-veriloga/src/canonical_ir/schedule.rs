@@ -1827,7 +1827,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::SimParamValue(_)
         | CfgValueKind::SimParamPresent(_) => InvalidationClass::Newton,
 
-        CfgValueKind::Time | CfgValueKind::DdtScale | CfgValueKind::IdtScale => {
+        CfgValueKind::Time | CfgValueKind::IdtScale => {
             InvalidationClass::Timestep
         }
 

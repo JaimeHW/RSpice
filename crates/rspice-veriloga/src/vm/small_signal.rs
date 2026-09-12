@@ -1094,11 +1094,6 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 self.integral_origins.insert(*slot, origin);
                 self.stack.push(V::new(wrapped, 0.0));
             }
-            Instruction::DdtJacobian => {
-                let input = self.pop("DdtJacobian")?;
-                let result = self.multiply_values(V::new(0.0, self.omega), input);
-                self.stack.push(result);
-            }
             Instruction::DdtDerivativeState(_) => {
                 let input = self.pop("ddt input derivative")?;
                 let _primal = self.pop_real("ddt primal")?;
@@ -1622,10 +1617,11 @@ mod tests {
         for gain in [1e-200, 1e200] {
             let product = BytecodeProgram {
                 instructions: vec![
+                    Instruction::PushConst(0.0),
                     Instruction::PushVariable(0),
                     Instruction::PushConst(gain),
                     Instruction::Mul,
-                    Instruction::DdtJacobian,
+                    Instruction::DdtDerivativeState(0),
                 ],
             };
             let assignments = [
@@ -1757,8 +1753,9 @@ mod tests {
                     Instruction::PushConst(b),
                     Instruction::Mul,
                     Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(1.0),
-                    Instruction::DdtJacobian,
+                    Instruction::DdtDerivativeState(0),
                     Instruction::Add,
                 ]);
             }
@@ -1769,10 +1766,11 @@ mod tests {
             ]);
             if complex_divisor {
                 instructions.extend([
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(1e-200),
                     Instruction::PushConst(1e-200),
                     Instruction::Mul,
-                    Instruction::DdtJacobian,
+                    Instruction::DdtDerivativeState(0),
                     Instruction::Add,
                 ]);
             }
@@ -1910,12 +1908,14 @@ mod tests {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushConst(left[0]),
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(left[1]),
-                    Instruction::DdtJacobian,
+                    Instruction::DdtDerivativeState(0),
                     Instruction::Add,
                     Instruction::PushConst(right[0]),
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(right[1]),
-                    Instruction::DdtJacobian,
+                    Instruction::DdtDerivativeState(0),
                     Instruction::Add,
                     Instruction::Mul,
                 ],
@@ -1958,7 +1958,11 @@ mod tests {
         let frequency = 7.0;
         let omega = std::f64::consts::TAU * frequency;
         let ddt = BytecodeProgram {
-            instructions: vec![Instruction::PushConst(2.0), Instruction::DdtJacobian],
+            instructions: vec![
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(2.0),
+                Instruction::DdtDerivativeState(0),
+            ],
         };
         let idt = BytecodeProgram {
             instructions: vec![Instruction::PushConst(2.0), Instruction::IdtJacobian],

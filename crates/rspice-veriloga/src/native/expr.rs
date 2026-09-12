@@ -197,7 +197,6 @@ pub(crate) enum NativeOp {
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
-    DdtJacobian,
     DdtDerivativeState(usize),
     IdtState(usize),
     IdtJacobian,
@@ -2055,16 +2054,6 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::DdtState(*index));
-                }
-                Instruction::DdtJacobian => {
-                    require_stack(
-                        model.clone(),
-                        entry_kind,
-                        instruction_name(instruction),
-                        depth,
-                        1,
-                    )?;
-                    ops.push(NativeOp::DdtJacobian);
                 }
                 Instruction::IdtState(index) => {
                     require_stack(
@@ -8644,7 +8633,6 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::WhiteNoise => "WhiteNoise",
         NativeOp::FlickerNoise => "FlickerNoise",
         NativeOp::DdtState(_) => "DdtState",
-        NativeOp::DdtJacobian => "DdtJacobian",
         NativeOp::DdtDerivativeState(_) => "DdtDerivativeState",
         NativeOp::IdtState(_) => "IdtState",
         NativeOp::IdtJacobian => "IdtJacobian",
@@ -9591,7 +9579,6 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LaplaceStateDerivative(_)
         | NativeOp::WhiteNoise
         | NativeOp::DdtState(_)
-        | NativeOp::DdtJacobian
         | NativeOp::IdtJacobian
         | NativeOp::StorePreludeSlot(_) => (1, 1),
 
@@ -9824,7 +9811,6 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::IdtModState(_) => "IdtModState",
         Instruction::IdtDerivativeState(_) => "IdtDerivativeState",
         Instruction::IdtModDerivativeState(_) => "IdtModDerivativeState",
-        Instruction::DdtJacobian => "DdtJacobian",
         Instruction::DdtDerivativeState(_) => "DdtDerivativeState",
         Instruction::IdtJacobian => "IdtJacobian",
         Instruction::TableDerivative(_) => "TableDerivative",

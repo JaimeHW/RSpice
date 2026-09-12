@@ -1517,7 +1517,6 @@ impl DeviceIR {
                 }
                 Node::Unary(_, inner)
                 | Node::Limexp(inner)
-                | Node::DdtCompanion(inner)
                 | Node::IdtCompanion(inner)
                 | Node::CanonicalLimit(inner) => contains_ddt(arena, inner),
                 Node::Idt(inner, second) | Node::Limit(inner, second) => {
@@ -2397,8 +2396,7 @@ pub mod autodiff {
             Node::Conditional(_, then_expr, else_expr) => recurse(then_expr) | recurse(else_expr),
             Node::TableLookup { input, .. } | Node::TableDerivative { input, .. } => recurse(input),
             Node::Ddx { expr: inner, .. } => recurse(inner),
-            Node::DdtCompanion(inner)
-            | Node::IdtCompanion(inner)
+            Node::IdtCompanion(inner)
             | Node::DdtDerivative {
                 input_derivative: inner,
                 ..
@@ -3247,7 +3245,7 @@ pub mod autodiff {
                 }
                 SimplifiedConstant::Other
             }
-            Node::DdtCompanion(inner) | Node::IdtCompanion(inner) => {
+            Node::IdtCompanion(inner) => {
                 if simplified_constant(arena, inner, constants).is_zero() {
                     SimplifiedConstant::Value(0.0)
                 } else {
@@ -3591,7 +3589,6 @@ pub mod autodiff {
             | Node::PortConnected(_)
             | Node::LastCrossing { .. }
             | Node::Analysis(_)
-            | Node::DdtCompanion(_)
             | Node::IdtCompanion(_)
             | Node::TableDerivative { .. } => {}
         }
@@ -5354,16 +5351,6 @@ pub mod autodiff {
                 arena.push_call(func, &simplified)
             }
             // Companion factors of a zero derivative vanish
-            Node::DdtCompanion(operand) => {
-                let simplified = simplify_from(arena, operand, primal_len);
-                if matches!(*arena.node(simplified), Node::Const(value) if value == 0.0) {
-                    return arena.push(Node::Const(0.0));
-                }
-                if simplified == operand {
-                    return expr;
-                }
-                arena.push(Node::DdtCompanion(simplified))
-            }
             Node::IdtCompanion(operand) => {
                 let simplified = simplify_from(arena, operand, primal_len);
                 if matches!(*arena.node(simplified), Node::Const(value) if value == 0.0) {

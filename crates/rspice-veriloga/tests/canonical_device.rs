@@ -4653,7 +4653,7 @@ for (coefficients, input_gain) in [(runtime::GeneratedDdtCoefficients::inactive(
 }
 
 #[test]
-fn generated_ddt_jacobian_matches_uninitialized_transient_value() {
+fn generated_ddt_tangent_matches_uninitialized_transient_value() {
     for (expression, value, slopes) in [
         ("ddt(V(p)*V(p)+V(n)*V(n))", 0.0, [3.0, 1.0]),
         ("ddx(ddt(V(p)*V(p)*V(p)),V(p))", 6.75, [9.0, 0.0]),

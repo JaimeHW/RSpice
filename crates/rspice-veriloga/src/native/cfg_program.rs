@@ -859,10 +859,6 @@ impl Lowerer<'_> {
             // Identically zero in the large signal; only the derivative pass
             // gives it an amplitude.
             CfgValueKind::NoiseProcess(_) => push(NativeOp::Const(0.0), &[]),
-            CfgValueKind::DdtScale => {
-                let one = push(NativeOp::Const(1.0), &[])?;
-                push(NativeOp::DdtJacobian, &[one])
-            }
             CfgValueKind::IdtScale => {
                 let one = push(NativeOp::Const(1.0), &[])?;
                 push(NativeOp::IdtJacobian, &[one])
@@ -1581,7 +1577,7 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) => {
             Some("is a bounds-checked read that can report a runtime error")
         }
-        CfgValueKind::DdtScale | CfgValueKind::IdtScale => {
+        CfgValueKind::IdtScale => {
             Some("reads the integration state the guard exists to keep it off")
         }
         kind if kind.state_site().is_some() => {
@@ -1704,7 +1700,6 @@ mod tests {
         );
         assert!(speculation_hazard(&CfgValueKind::BlockParameter).is_some());
         assert!(speculation_hazard(&CfgValueKind::ParameterGiven(ParamId::from(0usize))).is_some());
-        assert!(speculation_hazard(&CfgValueKind::DdtScale).is_some());
         assert!(
             speculation_hazard(&CfgValueKind::Ddt {
                 operator: crate::canonical_ir::ExprId::from(0usize),

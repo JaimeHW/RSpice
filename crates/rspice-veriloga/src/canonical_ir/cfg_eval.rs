@@ -997,7 +997,6 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                 self.read(input)?;
                 self.inputs.ddt
             }
-            CfgValueKind::DdtScale => self.inputs.ddt_scale,
             CfgValueKind::DdtDerivative {
                 operator,
                 primal,

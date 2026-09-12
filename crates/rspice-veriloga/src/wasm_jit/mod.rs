@@ -126,7 +126,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 38 lowers circular integrators through the canonical CFG plan.
 /// Version 39 preserves initial-condition and modulus derivatives of integrals.
 /// Version 40 retains the initialization rule of each DDT derivative site.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 40;
+/// Version 41 retires the ddt companion Jacobian opcode 441 from the emitted set.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 41;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

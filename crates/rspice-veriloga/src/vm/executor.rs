@@ -808,21 +808,6 @@ impl<'a> Vm<'a> {
                 self.stack.push(result?);
             }
 
-            // Companion Jacobian factor for ddt: a / dt (0 at DC)
-            Instruction::DdtJacobian => {
-                let coefficients = self.context.integration_coefficients();
-                let dynamic = self.context.evaluation_mode.dynamic_operators_enabled()
-                    && (!matches!(self.context.analysis_type, 1 | 3)
-                        || self.context.analysis_phase.is_equilibrium());
-                self.unary_op(|a| {
-                    if dynamic && coefficients.active {
-                        a * coefficients.derivative_scale
-                    } else {
-                        0.0
-                    }
-                })?
-            }
-
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
                 let coefficients = self.context.state_integration_coefficients();
@@ -2736,21 +2721,17 @@ mod tests {
                 context.analysis_phase = phase;
                 let integrates = !matches!(analysis, 1 | 3) || phase.is_equilibrium();
                 let before = format!("{context:?}");
-                for (instruction, active_gain) in [
-                    (Instruction::DdtJacobian, 4.0),
-                    (Instruction::IdtJacobian, 1.0),
-                ] {
-                    assert_eq!(
-                        execute_with_context(
-                            &mut context,
-                            vec![Instruction::PushConst(2.0), instruction],
-                        )
-                        .unwrap(),
-                        if integrates { active_gain } else { 0.0 },
-                        "analysis {analysis}, phase {phase:?}",
-                    );
-                    assert_eq!(format!("{context:?}"), before);
-                }
+                let (instruction, active_gain) = (Instruction::IdtJacobian, 1.0);
+                assert_eq!(
+                    execute_with_context(
+                        &mut context,
+                        vec![Instruction::PushConst(2.0), instruction],
+                    )
+                    .unwrap(),
+                    if integrates { active_gain } else { 0.0 },
+                    "analysis {analysis}, phase {phase:?}",
+                );
+                assert_eq!(format!("{context:?}"), before);
             }
         }
     }
@@ -2770,10 +2751,6 @@ mod tests {
         for (instructions, expected) in [
             (
                 vec![Instruction::PushConst(99.0), Instruction::DdtState(0)],
-                0.0,
-            ),
-            (
-                vec![Instruction::PushConst(2.0), Instruction::DdtJacobian],
                 0.0,
             ),
             (

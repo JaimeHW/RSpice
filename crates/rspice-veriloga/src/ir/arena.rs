@@ -269,8 +269,6 @@ pub enum Node {
         /// Index into the arena's `ddx` axis table.
         axis: u32,
     },
-    /// Companion-model Jacobian factor for `ddt`.
-    DdtCompanion(NodeId),
     /// Tangent of a DDT candidate, retaining its accepted-history site.
     DdtDerivative {
         primal: NodeId,
@@ -986,7 +984,6 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
         | Node::PortConnected(_)
         | Node::Analysis(_)
         | Node::LastCrossing { .. }
-        | Node::DdtCompanion(_)
         | Node::IdtCompanion(_)
         | Node::TableDerivative { .. } => {}
     }
@@ -1397,7 +1394,6 @@ pub fn rebuild_children(
         | Node::PortConnected(_)
         | Node::Analysis(_)
         | Node::LastCrossing { .. }
-        | Node::DdtCompanion(_)
         | Node::IdtCompanion(_)
         | Node::TableDerivative { .. } => id,
     }
@@ -1759,7 +1755,6 @@ mod tests {
         out.push(arena.push(Node::TableLookup { input: one, table }));
         out.push(arena.push(Node::TableDerivative { input: one, table }));
         out.push(arena.push(Node::Ddx { expr: one, axis }));
-        out.push(arena.push(Node::DdtCompanion(one)));
         out.push(arena.push(Node::DdtDerivative {
             primal: one,
             input_derivative: two,

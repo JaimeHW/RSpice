@@ -636,7 +636,7 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             // runtime keeps, so it is refused rather than approximated.
             NativeOp::DdtState(_) => Self::unary(stack, name, |_| S::from_f64(0.0))?,
             NativeOp::DdtDerivativeState(_) => Self::binary(stack, name, |_, _| S::from_f64(0.0))?,
-            NativeOp::DdtJacobian | NativeOp::IdtJacobian => {
+            NativeOp::IdtJacobian => {
                 Self::unary(stack, name, |_| S::from_f64(0.0))?;
             }
             NativeOp::IdtState(_) => Self::binary(stack, name, |_, condition| condition)?,
@@ -1031,10 +1031,6 @@ mod tests {
     fn the_integrators_answer_what_the_runtime_answers_when_integration_is_off() {
         assert_eq!(
             run_f64(vec![NativeOp::Const(9.0), NativeOp::DdtState(0)], 1),
-            Ok(0.0)
-        );
-        assert_eq!(
-            run_f64(vec![NativeOp::Const(9.0), NativeOp::DdtJacobian], 1),
             Ok(0.0)
         );
         assert_eq!(

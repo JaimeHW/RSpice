@@ -4591,7 +4591,7 @@ endmodule
     /// merge whose taken arm does not depend on it, evaluated at `V(p, n) = 0`.
     /// The term is `q · ln(V / vsat) · dmt/dV(t) = 0 · −∞ · 0`; unguarded, the
     /// derivative pass made `d(ddt q)/dV(t)` NaN where the bytecode's
-    /// `DdtJacobian` short-circuits to 0 and the analytic value is 0.
+    /// `DdtDerivativeState` short-circuits to 0 and the analytic value is 0.
     ///
     /// Two modules: the `ddt` form, which the finite oracle compares against
     /// the bytecode the way the shipped census does, and the resistive form,

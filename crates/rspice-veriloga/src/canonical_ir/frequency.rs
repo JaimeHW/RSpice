@@ -27,7 +27,6 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 | CfgValueKind::Idt { .. }
                 | CfgValueKind::IdtMod { .. }
                 | CfgValueKind::IntegralDerivative { .. }
-                | CfgValueKind::DdtScale
                 | CfgValueKind::IdtScale
         )
     }) {
@@ -126,7 +125,7 @@ pub(crate) fn freeze_noise_primal(function: &mut CfgFunction) {
                 modulus,
                 offset,
             },
-            CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
+            CfgValueKind::IdtScale => CfgValueKind::RealConstant(0.0),
             CfgValueKind::DdtDerivative { primal, .. } => CfgValueKind::Binary {
                 op: CfgBinaryOp::CheckedValue,
                 left: primal,
@@ -352,10 +351,7 @@ pub(crate) fn expand(
         } else {
             for &power in support {
                 let id = ValueId::from(function.values.len());
-                let kind = if matches!(
-                    source.values[index].kind,
-                    CfgValueKind::DdtScale | CfgValueKind::IdtScale
-                ) {
+                let kind = if matches!(source.values[index].kind, CfgValueKind::IdtScale) {
                     CfgValueKind::RealConstant(1.0)
                 } else {
                     CfgValueKind::BlockParameter
@@ -791,7 +787,6 @@ fn value_powers(
 ) -> Result<Powers, FrequencyError> {
     let at = |value: &ValueId| &powers[usize::from(*value)];
     Ok(match kind {
-        CfgValueKind::DdtScale => Powers::from([DynamicPower { ddt: 1, idt: 0 }]),
         CfgValueKind::IdtScale => Powers::from([DynamicPower { ddt: 0, idt: 1 }]),
         CfgValueKind::DdtDerivative {
             input_derivative, ..
@@ -957,7 +952,7 @@ impl Expansion<'_> {
     ) -> Result<(), FrequencyError> {
         let ty = value.value_type;
         let kind = match &value.kind {
-            CfgValueKind::DdtScale | CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
+            CfgValueKind::IdtScale => CfgValueKind::RealConstant(1.0),
             CfgValueKind::DdtDerivative {
                 primal,
                 input_derivative,

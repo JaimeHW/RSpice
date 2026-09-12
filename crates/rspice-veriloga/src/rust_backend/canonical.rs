@@ -454,7 +454,6 @@ fn kernel_region_metrics(
             CfgValueKind::Ddt { operator, .. } => {
                 write!(out, "ddt:{}", operator_indices[operator])
             }
-            CfgValueKind::DdtScale => write!(out, "ddt-scale"),
             CfgValueKind::DdtDerivative { operator, .. } => {
                 write!(out, "ddt-derivative:{}", operator_indices[operator])
             }
@@ -3506,12 +3505,6 @@ impl ModelPlan {
                     .join(", ")
             );
         }
-        if wants.ddt_scale {
-            out.push_str(
-                "        let ddt_scale_value = self.ddt_coefficients.derivative_scale;\n\
-                 \x20       let ddt_scale = move || ddt_scale_value;\n",
-            );
-        }
         // `evaluate_noise_sources` takes `&self`, runs at a fixed operating
         // point, and is not a Newton step — there is nothing to damp and no
         // history it may write. Both bindings are therefore the
@@ -3916,13 +3909,6 @@ impl ModelPlan {
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-        }
-        if wants.ddt_scale {
-            let _ = writeln!(
-                out,
-                "{pad}let ddt_scale_value = if self.ddt_coefficients.active && ctx.integration_operators_enabled() {{ self.ddt_coefficients.derivative_scale }} else {{ 0.0 }};"
-            );
-            let _ = writeln!(out, "{pad}let ddt_scale = move || ddt_scale_value;");
         }
         if wants.idt_scale {
             // The generalized integration rule defines ddt(y) = input, so the
@@ -5347,7 +5333,6 @@ struct Wants {
     time: bool,
     ddt: bool,
     ddt_derivative: bool,
-    ddt_scale: bool,
     idt: bool,
     idt_scale: bool,
     idt_derivative: bool,
@@ -5382,7 +5367,6 @@ impl Wants {
             CfgValueKind::Time => self.time = true,
             CfgValueKind::Ddt { .. } => self.ddt = true,
             CfgValueKind::DdtDerivative { .. } => self.ddt_derivative = true,
-            CfgValueKind::DdtScale => self.ddt_scale = true,
             CfgValueKind::Idt { .. } => self.idt = true,
             CfgValueKind::IdtScale => self.idt_scale = true,
             CfgValueKind::IntegralDerivative { wrap: None, .. } => self.idt_derivative = true,

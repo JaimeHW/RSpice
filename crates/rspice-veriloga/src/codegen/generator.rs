@@ -1461,11 +1461,6 @@ impl CodeGenerator {
                         .instructions
                         .push(Instruction::DdtDerivativeState(state_id));
                 }
-                Node::DdtCompanion(inner) => {
-                    // Jacobian companion factor: operand / dt (0 at DC)
-                    self.emit_expr(arena, inner, emit_ctx, program)?;
-                    program.instructions.push(Instruction::DdtJacobian);
-                }
                 Node::IdtCompanion(inner) => {
                     // Jacobian companion factor: operand * dt (0 at DC)
                     self.emit_expr(arena, inner, emit_ctx, program)?;

@@ -394,7 +394,7 @@ fn evaluate_stateful_helper(
             require_integration_state(session, index)?;
             (Instruction::DdtState(index), 1)
         }
-        441 => (Instruction::DdtJacobian, 1),
+        // 441 was the ddt companion Jacobian; the opcode is retired, not reused.
         482 => {
             require_integration_state(session, index)?;
             (Instruction::DdtDerivativeState(index), 2)
@@ -1357,18 +1357,6 @@ mod tests {
         assert_eq!(session.context().state_derivatives[0], 10.0);
         assert!(session.context().state_initialized[0]);
         assert_eq!(session.context().state_candidate_valid[0], 1);
-
-        let jacobian = evaluate_helper_with_session(
-            441,
-            0,
-            0,
-            0,
-            [2.5, 0.0, 0.0, 0.0, 0.0],
-            &[],
-            Some(&mut session),
-        )
-        .expect("evaluate ddt Jacobian through reference VM semantics");
-        assert_eq!(jacobian, 25.0);
         session.context_mut().time = 1.0;
         assert!(session.take_error().is_none());
         assert_eq!(session.into_context().time, 1.0);

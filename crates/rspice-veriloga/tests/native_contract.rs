@@ -5567,7 +5567,7 @@ endmodule
 
 #[cfg(all(target_arch = "x86_64", feature = "native-bytecode-contract-tests"))]
 #[test]
-fn native_compile_accepts_reactive_ddt_jacobians_without_fallback() {
+fn native_compile_publishes_reactive_jacobian_entry_points_without_fallback() {
     let model = reactive_model();
     assert!(
         model

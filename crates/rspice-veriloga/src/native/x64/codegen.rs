@@ -33,10 +33,9 @@ use crate::native::abi::{
     rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
-    rspice_cosh, rspice_cross_state_native, rspice_ddt_derivative_native,
-    rspice_ddt_jacobian_native, rspice_ddt_state_native, rspice_default_limit_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_cosh, rspice_cross_state_native, rspice_ddt_derivative_native, rspice_ddt_state_native,
+    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
+    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
     rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
@@ -1341,7 +1340,6 @@ impl FunctionCompiler {
                         NativeOp::WhiteNoise => self.emit_white_noise()?,
                         NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                         NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
-                        NativeOp::DdtJacobian => self.emit_ddt_jacobian()?,
                         NativeOp::DdtDerivativeState(index) => {
                             self.emit_state_operand_helper(index, 2, rspice_ddt_derivative_native)?
                         }
@@ -3711,19 +3709,6 @@ impl FunctionCompiler {
             state_index,
             rspice_ddt_state_native,
         );
-        Ok(())
-    }
-
-    fn emit_ddt_jacobian(&mut self) -> JitResult<()> {
-        if self.depth == 0 {
-            return Err(JitError::Encoding {
-                model: MODEL.into(),
-                detail: "ddt jacobian requires stack depth 1, found 0".into(),
-            });
-        }
-
-        let target = self.register_stack[self.depth - 1];
-        self.emit_operand_context_filter_helper_call(target, 1, 0, rspice_ddt_jacobian_native);
         Ok(())
     }
 
@@ -9340,28 +9325,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_computes_ddt_jacobian_from_timestep() {
-        let program = native_program(
-            EntryKind::Jacobian,
-            vec![Instruction::PushVariable(0), Instruction::DdtJacobian],
-            0,
-        );
-        let bytes = compile_value_function(&program).expect("compile ddt jacobian leaf");
-        let memory = ExecutableMemory::allocate(&bytes).expect("allocate ddt jacobian leaf");
-        let entry = memory.ptr_at(0).expect("entry point inside image");
-        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
-            unsafe { std::mem::transmute(entry) };
-        let vars = [2.0_f64];
-        let mut ctx = eval_context(&[], &[], &[], &[]);
-
-        set_backward_euler(&mut ctx, 0.25);
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
-
-        set_backward_euler(&mut ctx, 0.0);
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-    }
-
-    #[test]
     fn generated_value_leaf_computes_idt_state_and_records_integral() {
         let program = native_program(
             EntryKind::StampValue,
@@ -9815,23 +9778,14 @@ mod tests {
         );
 
         let jacobian_prefix = variable_prefix(1, XMM_STACK.len() - 1);
-        let mut ddt_jacobian = jacobian_prefix.clone();
-        ddt_jacobian.extend([Instruction::PushVariable(0), Instruction::DdtJacobian]);
-        ddt_jacobian.extend(add_reductions(jacobian_prefix.len()));
         let mut idt_jacobian = jacobian_prefix.clone();
         idt_jacobian.extend([Instruction::PushVariable(0), Instruction::IdtJacobian]);
         idt_jacobian.extend(add_reductions(jacobian_prefix.len()));
-        let jacobian_cases = [
-            (
-                constant_prefix_sum(jacobian_prefix.len()) + 8.0,
-                ddt_jacobian,
-            ),
-            (
+        {
+            let (expected, instructions) = (
                 constant_prefix_sum(jacobian_prefix.len()) + 0.5,
                 idt_jacobian,
-            ),
-        ];
-        for (expected, instructions) in jacobian_cases {
+            );
             let program = native_program(EntryKind::Jacobian, instructions, 0);
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes =

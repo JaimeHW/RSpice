@@ -360,12 +360,6 @@ pub enum CfgValueKind {
         primal: ValueId,
         input_derivative: ValueId,
     },
-    /// The integration rule's `d/dt` coefficient for the current step.
-    ///
-    /// An explicit global coefficient for frequency lowering and internal
-    /// expressions. Source derivatives use `DdtDerivative` to retain their
-    /// site's initialization rule.
-    DdtScale,
     /// `idt(x, ic)` — the time integral of `x`, in companion form.
     ///
     /// Carries its initial condition rather than defaulting it, because a step
@@ -1216,7 +1210,6 @@ impl CfgValueKind {
             | Self::NoiseProcess(_)
             | Self::Ddt { .. }
             | Self::DdtDerivative { .. }
-            | Self::DdtScale
             | Self::Idt { .. }
             | Self::IdtScale
             | Self::IdtMod { .. }
@@ -2573,7 +2566,6 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::Multiplicity
             | CfgValueKind::Time
             | CfgValueKind::Analysis(_)
-            | CfgValueKind::DdtScale
             | CfgValueKind::IdtScale
             | CfgValueKind::NodePotential(_)
             | CfgValueKind::BranchFlow(_)

@@ -833,8 +833,6 @@ pub enum Instruction {
     /// Stack: `[candidate, modulus, offset, input_derivative, ic_derivative,
     /// modulus_derivative] -> [derivative]`
     IdtModDerivativeState(usize),
-    /// Companion Jacobian factor for ddt: top-of-stack / dt (0 at DC)
-    DdtJacobian,
     /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)
     IdtJacobian,
     /// Slope of lookup table at the input point

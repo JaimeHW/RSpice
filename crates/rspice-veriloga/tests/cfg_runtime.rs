@@ -336,7 +336,6 @@ fn program(body: &str, names: &[String], bias: &Bias, staged: &[f64]) -> String 
 fn analysis(_name: &str) -> bool {{ false }}
 fn simparam(_name: &str, fallback: f64) -> f64 {{ fallback }}
 fn ddt(_operator: usize, _input: f64) -> f64 {{ 0.0 }}
-fn ddt_scale() -> f64 {{ 0.0 }}
 fn limit(_operator: usize, _proposed: f64, candidate: f64) -> f64 {{ candidate }}
 fn limit_previous(_operator: usize, proposed: f64) -> f64 {{ proposed }}
 
