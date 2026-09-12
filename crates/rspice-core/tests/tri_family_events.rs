@@ -433,7 +433,6 @@ fn a_loaded_discrete_output_reaches_the_supply_level() {
 }
 
 #[test]
-#[ignore = "R2.1: unloaded mixed D/A output node reads 0 V"]
 fn an_unloaded_discrete_output_reaches_the_supply_level() {
     let (_model, deck) = timer_deck("");
     let result = run(&deck, 6e-9, 0.05e-9);
@@ -449,7 +448,6 @@ fn an_unloaded_discrete_output_reaches_the_supply_level() {
 //=============================================================================
 
 #[test]
-#[ignore = "R2.1: unloaded mixed D/A output node reads 0 V"]
 fn unloaded_scheduled_digital_read_uses_analog_value_at_its_own_time() {
     let model = ModelFile::new(
         "module sample_at_ten(p,q);\n input p; electrical p;\n output q; reg q;\n \
@@ -578,7 +576,6 @@ fn unloaded_crossing_does_not_execute_an_unrelated_future_timer_early() {
 }
 
 #[test]
-#[ignore = "R2.1: unloaded mixed D/A output node reads 0 V"]
 fn unloaded_connect_rules_survive_a_verilog_include_wrapper() {
     let mut source = String::from(
         "module rules_device(p,clk,q);\n input p; electrical p;\n input clk; wire clk;\n \

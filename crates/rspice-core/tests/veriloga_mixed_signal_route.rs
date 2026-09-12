@@ -1042,6 +1042,39 @@ fn a_digital_only_module_drives_its_analog_boundary() {
     }
 }
 
+/// The same boundary with nothing on it at all.
+///
+/// A load is a load, not a licence: the D/A source is the net's only driver in
+/// both decks, so removing the divider must move the answer from the divided
+/// level to the open-circuit one and nowhere else. This is the twin that the
+/// unloaded-output defect failed — the net lost its bridge, kept its row, and
+/// read 0 V — so it is the one that says the deck's load no longer decides
+/// whether the boundary exists.
+#[test]
+fn an_unloaded_digital_only_module_drives_its_analog_boundary() {
+    let model = ModelFile::new(
+        "digital_only_open",
+        "module digital_only_open(q); output q; reg q; initial q=1'b1; endmodule",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* unloaded digital-only Verilog device\n.param vcc=3.3\nX1 out digital_only_open\n.va \"{}\" digital_only_open\n.end\n",
+        model.deck_path(),
+    )).unwrap();
+    let result = Engine::default().run_tran(&netlist, 2e-9, 1e-10).unwrap();
+    let output = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!(!result.time.is_empty());
+    for &voltage in &result.voltages[output] {
+        assert!(
+            (voltage - 3.3).abs() < 1e-9,
+            "an unloaded D/A source must drive its own supply level: {voltage}"
+        );
+    }
+}
+
 #[test]
 fn a_portless_mixed_initializer_finishes_without_contribution_equations() {
     use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};
@@ -2190,10 +2223,27 @@ endmodule
             );
         }
     }
+    // `free` is the bit the deck neither loads nor reads, and it is driven all
+    // the same: one discrete endpoint and no analog element leaves an analog
+    // node whose only driver is the D/A source, so it follows its own bit up to
+    // the supply and back down. What observing a bit changes is which bits a
+    // behavioral source can read back — not which bits exist electrically.
+    // This assertion used to require 0 V forever, which is the unloaded-output
+    // defect stated as an expectation: the net had lost its bridge but kept the
+    // row, so nothing drove it.
+    let free_wave = waveform(&result, "free");
     assert!(
-        waveform(&result, "free")
-            .iter()
-            .all(|value| value.abs() < 1e-14)
+        free_wave.iter().any(|value| (value - 3.3).abs() < 1e-8),
+        "an unobserved bit is still driven to its own supply level"
+    );
+    assert!(
+        free_wave
+            .first()
+            .is_some_and(|value: &f64| value.abs() < 1e-8)
+            && free_wave
+                .last()
+                .is_some_and(|value: &f64| value.abs() < 1e-8),
+        "and it follows its bit back down when the module clears it"
     );
     let free = result.digital_trace_named("free").unwrap();
     assert_eq!(free.len(), 3);

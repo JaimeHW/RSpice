@@ -120,15 +120,13 @@ endmodule
     }
 }
 
-// The voltage assertions use lightly loaded electrical outputs, which require
-// D/A conversion. An unloaded HDL-only net is observed through digital traces.
 #[test]
 fn initial_digital_read_uses_the_solved_time_zero_voltage() {
     let model = ModelFile::new(
         "module sample(p,q); input p; electrical p; output q; reg q; initial q=(V(p)>0.999); analog I(p)<+0; endmodule",
     );
     let deck = Netlist::parse(&format!(
-        "* initial sample\nV1 p 0 1\nRload q 0 1e12\nX1 p q sample\n.va \"{}\" sample\n.end",
+        "* initial sample\nV1 p 0 1\nX1 p q sample\n.va \"{}\" sample\n.end",
         model.path()
     ))
     .unwrap();
@@ -159,7 +157,7 @@ module sample_at_ten(p,q);
 endmodule
 "#,
     );
-    let deck = Netlist::parse(&format!("* sample a known ramp at 10 ns\nV1 p 0 PWL(0 0 20n 2)\nRload q 0 1e12\nX1 p q sample_at_ten\n.va \"{}\" sample_at_ten\n.end\n", model.path())).unwrap();
+    let deck = Netlist::parse(&format!("* sample a known ramp at 10 ns\nV1 p 0 PWL(0 0 20n 2)\nX1 p q sample_at_ten\n.va \"{}\" sample_at_ten\n.end\n", model.path())).unwrap();
     let result = Engine::default().run_tran(&deck, 12e-9, 0.2e-9).unwrap();
     let p = result
         .node_names
@@ -294,7 +292,7 @@ module param_device(p,q);
 endmodule
 "#,
     );
-    let deck = Netlist::parse(&format!("* parameter support\n.param r=2000\nV1 vdd 0 1\nR1 vdd p1 1000\nR2 vdd p2 1000\nRload1 q1 0 1e12\nRload2 q2 0 1e12\nX1 p1 q1 param_device resistance={{r}}\nX2 p2 q2 param_device resistance=3000\n.va \"{}\" param_device\n.end\n", model.path())).unwrap();
+    let deck = Netlist::parse(&format!("* parameter support\n.param r=2000\nV1 vdd 0 1\nR1 vdd p1 1000\nR2 vdd p2 1000\nX1 p1 q1 param_device resistance={{r}}\nX2 p2 q2 param_device resistance=3000\n.va \"{}\" param_device\n.end\n", model.path())).unwrap();
     let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
     for (name, expected) in [("p1", 2.0 / 3.0), ("p2", 0.75), ("q1", 0.0), ("q2", 3.3)] {
         let index = result
@@ -405,7 +403,7 @@ module future_timer(p,clk,q,edge_seen,delayed);
 endmodule
 "#,
     );
-    let deck = Netlist::parse(&format!("* A/D crossing before independent timer\nV1 p 0 1\nVclk clk 0 PWL(0 0 3.5n 0 3.6n 3.3 6n 3.3)\nRloadq q 0 1e12\nRloade edge 0 1e12\nRloadd delayed 0 1e12\nX1 p clk q edge delayed future_timer\n.va \"{}\" future_timer\n.end\n", model.path())).unwrap();
+    let deck = Netlist::parse(&format!("* A/D crossing before independent timer\nV1 p 0 1\nVclk clk 0 PWL(0 0 3.5n 0 3.6n 3.3 6n 3.3)\nX1 p clk q edge delayed future_timer\n.va \"{}\" future_timer\n.end\n", model.path())).unwrap();
     let result = Engine::default().run_tran(&deck, 5.5e-9, 0.05e-9).unwrap();
     for (name, earliest, latest) in [
         ("edge", 3.5e-9, 3.7e-9),
@@ -465,7 +463,7 @@ endmodule
     let direct = ModelFile::new(&source);
     let wrapper = ModelFile::new(&format!("`include \"{}\"\n", direct.path()));
     let run = |model: &ModelFile| {
-        let deck = Netlist::parse(&format!("* include must preserve electrical conversion\nV1 p 0 1\nVclk clk 0 1\nRload q 0 1e12\nX1 p clk q rules_device\n.va \"{}\" rules_device\n.end\n", model.path())).unwrap();
+        let deck = Netlist::parse(&format!("* include must preserve electrical conversion\nV1 p 0 1\nVclk clk 0 1\nX1 p clk q rules_device\n.va \"{}\" rules_device\n.end\n", model.path())).unwrap();
         let result = Engine::default().run_tran(&deck, 2e-9, 0.2e-9).unwrap();
         let q = result
             .node_names
