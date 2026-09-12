@@ -125,10 +125,11 @@ pub(crate) enum PeriodicDeviceFamily {
     XspiceInstance,
     RuntimeVerilogA,
     GeneratedVerilogA,
+    MixedSignalHost,
 }
 
 impl PeriodicDeviceFamily {
-    pub(crate) const ALL: [Self; 37] = [
+    pub(crate) const ALL: [Self; 38] = [
         Self::Resistor,
         Self::ResistorBranch,
         Self::Capacitor,
@@ -166,6 +167,7 @@ impl PeriodicDeviceFamily {
         Self::XspiceInstance,
         Self::RuntimeVerilogA,
         Self::GeneratedVerilogA,
+        Self::MixedSignalHost,
     ];
 
     /// Human-readable family name used in rejection messages.
@@ -208,6 +210,7 @@ impl PeriodicDeviceFamily {
             Self::XspiceInstance => "XSPICE devices",
             Self::RuntimeVerilogA => "runtime Verilog-A devices",
             Self::GeneratedVerilogA => "generated Verilog-A devices",
+            Self::MixedSignalHost => "mixed Verilog-AMS modules",
         }
     }
 
@@ -269,6 +272,21 @@ impl PeriodicDeviceFamily {
                     circuit.generated_veriloga_devices.len()
                 }
                 #[cfg(not(feature = "veriloga-builtins-base"))]
+                {
+                    let _ = circuit;
+                    0
+                }
+            }
+            // A mixed host is not one of `veriloga_devices`: that list holds
+            // the purely analog instances, and a mixed module's analog half is
+            // reached through its host. Counting it separately is what makes
+            // the family visible to the gap queries at all.
+            Self::MixedSignalHost => {
+                #[cfg(feature = "veriloga")]
+                {
+                    circuit.mixed_signal_hosts.len()
+                }
+                #[cfg(not(feature = "veriloga"))]
                 {
                     let _ = circuit;
                     0
@@ -336,6 +354,11 @@ const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
      need qualified cyclostationary amplitude spectra";
+/// One reason covers all six contracts for a mixed Verilog-AMS module, so it
+/// is stated once instead of six near-identical times.
+const MIXED_SIGNAL_INTERLEAVE: &str = "a mixed Verilog-AMS module's discrete half is executed by a transient event \
+     interleave, which has no periodic steady-state, small-signal or \
+     continuation form; only `.tran` runs a mixed module";
 
 /// The declaration table.
 ///
@@ -668,6 +691,24 @@ pub(crate) const fn periodic_capability_descriptor(
             noise: Absent("periodic generated Verilog-A noise sources are not declared"),
             pss_state: Absent("generated Verilog-A integration state"),
             envelope: Absent(ENVELOPE_LINEAR_SUBSET),
+        },
+        // A mixed module refuses all six outright, and for one reason rather
+        // than six: its discrete half is a running digital design advanced by
+        // the transient event interleave. There is no periodic steady state to
+        // linearize around, no charge state to export as a finite descriptor,
+        // and no period map that carries an event queue and every process's
+        // resumption point. The analyses refuse it by name before they reach
+        // this table (`Engine::ensure_no_mixed_signal_analysis`); the family is
+        // declared here so that the table stays exhaustive over what
+        // `CircuitData` can hold, and so a route that ever reaches a gap query
+        // without passing that guard fails closed instead of omitting the host.
+        F::MixedSignalHost => PeriodicCapabilityDescriptor {
+            residual_jacobian: Absent(MIXED_SIGNAL_INTERLEAVE),
+            dynamic_state: Absent(MIXED_SIGNAL_INTERLEAVE),
+            small_signal: Absent(MIXED_SIGNAL_INTERLEAVE),
+            noise: Absent(MIXED_SIGNAL_INTERLEAVE),
+            pss_state: Absent(MIXED_SIGNAL_INTERLEAVE),
+            envelope: Absent(MIXED_SIGNAL_INTERLEAVE),
         },
     }
 }
@@ -1628,6 +1669,11 @@ mod tests {
             F::XspiceInstance => [I, C, A, I, A, A],
             F::RuntimeVerilogA => [A, C, I, A, A, A],
             F::GeneratedVerilogA => [I, C, A, A, A, A],
+            // Not one of the deleted hand lists: none of them knew about mixed
+            // hosts at all, which is why a mixed module reached the periodic
+            // small-signal analyses as an omission rather than as a gap. It
+            // declares every contract absent, so the table fails closed.
+            F::MixedSignalHost => [A, A, A, A, A, A],
         }
     }
 
@@ -1736,6 +1782,115 @@ mod tests {
         assert!(dynamic_state_descriptor_gaps(&circuit).is_empty());
         assert!(cyclostationary_noise_gaps(&circuit).is_empty());
         assert!(!has_exact_periodic_nonlinear_devices(&circuit));
+    }
+
+    /// A mixed Verilog-AMS module refuses every contract, and says the same
+    /// thing about each.
+    ///
+    /// The declaration matters more than most because the family's absence
+    /// from this table was not neutral: `instance_count` reads
+    /// `mixed_signal_hosts`, which no other family reads, so before this entry
+    /// existed a mixed host was invisible to all six gap queries — a circuit
+    /// containing one looked, to every one of them, exactly like a circuit
+    /// containing nothing.
+    #[test]
+    fn a_mixed_signal_host_refuses_every_periodic_contract_for_the_same_reason() {
+        let descriptor = periodic_capability_descriptor(PeriodicDeviceFamily::MixedSignalHost);
+        for capability in PeriodicCapability::ALL {
+            let Absent(missing) = descriptor.support(capability) else {
+                panic!(
+                    "a mixed module may not declare {capability:?} anything but absent, got {:?}",
+                    descriptor.support(capability)
+                );
+            };
+            assert!(
+                missing.contains("only `.tran` runs a mixed module"),
+                "{capability:?} must say what does run a mixed module: {missing}"
+            );
+        }
+    }
+
+    /// A circuit holding one mixed host is a gap in every contract, by name.
+    ///
+    /// The analyses refuse a mixed module before they ask the table anything,
+    /// so this is the second line rather than the first: it pins that a route
+    /// which ever reaches a gap query with a mixed host present fails closed.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn a_circuit_holding_a_mixed_host_is_a_gap_in_every_contract() {
+        use crate::xspice::event_scheduler::SchedulerLimits;
+        use crate::xspice::verilog::MixedSignalHost;
+        use std::sync::Arc;
+
+        let engine = crate::engine::Engine::default();
+        let netlist =
+            crate::Netlist::parse("mixed capability gap\nRp p 0 1k\nRq q 0 1k\n.end\n").unwrap();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let p = circuit.get_node_by_name("p").unwrap();
+        let q = circuit.get_node_by_name("q").unwrap();
+        let compiled = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+            enable_ams: true,
+            ..Default::default()
+        })
+        .compile_runtime(
+            r#"
+module toggler(p, qout);
+ inout p; electrical p;
+ output qout; reg qout;
+ initial qout = 1'b0;
+ always #5 qout = ~qout;
+ analog I(p) <+ V(p) / 1000.0;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+        let mut host = MixedSignalHost::from_compiled(
+            "xmix",
+            Arc::new(compiled.model),
+            &compiled.canonical_ir,
+            &[p],
+            SchedulerLimits::default(),
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+        host.add_dac_bridge("qout", 0, (q, 0), 0.0, 1.0, 20.0)
+            .unwrap();
+        circuit.add_mixed_signal_host(host).unwrap();
+        assert_eq!(
+            PeriodicDeviceFamily::MixedSignalHost.instance_count(&circuit),
+            1,
+            "the family must count the hosts the circuit actually holds"
+        );
+
+        // The five contracts whose gap query is generic over the table. The
+        // sixth, `cyclostationary_noise_gaps`, is hand-written over the
+        // families that *restrict* colored noise per instance and asks the
+        // table nothing about an absent one — so it reports no family that
+        // declares `NoiseSources` absent, the mixed host included. That is the
+        // shape it already had for runtime and generated Verilog-A, and pnoise
+        // refuses all three through the residual and descriptor gaps above it.
+        for (contract, gaps) in [
+            ("residual", periodic_residual_gaps(&circuit)),
+            ("descriptor", periodic_descriptor_gaps(&circuit)),
+            ("pss state", pss_state_gaps(&circuit)),
+            ("envelope", envelope_gaps(&circuit)),
+            ("dynamic state", dynamic_state_descriptor_gaps(&circuit)),
+        ] {
+            assert!(
+                gaps.iter()
+                    .any(|gap| gap.family == PeriodicDeviceFamily::MixedSignalHost),
+                "the {contract} contract must report the mixed host as its own family, got {gaps:?}"
+            );
+            assert!(
+                summarize(&gaps).is_some(),
+                "the {contract} contract must summarize a gap it found"
+            );
+        }
+        assert!(
+            !has_exact_periodic_nonlinear_devices(&circuit),
+            "a mixed host must not be mistaken for a device with an exact periodic residual"
+        );
     }
 
     #[derive(Debug)]
