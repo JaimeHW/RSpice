@@ -289,6 +289,13 @@ pub struct Flattener<'a> {
     external_subckts: HashSet<String>,
     /// Unselected Verilog-A imports may supply additional names at binding.
     defer_external_module_binding: bool,
+    /// The run temperature and nominal temperature the deck stated, in
+    /// Celsius. An external master's instance parameters are the only
+    /// expressions this pass resolves for a module it cannot see, and they
+    /// have to see the deck's temperature rather than the 27 C the expression
+    /// built-ins fall back to when nothing binds `TEMP`.
+    options_temperature_celsius: Option<f64>,
+    options_nominal_temperature_celsius: Option<f64>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
     /// Xyce's explicit ground-synonym preprocessing policy.
@@ -373,6 +380,8 @@ impl<'a> Flattener<'a> {
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
             defer_external_module_binding: false,
+            options_temperature_celsius: None,
+            options_nominal_temperature_celsius: None,
             global_nodes: HashSet::new(),
             ground_policy: super::GroundPolicy::OnlyZero,
             expansion_stack: Vec::new(),
@@ -468,6 +477,8 @@ impl<'a> Flattener<'a> {
         self.parameter_direction = netlist.parameter_direction.clone();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.defer_external_module_binding = netlist.needs_veriloga_module_discovery();
+        self.options_temperature_celsius = netlist.options.temp;
+        self.options_nominal_temperature_celsius = netlist.options.tnom;
         self.global_nodes = netlist
             .global_nodes
             .iter()
@@ -3046,12 +3057,57 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
     ) -> Result<Element, ParseError> {
         if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
+            let mut master_scope = None;
             for (_, value) in params.iter_mut() {
+                // Two values only the route that binds the master can judge
+                // are carried through unresolved, so that route refuses them
+                // by kind and names the master: a string, where only the
+                // master knows whether the parameter is one, and an
+                // expression built from circuit state, which is not a value
+                // an instance can be built with at all. Resolving either here
+                // would flatten it into one untyped netlist error about a
+                // parameter the deck never wrote.
+                if parametric_value_is_string(value)
+                    || matches!(value, ParametricValue::Expression(expression)
+                        if super::expr::parameter_expression_circuit_probe(expression).is_some())
+                {
+                    continue;
+                }
+                let scope = master_scope.get_or_insert_with(|| self.external_master_scope(scope));
                 let resolved = resolve_parametric_value(value, scope, &self.random)?;
                 *value = ParametricValue::Resolved(resolved);
             }
         }
         Ok(element)
+    }
+
+    /// The scope an external master's instance parameters resolve in.
+    ///
+    /// These are the only expressions this pass evaluates for a module it
+    /// cannot see, and `TEMP`/`TEMPER`/`VT`/`TNOM` are what a card writes when
+    /// it scales a device with the run's temperature. Nothing binds `TEMP` in
+    /// a deck's parameter scope — `.OPTIONS TEMP` is an option, not a
+    /// parameter — so without this the expression built-ins fall back to 27 C
+    /// and a card on an 85 C deck silently means 27 C. A deck that binds one
+    /// of these names itself keeps its own binding.
+    fn external_master_scope(&self, scope: &ParamContext) -> ParamContext {
+        let mut master_scope = scope.clone();
+        if let Some(temperature) = self.options_temperature_celsius
+            && !master_scope.has_any_parameter_binding("TEMP")
+            && !master_scope.has_any_parameter_binding("TEMPER")
+        {
+            master_scope.set("TEMP", temperature);
+        }
+        if !master_scope.has_any_parameter_binding("TNOM") {
+            // Unlike `TEMP`, `TNOM` has no expression built-in to fall back
+            // to, so the deck's nominal temperature is bound here with the
+            // same 27 C default every model card reads it with.
+            master_scope.set(
+                "TNOM",
+                self.options_nominal_temperature_celsius.unwrap_or(27.0),
+            );
+        }
+        master_scope
     }
 
     fn resolve_optional_scoped_model(
