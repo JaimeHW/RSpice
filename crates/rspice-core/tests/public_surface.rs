@@ -851,7 +851,15 @@ use rspice_core::analysis::harmonic_balance::{
 // one; the `SimulationError::Elaboration` variant costs nothing, since the
 // ratchet counts item statements and not variants, and the two grouped
 // re-exports that publish the pair were already counted.
-const MAX_PUBLIC_ITEMS: usize = 5006;
+// 2026-09-12, +1 (5,006 -> 5,007): case 1 above, a move that preserves the set
+// of public names exactly. `EventOnlyNetKind`, `EventTraceSurface` and
+// `event_only_voltage_refusal` moved out of `analysis::transient` into the
+// `event_net` leaf, because `solver` and `circuit` both carry the kind and
+// both sit below `analysis` -- the layering ratchet had two new upward edges
+// for it. The three declarations moved with the code, `event_net` itself is a
+// private module, and the one grouped `pub use` that keeps every frontend's
+// `analysis::transient::` spelling working is the whole of this +1.
+const MAX_PUBLIC_ITEMS: usize = 5007;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

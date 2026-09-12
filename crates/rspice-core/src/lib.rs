@@ -86,6 +86,8 @@ pub mod constants;
 pub mod device;
 pub mod diagnostics;
 pub mod engine;
+/// The names an event-only net is refused and published under.
+mod event_net;
 pub mod execution;
 pub mod expr;
 /// Stable analysis and run-coordinate identities, named by both the engine's

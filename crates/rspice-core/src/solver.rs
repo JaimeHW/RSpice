@@ -22,6 +22,7 @@ pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use newton::*;
 
 use crate::Value;
+use crate::event_net::{EventOnlyNetKind, EventTraceSurface, event_only_voltage_refusal};
 use std::collections::HashMap;
 
 /// Simulation result containing node voltages and branch currents
@@ -69,7 +70,7 @@ pub struct SimulationResult {
     /// Kept private so the invariant — one entry per `node_voltages` slot,
     /// never masking ground — belongs to this type rather than to each of its
     /// producers.
-    event_only_nodes: Vec<Option<crate::analysis::transient::EventOnlyNetKind>>,
+    event_only_nodes: Vec<Option<EventOnlyNetKind>>,
 }
 
 impl SimulationResult {
@@ -135,10 +136,7 @@ impl SimulationResult {
     /// it owns is the placeholder the assembly closes with `v = 0` to restore
     /// rank, and the net's values live in the event domain the kind names.
     /// Ground and every ordinary analog node answer `None`.
-    pub fn event_only_node_kind(
-        &self,
-        node: usize,
-    ) -> Option<crate::analysis::transient::EventOnlyNetKind> {
+    pub fn event_only_node_kind(&self, node: usize) -> Option<EventOnlyNetKind> {
         if node == 0 {
             return None;
         }
@@ -150,7 +148,7 @@ impl SimulationResult {
     ///
     /// Export and projection surfaces walk the whole namespace, so they read
     /// the mask once rather than asking per node.
-    pub fn event_only_nodes(&self) -> &[Option<crate::analysis::transient::EventOnlyNetKind>] {
+    pub fn event_only_nodes(&self) -> &[Option<EventOnlyNetKind>] {
         &self.event_only_nodes
     }
 
@@ -161,10 +159,7 @@ impl SimulationResult {
     /// state calls it to restore what that state recorded. The vector is
     /// normalized to `node_voltages`, and ground is never masked, so a
     /// producer cannot leave the two out of step.
-    pub fn set_event_only_nodes(
-        &mut self,
-        nodes: Vec<Option<crate::analysis::transient::EventOnlyNetKind>>,
-    ) {
+    pub fn set_event_only_nodes(&mut self, nodes: Vec<Option<EventOnlyNetKind>>) {
         self.event_only_nodes = nodes;
         self.event_only_nodes.resize(self.node_voltages.len(), None);
         if let Some(ground) = self.event_only_nodes.first_mut() {
@@ -191,11 +186,7 @@ impl SimulationResult {
                 .unwrap_or_else(|| node.to_string());
             panic!(
                 "{}",
-                crate::analysis::transient::event_only_voltage_refusal(
-                    &name,
-                    kind,
-                    crate::analysis::transient::EventTraceSurface::SolvedPoint,
-                )
+                event_only_voltage_refusal(&name, kind, EventTraceSurface::SolvedPoint,)
             );
         }
 

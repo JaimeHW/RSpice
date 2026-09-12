@@ -93,6 +93,13 @@ const LAYERS: &[(&str, u32)] = &[
     // families reaching ten ranks up. The reader's half, which also answers
     // for the compiled Verilog-A catalog, stays in `circuit` for that reason.
     ("op_label", 0),
+    // The names an event-only net is refused and published under: which
+    // event domain owns it, which result class is being addressed, and the
+    // one sentence every surface says. Data, like `op_label`: a solved
+    // point in `solver` and the analog-touch classification in `circuit`
+    // both carry the kind, and neither should reach up into `analysis` for
+    // two field-less enums. `analysis::transient` re-exports all three.
+    ("event_net", 0),
     // SPICE engineering-suffix semantics. Both expression parsers and the
     // deck lexer consume this leaf so numeric text has one semantic owner.
     ("spice_number", 0),

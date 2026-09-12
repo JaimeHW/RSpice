@@ -18,7 +18,7 @@ pub(crate) use coupled::{XspiceDigitalBindings, XspiceDigitalParticipant};
 
 use super::scheduler;
 use super::*;
-use crate::analysis::transient::EventOnlyNetKind;
+use crate::event_net::EventOnlyNetKind;
 use crate::xspice::{
     EventInputKind, ResourceTransaction, SharedXspiceEventQueue, SharedXspiceEventValues,
     XspiceEventInputs, XspiceInstanceCheckpoint,
