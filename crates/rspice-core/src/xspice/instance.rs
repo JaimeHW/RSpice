@@ -1982,6 +1982,48 @@ impl XspiceInstance {
         }
     }
 
+    /// Enumerate the circuit nodes this instance reads a *voltage* from.
+    ///
+    /// The analog counterpart of [`Self::for_each_event_input_net`], and it
+    /// answers the same question for the same reason: which instances can a
+    /// change to this net have reached. Only node potentials are reported —
+    /// branch currents, named sources and null connections are omitted —
+    /// because the one writer that asks, the accepted step's voltage
+    /// projection, writes node rows and nothing else.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn for_each_analog_input_net(&self, mut visit: impl FnMut(usize)) {
+        fn typed_element(element: &AnalogInputConnection, visit: &mut impl FnMut(usize)) {
+            match element {
+                AnalogInputConnection::Node(node) => visit(*node),
+                AnalogInputConnection::Differential(pos, neg) => {
+                    visit(*pos);
+                    visit(*neg);
+                }
+                _ => {}
+            }
+        }
+
+        for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
+            if port.direction != super::PortDirection::In
+                && port.direction != super::PortDirection::InOut
+            {
+                continue;
+            }
+            match connection {
+                PortConnection::Analog(node) => visit(*node),
+                PortConnection::Differential(pos, neg) => {
+                    visit(*pos);
+                    visit(*neg);
+                }
+                PortConnection::AnalogVector(nodes) => nodes.iter().for_each(|node| visit(*node)),
+                PortConnection::TypedAnalogVector(elements) => elements
+                    .iter()
+                    .for_each(|element| typed_element(element, &mut visit)),
+                _ => {}
+            }
+        }
+    }
+
     /// Enumerate original digital output identities, including vector element
     /// indices and inverted connections. Inversion belongs to schedule_events;
     /// an observer or an input alias is never an additional driver.

@@ -28,6 +28,10 @@ struct ResourceProbe {
     resource: Arc<ProbeResource>,
     ports: Vec<PortSpec>,
     phase: crate::xspice::EvaluationPhase,
+    /// What the model imposes on its output port. A voltage output is the
+    /// case that makes the accepted step project its result back into the
+    /// solution and settle the boundary again.
+    output: f64,
 }
 impl CodeModel for ResourceProbe {
     fn name(&self) -> &str {
@@ -53,7 +57,7 @@ impl CodeModel for ResourceProbe {
             .transactional_resource::<ProbeResource>("counter")?
             .unwrap();
         *resource.value.lock().unwrap() += 1;
-        ctx.set_output("out", 0.0);
+        ctx.set_output("out", self.output);
         Ok(())
     }
 }
@@ -83,6 +87,21 @@ fn compile_unstarted(
 
 fn fixture(
     phase: crate::xspice::EvaluationPhase,
+) -> (
+    crate::CircuitData,
+    crate::solver::StaticMatrix,
+    Vec<f64>,
+    Arc<ProbeResource>,
+) {
+    fixture_with(phase, false)
+}
+
+/// `voltage_output` gives the resource probe a branch-backed voltage output
+/// instead of a current one, which is what makes an accepted step's
+/// `project_xspice_voltage_outputs` move the solution and re-settle.
+fn fixture_with(
+    phase: crate::xspice::EvaluationPhase,
+    voltage_output: bool,
 ) -> (
     crate::CircuitData,
     crate::solver::StaticMatrix,
@@ -177,7 +196,15 @@ endmodule
             Arc::new(ResourceProbe {
                 resource: resource.clone(),
                 phase,
-                ports: vec![PortSpec::output("out", PortType::Current)],
+                output: if voltage_output { 0.75 } else { 0.0 },
+                ports: vec![PortSpec::output(
+                    "out",
+                    if voltage_output {
+                        PortType::Voltage
+                    } else {
+                        PortType::Current
+                    },
+                )],
             }),
             vec![PortConnection::Analog(p)],
         ),
@@ -186,6 +213,10 @@ endmodule
         let mut instance =
             XspiceInstance::new(name, model, connections, &[], &[], &[], &[]).unwrap();
         instance.init().unwrap();
+        if voltage_output && name == "Aresource" {
+            let branch = circuit.allocate_branch_named("Aresource#out");
+            instance.set_output_branch(0, branch).unwrap();
+        }
         circuit.add_xspice_instance(instance);
     }
     circuit
@@ -382,5 +413,72 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
                 crate::xspice::DigitalState::One
             );
         }
+    }
+}
+
+/// One accepted step is one accepted-phase evaluation of each code model, even
+/// when the candidate's own voltage output moves the solution under it.
+///
+/// The accepted step settles the shared boundary, projects every XSPICE
+/// voltage output into the solution, and settles again if that moved anything
+/// — which is right, because an A/D bridge or a model input reading the moved
+/// row now holds a stale value. What is not right is re-running every *other*
+/// instance's `AcceptedStep` body at the same timepoint: an accepted-phase
+/// evaluation is where a code model requests its breakpoints, writes a
+/// transactional resource and advances whatever external state it owns, and
+/// none of that undoes itself on a second call. The resource counter here is
+/// the smallest witness of that class, and the deck is arranged so the second
+/// settle pass has nothing new to tell the probe.
+#[test]
+fn coupled_acceptance_evaluates_each_model_once_across_a_voltage_projection() {
+    let (mut circuit, _, mut solution, resource) =
+        fixture_with(crate::xspice::EvaluationPhase::AcceptedStep, true);
+    let p = circuit.get_node_by_name("p").unwrap() - 1;
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+    solution[stimulus] = 1.0;
+    let coeff = crate::numerics::integration::CompanionCoefficients::backward_euler();
+    for (accepted, time, dt) in [(1_u64, 0.0, 0.0), (2, 1e-9, 1e-9)] {
+        // The converged candidate is not the model's imposed output, which is
+        // what leaves the projection something to move.
+        solution[p] = 0.0;
+        let rollback = circuit.capture_xspice_acceptance();
+        let mut projected = Vec::new();
+        crate::xspice::settle_cost::reset();
+        circuit
+            .accept_mixed_transient_with(
+                time,
+                dt,
+                &mut solution,
+                XspiceCompanionPolicy {
+                    coefficients: &coeff,
+                    xyce_one_step_order2: false,
+                },
+                time == 0.0,
+                false,
+                Some(rollback.resources()),
+                false,
+                &mut projected,
+                |_, _, _, _| Ok(()),
+            )
+            .unwrap();
+        rollback.resources().commit();
+        let counts = crate::xspice::settle_cost::counts();
+        eprintln!("accepted step at t={time:e}: {counts:?}, projected={projected:?}");
+        assert!(
+            !projected.is_empty(),
+            "the probe's voltage output has to move the solution, or this pins nothing"
+        );
+        assert!(
+            (solution[p] - 0.75).abs() < 1e-15,
+            "the projection must still reach the solution: {}",
+            solution[p]
+        );
+        assert_eq!(
+            *resource.value.lock().unwrap(),
+            accepted,
+            "each accepted step must evaluate the probe exactly once; a second \
+             evaluation is a projection pass re-running an accepted-phase body \
+             that has already run at this timepoint"
+        );
     }
 }

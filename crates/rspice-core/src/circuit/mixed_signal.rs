@@ -687,20 +687,48 @@ impl CircuitData {
         )?;
         if let Some(bindings) = &bindings {
             let mut projected_quiet = false;
-            for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
-                let mut participant = XspiceDigitalParticipant::new(
-                    owner.circuit,
-                    bindings,
-                    solution,
-                    time,
-                    dt,
-                    crate::xspice::AnalysisType::Transient,
-                    crate::xspice::EvaluationPhase::AcceptedStep,
-                    companion,
-                    resources,
-                );
+            // Carried across the projection passes, and the reason an accepted
+            // step dispatches each instance once: a pass that re-settles the
+            // boundary after moving the solution resumes the candidate's own
+            // Active wave rather than opening a new one, so it evaluates the
+            // instances whose inputs the projection invalidated instead of
+            // every instance in the circuit. Re-running the rest would not ask
+            // the same question twice — it would run their `AcceptedStep`
+            // effects twice, and a model that requests a breakpoint, writes a
+            // transactional resource or advances external state does not undo
+            // the first one.
+            let mut wave = None;
+            let mut moved: Vec<usize> = Vec::new();
+            for pass in 0..MAX_BOUNDARY_SETTLE_PASSES {
+                let mut participant = if pass == 0 {
+                    XspiceDigitalParticipant::new(
+                        owner.circuit,
+                        bindings,
+                        solution,
+                        time,
+                        dt,
+                        crate::xspice::AnalysisType::Transient,
+                        crate::xspice::EvaluationPhase::AcceptedStep,
+                        companion,
+                        resources,
+                    )
+                } else {
+                    XspiceDigitalParticipant::resume(
+                        owner.circuit,
+                        bindings,
+                        solution,
+                        time,
+                        dt,
+                        crate::xspice::AnalysisType::Transient,
+                        crate::xspice::EvaluationPhase::AcceptedStep,
+                        companion,
+                        resources,
+                        wave.take(),
+                        &moved,
+                    )
+                };
                 group.settle_with(&mut digital, solution, Some(&mut participant))?;
-                drop(participant);
+                wave = participant.into_wave();
                 let updates = owner
                     .circuit
                     .project_xspice_voltage_outputs(solution, owner.circuit.num_nodes());
@@ -708,6 +736,8 @@ impl CircuitData {
                     projected_quiet = true;
                     break;
                 }
+                moved.clear();
+                moved.extend(updates.iter().map(|(index, _)| index + 1));
                 projected.extend(updates);
             }
             if !projected_quiet {

@@ -40,6 +40,24 @@ pub(crate) struct XspiceActiveWave {
     pass: usize,
 }
 
+impl XspiceActiveWave {
+    /// Open this wave past its blanket opening dispatch.
+    ///
+    /// The opening pass of a wave evaluates every registered instance, because
+    /// a wave normally opens at a timepoint no instance has been evaluated at.
+    /// A candidate that re-settles — the accepted step's voltage-projection
+    /// loop, which re-runs the boundary after moving the solution — is not
+    /// that: every instance has already run at this timepoint, and running
+    /// them again is not a second look at the same question but a second
+    /// execution of the same accepted-phase side effects. Past the opening
+    /// pass the wave dispatches only what an event or a moved analog input
+    /// marked, which is the set whose answer can actually have changed.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn skip_opening_dispatch(&mut self) {
+        self.pass = self.pass.max(1);
+    }
+}
+
 /// Copy-on-write event/model state staged by circuit probe/acceptance transactions.
 /// Dispatch topology is immutable, and per-evaluation scratch is recomputed.
 pub(crate) struct XspiceAcceptanceRollback {
@@ -820,6 +838,26 @@ impl CircuitData {
             analog_transitions: HashMap::new(),
             pass: 0,
         })
+    }
+
+    /// Owe an evaluation to every instance reading a voltage from `nodes`.
+    ///
+    /// The accepted step's voltage projection writes model outputs back into
+    /// the solution and then re-settles the boundary. Whatever reads one of
+    /// the rows it moved has a stale input and must run again; everything else
+    /// would recompute the same answer from the same inputs, and running it
+    /// again would execute its accepted-phase side effects a second time.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn record_xspice_analog_input_dispatch(&mut self, nodes: &[NodeId]) {
+        if nodes.is_empty() || self.xspice_dispatch_pending.len() != self.xspice_instances.len() {
+            return;
+        }
+        self.ensure_xspice_event_dispatch();
+        let dispatch = self
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("prepared event dispatch");
+        dispatch.record_analog_fanout_pending(&mut self.xspice_dispatch_pending, nodes);
     }
 
     /// Publish an already-resolved shared-net observation bank. These values

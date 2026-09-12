@@ -148,6 +148,11 @@ pub(crate) struct XspiceDigitalParticipant<'a> {
     wave: Option<XspiceActiveWave>,
     pending: VecDeque<DigitalBitChange>,
     initialized: bool,
+    /// Node rows an earlier pass of this same candidate moved, and with them
+    /// the fact that there *was* an earlier pass. Empty and `None` for the
+    /// opening pass, which is the ordinary case.
+    projected: &'a [NodeId],
+    resettling: bool,
 }
 
 impl<'a> XspiceDigitalParticipant<'a> {
@@ -177,7 +182,52 @@ impl<'a> XspiceDigitalParticipant<'a> {
             wave: None,
             pending: VecDeque::new(),
             initialized: false,
+            projected: &[],
+            resettling: false,
         }
+    }
+
+    /// Continue one candidate whose solution a voltage projection moved.
+    ///
+    /// The wave comes back in so that the models' accumulated analog
+    /// transitions and the pass counter survive the projection, and `projected`
+    /// names the node rows that moved. Together they make the re-settle
+    /// dispatch exactly the instances whose inputs are now stale instead of
+    /// re-running every instance's accepted-phase evaluation at a timepoint it
+    /// has already been evaluated at.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resume(
+        circuit: &'a mut CircuitData,
+        bindings: &'a XspiceDigitalBindings,
+        solution: &'a [Value],
+        time: Value,
+        timestep: Value,
+        analysis: crate::xspice::AnalysisType,
+        phase: crate::xspice::EvaluationPhase,
+        companion: XspiceCompanionPolicy<'_>,
+        resources: Option<&'a ResourceTransaction>,
+        wave: Option<XspiceActiveWave>,
+        projected: &'a [NodeId],
+    ) -> Self {
+        let mut resumed = Self::new(
+            circuit, bindings, solution, time, timestep, analysis, phase, companion, resources,
+        );
+        // Owed before the settle begins, because a resumed wave never reopens
+        // and `begin_xspice_active_wave` — the other place these marks are
+        // laid down — is what clears the pending flags.
+        resumed
+            .circuit
+            .record_xspice_analog_input_dispatch(projected);
+        resumed.initialized = wave.is_some();
+        resumed.wave = wave;
+        resumed.projected = projected;
+        resumed.resettling = true;
+        resumed
+    }
+
+    /// Hand the candidate's Active wave back to the projection loop.
+    pub(crate) fn into_wave(self) -> Option<XspiceActiveWave> {
+        self.wave
     }
 }
 
@@ -209,20 +259,27 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                     "missed XSPICE breakpoint at {due:.16e}s before shared Active work at {physical:.16e}s"
                 )));
             }
-            self.wave = Some(
-                self.circuit
-                    .begin_xspice_active_wave(
-                        physical,
-                        self.timestep - (self.time - physical),
-                        self.analysis,
-                        self.phase,
-                        XspiceCompanionPolicy {
-                            coefficients: &self.coefficients,
-                            xyce_one_step_order2: self.xyce_one_step_order2,
-                        },
-                    )
-                    .map_err(|error| external_error(error.to_string()))?,
-            );
+            let mut wave = self
+                .circuit
+                .begin_xspice_active_wave(
+                    physical,
+                    self.timestep - (self.time - physical),
+                    self.analysis,
+                    self.phase,
+                    XspiceCompanionPolicy {
+                        coefficients: &self.coefficients,
+                        xyce_one_step_order2: self.xyce_one_step_order2,
+                    },
+                )
+                .map_err(|error| external_error(error.to_string()))?;
+            if self.resettling {
+                // Opening a wave resets the pending flags, so the projection's
+                // marks are laid down again behind it.
+                wave.skip_opening_dispatch();
+                let projected = self.projected;
+                self.circuit.record_xspice_analog_input_dispatch(projected);
+            }
+            self.wave = Some(wave);
         }
         self.pending.extend(exchange.take_changes());
         let wave = self.wave.as_mut().expect("prepared physical Active wave");

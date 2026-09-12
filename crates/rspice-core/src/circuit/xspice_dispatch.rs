@@ -125,6 +125,17 @@ pub(crate) struct XspiceEventDispatch {
     /// index because the two drains report separate touched-node lists and a
     /// net number means nothing without its kind.
     real_fanout: HashMap<NodeId, Vec<u32>>,
+    /// Node to the ascending registration indices of the instances whose
+    /// input ports read a *voltage* from it.
+    ///
+    /// Read by one caller: the accepted step's voltage projection, which moves
+    /// node rows of the solution after the models have run and needs to know
+    /// which of them that invalidates. Kept beside the event fan-outs because
+    /// it is the same index over the same instance list, built in the same
+    /// walk; kept apart from them because a node number means nothing without
+    /// the kind of value being read from it.
+    #[cfg(feature = "veriloga")]
+    analog_fanout: HashMap<NodeId, Vec<u32>>,
     /// Per instance, in registration order: whether it may be skipped while
     /// its input nets are quiet. Every other instance is evaluated on the
     /// opening pass of every settle call, exactly as it was before this map
@@ -137,6 +148,8 @@ impl XspiceEventDispatch {
     pub(crate) fn build(instances: &[SharedXspiceInstance]) -> Self {
         let mut digital_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut real_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
+        #[cfg(feature = "veriloga")]
+        let mut analog_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut dirty_dispatched = Vec::with_capacity(instances.len());
         for (index, instance) in instances.iter().enumerate() {
             let index = index as u32;
@@ -153,11 +166,20 @@ impl XspiceEventDispatch {
                     entry.push(index);
                 }
             });
+            #[cfg(feature = "veriloga")]
+            instance.for_each_analog_input_net(|node| {
+                let entry = analog_fanout.entry(node).or_default();
+                if entry.last() != Some(&index) {
+                    entry.push(index);
+                }
+            });
             dirty_dispatched.push(instance.supports_event_dirty_dispatch());
         }
         Self {
             digital_fanout,
             real_fanout,
+            #[cfg(feature = "veriloga")]
+            analog_fanout,
             dirty_dispatched,
         }
     }
@@ -201,6 +223,25 @@ impl XspiceEventDispatch {
                     && !instance.event_inputs_dirty()
                 {
                     instance.make_mut().mark_event_inputs_dirty();
+                }
+            }
+        }
+    }
+
+    /// Record every instance reading a voltage from `nodes` as owed an
+    /// evaluation in the pass `pending` describes.
+    ///
+    /// The event flags have no counterpart here on purpose: an event drain
+    /// reports what it wrote, so the persistent dirty bit can be set from the
+    /// same list, while a moved node row is not an event and does not enter
+    /// any instance's event-input signature. Only the pass is owed.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn record_analog_fanout_pending(&self, pending: &mut [bool], nodes: &[NodeId]) {
+        for &node in nodes {
+            let fanout: &[u32] = self.analog_fanout.get(&node).map_or(&[], Vec::as_slice);
+            for &index in fanout {
+                if let Some(slot) = pending.get_mut(index as usize) {
+                    *slot = true;
                 }
             }
         }
