@@ -191,11 +191,16 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                 "writable"
             }
         });
-    let response = egui::Frame::new()
+    // No rule under this strip: the column header below opens with one of its
+    // own, and two hairlines a pixel apart read as one thick, uneven line.
+    egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.set_min_height(CONTEXT_HEIGHT - 10.0);
+            // A `Frame` shrinks to its content, so a band that is not told
+            // to take the visible width stops partway across the workspace.
+            ui.set_width((visible_workspace_width(ui) - 20.0).max(1.0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 let search_width = (ui.available_width() * 0.38).clamp(180.0, 420.0);
@@ -222,11 +227,6 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                 );
             });
         });
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
 }
 
 fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {

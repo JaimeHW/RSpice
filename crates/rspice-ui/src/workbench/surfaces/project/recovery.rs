@@ -73,10 +73,15 @@ fn recovery_context_strip(ui: &mut Ui, state: &mut AppState) {
             .quarantined
             .is_empty();
     let modified = crate::workbench::lifecycle::project_lifecycle::dirty_document_count(state);
-    let shown = egui::Frame::new()
+    // No rule under this strip: the panel header below opens with one of its
+    // own, and two hairlines a pixel apart read as one thick, uneven line.
+    egui::Frame::new()
         .fill(t.color.bg_inset)
         .inner_margin(Margin::symmetric(10, 5))
         .show(ui, |ui| {
+            // A `Frame` shrinks to its content, so a band that is not told
+            // to take the visible width stops partway across the workspace.
+            ui.set_width((visible_workspace_width(ui) - 20.0).max(1.0));
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let search = ui.add_sized(
@@ -111,11 +116,6 @@ fn recovery_context_strip(ui: &mut Ui, state: &mut AppState) {
                 );
             });
         });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
 }
 
 fn recovery_context_fact(ui: &mut Ui, label: &str, value: String, color: Color32) {
@@ -279,6 +279,7 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(
@@ -335,6 +336,9 @@ fn recovery_policy_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 5))
         .show(ui, |ui| {
+            // An action bar that stops short of the pane edge reads as a
+            // floating box of buttons rather than the panel's own footer.
+            ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
                 let pending = manual_checkpoint_pending();
                 let create = Button::new(if pending {
