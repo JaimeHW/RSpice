@@ -629,3 +629,127 @@ fn m_reaches_a_mixed_instance_through_a_subcircuit_wrapper() {
         "the wrapper must not change the digital trace: worst {worst:e}"
     );
 }
+
+/// A mixed host's D/A edge is an event-driven boundary for the transient
+/// recovery guards, so a deck may not be recovered differently depending on
+/// whether something *else* happens to disarm them.
+///
+/// `is_excessive_quiet_force_candidate` and `is_stagnant_force_candidate` are
+/// armed only on a circuit the engine classifies as static-source driven:
+/// both reason from `max_expected_source_delta`, which sees only the analog
+/// independent sources, so on a deck whose solution is stepped by a digital
+/// edge they read a legitimate post-edge jump as a nonphysical quiet
+/// excursion. The classification used to name XSPICE event-driven code models
+/// and nothing else.
+///
+/// A mixed Verilog-AMS instance is not one of those, and the first assertion
+/// here is what makes that concrete rather than a claim about internals: an
+/// XSPICE `dac_bridge` auto-bridge instance is what an *analog* Verilog-A
+/// boundary net gets, while a mixed module's discrete port is bridged on the
+/// host itself, so this deck reaches the recovery path reporting no XSPICE
+/// event-driven device at all even though every volt on its load comes from a
+/// digital edge.
+///
+/// The control for the run comparison is the same deck with one inert `DC 0`
+/// source added on a disconnected node. That source moves nothing and predicts
+/// nothing — every analog equation, every digital edge and every expected
+/// source delta in the two decks is identical — but its nodes enter
+/// `voltage_lte_excluded_nodes`, which is the other half of the same
+/// classification and disarms the guards. Two runs that differ by nothing but
+/// that bit must recover alike.
+#[test]
+fn a_mixed_da_edge_recovers_the_same_whether_or_not_the_guards_are_disarmed() {
+    let model = ModelFile::new(
+        r#"
+`include "disciplines.vams"
+module edge_toggler(p, n, y);
+    inout p, n;
+    electrical p, n;
+    output y;
+    reg y;
+    initial y = 1'b0;
+    always #5 y = ~y;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#,
+    );
+    // No analog voltage source anywhere: the D/A edge is the only thing that
+    // moves this circuit, and a stiff junction clamp on the driven node is
+    // what makes the post-edge Newton solve hard enough to reach the
+    // force-accept recovery path at all.
+    let base = format!(
+        "* a mixed D/A edge into a stiff junction clamp\n\
+         x1 p 0 y edge_toggler\n\
+         rp p 0 1meg\n\
+         rs y clamp 0.05\n\
+         d1 clamp 0 stiff\n\
+         c1 clamp 0 1p\n\
+         .model stiff d(is=1e-20 n=0.4 rs=0 cjo=0)\n\
+         .va \"{}\" edge_toggler\n",
+        model.path()
+    );
+    let guarded = format!("{base}.end\n");
+    // One source that never moves, on a node that touches nothing else.
+    let disarmed = format!("{base}vinert inert 0 dc 0\nrinert inert 0 1k\n.end\n");
+
+    let built = Engine::default()
+        .build_circuit(&Netlist::parse(&guarded).unwrap())
+        .unwrap();
+    assert!(
+        !built.has_xspice_event_driven_devices(),
+        "a mixed module's discrete port is bridged on its host, so the XSPICE \
+         event-driven classification cannot be what puts this deck on the \
+         event-driven side of the recovery guards"
+    );
+
+    let run = |deck: &str, label: &str| {
+        let netlist = Netlist::parse(deck).unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_tran(&netlist, 60e-9, 1e-9)
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        let quality = engine.convergence_quality();
+        println!(
+            "{label}: force_accepted_points={} timestep_reductions={} lte_rejections={} total_iterations={} points={}",
+            quality.force_accepted_points,
+            quality.timestep_reductions,
+            quality.lte_rejections,
+            quality.total_iterations,
+            result.time.len()
+        );
+        let clamp = result
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case("clamp"))
+            .expect("the clamped node is reported");
+        (quality, result.time.clone(), result.voltages[clamp].clone())
+    };
+
+    let (guarded_quality, guarded_time, guarded_clamp) = run(&guarded, "mixed deck");
+    let (disarmed_quality, disarmed_time, disarmed_clamp) =
+        run(&disarmed, "mixed deck + inert source");
+
+    assert_eq!(
+        guarded_quality.force_accepted_points, disarmed_quality.force_accepted_points,
+        "a mixed D/A edge must be an event-driven boundary in its own right, so the \
+         force-accept recovery path cannot depend on an unrelated inert source"
+    );
+    assert_eq!(
+        guarded_quality.timestep_reductions, disarmed_quality.timestep_reductions,
+        "the recovery timestep policy must not change with the classification either"
+    );
+    assert_eq!(
+        guarded_time.len(),
+        disarmed_time.len(),
+        "an inert source must not change which timepoints are accepted"
+    );
+    let worst = guarded_clamp
+        .iter()
+        .zip(&disarmed_clamp)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        worst < 1e-9,
+        "the clamped node must follow the same trace either way, worst difference {worst:e}"
+    );
+}
