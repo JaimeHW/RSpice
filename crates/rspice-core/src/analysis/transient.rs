@@ -1062,19 +1062,27 @@ impl TransientResult {
             };
 
             let trace = &mut self.digital_traces[trace_idx];
-            if trace
-                .points
-                .last()
-                .is_some_and(|point| point.time == time && point.value == value)
-            {
-                continue;
-            }
-            if trace
-                .points
-                .last()
-                .is_some_and(|point| point.value == value)
-            {
-                continue;
+            if let Some(last) = trace.points.last() {
+                // A node holds one value at one instant. A second value for a
+                // node already written at this time is a zero-width glitch: an
+                // event with no duration, which no viewer can draw and no VCD
+                // can spell. The snapshot is assembled to make it impossible —
+                // one entry per node — so reaching here is a defect in that
+                // assembly rather than something a deck can cause, and the
+                // first value written stands.
+                if last.time == time {
+                    debug_assert!(
+                        last.value == value,
+                        "digital node {node_name} was committed twice at t={time:e}: \
+                         {:?} and then {:?}",
+                        last.value,
+                        value
+                    );
+                    continue;
+                }
+                if last.value == value {
+                    continue;
+                }
             }
             trace.points.push(DigitalTracePoint { time, value });
             added_values = added_values.saturating_add(2);
