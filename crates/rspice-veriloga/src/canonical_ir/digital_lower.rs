@@ -3846,7 +3846,21 @@ impl ProcessLowerer<'_> {
                 self.unknown(width)
             }
             UnaryOp::Not => {
-                let input = self.condition(block, &unary.operand);
+                // `!x` *is* the reduction. `DigitalLogicalNot` takes an operand
+                // of any width to one bit — that is what [`Self::truth_value`]
+                // builds `!!x` out of — so reducing the operand to a truth
+                // value first and negating that emits three negations where
+                // section 4.1.8 has one, and the extra pair computes nothing
+                // the single one does not.
+                //
+                // A real operand still goes through [`Self::condition`], whose
+                // `!= 0.0` is the section 9.4 conversion rather than a width
+                // reduction: there is no four-state value to negate without it.
+                let input = if self.is_real_expression(&unary.operand) {
+                    self.condition(block, &unary.operand)
+                } else {
+                    self.expression(block, &unary.operand)
+                };
                 self.builder.push(
                     block,
                     CfgValueType::FourState { width: 1 },

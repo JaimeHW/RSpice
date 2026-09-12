@@ -307,7 +307,10 @@ use super::*;
 // drops the persisted `Instruction::CanonicalLimitState`, so a record that
 // carries one no longer deserializes at all and is discarded as unreadable
 // rather than at the version check.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 91;
+// Version 92 lowers a digital `!` to the one negation section 4.1.8 describes
+// instead of negating a `!!x` truth value, so a cached process function carries
+// two fewer `DigitalLogicalNot` values per logical negation (2026-09-12).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 92;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
