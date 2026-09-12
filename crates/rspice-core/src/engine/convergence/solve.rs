@@ -1158,7 +1158,16 @@ impl Engine {
         };
 
         // Log diagnostic information when falling back to convergence aids.
-        if let Some(err) = direct_solver_error.as_ref() {
+        if let Some(detail) = direct_solver_error
+            .as_ref()
+            .and_then(SimulationError::nonfinite_trial_detail)
+        {
+            log::warn!(
+                "DC Newton-Raphson rejected a non-finite device trial iterate after {} iteration(s): {}. Trying configured convergence aids...",
+                direct_iterations.max(1),
+                detail
+            );
+        } else if let Some(err) = direct_solver_error.as_ref() {
             log::warn!(
                 "DC Newton-Raphson linear solve failed after {} iteration(s): {}. Trying configured convergence aids...",
                 direct_iterations.max(1),
