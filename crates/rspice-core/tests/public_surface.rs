@@ -792,7 +792,17 @@ use rspice_core::analysis::harmonic_balance::{
 //   narrowing it makes dead code that `-D warnings` then deletes, and deleting
 //   a read-only accessor for a field the struct holds is the magnetics
 //   package's decision, not a visibility pass's.
-const MAX_PUBLIC_ITEMS: usize = 4988;
+//
+// The ceiling is 4,993 and the tree measures 4,993, with no headroom between
+// them. The narrowing above takes the count to 4,988; the other five are the
+// S-parameter network-quality API that landed beside this pass —
+// `NetworkQuality`, `SampledPassivity`, `network_quality_with_abort`,
+// `MAX_NETWORK_DIAGNOSTIC_PORTS` and the `pub use` that surfaces them from
+// `analysis::s_param::quality` — which is case 2 above, an entry point a
+// frontend calls rather than a helper that leaked. The next change that adds a
+// public statement states its own case here; the next one that narrows lowers
+// this number with it.
+const MAX_PUBLIC_ITEMS: usize = 4993;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
