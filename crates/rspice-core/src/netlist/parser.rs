@@ -980,6 +980,12 @@ fn parse_netlist_impl(
         options.resource_limits,
         abort,
     )?;
+    // The last point in a parse where all three instance-master namespaces
+    // are known: every `.subckt` an include contributed has been read, and
+    // every `.VERILOGA` directive collected, so a name defined twice can be
+    // reported once against the source that defined it.
+    let shadowed = shadowed_instance_master_diagnostics(&netlist, input);
+    netlist.diagnostics.extend(shadowed);
     Ok(netlist)
 }
 

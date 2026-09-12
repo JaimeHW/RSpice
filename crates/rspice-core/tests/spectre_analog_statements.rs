@@ -581,31 +581,59 @@ endmodule
 ";
 
     /// The library file is named after nothing the decks mention, so a master
-    /// can only resolve through the module name the source declares.
-    struct Library(PathBuf);
+    /// can only resolve through the module name the source declares — except
+    /// under [`Library::write_with_stem`], which exists so the file stem is
+    /// itself the name under test.
+    struct Library {
+        path: PathBuf,
+        /// The directory this test created so it could choose the file stem.
+        /// Only a directory of our own making is ever removed.
+        owned_directory: Option<PathBuf>,
+    }
+
+    /// A per-process, per-call suffix, so two runs never share a path.
+    fn unique_suffix() -> String {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock follows the Unix epoch")
+            .as_nanos();
+        format!("{}_{nonce}", std::process::id())
+    }
 
     impl Library {
         fn write(label: &str) -> Self {
-            let nonce = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock follows the Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "rspice_r31_{label}_{}_{nonce}.va",
-                std::process::id()
-            ));
+            let path =
+                std::env::temp_dir().join(format!("rspice_r31_{label}_{}.va", unique_suffix()));
             std::fs::write(&path, PROBE).expect("write the Verilog-A library");
-            Self(path)
+            Self {
+                path,
+                owned_directory: None,
+            }
+        }
+
+        /// The same source under a chosen file stem, in a directory of its own.
+        fn write_with_stem(stem: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!("rspice_r34_{}", unique_suffix()));
+            std::fs::create_dir_all(&directory).expect("create the Verilog-A library directory");
+            let path = directory.join(format!("{stem}.va"));
+            std::fs::write(&path, PROBE).expect("write the Verilog-A library");
+            Self {
+                path,
+                owned_directory: Some(directory),
+            }
         }
 
         fn quoted(&self) -> String {
-            self.0.display().to_string().replace('\\', "/")
+            self.path.display().to_string().replace('\\', "/")
         }
     }
 
     impl Drop for Library {
         fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(&self.path);
+            if let Some(directory) = &self.owned_directory {
+                let _ = std::fs::remove_dir(directory);
+            }
         }
     }
 
@@ -769,6 +797,68 @@ endmodule
         assert!(
             (lowered - 0.75).abs() < 1e-9,
             "the deck's own subcircuit must supply the 3k leg, got {lowered}"
+        );
+    }
+
+    /// The shadowing above is silent no longer, and the Spectre route says it
+    /// through the adapter: `ahdl_include` lowers to `.VERILOGA` and `subckt`
+    /// to `.subckt`, so both dialects reach the same check and word it the
+    /// same way on the same lines.
+    #[test]
+    fn a_shadowed_ahdl_included_master_warns_identically_on_both_dialects() {
+        let library = Library::write_with_stem("r31_probe");
+        let spectre = adapt(
+            "ahdl-include-shadow-warning",
+            &format!(
+                "simulator lang=spectre\n\
+                 ahdl_include \"{}\"\n\
+                 subckt r31_probe (p n)\n\
+                 RS (p n) resistor r=3k\n\
+                 ends r31_probe\n\
+                 V1 (in 0) vsource dc=1\n\
+                 R1 (in out) resistor r=1k\n\
+                 x1 (out 0) r31_probe\n\
+                 op1 dc\n",
+                library.quoted()
+            ),
+        );
+        let spice = Netlist::parse(&format!(
+            "equivalent SPICE deck\n\
+             .va \"{}\"\n\
+             .subckt r31_probe p n\n\
+             RRS p n 3k\n\
+             .ends r31_probe\n\
+             VV1 in 0 1\n\
+             RR1 in out 1k\n\
+             Xx1 out 0 r31_probe\n\
+             .op\n\
+             .end\n",
+            library.quoted()
+        ))
+        .expect("the SPICE route parses the shadowing deck");
+
+        for (route, netlist) in [("spectre", &spectre), ("spice", &spice)] {
+            assert_eq!(netlist.diagnostics.len(), 1, "{route}");
+            assert_eq!(
+                netlist.diagnostics[0].code, "shadowed-instance-master",
+                "{route}"
+            );
+            assert_eq!(netlist.diagnostics[0].line, 3, "{route}");
+        }
+        assert_eq!(spectre.diagnostics[0].message, spice.diagnostics[0].message);
+        let message = &spectre.diagnostics[0].message;
+        assert!(
+            message.starts_with("Instance master R31_PROBE is defined in more than one namespace:"),
+            "{message}"
+        );
+        assert!(message.contains(".subckt r31_probe at line 3"), "{message}");
+        assert!(
+            message.contains("the .VERILOGA file stem of '") && message.contains("at line 2"),
+            "{message}"
+        );
+        assert!(
+            message.ends_with("; the deck's .subckt is used"),
+            "{message}"
         );
     }
 }

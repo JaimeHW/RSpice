@@ -583,3 +583,262 @@ pub(super) fn rewrite_scoped_references(
         }
     }
 }
+
+/// Which namespace defines an instance master, ordered the way the engine
+/// resolves them.
+///
+/// Hierarchy expansion takes the deck's own `.subckt` first
+/// (`netlist::flattener`'s `find_subcircuit`), before an unclaimed master is
+/// preserved for external binding. What survives is bound to a Verilog-A
+/// artifact next — explicit alias, then `module=` selection, then file stem
+/// (`engine::builder`'s `VerilogABindingPriority`) — and only a name no
+/// artifact claims reaches the build-time generated catalog.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MasterNamespace {
+    DeckSubcircuit,
+    VerilogAAlias,
+    VerilogAModuleSelection,
+    VerilogAFileStem,
+    GeneratedBuiltin,
+}
+
+impl MasterNamespace {
+    /// How the warning names the definition the deck will actually get.
+    fn winner(self) -> &'static str {
+        match self {
+            Self::DeckSubcircuit => "the deck's .subckt",
+            Self::VerilogAAlias => "the .VERILOGA alias",
+            Self::VerilogAModuleSelection => "the .VERILOGA module= selection",
+            Self::VerilogAFileStem => "the .VERILOGA file stem",
+            Self::GeneratedBuiltin => "the generated built-in model",
+        }
+    }
+}
+
+/// One definition of one instance-master name.
+#[derive(Clone)]
+struct MasterClaim {
+    namespace: MasterNamespace,
+    /// Upper-case spelling the namespaces are compared on.
+    canonical: String,
+    /// Spelling as authored, so the warning points at the source token.
+    authored: String,
+    /// The `.VERILOGA` source this definition came from, when it came from one.
+    source: Option<std::path::PathBuf>,
+}
+
+/// `.subckt`, `.VERILOGA` and the build-time generated catalog are three
+/// independent instance-master namespaces, and a name defined in two of them
+/// resolves silently by precedence. Spectre warns when a master is defined
+/// twice; so does RSpice, naming both definitions and which one the deck gets.
+///
+/// Every Verilog-A spelling of one include is one namespace: an alias and a
+/// file stem that agree name the same artifact, which is not a shadow.
+///
+/// The scan over the source is what supplies a line number — neither
+/// `SubcircuitDef` nor [`VerilogAInclude`] records one — and it runs only for
+/// a name that really is defined twice.
+pub(super) fn shadowed_instance_master_diagnostics(
+    netlist: &Netlist,
+    source: &str,
+) -> Vec<ParseDiagnostic> {
+    let builtins = crate::netlist::generated_builtin_masters();
+    if netlist.veriloga_includes.is_empty() && builtins.is_empty() {
+        return Vec::new();
+    }
+
+    // Without the feature there is no Verilog-A binding to shadow: an include
+    // is carried through parsing and refused at construction.
+    let mut veriloga: Vec<MasterClaim> = Vec::new();
+    if cfg!(feature = "veriloga") {
+        for include in &netlist.veriloga_includes {
+            let path = include.file_path.as_path();
+            let spellings = [
+                (
+                    include.model_name.as_deref(),
+                    MasterNamespace::VerilogAAlias,
+                ),
+                (
+                    include.selected_module.as_deref(),
+                    MasterNamespace::VerilogAModuleSelection,
+                ),
+                (
+                    path.file_stem().and_then(|stem| stem.to_str()),
+                    MasterNamespace::VerilogAFileStem,
+                ),
+            ];
+            for (authored, namespace) in spellings {
+                let Some(authored) = authored else {
+                    continue;
+                };
+                let claim = MasterClaim {
+                    namespace,
+                    canonical: authored.to_ascii_uppercase(),
+                    authored: authored.to_owned(),
+                    source: Some(path.to_path_buf()),
+                };
+                match veriloga
+                    .iter()
+                    .position(|existing| existing.canonical == claim.canonical)
+                {
+                    Some(index) if veriloga[index].namespace <= claim.namespace => {}
+                    Some(index) => veriloga[index] = claim,
+                    None => veriloga.push(claim),
+                }
+            }
+        }
+    }
+
+    let builtin_claim = |canonical: &str| {
+        builtins.get(canonical).map(|authored| MasterClaim {
+            namespace: MasterNamespace::GeneratedBuiltin,
+            canonical: canonical.to_owned(),
+            authored: (*authored).to_owned(),
+            source: None,
+        })
+    };
+
+    let mut diagnostics = Vec::new();
+    let mut reported: Vec<String> = Vec::new();
+    for subckt in &netlist.subcircuits {
+        let canonical = subckt.name.to_ascii_uppercase();
+        let mut definitions = vec![MasterClaim {
+            namespace: MasterNamespace::DeckSubcircuit,
+            canonical: canonical.clone(),
+            authored: subckt.name.clone(),
+            source: None,
+        }];
+        definitions.extend(
+            veriloga
+                .iter()
+                .find(|claim| claim.canonical == canonical)
+                .cloned(),
+        );
+        definitions.extend(builtin_claim(&canonical));
+        if definitions.len() < 2 || reported.contains(&canonical) {
+            continue;
+        }
+        reported.push(canonical);
+        diagnostics.push(shadowed_master_warning(&definitions, source));
+    }
+    for claim in &veriloga {
+        if reported.contains(&claim.canonical) {
+            continue;
+        }
+        let Some(builtin) = builtin_claim(&claim.canonical) else {
+            continue;
+        };
+        reported.push(claim.canonical.clone());
+        diagnostics.push(shadowed_master_warning(&[claim.clone(), builtin], source));
+    }
+    diagnostics
+}
+
+/// The one warning for one twice-defined master. `definitions` is in
+/// resolution order, so its first entry is the definition that is used.
+fn shadowed_master_warning(definitions: &[MasterClaim], source: &str) -> ParseDiagnostic {
+    let described: Vec<(String, usize)> = definitions
+        .iter()
+        .map(|claim| describe_master_claim(claim, source))
+        .collect();
+    let spellings: Vec<&str> = described
+        .iter()
+        .map(|(description, _)| description.as_str())
+        .collect();
+    let message = format!(
+        "Instance master {} is defined in more than one namespace: {}; {} is used",
+        definitions[0].canonical,
+        join_master_definitions(&spellings),
+        definitions[0].namespace.winner()
+    );
+    ParseDiagnostic::warning(described[0].1, "shadowed-instance-master", message)
+}
+
+/// One definition as the warning spells it, with the source line it was found
+/// on — `0` when the scan cannot see it, which is what
+/// [`ParseDiagnostic::line`] reserves for a diagnostic with no single line.
+fn describe_master_claim(claim: &MasterClaim, source: &str) -> (String, usize) {
+    let at = |line: usize| {
+        if line == 0 {
+            String::new()
+        } else {
+            format!(" at line {line}")
+        }
+    };
+    match claim.namespace {
+        MasterNamespace::DeckSubcircuit => {
+            let line = deck_subcircuit_line(source, &claim.authored);
+            (format!(".subckt {}{}", claim.authored, at(line)), line)
+        }
+        MasterNamespace::GeneratedBuiltin => (
+            format!("the generated built-in model {}", claim.authored),
+            0,
+        ),
+        namespace => {
+            // Only a Verilog-A definition reaches this arm, and each one
+            // records the source that declared it.
+            let path = claim.source.as_deref().unwrap_or(std::path::Path::new(""));
+            let line = veriloga_include_line(source, path);
+            let spelling = match namespace {
+                MasterNamespace::VerilogAAlias => format!(".VERILOGA alias {}", claim.authored),
+                MasterNamespace::VerilogAModuleSelection => {
+                    format!(".VERILOGA module={}", claim.authored)
+                }
+                _ => ".VERILOGA file stem".to_owned(),
+            };
+            (
+                format!("the {spelling} of '{}'{}", path.display(), at(line)),
+                line,
+            )
+        }
+    }
+}
+
+fn join_master_definitions(definitions: &[&str]) -> String {
+    match definitions {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [head @ .., last] => format!("{} and {last}", head.join(", ")),
+    }
+}
+
+/// The line a `.subckt` of this name is declared on, or `0`.
+fn deck_subcircuit_line(source: &str, name: &str) -> usize {
+    source
+        .lines()
+        .position(|line| {
+            strip_leading_directive(line.trim_start(), ".subckt").is_some_and(|rest| {
+                rest.split_whitespace()
+                    .next()
+                    .is_some_and(|declared| declared.eq_ignore_ascii_case(name))
+            })
+        })
+        .map_or(0, |index| index + 1)
+}
+
+/// The line a `.VERILOGA`/`.VA` directive names this file on, or `0`.
+fn veriloga_include_line(source: &str, path: &std::path::Path) -> usize {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return 0;
+    };
+    source
+        .lines()
+        .position(|line| {
+            let trimmed = line.trim_start();
+            (strip_leading_directive(trimmed, ".veriloga").is_some()
+                || strip_leading_directive(trimmed, ".va").is_some())
+                && trimmed.contains(file_name)
+        })
+        .map_or(0, |index| index + 1)
+}
+
+/// What follows `directive` when `line` opens with it as a whole word.
+fn strip_leading_directive<'a>(line: &'a str, directive: &str) -> Option<&'a str> {
+    let head = line.get(..directive.len())?;
+    if !head.eq_ignore_ascii_case(directive) {
+        return None;
+    }
+    let rest = &line[directive.len()..];
+    rest.starts_with(char::is_whitespace)
+        .then(|| rest.trim_start())
+}
