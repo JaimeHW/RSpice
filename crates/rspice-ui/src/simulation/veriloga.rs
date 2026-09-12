@@ -531,6 +531,10 @@ impl PreparedVerilogARuntimeSet {
     }
 
     /// Executable devices only, for consumers such as the browser JIT.
+    ///
+    /// The browser JIT is the only shipping caller, and it is compiled only
+    /// into the worker: a native build reaches the set through `sources`.
+    #[cfg(any(test, all(target_arch = "wasm32", feature = "browser-worker")))]
     pub fn device_runtimes(&self) -> impl ExactSizeIterator<Item = &PreparedVerilogARuntime> {
         self.runtimes.iter()
     }
