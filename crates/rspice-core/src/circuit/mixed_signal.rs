@@ -251,6 +251,19 @@ impl<'a> MixedHostTrialGroup<'a> {
         Ok(action)
     }
 
+    /// Tell every instance that the circuit's shared queue had an activation
+    /// of its own due at this trial's tick.
+    ///
+    /// Called on the acceptance paths only, because acceptance is where the
+    /// answer is used: a boundary move at a timepoint a process was due to run
+    /// at is the schedule's, and the accepted-flip ceiling does not count it.
+    /// An enrolled instance holds no queue and cannot read this for itself.
+    fn note_scheduled_activation(&mut self) {
+        for host in self.hosts.iter_mut() {
+            host.note_scheduled_activation();
+        }
+    }
+
     fn prepare(
         &mut self,
     ) -> Result<Vec<crate::xspice::verilog::PreparedMixedAcceptance<'_>>, SimulationError> {
@@ -699,6 +712,9 @@ impl CircuitData {
             Some((initial_step, final_step)),
             false,
         )?;
+        if digital.opened_on_scheduled_activation() {
+            group.note_scheduled_activation();
+        }
         if let Some(bindings) = &bindings {
             let mut projected_quiet = false;
             // Carried across the projection passes, and the reason an accepted
@@ -838,6 +854,9 @@ impl CircuitData {
                 Some((initial_step, final_step)),
                 false,
             )?;
+            if digital.opened_on_scheduled_activation() {
+                group.note_scheduled_activation();
+            }
             group.settle(&mut digital, voltages)?;
             for host in group.hosts.iter_mut() {
                 let stamped = host.stamp(voltages, |_, _, _| {}, |_, _| {});

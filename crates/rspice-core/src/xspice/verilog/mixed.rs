@@ -185,6 +185,28 @@ pub(crate) enum BoundaryBitSource {
 /// nothing for a smaller step to find, and the run would otherwise chatter to
 /// `tstop` and report a trace.
 ///
+/// # The one move this count does not take
+///
+/// A move the discrete half's *own* schedule explains is not evidence of that
+/// loop, and is not counted: see [`BoundaryMove::Scheduled`]. The premise above
+/// — a resolved waveform moves a boundary net once in several accepted points —
+/// holds only while the stepper has points to spare between two activations. A
+/// clock whose period is a few minimum steps does not leave it any: the step
+/// after a landed activation restarts at a tenth of the gap to the next one
+/// (`transient::breakpoint`), the floor clamps that back up, and the stepper
+/// then lands on every tick and on nothing else. Such a clock moved its D/A
+/// bridge at every accepted point and was refused here as a zero-delay loop —
+/// a 10 fs `always #0.01` toggle under a millisecond maximum step at point 129,
+/// with the analog side entirely passive. The schedule is the fact there, and
+/// the bound that belongs to a schedule is the transient stepper's own
+/// (`sub_minimum_activation_check`), which measures the rate the run advances
+/// at rather than the boundary.
+///
+/// The exchange is deliberate: feedback through a module that *does* delay its
+/// reaction — `always @(c) #1 y = ~c` — is now bounded by that schedule guard
+/// rather than by this one, and this one keeps the loop it was written for, the
+/// one with no delay anywhere in it.
+///
 /// 128 rather than a smaller number because the cost of being wrong is
 /// asymmetric: a false positive refuses a deck that would have run, and a false
 /// negative costs the extra timepoints it takes to reach the ceiling.
@@ -199,12 +221,40 @@ const MAX_CONSECUTIVE_BOUNDARY_FLIPS: u32 = 128;
 /// a `u16` so an accepted timepoint costs a shift rather than an allocation.
 const BOUNDARY_VALUE_HISTORY: u32 = 8;
 
+/// What one recorded value did to a boundary net, as the flip run counts it.
+///
+/// The three cases are what separate the loop [`MAX_CONSECUTIVE_BOUNDARY_FLIPS`]
+/// is about from a schedule that merely runs faster than the stepper can spare
+/// points for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundaryMove {
+    /// The net holds the value the previous record left it at. The run ends:
+    /// an interval the solver resolved without the boundary moving is exactly
+    /// what a loop never produces.
+    Still,
+    /// The net moved at a timepoint the discrete half had an activation of its
+    /// own due at — the schedule's own tick, and the module's own doing.
+    ///
+    /// The run neither grows nor restarts. It does not grow because the move
+    /// is explained: a process woke on its own delay and assigned the net, and
+    /// no analog solution took part in deciding that it should. It does not
+    /// restart either, because a scheduled activation is no evidence that a
+    /// loop underneath it has stopped — a design with both keeps whatever run
+    /// its unexplained moves have built, and is still refused at the ceiling.
+    Scheduled,
+    /// The net moved with nothing in the discrete half's queue to explain it,
+    /// so the only thing that can have moved it is the analog solution at this
+    /// timepoint. This is the move the ceiling counts.
+    Unexplained,
+}
+
 /// One boundary net's retained values and consecutive movement count.
 /// Accepted histories record every timepoint; diagnostic probe histories
 /// record only changes and are stored separately from accepted state.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct BoundaryNetHistory {
-    /// Consecutive recorded values that moved this net.
+    /// Consecutive recorded values that moved this net with nothing scheduled
+    /// to explain the move.
     run: u32,
     /// The last [`BOUNDARY_VALUE_HISTORY`] recorded values, two bits each,
     /// most recent in the low bits.
@@ -233,10 +283,14 @@ impl BoundaryNetHistory {
         }
     }
 
-    fn push(&mut self, bit: FourStateBit, moved: bool) {
+    fn push(&mut self, bit: FourStateBit, move_kind: BoundaryMove) {
         self.recent = (self.recent << 2) | Self::code(bit);
         self.filled = self.filled.saturating_add(1).min(BOUNDARY_VALUE_HISTORY);
-        self.run = if moved { self.run.saturating_add(1) } else { 0 };
+        self.run = match move_kind {
+            BoundaryMove::Still => 0,
+            BoundaryMove::Scheduled => self.run,
+            BoundaryMove::Unexplained => self.run.saturating_add(1),
+        };
     }
 
     /// The retained values, oldest first.
@@ -823,6 +877,24 @@ struct ActiveTrial {
     /// tick. Both events are inside one step and no second solve can separate
     /// them, because re-solving lands on the movement again.
     digital_feedback: bool,
+    /// Whether the discrete half had an activation of its own due at or before
+    /// this trial's tick when the trial opened.
+    ///
+    /// Read before the queue is drained, because draining it is what consumes
+    /// the evidence: afterwards every activation this timepoint ran has left
+    /// the wheel and the module looks as idle as a comparator that only ever
+    /// reacts to its input. A boundary this trial moves is then the schedule's
+    /// own move rather than the analog solution's, which is the one thing
+    /// [`MAX_CONSECUTIVE_BOUNDARY_FLIPS`] must not count.
+    ///
+    /// An enrolled instance schedules into the circuit's shared queue and
+    /// cannot see it from here, so for one of those this opens `false` and the
+    /// coordinator reports the queue's own answer through
+    /// [`MixedSignalHost::note_scheduled_activation`] — the same shape
+    /// `digital_feedback` is given by
+    /// [`MixedSignalHost::note_shared_digital_feedback`], and for the same
+    /// reason.
+    scheduled_activation: bool,
     /// The digital host as it stood when the trial opened — the whole of what
     /// a rejected trial has to put back.
     ///
@@ -1995,6 +2067,13 @@ impl MixedSignalHost {
                 ),
             });
         }
+        // Before anything below drains the queue: see
+        // `ActiveTrial::scheduled_activation`.
+        let scheduled_activation = self
+            .state
+            .digital
+            .next_tick()
+            .is_some_and(|next| next <= tick);
         if let Some(next) = self.state.digital.next_tick()
             && next < tick
         {
@@ -2114,6 +2193,7 @@ impl MixedSignalHost {
         self.trial = Some(ActiveTrial {
             start_digital,
             digital_feedback: false,
+            scheduled_activation,
             rollback,
             analog_inputs: previous_inputs,
             tick,
@@ -2145,6 +2225,23 @@ impl MixedSignalHost {
     pub(crate) fn note_shared_digital_feedback(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
             trial.digital_feedback = true;
+        }
+    }
+
+    /// Record that the circuit's shared process queue had an activation of its
+    /// own due at or before this trial's tick when the trial opened.
+    ///
+    /// An enrolled instance holds values, not a queue, so it cannot read this
+    /// for itself; the coordinator owns the wheel every enrolled instance
+    /// schedules into and reports its answer here. The fact is the circuit's
+    /// rather than this instance's on purpose: one instance's clock and
+    /// another's D/A bridge can meet on one deck node, so the question a
+    /// boundary move has to be judged against is whether *anything* was
+    /// scheduled to run at this timepoint. See
+    /// [`ActiveTrial::scheduled_activation`].
+    pub(crate) fn note_scheduled_activation(&mut self) {
+        if let Some(trial) = self.trial.as_mut() {
+            trial.scheduled_activation = true;
         }
     }
 
@@ -3130,7 +3227,17 @@ impl MixedSignalHost {
                 .read(signal)
                 .map_or(FourStateBit::HighImpedance, |value| value.bit(bit));
             if entry.filled == 0 || entry.recent & 3 != BoundaryNetHistory::code(bit) {
-                entry.push(bit, entry.filled != 0);
+                // Rejected probes of one timepoint: every retained sample is a
+                // transition the solver produced, and there is no schedule to
+                // attribute one to inside a single tick.
+                entry.push(
+                    bit,
+                    if entry.filled == 0 {
+                        BoundaryMove::Still
+                    } else {
+                        BoundaryMove::Unexplained
+                    },
+                );
             }
         };
         for (bridge, entry) in bridges.adc.iter().zip(&mut history.adc) {
@@ -3219,6 +3326,14 @@ impl MixedSignalHost {
                 .read(signal)
                 .map_or(FourStateBit::HighImpedance, |value| value.bit(bit))
         };
+        // One reading of this timepoint, shared by every net on it: whether a
+        // process was due to run here is a fact about the timepoint, not about
+        // a bridge.
+        let classify = |moved: bool| match (moved, trial.scheduled_activation) {
+            (false, _) => BoundaryMove::Still,
+            (true, true) => BoundaryMove::Scheduled,
+            (true, false) => BoundaryMove::Unexplained,
+        };
         adc.clear();
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let mut entry = self
@@ -3229,7 +3344,7 @@ impl MixedSignalHost {
                 .unwrap_or_default();
             entry.push(
                 read_bit(bridge.signal, bridge.bit),
-                trial.vectors.adc_moved.get(index).copied().unwrap_or(false),
+                classify(trial.vectors.adc_moved.get(index).copied().unwrap_or(false)),
             );
             adc.push(entry);
         }
@@ -3243,7 +3358,7 @@ impl MixedSignalHost {
                 .unwrap_or_default();
             entry.push(
                 read_bit(bridge.signal, bridge.bit),
-                trial.vectors.dac_moved.get(index).copied().unwrap_or(false),
+                classify(trial.vectors.dac_moved.get(index).copied().unwrap_or(false)),
             );
             dac.push(entry);
         }
@@ -3251,6 +3366,12 @@ impl MixedSignalHost {
 
     /// The diagnostic for a boundary that has moved at every accepted timepoint
     /// for too long, or `None` when none has.
+    ///
+    /// "Too long" counts only the moves no schedule explains — the rule is
+    /// [`BoundaryMove`], and the reason it exists is on
+    /// [`MAX_CONSECUTIVE_BOUNDARY_FLIPS`]. The reported `moved N times` is that
+    /// same count, so the number in the message is the number the ceiling was
+    /// compared against.
     fn boundary_flip_run(
         &self,
         adc_history: &[BoundaryNetHistory],
@@ -5041,6 +5162,137 @@ endmodule
         assert!(
             (target - 1.8e-9).abs() < 1.0e-12,
             "the root must be the interpolated crossing at 1.8 ns, got {target:e}"
+        );
+    }
+
+    /// A module with no schedule of its own: its D/A output moves only because
+    /// the analog side moved its A/D input, which is the loop
+    /// [`MAX_CONSECUTIVE_BOUNDARY_FLIPS`] exists for.
+    const UNSCHEDULED_FLIP: &str = r#"
+module unscheduled_flip(p, n, adc, dac);
+  inout p, n;
+  electrical p, n;
+  input adc; wire adc;
+  output dac; reg dac;
+  initial dac = 1'b0;
+  always @(adc) dac = ~dac;
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+    /// The same boundary, moved by the module's own femtosecond-scale clock
+    /// instead: one activation per tick, and the analog side takes no part.
+    const SCHEDULED_FLIP: &str = r#"
+module scheduled_flip(p, n, dac);
+  inout p, n;
+  electrical p, n;
+  output dac; reg dac;
+  initial dac = 1'b0;
+  always #1 dac = ~dac;
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+
+    fn flip_host(source: &str, instance: &str, adc: bool) -> MixedSignalHost {
+        let mut host =
+            MixedSignalHost::compile(source, None, instance, &[1, 0], SchedulerLimits::default())
+                .expect("the flip module compiles and starts");
+        if adc {
+            host.add_adc_bridge("adc", 0, (3, 0), 0.4, 0.6)
+                .expect("A/D bridge");
+        }
+        host.add_dac_bridge("dac", 0, (4, 0), 0.0, 5.0, 100.0)
+            .expect("D/A bridge");
+        host
+    }
+
+    /// **The accepted-flip ceiling, kept.** A boundary that moves at every
+    /// accepted timepoint with nothing scheduled to explain it is still
+    /// refused at the ceiling, with the count in the message.
+    ///
+    /// The deck-level fixtures for cross-domain feedback all refuse at
+    /// *startup*, from the rejected-probe diagnostic, so none of them reaches
+    /// this path at all: an accepted-history refusal needs a loop that settles
+    /// inside each timepoint and moves again at the next one. It is driven
+    /// here from the module's own interface, which is the only place that
+    /// shape can be produced deterministically — and it is the case the
+    /// schedule exclusion had to leave alone.
+    #[test]
+    fn a_boundary_flip_run_refuses_a_move_no_schedule_explains() {
+        let mut host = flip_host(UNSCHEDULED_FLIP, "xunscheduled", true);
+        let mut refusal = None;
+        for tick in 0..(u64::from(MAX_CONSECUTIVE_BOUNDARY_FLIPS) + 16) {
+            begin(&mut host, tick);
+            let sense = if tick % 2 == 1 { 1.0 } else { 0.0 };
+            while host
+                .settle_analog_bridges(&[0.0, 0.0, sense, 0.0])
+                .expect("bridges settle")
+            {}
+            if let Err(error) = host.accept_trial() {
+                refusal = Some((tick, error));
+                break;
+            }
+        }
+        let (tick, error) = refusal
+            .expect("a boundary the analog side moves at every accepted timepoint must be refused");
+        assert_eq!(
+            host.next_event_time().expect("the wheel is readable"),
+            None,
+            "the module must have nothing scheduled, or the refusal proves nothing about \
+             an unexplained move"
+        );
+        let MixedSignalError::BoundaryOscillation {
+            limit,
+            within_one_timepoint,
+            nets,
+            ..
+        } = &error
+        else {
+            panic!("the wrong refusal at tick {tick}: {error}");
+        };
+        assert_eq!(*limit, MAX_CONSECUTIVE_BOUNDARY_FLIPS);
+        assert!(
+            !*within_one_timepoint,
+            "this is the accepted-history ceiling, not the settle one: {error}"
+        );
+        let moves = u64::from(MAX_CONSECUTIVE_BOUNDARY_FLIPS) + 1;
+        assert!(
+            nets.iter()
+                .any(|net| net.contains(&format!("moved {moves} times"))
+                    && net.contains("driven by the module")),
+            "the refusal must report the run that tripped the ceiling: {error}"
+        );
+    }
+
+    /// **The schedule's own tick, not counted.** A clock that moves its D/A
+    /// bridge at every accepted timepoint runs past the ceiling.
+    ///
+    /// One activation per tick and one accepted timepoint per activation is
+    /// what a stepper does with a clock whose period is a few minimum steps,
+    /// and it used to be refused here as a zero-delay loop at the 129th point
+    /// — the analog side having taken no part in any of them. The vacuity
+    /// guard is the move count: the boundary has to actually move at more
+    /// accepted points than the ceiling for the run to say anything.
+    #[test]
+    fn a_boundary_flip_run_does_not_count_a_scheduled_clocks_own_tick() {
+        let mut host = flip_host(SCHEDULED_FLIP, "xscheduled", false);
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        let mut previous = host.read_digital("dac").expect("dac is readable");
+        let mut moves = 0_u32;
+        for tick in 1..(u64::from(MAX_CONSECUTIVE_BOUNDARY_FLIPS) + 40) {
+            begin(&mut host, tick);
+            settle_and_accept(&mut host, &[0.0; 4]);
+            let now = host.read_digital("dac").expect("dac is readable");
+            if now != previous {
+                moves += 1;
+            }
+            previous = now;
+        }
+        assert!(
+            moves > MAX_CONSECUTIVE_BOUNDARY_FLIPS,
+            "the clock has to move the boundary at more accepted timepoints than the \
+             ceiling for this to be the case it is about, saw {moves}"
         );
     }
 

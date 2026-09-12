@@ -711,6 +711,9 @@ impl MixedDigitalCoordinator {
                 });
             }
         }
+        // Read before the queue is drained, and reported to the instances by
+        // `MixedHostTrialGroup`: see `ActiveTrial::scheduled_activation`.
+        let scheduled_activation = self.digital.next_tick().is_some_and(|next| next <= tick);
         let rollback = self.digital.clone();
         Ok(SharedDigitalTrial {
             coordinator: self,
@@ -719,6 +722,7 @@ impl MixedDigitalCoordinator {
             tick,
             published_tick: tick,
             probe,
+            scheduled_activation,
         })
     }
 }
@@ -741,6 +745,10 @@ pub(crate) struct SharedDigitalTrial<'a> {
     /// store's clock go backwards inside one trial.
     published_tick: u64,
     probe: bool,
+    /// Whether the shared queue held an activation due at or before this
+    /// trial's tick when it opened. Read once, at the only instant it is
+    /// readable — see `MixedSignalHost::note_scheduled_activation`.
+    scheduled_activation: bool,
 }
 
 struct CircuitAnalogParticipant<'a, 'p> {
@@ -787,6 +795,15 @@ impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
 }
 
 impl SharedDigitalTrial<'_> {
+    /// Whether this trial opened on a tick the shared queue already had work
+    /// due at.
+    ///
+    /// The one caller is the acceptance path, which hands the answer to every
+    /// enrolled instance before a boundary move at this timepoint is judged.
+    pub(crate) fn opened_on_scheduled_activation(&self) -> bool {
+        self.scheduled_activation
+    }
+
     /// Read every process probe before allowing any instance to run.
     pub(crate) fn advance(
         &mut self,
