@@ -139,6 +139,7 @@ jobs:
       - name: Test Verilog-A-gated core suites through the bytecode interpreter
         run: >-
           cargo test --locked -p rspice-core --features veriloga --no-fail-fast
+          --test capability_refusals
           --test connect_module_insertion
           --test transient_checkpoint
           --test veriloga_ac
@@ -159,7 +160,7 @@ jobs:
           --test veriloga_transient
       # A second invocation rather than four more names above: these suites
       # need a generated model compiled in, and adding `veriloga-model-diode-cmc`
-      # to the list above would reroute cards the eighteen suites there assert
+      # to the list above would reroute cards the nineteen suites there assert
       # about through the generated device instead of the native one.
       - name: Test the tri-family and generated-route suites through the bytecode interpreter
         run: >-
@@ -289,6 +290,7 @@ jobs:
       - name: Test Verilog-A-gated core suites through the native JIT (Linux x64)
         run: >-
           cargo test --locked -p rspice-core --features veriloga-native --no-fail-fast
+          --test capability_refusals
           --test connect_module_insertion
           --test transient_checkpoint
           --test veriloga_ac
