@@ -399,6 +399,10 @@ struct ProcessSlot {
     /// How to enter the process next time. `None` enters at the entry block,
     /// which is what a process that has never run does.
     resume: Option<DigitalResumeState>,
+    /// The store sequence this process's wait was armed at, so that a change
+    /// older than the wait cannot satisfy it. Zero for a standing `always`
+    /// list, which was armed before anything happened — see the arming barrier
+    /// in `run_process`.
     wait_after_sequence: u64,
     remaining_events: DigitalEventCount,
 }
@@ -1166,10 +1170,33 @@ impl DigitalHost {
                     }
                     DigitalWaitRequest::Event(terms) => {
                         self.slots[index].remaining_events = remaining;
-                        self.slots[index].wait_after_sequence = self
-                            .store
-                            .current_sequence()
-                            .ok_or(DigitalRunError::EventSequenceOverflow)?;
+                        // An `always` block's own list is the process's
+                        // standing sensitivity, not a wait armed where it is
+                        // reached: IEEE 1364-2005 section 9.9.2 restarts the
+                        // process at its event control, and that control has
+                        // been watching since before the process first ran. So
+                        // a write the body made on its way back to the top is
+                        // a change the list was already subscribed to, and
+                        // `always @(q or seed) q = ~q;` is the zero-delay loop
+                        // the kernel's delta ceiling exists to bound — not a
+                        // process that deadlocks on its own event.
+                        //
+                        // A `@(...)` reached inside a body is the other case
+                        // and keeps the barrier, because it starts watching
+                        // where it is written: `clk = 1; @(posedge clk) ...`
+                        // waits for the *next* edge, not the one it just made.
+                        //
+                        // Zero is the barrier that stops nothing: sequences
+                        // are handed out from one, so no transition can carry
+                        // it.
+                        let barrier = if self.is_standing_sensitivity(index, &terms) {
+                            0
+                        } else {
+                            self.store
+                                .current_sequence()
+                                .ok_or(DigitalRunError::EventSequenceOverflow)?
+                        };
+                        self.slots[index].wait_after_sequence = barrier;
                         self.subscribe(index, &terms);
                         self.slots[index].status = ProcessStatus::AwaitingEvent(terms);
                         Ok(())
@@ -1358,6 +1385,22 @@ impl DigitalHost {
         } else {
             self.queue(index, tick)
         }
+    }
+
+    /// Whether this suspension is the process's standing `always @(...)` list.
+    ///
+    /// `CfgDigitalProcess::static_sensitivity` is present only for a process
+    /// that opens with an event control, and is the list such a process comes
+    /// back to on every pass. Matching the suspension against it is how the
+    /// host tells the standing list from a `@(...)` written inside a body —
+    /// the front end already decided which shape this process has, and the
+    /// answer is asked of it rather than rediscovered here.
+    fn is_standing_sensitivity(&self, index: usize, terms: &[DigitalSensitivityTerm]) -> bool {
+        self.plan
+            .processes
+            .get(index)
+            .and_then(|process| process.static_sensitivity.as_ref())
+            .is_some_and(|standing| standing.terms.as_slice() == terms)
     }
 
     /// Subscribe a process to every net its sensitivity list names.
