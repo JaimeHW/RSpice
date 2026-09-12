@@ -496,6 +496,12 @@ fn known_subckt_names(netlist: &Netlist) -> HashSet<String> {
     for include in &netlist.veriloga_includes {
         names.extend(include.declared_model_names().map(str::to_ascii_uppercase));
     }
+    // The build-time generated catalog is a master namespace of its own: an
+    // `X` card that names one binds against it during construction
+    // (`engine::builder`'s `instantiate_builtin`, after the Verilog-A
+    // artifacts). Leaving it out made every shipped compact model read as an
+    // unknown subcircuit in a deck that builds and runs.
+    names.extend(super::generated_builtin_masters().keys().cloned());
     names
 }
 
@@ -738,6 +744,33 @@ mod tests {
         let diagnostics = netlist.lint_unknown_references();
 
         assert_eq!(diagnostics, Vec::new());
+    }
+
+    /// An `X` card naming a model from the build-time generated catalog
+    /// builds and runs, so the lint must not call it undefined — while a
+    /// near-miss beside it is still the typo it looks like.
+    #[test]
+    fn a_generated_builtin_master_is_known_and_a_typo_beside_it_is_not() {
+        let deck = "source map\n\
+            X1 a k DIODE_CMC\n\
+            X2 a k DIODE_CMD\n\
+            .end\n";
+
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let names = netlist
+            .lint_unknown_references()
+            .into_iter()
+            .map(|diagnostic| diagnostic.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"DIODE_CMD".to_owned()), "{names:?}");
+        // Without the generated catalog compiled in, the master genuinely is
+        // undefined, and saying so stays correct.
+        assert_eq!(
+            names.contains(&"DIODE_CMC".to_owned()),
+            !cfg!(feature = "veriloga-builtins-base"),
+            "{names:?}"
+        );
     }
 
     #[test]
