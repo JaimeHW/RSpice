@@ -1535,3 +1535,175 @@ fn every_digital_activation_becomes_a_bit_exact_accepted_timepoint() {
         &missing[..missing.len().min(5)]
     );
 }
+
+//=============================================================================
+// 4 — a digital schedule finer than the analog resolution lands, never refuses
+//=============================================================================
+
+/// A free-running clock declared in picoseconds on a femtosecond precision.
+///
+/// `always #1` is one *module* time unit, so this toggles every picosecond —
+/// three orders of magnitude below the nanosecond cadence the rest of this
+/// suite runs at, and far below any step the analog controller would pick on
+/// its own. The analog half is a resistor written as a contribution so the
+/// module is a mixed one; the interesting half is entirely discrete.
+const PICOSECOND_CLOCK: &str = r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module picosecond_clock(p, n, clk);
+    inout p, n;
+    electrical p, n;
+    output clk;
+    reg clk;
+    initial clk = 1'b0;
+    always #1 clk = ~clk;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// A module whose digital half chains a one-femtosecond delay onto an
+/// activation the *analog* side produced.
+///
+/// The `posedge` comes from an A/D conversion of a deck node, so the first
+/// activation lands wherever the analog crossing lands; the `#0.001` — one
+/// thousandth of the declared picosecond unit, one tick of the declared
+/// femtosecond precision — then asks for a second activation an interval later
+/// that no analog step is allowed to resolve.
+const FEMTOSECOND_FOLLOW: &str = r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module femtosecond_follow(p, n, sense, q, qd);
+    inout p, n;
+    electrical p, n;
+    input sense;
+    output q, qd;
+    wire sense;
+    reg q, qd;
+    initial begin q = 1'b0; qd = 1'b0; end
+    always @(posedge sense) begin
+        q = ~q;
+        #0.001 qd = ~qd;
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+fn picosecond_clock_deck(model: &ModelFile, tstop_ns: u32) -> String {
+    format!(
+        "* a picosecond digital clock driving an analog RC across a d2a boundary\n\
+         x1 p 0 clk picosecond_clock\n\
+         rp p 0 1meg\n\
+         r1 clk out 1k\n\
+         c1 out 0 10p\n\
+         .va \"{}\" picosecond_clock\n\
+         .tran 1n {tstop_ns}n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+fn femtosecond_follow_deck(model: &ModelFile) -> String {
+    format!(
+        "* a femtosecond follow-up chained onto an A/D crossing\n\
+         vsense sense 0 pulse(0 3.3 100u 1u 1u 100u 200u)\n\
+         x1 p 0 sense q qd femtosecond_follow\n\
+         rp p 0 1meg\n\
+         rq q 0 10k\n\
+         rqd qd 0 10k\n\
+         .va \"{}\" femtosecond_follow\n\
+         .tran 10u 400u\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **Property 4, case a.** A picosecond clock is simulated, not refused.
+///
+/// Every one of these activations is a mandatory analog time: the breakpoint
+/// manager holds it and the stepper must advance to it. What it must *not* do
+/// is decide that a schedule finer than its own preferred cadence is an error.
+/// The analog controller would happily take nanosecond steps here — the
+/// requested maximum is a nanosecond — and the whole run is spent landing on
+/// picosecond activations instead, which is the correct answer and the
+/// expensive one.
+#[test]
+fn a_picosecond_clock_runs_to_tstop_instead_of_ending_the_run() {
+    const TSTOP_NS: u32 = 100;
+    const HALF_PERIOD: f64 = 1.0e-12;
+
+    let tstop = f64::from(TSTOP_NS) * 1.0e-9;
+    let model = ModelFile::new("picosecond_clock", PICOSECOND_CLOCK);
+    let result = run(&picosecond_clock_deck(&model, TSTOP_NS), tstop, 1.0e-9);
+
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= tstop - HALF_PERIOD,
+        "the run must reach tstop {tstop:e}s, it stopped at {last:e}s"
+    );
+    let points = digital_points(&result, "clk");
+    assert!(
+        points.len() > 1000,
+        "a picosecond clock over {TSTOP_NS} ns must produce thousands of transitions, saw {}",
+        points.len()
+    );
+    for pair in points.windows(2).take(64) {
+        let gap = pair[1].0 - pair[0].0;
+        assert!(
+            (gap - HALF_PERIOD).abs() <= 1.0e-15,
+            "consecutive activations must be one picosecond apart, saw {gap:e}s between \
+             {:e}s and {:e}s",
+            pair[0].0,
+            pair[1].0
+        );
+    }
+}
+
+/// **Property 4, case b.** A follow-up activation closer than the solver's
+/// hard minimum lands on the nearest analog instant it can, and the run
+/// continues.
+///
+/// The maximum step here is a millisecond, which puts ngspice's `delmin` — and
+/// with it the solver hard minimum — at ten femtoseconds, and the breakpoint
+/// tolerance at a hundred. The module's `#0.001` is *one* femtosecond after an
+/// activation the analog side just landed on, so it is below both. The digital
+/// scheduler keeps that exact tick; the analog side owes it only a timepoint at
+/// or after it, so the two activations coalesce onto neighbouring analog points
+/// rather than ending the run.
+#[test]
+fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
+    const TSTOP: f64 = 400.0e-6;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let model = ModelFile::new("femtosecond_follow", FEMTOSECOND_FOLLOW);
+    let result = run(&femtosecond_follow_deck(&model), TSTOP, MAX_STEP);
+
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= TSTOP - 1.0e-12,
+        "the run must reach tstop {TSTOP:e}s, it stopped at {last:e}s"
+    );
+    let q = digital_points(&result, "q");
+    let qd = digital_points(&result, "qd");
+    assert!(
+        q.len() >= 2,
+        "the two rising edges of the stimulus must each activate the module, saw {q:?}"
+    );
+    assert_eq!(
+        qd.len(),
+        q.len(),
+        "every activation owes exactly one follow-up: {q:?} against {qd:?}"
+    );
+    for (index, (&(q_time, _), &(qd_time, _))) in q.iter().zip(&qd).enumerate() {
+        assert!(
+            qd_time >= q_time,
+            "follow-up {index} must not precede the activation it is chained to: \
+             {qd_time:e}s before {q_time:e}s"
+        );
+        assert!(
+            qd_time - q_time <= 1.0e-12,
+            "follow-up {index} is one femtosecond of digital time after its activation and \
+             must coalesce onto a neighbouring analog point, saw {:e}s later",
+            qd_time - q_time
+        );
+    }
+}
