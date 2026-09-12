@@ -52,6 +52,24 @@ pub struct SimulationResult {
     pub time_points: Vec<Value>,
     /// Voltage waveforms, indexed `[node_id][time_index]`.
     pub voltage_waveforms: Vec<Vec<Value>>,
+    /// Which node identities carry events rather than an analog level, in the
+    /// domain that owns each, positionally aligned with `node_voltages`.
+    ///
+    /// A transient result says "this net has no voltage" by leaving its
+    /// waveform column empty. This type has no such room: `node_voltages` is
+    /// dense and indexed BY NODE ID, and every DC consumer — the sweep
+    /// projections, the Monte Carlo driver, the parametric sweeps — reads it
+    /// back that way, so dropping a row would renumber every row after it.
+    /// The absence is therefore carried beside the values rather than in
+    /// them: the slot still holds whatever the assembly closed the
+    /// placeholder row with, and this mask is what says that number is not a
+    /// voltage. The accessors here refuse it, and every surface that renders
+    /// or exports the table skips it.
+    ///
+    /// Kept private so the invariant — one entry per `node_voltages` slot,
+    /// never masking ground — belongs to this type rather than to each of its
+    /// producers.
+    event_only_nodes: Vec<Option<crate::analysis::transient::EventOnlyNetKind>>,
 }
 
 impl SimulationResult {
@@ -67,6 +85,7 @@ impl SimulationResult {
             dc_observable_index: HashMap::new(),
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
+            event_only_nodes: vec![None; num_nodes + 1],
         }
     }
 
@@ -110,14 +129,74 @@ impl SimulationResult {
             .find_map(|(candidate, value)| candidate.eq_ignore_ascii_case(name).then_some(*value))
     }
 
+    /// Which event domain owns a node identity outright, if one does.
+    ///
+    /// `Some(_)` means this analysis solved no voltage for the node: the row
+    /// it owns is the placeholder the assembly closes with `v = 0` to restore
+    /// rank, and the net's values live in the event domain the kind names.
+    /// Ground and every ordinary analog node answer `None`.
+    pub fn event_only_node_kind(
+        &self,
+        node: usize,
+    ) -> Option<crate::analysis::transient::EventOnlyNetKind> {
+        if node == 0 {
+            return None;
+        }
+        self.event_only_nodes.get(node).copied().flatten()
+    }
+
+    /// [`Self::event_only_node_kind`] for the whole table at once, aligned
+    /// with `node_voltages`.
+    ///
+    /// Export and projection surfaces walk the whole namespace, so they read
+    /// the mask once rather than asking per node.
+    pub fn event_only_nodes(&self) -> &[Option<crate::analysis::transient::EventOnlyNetKind>] {
+        &self.event_only_nodes
+    }
+
+    /// Record which node identities the circuit classified as event-only.
+    ///
+    /// The engine calls this with the circuit's own classification once a
+    /// point is solved; a binding that rebuilds a result from its serialized
+    /// state calls it to restore what that state recorded. The vector is
+    /// normalized to `node_voltages`, and ground is never masked, so a
+    /// producer cannot leave the two out of step.
+    pub fn set_event_only_nodes(
+        &mut self,
+        nodes: Vec<Option<crate::analysis::transient::EventOnlyNetKind>>,
+    ) {
+        self.event_only_nodes = nodes;
+        self.event_only_nodes.resize(self.node_voltages.len(), None);
+        if let Some(ground) = self.event_only_nodes.first_mut() {
+            *ground = None;
+        }
+    }
+
     /// Get voltage at a node.
     ///
-    /// Panics when `node` is out of range. Use [`Self::try_voltage`] when
-    /// probing dynamically-specified nodes.
+    /// Panics when `node` is out of range, and when the node carries events
+    /// rather than a voltage. Use [`Self::try_voltage`] when probing
+    /// dynamically-specified nodes.
     #[track_caller]
     pub fn voltage(&self, node: usize) -> Value {
         if node == 0 {
             return 0.0;
+        }
+
+        if let Some(kind) = self.event_only_node_kind(node) {
+            let name = self
+                .node_names
+                .get(node)
+                .cloned()
+                .unwrap_or_else(|| node.to_string());
+            panic!(
+                "{}",
+                crate::analysis::transient::event_only_voltage_refusal(
+                    &name,
+                    kind,
+                    crate::analysis::transient::EventTraceSurface::SolvedPoint,
+                )
+            );
         }
 
         self.try_voltage(node).unwrap_or_else(|| {
@@ -129,10 +208,18 @@ impl SimulationResult {
         })
     }
 
-    /// Get voltage at a node, returning `None` for invalid node IDs.
+    /// Get voltage at a node, returning `None` for invalid node IDs and for a
+    /// node that carries events rather than a voltage.
+    ///
+    /// The second case is absence, not error: the slot exists and holds the
+    /// placeholder row's number, and answering with it would publish 0 V for
+    /// a net that carries logic. Callers that need to say which of the two it
+    /// was ask [`Self::event_only_node_kind`].
     pub fn try_voltage(&self, node: usize) -> Option<Value> {
         if node == 0 {
             Some(0.0)
+        } else if self.event_only_node_kind(node).is_some() {
+            None
         } else {
             self.node_voltages.get(node).copied()
         }

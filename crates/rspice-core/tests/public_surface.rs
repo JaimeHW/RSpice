@@ -826,7 +826,21 @@ use rspice_core::analysis::harmonic_balance::{
 // helpers that render the sentence's carriers (`column_label`,
 // `python_accessor`) cost this ratchet nothing, and the convenience boolean
 // over the predicate was dropped rather than published.
-const MAX_PUBLIC_ITEMS: usize = 5000;
+// 2026-09-12, +3 (5,000 -> 5,003): the same namespace rule at a solved DC
+// point. `SimulationResult::node_voltages` is dense and indexed by node id, so
+// absence cannot be a shape there the way an empty column is one in a
+// transient result; it is a mask carried beside the values. Three items on
+// `SimulationResult` carry it across a crate boundary and none can be
+// narrowed: `event_only_node_kind`, the per-node predicate the Python
+// bindings, the UI's DC bridge and the CLI's output spec all decide through;
+// `event_only_nodes`, the whole mask, which export surfaces read once instead
+// of asking per node; and `set_event_only_nodes`, which the engine calls with
+// the circuit's classification and which a binding rebuilding a result from
+// its pickled state calls to restore it. The field itself stays private so
+// the alignment invariant belongs to the type. The new `EventTraceSurface`
+// variant for this class costs nothing: the ratchet counts item statements,
+// not variants.
+const MAX_PUBLIC_ITEMS: usize = 5003;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

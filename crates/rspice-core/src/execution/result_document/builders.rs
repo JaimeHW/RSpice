@@ -588,7 +588,21 @@ impl AnalysisResultDocument {
         )?;
 
         let mut signals = Vec::new();
-        for (name, value) in result.node_names.iter().zip(&result.node_voltages) {
+        // An event-only net gets no voltage descriptor at all, exactly as it
+        // gets none in a transient document: a descriptor promises the signal
+        // exists and this run chose what to keep of it, and the voltage of a
+        // net that carries events does not exist. Its slot in `node_voltages`
+        // holds the placeholder row's number, which is why it cannot simply
+        // be projected.
+        for (index, (name, value)) in result
+            .node_names
+            .iter()
+            .zip(&result.node_voltages)
+            .enumerate()
+        {
+            if result.event_only_node_kind(index).is_some() {
+                continue;
+            }
             signals.push(ResultSignal::new(
                 voltage_descriptor(LOCATION, name, SignalValueType::Real, 1)?,
                 None,
@@ -737,6 +751,12 @@ impl AnalysisResultDocument {
 
         let mut signals = Vec::with_capacity(node_names.len() + branch_names.len());
         for (index, name) in node_names.iter().enumerate() {
+            // Absent at every point, for the reason the operating-point
+            // builder above gives: the sweep publishes no voltage for a net
+            // only the event domain resolves.
+            if first.result.event_only_node_kind(index).is_some() {
+                continue;
+            }
             let column = points
                 .iter()
                 .map(|point| {

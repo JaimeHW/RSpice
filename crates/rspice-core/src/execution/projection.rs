@@ -941,6 +941,14 @@ pub fn operating_point_projection_signals(
 ) -> Result<Vec<ProjectionSourceSignal<'_>>, SignalSchemaError> {
     let mut signals = Vec::new();
     for (node_id, value) in result.node_voltages.iter().enumerate().skip(1) {
+        // A net only the event domain resolves publishes no voltage column:
+        // its slot holds the placeholder row the assembly closed with `v = 0`,
+        // and every table built from this inventory — the CLI's OP print, the
+        // rawfile, the HDF5 and CSV exports — would otherwise carry 0 V for a
+        // net that carries events.
+        if result.event_only_node_kind(node_id).is_some() {
+            continue;
+        }
         let registry = result_registry_name(result.node_names.get(node_id), node_id);
         signals.push(ProjectionSourceSignal::new(
             format!("V({registry})"),

@@ -1666,8 +1666,14 @@ impl Engine {
     /// The card said `V(q)` of a net the analog solver does not resolve, and
     /// the only answer the run could give is the placeholder row's zero. That
     /// is the defect, so the request is refused here — with both the circuit
-    /// and the deck's output cards in hand, before the first timepoint —
+    /// and the deck's output cards in hand, before the run solves anything —
     /// rather than answered wrongly.
+    ///
+    /// `analysis` is the namespace being built, and it does two jobs: a card
+    /// qualified for another analysis is that analysis's business and is
+    /// skipped, and the refusal names the card the reader wrote. The rule is
+    /// decided on the circuit rather than per analysis, so a transient, an
+    /// operating point and a `.DC` sweep all come through here.
     ///
     /// Wildcards are deliberately exempt. `V(*)` and `.SAVE ALL` ask for
     /// whatever the run has; they assert nothing about any one net, so they
@@ -1680,10 +1686,11 @@ impl Engine {
     /// an accessor call and so is not among a card's typed dependencies; that
     /// spelling meets the same sentence after the run, from the measurement
     /// resolver, because its signal table has no entry for the net either.
-    fn refuse_authored_event_only_voltages(
+    pub(in crate::engine) fn refuse_authored_event_only_voltages(
         netlist: &Netlist,
         node_names: &[String],
         event_only_nodes: &[Option<EventOnlyNetKind>],
+        analysis: OutputAnalysisKind,
     ) -> Result<(), SimulationError> {
         if !event_only_nodes.iter().any(Option::is_some) {
             return Ok(());
@@ -1725,7 +1732,7 @@ impl Engine {
             // business, and the other namespaces are not built here.
             if !request
                 .analysis
-                .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+                .is_none_or(|qualifier| qualifier == analysis)
             {
                 continue;
             }
@@ -1750,7 +1757,7 @@ impl Engine {
                 return Err(SimulationError::Netlist(
                     crate::analysis::measure_signals::event_only_voltage_operand_refusal(
                         request,
-                        OutputAnalysisKind::Tran,
+                        analysis,
                         format!("{}({})", dependency.operator, dependency.symbol),
                         &name,
                         kind,
@@ -4901,7 +4908,12 @@ impl Engine {
         // An authored `V()` of one is an assertion the run cannot honour, so
         // it is refused here rather than answered with the placeholder row's
         // zero — before the first timepoint is solved.
-        Self::refuse_authored_event_only_voltages(netlist, &node_names, &event_only_nodes)?;
+        Self::refuse_authored_event_only_voltages(
+            netlist,
+            &node_names,
+            &event_only_nodes,
+            OutputAnalysisKind::Tran,
+        )?;
 
         log::debug!("Transient node mapping contains {} nodes", node_names.len());
         if log::log_enabled!(log::Level::Trace) {

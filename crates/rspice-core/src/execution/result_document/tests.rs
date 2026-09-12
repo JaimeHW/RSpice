@@ -927,6 +927,55 @@ fn operating_point_document_matches_its_source() {
     assert_eq!(state.parameters()[0].values, vec![Some(1.5e-3)]);
 }
 
+/// An event-only net gets no voltage descriptor in an operating-point
+/// document — not an unprojected one.
+///
+/// A descriptor promises the signal exists and this run chose what to keep of
+/// it, and the voltage of a net that carries events does not exist. Its slot
+/// in `node_voltages` is dense and holds the placeholder row the assembly
+/// closed with `v = 0`, so without this the document would publish that zero
+/// as a one-sample series and every frontend reading the document would show
+/// it. The analog nodes of the same result are untouched, which is what makes
+/// this a skip rather than a schema change.
+#[test]
+fn an_operating_point_document_omits_an_event_only_nets_voltage() {
+    let mut source = operating_point_result();
+    source.set_event_only_nodes(vec![
+        None,
+        Some(crate::analysis::transient::EventOnlyNetKind::Digital),
+        None,
+    ]);
+    let document = AnalysisResultDocument::from_operating_point(
+        instance(AnalysisKind::Op),
+        &source,
+        Some(&device_report()),
+    )
+    .expect("the point projects")
+    .build()
+    .expect("the document builds");
+
+    assert!(
+        document
+            .signals()
+            .iter()
+            .all(|signal| signal.descriptor().canonical_name() != "v(in)"),
+        "an event-only net has no voltage descriptor at all"
+    );
+    assert_eq!(
+        samples_of(&document, "v(out)"),
+        SeriesValues::Real {
+            samples: vec![Some(0.5)]
+        },
+        "and the analog nodes are unaffected"
+    );
+    assert_eq!(
+        samples_of(&document, "i(v1)"),
+        SeriesValues::Real {
+            samples: vec![Some(source.branch_currents[0])]
+        }
+    );
+}
+
 #[test]
 fn ac_document_preserves_complex_values_units_and_names() {
     let source = ac_points();

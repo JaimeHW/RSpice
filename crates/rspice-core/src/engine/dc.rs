@@ -7,6 +7,7 @@
 use super::core::{DcOpStartup, StartupVoltageHints};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::netlist::OutputAnalysisKind;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
@@ -174,6 +175,21 @@ fn dc_sweep_point_value_count(point: &DcSweepPointResult) -> usize {
     dc_result_value_count(&point.result, &point.device_op_report).saturating_add(1)
 }
 
+/// The event-only classification of a built circuit, aligned with
+/// `node_names_sorted()` — that is, `[i]` describes node `i + 1`.
+///
+/// One producer for the whole DC family: the pre-run card refusal and the
+/// solved point's mask are the same question asked of the same circuit, and a
+/// second derivation is a second answer waiting to disagree.
+fn dc_event_only_nodes(
+    circuit: &CircuitData,
+    node_count: usize,
+) -> Vec<Option<crate::analysis::transient::EventOnlyNetKind>> {
+    (1..=node_count)
+        .map(|node| circuit.event_only_net_kind(node))
+        .collect()
+}
+
 fn populate_public_dc_solution(
     circuit: &CircuitData,
     solution: &[Value],
@@ -207,6 +223,18 @@ fn populate_public_dc_solution(
     result
         .branch_currents
         .copy_from_slice(&solution[node_count..public_value_count]);
+    // A net only the event domain resolves owns one of those rows, and the
+    // assembly closed it with the identity equation `v = 0` to restore rank.
+    // Copying it above copied a rank repair, not a level, so the same
+    // classification the transient namespace is built from travels with the
+    // values and says which slots are not voltages. It is read from the
+    // circuit after the solve because the circuit is fully built by then,
+    // ground remap included, and node ids mean what the names mean.
+    result.set_event_only_nodes(
+        std::iter::once(None)
+            .chain(dc_event_only_nodes(circuit, node_count))
+            .collect(),
+    );
     // Some devices own solver-only unknowns after the public branch range.
     // Those internal states remain available to device observation through
     // `solution`, but they are intentionally not exposed as branch currents.
@@ -676,6 +704,27 @@ impl Engine {
         Ok(())
     }
 
+    /// Refuse an authored `V()` operand naming an event-only net before a DC
+    /// analysis solves anything.
+    ///
+    /// The transient owns the wording and the operand rules; this only asks
+    /// the built circuit the same question its namespace build asks, under
+    /// the analysis whose cards are being read. The name vector is built only
+    /// when the deck actually has an event domain, because it is a clone of
+    /// every node name in the circuit.
+    fn refuse_authored_event_only_dc_voltages(
+        netlist: &Netlist,
+        circuit: &CircuitData,
+        analysis: OutputAnalysisKind,
+    ) -> Result<(), SimulationError> {
+        if circuit.xspice_event_node_matrix_rows().next().is_none() {
+            return Ok(());
+        }
+        let node_names = circuit.node_names_sorted();
+        let event_only_nodes = dc_event_only_nodes(circuit, node_names.len());
+        Self::refuse_authored_event_only_voltages(netlist, &node_names, &event_only_nodes, analysis)
+    }
+
     fn build_empty_dc_result() -> SimulationResult {
         let mut result = SimulationResult::new(0, 0);
         result.node_names = vec!["0".to_string()];
@@ -901,6 +950,13 @@ impl Engine {
 
         // Build circuit from netlist
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        // An operating point publishes no voltage for a net only the event
+        // domain resolves, so a card that named one asserted something this
+        // run cannot honour. Refused here, before the solve, for the same
+        // reason the transient refuses it before its first timepoint: the
+        // alternative is answering with the placeholder row's zero. A sweep
+        // point runs through its own entry below.
+        Self::refuse_authored_event_only_dc_voltages(netlist, &circuit, OutputAnalysisKind::Op)?;
 
         let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
         if lifecycle
@@ -1427,6 +1483,10 @@ impl Engine {
 
         // Build circuit once
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        // Every point of this sweep publishes the same namespace, so a card
+        // naming an event-only net is refused once, before the first point,
+        // rather than once per point after the fact.
+        Self::refuse_authored_event_only_dc_voltages(netlist, &circuit, OutputAnalysisKind::Dc)?;
 
         if lifecycle.next_public_point == 0 {
             circuit.begin_veriloga_dc_analysis()

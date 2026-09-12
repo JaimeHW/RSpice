@@ -765,6 +765,15 @@ pub enum EventTraceSurface {
     Result,
     /// The decimated `CompressedTransientResult` binding.
     Compressed,
+    /// One solved DC point — an operating point, or a point of a `.DC`
+    /// sweep — and the `SimulationResult` binding over it.
+    ///
+    /// This class carries no event trace of its own: a DC solve publishes one
+    /// number per analog unknown and nothing else, so the accessor the
+    /// refusal recommends is a transient run's. Naming this class's own
+    /// accessor would be the defect the surface exists to stop making, in the
+    /// other direction: recommending a method that does not exist at all.
+    SolvedPoint,
 }
 
 impl EventOnlyNetKind {
@@ -785,12 +794,21 @@ impl EventOnlyNetKind {
     /// The Python accessor that returns this net's event trace, as the class
     /// being addressed spells it.
     ///
-    /// Only the digital accessor differs between the two classes; both spell
-    /// the real one `real_trace`.
+    /// Only the digital accessor differs between the two transient classes;
+    /// both spell the real one `real_trace`. A solved DC point publishes no
+    /// event trace at all, so it names the transient class's accessor and says
+    /// whose it is — a reader who is told to call a method has to be able to
+    /// find the object that has it.
     fn python_accessor(self, name: &str, surface: EventTraceSurface) -> String {
         match (self, surface) {
             (Self::Digital, EventTraceSurface::Result) => format!("digital_events('{name}')"),
             (Self::Digital, EventTraceSurface::Compressed) => format!("digital_trace('{name}')"),
+            (Self::Digital, EventTraceSurface::SolvedPoint) => {
+                format!("a transient run's digital_events('{name}')")
+            }
+            (Self::Real, EventTraceSurface::SolvedPoint) => {
+                format!("a transient run's real_trace('{name}')")
+            }
             (Self::Real, _) => format!("real_trace('{name}')"),
         }
     }

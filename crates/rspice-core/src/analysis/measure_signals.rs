@@ -1858,12 +1858,22 @@ fn evaluate_dc_output_columns_with_abort(
     let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
     };
-    // A DC sweep has no event domain to exclude: `.OP`/`.DC` on a mixed deck
-    // is refused outright, and that namespace belongs to its own lane.
+    // A DC point's namespace excludes an event-only net exactly as a
+    // transient's does. The mask is carried on the point rather than derived
+    // from an empty column, because `node_voltages` is dense, and it is
+    // aligned with `node_names` — ground included at index 0 — which is the
+    // alignment the wildcard expansion reads it under.
+    let event_only = sweep.first().map_or_else(Vec::new, |(_, result)| {
+        result
+            .event_only_nodes()
+            .iter()
+            .map(Option::is_some)
+            .collect()
+    });
     let node_metadata = sweep.first().map(|(_, result)| RealOutputNodeMetadata {
         names: result.node_names.as_slice(),
         voltage_count: result.node_voltages.len(),
-        event_only: &[],
+        event_only: &event_only,
     });
     let projection = preflight_real_output_requests(
         &requests,
@@ -1994,17 +2004,27 @@ pub(crate) fn event_only_voltage_operand_refusal(
                 .position(|authored| authored.to_ascii_lowercase().contains(&wanted))
         })
         .unwrap_or(0);
+    // Which result class the reader will be holding when they take the advice.
+    // A transient run's own result carries the event trace and spells the
+    // accessor plainly; a solved DC point carries none, so its sentence names
+    // a transient run's accessor and says whose it is. Getting this from the
+    // analysis rather than from the caller keeps the two namespace builds from
+    // drifting — a refusal that recommends a method the object in hand does not
+    // have is the defect this whole sentence exists to stop making.
+    let surface = match analysis {
+        OutputAnalysisKind::Tran => crate::analysis::transient::EventTraceSurface::Result,
+        // No other namespace build refuses this today. A solved point is also
+        // the honest answer for any that later does: it is true of every class
+        // except the transient result itself.
+        _ => crate::analysis::transient::EventTraceSurface::SolvedPoint,
+    };
     OutputProjectionError::Operand {
         analysis,
         origin: request.origin.clone(),
         operand_index,
         operand,
         row: None,
-        detail: crate::analysis::transient::event_only_voltage_refusal(
-            node,
-            kind,
-            crate::analysis::transient::EventTraceSurface::Result,
-        ),
+        detail: crate::analysis::transient::event_only_voltage_refusal(node, kind, surface),
     }
     .to_string()
 }
@@ -2401,6 +2421,13 @@ impl DcOutputSeries {
             {
                 if item_index.is_multiple_of(64) && abort.is_aborted() {
                     return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                // An event-only net contributes no voltage spelling at all.
+                // Its slot holds the placeholder row's number, so publishing
+                // it as a column would publish 0 V for a net that carries
+                // events — the defect this skip exists to stop.
+                if result.event_only_node_kind(item_index).is_some() {
+                    continue;
                 }
                 if !name.is_empty() {
                     row_values.push((format!("V({name})"), *value));
@@ -4667,6 +4694,13 @@ impl DcSweepSeries {
             if node.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            // A net only the event domain resolves has no measurable voltage,
+            // so it gets no entry here: a `.MEASURE DC ... V(q)` misses, and
+            // the miss is rewritten into the one refusal sentence rather than
+            // answered with the placeholder row's zero.
+            if first.event_only_node_kind(node).is_some() {
+                continue;
+            }
             let mut series = Vec::with_capacity(sweep.len());
             for (row, (sweep_value, result)) in sweep.iter().enumerate() {
                 if row.is_multiple_of(64) && abort.is_aborted() {
@@ -6133,6 +6167,31 @@ fn event_only_signal_miss(error: &str, result: &TransientResult) -> Option<Strin
     })
 }
 
+/// [`event_only_signal_miss`] for a DC sweep or a single solved point.
+///
+/// The same spelling reaches the same dead end here — `.MEASURE DC ... FIND q`
+/// names a net whose entry the signal table deliberately does not hold — and
+/// the same sentence replaces "not found", naming the carrier a transient run
+/// publishes it through.
+fn dc_event_only_signal_miss(error: &str, sweep: &[(Value, SimulationResult)]) -> Option<String> {
+    let rest = error.strip_prefix("Signal '")?;
+    let name = rest.strip_suffix("' not found")?;
+    let bare = name
+        .trim()
+        .strip_prefix("V(")
+        .or_else(|| name.trim().strip_prefix("v("))
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(name.trim());
+    let (_, first) = sweep.first()?;
+    let node = first.node_index_named(bare)?;
+    let kind = first.event_only_node_kind(node)?;
+    Some(crate::analysis::transient::event_only_voltage_refusal(
+        bare,
+        kind,
+        crate::analysis::transient::EventTraceSurface::SolvedPoint,
+    ))
+}
+
 /// Re-evaluate the netlist's transient `.MEAS` statements over a serialized
 /// point stream, such as a PRN or CSV file read by a `-remeasure` workflow.
 ///
@@ -6627,6 +6686,15 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
         ),
     };
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
+    for measurement in &mut results {
+        let refusal = measurement
+            .error
+            .as_deref()
+            .and_then(|error| dc_event_only_signal_miss(error, sweep));
+        if let Some(refusal) = refusal {
+            measurement.error = Some(refusal);
+        }
+    }
     if abort.is_aborted() {
         Err(SimulationError::Aborted)
     } else {
