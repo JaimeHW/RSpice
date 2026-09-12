@@ -17,11 +17,14 @@
 //!
 //! # The sequence golden, and what it is worth
 //!
-//! Deck A pins a point count and an FNV-1a hash over the accepted time grid
-//! and over every node waveform. A golden of this kind proves self-agreement
-//! and nothing else: it says the route reproduces its own answer, not that the
-//! answer is physically right. Read it as a tripwire for an unintended change
-//! of the accepted grid, never as an oracle.
+//! Decks A and C2 each pin a point count and an FNV-1a hash over the accepted
+//! time grid and over every node waveform, through the one fingerprint in
+//! `common/determinism_fingerprint.rs` that every mixed suite pins with. A
+//! golden of this kind proves self-agreement and nothing else: it says the
+//! route reproduces its own answer, not that the answer is physically right.
+//! Read it as a tripwire for an unintended change of the accepted grid, never
+//! as an oracle — and see the cross-process cases at the foot of this file for
+//! what makes it worth more than a point count.
 //!
 //! ## Regenerating the goldens
 //!
@@ -33,9 +36,15 @@
 //! different grids — and re-run without the variable.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/determinism_fingerprint.rs"]
+mod determinism_fingerprint;
 #[path = "common/digital_trace_invariants.rs"]
 mod digital_trace_invariants;
 
+use determinism_fingerprint::{
+    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, emitting, fingerprint,
+    pin_fingerprint,
+};
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
@@ -46,9 +55,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 //=============================================================================
 // Pinned values, measured on the lane base
 //=============================================================================
-
-/// Environment variable that turns every pinned comparison into a print.
-const EMIT_ENV: &str = "RSPICE_TRI_FAMILY_EMIT";
 
 /// Whether the generated `diode_cmc` card is in this build. The deck carries
 /// the card only when it is, so the goldens below are the with-card numbers
@@ -108,7 +114,28 @@ const DECK_A_GRID_HASH: u64 = 0x9485_9e98_f8c7_6df9;
 /// results-only and left the accepted grid and every solved level alone. The
 /// structure assertions beside the pin say the same thing by name.
 const DECK_A_VOLT_HASH: u64 = 0x1b54_c78e_1859_dae5;
+
+/// Deck A's fingerprint, from the three constants above.
+const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {
+    points: DECK_A_POINTS,
+    grid_hash: DECK_A_GRID_HASH,
+    volt_hash: DECK_A_VOLT_HASH,
+};
+
 const DECK_C2_POINTS: usize = 265;
+
+/// Deck C2's accepted grid and analog solution, first measured 2026-09-13.
+///
+/// The point count is the one this file has pinned since R2.2; the two hashes
+/// are new, and they are what turns "the load did not multiply the grid" into
+/// "the unloaded deck lands on the same grid, at the same levels, every time".
+/// Deck C2 carries two mixed modules and no native source at all, so it is the
+/// one deck here whose whole timeline is the discrete halves' schedule.
+const DECK_C2_FINGERPRINT: Fingerprint = Fingerprint {
+    points: DECK_C2_POINTS,
+    grid_hash: 0x28ff_9ed5_d9c9_59f2,
+    volt_hash: 0x3748_a5da_95de_f3d7,
+};
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
 /// refinement fix moved the accepted grid.
@@ -219,43 +246,6 @@ impl Drop for ModelFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
-}
-
-fn emitting() -> bool {
-    std::env::var_os(EMIT_ENV).is_some()
-}
-
-fn pin_usize(key: &str, observed: usize, expected: usize) {
-    println!("TRIFAMILY {key}={observed}");
-    if emitting() {
-        return;
-    }
-    assert_eq!(
-        observed, expected,
-        "{key} moved off its pinned value; re-measure with {EMIT_ENV}=1"
-    );
-}
-
-fn pin_hash(key: &str, observed: u64, expected: u64) {
-    println!("TRIFAMILY {key}={observed:016x}");
-    if emitting() {
-        return;
-    }
-    assert_eq!(
-        observed, expected,
-        "{key} moved off its pinned value ({observed:016x} vs {expected:016x}); \
-         re-measure with {EMIT_ENV}=1"
-    );
-}
-
-/// FNV-1a over the raw bits of a float sequence.
-fn sequence_hash(values: impl Iterator<Item = f64>) -> u64 {
-    let mut hash: u64 = 1469598103934665603;
-    for value in values {
-        hash ^= value.to_bits();
-        hash = hash.wrapping_mul(1099511628211);
-    }
-    hash
 }
 
 /// Every node waveform keyed by upper-case name, so two decks that allocate
@@ -435,19 +425,10 @@ fn run_deck_a() -> TransientResult {
     result
 }
 
-/// Point count and both sequence hashes, in the order the goldens list them.
-fn deck_a_fingerprint(result: &TransientResult) -> (usize, u64, u64) {
-    (
-        result.time.len(),
-        sequence_hash(result.time.iter().copied()),
-        sequence_hash(result.voltages.iter().flatten().copied()),
-    )
-}
-
 #[test]
 fn deck_a_tri_family_transient_sequence_golden() {
     let result = run_deck_a();
-    let (points, grid, voltages) = deck_a_fingerprint(&result);
+    let observed = fingerprint(&result);
 
     // Structure first: the golden is meaningless if the run lost a family.
     assert!(
@@ -505,12 +486,10 @@ fn deck_a_tri_family_transient_sequence_golden() {
     if !DIODE_CMC {
         // Without the generated card the deck is a different circuit, so the
         // pinned sequence does not apply; the structure above still does.
-        println!("TRIFAMILY deck_a_points_no_diode_cmc={points}");
+        println!("TRIFAMILY deck_a_points_no_diode_cmc={}", observed.points);
         return;
     }
-    pin_usize("deck_a_points", points, DECK_A_POINTS);
-    pin_hash("deck_a_grid_hash", grid, DECK_A_GRID_HASH);
-    pin_hash("deck_a_volt_hash", voltages, DECK_A_VOLT_HASH);
+    pin_fingerprint("deck_a", observed, DECK_A_FINGERPRINT);
 }
 
 /// A digital edge must not restart the analog stepper anywhere near its floor.
@@ -993,7 +972,7 @@ fn deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period() {
         received.len() * 2 >= points.len(),
         "the receiving module must see every rise of dq, got {received:?}"
     );
-    pin_usize("deck_c2_points", result.time.len(), DECK_C2_POINTS);
+    pin_fingerprint("deck_c2", fingerprint(&result), DECK_C2_FINGERPRINT);
 }
 
 #[test]
@@ -1216,7 +1195,7 @@ fn deck_a_hashes_are_identical_across_processes() {
         return;
     };
 
-    let parent = deck_a_fingerprint(&run_deck_a());
+    let parent = fingerprint(&run_deck_a());
     for attempt in 0..4 {
         let output = Command::new(&executable)
             .args([
@@ -1244,16 +1223,44 @@ fn deck_a_hashes_are_identical_across_processes() {
                 .unwrap_or_else(|| panic!("child {attempt} printed no {key}:\n{stdout}"))
                 .to_string()
         };
-        let child = (
-            read("deck_a_points")
+        let child = Fingerprint {
+            points: read("deck_a_points")
                 .parse::<usize>()
                 .expect("child point count"),
-            u64::from_str_radix(&read("deck_a_grid_hash"), 16).expect("child grid hash"),
-            u64::from_str_radix(&read("deck_a_volt_hash"), 16).expect("child voltage hash"),
-        );
+            grid_hash: u64::from_str_radix(&read("deck_a_grid_hash"), 16).expect("child grid hash"),
+            volt_hash: u64::from_str_radix(&read("deck_a_volt_hash"), 16)
+                .expect("child voltage hash"),
+        };
         assert_eq!(
             child, parent,
             "child {attempt} produced a different deck A sequence than this process"
         );
     }
+}
+
+/// Deck C2's fingerprint, re-derived in fresh processes.
+///
+/// Deck A's case above compares its children against a fingerprint this
+/// process computed; this one compares them against the pinned constants,
+/// which is the same claim once the pin itself is asserted — and
+/// `deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period` asserts
+/// it in this same binary run. The difference is that the comparison
+/// generalizes: a fixture joins it by naming its test and its pinned
+/// fingerprint, with no per-deck parsing.
+///
+/// Eight children rather than one, because what this is looking for — an
+/// address, a hash iteration order, a cache entry that survived into the
+/// answer — does not reproduce reliably on a single fresh process. Eight is
+/// the count the audit's own determinism probe used; four measured 0.6 s on
+/// this deck, so eight is about a second of the suite's run. Deck A's case
+/// above keeps the four it was written with, and its four are a different
+/// statement: child against this process, rather than child against the pin.
+#[test]
+fn deck_c2_hashes_are_identical_across_processes() {
+    assert_fingerprints_survive_new_processes(
+        "deck_c2",
+        &["deck_c2_unloaded_digital_to_digital_net_carries_the_driver_period"],
+        8,
+        &DECK_C2_FINGERPRINT.records("deck_c2"),
+    );
 }

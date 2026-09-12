@@ -24,20 +24,39 @@
 //! in one pass without asserting any of them.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/determinism_fingerprint.rs"]
+mod determinism_fingerprint;
 #[path = "common/digital_trace_invariants.rs"]
 mod digital_trace_invariants;
 
+use determinism_fingerprint::{
+    EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, emitting, fingerprint,
+    pin_fingerprint,
+};
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const EMIT_ENV: &str = "RSPICE_TRI_FAMILY_EMIT";
-
 /// `out` of deck E, four nanoseconds after the divider's first rise.
 const DECK_E_OUT_EARLY: f64 = 1.214404;
 /// `out` of deck E, eight nanoseconds after the divider's first rise.
 const DECK_E_OUT_LATE: f64 = 1.888954;
+
+/// Deck E's accepted grid and analog solution, first measured 2026-09-13.
+///
+/// The two sampled voltages beside it are a tolerance pin: they say the RC
+/// charges through the driven level, to a millivolt. This says the whole run
+/// reproduces — every accepted timepoint and every node, bit for bit — which
+/// is the claim a tolerance cannot make and the one a determinism gate needs.
+/// Deck E is the only fixture in this file whose analog half is charged by a
+/// bare HDL event net, so its grid is the event schedule and the RC together.
+const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
+    points: 267,
+    grid_hash: 0x62ac_bec5_7815_00bc,
+    volt_hash: 0x7658_cfbc_6cd9_6685,
+};
+
 /// First transition of the flop output in deck E3, and the delay every one of
 /// its transitions sits behind the HDL clock rise that caused it: the model's
 /// 0.1 ns `clk_delay` composed with its own default 1 ns output delay.
@@ -72,10 +91,6 @@ impl Drop for ModelFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
-}
-
-fn emitting() -> bool {
-    std::env::var_os(EMIT_ENV).is_some()
 }
 
 fn pin_f64(key: &str, observed: f64, expected: f64, tolerance: f64) {
@@ -232,6 +247,26 @@ fn deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc() {
     );
     pin_f64("deck_e_out_early", early, DECK_E_OUT_EARLY, 1e-3);
     pin_f64("deck_e_out_late", late, DECK_E_OUT_LATE, 1e-3);
+    pin_fingerprint("deck_e", fingerprint(&result), DECK_E_FINGERPRINT);
+}
+
+/// Deck E's fingerprint, re-derived in fresh processes.
+///
+/// The deck's whole timeline comes from two HDL modules' own schedules, so an
+/// iteration order or a cache entry that reached the answer would move the
+/// accepted grid rather than any one sampled voltage — which is what a
+/// tolerance pin on two samples cannot see and this can.
+///
+/// Eight children, the count the audit's own determinism probe used. Measured
+/// at 0.6 s for four on this deck, so eight is a second of the suite's run.
+#[test]
+fn deck_e_hashes_are_identical_across_processes() {
+    assert_fingerprints_survive_new_processes(
+        "deck_e",
+        &["deck_e_bare_hdl_event_net_divides_the_clock_and_drives_an_rc"],
+        8,
+        &DECK_E_FINGERPRINT.records("deck_e"),
+    );
 }
 
 /// Deck E's `clk` is digital-only, and the analog namespace says so.
