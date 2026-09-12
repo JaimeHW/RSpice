@@ -289,6 +289,231 @@ impl std::fmt::Display for UnsupportedCapabilityError {
 
 impl std::error::Error for UnsupportedCapabilityError {}
 
+/// Which step of binding a deck instance to a Verilog-A or Verilog-AMS master
+/// failed.
+///
+/// One kind per *action a person takes next*, which is why the set is this
+/// coarse and not one per message: a workbench decides between "find the
+/// file", "fix the name", "fix the value on this instance", "rewire this
+/// port", "write connect rules", "fix the model source", and "report a bug",
+/// and nothing finer changes what it shows. The message still carries the
+/// specifics; the kind is what a UI, an exit code or a regression suite
+/// branches on, so none of them has to match prose.
+///
+/// Two distinctions the Verilog-AMS vocabulary makes are deliberately *not*
+/// here. A value of the wrong type and a value outside its admitted range are
+/// one [`Self::ParameterValue`], because the edit is the same and because the
+/// compiled model's own runtime collapses them before the engine sees them. A
+/// port declared with a discipline this route cannot bridge and a port wired
+/// to a net that cannot carry it are one [`Self::PortDiscipline`], because
+/// both are answered at the same terminal on the same symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ElaborationErrorKind {
+    /// The Verilog-A source, one of its dependencies, or a registered sealed
+    /// runtime could not be read as a stable snapshot.
+    MissingSource,
+    /// Nothing in the design provides the master the instance names.
+    UnknownModule,
+    /// The name resolves, but not to exactly one module this route may use.
+    ModuleNotSelected,
+    /// The master declares no parameter by that name.
+    ParameterUnknown,
+    /// The master declares the parameter and will not take this value.
+    ParameterValue,
+    /// The instance does not connect the nets the master's ports need.
+    PortCount,
+    /// A port cannot be bridged as it is declared, or as it is connected.
+    PortDiscipline,
+    /// Verilog-AMS clause 7 connect-rule selection or delegation refused.
+    ConnectRule,
+    /// The Verilog-A compiler declined to produce an artifact for this source.
+    CompileRefusal,
+    /// A compiled or cached artifact failed its own integrity contract.
+    CacheCorrupt,
+    /// A binding step the engine expected to succeed did not. Not the deck's
+    /// fault, and the only kind that is a defect report rather than an edit.
+    Internal,
+}
+
+impl ElaborationErrorKind {
+    /// Stable snake-case token used by API, wire and report payloads.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingSource => "missing_source",
+            Self::UnknownModule => "unknown_module",
+            Self::ModuleNotSelected => "module_not_selected",
+            Self::ParameterUnknown => "parameter_unknown",
+            Self::ParameterValue => "parameter_value",
+            Self::PortCount => "port_count",
+            Self::PortDiscipline => "port_discipline",
+            Self::ConnectRule => "connect_rule",
+            Self::CompileRefusal => "compile_refusal",
+            Self::CacheCorrupt => "cache_corrupt",
+            Self::Internal => "internal",
+        }
+    }
+
+    /// The clause rendered between the subject and the detail.
+    const fn sentence(self) -> &'static str {
+        match self {
+            Self::MissingSource => "the Verilog-A source could not be read",
+            Self::UnknownModule => "no Verilog-A module answers to that name",
+            Self::ModuleNotSelected => "the module selection does not name one module",
+            Self::ParameterUnknown => "the master declares no such parameter",
+            Self::ParameterValue => "the parameter value is not one the master accepts",
+            Self::PortCount => "the instance does not connect the nets the master declares",
+            Self::PortDiscipline => "a port cannot be bridged as it is declared or connected",
+            Self::ConnectRule => "the connect rules do not settle this boundary",
+            Self::CompileRefusal => "the Verilog-A compiler refused this source",
+            Self::CacheCorrupt => "a compiled Verilog-A artifact failed its integrity contract",
+            Self::Internal => "the engine could not complete this binding",
+        }
+    }
+
+    /// The shared taxonomy entry this kind reports as.
+    ///
+    /// Every authored-input kind is a netlist failure, which is what it always
+    /// should have been: an X-card connecting the wrong number of nets is the
+    /// deck being wrong, and reporting it as a simulation failure sent the CLI
+    /// to the wrong exit code and a frontend to the wrong presentation. Only
+    /// the two kinds nothing in the deck can fix stay simulation failures.
+    const fn descriptor_parts(self) -> (SimulationErrorCode, SimulationErrorCategory) {
+        match self {
+            Self::MissingSource
+            | Self::UnknownModule
+            | Self::ModuleNotSelected
+            | Self::ParameterUnknown
+            | Self::ParameterValue
+            | Self::PortCount
+            | Self::PortDiscipline
+            | Self::ConnectRule
+            | Self::CompileRefusal => (
+                SimulationErrorCode::NetlistError,
+                SimulationErrorCategory::Netlist,
+            ),
+            Self::CacheCorrupt | Self::Internal => (
+                SimulationErrorCode::CircuitError,
+                SimulationErrorCategory::Simulation,
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for ElaborationErrorKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A refusal raised while elaborating a deck against a Verilog-A or mixed
+/// Verilog-AMS master.
+///
+/// The seam between a `.VERILOGA` source and an X-card used to report about
+/// forty distinct formatted strings through two untyped [`SimulationError`]
+/// variants, chosen by which one each site happened to reach for. A frontend
+/// could tell a missing file from a mis-wired port only by matching prose, and
+/// the two variants disagreed about the same class of failure — a wrong
+/// terminal count was a circuit error while an unreadable source was a netlist
+/// error, so the CLI gave them different exit codes.
+///
+/// This is that seam's one report. `instance` is the deck's own name for the
+/// X-card, which is what places the failure on a schematic; `module` is the
+/// master it names or the source it came from; `kind` is what a consumer
+/// branches on; `detail` is the sentence the site already wrote, unchanged
+/// except where it merely repeated the subject.
+///
+/// `span` is present when the engine genuinely knows where to point, which
+/// today means the Verilog-A source file — a parsed [`crate::netlist::Element`]
+/// carries no line, so an instance-side refusal reports `None` rather than
+/// inventing one. Line `0` in a source span means "this file", the same
+/// convention the output projection already uses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ElaborationError {
+    /// Deck name of the instance being bound, when one instance owns the
+    /// failure. `None` for a design-level refusal, such as selecting the
+    /// deck's connect rules, which happens before any instance is reached.
+    pub instance: Option<String>,
+    /// The master the instance names, or the source being elaborated.
+    pub module: Option<String>,
+    /// What kind of binding step failed.
+    pub kind: ElaborationErrorKind,
+    /// Where the offending construct was authored, when the engine knows.
+    pub span: Option<NetlistSourceLocation>,
+    /// The site's own explanation, naming the specifics the kind does not.
+    pub detail: String,
+}
+
+impl ElaborationError {
+    pub(crate) fn new(kind: ElaborationErrorKind, detail: impl Into<String>) -> Self {
+        Self {
+            instance: None,
+            module: None,
+            kind,
+            span: None,
+            detail: detail.into(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn instance(mut self, instance: impl Into<String>) -> Self {
+        self.instance = Some(instance.into());
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn module(mut self, module: impl Into<String>) -> Self {
+        self.module = Some(module.into());
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn at(mut self, span: NetlistSourceLocation) -> Self {
+        self.span = Some(span);
+        self
+    }
+
+    /// Point at a whole Verilog-A source file, which is as precise as this
+    /// seam can be: the compiler reports its own offsets inside `detail`, and
+    /// the deck line that authored the `.VERILOGA` card is not retained by the
+    /// parsed netlist.
+    #[must_use]
+    pub(crate) fn in_source(self, path: impl Into<std::path::PathBuf>) -> Self {
+        let path = path.into();
+        let display = path.display().to_string();
+        self.at(NetlistSourceLocation::in_file(path, 0))
+            .module_if_unset(display)
+    }
+
+    fn module_if_unset(mut self, module: String) -> Self {
+        if self.module.is_none() {
+            self.module = Some(module);
+        }
+        self
+    }
+}
+
+impl std::fmt::Display for ElaborationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Elaboration error")?;
+        if let Some(span) = &self.span {
+            write!(formatter, " at {span}")?;
+        }
+        formatter.write_str(": ")?;
+        match (&self.instance, &self.module) {
+            (Some(instance), Some(module)) => {
+                write!(formatter, "instance '{instance}' (module '{module}'): ")?;
+            }
+            (Some(instance), None) => write!(formatter, "instance '{instance}': ")?,
+            (None, Some(module)) => write!(formatter, "module '{module}': ")?,
+            (None, None) => {}
+        }
+        write!(formatter, "{}: {}", self.kind.sentence(), self.detail)
+    }
+}
+
+impl std::error::Error for ElaborationError {}
+
 /// A materialized run that disagrees with the deck plan that produced it.
 ///
 /// Every variant is an internal consistency failure, not an authored one: the
@@ -696,6 +921,18 @@ pub enum SimulationError {
     #[error(transparent)]
     UnsupportedCapability(Box<UnsupportedCapabilityError>),
 
+    /// Binding a deck instance to a Verilog-A or mixed Verilog-AMS master
+    /// failed.
+    ///
+    /// The whole `.VERILOGA`/X-card seam reports through this one variant so
+    /// a consumer reads [`ElaborationErrorKind`] instead of matching prose,
+    /// and so one class of failure cannot be a circuit error at one site and
+    /// a netlist error at the next. Its descriptor is the kind's, so the exit
+    /// code and the Python exception attributes follow the classification
+    /// rather than the variant.
+    #[error(transparent)]
+    Elaboration(Box<ElaborationError>),
+
     #[error(transparent)]
     MaterializationMismatch(Box<MaterializationMismatchError>),
 
@@ -767,6 +1004,16 @@ impl From<ResultSchemaMismatchError> for SimulationError {
 impl From<UnsupportedCapabilityError> for SimulationError {
     fn from(error: UnsupportedCapabilityError) -> Self {
         Self::UnsupportedCapability(Box::new(error))
+    }
+}
+
+/// The one conversion the Verilog-A and mixed elaboration seam reports
+/// through. Every site on that seam builds an [`ElaborationError`] and lets
+/// `?` apply this, so the rendered prefix, the descriptor and the source span
+/// are decided once rather than at forty call sites.
+impl From<ElaborationError> for SimulationError {
+    fn from(error: ElaborationError) -> Self {
+        Self::Elaboration(Box::new(error))
     }
 }
 
@@ -913,6 +1160,13 @@ impl SimulationError {
                 SimulationErrorCategory::Capability,
                 false,
             ),
+            // The kind decides, not the variant: an elaboration refusal a deck
+            // edit fixes is a netlist failure and one nothing in the deck can
+            // fix is a simulation failure, and both spellings arrive here.
+            Self::Elaboration(error) => {
+                let (code, category) = error.kind.descriptor_parts();
+                (code, category, false)
+            }
             Self::MaterializationMismatch(_) => (
                 SimulationErrorCode::MaterializationMismatch,
                 SimulationErrorCategory::Materialization,
@@ -1009,6 +1263,7 @@ impl SimulationError {
     pub fn source_location(&self) -> Option<&NetlistSourceLocation> {
         match self {
             Self::UnsupportedCapability(error) => error.location.as_ref(),
+            Self::Elaboration(error) => error.span.as_ref(),
             _ => None,
         }
     }

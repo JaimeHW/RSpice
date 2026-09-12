@@ -14,10 +14,11 @@ use rspice_core::execution::{
 use rspice_core::netlist::NetlistSourceLocation;
 use rspice_core::solver::SolverError;
 use rspice_core::{
-    MaterializationMismatchError, Netlist, OutputCommitError, OutputCommitPhase,
-    PersistenceIncompatibleError, RequestedSignalUnavailableError, ResourceKind,
-    ResultSchemaMismatchError, SimulationConfigError, SimulationError, SimulationErrorCategory,
-    SimulationErrorCode, UnsupportedCapabilityError,
+    ElaborationError, ElaborationErrorKind, MaterializationMismatchError, Netlist,
+    OutputCommitError, OutputCommitPhase, PersistenceIncompatibleError,
+    RequestedSignalUnavailableError, ResourceKind, ResultSchemaMismatchError,
+    SimulationConfigError, SimulationError, SimulationErrorCategory, SimulationErrorCode,
+    UnsupportedCapabilityError,
 };
 
 /// An analysis identity minted by the planner, which is the only way one is
@@ -337,6 +338,15 @@ fn expected_descriptor(
         SimulationError::UnsupportedCapability(_) => {
             (Code::UnsupportedCapability, Category::Capability, false)
         }
+        // The elaboration seam's classification is the kind's, not the
+        // variant's: a refusal a deck edit fixes is a netlist failure and one
+        // nothing in the deck can fix is a simulation failure.
+        SimulationError::Elaboration(error) => match error.kind {
+            ElaborationErrorKind::CacheCorrupt | ElaborationErrorKind::Internal => {
+                (Code::CircuitError, Category::Simulation, false)
+            }
+            _ => (Code::NetlistError, Category::Netlist, false),
+        },
         SimulationError::MaterializationMismatch(_) => (
             Code::MaterializationMismatch,
             Category::Materialization,
@@ -405,6 +415,26 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             },
         )),
         SimulationError::unsupported_capability("analysis.pz.device", "no PZ stamp"),
+        // Both halves of the elaboration classification, so the descriptor
+        // table is exercised on a netlist-category kind and a simulation one.
+        SimulationError::from(ElaborationError {
+            instance: Some("X1".to_string()),
+            module: Some("counter".to_string()),
+            kind: ElaborationErrorKind::PortCount,
+            span: None,
+            detail: "the master declares at most 3 terminal(s) and the card connects 4".to_string(),
+        }),
+        SimulationError::from(ElaborationError {
+            instance: None,
+            module: Some("counter.va".to_string()),
+            kind: ElaborationErrorKind::CacheCorrupt,
+            span: Some(NetlistSourceLocation::in_file(
+                "counter.va",
+                0,
+            )),
+            detail: "compiled runtime artifacts failed integrity validation: digest mismatch"
+                .to_string(),
+        }),
         SimulationError::from(MaterializationMismatchError::PlanNetlist),
         SimulationError::Solver(SolverError::ConvergenceFailed(9)),
         SimulationError::Netlist("no analyses".to_string()),

@@ -840,7 +840,18 @@ use rspice_core::analysis::harmonic_balance::{
 // the alignment invariant belongs to the type. The new `EventTraceSurface`
 // variant for this class costs nothing: the ratchet counts item statements,
 // not variants.
-const MAX_PUBLIC_ITEMS: usize = 5003;
+// 2026-09-12, +3 (5,003 -> 5,006): the typed report the Verilog-A and mixed
+// elaboration seam replaced about forty formatted strings with. `ElaborationError`
+// is what the GUI's engine bridge destructures to put a failed binding on the
+// symbol it belongs to, `ElaborationErrorKind` is what it and the CLI's exit
+// status branch on instead of matching prose, and `ElaborationErrorKind::as_str`
+// is the stable token both the browser worker wire format and the Python
+// binding carry. Everything else the type needs — its constructor and the four
+// builders that fill it in — is `pub(crate)`, because only this crate raises
+// one; the `SimulationError::Elaboration` variant costs nothing, since the
+// ratchet counts item statements and not variants, and the two grouped
+// re-exports that publish the pair were already counted.
+const MAX_PUBLIC_ITEMS: usize = 5006;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
