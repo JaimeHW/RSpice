@@ -17,12 +17,14 @@ use rspice_veriloga::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CanonicalValueType, CfgEvalInputs, CfgScalar, ComplexStep,
     ValueId, differentiate, evaluate_cfg,
 };
-use rspice_veriloga::rust_backend::discover_veriloga_sources;
+use rspice_veriloga::rust_backend::{
+    VERILOGA_COMPILE_PROFILE_FILE_NAME, discover_veriloga_sources, parse_generated_builtin_manifest,
+};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use rspice_veriloga_runtime::{
     AnalogAnalysisPhase, active_analysis_query_names, analysis_query_mask,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Relative agreement demanded between the rule and the difference.
@@ -99,22 +101,58 @@ const ORACLE_DIVERGENCE_FACTOR: f64 = 1.0e12;
 /// branches, and 7.5e-8 is accumulated reordering across that, the same argument
 /// that put the corpus tolerance at 1e-9 rather than the fixtures' 1e-11.
 /// `PSP104VA` at 1.3e-9 is a rounding's width from the tolerance itself.
-const KNOWN_COMPLEX_STEP_DEVIATIONS: &[(&str, f64)] = &[
-    ("bsimcmg_va", 3.0e-3),
-    ("PSPNQS104VA", 1.0e-8),
-    // Oracle non-analytic under drawn parameters.
-    ("ekv_va", 4.0e-1),
-    ("l_utsoi", 5.0e-7),
-    // Valid oracle; accumulation, worst measured 7.457e-8 and 1.304e-9.
-    ("asmhemt", 1.0e-7),
-    ("PSP104VA", 2.0e-9),
+/// Keyed by the profile's own `SOURCE::MODULE` selector, and carrying its
+/// reason as a field rather than as a comment above it. Three module names in
+/// the corpus name more than one source — `hisimsoi_va` three times, `l_utsoi`
+/// and `bsimsoi` twice each — so a bare name is not an identity, and a reason
+/// that lives in a comment can be dropped by an edit that keeps the number.
+/// [`every_shipped_device_has_one_identity`] holds every key here to a real
+/// namespace declaration, because a selector that matches nothing silently
+/// restores the strict tolerance.
+const KNOWN_COMPLEX_STEP_DEVIATIONS: &[(&str, f64, &str)] = &[
+    (
+        "cmc/BSIM-CMG_112.1.0_04282026/code/bsimcmg.va::bsimcmg_va",
+        3.0e-3,
+        "oracle non-analytic: drifts on 51 evaluations of the value census",
+    ),
+    (
+        "cmc/PSP104.1.0_vacode/vacode/psp104_nqs.va::PSPNQS104VA",
+        1.0e-8,
+        "oracle non-analytic: drifts on 42 evaluations of the value census",
+    ),
+    (
+        "ekv26_2.6/ekv26_SDext_Verilog-A.va::ekv_va",
+        4.0e-1,
+        "oracle non-analytic once parameters are drawn: 8 evaluations drift",
+    ),
+    (
+        "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102.va::l_utsoi",
+        5.0e-7,
+        "oracle non-analytic once parameters are drawn: 20 evaluations drift",
+    ),
+    (
+        "cmc/L_UTSOI_102.9.0_code_package/vacode/L_UTSOI_102_nqs.va::l_utsoi",
+        5.0e-7,
+        "the same body through the NQS source, which the bare-name key also \
+         covered and which no measurement has separated from it",
+    ),
+    (
+        "cmc/ASM-HEMT101.6.0_05132026/vacode/asmhemt.va::asmhemt",
+        1.0e-7,
+        "valid oracle; reordering accumulated over 23 nodes, worst 7.457e-8",
+    ),
+    (
+        "cmc/PSP104.1.0_vacode/vacode/psp104.va::PSP104VA",
+        2.0e-9,
+        "valid oracle; accumulated reordering, worst 1.304e-9",
+    ),
 ];
 
-fn corpus_tolerance(module: &str) -> f64 {
+fn corpus_tolerance(key: &str) -> f64 {
     KNOWN_COMPLEX_STEP_DEVIATIONS
         .iter()
-        .find(|(name, _)| *name == module)
-        .map_or(CORPUS_COMPLEX_TOLERANCE, |(_, tolerance)| *tolerance)
+        .find(|(selector, _, _)| *selector == key)
+        .map_or(CORPUS_COMPLEX_TOLERANCE, |(_, tolerance, _)| *tolerance)
 }
 
 /// Neither oracle here is seeded with [`AdSeed::LimiterCorrection`], and neither
@@ -323,6 +361,13 @@ fn artifact(source: &str) -> CanonicalIrArtifact {
 /// those models with their derived quantities never computed. `hicumL0` and
 /// `hicumL2` gate their operating-point block on `analysis("static")`, which the
 /// same mask turns on.
+///
+/// The initial-step flag is unconditional rather than set for the first
+/// evaluation only, because the interpreter these oracles run on carries no
+/// history between calls: every `evaluate_cfg` starts from nothing, so every
+/// evaluation *is* an initial step. All six corpus consumers gate idempotent
+/// parameter preprocessing, so running it on each call computes the same
+/// derived quantities it would have computed once.
 fn initial_dc_analyses() -> HashSet<smol_str::SmolStr> {
     active_analysis_query_names(analysis_query_mask(
         0,
@@ -1481,6 +1526,24 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
 /// silently. A census that says nothing about a model reads as coverage it does
 /// not have, and the point of this test is to know which models the rule has
 /// actually been checked on.
+///
+/// For a *shipped* device that is an assertion rather than a note. Reporting
+/// catches a device that has never been compared; it cannot catch one that
+/// compared three hundred entries yesterday and none today, because a model
+/// whose evaluation now fails at every drawn point, or whose entries have all
+/// fallen under the significance floor, leaves the aggregate counts healthy and
+/// the run green. So every device the profile declares must reach the rule and
+/// compare at least one entry, and a device that never compiled, never lowered
+/// or never differentiated compares zero — exempting those is the same hole
+/// reached from the other side.
+///
+/// Deliberately not a pinned count and deliberately not a ratchet. The number
+/// of entries a device yields moves with the seeded draw, the significance
+/// floor, the divergence ceiling and the model's own node and branch layout,
+/// none of which are the property under test; a threshold built from them
+/// re-creates the 47-discovered/43-shipped/42-checked confusion that made an
+/// earlier attempt at this assertion wrong on its first run. One entry is the
+/// smallest claim that cannot be satisfied by measuring nothing.
 #[test]
 #[ignore = "compiles the whole shipped corpus"]
 fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
@@ -1491,7 +1554,8 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
     let (mut checked, mut entries, mut uncompiled, mut unlowered, mut undifferentiated) =
         (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut violations = Vec::new();
-    let mut uncompared = Vec::new();
+    let mut outcomes: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    let mut shipped: Vec<(String, String)> = Vec::new();
 
     for (candidate, module) in candidates.iter().flat_map(|candidate| {
         candidate
@@ -1499,20 +1563,38 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             .iter()
             .map(move |module| (candidate, module.to_string()))
     }) {
+        // `(source, module)`, in the profile's own spelling. A bare module name
+        // is not an identity here: `hisimsoi_va` names three sources and
+        // `l_utsoi` and `bsimsoi` two each, so keying on it makes those devices
+        // share a seed, a tolerance and a row in the report.
+        let relative = relative_source(&root, &candidate.path);
+        let key = format!("{relative}::{module}");
+        if let Some(id) = candidate.compile_profile.namespaces.get(&module) {
+            shipped.push((key.clone(), format!("{module} ({relative}, {id})")));
+        }
+
         let mut options = CompilerOptions::default();
         options.include_paths.push(root.clone());
         options.defines = candidate.compile_profile.defines.clone();
         options.undefines = candidate.compile_profile.undefines.clone();
-        let Ok(compiled) = VerilogACompiler::new(options)
+        let compiled = match VerilogACompiler::new(options)
             .compile_file_canonical_ir_with_metadata(&candidate.path, Some(&module))
-        else {
-            uncompiled += 1;
-            continue;
+        {
+            Ok(compiled) => compiled,
+            Err(error) => {
+                uncompiled += 1;
+                outcomes.insert(key, (0, format!("did not compile: {error}")));
+                continue;
+            }
         };
         let artifact = compiled.artifact;
-        let Ok(cfg) = CfgModel::from_hir(&artifact.hir, &artifact.mir) else {
-            unlowered += 1;
-            continue;
+        let cfg = match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
+            Ok(cfg) => cfg,
+            Err(diagnostics) => {
+                unlowered += 1;
+                outcomes.insert(key, (0, format!("did not lower: {diagnostics:?}")));
+                continue;
+            }
         };
 
         let lanes: Vec<AdSeed> = (0..artifact.mir.nodes.len())
@@ -1522,9 +1604,13 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                     .map(|index| AdSeed::BranchUnknownFlow(index.into())),
             )
             .collect();
-        let Ok(mut differentiated) = differentiate(&cfg.function, &lanes) else {
-            undifferentiated += 1;
-            continue;
+        let mut differentiated = match differentiate(&cfg.function, &lanes) {
+            Ok(differentiated) => differentiated,
+            Err(error) => {
+                undifferentiated += 1;
+                outcomes.insert(key, (0, format!("did not differentiate: {error}")));
+                continue;
+            }
         };
         let rows: Vec<Vec<Option<ValueId>>> = cfg
             .residuals
@@ -1532,13 +1618,24 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             .map(|residual| differentiated.derivative_row(*residual))
             .collect();
 
-        let mut state = seed_for(&module);
+        let mut state = seed_for(&key);
         let mut model_entries = 0usize;
+        let mut evaluated = 0usize;
+        let mut skipped = Vec::new();
         for point in 0..POINTS {
             let bias = random_bias_point(&artifact, &mut state);
-            let Ok(snapshot) = evaluate_cfg(&differentiated.function, &inputs(&bias)) else {
-                continue;
+            let snapshot = match evaluate_cfg(&differentiated.function, &inputs(&bias)) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    // A drawn point may sit where the model itself refuses to
+                    // evaluate, and which point and why is the difference
+                    // between a model that is hard to bias and one that stopped
+                    // evaluating at all.
+                    skipped.push(format!("point {point}: {error}"));
+                    continue;
+                }
             };
+            evaluated += 1;
             let columns: Vec<_> = lanes
                 .iter()
                 .map(|seed| {
@@ -1559,19 +1656,24 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                 })
                 .collect();
             model_entries += compare_block(
-                &format!("{module}: point {point}"),
+                &format!("{key}: point {point}"),
                 &lanes,
                 &block,
-                corpus_tolerance(&module),
+                corpus_tolerance(&key),
                 &mut violations,
             );
         }
         checked += 1;
         entries += model_entries;
-        if model_entries == 0 {
-            uncompared.push(module.clone());
+        let mut outcome = format!(
+            "evaluated at {evaluated} of {POINTS} points, compared {model_entries} entries"
+        );
+        for reason in &skipped {
+            outcome.push_str("\n      skipped ");
+            outcome.push_str(reason);
         }
-        eprintln!("{module:>24}  {model_entries} entries");
+        outcomes.insert(key.clone(), (model_entries, outcome));
+        eprintln!("{key}  {model_entries} entries");
     }
 
     let discovered: usize = candidates
@@ -1579,24 +1681,40 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
         .map(|candidate| candidate.modules.len())
         .sum();
     eprintln!(
-        "checked {checked} of {discovered} models, {entries} entries; \
-         {uncompiled} uncompiled, {unlowered} unlowered, {undifferentiated} undifferentiated"
+        "checked {checked} of {discovered} models, {} shipped, {entries} entries; \
+         {uncompiled} uncompiled, {unlowered} unlowered, {undifferentiated} undifferentiated",
+        shipped.len()
     );
-    if !uncompared.is_empty() {
-        eprintln!(
-            "reached the rule but compared nothing: {}",
-            uncompared.join(", ")
-        );
-    }
-    // Reported, not asserted. `checked < discovered` and an empty model are
-    // both coverage facts, and neither is a statement about the chain rule —
-    // the property this test exists for. Failing on them would put a red on a
-    // model that stopped compiling for a reason that belongs to the front end,
-    // in the only run that compiles the corpus at all. What is asserted is that
-    // discovery found something and that something was compared; the per-model
-    // form of that lives in
-    // [`every_jacobian_entry_matches_complex_step_at_drawn_bias_points`], where
-    // every run exercises it.
+
+    // How far short of the whole discovered set the census got is reported: a
+    // helper module that stops compiling is the front end's business, not the
+    // chain rule's, and this is the only run that compiles the corpus at all.
+    // A *shipped* device is different — see this test's own documentation.
+    let short: Vec<String> = shipped
+        .iter()
+        .filter_map(|(key, identity)| match outcomes.get(key) {
+            Some((entries, _)) if *entries > 0 => None,
+            Some((_, outcome)) => Some(format!("  {identity}\n      {outcome}")),
+            None => Some(format!(
+                "  {identity}\n      was never reached by the census"
+            )),
+        })
+        .collect();
+    assert!(
+        !shipped.is_empty(),
+        "the profile declared no shipped devices, so this census asserts nothing"
+    );
+    assert!(
+        short.is_empty(),
+        "{} of {} shipped devices compared no derivative entry:
+{}",
+        short.len(),
+        shipped.len(),
+        short.join(
+            "
+"
+        )
+    );
     assert!(discovered > 0, "no shipped models discovered");
     assert!(entries > 0, "no entry was compared");
     assert!(
@@ -1619,6 +1737,155 @@ fn model_root() -> PathBuf {
         .join("veriloga");
     assert!(root.exists(), "model tree missing: {}", root.display());
     root
+}
+
+/// A shipped device is `(source, module)`, and the generated manifest agrees.
+///
+/// [`the_whole_corpus_matches_complex_step_at_drawn_bias_points`] keys its
+/// seed, its tolerance, its report row and its per-device assertion on that
+/// pair. Keying is only correct if the pair is unique, and it is only
+/// *necessary* if the bare module name is not — three sources publish
+/// `hisimsoi_va`, and the manifest says so itself in the folder names
+/// `hisimsoi__hisimsoi_va__5be18005`, `hisimsoi_n4__hisimsoi_va__242bc21d` and
+/// `hisimsoi_n5__hisimsoi_va__38074d06`.
+///
+/// This is the runnable half of that census. It compiles nothing, so it runs in
+/// every `cargo test`, and it fails if the key set drifts, if a source in the
+/// profile disappears, or if a tolerance allowance names a device that is not
+/// shipped — which would silently restore the strict tolerance in the one run
+/// nobody watches.
+#[test]
+fn every_shipped_device_has_one_identity() {
+    let root = model_root();
+    let profile = std::fs::read_to_string(root.join(VERILOGA_COMPILE_PROFILE_FILE_NAME))
+        .expect("the model root declares a compile profile");
+
+    let mut declared: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for line in profile.lines() {
+        let Some(arguments) = line.trim().strip_prefix("namespace ") else {
+            continue;
+        };
+        let (selector, id) = arguments
+            .trim()
+            .split_once('=')
+            .expect("a namespace reads SOURCE::MODULE=HEX_ID");
+        let (source, module) = selector
+            .rsplit_once("::")
+            .expect("a namespace selector names SOURCE::MODULE");
+        assert!(
+            root.join(source).is_file(),
+            "{selector} names a source that is not in the tree"
+        );
+        let clash = declared.insert(
+            selector.to_string(),
+            (module.to_string(), id.to_ascii_lowercase()),
+        );
+        assert!(
+            clash.is_none(),
+            "{selector} is declared twice, so the census would key two devices the same"
+        );
+    }
+
+    let manifest_text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("rspice-veriloga-models")
+            .join("manifest.txt"),
+    )
+    .expect("the generated built-in manifest is checked in");
+    let manifest = parse_generated_builtin_manifest(&manifest_text)
+        .expect("the checked-in manifest parses at the current schema version");
+
+    assert_eq!(
+        declared.len(),
+        manifest.device_count,
+        "the profile declares {} devices and the manifest generated {}",
+        declared.len(),
+        manifest.device_count
+    );
+
+    // `folder_name` is `<source stem>__<module>__<hex id>`, so the manifest
+    // carries the same identity the profile declares and the two can disagree.
+    let published: BTreeSet<(String, String)> = manifest
+        .devices
+        .iter()
+        .map(|device| {
+            let (_, id) = device
+                .folder_name
+                .rsplit_once("__")
+                .expect("a generated folder name ends in its namespace id");
+            (device.module_name.clone(), id.to_ascii_lowercase())
+        })
+        .collect();
+    let profiled: BTreeSet<(String, String)> = declared.values().cloned().collect();
+    assert_eq!(
+        profiled, published,
+        "the profile's (module, id) pairs and the manifest's disagree"
+    );
+
+    let bare: BTreeSet<&str> = declared
+        .values()
+        .map(|(module, _)| module.as_str())
+        .collect();
+    let shared: Vec<&str> = bare
+        .iter()
+        .copied()
+        .filter(|name| {
+            declared
+                .values()
+                .filter(|(module, _)| module == name)
+                .count()
+                > 1
+        })
+        .collect();
+    assert!(
+        bare.len() < declared.len(),
+        "no module name is shared by two sources any more, so the census's \
+         (source, module) key is no longer load-bearing — check whether the \
+         corpus changed before simplifying it back to a bare name"
+    );
+    assert_eq!(
+        declared.len() - bare.len(),
+        4,
+        "shared module names {shared:?} cost {} of {} keys; a bare-name key \
+         would merge exactly those devices",
+        declared.len() - bare.len(),
+        declared.len()
+    );
+
+    let mut allowed = BTreeSet::new();
+    for (selector, tolerance, reason) in KNOWN_COMPLEX_STEP_DEVIATIONS {
+        assert!(
+            declared.contains_key(*selector),
+            "the tolerance allowance for {selector} names no shipped device, so \
+             it applies to nothing and the strict tolerance is what runs"
+        );
+        assert!(
+            *tolerance > CORPUS_COMPLEX_TOLERANCE,
+            "the allowance for {selector} is not looser than the corpus tolerance"
+        );
+        assert!(
+            !reason.trim().is_empty(),
+            "the allowance for {selector} carries no reason"
+        );
+        assert!(
+            allowed.insert(*selector),
+            "{selector} carries two tolerance allowances"
+        );
+    }
+}
+
+/// A source in the profile's own spelling: forward slashes, relative to the
+/// model root, so the key a census builds is the selector the profile declares
+/// and comparing the two is a string comparison rather than a path dance.
+fn relative_source(root: &Path, path: &Path) -> String {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    path.strip_prefix(&root)
+        .unwrap_or(path)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Compare one equation's row against complex step, and report how many entries
