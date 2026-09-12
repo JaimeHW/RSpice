@@ -302,6 +302,71 @@ jobs:
           path: target/veriloga-stamp-qualification.json
           if-no-files-found: error
 
+  mixed-determinism:
+    name: Mixed-deck determinism (serial vs parallel)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
+      # Every pinned quantity prints and none is asserted, so what the two runs
+      # below produce is the complete emitted set for their build rather than a
+      # pass/fail against constants the per-push tier already checks.
+      RSPICE_TRI_FAMILY_EMIT: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: mixed-determinism
+      # Serial test threads and --nocapture for both runs: the comparison is
+      # over printed lines, and a key printed by two threads at once is a
+      # difference in the log rather than in the engine.
+      - name: Mixed suites, default features (parallel reductions)
+        shell: bash
+        run: >-
+          cargo test --locked -p rspice-core
+          --features veriloga,veriloga-model-diode-cmc --no-fail-fast
+          --test tri_family_transient
+          --test tri_family_events
+          --test veriloga_mixed_signal_hardening
+          -- --nocapture --test-threads 1 | tee parallel.log
+      # The same suites with rayon, portable-atomic, faer/rayon and the SIMD
+      # kernels compiled out. faer's serial reductions may sum a row in a
+      # different order than its parallel ones, and a summation order that
+      # reaches the accepted grid is exactly what a per-fixture hash is shaped
+      # to catch: nothing else in the tree runs these decks serially.
+      - name: Mixed suites, --no-default-features (serial reductions)
+        shell: bash
+        run: >-
+          cargo test --locked -p rspice-core --no-default-features
+          --features veriloga,veriloga-model-diode-cmc --no-fail-fast
+          --test tri_family_transient
+          --test tri_family_events
+          --test veriloga_mixed_signal_hardening
+          -- --nocapture --test-threads 1 | tee serial.log
+      # One required key per suite, so a suite that linked to nothing fails
+      # here instead of quietly shrinking the comparison; --min-keys is the
+      # loose floor underneath that.
+      - name: Diff the two emitted fingerprint sets
+        run: >-
+          python3 tools/ci/compare_trifamily_fingerprints.py
+          --label-a parallel --label-b serial
+          --min-keys 40
+          --require-key deck_a_grid_hash
+          --require-key deck_e_grid_hash
+          --require-key hardening_clock_divider_grid_hash
+          parallel.log serial.log
+      - name: Upload emitted fingerprint logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mixed-determinism-logs
+          path: |
+            parallel.log
+            serial.log
+          if-no-files-found: error
+
   release-build:
     name: Release build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

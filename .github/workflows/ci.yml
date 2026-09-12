@@ -85,6 +85,8 @@ jobs:
         run: python3 tools/models/build_manifest.py --check
       - name: Drawing-sheet qualification harness regressions
         run: python3 tools/ci/test_qualify_drawing_sheet.py
+      - name: Mixed-deck fingerprint comparison regressions
+        run: python3 tools/ci/test_compare_trifamily_fingerprints.py
       - name: Clippy (warnings denied)
         run: cargo clippy --locked --workspace --exclude rspice-python --exclude rspice-wasm --all-targets --message-format short -- -D warnings
 
