@@ -150,11 +150,23 @@ fn state_integration_coefficients(ctx: &EvalContext) -> IntegrationCoefficients 
         .unwrap_or_else(|| integration_coefficients(ctx))
 }
 
-fn event_integer_operand(name: &str, value: f64) -> Result<i32, String> {
-    let converted = real_to_integer(value)
-        .map_err(|error| format!("{name} integer conversion failed: {error}"))?;
+/// Native twin of the interpreter's `event_integer_operand`.
+///
+/// The bool is the producer's classification: true when the refusal is a
+/// property of this iterate (a non-finite operand) and false when it fails the
+/// same way at every point.
+fn event_integer_operand(name: &str, value: f64) -> Result<i32, (bool, String)> {
+    let converted = real_to_integer(value).map_err(|error| {
+        (
+            error.is_non_finite_operand(),
+            format!("{name} integer conversion failed: {error}"),
+        )
+    })?;
     if f64::from(converted) != value {
-        return Err(format!("{name} must evaluate to an integer, got {value}"));
+        return Err((
+            false,
+            format!("{name} must evaluate to an integer, got {value}"),
+        ));
     }
     Ok(converted)
 }
@@ -595,6 +607,30 @@ impl EvalContext {
             .record(NativeRuntimeErrorKind::InvalidNumericResult, message);
     }
 
+    /// Record a refusal the producer has already classified.
+    ///
+    /// The native helpers call the same `zfilter`, `laplace` and `integer`
+    /// code the interpreter does, so they ask it the same question rather than
+    /// deciding for themselves — that is what keeps `NativeJit` and
+    /// `InvalidNumericResult` lining up with the interpreter's
+    /// `InvalidRuntimeOperation` and `InvalidNumericResult` for the same
+    /// failure.
+    pub(crate) fn record_classified(&self, iterate_dependent: bool, message: impl Into<String>) {
+        if iterate_dependent {
+            self.record_invalid_numeric_result(message);
+        } else {
+            self.record_runtime_error(message);
+        }
+    }
+
+    /// Record a refusal the shared VM helpers already classified for us.
+    pub(crate) fn record_vm_error(&self, error: &crate::vm::VmError, message: impl Into<String>) {
+        self.record_classified(
+            matches!(error, crate::vm::VmError::InvalidNumericResult(_)),
+            message,
+        );
+    }
+
     fn invalidate_task_candidate(&self) {
         // SAFETY: The dispatch owns the journal slot exclusively, just like its
         // numerical state pointers. Observational dispatches supply null.
@@ -659,6 +695,18 @@ fn set_native_context_error_ptr(ctx: *const EvalContext, message: impl Into<Stri
     // SAFETY: A non-null pointer comes from the active native entry point.
     if let Some(ctx) = unsafe { ctx.as_ref() } {
         set_native_context_error(ctx, message);
+    }
+}
+
+/// Pointer form of [`EvalContext::record_classified`].
+fn set_native_context_classified_ptr(
+    ctx: *const EvalContext,
+    iterate_dependent: bool,
+    message: impl Into<String>,
+) {
+    // SAFETY: A non-null pointer comes from the active native entry point.
+    if let Some(ctx) = unsafe { ctx.as_ref() } {
+        ctx.record_classified(iterate_dependent, message);
     }
 }
 
@@ -1234,26 +1282,39 @@ pub unsafe extern "C" fn rspice_integer_operation_native(
     ctx: *const EvalContext,
     descriptor: usize,
 ) -> f64 {
+    // `(iterate_dependent, message)`: only a non-finite operand is a property
+    // of the point the solver offered, and the shared integer runtime is the
+    // only place that knows which it was. A malformed descriptor is the JIT's
+    // own fault and never iterate-dependent.
     let result = (|| {
         if operands.is_null() {
-            return Err("native integer operation received null operand storage".to_string());
+            return Err((
+                false,
+                "native integer operation received null operand storage".to_string(),
+            ));
         }
         let kind = descriptor & INTEGER_DESCRIPTOR_KIND_MASK;
         // SAFETY: generated native call sites pass a validated operand run of
         // the length selected by the descriptor kind.
         let left = unsafe { *operands };
+        let classify = |error: crate::integer_runtime::IntegerRuntimeError| {
+            (error.is_non_finite_operand(), error.to_string())
+        };
         if kind == INTEGER_CAST_DESCRIPTOR {
-            return real_to_integer(left)
-                .map(f64::from)
-                .map_err(|error| error.to_string());
+            return real_to_integer(left).map(f64::from).map_err(classify);
         }
 
         if (INTEGER_BINARY_DESCRIPTOR_BASE..INTEGER_BINARY_DESCRIPTOR_BASE + 11).contains(&kind) {
             let operation = integer_operation_from_code(kind - INTEGER_BINARY_DESCRIPTOR_BASE)
-                .ok_or_else(|| "native integer descriptor has an invalid operation".to_string())?;
+                .ok_or_else(|| {
+                    (
+                        false,
+                        "native integer descriptor has an invalid operation".to_string(),
+                    )
+                })?;
             // SAFETY: binary descriptors require exactly two operands.
             let right = unsafe { *operands.add(1) };
-            return integer_binary(operation, left, right).map_err(|error| error.to_string());
+            return integer_binary(operation, left, right).map_err(classify);
         }
 
         if (INTEGER_SHIFT_CONST_DESCRIPTOR_BASE..INTEGER_SHIFT_CONST_DESCRIPTOR_BASE + 5)
@@ -1261,10 +1322,14 @@ pub unsafe extern "C" fn rspice_integer_operation_native(
         {
             let operation = integer_operation_from_code(kind - INTEGER_SHIFT_CONST_DESCRIPTOR_BASE)
                 .ok_or_else(|| {
-                    "native integer constant-shift descriptor has an invalid operation".to_string()
+                    (
+                        false,
+                        "native integer constant-shift descriptor has an invalid operation"
+                            .to_string(),
+                    )
                 })?;
             let count = ((descriptor >> 8) & 0xff) as f64;
-            return integer_binary(operation, left, count).map_err(|error| error.to_string());
+            return integer_binary(operation, left, count).map_err(classify);
         }
 
         if (INTEGER_BINARY_CONST_DESCRIPTOR_BASE..INTEGER_BINARY_CONST_DESCRIPTOR_BASE + 5)
@@ -1273,20 +1338,28 @@ pub unsafe extern "C" fn rspice_integer_operation_native(
             let operation =
                 integer_operation_from_code(kind - INTEGER_BINARY_CONST_DESCRIPTOR_BASE)
                     .ok_or_else(|| {
-                        "native integer constant descriptor has an invalid operation".to_string()
+                        (
+                            false,
+                            "native integer constant descriptor has an invalid operation"
+                                .to_string(),
+                        )
                     })?;
             let right = ((descriptor >> INTEGER_DESCRIPTOR_PAYLOAD_SHIFT) as u32 as i32) as f64;
-            return integer_binary(operation, left, right).map_err(|error| error.to_string());
+            return integer_binary(operation, left, right).map_err(classify);
         }
 
-        Err("native integer operation received an invalid descriptor".to_string())
+        Err((
+            false,
+            "native integer operation received an invalid descriptor".to_string(),
+        ))
     })();
 
     match result {
         Ok(value) => value,
-        Err(error) => {
-            set_native_context_error_ptr(
+        Err((iterate_dependent, error)) => {
+            set_native_context_classified_ptr(
                 ctx,
+                iterate_dependent,
                 format!(
                     "native Verilog-AMS integer operation failed: {error}; no interpreter fallback"
                 ),
@@ -1357,8 +1430,8 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     match result {
         Ok(value) => value,
         Err(error) => {
-            set_native_context_error(
-                ctx,
+            ctx.record_classified(
+                error.is_iterate_dependent(),
                 format!("native Laplace filter {filter_id} evaluation failed: {error}"),
             );
             0.0
@@ -1419,35 +1492,40 @@ pub unsafe extern "C" fn rspice_laplace_derivative_native(
     };
     let filter = &filters[filter_id];
     let coefficients = state_integration_coefficients(ctx);
+    // The bool beside each message is the producer's own classification, kept
+    // beside the rendered text so the native route lands in the same kind as
+    // the interpreter's `LaplaceStateDerivative` arm.
     let result = if ctx.static_dae_probe != 0 {
         filter
             .static_dae_input_action(input_derivative)
-            .map_err(|error| error.to_string())
+            .map_err(|error| (error.is_iterate_dependent(), error.to_string()))
     } else if ctx.analysis_type == 2 && coefficients.active {
         match filter.transient_input_gain(coefficients) {
             Ok(gain) => {
                 let result = gain * input_derivative;
                 if !result.is_finite() || (result == 0.0 && gain != 0.0 && input_derivative != 0.0)
                 {
-                    Err("input action is not representable".to_owned())
+                    // The input derivative is the iterate's.
+                    Err((true, "input action is not representable".to_owned()))
                 } else {
                     Ok(result)
                 }
             }
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err((error.is_iterate_dependent(), error.to_string())),
         }
     } else {
         filter
             .dc_output(input_derivative)
-            .map_err(|error| error.to_string())
+            .map_err(|error| (error.is_iterate_dependent(), error.to_string()))
     };
 
     match result {
         Ok(value) => value,
-        Err(error) => {
-            ctx.record_invalid_numeric_result(format!(
-                "native Laplace derivative {filter_id} evaluation failed: {error}"
-            ));
+        Err((iterate_dependent, error)) => {
+            ctx.record_classified(
+                iterate_dependent,
+                format!("native Laplace derivative {filter_id} evaluation failed: {error}"),
+            );
             0.0
         }
     }
@@ -1532,9 +1610,10 @@ pub unsafe extern "C" fn rspice_zi_step_native(
         ) {
             Ok(value) => value,
             Err(error) => {
-                ctx.record_invalid_numeric_result(format!(
-                    "native zi filter {filter_id} static observation failed: {error}"
-                ));
+                ctx.record_vm_error(
+                    &error,
+                    format!("native zi filter {filter_id} static observation failed: {error}"),
+                );
                 0.0
             }
         };
@@ -1543,9 +1622,10 @@ pub unsafe extern "C" fn rspice_zi_step_native(
         match layout.freeze_filter(operands) {
             Ok(filter) => filters[filter_id] = filter,
             Err(error) => {
-                ctx.record_invalid_numeric_result(format!(
-                    "native zi filter {filter_id} definition freeze failed: {error}"
-                ));
+                ctx.record_classified(
+                    error.is_iterate_dependent(),
+                    format!("native zi filter {filter_id} definition freeze failed: {error}"),
+                );
                 return 0.0;
             }
         }
@@ -1567,9 +1647,10 @@ pub unsafe extern "C" fn rspice_zi_step_native(
                         *current = current.min(event_time);
                     }
                     Err(error) => {
-                        ctx.record_invalid_numeric_result(format!(
-                            "native zi filter {filter_id} breakpoint failed: {error}"
-                        ));
+                        ctx.record_classified(
+                            error.is_iterate_dependent(),
+                            format!("native zi filter {filter_id} breakpoint failed: {error}"),
+                        );
                         return 0.0;
                     }
                 }
@@ -1577,9 +1658,10 @@ pub unsafe extern "C" fn rspice_zi_step_native(
             value
         }
         Err(error) => {
-            ctx.record_invalid_numeric_result(format!(
-                "native zi filter {filter_id} evaluation failed: {error}"
-            ));
+            ctx.record_classified(
+                error.is_iterate_dependent(),
+                format!("native zi filter {filter_id} evaluation failed: {error}"),
+            );
             0.0
         }
     }
@@ -1642,9 +1724,10 @@ pub unsafe extern "C" fn rspice_zi_derivative_native(
         ) {
             Ok(value) => value,
             Err(error) => {
-                ctx.record_invalid_numeric_result(format!(
-                    "native zi filter {filter_id} static observation failed: {error}"
-                ));
+                ctx.record_vm_error(
+                    &error,
+                    format!("native zi filter {filter_id} static observation failed: {error}"),
+                );
                 0.0
             }
         };
@@ -1653,9 +1736,10 @@ pub unsafe extern "C" fn rspice_zi_derivative_native(
         match layout.freeze_filter(operands) {
             Ok(filter) => filters[filter_id] = filter,
             Err(error) => {
-                ctx.record_invalid_numeric_result(format!(
-                    "native zi filter {filter_id} definition freeze failed: {error}"
-                ));
+                ctx.record_classified(
+                    error.is_iterate_dependent(),
+                    format!("native zi filter {filter_id} definition freeze failed: {error}"),
+                );
                 return 0.0;
             }
         }
@@ -1671,9 +1755,10 @@ pub unsafe extern "C" fn rspice_zi_derivative_native(
     ) {
         Ok(value) => value,
         Err(error) => {
-            ctx.record_invalid_numeric_result(format!(
-                "native zi filter {filter_id} derivative failed: {error}"
-            ));
+            ctx.record_classified(
+                error.is_iterate_dependent(),
+                format!("native zi filter {filter_id} derivative failed: {error}"),
+            );
             0.0
         }
     }
@@ -2844,15 +2929,15 @@ pub unsafe extern "C" fn rspice_cross_state_native(
     let expr_tol = operands[3];
     let direction = match event_integer_operand("cross direction", direction_raw) {
         Ok(direction) => direction,
-        Err(error) => {
-            set_native_context_error(ctx, error);
+        Err((iterate_dependent, error)) => {
+            ctx.record_classified(iterate_dependent, error);
             return 0.0;
         }
     };
     let enabled = match event_integer_operand("cross enable", operands[4]) {
         Ok(enable) => enable != 0,
-        Err(error) => {
-            set_native_context_error(ctx, error);
+        Err((iterate_dependent, error)) => {
+            ctx.record_classified(iterate_dependent, error);
             return 0.0;
         }
     };
@@ -2928,8 +3013,8 @@ pub unsafe extern "C" fn rspice_above_state_native(
     let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
     let enabled = match event_integer_operand("above enable", operands[3]) {
         Ok(enable) => enable != 0,
-        Err(error) => {
-            set_native_context_error(ctx, error);
+        Err((iterate_dependent, error)) => {
+            ctx.record_classified(iterate_dependent, error);
             return 0.0;
         }
     };
@@ -3014,8 +3099,8 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
     let direction = match event_integer_operand("last_crossing direction", operands[1]) {
         Ok(direction) => direction,
-        Err(error) => {
-            set_native_context_error(ctx, error);
+        Err((iterate_dependent, error)) => {
+            ctx.record_classified(iterate_dependent, error);
             return -1.0;
         }
     };
@@ -3095,6 +3180,13 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
     len: usize,
     lower: i64,
 ) -> f64 {
+    // A non-finite index is the one failure here that belongs to the point the
+    // solver offered: the index expression is the module's arithmetic on the
+    // iterate, and `ArrayIndexError::NonFinite` is exactly what the
+    // interpreter classifies as rejectable. A rounded-out-of-range index, an
+    // index outside the declared bounds, zero-length storage and a length the
+    // native bounds range cannot hold are all structural on both routes.
+    let mut iterate_dependent = false;
     let message = if len == 0 {
         "native dynamic variable access has zero-length storage; no interpreter fallback".into()
     } else if let Ok(len_i64) = i64::try_from(len) {
@@ -3107,12 +3199,13 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
                 dynamic_variable_bounds_error(index, lower, len_i64)
             }
         } else {
+            iterate_dependent = !raw_index.is_finite();
             dynamic_variable_bounds_error(raw_index, lower, len_i64)
         }
     } else {
         "native dynamic variable length exceeds native bounds range; no interpreter fallback".into()
     };
-    set_native_context_error_ptr(ctx, message);
+    set_native_context_classified_ptr(ctx, iterate_dependent, message);
     0.0
 }
 

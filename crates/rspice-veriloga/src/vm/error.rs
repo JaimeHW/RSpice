@@ -49,6 +49,25 @@ pub enum VmError {
     },
 }
 
+impl VmError {
+    /// Build the refusal a producer has already classified.
+    ///
+    /// The value is known where the failure is raised and nowhere above it, so
+    /// every runtime that can reach a given refusal asks the same producer —
+    /// `IntegerRuntimeError::is_non_finite_operand`,
+    /// `ZiFilterError::is_iterate_dependent`,
+    /// `LaplaceError::is_iterate_dependent` — rather than deciding for itself.
+    /// That is what keeps the interpreter, the native backend and the
+    /// generated Rust answering the same question the same way.
+    pub(crate) fn classified(iterate_dependent: bool, message: String) -> Self {
+        if iterate_dependent {
+            Self::InvalidNumericResult(message)
+        } else {
+            Self::InvalidRuntimeOperation(message)
+        }
+    }
+}
+
 impl std::fmt::Display for VmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

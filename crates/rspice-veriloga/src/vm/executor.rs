@@ -16,12 +16,22 @@ use crate::codegen::{BytecodeProgram, Instruction};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 
+/// Convert an event-control operand to the Verilog-AMS `integer` it must be.
+///
+/// The two ways this fails are not the same kind of failure and the producer
+/// is the only place that can tell them apart. A NaN or an infinity is what an
+/// overshooting iterate produced and the next one may not; a finite value that
+/// is not an integer, or one that rounds outside the signed 32-bit range, is
+/// what the module's arithmetic computes at every point.
 fn event_integer_operand(name: &str, value: f64) -> Result<i32, VmError> {
     let converted = real_to_integer(value).map_err(|error| {
-        VmError::InvalidNumericResult(format!("{name} integer conversion failed: {error}"))
+        VmError::classified(
+            error.is_non_finite_operand(),
+            format!("{name} integer conversion failed: {error}"),
+        )
     })?;
     if f64::from(converted) != value {
-        return Err(VmError::InvalidNumericResult(format!(
+        return Err(VmError::InvalidRuntimeOperation(format!(
             "{name} must evaluate to an integer, got {value}"
         )));
     }
@@ -70,10 +80,13 @@ pub(crate) fn observe_zi_state(
         filter
     } else {
         definition = layout.freeze_filter(operands).map_err(|error| {
-            VmError::InvalidNumericResult(format!(
-                "zi filter {} observation definition failed: {error}",
-                layout.filter_id
-            ))
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!(
+                    "zi filter {} observation definition failed: {error}",
+                    layout.filter_id
+                ),
+            )
         })?;
         &definition
     };
@@ -85,10 +98,13 @@ pub(crate) fn observe_zi_state(
             layout.direct_assignment,
         )
         .map_err(|error| {
-            VmError::InvalidNumericResult(format!(
-                "zi filter {} static observation failed: {error}",
-                layout.filter_id
-            ))
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!(
+                    "zi filter {} static observation failed: {error}",
+                    layout.filter_id
+                ),
+            )
         })?;
     Ok(if derivative { 0.0 } else { output })
 }
@@ -119,9 +135,10 @@ pub(crate) fn execute_zi_state(
     }
     if !filter.definition_is_frozen() {
         *filter = layout.freeze_filter(operands).map_err(|error| {
-            VmError::InvalidNumericResult(format!(
-                "zi filter {filter_id} definition freeze failed: {error}"
-            ))
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!("zi filter {filter_id} definition freeze failed: {error}"),
+            )
         })?;
     }
     let time = context.time;
@@ -137,7 +154,12 @@ pub(crate) fn execute_zi_state(
             transition,
             layout.direct_assignment,
         )
-        .map_err(|error| VmError::InvalidNumericResult(format!("zi filter {filter_id}: {error}")))
+        .map_err(|error| {
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!("zi filter {filter_id}: {error}"),
+            )
+        })
 }
 
 /// Read-only Zi derivative counterpart to [`execute_zi_state`].
@@ -166,9 +188,10 @@ pub(crate) fn execute_zi_state_derivative(
     }
     if !filter.definition_is_frozen() {
         *filter = layout.freeze_filter(operands).map_err(|error| {
-            VmError::InvalidNumericResult(format!(
-                "zi filter {filter_id} definition freeze failed: {error}"
-            ))
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!("zi filter {filter_id} definition freeze failed: {error}"),
+            )
         })?;
     }
     let time = context.time;
@@ -184,7 +207,12 @@ pub(crate) fn execute_zi_state_derivative(
             transition,
             layout.direct_assignment,
         )
-        .map_err(|error| VmError::InvalidNumericResult(format!("zi filter {filter_id}: {error}")))
+        .map_err(|error| {
+            VmError::classified(
+                error.is_iterate_dependent(),
+                format!("zi filter {filter_id}: {error}"),
+            )
+        })
 }
 
 impl<'a> Vm<'a> {
@@ -1059,9 +1087,14 @@ impl<'a> Vm<'a> {
                             input, time, delay, rise_time, fall_time,
                         )
                         .map(|()| input),
-                        analysis_type => Err(format!(
-                            "transition received invalid analysis type {analysis_type}"
-                        )),
+                        // Not a value this iterate produced: the analysis code
+                        // is the same for every point of the analysis, so the
+                        // refusal cannot be cured by a smaller step.
+                        analysis_type => {
+                            return Err(VmError::InvalidRuntimeOperation(format!(
+                                "transition received invalid analysis type {analysis_type}"
+                            )));
+                        }
                     }
                 }
                 .map_err(|error| VmError::InvalidNumericResult(format!("transition: {error}")))?;
@@ -1414,7 +1447,10 @@ impl<'a> Vm<'a> {
                     filter.dc_output(input)
                 }
                 .map_err(|error| {
-                    VmError::InvalidNumericResult(format!("Laplace filter {filter_id}: {error}"))
+                    VmError::classified(
+                        error.is_iterate_dependent(),
+                        format!("Laplace filter {filter_id}: {error}"),
+                    )
                 })?;
                 self.stack.push(result);
             }
@@ -1434,15 +1470,17 @@ impl<'a> Vm<'a> {
                     filter
                         .static_dae_input_action(input_derivative)
                         .map_err(|error| {
-                            VmError::InvalidNumericResult(format!(
-                                "Laplace derivative {filter_id}: {error}"
-                            ))
+                            VmError::classified(
+                                error.is_iterate_dependent(),
+                                format!("Laplace derivative {filter_id}: {error}"),
+                            )
                         })?
                 } else if self.context.analysis_type == 2 && coefficients.active {
                     let gain = filter.transient_input_gain(coefficients).map_err(|error| {
-                        VmError::InvalidNumericResult(format!(
-                            "Laplace derivative {filter_id}: {error}"
-                        ))
+                        VmError::classified(
+                            error.is_iterate_dependent(),
+                            format!("Laplace derivative {filter_id}: {error}"),
+                        )
                     })?;
                     let result = gain * input_derivative;
                     if !result.is_finite()
@@ -1455,9 +1493,10 @@ impl<'a> Vm<'a> {
                     result
                 } else {
                     filter.dc_output(input_derivative).map_err(|error| {
-                        VmError::InvalidNumericResult(format!(
-                            "Laplace derivative {filter_id}: {error}"
-                        ))
+                        VmError::classified(
+                            error.is_iterate_dependent(),
+                            format!("Laplace derivative {filter_id}: {error}"),
+                        )
                     })?
                 };
                 self.stack.push(result);
@@ -1502,7 +1541,10 @@ impl<'a> Vm<'a> {
         let right = self.pop()?;
         let left = self.pop()?;
         let value = integer_binary(operation, left, right).map_err(|error| {
-            VmError::InvalidNumericResult(format!("Verilog-AMS integer operation failed: {error}"))
+            VmError::classified(
+                error.is_non_finite_operand(),
+                format!("Verilog-AMS integer operation failed: {error}"),
+            )
         })?;
         self.stack.push(value);
         Ok(())
@@ -1816,6 +1858,169 @@ mod tests {
         let error = Vm::array_slot(9_223_372_036_854_775_808.0, 0, 1, 0)
             .expect_err("unrepresentable rounded array indices must fail closed");
         assert!(matches!(error, VmError::InvalidRuntimeOperation(_)));
+    }
+
+    /// The classification of one runtime refusal, for every producer the three
+    /// executable routes share.
+    ///
+    /// The interpreter, the native backend and the generated Rust all call
+    /// these same three predicates — the interpreter through
+    /// [`VmError::classified`], native through `EvalContext::record_classified`
+    /// and `record_vm_error`, generated Rust through
+    /// `GeneratedEvalContext::integer_result` and
+    /// `generated_veriloga_stamp_error` — so a row of this table cannot mean
+    /// one thing on one route and another on the next. That is the whole point
+    /// of splitting at the producer: it is the only place that still holds the
+    /// value, and a consumer reclassifying by message text is how the three
+    /// routes drifted apart in the first place.
+    #[test]
+    fn every_shared_producer_splits_a_refusal_the_same_way_for_every_route() {
+        use crate::integer_runtime::IntegerRuntimeError;
+        use crate::laplace::LaplaceError;
+        use crate::zfilter::ZiFilterError;
+
+        // Integer conversion and arithmetic: only a non-finite operand is the
+        // iterate's. Rounding outside the signed 32-bit range, dividing by
+        // zero and zero to a negative power refuse identically at every point.
+        for (error, iterate_dependent) in [
+            (
+                IntegerRuntimeError::NonFiniteOperand { value: f64::NAN },
+                true,
+            ),
+            (
+                IntegerRuntimeError::OperandOutOfRange { value: 1.0e30 },
+                false,
+            ),
+            (IntegerRuntimeError::DivisionByZero, false),
+            (IntegerRuntimeError::ModulusByZero, false),
+            (
+                IntegerRuntimeError::ZeroToNegativePower { exponent: -3 },
+                false,
+            ),
+        ] {
+            assert_eq!(
+                error.is_non_finite_operand(),
+                iterate_dependent,
+                "{error:?}"
+            );
+        }
+
+        // Zi and Laplace: Verilog-AMS requires every argument of these filters
+        // but the input to be a constant expression, so a definition, a
+        // singular DC gain and inconsistent accepted state all fail the same
+        // way at every iterate. Only the evaluation of the input is the
+        // iterate's.
+        for (error, iterate_dependent) in [
+            (
+                ZiFilterError::InvalidDefinition("coefficient".into()),
+                false,
+            ),
+            (ZiFilterError::SingularDc, false),
+            (ZiFilterError::InvalidEvaluation("input".into()), true),
+            (ZiFilterError::InvalidState("history".into()), false),
+        ] {
+            assert_eq!(error.is_iterate_dependent(), iterate_dependent, "{error:?}");
+        }
+        for (error, iterate_dependent) in [
+            (LaplaceError::InvalidDefinition("poles".into()), false),
+            (LaplaceError::SingularSystem("dc"), false),
+            (LaplaceError::InvalidEvaluation("input".into()), true),
+        ] {
+            assert_eq!(error.is_iterate_dependent(), iterate_dependent, "{error:?}");
+        }
+
+        // And the one constructor every interpreter site goes through.
+        assert!(matches!(
+            VmError::classified(true, "x".into()),
+            VmError::InvalidNumericResult(_)
+        ));
+        assert!(matches!(
+            VmError::classified(false, "x".into()),
+            VmError::InvalidRuntimeOperation(_)
+        ));
+    }
+
+    /// An event-control operand that is not an integer: which half of the
+    /// refusal a Newton retry could ever cure.
+    #[test]
+    fn an_event_integer_operand_splits_the_non_finite_case_from_the_rest() {
+        for raw in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = event_integer_operand("cross direction", raw)
+                .expect_err("a non-finite event operand must fail closed");
+            assert!(
+                matches!(error, VmError::InvalidNumericResult(_)),
+                "{raw}: {error:?}"
+            );
+        }
+        // Finite and not an integer, and finite and outside the signed 32-bit
+        // range: the module computes the same value at every point the solver
+        // could offer, so walking the ladder only delays this message.
+        for raw in [1.5, -0.25, 1.0e30, -1.0e30] {
+            let error = event_integer_operand("cross direction", raw)
+                .expect_err("a non-integer event operand must fail closed");
+            assert!(
+                matches!(error, VmError::InvalidRuntimeOperation(_)),
+                "{raw}: {error:?}"
+            );
+        }
+        assert_eq!(event_integer_operand("cross direction", -1.0), Ok(-1));
+    }
+
+    /// The same split for ordinary integer arithmetic inside an expression.
+    #[test]
+    fn an_integer_operation_splits_the_non_finite_case_from_the_rest() {
+        let mut context = VmContext::default();
+        let mut vm = Vm::new(&mut context);
+        vm.stack.push(f64::NAN);
+        vm.stack.push(1.0);
+        let error = vm
+            .integer_binary_op(IntegerBinaryOperation::BitAnd)
+            .expect_err("a non-finite integer operand must fail closed");
+        assert!(
+            matches!(error, VmError::InvalidNumericResult(_)),
+            "{error:?}"
+        );
+
+        vm.stack.clear();
+        vm.stack.push(1.0);
+        vm.stack.push(0.0);
+        let error = vm
+            .integer_binary_op(IntegerBinaryOperation::Arithmetic(
+                crate::integer_runtime::IntegerArithmeticOperation::Div,
+            ))
+            .expect_err("integer division by zero must fail closed");
+        assert!(
+            matches!(error, VmError::InvalidRuntimeOperation(_)),
+            "{error:?}"
+        );
+    }
+
+    /// A `transition` asked for an analysis the operator has no rule for is a
+    /// property of the analysis, not of the iterate.
+    #[test]
+    fn a_transition_in_an_unknown_analysis_is_structural() {
+        let mut context = VmContext::default();
+        context
+            .transition_filters
+            .push(crate::vm::TransitionFilter::default());
+        context.analysis_type = 9;
+        let mut vm = Vm::new(&mut context);
+        let error = vm
+            .execute(&BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0e-9),
+                    Instruction::PushConst(1.0e-9),
+                    Instruction::TransitionState(0),
+                ],
+            })
+            .expect_err("an unknown analysis type must fail closed");
+        assert!(
+            matches!(error, VmError::InvalidRuntimeOperation(_)),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("invalid analysis type 9"));
     }
 
     #[test]

@@ -45,6 +45,23 @@ pub enum ZiFilterError {
     InvalidState(String),
 }
 
+impl ZiFilterError {
+    /// Whether the refusal depends on the point the solver handed the device.
+    ///
+    /// Only [`Self::InvalidEvaluation`] does: it is raised for the runtime
+    /// input, the time and the arithmetic on them. A definition that does not
+    /// validate, a denominator that is zero at `z = 1`, and inconsistent
+    /// accepted state are all properties of the model and its parameters —
+    /// Verilog-AMS 2023 requires a `zi_*` filter's coefficient, period and
+    /// transition arguments to be constant expressions, so a definition that
+    /// is refused once is refused at every iterate, and retrying one spends
+    /// the whole convergence ladder to report the message it already had.
+    #[inline]
+    pub fn is_iterate_dependent(&self) -> bool {
+        matches!(self, Self::InvalidEvaluation(_))
+    }
+}
+
 /// Validate and return the complete flattened operand count for one Zi site.
 /// Checked arithmetic is intentional: malformed serialized layouts must fail
 /// before any backend performs slice, stack, or pointer arithmetic.

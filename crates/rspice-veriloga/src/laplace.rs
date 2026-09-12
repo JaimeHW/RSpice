@@ -49,6 +49,23 @@ pub enum LaplaceError {
     InvalidEvaluation(String),
 }
 
+impl LaplaceError {
+    /// Whether the refusal depends on the point the solver handed the device.
+    ///
+    /// Only [`Self::InvalidEvaluation`] does: it is raised for the filter's
+    /// runtime input and the arithmetic on it, which is the iterate. A
+    /// malformed transfer function and a state-space system with no unique
+    /// solution are properties of the authored poles, zeros and coefficients —
+    /// Verilog-AMS 2023 requires every `laplace_*` argument but the input to
+    /// be a constant expression — so both refuse identically at every point,
+    /// and retrying one spends the whole convergence ladder to report the
+    /// message it already had.
+    #[inline]
+    pub fn is_iterate_dependent(&self) -> bool {
+        matches!(self, Self::InvalidEvaluation(_))
+    }
+}
+
 /// Convert (re, im) root pairs into real polynomial coefficients in
 /// ascending powers of s. Errors when the roots do not form conjugate pairs.
 pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {

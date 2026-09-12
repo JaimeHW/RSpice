@@ -869,7 +869,11 @@ impl VmContext {
     }
 
     fn validate_event_state_layout(&self) -> Result<(), VmError> {
-        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        // Accepted-state, commit and checkpoint validation. None of it runs at
+        // a Newton trial: by the time it is asked, the point has already been
+        // accepted, so there is no iterate left to reject and a retry would
+        // spend the whole convergence ladder to report the same message.
+        let invalid = |message: String| VmError::InvalidRuntimeOperation(message);
         if self.event_state_indices.len() != self.accepted_event_variables.len() {
             return Err(invalid(
                 "accepted event-variable storage shape is inconsistent".into(),
@@ -901,7 +905,7 @@ impl VmContext {
             .zip(&self.accepted_event_variables)
         {
             if accepted.is_nan() || self.variables[index].is_nan() {
-                return Err(VmError::InvalidNumericResult(format!(
+                return Err(VmError::InvalidRuntimeOperation(format!(
                     "event-state variable {index} contains an invalid numeric value"
                 )));
             }
@@ -927,7 +931,11 @@ impl VmContext {
         // state. The second pass is deliberately infallible, preserving the
         // all-or-nothing contract without cloning filter histories (and
         // allocating) on every accepted timestep.
-        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        // Accepted-state, commit and checkpoint validation. None of it runs at
+        // a Newton trial: by the time it is asked, the point has already been
+        // accepted, so there is no iterate left to reject and a retry would
+        // spend the whole convergence ladder to report the same message.
+        let invalid = |message: String| VmError::InvalidRuntimeOperation(message);
         let time = self.time;
         if !time.is_finite() || time < 0.0 {
             return Err(invalid(format!(
@@ -1016,7 +1024,7 @@ impl VmContext {
         // completing every validation before any accepted state is mutated.
         for (filter_id, filter) in self.zi_filters.iter().enumerate() {
             filter.validate_commit(time).map_err(|error| {
-                VmError::InvalidNumericResult(format!(
+                VmError::InvalidRuntimeOperation(format!(
                     "zi filter {filter_id} commit failed: {error}"
                 ))
             })?;
@@ -1131,7 +1139,11 @@ impl VmContext {
                 "deliver accepted analog tasks before capturing a checkpoint".into(),
             ));
         }
-        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        // Accepted-state, commit and checkpoint validation. None of it runs at
+        // a Newton trial: by the time it is asked, the point has already been
+        // accepted, so there is no iterate left to reject and a retry would
+        // spend the whole convergence ladder to report the same message.
+        let invalid = |message: String| VmError::InvalidRuntimeOperation(message);
         self.validate_event_state_layout()?;
         if self.state_candidate_valid.len() != self.state_values.len()
             || self.state_older_candidate.len() != self.state_values.len()
@@ -1277,7 +1289,11 @@ impl VmContext {
         &self,
         checkpoint: &VmAcceptedCheckpoint,
     ) -> Result<(), VmError> {
-        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        // Accepted-state, commit and checkpoint validation. None of it runs at
+        // a Newton trial: by the time it is asked, the point has already been
+        // accepted, so there is no iterate left to reject and a retry would
+        // spend the whole convergence ladder to report the same message.
+        let invalid = |message: String| VmError::InvalidRuntimeOperation(message);
         self.validate_event_state_layout()?;
         if !checkpoint.time.is_finite() || checkpoint.time < 0.0 {
             return Err(invalid(
@@ -1650,7 +1666,7 @@ impl VmContext {
             .filter(|(_, filter)| filter.participates_in_transient_schedule())
             .map(|(filter_id, filter)| {
                 filter.next_sample_step_bound(self.time).map_err(|error| {
-                    VmError::InvalidNumericResult(format!(
+                    VmError::InvalidRuntimeOperation(format!(
                         "zi filter {filter_id} breakpoint failed: {error}"
                     ))
                 })
@@ -1683,7 +1699,7 @@ impl VmContext {
             .filter(|(_, filter)| filter.participates_in_transient_schedule())
             .map(|(filter_id, filter)| {
                 filter.next_event_time(self.time).map_err(|error| {
-                    VmError::InvalidNumericResult(format!(
+                    VmError::InvalidRuntimeOperation(format!(
                         "zi filter {filter_id} event target failed: {error}"
                     ))
                 })
@@ -1716,7 +1732,7 @@ impl VmContext {
             })
             .try_fold(None, |minimum, (detector_id, target)| {
                 if !target.is_finite() || target < 0.0 || target >= self.time {
-                    return Err(VmError::InvalidNumericResult(format!(
+                    return Err(VmError::InvalidRuntimeOperation(format!(
                         "cross detector {detector_id} produced invalid refinement target {target} for candidate time {}",
                         self.time
                     )));

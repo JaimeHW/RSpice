@@ -734,8 +734,12 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
     ) -> Result<(), VmError> {
         let right = self.pop_real(label)?;
         let left = self.pop_real(label)?;
-        let value = integer_binary(operation, left, right)
-            .map_err(|error| VmError::InvalidNumericResult(format!("{label} failed: {error}")))?;
+        let value = integer_binary(operation, left, right).map_err(|error| {
+            VmError::classified(
+                error.is_non_finite_operand(),
+                format!("{label} failed: {error}"),
+            )
+        })?;
         self.stack.push(V::new(value, 0.0));
         Ok(())
     }
@@ -1342,7 +1346,10 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
                 let gain = filter.dc_output(1.0).map_err(|error| {
-                    VmError::InvalidNumericResult(format!("Laplace filter {filter_id}: {error}"))
+                    VmError::classified(
+                        error.is_iterate_dependent(),
+                        format!("Laplace filter {filter_id}: {error}"),
+                    )
                 })?;
                 let result = self.scale_value(input, gain);
                 self.stack.push(result);
@@ -1362,9 +1369,10 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                         filter
                             .frequency_response_rectangular(self.frequency_hz)
                             .map_err(|error| {
-                                VmError::InvalidNumericResult(format!(
-                                    "Laplace filter {filter_id}: {error}"
-                                ))
+                                VmError::classified(
+                                    error.is_iterate_dependent(),
+                                    format!("Laplace filter {filter_id}: {error}"),
+                                )
                             })
                     },
                 )?;
