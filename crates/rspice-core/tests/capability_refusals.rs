@@ -227,3 +227,154 @@ fn a_capability_refusal_keeps_its_category_across_the_parse_boundary() {
         "got {refused}"
     );
 }
+
+/// Pole-zero over runtime Verilog-A devices, whose descriptor admission is
+/// decided per instance by the operators the compiled analog body uses.
+///
+/// Placed beside [`pole_zero_refuses_transmission_lines`] because it is the
+/// same refusal: a `G + sC` descriptor pair has no room for a transport delay
+/// or for state the runtime carries privately, and either one linearized at a
+/// single frequency is a two-point fit rather than the device's response.
+#[cfg(feature = "veriloga")]
+mod veriloga_pole_zero {
+    use super::{Engine, capability_token, node, parse};
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    fn write_model(name: &str, source: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("rspice_pz_{}_{}.va", name, std::process::id()));
+        let mut file = std::fs::File::create(&path).expect("create model file");
+        file.write_all(source.as_bytes()).expect("write model");
+        path
+    }
+
+    /// `V(out)/I(in)` across a 1k series resistor into a 1k load the Verilog-A
+    /// instance shunts, so the transfer is `1000/(1 + 1000*Yd(s))` and carries
+    /// the module's response and nothing else. The drive is a current source
+    /// because a `.pz` voltage input parallel to an ideal source has no
+    /// transfer to extract.
+    fn pz_deck(model: &Path, module: &str) -> String {
+        format!(
+            "* pole-zero over a runtime Verilog-A device\n\
+             I1 in 0 DC 0 AC 1\n\
+             R1 in out 1k\n\
+             RL out 0 1k\n\
+             X1 out 0 {module}\n\
+             .va \"{}\" {module}\n\
+             .end\n",
+            model.display().to_string().replace('\\', "/"),
+        )
+    }
+
+    /// Run the deck, require a `analysis.pz.device` refusal, and hand back its
+    /// text folded to lower case: a deck names its instance in whichever case
+    /// the elaborator kept, and that is not what these tests are pinning.
+    fn refused(model: &Path, module: &str, why: &str) -> String {
+        let netlist = parse(&pz_deck(model, module));
+        let input = node(&netlist, "in");
+        let output = node(&netlist, "out");
+        let error = match Engine::default().run_pz(&netlist, input, output) {
+            Ok(result) => panic!(
+                "{why}, but pole-zero answered with poles {:?}",
+                result.poles
+            ),
+            Err(error) => error,
+        };
+        assert_eq!(capability_token(&error), "analysis.pz.device");
+        error.to_string().to_ascii_lowercase()
+    }
+
+    #[test]
+    fn pole_zero_refuses_a_verilog_a_transport_delay() {
+        // Yd(s) = 1e-3*exp(-s*1n), so the transfer is 1000/(1 + exp(-s*1n)):
+        // infinitely many poles on the imaginary axis, at s = j*pi*(2k+1)*1e9.
+        // Sampling that at w = 0 and w = 1 rad/s fits Im(Yd)/w = -1e-12, a
+        // NEGATIVE capacitance, and before this refusal `.pz` answered with a
+        // single pole at s = +2e9 -- one root, wrong magnitude, and a sign
+        // that reports a passive delay-loaded network as unstable.
+        let model = write_model(
+            "absdelay",
+            "module pz_absdelay(p, n);\n\
+             inout p, n;\n\
+             electrical p, n;\n\
+             analog I(p, n) <+ 1.0e-3 * absdelay(V(p, n), 1.0e-9);\n\
+             endmodule\n",
+        );
+        let message = refused(
+            &model,
+            "pz_absdelay",
+            "exp(-s*td) has no rational G + sC descriptor",
+        );
+        for expected in ["'x1'", "'pz_absdelay'", "uses absdelay"] {
+            assert!(
+                message.contains(expected),
+                "the refusal must name the instance, the module and the operator: {message}"
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+
+    #[test]
+    fn pole_zero_refuses_a_verilog_a_laplace_filter() {
+        // A rational response is refused too, and for a reason the analytic
+        // answer makes concrete. Yd(s) = 1e-3/(1 + s*1n) gives a transfer of
+        // 1000*(1 + s*1n)/(2 + s*1n): a pole at -2e9 and a zero at -1e9. The
+        // filter's state is the runtime's own, never a descriptor column, so
+        // the two-point fit returned a pole at +2e9 and NO zero at all.
+        let model = write_model(
+            "laplace",
+            "module pz_laplace(p, n);\n\
+             inout p, n;\n\
+             electrical p, n;\n\
+             analog I(p, n) <+ 1.0e-3 * laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0e-9});\n\
+             endmodule\n",
+        );
+        let message = refused(
+            &model,
+            "pz_laplace",
+            "a laplace filter's state is not a descriptor column",
+        );
+        for expected in ["'x1'", "'pz_laplace'", "uses laplace"] {
+            assert!(
+                message.contains(expected),
+                "the refusal must name the instance, the module and the operator: {message}"
+            );
+        }
+        let _ = std::fs::remove_file(model);
+    }
+
+    #[test]
+    fn pole_zero_admits_a_ddt_only_verilog_a_device() {
+        // The other half of the declaration: `ddt` charge *is* the descriptor's
+        // C contribution, so a module that integrates nothing else is admitted
+        // exactly like a native capacitor. Yd(s) = 1e-3 + s*1e-12 gives
+        // 1000/(2 + s*1e-9), whose single pole at -2e9 is what PZ must return.
+        let model = write_model(
+            "ddt",
+            "module pz_ddt(p, n);\n\
+             inout p, n;\n\
+             electrical p, n;\n\
+             analog I(p, n) <+ 1.0e-3 * V(p, n) + ddt(1.0e-12 * V(p, n));\n\
+             endmodule\n",
+        );
+        let netlist = parse(&pz_deck(&model, "pz_ddt"));
+        let input = node(&netlist, "in");
+        let output = node(&netlist, "out");
+        let result = Engine::default()
+            .run_pz(&netlist, input, output)
+            .expect("a ddt-only module exports its charge as a finite descriptor state");
+        assert_eq!(result.poles.len(), 1, "{:#?}", result.poles);
+        let pole = result.poles[0];
+        assert!(
+            (pole.re + 2.0e9).abs() <= 1.0e-6 * 2.0e9 && pole.im.abs() <= 1.0e-6 * 2.0e9,
+            "the admitted descriptor must return the analytic pole -2e9: {pole}"
+        );
+        let dc_gain = result.dc_gain.expect("the transfer has a finite DC value");
+        assert!(
+            (dc_gain - 500.0).abs() <= 1.0e-6 * 500.0,
+            "H(0) = 1000/(1 + 1000*1e-3): {dc_gain}"
+        );
+        let _ = std::fs::remove_file(model);
+    }
+}

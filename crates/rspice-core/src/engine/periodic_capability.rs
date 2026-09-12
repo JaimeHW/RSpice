@@ -354,6 +354,14 @@ const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a
      colored-noise folding rather than a DC-bias substitution";
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
      need qualified cyclostationary amplitude spectra";
+/// The condition behind a runtime Verilog-A module's dynamic-state
+/// declaration. Written like the transmission line's, because it is the same
+/// answer: a delay has no rational descriptor, and a filter or integrator the
+/// runtime carries privately has no descriptor column to be exported into.
+const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body whose only dynamic operator is `ddt`; `absdelay` is a transport delay with \
+     no rational transfer function, and `laplace_*`, `zi_*`, `idt` and `idtmod` hold runtime \
+     state the `G + sC` descriptor pair has no column for, so linearizing either at one \
+     frequency fits a capacitance instead of reporting the device's response";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "a mixed Verilog-AMS module's discrete half is executed by a transient event \
@@ -678,7 +686,7 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Absent(
                 "runtime Verilog-A devices without exact HB charge/noise capability metadata",
             ),
-            dynamic_state: Complete,
+            dynamic_state: Restricted(RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR),
             small_signal: Inapplicable,
             noise: Absent("periodic Verilog-A noise sources are not declared"),
             pss_state: Absent("Verilog-A integration state"),
@@ -1478,6 +1486,30 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                         }
                     }
                 }
+                // Read off the compiled program's own state vocabulary rather
+                // than a list kept here: the runtime is what decides which
+                // operator owns a private state record, and a module that only
+                // integrates charge with `ddt` exports that charge as the
+                // descriptor's `C` exactly like a native capacitor does.
+                F::RuntimeVerilogA =>
+                {
+                    #[cfg(feature = "veriloga")]
+                    for device in circuit.veriloga_devices().iter() {
+                        let operators = device.non_rational_analog_operators();
+                        if operators.is_empty() {
+                            continue;
+                        }
+                        gaps.push(CapabilityGap::new(
+                            family,
+                            format!(
+                                "Verilog-A instance '{}' (module '{}') uses {}: {condition}",
+                                device.name,
+                                device.model_name(),
+                                operators.join(", "),
+                            ),
+                        ));
+                    }
+                }
                 _ => {}
             },
         }
@@ -1664,7 +1696,12 @@ mod tests {
             F::JilesAthertonInductor | F::XyceCoreGroup => [I, C, A, I, A, A],
             F::BehavioralSource => [I, C, A, I, R, A],
             F::XspiceInstance => [I, C, A, I, A, A],
-            F::RuntimeVerilogA => [A, C, I, A, A, A],
+            // The dynamic-state contract became instance conditional for the
+            // same reason the transmission line's did: `absdelay` is a delay
+            // and `laplace_*`/`zi_*`/`idt`/`idtmod` are runtime-private state,
+            // none of which a `G + sC` pair can hold. A `ddt`-only module is
+            // admitted where a native capacitor is.
+            F::RuntimeVerilogA => [A, R, I, A, A, A],
             F::GeneratedVerilogA => [I, C, A, A, A, A],
             // Not one of the deleted hand lists: none of them knew about mixed
             // hosts at all, which is why a mixed module reached the periodic
