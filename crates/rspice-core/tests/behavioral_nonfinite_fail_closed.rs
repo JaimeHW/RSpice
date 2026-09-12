@@ -55,8 +55,9 @@ fn source_cases(expression: &str) -> [(String, &'static str, &'static str); 2] {
 /// from the zero guess proposes the former on its way to the latter.
 ///
 /// Before R1.14 the behavioral route's non-finite refusal ended the run at
-/// that iterate while the runtime Verilog-A route retried the same shape; the
-/// two answer the same way now.
+/// that iterate while the runtime Verilog-A route retried the same shape. The
+/// two answer the same way now in DC, which is this fixture, and in transient,
+/// which is the one below it.
 #[test]
 fn a_behavioral_domain_edge_at_a_trial_iterate_is_rejected_and_source_stepped() {
     let deck = "behavioral overflow at an overshooting iterate\n\
@@ -78,6 +79,75 @@ fn a_behavioral_domain_edge_at_a_trial_iterate_is_rejected_and_source_stepped() 
     assert!(
         residual.abs() < 1.0e-7,
         "V(a) = {voltage} leaves KCL residual {residual}"
+    );
+}
+
+/// The transient twin of the fixture above, on the same domain edge.
+///
+/// The two Newton loops meet a behavioural overflow in different places. DC
+/// only ever sees it at the stamp. Transient additionally asks
+/// `behavioral_linearizations_converged` at the candidate the linear solve
+/// just proposed — before anything stamps that candidate — and a 1 fs source
+/// edge inside the first offered step makes the first such candidate
+/// V(a) ~ 5 V, where `exp(5/0.002)` overflows. The check sat outside the
+/// rejection macro, so the same deck that DC retried ended the run in
+/// transient.
+#[test]
+fn a_behavioral_domain_edge_at_a_transient_trial_is_rejected_and_the_step_retried() {
+    let deck = "behavioral overflow at an overshooting transient iterate\n\
+                V1 in 0 PULSE(0 5 0 1e-15 1e-15 1 2)\n\
+                R1 in a 1k\n\
+                B1 a 0 I={1.0e-14*exp(v(a)/0.002)}\n\
+                .TRAN 1n 3n\n\
+                .END\n";
+    // The configured first step spans the whole 1 fs source edge, so the first
+    // Newton candidate carries the entire 5 V swing onto the exponential.
+    let engine = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(1.0e-9),
+        ..Default::default()
+    });
+    let result = engine
+        .run_tran(&parse(deck), 3.0e-9, 1.0e-9)
+        .expect("a non-finite trial iterate must reject the iterate, not the run");
+
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a is absent from the transient result");
+    let output = &result.voltages[index];
+    let source = |time: f64| -> f64 {
+        if time >= 1.0e-15 {
+            5.0
+        } else {
+            5.0 * time / 1.0e-15
+        }
+    };
+    // The first point the stepper accepts is finer than the edge it just
+    // failed on: that cut is what the rejected trial asked for.
+    assert!(
+        result.time.get(1).copied().unwrap_or(1.0) < 5.0e-16,
+        "the rejected trial must have cut the step: {:?}",
+        &result.time[..result.time.len().min(4)]
+    );
+    // The deck is resistive, so every accepted point solves
+    // (V - Vin)/1k + 1e-14*exp(V/0.002) = 0. The branch is checked in volts
+    // rather than in amps: the junction's slope at the solution is ~2.5 S, so
+    // the solver's own 1 uV voltage tolerance is already a ~2 uA residual and
+    // an amp-scale bound would be measuring `vntol`, not the branch.
+    for (&time, &voltage) in result.time.iter().zip(output) {
+        let residual = (voltage - source(time)) * 1.0e-3 + 1.0e-14 * (voltage / 0.002).exp();
+        let slope = 1.0e-3 + 1.0e-14 * (voltage / 0.002).exp() / 0.002;
+        let voltage_error = residual / slope;
+        assert!(
+            voltage_error.abs() < 1.0e-5,
+            "t={time}: V(a)={voltage} is {voltage_error} V off the KCL branch (residual {residual})"
+        );
+    }
+    assert!(
+        result.time.last().copied().unwrap_or(0.0) >= 3.0e-9 - 1.0e-18,
+        "the run must reach tstop: {:?}",
+        result.time.last()
     );
 }
 

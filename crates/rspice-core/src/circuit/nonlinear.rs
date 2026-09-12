@@ -1852,6 +1852,15 @@ impl CircuitData {
         self.xyce_core_trial_invalid
     }
 
+    /// Whether every behavioral source's linearization still describes the
+    /// candidate the solver is holding.
+    ///
+    /// This re-evaluates each `B` expression at that candidate, so it fails for
+    /// the same reasons a stamp does and is classified the same way: an
+    /// expression that left the reals at an overshooting iterate is a rejectable
+    /// trial, not a refused circuit. Transient asks this question at a candidate
+    /// nothing has stamped yet, which is why the classification cannot be left
+    /// to the stamping path alone.
     pub fn behavioral_linearizations_converged(
         &mut self,
         solution: &[Value],
@@ -1859,10 +1868,10 @@ impl CircuitData {
         reltol: Value,
         voltage_abstol: Value,
         current_abstol: Value,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, StampError> {
         self.behavioral_sources
             .linearizations_converged(solution, time, reltol, voltage_abstol, current_abstol)
-            .map_err(|error| error.to_string())
+            .map_err(behavioral_stamp_error)
     }
 }
 

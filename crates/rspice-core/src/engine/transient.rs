@@ -7195,15 +7195,17 @@ impl Engine {
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
                             || circuit.nonlinear_converged(self.device_convergence_criteria()));
-                    let behavioral_converged = circuit
-                        .behavioral_linearizations_converged(
-                            &new_solution,
-                            t,
-                            self.voltage_reltol(),
-                            self.voltage_abstol(),
-                            self.current_abstol(),
-                        )
-                        .map_err(SimulationError::Circuit)?;
+                    let behavioral_converged = stamp_trial_or_reject!(
+                        circuit
+                            .behavioral_linearizations_converged(
+                                &new_solution,
+                                t,
+                                self.voltage_reltol(),
+                                self.voltage_abstol(),
+                                self.current_abstol(),
+                            )
+                            .map_err(SimulationError::from)
+                    );
                     let decision = status.evaluate(
                         nox_status::XyceNoxSample {
                             iteration: _iter,
@@ -7535,15 +7537,17 @@ impl Engine {
                                     || !circuit.has_nonlinear_devices()
                                     || circuit
                                         .nonlinear_converged(self.device_convergence_criteria()));
-                            let behavioral_converged = circuit
-                                .behavioral_linearizations_converged(
-                                    &new_solution,
-                                    step_time,
-                                    self.voltage_reltol(),
-                                    self.voltage_abstol(),
-                                    self.current_abstol(),
-                                )
-                                .map_err(SimulationError::Circuit)?;
+                            let behavioral_converged = stamp_trial_or_reject!(
+                                circuit
+                                    .behavioral_linearizations_converged(
+                                        &new_solution,
+                                        step_time,
+                                        self.voltage_reltol(),
+                                        self.voltage_abstol(),
+                                        self.current_abstol(),
+                                    )
+                                    .map_err(SimulationError::from)
+                            );
                             let decision = xyce_damped_status
                                 .as_mut()
                                 .expect("Xyce DampedNewton status is initialized for this path")
@@ -7750,15 +7754,17 @@ impl Engine {
                         // behavioral-expression linearization, not a device
                         // `isConverged` flag controlled by Xyce's
                         // ENFORCEDEVICECONV status test.
-                        let mut behavioral_converged = circuit
-                            .behavioral_linearizations_converged(
-                                &new_solution,
-                                step_time,
-                                self.voltage_reltol(),
-                                self.voltage_abstol(),
-                                self.current_abstol(),
-                            )
-                            .map_err(SimulationError::Circuit)?;
+                        let mut behavioral_converged = stamp_trial_or_reject!(
+                            circuit
+                                .behavioral_linearizations_converged(
+                                    &new_solution,
+                                    step_time,
+                                    self.voltage_reltol(),
+                                    self.voltage_abstol(),
+                                    self.current_abstol(),
+                                )
+                                .map_err(SimulationError::from)
+                        );
                         let mut residual_converged_for_acceptance = false;
                         total_postsolve_convergence_nanos +=
                             postsolve_convergence_start.elapsed().as_nanos();
@@ -7850,15 +7856,17 @@ impl Engine {
                                         || circuit.nonlinear_converged(
                                             self.device_convergence_criteria(),
                                         ));
-                                behavioral_converged = circuit
-                                    .behavioral_linearizations_converged(
-                                        &new_solution,
-                                        step_time,
-                                        self.voltage_reltol(),
-                                        self.voltage_abstol(),
-                                        self.current_abstol(),
-                                    )
-                                    .map_err(SimulationError::Circuit)?;
+                                behavioral_converged = stamp_trial_or_reject!(
+                                    circuit
+                                        .behavioral_linearizations_converged(
+                                            &new_solution,
+                                            step_time,
+                                            self.voltage_reltol(),
+                                            self.voltage_abstol(),
+                                            self.current_abstol(),
+                                        )
+                                        .map_err(SimulationError::from)
+                                );
                             }
                             if _iter == 0
                                 && globalization_active
