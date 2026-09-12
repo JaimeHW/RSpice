@@ -1834,22 +1834,21 @@ impl BuiltinVerilogAInstance {
         // OneStep history path. It must not replace any candidate produced by
         // the preceding complete transient evaluation, including ordinary
         // event-controlled variables, DDT/IDT history, or limiter anchors.
-        let static_dae_state = (evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe)
-            .then(|| self.kind.capture_rollback_state());
-        // Whichever sink, if any, received a value that was not finite. The
-        // generated backend emits no finiteness check of its own — the runtime
-        // route's `finite_stamp_value` has no counterpart in generated code —
-        // so without this the module's NaN reaches the matrix and the solver
-        // learns of it only as a failed linear solve, which the transient
-        // reads as "cut dt" and DC as nothing at all.
-        let non_finite_contribution: Option<&'static str>;
+        let static_dae_probe = evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe;
+        let static_dae_state = static_dae_probe.then(|| self.kind.capture_rollback_state());
         // Static history observes the settled candidate, including event
         // variables and integration state. Only a new dynamic evaluation
         // restarts those lanes from accepted history.
         if ctx.dynamic_operators_enabled() {
             self.kind.begin_stateful_evaluation();
         }
-        if evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe {
+        // Whichever sink, if any, received a value that was not finite. The
+        // generated backend emits no finiteness check of its own — the runtime
+        // route's `finite_stamp_value` has no counterpart in generated code —
+        // so without this the module's NaN reaches the matrix and the solver
+        // learns of it only as a failed linear solve, which the transient
+        // reads as "cut dt" and DC as nothing at all.
+        let non_finite_contribution = if static_dae_probe {
             // OneStep history capture evaluates only F(x)-B(t), with dynamic
             // operators intentionally suppressed. It is not a physical
             // device operating point and must not replace the complete lead
@@ -1862,7 +1861,7 @@ impl BuiltinVerilogAInstance {
                 self.static_stamp_cache.as_ref(),
             );
             self.kind.stamp(&ctx, &mut stamper);
-            non_finite_contribution = stamper.non_finite_contribution();
+            stamper.non_finite_contribution()
         } else {
             self.terminal_currents.fill(0.0);
             let mut stamper = GeneratedStamper::new_with_static_cache_and_terminal_currents(
@@ -1874,8 +1873,8 @@ impl BuiltinVerilogAInstance {
                 &mut self.terminal_currents,
             );
             self.kind.stamp(&ctx, &mut stamper);
-            non_finite_contribution = stamper.non_finite_contribution();
-        }
+            stamper.non_finite_contribution()
+        };
         let evaluation_error = ctx.take_evaluation_error();
         if let Some(state) = static_dae_state.as_ref() {
             self.kind.restore_rollback_state(state);
