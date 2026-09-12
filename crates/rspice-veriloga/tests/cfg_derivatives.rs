@@ -19,6 +19,9 @@ use rspice_veriloga::canonical_ir::{
 };
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use rspice_veriloga_runtime::{
+    AnalogAnalysisPhase, active_analysis_query_names, analysis_query_mask,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -292,7 +295,7 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
         thermal_voltage: 300.15 * 8.617_333_262e-5,
         multiplicity: 1.0,
         time: 0.0,
-        analyses: HashSet::new(),
+        analyses: initial_dc_analyses(),
         simparams: Default::default(),
         ddt: 0.0,
         ddt_scale: 0.0,
@@ -307,6 +310,28 @@ fn artifact(source: &str) -> CanonicalIrArtifact {
     VerilogACompiler::default()
         .compile_canonical_ir(source)
         .expect("fixture must compile to canonical IR")
+}
+
+/// The analysis state an isolated evaluation at a drawn bias actually is: the
+/// initial step of a DC point.
+///
+/// An empty set is not the neutral choice it looks like — it is a state no
+/// solver occupies, in which every query answers false, including the ones a
+/// model uses to decide whether it has been set up. `vbic_1p3` puts its whole
+/// model-parameter preprocessing behind `@(initial_step)` and HiSIM-SOI does the
+/// same in its top module, so an empty set had the corpus census differentiate
+/// those models with their derived quantities never computed. `hicumL0` and
+/// `hicumL2` gate their operating-point block on `analysis("static")`, which the
+/// same mask turns on.
+fn initial_dc_analyses() -> HashSet<smol_str::SmolStr> {
+    active_analysis_query_names(analysis_query_mask(
+        0,
+        AnalogAnalysisPhase::Point,
+        true,
+        false,
+    ))
+    .map(Into::into)
+    .collect()
 }
 
 fn fixtures() -> Vec<(&'static str, &'static str)> {
@@ -644,6 +669,16 @@ fn every_jacobian_entry_matches_complex_step() {
 const COMPLEX_TOLERANCE: f64 = 1.0e-11;
 
 fn complex_step(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual: ValueId) -> f64 {
+    complex_step_column(function, bias, seed, &[residual])[0]
+}
+
+/// One perturbed evaluation produces every equation in a Jacobian column.
+fn complex_step_column(
+    function: &CfgFunction,
+    bias: &BiasPoint,
+    seed: AdSeed,
+    residuals: &[ValueId],
+) -> Vec<f64> {
     let mut inputs = complex_inputs(bias);
     match seed {
         AdSeed::NodePotential(node) => {
@@ -658,11 +693,17 @@ fn complex_step(function: &CfgFunction, bias: &BiasPoint, seed: AdSeed, residual
         AdSeed::NoiseProcess(_) => unreachable!("{NO_NOISE_LANE}"),
         AdSeed::LimiterCorrection => unreachable!("{NO_CORRECTION_LANE}"),
     }
-    evaluate_cfg(function, &inputs)
-        .expect("the complex evaluation follows the same path")
-        .value(residual)
-        .expect("the residual is defined on every path")
-        .derivative()
+    let snapshot =
+        evaluate_cfg(function, &inputs).expect("the complex evaluation follows the same path");
+    residuals
+        .iter()
+        .map(|residual| {
+            snapshot
+                .value(*residual)
+                .expect("the residual is defined on every path")
+                .derivative()
+        })
+        .collect()
 }
 
 fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
@@ -680,7 +721,7 @@ fn complex_inputs(bias: &BiasPoint) -> CfgEvalInputs<ComplexStep> {
         thermal_voltage: ComplexStep::from_f64(300.15 * 8.617_333_262e-5),
         multiplicity: ComplexStep::from_f64(1.0),
         time: ComplexStep::from_f64(0.0),
-        analyses: HashSet::new(),
+        analyses: initial_dc_analyses(),
         simparams: Default::default(),
         ddt: ComplexStep::from_f64(0.0),
         ddt_scale: ComplexStep::from_f64(0.0),
@@ -1346,6 +1387,7 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
     const POINTS: usize = 8;
 
     let mut violations = Vec::new();
+    let mut compared = 0usize;
 
     for (name, source) in fixtures() {
         let artifact = artifact(source);
@@ -1368,6 +1410,7 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
             .collect();
 
         let mut state = seed_for(name);
+        let mut fixture_entries = 0usize;
         for point in 0..POINTS {
             let bias = random_bias_point(&artifact, &mut state);
             let Ok(snapshot) = evaluate_cfg(&differentiated.function, &inputs(&bias)) else {
@@ -1376,11 +1419,14 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
                 continue;
             };
 
-            let block: Vec<(Vec<f64>, Vec<f64>)> = cfg
-                .residuals
+            let columns: Vec<_> = lanes
                 .iter()
-                .enumerate()
-                .map(|(equation, residual)| {
+                .map(|seed| {
+                    complex_step_column(&differentiated.function, &bias, *seed, &cfg.residuals)
+                })
+                .collect();
+            let block: Vec<(Vec<f64>, Vec<f64>)> = (0..cfg.residuals.len())
+                .map(|equation| {
                     let stamped = (0..lanes.len())
                         .map(|lane| {
                             rows[equation][lane]
@@ -1388,14 +1434,11 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
                                 .unwrap_or(0.0)
                         })
                         .collect();
-                    let exact = lanes
-                        .iter()
-                        .map(|seed| complex_step(&differentiated.function, &bias, *seed, *residual))
-                        .collect();
+                    let exact = columns.iter().map(|column| column[equation]).collect();
                     (stamped, exact)
                 })
                 .collect();
-            compare_block(
+            fixture_entries += compare_block(
                 &format!("{name}: point {point}"),
                 &lanes,
                 &block,
@@ -1403,6 +1446,15 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
                 &mut violations,
             );
         }
+        // A fixture that compares nothing asserts nothing. Every fixture here
+        // is a hand-written model with a Jacobian that is deliberately not
+        // zero, so a zero count means the drawn points never reached the rule
+        // rather than that the rule agreed.
+        assert!(
+            fixture_entries > 0,
+            "{name}: no finite, significant derivative was compared"
+        );
+        compared += fixture_entries;
     }
 
     assert!(
@@ -1414,6 +1466,7 @@ fn every_jacobian_entry_matches_complex_step_at_drawn_bias_points() {
 "
         )
     );
+    eprintln!("compared {compared} entries across {POINTS} drawn points per fixture");
 }
 
 /// The same property, over every shipped model rather than the fixtures.
@@ -1438,6 +1491,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
     let (mut checked, mut entries, mut uncompiled, mut unlowered, mut undifferentiated) =
         (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut violations = Vec::new();
+    let mut uncompared = Vec::new();
 
     for (candidate, module) in candidates.iter().flat_map(|candidate| {
         candidate
@@ -1485,11 +1539,14 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
             let Ok(snapshot) = evaluate_cfg(&differentiated.function, &inputs(&bias)) else {
                 continue;
             };
-            let block: Vec<(Vec<f64>, Vec<f64>)> = cfg
-                .residuals
+            let columns: Vec<_> = lanes
                 .iter()
-                .enumerate()
-                .map(|(equation, residual)| {
+                .map(|seed| {
+                    complex_step_column(&differentiated.function, &bias, *seed, &cfg.residuals)
+                })
+                .collect();
+            let block: Vec<(Vec<f64>, Vec<f64>)> = (0..cfg.residuals.len())
+                .map(|equation| {
                     let stamped = (0..lanes.len())
                         .map(|lane| {
                             rows[equation][lane]
@@ -1497,10 +1554,7 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
                                 .unwrap_or(0.0)
                         })
                         .collect();
-                    let exact = lanes
-                        .iter()
-                        .map(|seed| complex_step(&differentiated.function, &bias, *seed, *residual))
-                        .collect();
+                    let exact = columns.iter().map(|column| column[equation]).collect();
                     (stamped, exact)
                 })
                 .collect();
@@ -1514,14 +1568,36 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
         }
         checked += 1;
         entries += model_entries;
+        if model_entries == 0 {
+            uncompared.push(module.clone());
+        }
         eprintln!("{module:>24}  {model_entries} entries");
     }
 
+    let discovered: usize = candidates
+        .iter()
+        .map(|candidate| candidate.modules.len())
+        .sum();
     eprintln!(
-        "checked {checked} models, {entries} entries; \
+        "checked {checked} of {discovered} models, {entries} entries; \
          {uncompiled} uncompiled, {unlowered} unlowered, {undifferentiated} undifferentiated"
     );
-    assert!(checked > 0, "no model reached the derivative rule");
+    if !uncompared.is_empty() {
+        eprintln!(
+            "reached the rule but compared nothing: {}",
+            uncompared.join(", ")
+        );
+    }
+    // Reported, not asserted. `checked < discovered` and an empty model are
+    // both coverage facts, and neither is a statement about the chain rule —
+    // the property this test exists for. Failing on them would put a red on a
+    // model that stopped compiling for a reason that belongs to the front end,
+    // in the only run that compiles the corpus at all. What is asserted is that
+    // discovery found something and that something was compared; the per-model
+    // form of that lives in
+    // [`every_jacobian_entry_matches_complex_step_at_drawn_bias_points`], where
+    // every run exercises it.
+    assert!(discovered > 0, "no shipped models discovered");
     assert!(entries > 0, "no entry was compared");
     assert!(
         violations.is_empty(),
