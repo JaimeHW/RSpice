@@ -327,7 +327,9 @@ fn expected_descriptor(
             (Code::InvalidConfiguration, Category::Configuration, false)
         }
         SimulationError::ResourceLimit(_) => (Code::ResourceLimit, Category::ResourceLimit, false),
-        SimulationError::Circuit(_) => (Code::CircuitError, Category::Simulation, false),
+        SimulationError::Circuit(_) | SimulationError::NonFiniteTrial(_) => {
+            (Code::CircuitError, Category::Simulation, false)
+        }
         SimulationError::ParameterDomain(_) => (Code::ParameterDomain, Category::Simulation, false),
         SimulationError::BehavioralReference(_) => {
             (Code::BehavioralReferenceError, Category::Simulation, false)
@@ -387,6 +389,10 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             limit: 1,
         }),
         SimulationError::Circuit("device stamp failed".to_string()),
+        SimulationError::NonFiniteTrial(Box::new(rspice_core::device::NonFiniteTrialError {
+            instance: "x1".to_string(),
+            detail: "Verilog-A device 'x1' produced a non-finite value at a trial iterate [p=-1.0e0]: contribution 0 evaluated to NaN".to_string(),
+        })),
         SimulationError::ParameterDomain("capacitance must be nonnegative".to_string()),
         SimulationError::BehavioralReference(Box::new(
             rspice_core::device::BehavioralReferenceError {

@@ -26,11 +26,16 @@ pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 /// structural failure hides it behind a stale diagnostic.
 fn prefer_nonfinite_trial_failure(
     fallback: SimulationError,
-    nonfinite_direct_failure: &Option<String>,
+    nonfinite_direct_failure: &Option<crate::device::NonFiniteTrialError>,
 ) -> SimulationError {
     match (&fallback, nonfinite_direct_failure) {
-        (SimulationError::ConvergenceFailed(_), Some(detail)) => {
-            SimulationError::Circuit(detail.clone())
+        // Keep the classification, not just the sentence: a caller above this
+        // one — the transient gmin rescue, for instance — decides whether to
+        // retry from the variant, and a rescue that turned a rejectable trial
+        // into an ordinary circuit error would end the run the dt cut was
+        // about to save.
+        (SimulationError::ConvergenceFailed(_), Some(trial)) => {
+            SimulationError::NonFiniteTrial(Box::new(trial.clone()))
         }
         _ => fallback,
     }
@@ -217,7 +222,7 @@ impl Engine {
             let zero_solution = vec![0.0; size];
             circuit
                 .stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0)
-                .map_err(SimulationError::Circuit)?;
+                .map_err(SimulationError::from)?;
         }
 
         let direct_result = matrix.solve(&rhs);
@@ -1208,8 +1213,8 @@ impl Engine {
         // aid runs out first.
         let nonfinite_direct_failure = direct_solver_error
             .as_ref()
-            .and_then(SimulationError::nonfinite_trial_detail)
-            .map(str::to_owned);
+            .and_then(SimulationError::nonfinite_trial)
+            .cloned();
 
         let conv_cfg = &self.config.convergence_config;
         let allow_source = conv_cfg.source_stepping;

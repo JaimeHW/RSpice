@@ -9,6 +9,79 @@
 //! deliberately excluded from rollback.
 
 use super::*;
+use crate::device::StampError;
+
+/// Classify a behavioral source's stamping failure.
+///
+/// `B`-source expressions leave their domain at an overshooting iterate for
+/// exactly the reason a Verilog-A module does — `ln(v(a)+0.1)` is a legal
+/// expression with a legal operating point — so a non-finite value at a trial
+/// point is a rejectable iterate, and every other failure is structural. The
+/// error already names the source and the analysis coordinate it failed at.
+fn behavioral_stamp_error(error: crate::device::BehavioralEvaluationError) -> StampError {
+    match &error {
+        crate::device::BehavioralEvaluationError::NonFinite { source_name, .. } => {
+            StampError::nonfinite_trial(source_name.clone(), error.to_string())
+        }
+        crate::device::BehavioralEvaluationError::Stamp { .. } => {
+            StampError::Structural(error.to_string())
+        }
+    }
+}
+
+/// Classify a generated/builtin Verilog-A device's evaluation failure.
+///
+/// The generated runtime raises typed non-finite refusals from its analog
+/// operators (`ddt`, `idt`, `idtmod`, event control) and from `ddx`; each of
+/// those is a property of the point the solver handed the device. A missing
+/// simulator parameter, an initialization slot, a loop ceiling or an unwrapped
+/// `idtmod` bound is not, and stays structural.
+#[cfg(feature = "veriloga-builtins-base")]
+fn generated_veriloga_stamp_error(
+    error: rspice_veriloga_runtime::GeneratedVerilogAEvaluationError,
+) -> StampError {
+    use rspice_veriloga_runtime::{
+        GeneratedDdtCandidateError, GeneratedEvaluationError, GeneratedEventControlError,
+        GeneratedIdtCandidateError, GeneratedIdtModCandidateError,
+    };
+
+    fn idt_is_nonfinite(error: &GeneratedIdtCandidateError) -> bool {
+        matches!(
+            error,
+            GeneratedIdtCandidateError::NonFiniteInput { .. }
+                | GeneratedIdtCandidateError::NonFiniteResult { .. }
+        )
+    }
+
+    let rejectable = match &error.source {
+        // `checked_derivative_value` fails only for a non-finite operand or a
+        // non-finite derivative.
+        GeneratedEvaluationError::Derivative { .. } => true,
+        GeneratedEvaluationError::DdtCandidate { source, .. } => matches!(
+            source,
+            GeneratedDdtCandidateError::NonFiniteInput { .. }
+                | GeneratedDdtCandidateError::NonFiniteResult
+        ),
+        GeneratedEvaluationError::IdtCandidate { source, .. } => idt_is_nonfinite(source),
+        GeneratedEvaluationError::IdtModCandidate { source, .. } => match source {
+            GeneratedIdtModCandidateError::Integral(source) => idt_is_nonfinite(source),
+            GeneratedIdtModCandidateError::NonFiniteHistory => true,
+            GeneratedIdtModCandidateError::Wrapping(_) => false,
+        },
+        GeneratedEvaluationError::EventControl { source, .. } => {
+            matches!(source, GeneratedEventControlError::NonFiniteExpression)
+        }
+        _ => false,
+    };
+    if rejectable {
+        StampError::nonfinite_trial(
+            error.instance_name.clone(),
+            format!("{error} at a trial iterate"),
+        )
+    } else {
+        StampError::Structural(error.to_string())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct NonlinearDeviceStateSnapshot {
@@ -1262,7 +1335,7 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.try_stamp_nonlinear(matrix, rhs, voltages)
     }
 
@@ -1273,7 +1346,7 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
@@ -1293,7 +1366,7 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
@@ -1311,7 +1384,7 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
@@ -1329,7 +1402,7 @@ impl CircuitData {
         rhs: &mut [Value],
         voltages: &[Value],
         static_probe: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         let mode = if static_probe {
             NonlinearStampMode::StaticProbe
         } else {
@@ -1359,7 +1432,7 @@ impl CircuitData {
         voltages: &[Value],
         stamp_mode: NonlinearStampMode,
         defer_vbic: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         use crate::device::NonlinearDevice;
         match stamp_mode {
             NonlinearStampMode::LimitedNewton => {
@@ -1452,11 +1525,14 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         #[inline]
-        fn value_at(solution: &[Value], node: NodeId) -> Result<Value, String> {
-            solution_node_voltage(solution, node)
-                .ok_or_else(|| format!("Xyce memristor node {node} is outside the solution vector"))
+        fn value_at(solution: &[Value], node: NodeId) -> Result<Value, StampError> {
+            solution_node_voltage(solution, node).ok_or_else(|| {
+                StampError::Structural(format!(
+                    "Xyce memristor node {node} is outside the solution vector"
+                ))
+            })
         }
 
         #[inline]
@@ -1495,12 +1571,24 @@ impl CircuitData {
                     self.xyce_memristor_operating_point_mode,
                     resistance_factor,
                 )
-                .map_err(|error| {
-                    format!(
-                        "{} memristor '{}': {error}",
+                // A memristor whose own arithmetic left the reals at this bias
+                // has rejected the iterate, not the run: the message names the
+                // instance and the bias it was handed, and the Newton loop cuts
+                // dt or steps the sources exactly as it does for Verilog-A.
+                .map_err(|fault| {
+                    let message = format!(
+                        "{} memristor '{}': {fault} at the trial iterate [v+={v_pos:.6e}, v-={v_neg:.6e}, x={x:.6e}]",
                         binding.device.family_name(),
                         binding.name
-                    )
+                    );
+                    match fault {
+                        crate::device::MemristorEvaluationFault::NonFinite(_) => {
+                            StampError::nonfinite_trial(binding.name.clone(), message)
+                        }
+                        crate::device::MemristorEvaluationFault::Structural(_) => {
+                            StampError::Structural(message)
+                        }
+                    }
                 })?;
             let variables = [v_pos, v_neg, x];
             let nodes = [binding.node_pos, binding.node_neg, binding.node_x];
@@ -1616,10 +1704,10 @@ impl CircuitData {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.behavioral_sources
             .stamp_all(matrix, rhs, solution, self.num_nodes, time)
-            .map_err(|error| error.to_string())
+            .map_err(behavioral_stamp_error)
     }
 
     /// Stamp behavioral sources and generated Verilog-A builtins with the
@@ -1631,7 +1719,7 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.stamp_behavioral_with_generated_mode(
             matrix,
             rhs,
@@ -1651,7 +1739,7 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.stamp_behavioral_with_generated_mode(
             matrix,
             rhs,
@@ -1671,7 +1759,7 @@ impl CircuitData {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.stamp_behavioral_with_generated_mode(
             matrix,
             rhs,
@@ -1690,7 +1778,7 @@ impl CircuitData {
         time: Value,
         _analysis: crate::xspice::AnalysisType,
         _evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         self.stamp_behavioral_sources(matrix, rhs, solution, time)?;
         #[cfg(feature = "veriloga-builtins-base")]
         {
@@ -1720,7 +1808,7 @@ impl CircuitData {
                         evaluation_mode: _evaluation_mode,
                     },
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(generated_veriloga_stamp_error)?;
         }
         Ok(())
     }

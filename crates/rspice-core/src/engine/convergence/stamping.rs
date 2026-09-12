@@ -178,13 +178,13 @@ impl Engine {
         } else {
             circuit.try_stamp_nonlinear(matrix, rhs, solution)
         }
-        .map_err(SimulationError::Circuit)?;
+        .map_err(SimulationError::from)?;
         if static_probe {
             circuit.stamp_behavioral_static_probe(matrix, rhs, solution, time, analysis)
         } else {
             circuit.stamp_behavioral(matrix, rhs, solution, time, analysis)
         }
-        .map_err(SimulationError::Circuit)?;
+        .map_err(SimulationError::from)?;
         if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);
@@ -339,7 +339,7 @@ impl Engine {
             let zero_solution = vec![0.0; rhs.len()];
             circuit
                 .stamp_behavioral_sources(matrix, rhs, &zero_solution, time)
-                .map_err(SimulationError::Circuit)?;
+                .map_err(SimulationError::from)?;
         }
         if circuit.has_xspice_devices() {
             let zero_solution = vec![0.0; rhs.len()];

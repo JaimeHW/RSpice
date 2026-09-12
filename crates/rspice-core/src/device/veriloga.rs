@@ -49,6 +49,7 @@ pub use rspice_veriloga::{
 };
 
 use crate::Value;
+use crate::device::StampError;
 
 /// One instance's terminal voltages at the iterate the solver handed it.
 ///
@@ -77,25 +78,33 @@ fn terminal_iterate_summary(device: &VerilogADevice, circuit_voltages: &[Value])
     format!("[{}]", terminals.join(", "))
 }
 
-/// Render one stamping failure, classifying a non-finite evaluation as a
-/// rejectable trial so the Newton loops can cut dt or step the sources instead
-/// of ending the run. Every other fault is structural and keeps its wording.
-fn stamp_failure_message(
+/// Classify one stamping failure: a non-finite evaluation is a rejectable
+/// trial, so the Newton loops can cut dt or step the sources instead of ending
+/// the run. Every other fault is structural and keeps its wording.
+///
+/// `InvalidNumericResult` is the compiler's non-finite-arithmetic variant, and
+/// only that. The refusals that share its shape without depending on the
+/// iterate — a Zi layout the runtime will not execute, an index that rounds
+/// outside the representable range — carry `InvalidRuntimeOperation` and fall
+/// into the structural arm with everything else.
+fn stamp_failure(
     device: &VerilogADevice,
     circuit_voltages: &[Value],
     error: &rspice_veriloga::vm::VmError,
-) -> String {
+) -> StampError {
     match error {
-        rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => format!(
-            "Verilog-A device '{}' {} {}: {detail}",
-            device.name,
-            crate::analysis::error::NONFINITE_TRIAL_MARKER,
-            terminal_iterate_summary(device, circuit_voltages),
+        rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => StampError::nonfinite_trial(
+            device.name.clone(),
+            format!(
+                "Verilog-A device '{}' produced a non-finite value at a trial iterate {}: {detail}",
+                device.name,
+                terminal_iterate_summary(device, circuit_voltages),
+            ),
         ),
-        other => format!(
+        other => StampError::Structural(format!(
             "Verilog-A device '{}' stamping failed: {other}",
             device.name
-        ),
+        )),
     }
 }
 
@@ -117,7 +126,7 @@ pub trait VerilogADeviceExt {
         circuit_voltages: &[Value],
         matrix_add: impl FnMut(usize, usize, Value),
         rhs_add: impl FnMut(usize, Value),
-    ) -> Result<(), String>;
+    ) -> Result<(), StampError>;
 
     /// Checked stamping with an explicit named-limiter evaluation policy.
     fn try_stamp_into_matrix_with_mode(
@@ -126,7 +135,7 @@ pub trait VerilogADeviceExt {
         matrix_add: impl FnMut(usize, usize, Value),
         rhs_add: impl FnMut(usize, Value),
         mode: VerilogAEvaluationMode,
-    ) -> Result<(), String>;
+    ) -> Result<(), StampError>;
 
     /// Get the total number of nodes (terminals + internal)
     fn total_nodes(&self) -> usize;
@@ -147,10 +156,10 @@ impl VerilogADeviceExt for VerilogADevice {
         circuit_voltages: &[Value],
         matrix_add: impl FnMut(usize, usize, Value),
         rhs_add: impl FnMut(usize, Value),
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         match self.try_stamp(circuit_voltages, matrix_add, rhs_add) {
             Ok(()) => Ok(()),
-            Err(error) => Err(stamp_failure_message(self, circuit_voltages, &error)),
+            Err(error) => Err(stamp_failure(self, circuit_voltages, &error)),
         }
     }
 
@@ -160,10 +169,10 @@ impl VerilogADeviceExt for VerilogADevice {
         matrix_add: impl FnMut(usize, usize, Value),
         rhs_add: impl FnMut(usize, Value),
         mode: VerilogAEvaluationMode,
-    ) -> Result<(), String> {
+    ) -> Result<(), StampError> {
         match self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode) {
             Ok(()) => Ok(()),
-            Err(error) => Err(stamp_failure_message(self, circuit_voltages, &error)),
+            Err(error) => Err(stamp_failure(self, circuit_voltages, &error)),
         }
     }
 
@@ -324,7 +333,7 @@ impl VerilogADevices {
         mut matrix_add: M,
         mut rhs_add: R,
         mode: VerilogAEvaluationMode,
-    ) -> Result<(), String>
+    ) -> Result<(), StampError>
     where
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
@@ -378,10 +387,16 @@ endmodule
         device.try_set_analysis_type(2).unwrap();
         device.try_set_time(0.0).unwrap();
         device.try_set_timestep(0.0).unwrap();
-        let message = device
+        let stamp_error = device
             .try_stamp_into_matrix(&[-1.0], |_, _, _| {}, |_, _| {})
             .expect_err("ln() leaves its domain at V(p,n) = -1 V");
-        let error = crate::SimulationError::Circuit(message);
+        // The classification is a variant now, and it survives the widening to
+        // `SimulationError` without anything reading the sentence.
+        assert!(matches!(
+            stamp_error,
+            crate::device::StampError::NonFiniteTrial(_)
+        ));
+        let error = crate::SimulationError::from(stamp_error);
         let detail = error
             .nonfinite_trial_detail()
             .expect("a non-finite contribution is a rejectable trial, not a fatal fault");
@@ -389,16 +404,52 @@ endmodule
         assert!(detail.contains("p=-1.000000e0"), "{detail}");
         assert!(detail.contains("n=0.000000e0"), "{detail}");
         assert!(detail.contains("contribution"), "{detail}");
+        assert_eq!(
+            error.nonfinite_trial().map(|trial| trial.instance.as_str()),
+            Some("x1")
+        );
     }
 
     /// A structural fault is not a rejectable trial: retrying it forever would
     /// replace a precise refusal with a convergence failure.
     #[test]
     fn a_structural_stamp_failure_is_not_a_rejectable_trial() {
-        let error = crate::SimulationError::Circuit(
+        let error = crate::SimulationError::from(crate::device::StampError::Structural(
             "Verilog-A device 'x1' stamping failed: invalid compiled model: no such branch".into(),
-        );
+        ));
+        assert!(matches!(error, crate::SimulationError::Circuit(_)));
         assert!(error.nonfinite_trial_detail().is_none());
+    }
+
+    /// A runtime refusal that does not depend on the iterate keeps the
+    /// structural arm even though it comes out of the same evaluation call as
+    /// a domain edge does.
+    #[test]
+    fn a_structural_runtime_refusal_is_not_a_rejectable_trial() {
+        let source = r#"
+module domain_edge_structural(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 1.0e-3 * V(p, n);
+endmodule
+"#;
+        let model = Compiler::default()
+            .compile(source)
+            .expect("compile structural-refusal fixture");
+        let device = VerilogADevice::try_new("x1", model, &[1, 0]).unwrap();
+        let error = super::stamp_failure(
+            &device,
+            &[-1.0],
+            &rspice_veriloga::vm::VmError::InvalidRuntimeOperation(
+                "runtime array index 1e30 rounds outside the signed 64-bit index range".into(),
+            ),
+        );
+        assert!(
+            matches!(error, crate::device::StampError::Structural(_)),
+            "{error}"
+        );
+        assert!(error.to_string().contains("stamping failed"), "{error}");
+        assert!(error.to_string().contains("array index"), "{error}");
     }
 
     #[test]

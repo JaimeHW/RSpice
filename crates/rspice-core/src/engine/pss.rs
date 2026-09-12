@@ -4099,7 +4099,7 @@ impl Engine {
             } else {
                 circuit.stamp_nonlinear(matrix, rhs, linearize_at)
             }
-            .map_err(SimulationError::Circuit)?;
+            .map_err(SimulationError::from)?;
         }
         if !initialization {
             circuit.diodes.stamp_charge_companions(
@@ -4158,7 +4158,7 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
             )
         }
-        .map_err(SimulationError::Circuit)?;
+        .map_err(SimulationError::from)?;
         if !initialization {
             pss.stamp_prescribed_current_correction(rhs, step)?;
             pss.stamp_charge_forcing(matrix, rhs, step, false)?;

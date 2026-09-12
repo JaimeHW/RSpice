@@ -802,7 +802,15 @@ use rspice_core::analysis::harmonic_balance::{
 // frontend calls rather than a helper that leaked. The next change that adds a
 // public statement states its own case here; the next one that narrows lowers
 // this number with it.
-const MAX_PUBLIC_ITEMS: usize = 4993;
+// The latest +3 is the typed device stamping outcome: `StampError` and its
+// `NonFiniteTrialError` payload, plus the `device` re-export that names them.
+// They are case 2, an entry point rather than a leak: `CircuitData`'s public
+// stamping methods return `StampError`, and `SimulationError::NonFiniteTrial`
+// carries `NonFiniteTrialError`, so both types appear in a public signature
+// and cannot be narrowed while those signatures stay public. They replace a
+// crate-private marker string that cost this ratchet nothing, which is why
+// this is growth rather than a swap.
+const MAX_PUBLIC_ITEMS: usize = 4996;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

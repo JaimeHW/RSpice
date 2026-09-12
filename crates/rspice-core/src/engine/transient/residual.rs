@@ -1689,11 +1689,11 @@ impl Engine {
             {
                 circuit
                     .try_stamp_static_probe_nonlinear(matrix, rhs, solution)
-                    .map_err(SimulationError::Circuit)?;
+                    .map_err(SimulationError::from)?;
             } else {
                 circuit
                     .stamp_nonlinear(matrix, rhs, solution)
-                    .map_err(SimulationError::Circuit)?;
+                    .map_err(SimulationError::from)?;
             }
             circuit
                 .stamp_behavioral_with_generated_mode(
@@ -1704,7 +1704,7 @@ impl Engine {
                     crate::xspice::AnalysisType::Transient,
                     evaluation_mode,
                 )
-                .map_err(SimulationError::Circuit)?;
+                .map_err(SimulationError::from)?;
             if let Some((before_values, before_rhs)) = static_nonlinear_snapshot {
                 for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                     *value = before + 0.5 * (*value - before);
@@ -1719,7 +1719,7 @@ impl Engine {
                 .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
             circuit
                 .stamp_behavioral_sources(matrix, rhs, solution, time)
-                .map_err(SimulationError::Circuit)?;
+                .map_err(SimulationError::from)?;
             if let Some((before_values, before_rhs)) = static_behavioral_snapshot {
                 for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                     *value = before + 0.5 * (*value - before);
@@ -2352,7 +2352,7 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit
                     .try_stamp_static_dae_nonlinear(probe, probe_rhs, solution)
-                    .map_err(SimulationError::Circuit)?;
+                    .map_err(SimulationError::from)?;
                 circuit
                     .stamp_behavioral_static_dae_probe(
                         probe,
@@ -2361,11 +2361,11 @@ impl Engine {
                         time,
                         crate::xspice::AnalysisType::Transient,
                     )
-                    .map_err(SimulationError::Circuit)?;
+                    .map_err(SimulationError::from)?;
             } else {
                 circuit
                     .stamp_behavioral_sources(probe, probe_rhs, solution, time)
-                    .map_err(SimulationError::Circuit)?;
+                    .map_err(SimulationError::from)?;
             }
             if circuit.has_xspice_devices() {
                 // OneStep's order-2 history term applies to the complete

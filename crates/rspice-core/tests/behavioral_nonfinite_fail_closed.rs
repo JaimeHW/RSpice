@@ -41,6 +41,46 @@ fn source_cases(expression: &str) -> [(String, &'static str, &'static str); 2] {
     ]
 }
 
+/// A `B` source whose expression is finite at its operating point and
+/// overflows at an overshooting Newton iterate is a rejected iterate, not a
+/// refused circuit.
+///
+/// The obvious spelling of this fixture — `ln(v(a)+0.1)`, the expression R1.4
+/// pinned on the Verilog-A route — cannot be written here: `expr/vm.rs:385`
+/// clamps every logarithm argument to `LOGARITHM_MIN_ARGUMENT`, which is
+/// SPICE's own behaviour and means a `B` source's `ln` never produces a
+/// non-finite value at any iterate. `exp` is unlimited, so an exponential
+/// junction is the behavioral shape that does leave the reals: `exp(5/0.002)`
+/// overflows while `exp(0.0539/0.002)` is an ordinary number, and plain Newton
+/// from the zero guess proposes the former on its way to the latter.
+///
+/// Before R1.14 the behavioral route's non-finite refusal ended the run at
+/// that iterate while the runtime Verilog-A route retried the same shape; the
+/// two answer the same way now.
+#[test]
+fn a_behavioral_domain_edge_at_a_trial_iterate_is_rejected_and_source_stepped() {
+    let deck = "behavioral overflow at an overshooting iterate\n\
+                V1 in 0 DC 5\n\
+                R1 in a 1k\n\
+                B1 a 0 I={1.0e-14*exp(v(a)/0.002)}\n\
+                .OP\n\
+                .END\n";
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&parse(deck))
+        .expect("a non-finite trial iterate must reject the iterate, not the run");
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a is absent from the operating point");
+    let voltage = result.node_voltages[index];
+    let residual = (voltage - 5.0) * 1.0e-3 + 1.0e-14 * (voltage / 0.002).exp();
+    assert!(
+        residual.abs() < 1.0e-7,
+        "V(a) = {voltage} leaves KCL residual {residual}"
+    );
+}
+
 #[test]
 fn dc_op_rejects_nonfinite_voltage_and_current_source_values() {
     for (source, kind, name) in source_cases("1e308*1e308") {

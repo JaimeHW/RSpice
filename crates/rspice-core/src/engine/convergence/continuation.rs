@@ -159,7 +159,7 @@ impl Engine {
             if let Some(zero_solution) = zero_solution.as_deref() {
                 circuit
                     .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
-                    .map_err(SolverError::InvalidCircuit)?;
+                    .map_err(|error| SolverError::InvalidCircuit(error.to_string()))?;
             }
 
             match matrix.solve_into(&rhs, &mut proposal) {
@@ -216,7 +216,7 @@ impl Engine {
             if let Some(zero_solution) = zero_solution.as_deref() {
                 circuit
                     .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
-                    .map_err(SolverError::InvalidCircuit)?;
+                    .map_err(|error| SolverError::InvalidCircuit(error.to_string()))?;
             }
 
             match matrix.solve_into(&rhs, &mut proposal) {

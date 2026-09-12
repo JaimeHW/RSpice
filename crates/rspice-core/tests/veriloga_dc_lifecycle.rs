@@ -940,18 +940,24 @@ endmodule"#,
         deck_path(&model)
     ))
     .unwrap();
+    // The point of this pin is that the model's own diagnostic survives
+    // instead of being flattened into a startup non-convergence. Since R1.14
+    // the non-finite half of that diagnostic is a variant of its own, so both
+    // spellings of "the device said why" are accepted and a convergence count
+    // is not.
+    let device_evaluation_failed = |error: &rspice_core::SimulationError| {
+        matches!(
+            error,
+            rspice_core::SimulationError::Circuit(_)
+                | rspice_core::SimulationError::NonFiniteTrial(_)
+        )
+    };
     let error = Engine::default().run_dc_op(&netlist).unwrap_err();
-    assert!(
-        matches!(error, rspice_core::SimulationError::Circuit(_)),
-        "{error}"
-    );
+    assert!(device_evaluation_failed(&error), "{error}");
     let error = Engine::default()
         .run_tran(&netlist, 1e-5, 1e-6)
         .unwrap_err();
-    assert!(
-        matches!(error, rspice_core::SimulationError::Circuit(_)),
-        "{error}"
-    );
+    assert!(device_evaluation_failed(&error), "{error}");
     let _ = std::fs::remove_file(model);
 }
 
@@ -1826,6 +1832,96 @@ fn an_unreachable_verilog_a_domain_names_the_instance_and_its_iterate() {
     assert!(message.contains("p="), "{message}");
 
     let _ = std::fs::remove_file(model);
+}
+
+/// A runtime refusal that does not depend on the iterate is structural, and
+/// spending the convergence ladder on it only delays the same message.
+///
+/// `tap[1e30 + V(p,n)]` rounds outside the representable index range at every
+/// real bias. Before R1.14 the compiler reported it as `InvalidNumericResult`,
+/// which the marker classified as a rejectable trial, so the solve walked the
+/// whole ladder — source stepping, pseudo-transient, gmin — before reporting
+/// an index that was never going to come into range. It now carries
+/// `InvalidRuntimeOperation` and ends the solve at the first stamp, with the
+/// index and the instance still named.
+#[test]
+fn a_structural_runtime_refusal_fails_without_walking_the_convergence_ladder() {
+    let structural = write_model(
+        "structural_array_index",
+        "module structural_array_index(p,n); inout p,n; electrical p,n;\n\
+             real tap[0:1];\n\
+             analog begin\n\
+                 tap[0] = 1.0;\n\
+                 tap[1] = 2.0;\n\
+                 I(p,n) <+ 1.0e-3*tap[1.0e30 + V(p,n)];\n\
+             end\n\
+         endmodule\n",
+    );
+    let structural_netlist = Netlist::parse_validated(&format!(
+        "* the index is outside the representable range at every bias\n\
+         V1 in 0 DC 1\n\
+         R1 in p 1k\n\
+         X1 p 0 structural_array_index\n\
+         .va \"{}\" structural_array_index\n\
+         .end\n",
+        deck_path(&structural)
+    ))
+    .unwrap();
+
+    let rejectable = write_model(
+        "rejectable_domain_edge",
+        "module rejectable_domain_edge(p,n); inout p,n; electrical p,n;\n\
+             analog I(p,n) <+ 1.0e-3*ln(-1.0 - V(p,n)*V(p,n));\n\
+         endmodule\n",
+    );
+    let rejectable_netlist = Netlist::parse_validated(&format!(
+        "* the module's argument is negative at every real bias\n\
+         V1 in 0 DC 1\n\
+         R1 in p 1k\n\
+         X1 p 0 rejectable_domain_edge\n\
+         .va \"{}\" rejectable_domain_edge\n\
+         .end\n",
+        deck_path(&rejectable)
+    ))
+    .unwrap();
+
+    let engine = Engine::default();
+    let error = engine
+        .run_dc_op(&structural_netlist)
+        .expect_err("an index outside the representable range has no reachable bias");
+    let message = error.to_string();
+    assert!(message.to_lowercase().contains("x1"), "{message}");
+    assert!(message.contains("stamping failed"), "{message}");
+    assert!(message.contains("runtime array index"), "{message}");
+    assert!(
+        !message.contains("non-finite value at a trial iterate"),
+        "a structural refusal must not be reported as a rejectable trial: {message}"
+    );
+
+    // The ladder is what the classification buys back. Warm both module caches
+    // first: the first run of a deck reads its source through the abort-polling
+    // reader, so an unwarmed run counts polls this comparison is not about.
+    engine.run_dc_op(&structural_netlist).expect_err("warm");
+    engine.run_dc_op(&rejectable_netlist).expect_err("warm");
+
+    let structural_polls = CountingAbort::new(usize::MAX);
+    engine
+        .run_dc_op_with_abort(&structural_netlist, &structural_polls)
+        .expect_err("structural refusal");
+    let rejectable_polls = CountingAbort::new(usize::MAX);
+    engine
+        .run_dc_op_with_abort(&rejectable_netlist, &rejectable_polls)
+        .expect_err("every retry is still non-finite");
+    assert!(
+        structural_polls.count() < rejectable_polls.count(),
+        "a structural refusal must end the solve before the aids the rejectable \
+         trial walks: structural polled {}, rejectable polled {}",
+        structural_polls.count(),
+        rejectable_polls.count()
+    );
+
+    let _ = std::fs::remove_file(structural);
+    let _ = std::fs::remove_file(rejectable);
 }
 
 /// Cancelling a run inside the last enabled convergence aid stops the run; it

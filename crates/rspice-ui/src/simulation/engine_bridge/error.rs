@@ -75,6 +75,13 @@ impl EngineBridge {
                 }
             }
             rspice_core::SimulationError::Circuit(msg) => SimulationError::CircuitError(msg),
+            // A device that could not evaluate finitely at a trial iterate is
+            // a circuit error to the UI: the classification exists for the
+            // solver's retry ladder, and by the time a run ends the engine has
+            // no retries left. Its display is the device's own diagnostic.
+            rspice_core::SimulationError::NonFiniteTrial(error) => {
+                SimulationError::CircuitError(error.to_string())
+            }
             rspice_core::SimulationError::Solver(solver_err) => {
                 SimulationError::SolverError(solver_err.to_string())
             }

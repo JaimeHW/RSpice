@@ -666,6 +666,18 @@ pub enum SimulationError {
     #[error("Circuit error: {0}")]
     Circuit(String),
 
+    /// A device could not evaluate finitely at the trial point a Newton loop
+    /// handed it.
+    ///
+    /// Separate from [`Self::Circuit`] because the solver acts on it
+    /// differently — the iterate is rejected and the step cut or the sources
+    /// stepped — while a frontend does not: the descriptor, the category and
+    /// the retryable flag are a circuit error's, and the display message is
+    /// the device's own diagnostic verbatim. A run that ends here reports
+    /// through [`Self::Circuit`] again, because by then no retry remains.
+    #[error(transparent)]
+    NonFiniteTrial(Box<crate::device::NonFiniteTrialError>),
+
     /// A finite parameter or resolved physical quantity violates a numerical
     /// constraint. Unlike an evaluation/convergence failure, this establishes
     /// that the trial point is outside the model's admitted parameter domain.
@@ -797,19 +809,19 @@ impl From<crate::device::veriloga_builtins::BuiltinInstantiationError> for Simul
     }
 }
 
-/// Phrase that marks a `SimulationError::Circuit` diagnostic as a device
-/// evaluation that left its own numeric domain *at the trial point it was
-/// handed*, rather than a structural fault in the circuit or the model.
+/// Every stamping route reports a rejectable iterate through the same type.
 ///
-/// `ln(V(p,n)+0.1)` is defined at every accepted point of a well-posed deck
-/// and undefined at an overshooting Newton iterate. Spectre and ngspice reject
-/// such an iterate — cut the timestep, step the sources — and end the run only
-/// when every retry is still non-finite. The classification travels inside the
-/// message because the device stamping surface is `Result<(), String>` from
-/// the device adapter to `SimulationError::Circuit`. The marker is written in
-/// exactly one place, the Verilog-A device adapter's stamp_failure_message,
-/// and read in exactly one place, nonfinite_trial_detail below.
-pub(crate) const NONFINITE_TRIAL_MARKER: &str = "produced a non-finite value at a trial iterate";
+/// A [`crate::device::StampError::Structural`] is an ordinary circuit error
+/// and keeps that variant, so the only thing this widening adds is the
+/// classification the Newton loops read.
+impl From<crate::device::StampError> for SimulationError {
+    fn from(error: crate::device::StampError) -> Self {
+        match error {
+            crate::device::StampError::NonFiniteTrial(trial) => Self::NonFiniteTrial(trial),
+            crate::device::StampError::Structural(message) => Self::Circuit(message),
+        }
+    }
+}
 
 impl SimulationError {
     /// The diagnostic of a device evaluation a Newton loop may reject as a
@@ -820,8 +832,14 @@ impl SimulationError {
     /// the terminal voltages that produced the non-finite result are the whole
     /// diagnostic value of the failure.
     pub(crate) fn nonfinite_trial_detail(&self) -> Option<&str> {
+        self.nonfinite_trial().map(|trial| trial.detail.as_str())
+    }
+
+    /// The typed rejectable failure itself, for a loop that has to carry it
+    /// across a boundary rather than only read it.
+    pub(crate) fn nonfinite_trial(&self) -> Option<&crate::device::NonFiniteTrialError> {
         match self {
-            Self::Circuit(message) if message.contains(NONFINITE_TRIAL_MARKER) => Some(message),
+            Self::NonFiniteTrial(trial) => Some(&**trial),
             _ => None,
         }
     }
@@ -846,7 +864,9 @@ impl SimulationError {
                 SimulationErrorCategory::Configuration,
                 false,
             ),
-            Self::Circuit(_) => (
+            // A rejectable trial is a circuit error to everyone outside the
+            // Newton loops: same code, same category, same retryable answer.
+            Self::Circuit(_) | Self::NonFiniteTrial(_) => (
                 SimulationErrorCode::CircuitError,
                 SimulationErrorCategory::Simulation,
                 false,

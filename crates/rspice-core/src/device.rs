@@ -19,6 +19,7 @@ pub mod memristor_pem;
 pub mod memristor_team;
 pub mod pwl_file;
 mod sources;
+mod stamp_error;
 mod switch;
 pub mod thermal;
 mod traits;
@@ -74,6 +75,7 @@ pub(crate) use memristor_team::{
     XyceTeamResistanceNoiseCheckpoint, XyceTeamResistanceNoiseRuntime,
 };
 pub use sources::{CurrentSource, VoltageSource};
+pub use stamp_error::{NonFiniteTrialError, StampError};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
 pub use transmission_line::TransmissionLine;
@@ -100,6 +102,38 @@ pub struct XyceMemristorCache {
     pub jacobian: [[Value; 3]; 3],
 }
 
+/// One memristor evaluation failure, already classified.
+///
+/// The two families raise `NonFiniteEvaluation` when their own arithmetic
+/// leaves the reals at the bias the solver handed them, which is a rejectable
+/// Newton iterate on exactly the terms a Verilog-A domain edge is. Every other
+/// refusal — an unusable model, a table that cannot be read — is structural.
+/// The instance name is added by the stamping loop, which knows it; the device
+/// does not carry one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MemristorEvaluationFault {
+    NonFinite(String),
+    Structural(String),
+}
+
+impl MemristorEvaluationFault {
+    fn classify(non_finite: bool, message: String) -> Self {
+        if non_finite {
+            Self::NonFinite(message)
+        } else {
+            Self::Structural(message)
+        }
+    }
+}
+
+impl std::fmt::Display for MemristorEvaluationFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFinite(message) | Self::Structural(message) => formatter.write_str(message),
+        }
+    }
+}
+
 /// Native Xyce memristor equation families supported by the engine.
 #[derive(Debug, Clone, PartialEq)]
 pub enum XyceMemristor {
@@ -123,6 +157,7 @@ impl XyceMemristor {
         operating_point: bool,
     ) -> Result<XyceMemristorCache, String> {
         self.evaluate_with_resistance_factor(v_pos, v_neg, x, operating_point, 1.0)
+            .map_err(|fault| fault.to_string())
     }
 
     pub(crate) fn evaluate_with_resistance_factor(
@@ -132,7 +167,7 @@ impl XyceMemristor {
         x: Value,
         operating_point: bool,
         resistance_factor: Value,
-    ) -> Result<XyceMemristorCache, String> {
+    ) -> Result<XyceMemristorCache, MemristorEvaluationFault> {
         match self {
             Self::Team(device) => {
                 // TEAM's steady-state row is degenerate unless both threshold
@@ -152,7 +187,12 @@ impl XyceMemristor {
                         mode,
                         resistance_factor,
                     )
-                    .map_err(|error| error.to_string())?;
+                    .map_err(|error| {
+                        MemristorEvaluationFault::classify(
+                            matches!(error, XyceTeamMemristorError::NonFiniteEvaluation),
+                            error.to_string(),
+                        )
+                    })?;
                 Ok(XyceMemristorCache {
                     current: cache.current,
                     resistance: Some(cache.resistance),
@@ -167,9 +207,12 @@ impl XyceMemristor {
                 } else {
                     XycePemEvaluationMode::Dynamic
                 };
-                let cache = device
-                    .evaluate(v_pos, v_neg, x, mode)
-                    .map_err(|error| error.to_string())?;
+                let cache = device.evaluate(v_pos, v_neg, x, mode).map_err(|error| {
+                    MemristorEvaluationFault::classify(
+                        matches!(error, XycePemMemristorError::NonFiniteEvaluation),
+                        error.to_string(),
+                    )
+                })?;
                 let mut residual = cache.residual;
                 let mut jacobian = cache.jacobian;
                 if !operating_point {
