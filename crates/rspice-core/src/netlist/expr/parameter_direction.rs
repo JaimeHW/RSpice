@@ -161,6 +161,7 @@ pub(super) struct ParameterDirection<'a, F> {
     resolver: &'a mut F,
     directions: Vec<ComplexDirection>,
     error: Option<ExprError>,
+    consumed: bool,
 }
 
 impl<'a, F> ParameterDirection<'a, F> {
@@ -169,6 +170,7 @@ impl<'a, F> ParameterDirection<'a, F> {
             resolver,
             directions: Vec::new(),
             error: None,
+            consumed: false,
         }
     }
 
@@ -182,10 +184,13 @@ impl<'a, F> ParameterDirection<'a, F> {
         if self.directions.len() != 1 {
             return Err(invalid("parameter direction stack is inconsistent"));
         }
-        if let Some(error) = self.error.take() {
+        let direction = self.pop()?;
+        if (self.consumed || undefined(direction))
+            && let Some(error) = self.error.take()
+        {
             return Err(error);
         }
-        self.pop()
+        Ok(direction)
     }
 
     // Finish the nominal traversal and consume its authored random draws even
@@ -196,7 +201,7 @@ impl<'a, F> ParameterDirection<'a, F> {
             Ok(direction) => self.directions.push(direction),
             Err(error) => {
                 self.error.get_or_insert(error);
-                self.directions.push(ComplexDirection::zero());
+                self.directions.push(ComplexDirection::from(Value::NAN));
             }
         }
     }
@@ -204,6 +209,15 @@ impl<'a, F> ParameterDirection<'a, F> {
 
 fn invalid(message: &str) -> ExprError {
     ExprError::InvalidArgument(message.to_owned())
+}
+
+/// An undefined direction travels as a NaN tangent so that only the values
+/// that actually consume it are undefined. An operation whose own result is
+/// locally constant in the parameter absorbs it instead: a comparison away
+/// from its switching point, or a step away from its jump, has a defined
+/// derivative no matter what its argument's tangent is.
+fn undefined(direction: ComplexDirection) -> bool {
+    direction.re.binary64().is_nan() || direction.im.binary64().is_nan()
 }
 
 impl<F> PreparedEvaluation for ParameterDirection<'_, F>
@@ -226,18 +240,15 @@ where
 
     fn unary(&mut self, op: UnaryOpKind, value: ComplexValue) -> Result<ComplexValue, ExprError> {
         let direction = self.pop()?;
-        if matches!(op, UnaryOpKind::Not)
-            && value == ComplexValue::from(0.0)
-            && !direction.is_zero()
-        {
-            self.error.get_or_insert_with(|| {
-                invalid("boolean boundary has no two-sided parameter derivative")
-            });
-        }
-        self.directions.push(match op {
-            UnaryOpKind::Neg => -direction,
-            UnaryOpKind::Pos => direction,
-            UnaryOpKind::Not => ComplexDirection::zero(),
+        self.push_direction(match op {
+            UnaryOpKind::Neg => Ok(-direction),
+            UnaryOpKind::Pos => Ok(direction),
+            // A logical negation is a step: its value is locally constant
+            // unless the argument crosses zero here, and only then undefined.
+            UnaryOpKind::Not if value == ComplexValue::from(0.0) && !direction.is_zero() => Err(
+                invalid("boolean boundary has no two-sided parameter derivative"),
+            ),
+            UnaryOpKind::Not => Ok(ComplexDirection::zero()),
         });
         Ok(apply_unary(op, value))
     }
@@ -346,7 +357,12 @@ where
 
     fn discard_condition(&mut self, condition: ComplexValue) -> Result<(), ExprError> {
         let direction = self.pop()?;
-        if condition == ComplexValue::from(0.0) && !direction.is_zero() {
+        // The selection is part of the result, so a condition that is itself
+        // undefined or is switching here leaves the result undefined. A
+        // condition built from an undefined tangent whose own truth is locally
+        // constant has already absorbed it and selects one branch throughout.
+        if undefined(direction) || (condition == ComplexValue::from(0.0) && !direction.is_zero()) {
+            self.consumed = true;
             self.error.get_or_insert_with(|| {
                 invalid("conditional boundary has no two-sided parameter derivative")
             });
