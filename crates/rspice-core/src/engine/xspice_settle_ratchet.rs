@@ -160,8 +160,10 @@ const MAX_EVENT_WORLD_DEEP_COPIES: u64 = 1_800;
 /// capacitors, inductors, diodes, BJTs, each MOSFET table, the behavioural
 /// sources, the Verilog-A devices — rather than with the three XSPICE cells it
 /// had actually written. That is one image per Newton iteration of every step
-/// of every deck carrying a code model, and it took this deck to 15,110: a
-/// factor of 400, and on a deck with real devices in it a copy of all of them.
+/// of every deck carrying a code model. Restoring the old capture on the fixed
+/// tree and re-running this deck reads 3,491 against the 38 here — a factor of
+/// 92 on a deck with no devices to copy, and on a deck with real ones a copy of
+/// every one of them 3,453 more times than the run needs.
 const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 40;
 
 /// How far under its ceiling a count may sit before the ceiling is considered
