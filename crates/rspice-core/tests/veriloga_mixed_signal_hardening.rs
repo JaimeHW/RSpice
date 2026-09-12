@@ -148,8 +148,12 @@ fn run(deck: &str, tstop: f64, max_step: f64) -> TransientResult {
 }
 
 fn error_for(deck: &str, tstop: f64, max_step: f64) -> String {
+    error_for_with(SimulationConfig::default(), deck, tstop, max_step)
+}
+
+fn error_for_with(config: SimulationConfig, deck: &str, tstop: f64, max_step: f64) -> String {
     let netlist = Netlist::parse(deck).expect("the deck parses");
-    Engine::new(SimulationConfig::default())
+    Engine::new(config)
         .run_tran(&netlist, tstop, max_step)
         .err()
         .map(|error| error.to_string())
@@ -2421,16 +2425,29 @@ module femtosecond_free_running(p, n, q);
 endmodule
 "#;
 
-/// The same cadence, interrupted: one femtosecond activation, then a
-/// picosecond the solver can resolve, over and over.
+/// The same cadence, interrupted: a run of femtosecond activations the solver
+/// cannot resolve, then one picosecond gap it can, over and over.
 ///
-/// Every second activation is a hundred times the ten-femtosecond minimum, so
-/// the run advances a picosecond per cycle and reaches any horizon. Nothing
-/// here is pathological — it is an ordinary picosecond schedule with one
-/// sub-resolution edge in it — and the interesting part is that the analog
-/// side spends every accepted point well under the floor-`dt` livelock
-/// detector's `64 * delmin` ceiling while doing so.
-const INTERRUPTED_FEMTOSECOND_CADENCE: &str = r#"
+/// The gap is a hundred times the ten-femtosecond minimum, so the run advances
+/// a picosecond per cycle and reaches any horizon. Nothing here is
+/// pathological, and the interesting part is that the analog side spends every
+/// accepted point well under the floor-`dt` livelock detector's `64 * delmin`
+/// ceiling while doing so.
+///
+/// The run length is a parameter because one sub-resolution edge per cycle
+/// proves too little: the counter leaves zero for at most one point, which no
+/// assertion about the run's *outcome* can see. A run of them is a stretch of
+/// digital time the analog side crosses one minimum step at a time — the
+/// breakpoint tolerance is ten minimum steps, so ten of these ticks are
+/// consumed per accepted point — and the count climbs one point per step
+/// before falling back to zero at the gap. The deck is then sized so that the
+/// total across the analysis is well past the refusal threshold, which is
+/// what makes reaching `tstop` a statement about the reset: without it these
+/// same points would end the run.
+fn interrupted_femtosecond_cadence(sub_minimum_run: usize) -> String {
+    let ticks = "        #0.001 ticks = ticks + 1;\n".repeat(sub_minimum_run);
+    format!(
+        r#"
 `timescale 1ps/1fs
 `include "disciplines.vams"
 module interrupted_femtosecond_cadence(p, n, q);
@@ -2441,25 +2458,53 @@ module interrupted_femtosecond_cadence(p, n, q);
     integer ticks;
     initial begin q = 1'b0; ticks = 0; end
     always begin
-        #0.001 ticks = ticks + 1;
-        #1 ticks = ticks + 1;
+{ticks}        #1 ticks = ticks + 1;
     end
     analog I(p, n) <+ V(p, n) / 1000000.0;
 endmodule
-"#;
+"#
+    )
+}
 
-fn free_running_deck(model: &ModelFile, module: &str) -> String {
+/// A femtosecond schedule beside an analog side that is not the subject.
+///
+/// The `.tran` line states the whole configuration these two fixtures need:
+/// an explicit maximum timestep orders of magnitude *above* `tstop`. That is
+/// what puts the solver's minimum (`delmin = 1e-11 * tmax`) anywhere near a
+/// digital schedule at all, and it is not a user-facing scenario — with a
+/// maximum at or below `tstop` the minimum is `1e-11 * tstop` and a schedule
+/// under it would need `1e11` accepted points to reach any horizon, which no
+/// simulator finishes and no deck author writes on purpose.
+fn free_running_deck(model: &ModelFile, module: &str, tstop: f64, max_step: f64) -> String {
     format!(
         "* a free-running digital schedule beside a quiet analog boundary\n\
          x1 p 0 q {module}\n\
          rp p 0 1meg\n\
          rq q 0 10k\n\
          .va \"{}\" {module}\n\
-         .tran 1n 10n\n\
+         .tran {:e} {tstop:e} 0 {max_step:e}\n\
          .end\n",
-        model.deck_path()
+        model.deck_path(),
+        tstop / 10.0,
     )
 }
+
+/// A nanosecond schedule, so a deck can hold two mixed instances that schedule
+/// orders of magnitude apart.
+const NANOSECOND_FREE_RUNNING: &str = r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module nanosecond_free_running(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    integer ticks;
+    initial begin q = 1'b0; ticks = 0; end
+    always #1 ticks = ticks + 1;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
 
 /// **Property 5, case a.** A schedule finer than the solver's minimum that
 /// never widens is refused, and the refusal names the module that holds the
@@ -2472,7 +2517,12 @@ fn free_running_deck(model: &ModelFile, module: &str) -> String {
 /// step. Nothing about this circuit is ill-conditioned: one resistor and one
 /// quiet boundary net. The module's schedule is the fact, and the diagnostic
 /// has to carry it — the instance, the floor it is under, how many points in a
-/// row it has held, and what reaching `tstop` would cost at that rate.
+/// row it has held, the maximum timestep that floor is derived from, and what
+/// reaching `tstop` would cost at that rate.
+///
+/// See [`free_running_deck`] for why the `.tran` line carries an explicit
+/// maximum timestep seven orders of magnitude above `tstop`: without one this
+/// guard is not reachable at all.
 #[test]
 fn a_free_running_sub_minimum_schedule_is_refused_by_naming_the_module_that_holds_the_stepper() {
     const TSTOP: f64 = 1.0e-10;
@@ -2480,7 +2530,7 @@ fn a_free_running_sub_minimum_schedule_is_refused_by_naming_the_module_that_hold
 
     let model = ModelFile::new("femtosecond_free_running", FEMTOSECOND_FREE_RUNNING);
     let error = error_for(
-        &free_running_deck(&model, "femtosecond_free_running"),
+        &free_running_deck(&model, "femtosecond_free_running", TSTOP, MAX_STEP),
         TSTOP,
         MAX_STEP,
     );
@@ -2498,34 +2548,67 @@ fn a_free_running_sub_minimum_schedule_is_refused_by_naming_the_module_that_hold
         "the solver minimum the schedule is under must be reported: {error}"
     );
     assert!(
+        lowered.contains("at or closer together"),
+        "a schedule exactly at the minimum is counted too, and the wording must admit it: {error}"
+    );
+    assert!(
+        lowered.contains("tmax=1.000e-3"),
+        "the maximum timestep the minimum is derived from is the first lever: {error}"
+    );
+    assert!(
+        lowered.contains("at least"),
+        "the remaining-point count is a lower bound, because a snapped point realizes one \
+         tick rather than one minimum step: {error}"
+    );
+    assert!(
         !lowered.contains("ill-conditioned"),
         "the circuit is not the subject of this refusal: {error}"
     );
 }
 
 /// **Property 5, case b.** A resolvable interval in the schedule keeps the run
-/// alive, and an ordinary picosecond cadence is not a trapped controller.
+/// alive, and a cadence with sub-resolution edges in it is not a trapped
+/// controller.
 ///
-/// Ten picoseconds is ten cycles of this module, and the base refused the same
-/// deck partway through the eighth: every accepted point sat under the
-/// floor-`dt` livelock detector's `64 * delmin` ceiling — 640 fs when the
-/// requested maximum step is a millisecond — so the streak reached the restart
-/// limit twice and ended the run as `numerically ill-conditioned`. It is not:
-/// the picosecond gaps are intervals the solver takes, which is exactly what
-/// both counts here have to see. The sub-minimum count starts again at each of
-/// them, and the livelock detector stands aside for a width the schedule
-/// chose.
+/// The base refused this deck's ancestor as `numerically ill-conditioned`:
+/// every accepted point sat under the floor-`dt` livelock detector's
+/// `64 * delmin` ceiling — 640 fs when the requested maximum step is a
+/// millisecond — so the streak reached the restart limit twice and ended the
+/// run. It is not ill-conditioned: the picosecond gaps are intervals the
+/// solver takes, which is exactly what both counts here have to see.
+///
+/// The module emits a *run* of `SUB_MINIMUM_RUN` femtosecond activations
+/// before each of those gaps, which is what makes the reset observable from
+/// the outside. Each run drives the sub-minimum count up to nearly its own
+/// length and each gap drops it back to zero; the deck is sized so that the
+/// analysis as a whole produces several times the 16384 points the refusal
+/// needs. Reaching `tstop` therefore says the count restarted — with the
+/// count accumulating instead, these same points would end the run — which is
+/// what the one-edge-per-cycle ancestor could not say: its count left zero for
+/// a single point and no outcome of the run depended on it.
+///
+/// See [`free_running_deck`] for the explicit maximum timestep this
+/// configuration needs.
 #[test]
 fn a_resolvable_interval_keeps_an_interrupted_sub_minimum_cadence_running() {
-    const TSTOP: f64 = 1.0e-11;
+    // One cycle is `SUB_MINIMUM_RUN` femtoseconds of unresolvable schedule
+    // plus one picosecond of resolvable gap. The analog side crosses the
+    // femtosecond part one minimum step at a time, so each cycle costs about
+    // twenty-five counted points and the interval below holds enough cycles
+    // for roughly thirty thousand of them, against a 16384-point refusal.
+    const SUB_MINIMUM_RUN: usize = 256;
+    const TSTOP: f64 = 1.5e-9;
     const MAX_STEP: f64 = 1.0e-3;
+    // `delmin = 1e-11 * tmax`, restated because the controller's floor is not
+    // observable from a result.
+    const SOLVER_FLOOR: f64 = MAX_STEP * 1.0e-11;
 
     let model = ModelFile::new(
         "interrupted_femtosecond_cadence",
-        INTERRUPTED_FEMTOSECOND_CADENCE,
+        &interrupted_femtosecond_cadence(SUB_MINIMUM_RUN),
     );
     let result = run(
-        &free_running_deck(&model, "interrupted_femtosecond_cadence"),
+        &free_running_deck(&model, "interrupted_femtosecond_cadence", TSTOP, MAX_STEP),
         TSTOP,
         MAX_STEP,
     );
@@ -2533,5 +2616,72 @@ fn a_resolvable_interval_keeps_an_interrupted_sub_minimum_cadence_running() {
     assert!(
         last >= TSTOP - 1.0e-15,
         "the run must reach tstop {TSTOP:e}s, it stopped at {last:e}s"
+    );
+    // How many counted points the run must have produced. Each femtosecond
+    // run is a stretch of digital time the analog side can only cross one
+    // minimum step at a time, and every one of those steps is a point the
+    // schedule paced and the clock did not advance past the floor at — which
+    // is exactly what the counter counts.
+    let cycles = (TSTOP / (SUB_MINIMUM_RUN as f64 * 1.0e-15 + 1.0e-12)).floor() as usize;
+    let counted = cycles * (SUB_MINIMUM_RUN as f64 * 1.0e-15 / SOLVER_FLOOR).floor() as usize;
+    assert!(
+        counted > 16384,
+        "the fixture must produce more sub-minimum points ({counted}) than the refusal \
+         threshold, or reaching tstop says nothing about the count restarting"
+    );
+    // And the arithmetic above has to agree with the run: every one of those
+    // steps is an accepted point, so a run that finished with fewer points
+    // than that crossed the femtosecond stretches some other way and proves
+    // nothing about the count.
+    assert!(
+        result.time.len() >= counted,
+        "every minimum step of a femtosecond stretch is an accepted point, saw {} for \
+         {counted} sub-minimum activations",
+        result.time.len()
+    );
+}
+
+/// **Property 5, case d.** Two mixed instances share one process queue, and
+/// the refusal still names the one whose schedule is holding the stepper.
+///
+/// Enrolling collapses every instance's queue into the circuit's single
+/// coordinator, so "the earliest activation" stops being attributable by
+/// asking the hosts — an enrolled host answers `None`. Before the coordinator
+/// reported the owning process, a deck with two mixed modules was refused
+/// without a name at all, which is the one case where naming matters most:
+/// with one module there is nothing to choose between.
+#[test]
+fn a_sub_minimum_schedule_is_attributed_among_several_mixed_instances() {
+    const TSTOP: f64 = 1.0e-10;
+    const MAX_STEP: f64 = 1.0e-3;
+
+    let fast = ModelFile::new("femtosecond_free_running", FEMTOSECOND_FREE_RUNNING);
+    let slow = ModelFile::new("nanosecond_free_running", NANOSECOND_FREE_RUNNING);
+    let deck = format!(
+        "* two mixed instances, one scheduling below the solver's minimum\n\
+         x1 p 0 q femtosecond_free_running\n\
+         x2 r 0 s nanosecond_free_running\n\
+         rp p 0 1meg\n\
+         rq q 0 10k\n\
+         rr r 0 1meg\n\
+         rs s 0 10k\n\
+         .va \"{}\" femtosecond_free_running\n\
+         .va \"{}\" nanosecond_free_running\n\
+         .tran 1n {TSTOP:e} 0 {MAX_STEP:e}\n\
+         .end\n",
+        fast.deck_path(),
+        slow.deck_path()
+    );
+
+    let error = error_for(&deck, TSTOP, MAX_STEP);
+    let lowered = error.to_lowercase();
+    assert!(
+        lowered.contains("instance 'x1'"),
+        "the femtosecond instance is the one holding the stepper: {error}"
+    );
+    assert!(
+        !lowered.contains("'x2'"),
+        "the nanosecond instance schedules a hundred thousand minimum steps away and is \
+         not the subject: {error}"
     );
 }
