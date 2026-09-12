@@ -7,11 +7,15 @@
 //! before dependent processes run. Only after shared settlement do analog
 //! equations consume the digital values and stamp their contributions.
 //!
-//! A group guard restores every model view and analog candidate on refusal,
-//! while the shared digital guard restores process resumptions, drivers and
-//! queues. Acceptance validates every model before promoting any participant.
-//! A CircuitData clone contains both the accepted shared runtime and its views;
-//! an individual model checkpoint cannot represent the shared process state.
+//! The four entry points below — a Newton probe, an operating point, the
+//! inspection of a converged candidate and an accepted timepoint — are four
+//! callers of one protocol. [`crate::circuit::scheduler::TrialKind`] is the
+//! whole of what separates them; the trial itself owns the rollback, so a
+//! speculative exit restores every model view, analog candidate, process
+//! resumption, driver and queue together. Acceptance validates every model
+//! before promoting any participant. A CircuitData clone contains both the
+//! accepted shared runtime and its views; an individual model checkpoint cannot
+//! represent the shared process state.
 //!
 //! The shared runtime's next event joins the transient breakpoint list. Analog
 //! electrical boundaries remain physical loads. Enrolled XSPICE event drivers
@@ -22,375 +26,14 @@
 #[path = "mixed_signal/coupled_tests.rs"]
 mod coupled_tests;
 
-use super::external_models::{
-    VerilogACompanionRules, XspiceAcceptanceRollback, XspiceCompanionPolicy, XspiceDigitalBindings,
-    XspiceDigitalParticipant,
-};
-use super::scheduler::shared_error;
+use super::external_models::{XspiceCompanionPolicy, XspiceDigitalBindings};
+use super::scheduler::{Candidate, MAX_BOUNDARY_SETTLE_PASSES, TrialKind, named, shared_error};
 use crate::circuit::CircuitData;
-use crate::xspice::verilog::host::DigitalActiveParticipant;
 use crate::{SimulationError, Value};
 
-use crate::xspice::verilog::{BoundaryBitSource, BoundaryBus, MixedSignalError, MixedSignalHost};
-
-/// How many times one trial may re-settle its boundary before the engine gives
-/// up on it.
-///
-/// The host has its own ceiling — the scheduler's delta-cycle cap, ten thousand
-/// by default — but that one measures the depth of a *digital* settling and is
-/// sized for it. A boundary that will not quiet is a different failure: two
-/// bridges driving each other across the domain wall, which either resolves in
-/// a couple of passes or never. Capping it here keeps a Newton iteration from
-/// paying ten thousand digital settles to learn that.
-const MAX_BOUNDARY_SETTLE_PASSES: u32 = 64;
-
-/// Convert the engine's companion coefficients into the runtime's integration
-/// coefficients.
-///
-/// The same arithmetic `prepare_veriloga_timepoint` does, because a mixed
-/// module's continuous half is integrated by the same runtime as an analog
-/// instance's and must be handed the same numbers — including the same refusal
-/// of an interval the companion rule cannot represent. A zero interval is the
-/// operating point and carries no rule.
-fn mixed_integration_coefficients(
-    time: Value,
-    dt: Value,
-    companion: XspiceCompanionPolicy<'_>,
-) -> Result<VerilogACompanionRules, SimulationError> {
-    VerilogACompanionRules::from_policy(dt, companion).map_err(|error| {
-        SimulationError::Circuit(format!(
-            "mixed Verilog-AMS modules cannot advance to t={time:.16e}s: {error}"
-        ))
-    })
-}
-
-fn mixed_error(instance: &str, error: MixedSignalError) -> SimulationError {
-    let message = format!("mixed Verilog-AMS instance '{instance}': {error}");
-    // The analog half's non-finite trial reaches the Newton loops classified,
-    // so a mixed host retries the same domain edge a plain analog instance
-    // retries. Every other mixed failure is structural and ends the run —
-    // including a non-finite value at an ACCEPTED point, which only
-    // `MixedSignalHost::stamp_trial` can ever produce this variant for.
-    match error {
-        MixedSignalError::AnalogNonFinite { .. } => SimulationError::from(
-            crate::device::StampError::nonfinite_trial(instance, message),
-        ),
-        _ => SimulationError::Circuit(message),
-    }
-}
-
-/// Name the host a refusal came from, after the borrow that produced it ended.
-///
-/// The obvious spelling — `map_err(|error| mixed_error(host.instance_name(),
-/// error))` on a call that already holds `host` mutably — does not borrow-check,
-/// and the obvious repair was to copy the name into a `String` first. That copy
-/// was taken *per Newton evaluation* on all three of the driver's paths, for a
-/// diagnostic that almost never gets built. Passing the finished `Result` in
-/// instead spends nothing on the path that succeeds: the mutable borrow ends
-/// with the call, so the name can simply be read.
-#[inline]
-fn named<T>(
-    host: &MixedSignalHost,
-    result: Result<T, MixedSignalError>,
-) -> Result<T, SimulationError> {
-    result.map_err(|error| mixed_error(host.instance_name(), error))
-}
-
-/// Own all instance trials together. Every speculative exit restores all views
-/// and analog candidates; the shared digital trial independently restores queues.
-struct MixedHostTrialGroup<'a> {
-    hosts: &'a mut [MixedSignalHost],
-    active: bool,
-}
-
-impl<'a> MixedHostTrialGroup<'a> {
-    fn begin(
-        hosts: &'a mut [MixedSignalHost],
-        time: Value,
-        dt: Value,
-        integration: VerilogACompanionRules,
-        analysis_step: Option<(bool, bool)>,
-        probe: bool,
-    ) -> Result<Self, SimulationError> {
-        if let Some(host) = hosts.iter().find(|host| host.trial_active()) {
-            return Err(mixed_error(
-                host.instance_name(),
-                MixedSignalError::TrialProtocol {
-                    detail: "a circuit trial cannot overlap an existing model trial".into(),
-                },
-            ));
-        }
-        let group = Self {
-            hosts,
-            active: true,
-        };
-        for host in group.hosts.iter_mut() {
-            let (initial, final_step) = analysis_step.unwrap_or_else(|| host.analysis_step());
-            let started = host.begin_trial_with_integration_rules(
-                time,
-                dt,
-                integration.derivative,
-                integration.state,
-                initial,
-                final_step,
-                probe,
-            );
-            named(host, started)?;
-        }
-        Ok(group)
-    }
-
-    fn settle(
-        &mut self,
-        digital: &mut crate::xspice::verilog::SharedDigitalTrial<'_>,
-        voltages: &[Value],
-    ) -> Result<(), SimulationError> {
-        self.settle_with(digital, voltages, None)
-    }
-
-    fn settle_with(
-        &mut self,
-        digital: &mut crate::xspice::verilog::SharedDigitalTrial<'_>,
-        voltages: &[Value],
-        mut participant: Option<&mut dyn DigitalActiveParticipant>,
-    ) -> Result<(), SimulationError> {
-        match &mut participant {
-            Some(participant) => {
-                digital.advance_with(self.hosts, voltages, Some(&mut **participant))
-            }
-            None => digital.advance(self.hosts, voltages),
-        }
-        .map_err(shared_error)?;
-        digital.synchronize(self.hosts).map_err(shared_error)?;
-        for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
-            // The coordinator ran the wheel for every enrolled instance at
-            // once, so whether that run moved something the analog equations
-            // read — a D/A output, or a discrete variable an analog block
-            // references — is a question about the whole circuit rather than
-            // about any one instance: one instance's bridge and another's A/D
-            // input can share a deck node, and one instance's variable steers
-            // the current it pushes into a node any other may sense. Ask every
-            // instance whether its own digital half moved one, and report the
-            // disjunction to all of them before any of their bridges are
-            // sampled.
-            //
-            // Asked before every pass rather than once before the first,
-            // because the write that matters is usually made by a process
-            // *this trial's own publications* woke, which happens inside a
-            // pass. [`MixedSignalHost::settle_analog_bridges`] asks the same
-            // question of the instance's own store at the top of every pass,
-            // for the same reason; an instance that holds no analog equation
-            // of its own — a sampler whose only port is an A/D input — has no
-            // store of its own to answer it with, and the circuit's answer is
-            // the only one it can ever get.
-            //
-            // After a synchronize either way, because an enrolled instance
-            // reads its boundary through a view and that is what refreshes
-            // one: asking before it compares the view against itself and
-            // always answers no. The first pass is preceded by the one above,
-            // every later pass by the loop's own.
-            let mut fed_back = false;
-            for host in self.hosts.iter() {
-                fed_back |= named(host, host.digital_feedback_since_trial_start())?;
-            }
-            if fed_back {
-                for host in self.hosts.iter_mut() {
-                    host.note_shared_digital_feedback();
-                }
-            }
-            let mut moved = false;
-            for host in self.hosts.iter_mut() {
-                let settled = host.settle_analog_bridges(voltages);
-                moved |= named(host, settled)?;
-            }
-            // All A/D decisions are published before any dependent HDL process
-            // runs. Analog equations read the resulting bank only after quiet.
-            moved |= match &mut participant {
-                Some(participant) => {
-                    digital.publish_adc_with(self.hosts, voltages, Some(&mut **participant))
-                }
-                None => digital.publish_adc(self.hosts, voltages),
-            }
-            .map_err(shared_error)?;
-            moved |= digital.synchronize(self.hosts).map_err(shared_error)?;
-            if !moved {
-                return Ok(());
-            }
-        }
-        let host = &self.hosts[0];
-        Err(mixed_error(
-            host.instance_name(),
-            host.boundary_settle_oscillation(MAX_BOUNDARY_SETTLE_PASSES),
-        ))
-    }
-
-    fn static_residual(&mut self, solution: &[Value]) -> Result<Vec<Value>, SimulationError> {
-        let mut action = vec![0.0; solution.len()];
-        let mut rhs = vec![0.0; solution.len()];
-        for host in self.hosts.iter_mut() {
-            let (mut bad_matrix, mut bad_rhs) = (false, false);
-            let stamped = host.stamp_static_dae(
-                solution,
-                |row, col, value| {
-                    if let (Some(slot), Some(voltage)) = (action.get_mut(row), solution.get(col)) {
-                        *slot += value * voltage;
-                    } else {
-                        bad_matrix = true;
-                    }
-                },
-                |row, value| {
-                    if let Some(slot) = rhs.get_mut(row) {
-                        *slot += value;
-                    } else {
-                        bad_rhs = true;
-                    }
-                },
-            );
-            named(host, stamped)?;
-            if bad_matrix || bad_rhs {
-                return Err(SimulationError::Circuit(format!(
-                    "mixed Verilog-AMS instance '{}' static history stamp exceeds the circuit topology",
-                    host.instance_name()
-                )));
-            }
-        }
-        for (value, rhs) in action.iter_mut().zip(rhs) {
-            *value -= rhs;
-            if !value.is_finite() {
-                return Err(SimulationError::Circuit(
-                    "mixed static residual is not finite".into(),
-                ));
-            }
-        }
-        Ok(action)
-    }
-
-    /// Tell every instance that the circuit's shared queue had an activation
-    /// of its own due at this trial's tick.
-    ///
-    /// Called on the acceptance paths only, because acceptance is where the
-    /// answer is used: a boundary move at a timepoint a process was due to run
-    /// at is the schedule's, and the accepted-flip ceiling does not count it.
-    /// An enrolled instance holds no queue and cannot read this for itself.
-    fn note_scheduled_activation(&mut self) {
-        for host in self.hosts.iter_mut() {
-            host.note_scheduled_activation();
-        }
-    }
-
-    fn prepare(
-        &mut self,
-    ) -> Result<Vec<crate::xspice::verilog::PreparedMixedAcceptance<'_>>, SimulationError> {
-        let mut prepared = Vec::with_capacity(self.hosts.len());
-        for host in self.hosts.iter_mut() {
-            prepared.push(
-                host.prepare_circuit_acceptance()
-                    .map_err(|(instance, error)| mixed_error(&instance, error))?,
-            );
-        }
-        Ok(prepared)
-    }
-
-    fn promote(&mut self) -> Result<(), SimulationError> {
-        for candidate in self.prepare()? {
-            candidate.commit();
-        }
-        self.active = false;
-        Ok(())
-    }
-}
-
-impl Drop for MixedHostTrialGroup<'_> {
-    fn drop(&mut self) {
-        if self.active {
-            for host in self.hosts.iter_mut() {
-                if host.trial_active() {
-                    let _ = host.reject_trial();
-                }
-            }
-        }
-    }
-}
-
-/// Temporarily split the circuit's digital owner/views from its code-model
-/// storage. All exits put the owners back. XSPICE probes retain state across
-/// Active waves and restore their COW model/queue images and external resources
-/// only after the entire mixed evaluation, including stamps, has finished.
-/// Accepted candidates instead use the engine's outer XSPICE/resource journal.
-struct MixedCircuitOwner<'a> {
-    circuit: &'a mut CircuitData,
-    coordinator: Option<crate::xspice::verilog::MixedDigitalCoordinator>,
-    hosts: Vec<MixedSignalHost>,
-    xspice: Option<XspiceAcceptanceRollback>,
-}
-impl<'a> MixedCircuitOwner<'a> {
-    fn begin(circuit: &'a mut CircuitData, capture_xspice: bool) -> Result<Self, SimulationError> {
-        let coordinator = circuit
-            .scheduler
-            .mixed_digital_coordinator
-            .take()
-            .ok_or_else(|| {
-                SimulationError::Circuit(
-                    "mixed circuit digital execution has not been elaborated".into(),
-                )
-            })?;
-        let hosts = std::mem::take(&mut circuit.mixed_signal_hosts);
-        let xspice = (capture_xspice && circuit.has_coupled_event_nets())
-            .then(|| circuit.capture_xspice_acceptance());
-        Ok(Self {
-            circuit,
-            coordinator: Some(coordinator),
-            hosts,
-            xspice,
-        })
-    }
-    fn restore_xspice(&mut self) -> Result<(), SimulationError> {
-        if let Some(snapshot) = self.xspice.take() {
-            self.circuit
-                .restore_xspice_acceptance(snapshot)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
-        }
-        Ok(())
-    }
-}
-impl Drop for MixedCircuitOwner<'_> {
-    fn drop(&mut self) {
-        // An explicit finish reports restoration errors. Unwinding still
-        // restores every context/queue; a resource failure latches the circuit.
-        if let Err(error) = self.restore_xspice() {
-            log::error!("{error}");
-        }
-        self.circuit.scheduler.mixed_digital_coordinator = self.coordinator.take();
-        self.circuit.mixed_signal_hosts = std::mem::take(&mut self.hosts);
-    }
-}
+use crate::xspice::verilog::{BoundaryBitSource, BoundaryBus, MixedSignalHost};
 
 impl CircuitData {
-    fn with_mixed_probe<T>(
-        &mut self,
-        evaluate: impl FnOnce(
-            &mut CircuitData,
-            &mut crate::xspice::verilog::MixedDigitalCoordinator,
-            &mut [MixedSignalHost],
-            Option<&crate::xspice::ResourceTransaction>,
-        ) -> Result<T, SimulationError>,
-    ) -> Result<T, SimulationError> {
-        let mut probe = MixedCircuitOwner::begin(self, true)?;
-        let result = evaluate(
-            probe.circuit,
-            probe.coordinator.as_mut().expect("owned coordinator"),
-            &mut probe.hosts,
-            probe.xspice.as_ref().map(|snapshot| snapshot.resources()),
-        );
-        match (result, probe.restore_xspice()) {
-            (Ok(value), Ok(())) => Ok(value),
-            (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
-            (Err(error), Err(restore)) => {
-                Err(SimulationError::Circuit(format!("{error}; {restore}")))
-            }
-        }
-    }
-
     /// Enrich a terminal solver failure without changing convergence recovery
     /// or accepting any speculative boundary state.
     pub(crate) fn annotate_mixed_convergence_failure(
@@ -401,10 +44,15 @@ impl CircuitData {
         if !matches!(error, SimulationError::ConvergenceFailed(_)) {
             return error;
         }
+        // Read from the parked ledgers rather than from the instances: the
+        // trial that recorded these samples handed them back to the scheduler
+        // when it closed, which is what keeps a rolled-back probe from erasing
+        // them. An empty vector is a circuit no trial has yet opened.
         let mut context = self
             .mixed_signal_hosts
             .iter()
-            .filter_map(|host| host.rejected_probe_activity(time));
+            .zip(&self.scheduler.ledgers)
+            .filter_map(|(host, ledger)| host.rejected_probe_activity(ledger, time));
         let Some(first) = context.next() else {
             return error;
         };
@@ -616,62 +264,49 @@ impl CircuitData {
         self.stamp_mixed_trial(
             matrix,
             rhs,
-            time,
-            dt,
+            Candidate {
+                time,
+                dt,
+                analysis_step: Some((initial_step, final_step)),
+            },
+            TrialKind::Probe,
             voltages,
             companion,
-            Some((initial_step, final_step)),
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn stamp_mixed_trial(
         &mut self,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
-        time: Value,
-        dt: Value,
+        candidate: Candidate,
+        kind: TrialKind,
         voltages: &[Value],
         companion: XspiceCompanionPolicy<'_>,
-        analysis_step: Option<(bool, bool)>,
     ) -> Result<(), SimulationError> {
         if self.mixed_signal_hosts.is_empty() {
             return Ok(());
         }
-        let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.scheduler.mixed_xspice_bindings.clone();
-        self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
-            let mut digital = coordinator.begin_trial(time, true).map_err(shared_error)?;
-            let mut group = MixedHostTrialGroup::begin(hosts, time, dt, integration, analysis_step, true)?;
-            if let Some(bindings) = &bindings {
-                let mut participant = XspiceDigitalParticipant::new(circuit, bindings, voltages, time, dt,
-                    if analysis_step.is_some() { crate::xspice::AnalysisType::Transient }
-                    else { crate::xspice::AnalysisType::DcOp },
-                    crate::xspice::EvaluationPhase::CircuitTrial, companion, resources);
-                group.settle_with(&mut digital, voltages, Some(&mut participant))?;
+        // Only HDL equations and their physical D/A bridges receive this
+        // weight. Enrolled XSPICE stamps apply their own policy.
+        let weight = if companion.xyce_one_step_order2 {
+            0.5
+        } else {
+            1.0
+        };
+        let mut trial = self.open_trial(candidate, kind, companion, None)?;
+        let stamped = (|| {
+            trial.settle(voltages)?;
+            if trial.has_code_models() {
                 // The same settled code-model candidate supplies its stamps.
-                // Dropping the participant ends its borrow, not the trial.
-                drop(participant);
-                circuit
+                trial
+                    .circuit_mut()
                     .stamp_xspice(matrix, rhs)
                     .map_err(SimulationError::from)?;
-            } else {
-                group.settle(&mut digital, voltages)?;
             }
-            // Only HDL equations and their physical D/A bridges receive this
-            // weight. Enrolled XSPICE stamps above already apply their policy.
-            let weight = if companion.xyce_one_step_order2 { 0.5 } else { 1.0 };
-            for host in group.hosts.iter_mut() {
-                let stamped = host.stamp_trial(voltages, |row, col, value| {
-                    if matrix.get_index(row, col).is_some() { matrix.add(row, col, weight * value); }
-                    else { log::debug!("mixed Verilog-AMS stamp ({row}, {col}) missing from matrix topology"); }
-                }, |row, value| {
-                    if let Some(slot) = rhs.get_mut(row) { *slot += weight * value; }
-                });
-                named(host, stamped)?;
-            }
-            Ok(())
-        })
+            trial.stamp(matrix, rhs, voltages, weight)
+        })();
+        trial.finish(stamped)
     }
 
     /// Stamp every mixed module into an operating-point assembly.
@@ -705,15 +340,18 @@ impl CircuitData {
         self.stamp_mixed_trial(
             matrix,
             rhs,
-            time,
-            0.0,
+            Candidate {
+                time,
+                dt: 0.0,
+                analysis_step: None,
+            },
+            TrialKind::OperatingPoint,
             solution,
             XspiceCompanionPolicy {
                 coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
                 ),
                 xyce_one_step_order2: false,
             },
-            None,
         )
     }
 
@@ -740,80 +378,33 @@ impl CircuitData {
             Option<&[Value]>,
         ) -> Result<T, SimulationError>,
     ) -> Result<(bool, T), SimulationError> {
-        let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.scheduler.mixed_xspice_bindings.clone();
-        if bindings.is_some() && resources.is_none() {
+        if self.scheduler.mixed_xspice_bindings.is_some() && resources.is_none() {
             return Err(SimulationError::Circuit(
                 "shared acceptance requires its resource transaction".into(),
             ));
         }
-        let mut owner = MixedCircuitOwner::begin(self, false)?;
-        let mut digital = owner
-            .coordinator
-            .as_mut()
-            .expect("owned coordinator")
-            .begin_trial(time, false)
-            .map_err(shared_error)?;
-        let mut group = MixedHostTrialGroup::begin(
-            &mut owner.hosts,
-            time,
-            dt,
-            integration,
-            Some((initial_step, final_step)),
-            false,
+        let mut trial = self.open_trial(
+            Candidate {
+                time,
+                dt,
+                analysis_step: Some((initial_step, final_step)),
+            },
+            TrialKind::Acceptance,
+            companion,
+            resources,
         )?;
-        if digital.opened_on_scheduled_activation() {
-            group.note_scheduled_activation();
-        }
-        if let Some(bindings) = &bindings {
+        if trial.has_code_models() {
             let mut projected_quiet = false;
-            // Carried across the projection passes, and the reason an accepted
-            // step dispatches each instance once: a pass that re-settles the
-            // boundary after moving the solution resumes the candidate's own
-            // Active wave rather than opening a new one, so it evaluates the
-            // instances whose inputs the projection invalidated instead of
-            // every instance in the circuit. Re-running the rest would not ask
-            // the same question twice — it would run their `AcceptedStep`
-            // effects twice, and a model that requests a breakpoint, writes a
-            // transactional resource or advances external state does not undo
-            // the first one.
             let mut wave = None;
             let mut moved: Vec<usize> = Vec::new();
             for pass in 0..MAX_BOUNDARY_SETTLE_PASSES {
-                let mut participant = if pass == 0 {
-                    XspiceDigitalParticipant::new(
-                        owner.circuit,
-                        bindings,
-                        solution,
-                        time,
-                        dt,
-                        crate::xspice::AnalysisType::Transient,
-                        crate::xspice::EvaluationPhase::AcceptedStep,
-                        companion,
-                        resources,
-                    )
-                } else {
-                    XspiceDigitalParticipant::resume(
-                        owner.circuit,
-                        bindings,
-                        solution,
-                        time,
-                        dt,
-                        crate::xspice::AnalysisType::Transient,
-                        crate::xspice::EvaluationPhase::AcceptedStep,
-                        companion,
-                        resources,
-                        wave.take(),
-                        &moved,
-                    )
-                };
-                group.settle_with(&mut digital, solution, Some(&mut participant))?;
-                wave = participant.into_wave();
-                let num_nodes = owner.circuit.num_nodes();
-                let (updates, refusal) =
-                    owner
-                        .circuit
-                        .project_xspice_voltage_outputs(solution, num_nodes, Some(time));
+                wave = trial.settle_projection_pass(solution, pass, &moved, wave.take())?;
+                let num_nodes = trial.circuit_mut().num_nodes();
+                let (updates, refusal) = trial.circuit_mut().project_xspice_voltage_outputs(
+                    solution,
+                    num_nodes,
+                    Some(time),
+                );
                 let updates = match refusal {
                     Ok(()) => updates,
                     Err(error) => {
@@ -835,31 +426,22 @@ impl CircuitData {
                 )));
             }
         } else {
-            group.settle(&mut digital, solution)?;
+            trial.settle(solution)?;
         }
-        let mut discontinuity = false;
-        for host in group.hosts.iter_mut() {
-            let stamped = host.stamp(solution, |_, _, _| {}, |_, _| {});
-            named(host, stamped)?;
-            discontinuity |= host.candidate_discontinuity();
-        }
+        let discontinuity = trial.evaluate(solution)?;
         // Reserve every HDL candidate before native state can be promoted.
         // Dropping these reservations on a callback error unwinds all hosts.
         let static_history = capture_static_history
-            .then(|| group.static_residual(solution))
+            .then(|| trial.static_residual(solution))
             .transpose()?;
-        let prepared = group.prepare()?;
+        let mut prepared = trial.prepare()?;
         let result = finish(
-            owner.circuit,
+            prepared.circuit_mut(),
             solution,
             projected,
             static_history.as_deref(),
         )?;
-        for candidate in prepared {
-            candidate.commit();
-        }
-        group.active = false;
-        digital.commit();
+        prepared.commit();
         Ok((discontinuity, result))
     }
 
@@ -882,48 +464,26 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<bool, SimulationError> {
-        let integration = mixed_integration_coefficients(
-            time,
-            dt,
-            XspiceCompanionPolicy {
-                coefficients,
-                xyce_one_step_order2: false,
-            },
-        )?;
         self.validate_nonmixed_model_acceptance()
             .map_err(SimulationError::Circuit)?;
         let mut discontinuity = self.veriloga_discontinuity_rising();
         if !self.mixed_signal_hosts.is_empty() {
-            let mut digital = self
-                .scheduler
-                .mixed_digital_coordinator
-                .as_mut()
-                .ok_or_else(|| {
-                    SimulationError::Circuit(
-                        "mixed circuit digital execution has not been elaborated".into(),
-                    )
-                })?
-                .begin_trial(time, false)
-                .map_err(shared_error)?;
-            let mut group = MixedHostTrialGroup::begin(
-                &mut self.mixed_signal_hosts,
-                time,
-                dt,
-                integration,
-                Some((initial_step, final_step)),
-                false,
+            let mut trial = self.open_trial(
+                Candidate {
+                    time,
+                    dt,
+                    analysis_step: Some((initial_step, final_step)),
+                },
+                TrialKind::Acceptance,
+                XspiceCompanionPolicy {
+                    coefficients,
+                    xyce_one_step_order2: false,
+                },
+                None,
             )?;
-            if digital.opened_on_scheduled_activation() {
-                group.note_scheduled_activation();
-            }
-            group.settle(&mut digital, voltages)?;
-            for host in group.hosts.iter_mut() {
-                let stamped = host.stamp(voltages, |_, _, _| {}, |_, _| {});
-                named(host, stamped)?;
-                discontinuity |= host.candidate_discontinuity();
-            }
-            group.promote()?;
-            digital.commit();
+            trial.settle(voltages)?;
+            discontinuity |= trial.evaluate(voltages)?;
+            trial.prepare()?.commit();
         }
         self.veriloga_devices.apply_validated_timestep_acceptance();
         #[cfg(feature = "veriloga-builtins-base")]
@@ -955,63 +515,33 @@ impl CircuitData {
         if self.mixed_signal_hosts.is_empty() {
             return Ok((None, false));
         }
-        let integration = mixed_integration_coefficients(time, dt, companion)?;
-        let bindings = self.scheduler.mixed_xspice_bindings.clone();
-        self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
-            let mut refinement: Option<Value> = None;
-            let mut discontinuity = false;
-            let mut digital = coordinator.begin_trial(time, false).map_err(shared_error)?;
-            let mut group = MixedHostTrialGroup::begin(
-                hosts,
+        let mut trial = self.open_trial(
+            Candidate {
                 time,
                 dt,
-                integration,
-                Some((initial_step, final_step)),
-                false,
-            )?;
-            if let Some(bindings) = &bindings {
-                let mut participant = XspiceDigitalParticipant::new(
-                    circuit,
-                    bindings,
-                    voltages,
-                    time,
-                    dt,
-                    crate::xspice::AnalysisType::Transient,
-                    crate::xspice::EvaluationPhase::CircuitTrial,
-                    companion,
-                    resources,
-                );
-                group.settle_with(&mut digital, voltages, Some(&mut participant))?;
-            } else {
-                group.settle(&mut digital, voltages)?;
-            }
+                analysis_step: Some((initial_step, final_step)),
+            },
+            TrialKind::Inspection,
+            companion,
+            None,
+        )?;
+        let inspected = (|| {
+            let mut discontinuity = false;
+            trial.settle(voltages)?;
             // An A/D crossing this settled trial placed strictly inside its
-            // own interval is a root the solver is asked to land on. It is
-            // read from the trial rather than predicted before one was opened,
-            // because whether a D/A bridge moved in this interval — the fact
-            // that decides whether the crossing is interior at all — is only
-            // established by running the discrete half. The trial rolls back
-            // either way, so nothing this settle published survives the
-            // refusal.
-            for host in group.hosts.iter() {
-                if let Some(target) =
-                    named(host, host.trial_boundary_refinement_time(minimum_timestep))?
-                {
-                    refinement =
-                        Some(refinement.map_or(target, |current: Value| current.min(target)));
-                }
-            }
+            // own interval is a root the solver is asked to land on.
+            let mut refinement = trial.interior_root(minimum_timestep)?;
             if refinement.is_some() {
                 return Ok((refinement, false));
             }
-            for host in group.hosts.iter_mut() {
+            for host in trial.hosts_mut() {
                 let inspected = (|| {
                     host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
                     discontinuity |= host.candidate_discontinuity();
                     let target = host
                         .analog_device()
                         .try_transient_event_refinement_time()
-                        .map_err(|error| MixedSignalError::Analog {
+                        .map_err(|error| crate::xspice::verilog::MixedSignalError::Analog {
                             detail: error.to_string(),
                         })?;
                     if let Some(target) = target {
@@ -1022,7 +552,7 @@ impl CircuitData {
                     } else if let Some(event) = host
                         .analog_device()
                         .first_candidate_analog_task(kind)
-                        .map_err(|error| MixedSignalError::Analog {
+                        .map_err(|error| crate::xspice::verilog::MixedSignalError::Analog {
                             detail: error.to_string(),
                         })?
                     {
@@ -1033,7 +563,8 @@ impl CircuitData {
                 named(host, inspected)?;
             }
             Ok((refinement, discontinuity))
-        })
+        })();
+        trial.finish(inspected)
     }
 
     /// Append every mixed module's committed boundary values to a digital

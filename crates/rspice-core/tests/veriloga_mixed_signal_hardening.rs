@@ -2760,7 +2760,7 @@ endmodule
 /// which reproduces the seam this deck actually re-solves across: the write
 /// lands in a Newton probe the solver rolls back, so the trial that dates the
 /// crossing it carried cannot read it from the store and the fact is latched
-/// per candidate instead (`mixed.rs`'s `CarriedFeedback`). It is asserted
+/// per candidate instead (`mixed.rs`'s `CandidateLedger`). It is asserted
 /// there rather than here because a deck cannot separate the two kinds of
 /// re-solve it would take to see it:
 /// the controller legitimately walks the step down towards `ca`'s own interior
@@ -2841,7 +2841,7 @@ fn the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing() {
 /// The dating that closes it is causal, not positional: `cb` is dated at the
 /// endpoint because the discrete half wrote something the analog equations
 /// read before it was found, and that write is remembered across the Newton
-/// probes the solver rolls back — `mixed.rs`'s `CarriedFeedback`, pinned at the
+/// probes the solver rolls back — `mixed.rs`'s `CandidateLedger`, pinned at the
 /// unit level by
 /// `a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is`
 /// and by its control

@@ -643,7 +643,7 @@ impl MixedDigitalCoordinator {
     /// Zero — the default — means no solver has declared one, and every
     /// activation the analog side steps past is a synchronization fault. A
     /// positive floor is the transient stepper's hard minimum timestep, and it
-    /// is what makes [`Self::begin_trial`] able to tell the two cases apart.
+    /// is what makes [`Self::open_trial`] able to tell the two cases apart.
     pub(crate) fn set_analog_step_floor(&mut self, floor: f64) {
         self.analog_step_floor = if floor.is_finite() && floor > 0.0 {
             floor
@@ -690,11 +690,11 @@ impl MixedDigitalCoordinator {
     /// that window coalesces onto this one analog timepoint. The refusal is
     /// kept for an activation the stepper could have landed on, because that
     /// one is a lost breakpoint rather than a resolution limit.
-    pub(crate) fn begin_trial(
+    pub(crate) fn open_trial(
         &mut self,
         time: f64,
         probe: bool,
-    ) -> Result<SharedDigitalTrial<'_>, MixedSignalError> {
+    ) -> Result<SharedTrialCursor, MixedSignalError> {
         if !self.enabled {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "circuit digital execution must start before a trial".into(),
@@ -721,11 +721,10 @@ impl MixedDigitalCoordinator {
             }
         }
         // Read before the queue is drained, and reported to the instances by
-        // `MixedHostTrialGroup`: see `ActiveTrial::scheduled_activation`.
+        // the circuit trial: see `ActiveTrial::scheduled_activation`.
         let scheduled_activation = self.digital.next_tick().is_some_and(|next| next <= tick);
         let rollback = self.digital.clone();
-        Ok(SharedDigitalTrial {
-            coordinator: self,
+        Ok(SharedTrialCursor {
             rollback: Some(rollback),
             time,
             tick,
@@ -736,9 +735,18 @@ impl MixedDigitalCoordinator {
     }
 }
 
-/// The shared event state rolls back on every exit except explicit acceptance.
-pub(crate) struct SharedDigitalTrial<'a> {
-    coordinator: &'a mut MixedDigitalCoordinator,
+/// One circuit trial's place on the shared wheel.
+///
+/// Data, not a guard: the wheel's pre-trial image travels in here rather than
+/// behind a borrow of the coordinator, because the circuit trial that opens one
+/// also owns the coordinator, the instances and the code-model lane, and a
+/// borrow of the coordinator would lend out the one thing every other lane of
+/// that trial has to reach. What replaces the borrow is the circuit trial's own
+/// `Drop`, which hands this back to
+/// [`MixedDigitalCoordinator::rollback_trial`] on every exit that is not an
+/// explicit [`MixedDigitalCoordinator::commit_trial`] — the same discipline,
+/// enforced in the one place that owns both halves.
+pub(crate) struct SharedTrialCursor {
     rollback: Option<MixedCell<DigitalHost>>,
     time: f64,
     tick: u64,
@@ -803,7 +811,7 @@ impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
     }
 }
 
-impl SharedDigitalTrial<'_> {
+impl SharedTrialCursor {
     /// Whether this trial opened on a tick the shared queue already had work
     /// due at.
     ///
@@ -813,22 +821,36 @@ impl SharedDigitalTrial<'_> {
         self.scheduled_activation
     }
 
+    /// The highest tick this trial has published an A/D bank at.
+    ///
+    /// Test-only: nothing in the engine reads the mark back, because the one
+    /// thing it governs — where the next group publishes — is inside the
+    /// settle. What asks is the pin that compares two trial kinds' settles.
+    #[cfg(test)]
+    pub(crate) fn published_tick(&self) -> u64 {
+        self.published_tick
+    }
+}
+
+impl MixedDigitalCoordinator {
     /// Read every process probe before allowing any instance to run.
     pub(crate) fn advance(
         &mut self,
+        cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
     ) -> Result<(), MixedSignalError> {
-        self.advance_with(hosts, solution, None)
+        self.advance_with(cursor, hosts, solution, None)
     }
 
     pub(crate) fn advance_with(
         &mut self,
+        cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
         participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<(), MixedSignalError> {
-        let coordinator = &mut self.coordinator;
+        let coordinator = self;
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
             host.validate_solution(solution)?;
             for (probe, global) in host.analog_probes.iter().zip(&map.analog_probes) {
@@ -845,11 +867,11 @@ impl SharedDigitalTrial<'_> {
         if coordinator
             .digital
             .next_tick()
-            .is_some_and(|next| next <= self.tick)
+            .is_some_and(|next| next <= cursor.tick)
         {
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
-            let advanced = digital.advance_to_with(self.tick, &mut participant);
+            let advanced = digital.advance_to_with(cursor.tick, &mut participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         if has_external {
@@ -864,11 +886,11 @@ impl SharedDigitalTrial<'_> {
             // is the least tick not before the instant — see this module's
             // "three time bases", which also says why nearest-tick is the
             // rejected alternative here rather than a forbidden one.
-            let tick = hdl_tick(self.time, |at| at.ceil_tick(coordinator.resolution))?;
+            let tick = hdl_tick(cursor.time, |at| at.ceil_tick(coordinator.resolution))?;
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
             let advanced =
-                digital.force_many_from_analog_with(&[], tick, self.time, &mut participant);
+                digital.force_many_from_analog_with(&[], tick, cursor.time, &mut participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
@@ -877,10 +899,11 @@ impl SharedDigitalTrial<'_> {
     /// Apply all A/D decisions together, preserving analog activation provenance.
     pub(crate) fn publish_adc(
         &mut self,
+        cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
     ) -> Result<bool, MixedSignalError> {
-        self.publish_adc_with(hosts, solution, None)
+        self.publish_adc_with(cursor, hosts, solution, None)
     }
 
     /// Every circuit A/D transition of this settle pass, in ascending crossing
@@ -893,10 +916,11 @@ impl SharedDigitalTrial<'_> {
     /// order the analog world produced them.
     fn collect_adc_publications(
         &mut self,
+        cursor: &SharedTrialCursor,
         hosts: &[MixedSignalHost],
     ) -> Result<(), MixedSignalError> {
-        let trial_tick = self.tick;
-        let coordinator = &mut self.coordinator;
+        let trial_tick = cursor.tick;
+        let coordinator = self;
         coordinator.publications.clear();
         for (index, host) in hosts.iter().enumerate() {
             // An endpoint-dated transition names no tick of its own — see
@@ -950,35 +974,36 @@ impl SharedDigitalTrial<'_> {
 
     pub(crate) fn publish_adc_with(
         &mut self,
+        cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
         mut participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
-        self.collect_adc_publications(hosts)?;
+        self.collect_adc_publications(cursor, hosts)?;
         // The analog candidate instant, which every group publishes against:
         // the continuous half has a solution at the trial's endpoint and
         // nowhere else inside the step, however finely the discrete half dates
         // the transitions it found there.
-        let candidate_seconds = self.time;
+        let candidate_seconds = cursor.time;
         let mut published_any = false;
         let mut group = 0;
-        while group < self.coordinator.publications.len() {
-            let crossing = self.coordinator.publications[group].crossing;
-            let end = self.coordinator.publications[group..]
+        while group < self.publications.len() {
+            let crossing = self.publications[group].crossing;
+            let end = self.publications[group..]
                 .iter()
                 .position(|entry| entry.crossing != crossing)
-                .map_or(self.coordinator.publications.len(), |offset| group + offset);
+                .map_or(self.publications.len(), |offset| group + offset);
             // Monotone across the trial, not merely across this pass: a
             // crossing in the lower half of a tick rounds to a slot the
             // digital world has already left, and an earlier group — of this
             // pass or of an earlier Newton iteration of this same trial — may
             // have left a later one still.
-            self.published_tick = self.coordinator.publications[group..end]
+            cursor.published_tick = self.publications[group..end]
                 .iter()
                 .map(|entry| entry.tick)
-                .fold(self.published_tick, u64::max);
-            let published_tick = self.published_tick;
-            let coordinator = &mut self.coordinator;
+                .fold(cursor.published_tick, u64::max);
+            let published_tick = cursor.published_tick;
+            let coordinator = &mut *self;
             coordinator.drives.clear();
             for entry in &coordinator.publications[group..end] {
                 let host = &hosts[entry.host];
@@ -1045,18 +1070,18 @@ impl SharedDigitalTrial<'_> {
     /// Refresh analog-facing values after shared settlement. No model view can
     /// advance a process or resolve a driver independently.
     pub(crate) fn synchronize(
-        &mut self,
+        &self,
         hosts: &mut [MixedSignalHost],
     ) -> Result<bool, MixedSignalError> {
         let mut changed = false;
-        for (host, map) in hosts.iter_mut().zip(&self.coordinator.maps) {
+        for (host, map) in hosts.iter_mut().zip(&self.maps) {
             let differs = map.signals.iter().enumerate().any(|(local, &global)| {
                 let local = DigitalSignalId::from(local);
                 if host.state.digital.is_real(local) {
                     host.state.digital.read_real(local).map(f64::to_bits)
-                        != self.coordinator.digital.read_real(global).map(f64::to_bits)
+                        != self.digital.read_real(global).map(f64::to_bits)
                 } else {
-                    host.state.digital.read(local) != self.coordinator.digital.read(global)
+                    host.state.digital.read(local) != self.digital.read(global)
                 }
             });
             if !differs {
@@ -1070,7 +1095,6 @@ impl SharedDigitalTrial<'_> {
                     .read(bridge.signal)
                     .map(|value| value.bit(bridge.bit))
                     != self
-                        .coordinator
                         .digital
                         .read(map.signals[usize::from(bridge.signal)])
                         .map(|value| value.bit(bridge.bit))
@@ -1085,12 +1109,8 @@ impl SharedDigitalTrial<'_> {
             };
             for (local, &global) in map.signals.iter().enumerate() {
                 if view.plan.signals[local].kind.is_real() {
-                    view.reals[local] = self
-                        .coordinator
-                        .digital
-                        .read_real(global)
-                        .expect("linked real signal");
-                } else if let Some(value) = self.coordinator.digital.read(global)
+                    view.reals[local] = self.digital.read_real(global).expect("linked real signal");
+                } else if let Some(value) = self.digital.read(global)
                     && view.bits[local] != *value
                 {
                     view.bits[local].clone_from(value);
@@ -1107,20 +1127,25 @@ impl SharedDigitalTrial<'_> {
         Ok(changed)
     }
 
-    pub(crate) fn commit(mut self) {
+    /// Promote the candidate this cursor opened. The image it carries is
+    /// dropped rather than applied.
+    pub(crate) fn commit_trial(&mut self, mut cursor: SharedTrialCursor) {
         assert!(
-            !self.probe,
+            !cursor.probe,
             "a numerical probe cannot commit shared digital state"
         );
-        self.coordinator.accepted_time = Some(self.time);
-        self.rollback = None;
+        self.accepted_time = Some(cursor.time);
+        cursor.rollback = None;
     }
-}
 
-impl Drop for SharedDigitalTrial<'_> {
-    fn drop(&mut self) {
-        if let Some(rollback) = self.rollback.take() {
-            self.coordinator.digital = rollback;
+    /// Put the wheel back where the cursor's trial found it.
+    ///
+    /// Called from the circuit trial's `Drop` on every exit that did not
+    /// commit, which is what makes a rejected trial's publications, process
+    /// resumptions and queued events disappear together.
+    pub(crate) fn rollback_trial(&mut self, mut cursor: SharedTrialCursor) {
+        if let Some(rollback) = cursor.rollback.take() {
+            self.digital = rollback;
         }
     }
 }

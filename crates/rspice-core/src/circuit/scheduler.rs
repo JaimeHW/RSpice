@@ -14,6 +14,12 @@
 //! fields are the same fields, moved rather than copied, and nothing about the
 //! trial protocol, the bridges or the per-host wheel moves with them.
 
+#[cfg(feature = "veriloga")]
+#[path = "scheduler/trial.rs"]
+mod trial;
+#[cfg(feature = "veriloga")]
+pub(in crate::circuit) use trial::{Candidate, MAX_BOUNDARY_SETTLE_PASSES, TrialKind, named};
+
 use crate::Value;
 use crate::xspice::event_scheduler::Instant;
 
@@ -161,6 +167,18 @@ pub(crate) struct CircuitScheduler {
     /// nothing has declared one. See [`Self::set_analog_step_floor`].
     #[cfg(feature = "veriloga")]
     analog_step_floor: Value,
+    /// One candidate ledger per enrolled mixed instance, in circuit
+    /// registration order.
+    ///
+    /// The facts about one candidate timepoint that the solver's rolled-back
+    /// Newton probes must not erase: which bridges a write inside the interval
+    /// carried, and the switching a rejected probe observed. They belong to the
+    /// candidate rather than to any trial opened on it, so they are parked here
+    /// between trials and lent to the instances for the life of one — see
+    /// [`Trial`]'s open and drop. Between trials this holds the live facts;
+    /// during one it holds the place-holders the instances swapped out.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) ledgers: Vec<crate::xspice::verilog::CandidateLedger>,
 }
 
 impl CircuitScheduler {
@@ -176,6 +194,8 @@ impl CircuitScheduler {
             mixed_xspice_bindings: None,
             #[cfg(feature = "veriloga")]
             analog_step_floor: 0.0,
+            #[cfg(feature = "veriloga")]
+            ledgers: Vec::new(),
         }
     }
 

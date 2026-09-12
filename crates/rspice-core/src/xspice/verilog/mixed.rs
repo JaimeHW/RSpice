@@ -78,7 +78,7 @@
 //! "Before it" spans the Newton probes of one candidate rather than one trial.
 //! The solver rolls a probe back before the solution that probe's write moved
 //! is ever solved, so the fact is latched per candidate instead of re-read per
-//! trial — `CarriedFeedback` carries that argument. It is the same question
+//! trial — `CandidateLedger` carries that argument. It is the same question
 //! about the same movement, asked where the re-solve actually happens; nothing
 //! is dated by where it fell relative to another crossing.
 //!
@@ -140,7 +140,7 @@ mod analog_samples;
 mod shared;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
-pub(crate) use shared::{MixedDigitalCoordinator, SharedDigitalTrial};
+pub(crate) use shared::{MixedDigitalCoordinator, SharedTrialCursor};
 
 use std::fmt;
 use std::sync::Arc;
@@ -333,15 +333,128 @@ impl BoundaryNetHistory {
     }
 }
 
-/// Diagnostic-only transitions from completed, rejected solver probes.
-/// Retain changes so a failed damping attempt's repeated identical samples
-/// cannot erase earlier switching. Acceptance and checkpoints exclude this.
-#[derive(Clone, Default)]
-struct BoundaryProbeHistory {
-    time: Option<f64>,
+/// What is remembered about one candidate timepoint across the Newton probes
+/// the solver rolls back.
+///
+/// Two facts, one keying rule. Both belong to the *candidate* rather than to
+/// any trial opened on it, and both would be erased by the rollback if they
+/// lived inside one — so they live here, keyed by the candidate's own
+/// timestamp, and are forgotten by [`Self::clear`] when a new accepted point
+/// opens a new interval.
+///
+/// # The causal latch
+///
+/// [`ActiveTrial::digital_feedback`] answers the fourth question of this
+/// module's "three time bases" — did the discrete half move something the
+/// analog equations read inside this interval — by comparing the store against
+/// the image taken when the trial opened. That comparison is exact, and it is
+/// blind in exactly one place.
+///
+/// The engine's re-solve is not a later pass of one trial. It is the next
+/// Newton probe: the circuit's trial protocol opens, settles, stamps and rolls
+/// back a probe trial for every Newton evaluation, and then opens a fresh trial
+/// from the accepted store to inspect the converged candidate. A write that
+/// lands in probe *k* is undone before probe *k+1* opens and before the
+/// inspection opens, while its effect — the analog solution it moved — is
+/// precisely what those later evaluations solve. So at the moment the effect is
+/// dated, the fact that caused it is true of the *candidate* and false of every
+/// trial that can be asked about it, and no pass-local reading of the store can
+/// recover it.
+///
+/// Arming records which bridges had *already* published when the write landed:
+/// those crossed before it and are the circuit's own. Every other bridge found
+/// crossing on this candidate first appears after the write and is dated where
+/// its cause is.
+///
+/// What that approximates is what [`ActiveTrial::digital_feedback`] already
+/// approximates and for the same reason: a crossing the circuit caused in the
+/// same interval as such a movement cannot be separated from it, because
+/// re-solving lands on the movement again. What it does *not* do is date a
+/// crossing by where it fell relative to another one. Two crossings on a
+/// candidate nothing fed back into keep their own instants however they are
+/// ordered — which matters because interpolation is a chord, and a chord across
+/// a curved rise can order two roots the other way round on a long interval
+/// than on the short one that lands the later of them.
+///
+/// # The rejected-probe samples
+///
+/// Diagnostic-only transitions from completed, rejected solver probes, kept for
+/// the same reason and keyed the same way. Changes are retained so a failed
+/// damping attempt's repeated identical samples cannot erase earlier switching.
+/// Acceptance and checkpoints exclude them.
+///
+/// # Who owns one
+///
+/// The circuit's scheduler, which parks one per enrolled instance between
+/// trials and lends it to the instance for the life of a trial — see
+/// [`MixedSignalHost::install_candidate_ledger`]. A standalone host keeps its
+/// own and is never parked; that path retires with the per-host wheel.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CandidateLedger {
+    /// The candidate timestamp the latch below was armed for. `None` when
+    /// nothing is latched: a new accepted point opens a new interval and the
+    /// write that was latched is now part of the accepted state rather than of
+    /// a step.
+    carried_time: Option<f64>,
+    /// The A/D bridges that had already published in the trial that armed this.
+    /// Parallel to `bridges.adc`.
+    innocent: Vec<bool>,
+    /// The candidate the rejected-probe samples below belong to.
+    probe_time: Option<f64>,
     probes: usize,
     adc: Vec<BoundaryNetHistory>,
     dac: Vec<BoundaryNetHistory>,
+}
+
+impl CandidateLedger {
+    /// Whether a crossing found on candidate `time` was carried by the write
+    /// this latched.
+    fn carries(&self, time: f64, bridge: usize) -> bool {
+        self.carried_time == Some(time) && !self.innocent.get(bridge).copied().unwrap_or(false)
+    }
+
+    /// Latch the fact that candidate `time` was fed back into, with the
+    /// bridges that had already published recorded as innocent.
+    ///
+    /// Armed once per candidate — a later pass must not widen the innocent set
+    /// with bridges that published *after* the write.
+    fn arm(&mut self, time: f64, published: &[bool]) {
+        if self.carried_time == Some(time) {
+            return;
+        }
+        self.carried_time = Some(time);
+        self.innocent.clear();
+        self.innocent.extend_from_slice(published);
+    }
+
+    /// Forget this candidate.
+    ///
+    /// A new accepted point is a new interval: whatever the discrete half fed
+    /// back into the candidate just accepted is now part of the accepted state
+    /// that the next interval's crossings are interpolated from, so there is
+    /// nothing left for it to have carried, and the probes that were rejected
+    /// on the way there describe a timepoint the run has left behind. The
+    /// vectors keep their allocations; only the keys are dropped.
+    fn clear(&mut self) {
+        self.carried_time = None;
+        self.probe_time = None;
+    }
+
+    /// The candidate the causal latch is armed for, or `None`.
+    ///
+    /// Test-only: the production readers are [`Self::carries`] and
+    /// [`Self::arm`], which ask about a named candidate rather than about
+    /// whichever one is latched.
+    #[cfg(test)]
+    pub(crate) fn carried_candidate(&self) -> Option<f64> {
+        self.carried_time
+    }
+
+    /// [`Self::carries`], for the pin that asserts the keying rule.
+    #[cfg(test)]
+    pub(crate) fn carries_at(&self, time: f64, bridge: usize) -> bool {
+        self.carries(time, bridge)
+    }
 }
 
 /// One boundary net's part in a settle that would not quiet.
@@ -775,11 +888,11 @@ impl AnalogSolverInputs {
 /// answer a question about two bridges — the boundary tables are a handful of
 /// entries wide, so the allocation dominated the arithmetic.
 ///
-/// Two of them are instead deliberately *longer*-lived than a trial, and both
-/// say so on themselves: [`BoundaryProbeHistory`] and [`CarriedFeedback`] are
-/// facts about one candidate timepoint that the solver's rolled-back Newton
-/// probes would otherwise erase, so they live where a probe cannot reach them
-/// and are keyed by the timestamp they belong to.
+/// One of them is instead deliberately *longer*-lived than a trial and says so
+/// on itself: [`CandidateLedger`] holds the facts about one candidate timepoint
+/// that the solver's rolled-back Newton probes would otherwise erase, so it
+/// lives where a probe cannot reach it and is keyed by the timestamp it belongs
+/// to.
 ///
 /// Held by value rather than behind a [`MixedCell`]: a capture must never see
 /// one, and a host clone is welcome to start with empty ones.
@@ -812,72 +925,18 @@ struct TrialScratch {
     /// at once: a bridge that published *before* the discrete half's write
     /// keeps the instant the circuit gave it, while one found after that write
     /// is dated where its cause is. A trial-wide flag answers for both and is
-    /// therefore wrong about one of them — see [`CarriedFeedback`].
+    /// therefore wrong about one of them — see [`CandidateLedger`].
     endpoint_dated: Vec<bool>,
     /// The boundary histories an acceptance would produce, computed before
     /// anything is committed so a chattering boundary can still be refused.
     adc_history: Vec<BoundaryNetHistory>,
     dac_history: Vec<BoundaryNetHistory>,
-    probe_history: BoundaryProbeHistory,
-    carried: CarriedFeedback,
+    /// The candidate-scoped facts a rolled-back probe must not erase, held
+    /// here for the life of one trial and parked on the circuit's scheduler
+    /// between trials.
+    ledger: CandidateLedger,
     /// The five vectors of the last finished trial, ready to be refilled.
     trial: TrialVectors,
-}
-
-/// What the discrete half fed back into one candidate timepoint, remembered
-/// across the Newton probes the solver rolls back.
-///
-/// [`ActiveTrial::digital_feedback`] answers the fourth question of this
-/// module's "three time bases" — did the discrete half move something the
-/// analog equations read inside this interval — by comparing the store against
-/// the image taken when the trial opened. That comparison is exact, and it is
-/// blind in exactly one place.
-///
-/// The engine's re-solve is not a later pass of one trial. It is the next
-/// Newton probe: `circuit::mixed_signal`'s `stamp_mixed_transient_trial` opens,
-/// settles, stamps and rolls back a probe trial for every Newton evaluation,
-/// and `visit_mixed_transient_candidate_task` then opens a fresh trial from the
-/// accepted store to inspect the converged candidate. A write that lands in
-/// probe *k* is undone before probe *k+1* opens and before the inspection opens,
-/// while its effect — the analog solution it moved — is precisely what those
-/// later evaluations solve. So at the moment the effect is dated, the fact that
-/// caused it is true of the *candidate* and false of every trial that can be
-/// asked about it, and no pass-local reading of the store can recover it.
-///
-/// It is therefore latched here, on the scratch, which survives a probe because
-/// hosts are moved rather than cloned through one — the same thing
-/// [`BoundaryProbeHistory`] relies on, keyed the same way, by the candidate's
-/// own timestamp. Arming records which bridges had *already* published when the
-/// write landed: those crossed before it and are the circuit's own. Every other
-/// bridge found crossing on this candidate first appears after the write and is
-/// dated where its cause is.
-///
-/// What that approximates is what [`ActiveTrial::digital_feedback`] already
-/// approximates and for the same reason: a crossing the circuit caused in the
-/// same interval as such a movement cannot be separated from it, because
-/// re-solving lands on the movement again. What it does *not* do is date a
-/// crossing by where it fell relative to another one. Two crossings on a
-/// candidate nothing fed back into keep their own instants however they are
-/// ordered — which matters because interpolation is a chord, and a chord across
-/// a curved rise can order two roots the other way round on a long interval
-/// than on the short one that lands the later of them.
-#[derive(Clone, Default)]
-struct CarriedFeedback {
-    /// The candidate timestamp this was armed for. `None` when nothing is
-    /// latched: a new accepted point opens a new interval and the write that
-    /// was latched is now part of the accepted state rather than of a step.
-    time: Option<f64>,
-    /// The A/D bridges that had already published in the trial that armed
-    /// this. Parallel to `bridges.adc`.
-    innocent: Vec<bool>,
-}
-
-impl CarriedFeedback {
-    /// Whether a crossing found on candidate `time` was carried by the write
-    /// this latched.
-    fn carries(&self, time: f64, bridge: usize) -> bool {
-        self.time == Some(time) && !self.innocent.get(bridge).copied().unwrap_or(false)
-    }
 }
 
 /// The per-trial vectors, moved between [`TrialScratch`] and [`ActiveTrial`].
@@ -1498,8 +1557,7 @@ impl MixedSignalHost {
         self.state.accepted_time = 0.0;
         self.state.started = false;
         self.digital_started = false;
-        self.scratch.probe_history.time = None;
-        self.scratch.carried.time = None;
+        self.scratch.ledger.clear();
         Ok(())
     }
 
@@ -2705,7 +2763,7 @@ impl MixedSignalHost {
     /// The two rules are therefore one rule, written once — the fourth
     /// question of this module's "three time bases". The movement it is applied
     /// from may have happened in a Newton probe this trial never saw, which is
-    /// what [`CarriedFeedback`] exists to carry; without it the landing this
+    /// what [`CandidateLedger`] exists to carry; without it the landing this
     /// refinement has just reached is rejected in favour of an instant behind
     /// itself, and the controller bisects into the root it had already found,
     /// one accepted timepoint per rung, down to `minimum_timestep`.
@@ -2882,18 +2940,10 @@ impl MixedSignalHost {
         // Latched the first time this candidate is seen to have been fed back
         // into, because the trial that sees it is not the trial the effect is
         // dated in: the solver rolls this one back and solves the moved problem
-        // in the next Newton probe. [`CarriedFeedback`] carries the argument in
-        // full. Armed once per candidate — a later pass must not widen the
-        // innocent set with bridges that published *after* the write.
-        if digital_feedback
-            && scratch.carried.time != Some(time_seconds)
-            && let Some(trial) = self.trial.as_ref()
-        {
-            scratch.carried.time = Some(time_seconds);
-            scratch
-                .carried
-                .innocent
-                .clone_from(&trial.vectors.adc_moved);
+        // in the next Newton probe. [`CandidateLedger`] carries the argument in
+        // full.
+        if digital_feedback && let Some(trial) = self.trial.as_ref() {
+            scratch.ledger.arm(time_seconds, &trial.vectors.adc_moved);
         }
         scratch.bit_drives.clear();
         scratch.drives.clear();
@@ -2940,7 +2990,7 @@ impl MixedSignalHost {
             // movement may have happened in a Newton probe the solver has
             // already rolled back, and because a bridge that published before
             // it crossed on the circuit's own account and keeps its instant.
-            let carried = digital_feedback || scratch.carried.carries(time_seconds, index);
+            let carried = digital_feedback || scratch.ledger.carries(time_seconds, index);
             let crossing = if carried {
                 time_seconds
             } else {
@@ -3214,12 +3264,8 @@ impl MixedSignalHost {
             &mut trial.vectors.probe_values,
         );
         self.scratch.trial = trial.vectors;
-        self.scratch.probe_history.time = None;
-        // A new accepted point is a new interval. Whatever the discrete half
-        // fed back into the candidate just accepted is now part of the accepted
-        // state that the next interval's crossings are interpolated from, so
-        // there is nothing left for it to have carried.
-        self.scratch.carried.time = None;
+        // A new accepted point is a new interval: see [`CandidateLedger::clear`].
+        self.scratch.ledger.clear();
     }
 
     /// Put a trial back the way it found things, and take its vectors back.
@@ -3355,8 +3401,7 @@ impl MixedSignalHost {
         self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
         self.digital_started = true;
-        self.scratch.probe_history.time = None;
-        self.scratch.carried.time = None;
+        self.scratch.ledger.clear();
         self.max_circuit_node = (0..self.analog.num_terminals())
             .map(|terminal| self.analog.node_for_terminal(terminal))
             .chain(
@@ -3390,13 +3435,13 @@ impl MixedSignalHost {
     }
 
     fn record_boundary_probe(&mut self, time: f64) {
-        let history = &mut self.scratch.probe_history;
+        let history = &mut self.scratch.ledger;
         let bridges = &self.state.bridges;
-        if history.time != Some(time)
+        if history.probe_time != Some(time)
             || history.adc.len() != bridges.adc.len()
             || history.dac.len() != bridges.dac.len()
         {
-            history.time = Some(time);
+            history.probe_time = Some(time);
             history.probes = 0;
             history
                 .adc
@@ -3438,9 +3483,19 @@ impl MixedSignalHost {
 
     /// Describe observed switching only after the caller has exhausted its
     /// convergence recovery. These samples never decide whether a solve passes.
-    pub(crate) fn rejected_probe_activity(&self, time: f64) -> Option<String> {
-        let history = &self.scratch.probe_history;
-        if history.time != Some(time) {
+    ///
+    /// The ledger is passed in rather than read off the host because the
+    /// circuit's scheduler owns one per enrolled instance and parks it there
+    /// between trials: the caller that renders this is asking after the trial
+    /// that recorded the samples has already handed them back. A standalone
+    /// host answers with [`Self::candidate_ledger`], which is its own.
+    pub(crate) fn rejected_probe_activity(
+        &self,
+        ledger: &CandidateLedger,
+        time: f64,
+    ) -> Option<String> {
+        let history = ledger;
+        if history.probe_time != Some(time) {
             return None;
         }
         let mut nets = Vec::new();
@@ -3493,6 +3548,51 @@ impl MixedSignalHost {
             history.probes,
             nets.join("; "),
         ))
+    }
+
+    /// This instance's candidate ledger.
+    ///
+    /// What it holds depends on who owns it. An enrolled instance's ledger is
+    /// parked on the circuit's scheduler between trials and installed here only
+    /// for the life of one, so reading it from outside a trial reads the parked
+    /// copy's place-holder; the circuit reads the scheduler's. A standalone
+    /// host is never parked and this is always its own.
+    ///
+    /// Test-only: the production reader of a parked ledger is the circuit,
+    /// which holds the scheduler's own vector.
+    #[cfg(test)]
+    pub(crate) fn candidate_ledger(&self) -> &CandidateLedger {
+        &self.scratch.ledger
+    }
+
+    /// What the open trial has published on each A/D bridge so far: whether
+    /// this trial moved it, and the instant it crossed at.
+    ///
+    /// Test-only, and in bridge order, which is enough to compare two settles:
+    /// the publication order is `(crossing, host, bridge)` by law, so two
+    /// records that agree bridge by bridge agree on the order as well.
+    #[cfg(test)]
+    pub(crate) fn trial_boundary_record(&self) -> Vec<(bool, Option<f64>)> {
+        self.trial.as_ref().map_or_else(Vec::new, |trial| {
+            trial
+                .vectors
+                .adc_moved
+                .iter()
+                .copied()
+                .zip(trial.vectors.transition_times.iter().copied())
+                .collect()
+        })
+    }
+
+    /// Lend this instance the candidate ledger the circuit parked for it, and
+    /// take back whatever it was holding.
+    ///
+    /// A swap rather than a move, so exactly one copy of the facts is live at
+    /// any instant and the trial's own `Drop` puts them back by calling this a
+    /// second time. Neither side allocates: both vectors keep the capacity the
+    /// last candidate left them.
+    pub(crate) fn install_candidate_ledger(&mut self, ledger: &mut CandidateLedger) {
+        std::mem::swap(&mut self.scratch.ledger, ledger);
     }
 
     /// The boundary histories this trial's acceptance would produce.
@@ -4817,7 +4917,9 @@ endmodule
         for _ in 0..20 {
             sample(&mut host, 0.0, 0.0);
         }
-        let detail = host.rejected_probe_activity(0.0).unwrap();
+        let detail = host
+            .rejected_probe_activity(host.candidate_ledger(), 0.0)
+            .unwrap();
         assert!(detail.contains("0 1 0 1"), "{detail}");
         assert!(detail.contains("28 rejected solver probes"), "{detail}");
         assert_eq!(host.read_digital("adc"), adc);
@@ -4829,15 +4931,24 @@ endmodule
         assert!(host.state.digital.next_tick().is_none());
         let after_probes = host.checkpoint().unwrap();
         host.restore(&after_probes).unwrap();
-        assert!(host.rejected_probe_activity(0.0).is_none());
+        assert!(
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+                .is_none()
+        );
 
         for _ in 0..4 {
             sample(&mut host, 0.0, 0.0);
             sample(&mut host, 0.0, 1.0);
         }
         sample(&mut host, 1e-9, 0.0);
-        assert!(host.rejected_probe_activity(0.0).is_none());
-        assert!(host.rejected_probe_activity(1e-9).is_none());
+        assert!(
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+                .is_none()
+        );
+        assert!(
+            host.rejected_probe_activity(host.candidate_ledger(), 1e-9)
+                .is_none()
+        );
         host.restore(&checkpoint).unwrap();
         for _ in 0..4 {
             sample(&mut host, 0.0, 0.0);
@@ -4845,7 +4956,10 @@ endmodule
         }
         begin(&mut host, 0);
         settle_and_accept(&mut host, &[0.0; 4]);
-        assert!(host.rejected_probe_activity(0.0).is_none());
+        assert!(
+            host.rejected_probe_activity(host.candidate_ledger(), 0.0)
+                .is_none()
+        );
     }
 
     #[test]
