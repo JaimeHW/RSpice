@@ -1484,6 +1484,7 @@ struct CheckpointLines<'a> {
     remaining: usize,
     abort: Option<&'a dyn AbortSignal>,
     consumed: usize,
+    terminated: bool,
 }
 
 impl<'a> CheckpointLines<'a> {
@@ -1493,6 +1494,7 @@ impl<'a> CheckpointLines<'a> {
             remaining: text.lines().count(),
             abort: None,
             consumed: 0,
+            terminated: checkpoint_text_is_terminated(text),
         }
     }
 
@@ -1515,12 +1517,32 @@ impl<'a> CheckpointLines<'a> {
             remaining,
             abort: Some(abort),
             consumed: 0,
+            terminated: checkpoint_text_is_terminated(text),
         })
     }
 
     fn remaining(&self) -> usize {
         self.remaining
     }
+
+    /// Whether the borrowed text ended where the encoder ends one.
+    fn is_terminated(&self) -> bool {
+        self.terminated
+    }
+}
+
+/// Whether canonical checkpoint text ends where [`TransientCheckpoint::to_text`]
+/// ends it.
+///
+/// Every record the encoder writes is closed by a newline, so a canonical
+/// document always is. `str::lines` cannot tell the difference: it yields the
+/// same final line whether or not that newline survived, so a file whose
+/// writer died one byte from the end used to decode into exactly the
+/// checkpoint it was cut from. That is the one truncation the format could not
+/// see, and it is the interesting one — a resumed run would restart from state
+/// nothing proved was completely written.
+fn checkpoint_text_is_terminated(text: &str) -> bool {
+    text.is_empty() || text.ends_with('\n')
 }
 
 impl<'a> Iterator for CheckpointLines<'a> {
@@ -8864,6 +8886,12 @@ impl TransientCheckpoint {
         }
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
+        }
+        if !lines.is_terminated() {
+            return Err(
+                "checkpoint text is truncated: its last record is not newline-terminated"
+                    .to_string(),
+            );
         }
 
         let mut cap_iter = cap_cols.into_iter();
