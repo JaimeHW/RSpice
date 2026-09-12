@@ -12,9 +12,20 @@ use super::veriloga_cache::{
 };
 use crate::abort_signal::AbortSignal;
 use crate::netlist::VerilogAInclude;
-use crate::{ResourceLimits, SimulationError};
+use crate::{ElaborationError, ElaborationErrorKind, ResourceLimits, SimulationError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Every refusal here is about one `.VERILOGA` source, so the source is the
+/// subject and the span points at the file. No instance has been reached yet:
+/// sources resolve once for the whole design, before any X-card is bound.
+fn source_refusal(
+    path: &Path,
+    kind: ElaborationErrorKind,
+    detail: impl Into<String>,
+) -> SimulationError {
+    ElaborationError::new(kind, detail).in_source(path).into()
+}
 
 #[derive(Default)]
 struct DependencyVersions {
@@ -32,12 +43,15 @@ impl DependencyVersions {
             std::collections::hash_map::Entry::Occupied(previous) => {
                 let (first_identity, first_root) = previous.get();
                 if first_identity != &identity {
-                    return Err(SimulationError::Netlist(format!(
-                        "Verilog-A dependency '{}' changed while sources '{}' and '{}' were being elaborated; retry with a stable source snapshot",
-                        path.display(),
-                        first_root.display(),
-                        root.display()
-                    )));
+                    return Err(source_refusal(
+                        path,
+                        ElaborationErrorKind::MissingSource,
+                        format!(
+                            "this dependency changed while sources '{}' and '{}' were being elaborated; retry with a stable source snapshot",
+                            first_root.display(),
+                            root.display()
+                        ),
+                    ));
                 }
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
@@ -74,16 +88,18 @@ pub(super) fn resolve_includes(
         if let Some(library) = lookup_registered_connection_library(path, limits, abort)? {
             for &index in &group {
                 if let Some(module) = &includes[index].selected_module {
-                    return Err(SimulationError::Netlist(format!(
-                        "Verilog-A source '{}' is a registered connection library; device module '{}' cannot be selected",
-                        path.display(),
-                        module
-                    )));
+                    return Err(source_refusal(
+                        path,
+                        ElaborationErrorKind::ModuleNotSelected,
+                        format!(
+                            "this source is a registered connection library; device module '{module}' cannot be selected"
+                        ),
+                    ));
                 }
             }
             let specification = library
                 .connect_specification()
-                .map_err(SimulationError::Netlist)?;
+                .map_err(|error| source_refusal(path, ElaborationErrorKind::ConnectRule, error))?;
             super::check_build_abort(abort)?;
             rules.register(path, specification)?;
             continue;
@@ -130,10 +146,11 @@ pub(super) fn resolve_includes(
             let source_identity = specification.source_identity.clone();
             let has_modules = specification.declares_module;
             if !has_modules && !prepared.is_connect_library() {
-                return Err(SimulationError::Netlist(format!(
-                    "Verilog-A source '{}' declares neither a device module nor a connection library",
-                    path.display()
-                )));
+                return Err(source_refusal(
+                    path,
+                    ElaborationErrorKind::UnknownModule,
+                    "this source declares neither a device module nor a connection library",
+                ));
             }
             rules.register(path, specification)?;
             // Reuse the complete analyzed tree for every selected module, and
@@ -143,11 +160,13 @@ pub(super) fn resolve_includes(
                 let include = &includes[index];
                 if !has_modules {
                     if let Some(module) = &include.selected_module {
-                        return Err(SimulationError::Netlist(format!(
-                            "Verilog-A source '{}' declares no device module, so module '{}' cannot be selected",
-                            path.display(),
-                            module
-                        )));
+                        return Err(source_refusal(
+                            path,
+                            ElaborationErrorKind::UnknownModule,
+                            format!(
+                                "this source declares no device module, so module '{module}' cannot be selected"
+                            ),
+                        ));
                     }
                     models[index] = None;
                     continue;

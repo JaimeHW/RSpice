@@ -325,6 +325,23 @@ pub(super) const VERILOGA_CACHE_MAX_ENTRIES_ENV: &str = "RSPICE_VERILOGA_CACHE_M
 #[cfg(feature = "veriloga")]
 pub(super) const VERILOGA_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_CACHE_MAX_BYTES";
 
+/// A refusal raised while resolving, compiling or reading back one Verilog-A
+/// source, with that source as the subject and the span.
+///
+/// No instance is in scope here either: a source is compiled once for the
+/// whole design and every X-card that names it shares the result, so blaming
+/// one of them would be arbitrary.
+#[cfg(feature = "veriloga")]
+fn cache_refusal(
+    path: &Path,
+    kind: crate::ElaborationErrorKind,
+    detail: impl Into<String>,
+) -> SimulationError {
+    crate::ElaborationError::new(kind, detail)
+        .in_source(path)
+        .into()
+}
+
 /// On-disk Verilog-A cache statistics.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -909,11 +926,11 @@ fn fingerprint_paths_with_limits_and_abort(
                 return Err(SimulationError::Aborted);
             }
             Err(VerilogADependencyReadError::Io(error)) => {
-                return Err(SimulationError::Netlist(format!(
-                    "Verilog-A dependency '{}' does not exist or is unreadable: {}",
-                    canonical_path.display(),
-                    error
-                )));
+                return Err(cache_refusal(
+                    &canonical_path,
+                    crate::ElaborationErrorKind::MissingSource,
+                    format!("this dependency does not exist or is unreadable: {error}"),
+                ));
             }
         }
     }
@@ -1840,10 +1857,11 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
     check_build_abort(abort)?;
     if selected_module.is_some() && is_sealed_veriloga_virtual_path(path) {
-        return Err(SimulationError::Netlist(format!(
-            "Sealed Verilog-A runtime '{}' already fixes its module; a module override is not permitted",
-            path.display()
-        )));
+        return Err(cache_refusal(
+            path,
+            crate::ElaborationErrorKind::ModuleNotSelected,
+            "this sealed Verilog-A runtime already fixes its module; a module override is not permitted",
+        ));
     }
     let canonical = VerilogASourceKey::new(path, selected_module);
     let memory_entry = if let Ok(mut cache) = veriloga_source_cache().write() {
@@ -1854,10 +1872,11 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     };
 
     if let Some(CachedVerilogASource::Connections(_)) = &memory_entry {
-        return Err(SimulationError::Netlist(format!(
-            "Verilog-A source '{}' is a connection library, not a device module",
-            path.display()
-        )));
+        return Err(cache_refusal(
+            path,
+            crate::ElaborationErrorKind::ModuleNotSelected,
+            "this source is a connection library, not a device module",
+        ));
     }
     if let Some(CachedVerilogASource::Runtime(entry)) = memory_entry {
         if dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
@@ -1883,10 +1902,11 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     // disk cache and ambient files are not eligible fallbacks.
     if is_sealed_veriloga_virtual_path(path) {
         VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
-        return Err(SimulationError::Netlist(format!(
-            "Sealed Verilog-A runtime '{}' is not installed for this execution",
-            path.display()
-        )));
+        return Err(cache_refusal(
+            path,
+            crate::ElaborationErrorKind::MissingSource,
+            "this sealed Verilog-A runtime is not installed for this execution",
+        ));
     }
 
     check_build_abort(abort)?;
@@ -1923,7 +1943,11 @@ pub(super) fn lookup_registered_connection_library(
         return Ok(None);
     }
     let mut cache = veriloga_source_cache().write().map_err(|_| {
-        SimulationError::Netlist("failed to acquire Verilog-A source cache lock".to_owned())
+        cache_refusal(
+            path,
+            crate::ElaborationErrorKind::Internal,
+            "failed to acquire the Verilog-A source cache lock",
+        )
     })?;
     cache.enforce_limit(limits.max_shared_cache_bytes);
     match cache.get(&VerilogASourceKey::new(path, None)) {
@@ -1963,17 +1987,18 @@ pub(super) fn prepare_veriloga_source(
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
     check_build_abort(abort)?;
     if is_sealed_veriloga_virtual_path(path) {
-        return Err(SimulationError::Netlist(format!(
-            "Sealed Verilog-A runtime '{}' requires its registered canonical source context; filesystem preparation is not permitted",
-            path.display()
-        )));
+        return Err(cache_refusal(
+            path,
+            crate::ElaborationErrorKind::MissingSource,
+            "this sealed Verilog-A runtime requires its registered canonical source context; filesystem preparation is not permitted",
+        ));
     }
     let source_metadata = std::fs::metadata(path).map_err(|error| {
-        SimulationError::Netlist(format!(
-            "Verilog-A source '{}' does not exist or is unreadable: {}",
-            path.display(),
-            error
-        ))
+        cache_refusal(
+            path,
+            crate::ElaborationErrorKind::MissingSource,
+            format!("this source does not exist or is unreadable: {error}"),
+        )
     })?;
     ResourceLimitError::ensure(
         ResourceKind::DependencySourceBytes,
@@ -2013,10 +2038,11 @@ pub(super) fn prepare_veriloga_source(
                 VERILOGA_CACHE_TELEMETRY
                     .compilations_failed
                     .fetch_add(1, Relaxed);
-                SimulationError::Netlist(format!(
-                    "Failed to prepare Verilog-A '{}': {error}",
-                    path.display()
-                ))
+                cache_refusal(
+                    path,
+                    crate::ElaborationErrorKind::CompileRefusal,
+                    format!("preparation failed: {error}"),
+                )
             }
         }
     })
@@ -2029,10 +2055,11 @@ pub(super) fn prepare_veriloga_source(
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
     check_build_abort(abort)?;
-    Err(SimulationError::Netlist(format!(
-        "Verilog-A source '{}' is not registered for browser execution; compile and register its virtual runtime before building the circuit",
-        path.display()
-    )))
+    Err(cache_refusal(
+        path,
+        crate::ElaborationErrorKind::MissingSource,
+        "this source is not registered for browser execution; compile and register its virtual runtime before building the circuit",
+    ))
 }
 
 #[cfg(feature = "veriloga")]
@@ -2081,22 +2108,22 @@ pub(super) fn compile_and_cache_prepared_veriloga(
             VERILOGA_CACHE_TELEMETRY
                 .compilations_failed
                 .fetch_add(1, Relaxed);
-            return Err(SimulationError::Netlist(format!(
-                "Failed to compile Verilog-A '{}': {}",
-                path.display(),
-                error
-            )));
+            return Err(cache_refusal(
+                path,
+                crate::ElaborationErrorKind::CompileRefusal,
+                format!("compilation failed: {error}"),
+            ));
         }
     };
 
     check_build_abort(abort)?;
     validate_runtime_artifact_pair(&compiled.model, Some(&compiled.canonical_ir)).map_err(
         |error| {
-            SimulationError::Netlist(format!(
-                "Compiled Verilog-A runtime artifacts for '{}' failed integrity validation: {}",
-                path.display(),
-                error
-            ))
+            cache_refusal(
+                path,
+                crate::ElaborationErrorKind::CacheCorrupt,
+                format!("compiled runtime artifacts failed integrity validation: {error}"),
+            )
         },
     )?;
     let mut dependency_bytes = 0_usize;
