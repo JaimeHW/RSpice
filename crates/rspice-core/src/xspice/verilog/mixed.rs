@@ -77,6 +77,23 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::threshold_crossing_time;
 
+/// Which half of a boundary a reported bit came from.
+///
+/// A deck node can carry both: one module drives it through a D/A bridge while
+/// another samples it through an A/D bridge. The two bits are then answers to
+/// different questions — what was put on the net, and what a particular reader
+/// made of the voltage that resulted — and they disagree over the interval the
+/// analog node spends crossing that reader's threshold. Anything that has to
+/// publish *the* value of the net resolves that with this, and the driver wins:
+/// the net's value is what its driver put there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum BoundaryBitSource {
+    /// A D/A bridge: what the module drives onto the deck node.
+    Driven,
+    /// An A/D bridge: what the module read off the deck node.
+    Sampled,
+}
+
 /// How many consecutive accepted timepoints may each move one boundary net
 /// before the interleave calls it feedback rather than signal.
 ///
@@ -1521,25 +1538,37 @@ impl MixedSignalHost {
     }
 
     /// Every boundary net's committed four-state value, paired with the circuit
-    /// node the deck attached it to.
+    /// node the deck attached it to and with which half of the boundary it came
+    /// from.
     ///
-    /// Both bridge directions are reported: an A/D bridge's signal is what the
-    /// module *read* off that node and a D/A bridge's is what it *drove* onto
-    /// it, and a waveform viewer wants both. Speculative state is never
-    /// reported — this reads the accepted store, and every trial that has not
-    /// been accepted has already been rolled back.
+    /// Both bridge directions are reported, and the direction is reported with
+    /// them: an A/D bridge's signal is what the module *read* off that node and
+    /// a D/A bridge's is what it *drove* onto it. Those are different claims
+    /// about the same net and they disagree for as long as the analog node
+    /// takes to cross the reader's threshold, so a caller that has to name one
+    /// value for the net needs to know which is which. Speculative state is
+    /// never reported — this reads the accepted store, and every trial that has
+    /// not been accepted has already been rolled back.
     pub(crate) fn boundary_digital_values<F>(&self, mut sink: F)
     where
-        F: FnMut(usize, FourStateBit),
+        F: FnMut(usize, FourStateBit, BoundaryBitSource),
     {
         for bridge in &self.state.bridges.adc {
             if let Some(value) = self.state.digital.read(bridge.signal) {
-                sink(bridge.positive, value.bit(bridge.bit));
+                sink(
+                    bridge.positive,
+                    value.bit(bridge.bit),
+                    BoundaryBitSource::Sampled,
+                );
             }
         }
         for bridge in &self.state.bridges.dac {
             if let Some(value) = self.state.digital.read(bridge.signal) {
-                sink(bridge.positive, value.bit(bridge.bit));
+                sink(
+                    bridge.positive,
+                    value.bit(bridge.bit),
+                    BoundaryBitSource::Driven,
+                );
             }
         }
     }

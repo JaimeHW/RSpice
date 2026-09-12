@@ -1168,7 +1168,17 @@ impl CircuitData {
         ));
         #[cfg(feature = "veriloga")]
         self.append_mixed_digital_snapshot(snapshot);
-        snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
+        // Stable and then deduplicated, so the snapshot is a function from node
+        // to value: one node, one committed value, whichever half of the
+        // circuit published it. XSPICE's own event nodes and the mixed
+        // boundaries are disjoint by construction — a net shared with an HDL
+        // port is filtered out above and republished by the coordinator — so
+        // the deduplication removes nothing today. It is here because
+        // `record_digital_snapshot` writes a trace point per entry, and a
+        // second entry for a node it has already written at this timepoint is
+        // a zero-width glitch rather than an event.
+        snapshot.sort_by_key(|(node_id, _)| *node_id);
+        snapshot.dedup_by_key(|(node_id, _)| *node_id);
     }
 
     /// Fill a reusable snapshot of committed XSPICE real event-node values.

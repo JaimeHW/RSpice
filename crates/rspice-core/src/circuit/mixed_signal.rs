@@ -30,7 +30,7 @@ use crate::circuit::CircuitData;
 use crate::xspice::verilog::host::DigitalActiveParticipant;
 use crate::{SimulationError, Value};
 
-use crate::xspice::verilog::{BoundaryBus, MixedSignalError, MixedSignalHost};
+use crate::xspice::verilog::{BoundaryBitSource, BoundaryBus, MixedSignalError, MixedSignalHost};
 
 /// How many times one trial may re-settle its boundary before the engine gives
 /// up on it.
@@ -941,7 +941,7 @@ impl CircuitData {
     }
 
     /// Append every mixed module's committed boundary values to a digital
-    /// snapshot.
+    /// snapshot, one value per deck node.
     ///
     /// Written into the same vector `fill_xspice_digital_snapshot` fills, and
     /// sorted with it, so `TransientResult::record_digital_snapshot` stays the
@@ -950,34 +950,89 @@ impl CircuitData {
     /// one net per conductor, so the deck node a bit landed on is what the
     /// snapshot records, and the declaration that says which of them were one
     /// word rides beside the traces rather than inside them.
+    ///
+    /// # Which bit, when a node carries more than one
+    ///
+    /// A deck node joining one module's discrete output to another's discrete
+    /// input has two bridges on it — x1's D/A and x2's A/D — and each publishes
+    /// its own bit. They are not the same claim. The D/A bit is what was put on
+    /// the net; the A/D bit is what one reader made of the voltage that
+    /// resulted, and it lags by however long the node takes to cross that
+    /// reader's threshold, which an analog load can stretch over many accepted
+    /// timepoints. Publishing both put two opposite values on one node at one
+    /// instant and the trace recorded a zero-width glitch for every accepted
+    /// point in the lag.
+    ///
+    /// So the driver wins: a net's value is what its driver drove. A reader's
+    /// sample is that instance's own input and has no channel of its own here —
+    /// [`crate::analysis::transient::DigitalTrace`] is keyed by deck node, not
+    /// by instance port — so it is not published rather than published as the
+    /// net. A node with no driver keeps its reader's bit, which is the only
+    /// claim anyone has made about it and the value an A/D-only boundary has
+    /// always traced.
+    ///
+    /// Ties inside one rank — two drivers on a net, or two readers of an analog
+    /// node with different thresholds — resolve to the first in enumeration
+    /// order, which is host registration order and then bridge declaration
+    /// order. Deterministic rather than arbitrary; a net with two disagreeing
+    /// drivers has no digital value to report and its analog voltage is the
+    /// answer.
     pub(crate) fn append_mixed_digital_snapshot(
         &self,
         snapshot: &mut Vec<(crate::circuit::NodeId, crate::xspice::DigitalValue)>,
     ) {
+        use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
         use rspice_veriloga::four_state::FourStateBit;
 
+        /// Precedence of a claim about a node, lowest first.
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        enum Claim {
+            /// The shared runtime already resolved every contribution to this
+            /// event net, so there is nothing left to choose between.
+            Resolved,
+            /// A D/A bridge drives the node.
+            Driven,
+            /// An A/D bridge reads it.
+            Sampled,
+        }
+
+        let mut claims: Vec<(crate::circuit::NodeId, Claim, DigitalValue)> = Vec::new();
         if let Some(digital) = &self.mixed_digital_coordinator {
-            snapshot.extend(digital.event_values());
+            claims.extend(
+                digital
+                    .event_values()
+                    .map(|(node, value)| (node, Claim::Resolved, value)),
+            );
         }
         for host in &self.mixed_signal_hosts {
-            host.boundary_digital_values(|node, bit| {
+            host.boundary_digital_values(|node, bit, source| {
                 if node == 0 {
                     return;
                 }
                 let state = match bit {
-                    FourStateBit::Zero => crate::xspice::DigitalState::Zero,
-                    FourStateBit::One => crate::xspice::DigitalState::One,
-                    FourStateBit::Unknown => crate::xspice::DigitalState::Unknown,
-                    FourStateBit::HighImpedance => crate::xspice::DigitalState::HighZ,
+                    FourStateBit::Zero => DigitalState::Zero,
+                    FourStateBit::One => DigitalState::One,
+                    FourStateBit::Unknown => DigitalState::Unknown,
+                    FourStateBit::HighImpedance => DigitalState::HighZ,
                 };
-                snapshot.push((
+                let claim = match source {
+                    BoundaryBitSource::Driven => Claim::Driven,
+                    BoundaryBitSource::Sampled => Claim::Sampled,
+                };
+                claims.push((
                     node,
-                    crate::xspice::DigitalValue {
+                    claim,
+                    DigitalValue {
                         state,
-                        strength: crate::xspice::DigitalStrength::Strong,
+                        strength: DigitalStrength::Strong,
                     },
                 ));
             });
         }
+        // Stable, so equal-rank claims keep enumeration order and the winner is
+        // a function of the circuit rather than of the sort's pivot choices.
+        claims.sort_by_key(|&(node, claim, _)| (node, claim));
+        claims.dedup_by_key(|&mut (node, ..)| node);
+        snapshot.extend(claims.into_iter().map(|(node, _, value)| (node, value)));
     }
 }

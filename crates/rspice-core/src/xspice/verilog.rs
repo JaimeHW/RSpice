@@ -131,7 +131,8 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 use host::DigitalHost;
 pub use host::DigitalRunError;
 pub(crate) use mixed::{
-    BoundaryBus, MixedDigitalCoordinator, PreparedMixedAcceptance, SharedDigitalTrial,
+    BoundaryBitSource, BoundaryBus, MixedDigitalCoordinator, PreparedMixedAcceptance,
+    SharedDigitalTrial,
 };
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
