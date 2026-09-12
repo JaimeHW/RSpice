@@ -177,6 +177,79 @@ fn sensitivity_expansion_preserves_the_nearby_expression_branch() {
 }
 
 #[test]
+fn sensitivity_preserves_a_dependency_kink_no_value_consumes() {
+    let deck = |gain: &str| {
+        format!(
+            "Unconsumed dependency kink\n.param gain={gain}\n.param kink={{abs(gain)}}\n\
+             V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {{1+gain+if(kink>1,10,0)}}\n.end\n"
+        )
+    };
+    let netlist = Netlist::parse(&deck("0")).unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    // `kink` is |gain|, so its own derivative at zero is undefined. The gain
+    // reads it only through a comparison that is false throughout |gain| < 1,
+    // which leaves the authored gain exactly 1+gain here: one definition's
+    // kink cannot refuse a later binding that never consumes it. A central
+    // difference inside that region is the oracle.
+    let probe = |gain: &str| {
+        engine
+            .run_dc_op(&Netlist::parse(&deck(gain)).unwrap())
+            .expect("the unswitched comparison solves")
+            .try_voltage_named("out")
+            .expect("out is solved")
+    };
+    assert_relative(
+        (probe("1e-13") - probe("-1e-13")) / 2e-13,
+        1.0,
+        1e-2,
+        "unconsumed dependency finite-difference oracle",
+    );
+    for (derivative, quantity) in [
+        (
+            engine
+                .run_sensitivity(&netlist, output, "gain", 0.0, None)
+                .expect("an unconsumed dependency kink leaves the slope defined"),
+            "unconsumed dependency DC sensitivity",
+        ),
+        (
+            engine
+                .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+                .expect("an unconsumed dependency kink leaves the slope defined")[0],
+            "unconsumed dependency AC magnitude sensitivity",
+        ),
+    ] {
+        assert_relative(derivative, 1.0, 1e-12, quantity);
+    }
+}
+
+#[test]
+fn sensitivity_refuses_a_dependency_kink_that_reaches_the_value() {
+    let netlist = Netlist::parse(
+        "Consumed dependency kink\n.param gain=0\n.param kink={abs(gain)}\n\
+         V1 in 0 DC 1 AC 1\nE1 out 0 in 0 {1+gain+kink}\n.end\n",
+    )
+    .unwrap();
+    let engine = physical_engine();
+    let output = node_id(&engine, &netlist, "out");
+    // The same two-level chain, with the kink reaching the authored gain: the
+    // opposing one-sided slopes are the value's own, so the typed refusal
+    // naming the dependency's cusp stands.
+    for result in [
+        engine.run_sensitivity(&netlist, output, "gain", 0.0, None),
+        engine
+            .run_sensitivity_ac(&netlist, output, "gain", 0.0, &[1.0], None)
+            .map(|values| values[0]),
+    ] {
+        let message = result
+            .expect_err("a consumed cusp must not masquerade as a defined slope")
+            .to_string();
+        assert!(message.to_ascii_lowercase().contains("gain"), "{message}");
+        assert!(message.contains("no two-sided derivative"), "{message}");
+    }
+}
+
+#[test]
 fn sensitivity_replays_same_card_and_included_parameter_dependencies() {
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::netlist::{NetlistParseOptions, SealedSourceBundle, SealedSourceEdge};
