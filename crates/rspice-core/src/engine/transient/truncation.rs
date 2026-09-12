@@ -2592,6 +2592,10 @@ impl Engine {
         // same thing as a deck that instantiates none of its models.
         #[cfg(not(feature = "veriloga-builtins-base"))]
         let generated = VerilogaRouteBound::Absent;
+        // Only the generated route reads the candidate solution; the runtime
+        // route walks the accepted state it already holds.
+        #[cfg(not(feature = "veriloga-builtins-base"))]
+        let _ = candidate_solution;
         #[cfg(feature = "veriloga")]
         let runtime =
             if circuit.veriloga_devices().is_empty() && circuit.mixed_signal_hosts.is_empty() {
