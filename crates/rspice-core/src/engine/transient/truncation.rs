@@ -2569,7 +2569,6 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         let runtime = Self::runtime_veriloga_ngspice_truncation_limit(
             circuit,
-            candidate_solution,
             step,
             accepted_dt_prev,
             accepted_dt_prev_prev,
@@ -2596,7 +2595,6 @@ impl Engine {
     #[cfg(feature = "veriloga")]
     pub(super) fn runtime_veriloga_ngspice_truncation_limit(
         circuit: &crate::circuit::CircuitData,
-        candidate_solution: &[Value],
         step: TruncationStep,
         accepted_dt_prev: Value,
         accepted_dt_prev_prev: Value,
@@ -2641,12 +2639,9 @@ impl Engine {
         // LTE. Reporting a chargeless module that way cost nine Verilog-A
         // transient decks their convergence.
         let mut limit = 2.0 * dt;
-        let mut probes_evaluated = true;
 
         let mut walk = |device: &crate::device::veriloga::VerilogADevice| {
-            // An instance whose probe will not evaluate at this candidate is
-            // the real missing-charge case, and only that one returns `None`.
-            let probed = device.visit_dynamic_charges_at(candidate_solution, &mut |charge| {
+            device.visit_dynamic_charges(&mut |charge| {
                 let RuntimeDynamicCharge {
                     current: q_curr,
                     previous: q_prev,
@@ -2680,7 +2675,6 @@ impl Engine {
                 };
                 limit = limit.min(branch_limit);
             });
-            probes_evaluated &= probed.is_ok();
         };
 
         for device in circuit.veriloga_devices().iter() {
@@ -2690,7 +2684,7 @@ impl Engine {
             walk(host.analog_device());
         }
 
-        probes_evaluated.then_some(limit)
+        Some(limit)
     }
 
     /// Prepare the unique, non-excluded solution indices used by the
@@ -4758,7 +4752,6 @@ R2 b 0 1k
         let dt = 1.0e-9;
         let limit = Engine::runtime_veriloga_ngspice_truncation_limit(
             &circuit,
-            &[0.0, 1.0, 0.5],
             TruncationStep {
                 method: IntegrationMethod::Trapezoidal,
                 trap_order: 1,

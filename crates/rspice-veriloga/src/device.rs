@@ -4557,38 +4557,29 @@ impl VerilogADevice {
     }
 
     /// Visit the dynamic charge of every `ddt` operand this instance owns,
-    /// evaluated at `circuit_voltages` and paired with its accepted history.
+    /// as the latest evaluation left it, paired with its accepted history.
     ///
-    /// Nothing is collected: the walk that consumes these reduces them to one
-    /// bound, so handing it a borrowed record per operand keeps a deck of
-    /// thousands of instances from allocating a history vector per instance
-    /// per accepted step.
+    /// Nothing is collected and nothing is evaluated: the walk that consumes
+    /// these reduces them to one bound, so handing it a borrowed record per
+    /// operand keeps a deck of thousands of instances from allocating a
+    /// history vector per instance per accepted step.
     ///
-    /// The probe runs on a copy, so asking a device what it would store at a
-    /// trial point cannot change what it did store at the accepted one. The
-    /// history is read off the live instance before the copy evaluates,
-    /// because a module whose `ddt` sites are inactive writes the trial value
-    /// into its own previous lane and would otherwise report a charge that
-    /// never moved.
-    pub fn visit_dynamic_charges_at(
-        &self,
-        circuit_voltages: &[f64],
-        visit: &mut dyn FnMut(RuntimeDynamicCharge),
-    ) -> Result<(), VmError> {
-        if self.dynamic_charge_slots.is_empty() {
-            return Ok(());
-        }
-        let mut probe = self.clone();
-        probe.context.record_task_effects = false;
-        probe.try_stamp_with_mode(
-            circuit_voltages,
-            |_, _, _| {},
-            |_, _| {},
-            crate::vm::VerilogAEvaluationMode::StaticProbe,
-        )?;
+    /// The candidate charge is the one the last Newton load wrote into the
+    /// site's own lane, which is exactly the charge ngspice's `CKTterr`
+    /// differences: it estimates the error of the step that was solved from
+    /// the state the final `DEVload` left, and never re-evaluates a device to
+    /// ask again at the solved point. Re-evaluating here would cost a full
+    /// model evaluation per instance per candidate step — the dominant cost in
+    /// a Verilog-A transient — to answer a question already answered.
+    ///
+    /// A site whose `ddt` did not execute this step holds the charge its last
+    /// acceptance restored, which equals its own previous accepted value and
+    /// so differences to nothing. That is the right answer for a site that is
+    /// not integrating rather than a stale one.
+    pub fn visit_dynamic_charges(&self, visit: &mut dyn FnMut(RuntimeDynamicCharge)) {
         for (index, &slot) in self.dynamic_charge_slots.iter().enumerate() {
             let (Some(&current), Some(&previous), Some(&older), Some(&companion_previous)) = (
-                probe.context.state_values.get(slot),
+                self.context.state_values.get(slot),
                 self.context.state_values_prev.get(slot),
                 self.context.state_values_older.get(slot),
                 self.context.state_derivatives_prev.get(slot),
@@ -4612,7 +4603,6 @@ impl VerilogADevice {
                 companion_previous,
             });
         }
-        Ok(())
     }
 
     /// Whether this model defines behavior for the initial nodeset solve.
