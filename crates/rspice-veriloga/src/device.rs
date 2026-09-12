@@ -1012,6 +1012,10 @@ pub struct VerilogADevice {
     /// Required noise-gain variables, computed once on first noise observation.
     /// Clones share the mask; compiled assignment programs are never copied.
     noise_gain_live_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
+    /// Variables the complex small-signal replay may write, computed once on
+    /// first use. Empty means "no simulator-control variable in this module",
+    /// which is every module that never calls `$bound_step`/`$discontinuity`.
+    small_signal_replay_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -2898,6 +2902,7 @@ impl VerilogADevice {
             canonical_noise_plan,
             one_step_dae_split_safe,
             noise_gain_live_variables: std::sync::OnceLock::new(),
+            small_signal_replay_variables: std::sync::OnceLock::new(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -5425,6 +5430,7 @@ impl VerilogADevice {
             false,
         )?;
 
+        let replay_mask = self.small_signal_replay_variables();
         let model = &self.model;
         let matrix_indices = &self.matrix_indices;
         let mut vm = crate::vm::SmallSignalVm::with_variable_seed(
@@ -5432,7 +5438,14 @@ impl VerilogADevice {
             frequency_hz,
             &variable_seed,
         )?;
-        vm.execute_assignments(&model.assignment_steps)?;
+        // An empty mask is "this module has no simulator-control variable", not
+        // "replay nothing": the live filter treats an empty slice as a module
+        // with no variables at all and would skip every assignment.
+        if replay_mask.is_empty() {
+            vm.execute_assignments(&model.assignment_steps)?;
+        } else {
+            vm.execute_live_assignments(&model.assignment_steps, Some(replay_mask))?;
+        }
 
         let matrix_capacity = model.branch_sources.len().saturating_mul(4).saturating_add(
             matrix_indices
@@ -7995,6 +8008,74 @@ impl VerilogADevice {
         Self::execute_assignment_steps(&mut vm, &model.assignment_steps[split..])
     }
 
+    /// Whether `name` is a hidden simulator-control task variable.
+    ///
+    /// The front end gives `$bound_step` and `$discontinuity` their canonical
+    /// names, and the hierarchy elaborator renames a child module's copy to
+    /// `__rspice_h<n>_<name>` — once per level of instantiation — so strip any
+    /// run of those prefixes before comparing. A declared variable cannot
+    /// collide: `$` does not open a Verilog-A identifier, which is why the
+    /// front end can reserve these names for itself in the first place.
+    fn is_simulator_control_variable(name: &str) -> bool {
+        let mut rest = name;
+        while let Some(tail) = rest.strip_prefix("__rspice_h") {
+            let digits = tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            if digits == 0 {
+                break;
+            }
+            let Some(next) = tail[digits..].strip_prefix('_') else {
+                break;
+            };
+            rest = next;
+        }
+        crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES.contains(&rest)
+    }
+
+    /// Variables the complex small-signal replay is allowed to write.
+    ///
+    /// `$bound_step` and `$discontinuity` steer the transient stepper, and the
+    /// front end lowers them into ordinary numeric assignments on hidden
+    /// variables: an unconditional per-evaluation reset — `+inf` for the step
+    /// bound — followed by a `min`/bitwise update at each active call site.
+    /// The scalar backends want exactly that. Replaying the reset in complex
+    /// arithmetic instead pushes `+inf` through the finiteness guard, so a
+    /// module that merely mentions `$bound_step` anywhere in its analog block
+    /// could not answer `.ac` or `.noise` at all.
+    ///
+    /// Simulator control has no small-signal meaning — Spectre ignores these
+    /// in AC, noise and SP — so the replay skips their writes and leaves every
+    /// other variable alone. Nothing observes the skip: the stepper reads
+    /// `$bound_step`/`$discontinuity` from the scalar variable image the
+    /// ordinary backend produced, and this read-only complex replay keeps its
+    /// own private image that it never publishes back.
+    fn small_signal_replay_variables(&self) -> &[bool] {
+        self.small_signal_replay_variables.get_or_init(|| {
+            let controls: Vec<usize> = self
+                .model
+                .variable_names
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| Self::is_simulator_control_variable(name))
+                .map(|(index, _)| index)
+                .collect();
+            // The overwhelming majority of modules call neither task and do
+            // not allocate a model-sized mask.
+            if controls.is_empty() {
+                return std::sync::Arc::from([]);
+            }
+            let mut live = vec![
+                true;
+                self.model
+                    .num_variables
+                    .max(self.model.variable_names.len())
+            ];
+            for slot in controls {
+                live[slot] = false;
+            }
+            live.into()
+        })
+    }
+
     fn noise_gain_live_variables(&self) -> &[bool] {
         use crate::codegen::assignment_liveness::{
             AssignmentEffects, mark_program_variable_reads, propagate_live_assignment_slots,
@@ -9538,6 +9619,103 @@ endmodule
         }
     }
 
+    /// Simulator-control tasks are transient statements and carry no
+    /// small-signal meaning, so asking for a step bound must not move — or
+    /// refuse — the frequency-domain answer.
+    ///
+    /// The front end lowers `$bound_step`/`$discontinuity` into assignments on
+    /// hidden variables that every evaluation resets, the step bound to `+inf`.
+    /// The complex replay used to execute those resets like any other
+    /// assignment and fail its finiteness guard on the sentinel, which took
+    /// `.ac` and `.noise` away from every module that asked for a bound
+    /// anywhere in its analog block.
+    #[test]
+    fn small_signal_answers_are_unmoved_by_simulator_control_tasks() {
+        let one_port = |control: &str| {
+            format!(
+                r#"
+`include "disciplines.vams"
+module controlled_rc(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin{control}
+        I(p, n) <+ V(p, n) / 2.0e3 + ddt(1.0e-12 * V(p, n));
+    end
+endmodule
+"#
+            )
+        };
+        let plain = one_port("");
+        let controlled = one_port(
+            "\n        $bound_step(2.0e-9);\n        \
+             if (V(p, n) > 1.0)\n            $discontinuity(0);",
+        );
+
+        let frequency_hz = 1.0e6;
+        let reference = one_port_admittance(&plain, 0.5, frequency_hz);
+        let bounded = one_port_admittance(&controlled, 0.5, frequency_hz);
+        assert_eq!(
+            bounded, reference,
+            "a step bound is a transient request and must leave the \
+             small-signal admittance exactly where it was"
+        );
+    }
+
+    /// Why the replay needs a mask at all, rather than a tolerant guard.
+    ///
+    /// The `+inf` the step bound resets to is a real value in the assignment
+    /// stream, and replaying that stream unfiltered still fails — as it must,
+    /// because the finiteness guard is what keeps a genuinely divergent model
+    /// from stamping garbage. The fix is to not replay the control write, not
+    /// to accept a non-finite one, and this says so in both directions.
+    #[test]
+    fn small_signal_replay_needs_the_control_mask_to_pass_the_finiteness_guard() {
+        let source = r#"
+`include "disciplines.vams"
+module bounded_rc(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        $bound_step(2.0e-9);
+        I(p, n) <+ V(p, n) / 2.0e3 + ddt(1.0e-12 * V(p, n));
+    end
+endmodule
+"#;
+        let mut device = device(source);
+        device.try_begin_analysis(1).expect("begin AC analysis");
+        device
+            .try_update_all_voltages(&[0.5])
+            .expect("update the fixture bias");
+        let seed = device.context.variables.clone();
+        device
+            .try_evaluate_with_task_recording(crate::vm::VerilogAEvaluationMode::SmallSignal, false)
+            .expect("small-signal operating point");
+
+        let mask = device.small_signal_replay_variables();
+        assert!(
+            !mask.is_empty() && mask.iter().any(|replayed| !replayed),
+            "the fixture must carry a suppressed control variable"
+        );
+
+        let mut unmasked =
+            crate::vm::SmallSignalVm::with_variable_seed(&device.context, 1.0e6, &seed)
+                .expect("build the unmasked replay");
+        let error = unmasked
+            .execute_assignments(&device.model.assignment_steps)
+            .expect_err("the unfiltered replay must still refuse the sentinel");
+        assert!(
+            error.to_string().contains("non-finite"),
+            "the step-bound sentinel is what the guard rejects, got: {error}"
+        );
+
+        let mut masked =
+            crate::vm::SmallSignalVm::with_variable_seed(&device.context, 1.0e6, &seed)
+                .expect("build the masked replay");
+        masked
+            .execute_live_assignments(&device.model.assignment_steps, Some(mask))
+            .expect("the masked replay skips the control write and completes");
+    }
+
     /// Focused release benchmark for the complex frequency-domain path.
     ///
     /// The split real/reactive path is an exact reference for this deliberately
@@ -10162,6 +10340,7 @@ endmodule
             canonical_noise_plan,
             one_step_dae_split_safe: false,
             noise_gain_live_variables: std::sync::OnceLock::new(),
+            small_signal_replay_variables: std::sync::OnceLock::new(),
             prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
