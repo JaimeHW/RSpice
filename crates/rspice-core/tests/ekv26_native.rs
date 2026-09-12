@@ -661,10 +661,28 @@ fn ekv26_generated_route_admits_the_card_tail_it_can_honour_and_names_the_rest()
     solve(" as=1e-12 ad=1e-12 ps=2e-6 pd=2e-6")
         .expect("declared geometry keys reach the generated route");
 
+    // An instance temperature is the engine's to apply rather than the
+    // module's to declare: the generated device carries its own temperature
+    // setter, so these keys heat this one transistor and the drain current
+    // moves with them.
+    let drain = |result: &SimulationResult| {
+        result
+            .branch_current_named("vd")
+            .unwrap_or_else(|| panic!("missing vd branch in {:?}", result.branch_names))
+    };
+    let nominal = drain(&solve("").expect("the bare card solves"));
+    for tail in [" TEMP=85", " DTEMP=58"] {
+        let heated = solve(tail).unwrap_or_else(|error| {
+            panic!("'{tail}' sets this instance's temperature, not the deck's: {error}")
+        });
+        assert!(
+            (drain(&heated) - nominal).abs() > 0.0,
+            "'{tail}' must reach the device: it drew the same current as the 27 C card"
+        );
+    }
+
     for (tail, fragments) in [
         (" IC=0.2,0.3", ["M1", "IC=", "ekv_va"]),
-        (" TEMP=85", ["M1", "TEMP", "ekv_va"]),
-        (" DTEMP=10", ["M1", "DTEMP", "ekv_va"]),
         (" NRD=3", ["M1", "NRD", "ekv_va"]),
     ] {
         let message = solve(tail)

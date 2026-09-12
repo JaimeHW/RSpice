@@ -603,7 +603,8 @@ fn add_generated_instance(
         element,
         instance_params,
         deferred_params,
-        &netlist.params,
+        netlist,
+        temperature,
     )?;
     let params = generated_params(
         target,
@@ -627,7 +628,7 @@ fn add_generated_instance(
     device
         .set_terminal_current_aliases(generated_card_current_aliases(target, element))
         .map_err(SimulationError::Circuit)?;
-    device.set_temperature(temperature);
+    device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);
     Ok(())
@@ -640,9 +641,12 @@ fn add_generated_instance(
 /// the native one. These are the keys where the two vocabularies do not
 /// overlap: no Verilog-A module declares them, so forwarding them as parameters
 /// could only ever fail, and dropping them would change the answer in silence.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct GeneratedCardKeywords {
     initial_off: bool,
+    /// This device's operating temperature in kelvin, already folded from the
+    /// circuit temperature and whatever the card said about it.
+    temperature: f64,
 }
 
 /// What the generated route does with one instance-tail key.
@@ -651,6 +655,10 @@ enum GeneratedInstanceKeyRole {
     Parameter,
     /// The `OFF` keyword, honoured by the generated-device adapter.
     InitiallyOff,
+    /// `TEMP=`, this instance's absolute operating temperature in Celsius.
+    AbsoluteTemperature,
+    /// `DTEMP=`/`TRISE=`, an offset from the circuit temperature in kelvin.
+    TemperatureOffset,
     /// Card semantics this generated module cannot express. The payload is the
     /// user-facing reason, which must name what the deck actually wrote.
     Unsupported(String),
@@ -667,8 +675,19 @@ const GENERATED_INSTANCE_IC_KEYS: &[&str] = &[
     "IC", "IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS", "IC_VBE", "IC_VCE",
 ];
 
-/// Instance temperature keys the native junction-device cards accept.
-const GENERATED_INSTANCE_TEMPERATURE_KEYS: &[&str] = &["TEMP", "DTEMP"];
+/// Instance temperature keys the native junction-device cards accept, and the
+/// generated route honours by heating this one device.
+///
+/// A generated module that declares the name itself keeps it: the lookup below
+/// asks the module first, so a card key is an engine keyword only where the
+/// module has no parameter to bind it to.
+///
+/// These are the two spellings the card grammars admit for a MOSFET, diode or
+/// BJT instance (`netlist::parser::elements::is_mosfet_assignment_name` and
+/// its neighbours); the Verilog-A X-card route, whose tail is free-form, also
+/// takes `TRISE`.
+const GENERATED_INSTANCE_ABSOLUTE_TEMPERATURE_KEYS: &[&str] = &["TEMP"];
+const GENERATED_INSTANCE_TEMPERATURE_OFFSET_KEYS: &[&str] = &["DTEMP"];
 
 fn generated_instance_key_role(target: GeneratedTarget, name: &str) -> GeneratedInstanceKeyRole {
     // `OFF` is a bare keyword in the card grammar and a solver directive in
@@ -690,18 +709,15 @@ fn generated_instance_key_role(target: GeneratedTarget, name: &str) -> Generated
             target.model_name
         ));
     }
-    if matches_model_type(name, GENERATED_INSTANCE_TEMPERATURE_KEYS) {
-        let reason = if declared.is_some() {
-            "declares it only for model-card assignment"
-        } else {
-            "does not declare it"
-        };
-        return GeneratedInstanceKeyRole::Unsupported(format!(
-            "instance {} sets one device's operating temperature, and generated Verilog-A model '{}' {}; set the temperature on the .MODEL card or with .OPTIONS TEMP instead",
-            name.to_ascii_uppercase(),
-            target.model_name,
-            reason
-        ));
+    // An instance temperature is the engine's to apply, not the module's: the
+    // generated device carries its own `set_temperature`, so a card naming one
+    // of these keys heats that device alone. A module declaring the name has
+    // already claimed it above.
+    if matches_model_type(name, GENERATED_INSTANCE_ABSOLUTE_TEMPERATURE_KEYS) {
+        return GeneratedInstanceKeyRole::AbsoluteTemperature;
+    }
+    if matches_model_type(name, GENERATED_INSTANCE_TEMPERATURE_OFFSET_KEYS) {
+        return GeneratedInstanceKeyRole::TemperatureOffset;
     }
     // Everything else is a parameter name. An undeclared one still fails, but
     // it fails at the instantiation site with the module and the exact key the
@@ -719,9 +735,15 @@ fn generated_card_keywords(
     element: &Element,
     instance_params: &[(String, f64)],
     deferred_params: &[(String, String)],
-    param_ctx: &crate::netlist::ParamContext,
+    netlist: &Netlist,
+    circuit_temperature_kelvin: f64,
 ) -> Result<GeneratedCardKeywords, SimulationError> {
-    let mut keywords = GeneratedCardKeywords::default();
+    let mut keywords = GeneratedCardKeywords {
+        initial_off: false,
+        temperature: circuit_temperature_kelvin,
+    };
+    let mut absolute_temperature: Option<f64> = None;
+    let mut temperature_offset: Option<f64> = None;
     let unsupported = |reason: String| {
         SimulationError::Circuit(format!(
             "{} '{}': {}",
@@ -730,6 +752,7 @@ fn generated_card_keywords(
             reason
         ))
     };
+    let mut context = super::InstanceParameterContext::new(netlist, circuit_temperature_kelvin);
     for (name, value) in instance_params {
         if is_internal_routing_param(name) {
             continue;
@@ -737,31 +760,57 @@ fn generated_card_keywords(
         match generated_instance_key_role(target, name) {
             GeneratedInstanceKeyRole::Parameter => {}
             GeneratedInstanceKeyRole::InitiallyOff => keywords.initial_off |= *value != 0.0,
+            GeneratedInstanceKeyRole::AbsoluteTemperature => absolute_temperature = Some(*value),
+            GeneratedInstanceKeyRole::TemperatureOffset => temperature_offset = Some(*value),
             GeneratedInstanceKeyRole::Unsupported(reason) => {
                 return Err(unsupported(reason));
             }
         }
     }
     for (name, expr) in deferred_params {
-        match generated_instance_key_role(target, name) {
+        let role = generated_instance_key_role(target, name);
+        if matches!(role, GeneratedInstanceKeyRole::Parameter) {
+            continue;
+        }
+        let resolve = |context: &crate::netlist::ParamContext| {
+            crate::netlist::expr::eval_expression(expr, context).map_err(|error| {
+                unsupported(format!(
+                    "cannot resolve instance keyword {}={}: {}",
+                    name.to_ascii_uppercase(),
+                    expr,
+                    error
+                ))
+            })
+        };
+        match role {
             GeneratedInstanceKeyRole::Parameter => {}
             GeneratedInstanceKeyRole::InitiallyOff => {
-                let value =
-                    crate::netlist::expr::eval_expression(expr, param_ctx).map_err(|error| {
-                        SimulationError::Circuit(format!(
-                            "{} '{}': cannot resolve instance keyword OFF={}: {}",
-                            element_kind_name(element),
-                            element.name,
-                            expr,
-                            error
-                        ))
-                    })?;
-                keywords.initial_off |= value != 0.0;
+                keywords.initial_off |= resolve(context.get())? != 0.0;
+            }
+            GeneratedInstanceKeyRole::AbsoluteTemperature => {
+                absolute_temperature = Some(resolve(context.get())?);
+            }
+            GeneratedInstanceKeyRole::TemperatureOffset => {
+                temperature_offset = Some(resolve(context.get())?);
             }
             GeneratedInstanceKeyRole::Unsupported(reason) => {
                 return Err(unsupported(reason));
             }
         }
+    }
+    // An absolute instance temperature wins over an offset, as it does for a
+    // passive (`model_resolution::resolve_passive_eval_context`).
+    keywords.temperature = match (absolute_temperature, temperature_offset) {
+        (Some(celsius), _) => crate::constants::celsius_to_kelvin(celsius),
+        (None, Some(offset)) => circuit_temperature_kelvin + offset,
+        (None, None) => circuit_temperature_kelvin,
+    };
+    if !keywords.temperature.is_finite() || keywords.temperature <= 0.0 {
+        return Err(unsupported(format!(
+            "the card's instance temperature resolves to {} K, which is not a temperature a \
+             device can run at",
+            keywords.temperature
+        )));
     }
     Ok(keywords)
 }
@@ -1159,6 +1208,8 @@ fn is_generated_card_keyword(target: GeneratedTarget, name: &str) -> bool {
     matches!(
         generated_instance_key_role(target, name),
         GeneratedInstanceKeyRole::InitiallyOff
+            | GeneratedInstanceKeyRole::AbsoluteTemperature
+            | GeneratedInstanceKeyRole::TemperatureOffset
     )
 }
 
@@ -1389,6 +1440,9 @@ mod card_keyword_tests {
         (instance_params, deferred_params)
     }
 
+    /// The circuit temperature these fixtures run at, in kelvin (27 C).
+    const CIRCUIT_TEMPERATURE: f64 = 300.15;
+
     fn keywords(tail: &str) -> Result<GeneratedCardKeywords, SimulationError> {
         let (netlist, element) = mos_card(tail);
         let (instance_params, deferred_params) = card_tail(&element);
@@ -1397,7 +1451,8 @@ mod card_keyword_tests {
             &element,
             instance_params,
             deferred_params,
-            &netlist.params,
+            &netlist,
+            CIRCUIT_TEMPERATURE,
         )
     }
 
@@ -1441,11 +1496,7 @@ mod card_keyword_tests {
 
     #[test]
     fn card_keywords_the_module_cannot_honour_are_refused_by_name() {
-        for (tail, fragments) in [
-            (" IC=0.2,0.3", ["M1", "IC=", "ekv_va"]),
-            (" TEMP=85", ["M1", "TEMP", "ekv_va"]),
-            (" DTEMP=10", ["M1", "DTEMP", "ekv_va"]),
-        ] {
+        for (tail, fragments) in [(" IC=0.2,0.3", ["M1", "IC=", "ekv_va"])] {
             let message = keywords(tail)
                 .expect_err("ekv_va cannot honour this card keyword")
                 .to_string();
@@ -1458,6 +1509,36 @@ mod card_keyword_tests {
         }
     }
 
+    /// An instance temperature is the engine's to apply, so the generated
+    /// route folds it off the card instead of refusing it.
+    ///
+    /// This replaces the refusal these keys used to get, which sent a deck to
+    /// `.OPTIONS TEMP` — a global — for something the card said about one
+    /// device. An absolute `TEMP` wins over a `DTEMP` offset, which is the
+    /// precedence a passive instance has.
+    #[test]
+    fn an_instance_temperature_is_folded_off_the_card_rather_than_refused() {
+        let expect = |tail: &str, kelvin: f64| {
+            let resolved = keywords(tail)
+                .unwrap_or_else(|error| panic!("'{tail}' is an instance temperature: {error}"))
+                .temperature;
+            assert!(
+                (resolved - kelvin).abs() < 1e-9,
+                "'{tail}' must run at {kelvin} K, got {resolved}"
+            );
+        };
+        expect("", CIRCUIT_TEMPERATURE);
+        expect(" TEMP=85", 358.15);
+        expect(" DTEMP=10", CIRCUIT_TEMPERATURE + 10.0);
+        expect(" TEMP=85 DTEMP=10", 358.15);
+        expect(" DTEMP={5+5}", CIRCUIT_TEMPERATURE + 10.0);
+
+        let message = keywords(" TEMP=-400")
+            .expect_err("nothing runs below absolute zero")
+            .to_string();
+        assert!(message.contains("M1"), "unexpected refusal: {message}");
+    }
+
     #[test]
     fn an_undeclared_instance_parameter_still_fails_naming_the_module_and_the_key() {
         let (netlist, element) = mos_card(" nrd=3");
@@ -1467,7 +1548,8 @@ mod card_keyword_tests {
             &element,
             instance_params,
             deferred_params,
-            &netlist.params,
+            &netlist,
+            CIRCUIT_TEMPERATURE,
         )
         .expect("NRD is a parameter name, not a card keyword");
         let params = generated_params(
