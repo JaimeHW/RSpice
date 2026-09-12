@@ -380,17 +380,27 @@ pub(super) fn render_dialog(
                 .model_resolution_record(scope, &definition)
                 .is_some();
             let mut clear = false;
+            let explanation = format!(
+                "{} '{definition}' has {} loaded providers. {}",
+                scope.label(),
+                providers.len(),
+                if has_record {
+                    "The current decision is retained until you publish a replacement or clear it."
+                } else {
+                    "It cannot execute until one is published as the authenticated \r
+                     provider: choose a provider and enter an audit reason."
+                }
+            );
             let mut dialog = Dialog::new(
                 "Model sources",
-                "Contested model definition",
+                if has_record {
+                    "Model provider decision"
+                } else {
+                    "Contested model definition"
+                },
                 "Publish provider decision",
             )
-            .description(format!(
-                "{} '{definition}' is provided by {} loaded libraries and cannot execute until \
-                 one is published as the authenticated provider.",
-                scope.label(),
-                providers.len()
-            ))
+            .description(&explanation)
             .size(DialogSize::Transaction)
             // The audit reason is a multiline field, so Enter belongs to it.
             .primary_on_enter(false)
@@ -401,11 +411,7 @@ pub(super) fn render_dialog(
                 dialog = dialog.hint("A nonempty audit reason is required.");
             }
             let choice = dialog.show(ui.ctx(), |ui| {
-                ui.label(format!(
-                    "{} '{definition}' is provided by {} loaded libraries. Execution remains blocked until an exact authenticated provider is published.",
-                    scope.label(),
-                    providers.len()
-                ));
+                ui.label(&explanation);
                 for provider in &providers {
                     ui.radio_value(
                         &mut selected_provider,
