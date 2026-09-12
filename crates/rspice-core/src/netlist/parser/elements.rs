@@ -710,16 +710,29 @@ fn expand_passive_parasitics(
     }
 }
 
+/// What distinguishes one two-terminal passive family from another while its
+/// tail is read: the name a diagnostic calls it, the keyword spellings of its
+/// value, and the unit words a positional value may carry.
+#[derive(Clone, Copy)]
+struct PassiveFamily<'a> {
+    element_label: &'a str,
+    value_keys: &'a [&'a str],
+    unit_words: &'a [&'a str],
+}
+
 fn parse_passive_tail(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    element_label: &str,
-    value_keys: &[&str],
-    unit_words: &[&str],
+    family: PassiveFamily<'_>,
     defer_simple_param_refs: bool,
     capture_direction: bool,
 ) -> Result<PassiveTail, ParseError> {
+    let PassiveFamily {
+        element_label,
+        value_keys,
+        unit_words,
+    } = family;
     let mut tail = PassiveTail {
         direction: capture_direction.then(|| Ok(0.0.into())),
         value: None,
@@ -1072,9 +1085,11 @@ pub(super) fn parse_capacitor(
         stream,
         line_num,
         params,
-        "capacitor",
-        &["C", "VALUE", "CAP"],
-        PASSIVE_CAPACITOR_UNITS,
+        PassiveFamily {
+            element_label: "capacitor",
+            value_keys: &["C", "VALUE", "CAP"],
+            unit_words: PASSIVE_CAPACITOR_UNITS,
+        },
         defer_simple_param_refs,
         parameter_direction.is_some(),
     )?;
@@ -1140,9 +1155,11 @@ pub(super) fn parse_inductor(
         stream,
         line_num,
         params,
-        "inductor",
-        &["L", "VALUE", "IND"],
-        PASSIVE_INDUCTOR_UNITS,
+        PassiveFamily {
+            element_label: "inductor",
+            value_keys: &["L", "VALUE", "IND"],
+            unit_words: PASSIVE_INDUCTOR_UNITS,
+        },
         defer_simple_param_refs,
         parameter_direction.is_some(),
     )?;

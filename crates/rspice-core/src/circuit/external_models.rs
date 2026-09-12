@@ -389,7 +389,10 @@ pub(crate) struct VerilogACompanionRules {
 
 #[cfg(feature = "veriloga")]
 impl VerilogACompanionRules {
-    pub fn from_policy(dt: Value, policy: XspiceCompanionPolicy<'_>) -> Result<Self, String> {
+    pub(crate) fn from_policy(
+        dt: Value,
+        policy: XspiceCompanionPolicy<'_>,
+    ) -> Result<Self, String> {
         // OneStep2 assembles (Q-Qprev)/dt + (F+Fprev)/2. Its ddt
         // stamp is doubled BE before the external half-weight; internal
         // integrators and filters instead solve their full trapezoidal rule.
@@ -822,6 +825,10 @@ impl CircuitData {
     /// Publish an already-resolved shared-net observation bank. These values
     /// are not XSPICE output contributions. Mark both the persistent input
     /// signature and this active wave's pending fanout before resuming it.
+    ///
+    /// Shared-net observation is the mixed HDL path, so this follows the
+    /// `coupled` module that drives it rather than being dead without it.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn observe_xspice_shared_digital_inputs(
         &mut self,
         wave: &XspiceActiveWave,
@@ -984,8 +991,8 @@ impl CircuitData {
                         real_values: &event_values.real_values,
                         real_event_times: &event_values.real_event_times,
                     },
-                    &current_source_values,
-                    &analog_transitions,
+                    current_source_values,
+                    analog_transitions,
                     analysis,
                 );
                 continue;
@@ -1009,8 +1016,8 @@ impl CircuitData {
                     real_values: &event_values.real_values,
                     real_event_times: &event_values.real_event_times,
                 },
-                &current_source_values,
-                &analog_transitions,
+                current_source_values,
+                analog_transitions,
             ) {
                 let message = format!("{}: {}", instance.name, e);
                 if self.xspice_evaluation_error.is_none() {
@@ -2349,11 +2356,10 @@ impl CircuitData {
         ) {
             if node > 0
                 && let Some(slot) = solution.get_mut(node - 1)
+                && *slot != value
             {
-                if *slot != value {
-                    rollback.push((node - 1, *slot));
-                    *slot = value;
-                }
+                rollback.push((node - 1, *slot));
+                *slot = value;
             }
         }
 

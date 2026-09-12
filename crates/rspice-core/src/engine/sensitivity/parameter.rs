@@ -6,6 +6,10 @@ use crate::expr::Derivative;
 use crate::netlist::expr::ComplexDirection;
 use crate::netlist::{Element, ElementParameterDirection};
 
+/// One qualified linear response: the output phasors at every requested
+/// frequency, and their derivative with respect to the swept parameter.
+pub(super) type LinearParameterResponse = (Vec<Complex64>, Vec<Complex64>);
+
 fn linear_element(kind: &ElementKind) -> bool {
     match kind {
         ElementKind::Resistor {
@@ -244,7 +248,7 @@ impl Engine {
         frequencies: Option<&[Value]>,
         runs: &mut usize,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<(Vec<Complex64>, Vec<Complex64>)>, SimulationError> {
+    ) -> Result<Option<LinearParameterResponse>, SimulationError> {
         if netlist.source_text.is_none()
             || !netlist.params.has_any_parameter_binding(parameter)
             || !netlist.ast_overlay.device_parameters.is_empty()

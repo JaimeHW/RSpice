@@ -1212,30 +1212,30 @@ impl Bjt {
         let (_, cjep_temp) = junction(1, self.vjc_nominal, self.cjep_nominal, self.eaic, self.area);
         let mut nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
         let mut nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
-        if legacy_model && !self.xyce_compatibility {
-            if let Some(junctions) = &mut self.legacy_junction_params {
-                if let Some(mapping) = &mut junctions.temperature_parameters {
-                    // bjttemp.c maps the junction slopes independently; the
-                    // saturation-current temperature law still uses nominal N.
-                    let nominal = [
-                        self.nf_nominal,
-                        self.nr_nominal,
-                        self.nen,
-                        self.ncn,
-                        junctions.substrate_emission.unwrap_or(1.0),
-                    ];
-                    for ((operating, nominal), [first, second]) in mapping
-                        .operating_emission
-                        .iter_mut()
-                        .zip(nominal)
-                        .zip(mapping.emission_coefficients)
-                    {
-                        *operating = nominal * (1.0 + delta_t * (first + delta_t * second));
-                    }
-                    nf_temp = mapping.operating_emission[0];
-                    nr_temp = mapping.operating_emission[1];
-                }
+        if legacy_model
+            && !self.xyce_compatibility
+            && let Some(junctions) = &mut self.legacy_junction_params
+            && let Some(mapping) = &mut junctions.temperature_parameters
+        {
+            // bjttemp.c maps the junction slopes independently; the
+            // saturation-current temperature law still uses nominal N.
+            let nominal = [
+                self.nf_nominal,
+                self.nr_nominal,
+                self.nen,
+                self.ncn,
+                junctions.substrate_emission.unwrap_or(1.0),
+            ];
+            for ((operating, nominal), [first, second]) in mapping
+                .operating_emission
+                .iter_mut()
+                .zip(nominal)
+                .zip(mapping.emission_coefficients)
+            {
+                *operating = nominal * (1.0 + delta_t * (first + delta_t * second));
             }
+            nf_temp = mapping.operating_emission[0];
+            nr_temp = mapping.operating_emission[1];
         }
         let avc2_temp = self.avc2_nominal * (1.0 + (temp - self.tnom) * self.tavc);
         let vbbe_temp = self.vbbe_nominal * (1.0 + delta_t * (self.tvbbe1 + delta_t * self.tvbbe2));

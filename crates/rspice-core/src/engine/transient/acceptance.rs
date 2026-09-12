@@ -15,7 +15,7 @@ pub(super) struct NativeHistoryAcceptance<'state, 'inputs> {
 }
 
 impl Engine {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "veriloga"))]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn accept_external_transient_models(
         &self,
@@ -74,13 +74,13 @@ impl Engine {
                           solution: &mut [Value],
                           projected: &[(usize, Value)],
                           mixed_static: Option<&[Value]>| {
-                if !projected.is_empty() {
-                    if let Some(native) = native.as_mut() {
-                        native.snapshots.vbic_snapshots = None;
-                        native.snapshots.capacitor_accepted_states = None;
-                        native.snapshots.mosfet_caps = None;
-                        native.snapshots.mosfet_gate_companion_charges = None;
-                    }
+                if !projected.is_empty()
+                    && let Some(native) = native.as_mut()
+                {
+                    native.snapshots.vbic_snapshots = None;
+                    native.snapshots.capacitor_accepted_states = None;
+                    native.snapshots.mosfet_caps = None;
+                    native.snapshots.mosfet_gate_companion_charges = None;
                 }
                 // Refresh before final analog evaluation: updating device voltages
                 // invalidates numerical candidates, while static observation must
