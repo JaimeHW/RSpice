@@ -444,7 +444,9 @@ impl Engine {
                 Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, 1e-12);
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
-                self.try_stamp_operating_point_newton_system(
+                // As for a failed linear solve: a non-finite device evaluation
+                // ends this pseudo-transient stage, not the run.
+                if let Err(error) = self.try_stamp_operating_point_newton_system(
                     circuit,
                     matrix,
                     &mut rhs,
@@ -458,7 +460,12 @@ impl Engine {
                     },
                     false,
                     &mut correction_rhs,
-                )?;
+                ) {
+                    if error.nonfinite_trial_detail().is_none() {
+                        return Err(error);
+                    }
+                    break;
+                }
                 let solve_result = if uses_vbic_correction {
                     Self::solve_direct_dc_correction(
                         matrix,
@@ -957,7 +964,10 @@ impl Engine {
             let node_count = circuit.num_nodes().min(solution.len());
 
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            self.try_stamp_operating_point_newton_system(
+            // A non-finite device evaluation at this corrector iterate fails
+            // the continuation step, exactly as a failed linear solve does;
+            // the caller then shortens its stride instead of ending the run.
+            if let Err(error) = self.try_stamp_operating_point_newton_system(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -969,7 +979,12 @@ impl Engine {
                 },
                 false,
                 &mut correction_rhs,
-            )?;
+            ) {
+                if error.nonfinite_trial_detail().is_none() {
+                    return Err(error);
+                }
+                return Ok((solution, false, used_iterations));
+            }
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,

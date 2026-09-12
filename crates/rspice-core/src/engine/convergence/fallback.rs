@@ -221,7 +221,11 @@ impl Engine {
                 CorrectorSeedMode::StaticJfetEveryIteration
                     | CorrectorSeedMode::StaticProbeEveryIteration
             );
-            self.try_stamp_operating_point_newton_system(
+            // Source stepping exists to walk in from a reachable point, so a
+            // device that cannot evaluate finitely at this scale fails the
+            // continuation step and shortens the stride; it does not end the
+            // run. A structural stamping failure still does.
+            if let Err(error) = self.try_stamp_operating_point_newton_system(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -234,7 +238,12 @@ impl Engine {
                 },
                 static_probe,
                 &mut correction_rhs,
-            )?;
+            ) {
+                if error.nonfinite_trial_detail().is_none() {
+                    return Err(error);
+                }
+                return Ok((solution, false, used_iterations));
+            }
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,

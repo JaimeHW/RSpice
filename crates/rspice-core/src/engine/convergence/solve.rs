@@ -8,6 +8,23 @@ use crate::engine::core::{StartupVoltageConstraint, StartupVoltageHints};
 /// How many deficient rows the prose names before it summarizes the rest.
 pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 
+/// Report a device that could not evaluate finitely in preference to an
+/// iteration count.
+///
+/// Once the direct Newton has rejected an iterate for a non-finite device
+/// evaluation, every convergence aid is deforming the same unevaluable
+/// equations; each reports its own exhausted budget. That number tells the
+/// user nothing the original diagnostic does not tell them better.
+fn prefer_nonfinite_trial_failure(
+    fallback: SimulationError,
+    nonfinite_direct_failure: &Option<String>,
+) -> SimulationError {
+    match nonfinite_direct_failure {
+        Some(detail) => SimulationError::Circuit(detail.clone()),
+        None => fallback,
+    }
+}
+
 /// Name the matrix rows behind a singular linear system so the user sees
 /// which node or branch carries no constraining equation instead of a bare
 /// "matrix is singular".
@@ -912,7 +929,13 @@ impl Engine {
             Self::stamp_nodal_gmin(circuit, matrix, gmin_floor);
             // Stamp linear devices
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            self.try_stamp_operating_point_newton_system(
+            // A device that cannot evaluate finitely at this iterate has
+            // rejected the iterate, not the circuit: the operating point is
+            // exactly where GMIN and source stepping exist to walk in from a
+            // reachable one. Leave through the same door a failed linear solve
+            // uses so the continuation ladder below still runs; a structural
+            // stamping failure keeps ending the solve immediately.
+            if let Err(error) = self.try_stamp_operating_point_newton_system(
                 circuit,
                 matrix,
                 &mut rhs,
@@ -925,7 +948,14 @@ impl Engine {
                 },
                 false,
                 &mut correction_rhs,
-            )?;
+            ) {
+                if error.nonfinite_trial_detail().is_none() {
+                    return Err(error);
+                }
+                log::debug!("Rejecting a non-finite DC trial iterate: {error}");
+                direct_solver_error = Some(error);
+                break;
+            }
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
@@ -1150,6 +1180,16 @@ impl Engine {
             );
             return Ok(refined);
         }
+
+        // Every aid below deforms the same equations the direct Newton could
+        // not evaluate finitely, so each one fails for that same reason and
+        // reports it as an iteration count. Keep the diagnostic that names the
+        // instance, the operator and the voltages, and hand it back whichever
+        // aid runs out first.
+        let nonfinite_direct_failure = direct_solver_error
+            .as_ref()
+            .and_then(SimulationError::nonfinite_trial_detail)
+            .map(str::to_owned);
 
         let conv_cfg = &self.config.convergence_config;
         let allow_source = conv_cfg.source_stepping;
@@ -1456,7 +1496,7 @@ impl Engine {
                 Err(e) => {
                     circuit.restore_nonlinear_state(source_state);
                     if !allow_pseudo && !allow_gmin && !allow_arc {
-                        return Err(e);
+                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
                         "Source stepping failed with {}. Escalating to next configured aid.",
@@ -1509,7 +1549,7 @@ impl Engine {
                 }
                 Err(e) => {
                     if !allow_gmin && !allow_arc {
-                        return Err(e);
+                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
                         "Pseudo-transient continuation failed with {}. Escalating to next configured aid.",
@@ -1554,7 +1594,7 @@ impl Engine {
                 Err(e) => {
                     circuit.restore_nonlinear_state(gmin_state);
                     if !allow_arc {
-                        return Err(e);
+                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
                         "GMIN stepping failed with {}. Escalating to arc-length continuation.",
@@ -1605,7 +1645,7 @@ impl Engine {
                 }
                 Err(e) => {
                     if !allow_arc {
-                        return Err(e);
+                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
                         "Gate generation continuation failed with {}. Escalating to arc-length continuation.",
@@ -1643,7 +1683,10 @@ impl Engine {
                 return Ok(restarted);
             }
         }
-        Err(self.newton_non_convergence_error(newton_failure, dc_max_iterations))
+        Err(prefer_nonfinite_trial_failure(
+            self.newton_non_convergence_error(newton_failure, dc_max_iterations),
+            &nonfinite_direct_failure,
+        ))
     }
 
     pub(crate) fn solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(

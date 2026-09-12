@@ -1751,3 +1751,78 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 }
+
+/// Plain Newton from the zero guess overshoots `ln()`'s domain on its second
+/// iterate here. That is a rejected iterate, not a refused circuit: source
+/// stepping walks in from a reachable bias and the operating point exists.
+#[test]
+fn a_nonfinite_verilog_a_dc_trial_is_rejected_and_source_stepped() {
+    let model = write_model(
+        "nonfinite_dc_trial",
+        "module nonfinite_dc_trial(p,n); inout p,n; electrical p,n;\n\
+             analog I(p,n) <+ 1.0e-3*ln(V(p,n) + 0.1);\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse_validated(&format!(
+        "* plain Newton overshoots a log singularity from the zero guess\n\
+         V1 in 0 DC -5\n\
+         R1 in p 1k\n\
+         X1 p 0 nonfinite_dc_trial\n\
+         .va \"{}\" nonfinite_dc_trial\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+    let dc = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("a non-finite trial iterate must reject the iterate, not the run");
+    let voltage = node_voltage(&dc, "p");
+    assert!(
+        voltage > -0.1,
+        "V(p) = {voltage} is outside the model's domain"
+    );
+    let residual = (voltage + 5.0) * 1.0e-3 + 1.0e-3 * (voltage + 0.1).ln();
+    assert!(
+        residual.abs() < 1.0e-6,
+        "V(p) = {voltage} leaves KCL residual {residual}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// When no retry can produce a finite evaluation the run still fails - and the
+/// failure has to name the instance, the failing contribution and the iterate
+/// the device was handed, not just an iteration count.
+#[test]
+fn an_unreachable_verilog_a_domain_names_the_instance_and_its_iterate() {
+    let model = write_model(
+        "always_nonfinite",
+        "module always_nonfinite(p,n); inout p,n; electrical p,n;\n\
+             analog I(p,n) <+ 1.0e-3*ln(-1.0 - V(p,n)*V(p,n));\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse_validated(&format!(
+        "* the module's argument is negative at every real bias\n\
+         V1 in 0 DC 1\n\
+         R1 in p 1k\n\
+         X1 p 0 always_nonfinite\n\
+         .va \"{}\" always_nonfinite\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+    let error = Engine::default()
+        .run_dc_op(&netlist)
+        .expect_err("no retry can make this module evaluate finitely");
+    let message = error.to_string();
+    let lowered = message.to_lowercase();
+    assert!(lowered.contains("x1"), "{message}");
+    assert!(
+        message.contains("non-finite value at a trial iterate"),
+        "{message}"
+    );
+    assert!(message.contains("contribution"), "{message}");
+    assert!(message.contains("p="), "{message}");
+
+    let _ = std::fs::remove_file(model);
+}
