@@ -3731,6 +3731,84 @@ endmodule
         host.accept_trial().expect("accept a quiet trial");
     }
 
+    /// A host with one activation pending, reported with the analog time that
+    /// is accepted behind it.
+    ///
+    /// The A/D edge at the second trial leaves [`MIXED`]'s `#2` resume behind,
+    /// so the pending activation is two ticks after the tick the crossing was
+    /// published into and the interval to it from the accepted point is a
+    /// whole number of nanoseconds.
+    fn a_pending_activation() -> (MixedSignalHost, f64, f64) {
+        let mut host = host();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0; 4]);
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0, 0.0, 1.0, 0.0]);
+        let due = host
+            .next_event_time()
+            .expect("the wheel is readable")
+            .expect("the A/D edge leaves its `#2` resume behind");
+        (host, 1.0e-9, due)
+    }
+
+    /// The missed-breakpoint refusal is kept for an activation the stepper had
+    /// a legal interval to, and only for that one.
+    ///
+    /// A mixed module's next activation is one of the stepper's own landing
+    /// targets, so no engine path steps past a reachable one. That is the
+    /// point — and it also means the refusal can no longer be provoked from a
+    /// deck, which is how a guard rots into one that fires on the wrong side.
+    /// Both sides of the line are therefore pinned from the module's own
+    /// interface: an activation a whole floor or more after the accepted time
+    /// is a lost breakpoint, and the same activation under a floor wider than
+    /// the interval to it is not a fault at all — no analog time exists between
+    /// the accepted point and it.
+    #[test]
+    fn only_an_activation_with_an_interval_to_it_is_a_missed_breakpoint() {
+        let (mut host, accepted, due) = a_pending_activation();
+        let interval = due - accepted;
+        assert!(
+            interval > 0.0,
+            "the pending activation must be ahead of the accepted point, \
+             {due:e}s against {accepted:e}s"
+        );
+        let past = due + 1.0e-9;
+
+        host.set_analog_step_floor(interval * 0.5);
+        let error = host
+            .begin_trial(
+                past,
+                past - accepted,
+                IntegrationCoefficients::inactive(),
+                false,
+                false,
+            )
+            .expect_err("a trial past a reachable activation is a lost breakpoint");
+        assert!(
+            matches!(
+                error,
+                MixedSignalError::MissedDigitalBreakpoint {
+                    scheduled_seconds,
+                    ..
+                } if scheduled_seconds == due
+            ),
+            "the refusal must name the activation that was stepped over, got {error}"
+        );
+
+        let (mut host, accepted, due) = a_pending_activation();
+        let past = due + 1.0e-9;
+        host.set_analog_step_floor((due - accepted) * 2.0);
+        host.begin_trial(
+            past,
+            past - accepted,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .expect("an activation no analog step can reach is landed, not refused");
+        host.reject_trial().expect("the trial rolls back");
+    }
+
     #[test]
     fn runtime_delays_and_clock_queries_retain_physical_activation_and_roll_back() {
         let source = "module clocked(p,adc); inout p; electrical p; input adc; wire adc;
