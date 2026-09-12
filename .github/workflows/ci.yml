@@ -133,8 +133,8 @@ jobs:
       # full rspice-core build inside that job's budget rather than beside it.
       #
       # `tools/ci/test_ci_configuration.py` scans the test directory and fails
-      # if a gated target is missing from this list or from the native-JIT step
-      # in `test-linux-native`. The only permitted omissions are the two
+      # if a gated target is missing from this job or from the matching pair of
+      # steps in `test-linux-native`. The only permitted omissions are the two
       # optional BSIM4 oracle targets, whose Verilog-A source is not vendored.
       - name: Test Verilog-A-gated core suites through the bytecode interpreter
         run: >-
@@ -157,6 +157,18 @@ jobs:
           --test veriloga_project_virtual_identity
           --test veriloga_timestep
           --test veriloga_transient
+      # A second invocation rather than four more names above: these suites
+      # need a generated model compiled in, and adding `veriloga-model-diode-cmc`
+      # to the list above would reroute cards the eighteen suites there assert
+      # about through the generated device instead of the native one.
+      - name: Test the tri-family and generated-route suites through the bytecode interpreter
+        run: >-
+          cargo test --locked -p rspice-core
+          --features veriloga,veriloga-model-diode-cmc --no-fail-fast
+          --test tri_family_transient
+          --test tri_family_events
+          --test tri_family_small_signal
+          --test generated_route_parity
 
   test-libraries:
     name: Test workspace libraries & tools (Linux)
@@ -296,8 +308,20 @@ jobs:
           --test veriloga_timestep
           --test veriloga_transient
           -- --test-threads=1
+      # The generated-model half of the interpreter lane's pair, same reason.
+      - name: Test the tri-family and generated-route suites through the native JIT (Linux x64)
+        run: >-
+          cargo test --locked -p rspice-core
+          --features veriloga-native,veriloga-model-diode-cmc --no-fail-fast
+          --test tri_family_transient
+          --test tri_family_events
+          --test tri_family_small_signal
+          --test generated_route_parity
+          -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      - name: Test Verilog-A native route parity (Linux x64)
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test route_parity -- --test-threads=1
       - name: Test Verilog-A native multiplicity contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
       - name: Test Verilog-A native contract (Linux x64 release)
@@ -348,6 +372,8 @@ jobs:
           cargo test --locked -p rspice-veriloga --release --features native --lib native:: -- --test-threads=1
       - name: Verilog-A native JIT contract tests
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
+      - name: Verilog-A native route parity tests
+        run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test route_parity -- --test-threads=1
       - name: Verilog-A native multiplicity tests
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test mfactor -- --test-threads=1
       - name: Smoke Verilog-A native JIT benchmark gate
