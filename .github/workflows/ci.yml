@@ -153,6 +153,7 @@ jobs:
           --test veriloga_hb
           --test veriloga_include_resolution
           --test veriloga_indirect
+          --test veriloga_instance_parameters
           --test veriloga_mfactor
           --test veriloga_mixed_signal_hardening
           --test veriloga_mixed_signal_regressions
@@ -316,6 +317,7 @@ jobs:
           --test veriloga_hb
           --test veriloga_include_resolution
           --test veriloga_indirect
+          --test veriloga_instance_parameters
           --test veriloga_mfactor
           --test veriloga_mixed_signal_hardening
           --test veriloga_mixed_signal_regressions
