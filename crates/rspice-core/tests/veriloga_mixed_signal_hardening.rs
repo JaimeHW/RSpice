@@ -1909,6 +1909,11 @@ fn an_activation_inside_the_breakpoint_merge_tolerance_is_delivered() {
 //   the crossing's own; the tick is clamped forward onto the trial's
 //   high-water mark, because a wheel that runs backwards dates an effect
 //   before its cause.
+// * A crossing the discrete half's own feedback caused — a D/A level or a
+//   variable the analog block reads, moved inside the step — is dated at the
+//   trial's endpoint, where its cause is. Interpolating it over the whole step
+//   dates it wherever two Newton iterates happen to differ, which can be
+//   before the edge that caused it.
 // * A wake from the other event kernel — an XSPICE code model's output — is
 //   dated at the tick *at or after* it, because the reverse direction hands an
 //   HDL tick to XSPICE at exactly the instant that tick names. Nearest-tick
@@ -2279,17 +2284,20 @@ fn two_crossings_in_one_step_publish_at_their_own_ticks_in_order() {
 /// published and the discrete half has already reacted to. Here `ca` crosses
 /// 0.6 of the way through the step on the first iterate and publishes at the
 /// tick after the trial's; the `posedge ca` process writes `gain`, the analog
-/// half reads it, and the re-solve puts `cb`'s root 0.2 of the way through the
-/// step, which rounds back onto the tick the trial started on.
+/// half reads it, and the re-solve carries `cb` across its threshold. That
+/// second crossing is the feedback's own and is dated at the trial's endpoint,
+/// whose floored tick is the tick the trial started on — a tick below the one
+/// already published.
 ///
 /// The digital clock may not run backwards inside one trial. `$abstime` still
-/// answers "when did this happen" and is each crossing's own instant — the two
-/// are separately reported precisely so the tick can be clamped without lying
-/// about the physics — but `$realtime` is where the process sits on the wheel,
-/// and an effect dated a tick before a cause it followed is not a time base.
-/// The second publication is therefore clamped forward onto the trial's
-/// high-water mark, exactly as an interior crossing is clamped forward onto
-/// the trial's own tick.
+/// answers "when did this happen" — the two quantities are separately reported
+/// precisely so the tick can be clamped without lying about the physics — but
+/// `$realtime` is where the process sits on the wheel, and an effect dated a
+/// tick before a cause it followed is not a time base. The second publication
+/// is therefore clamped forward onto the trial's high-water mark, exactly as
+/// an interior crossing is clamped forward onto the trial's own tick. The
+/// clamp is what is under test here whatever dates the instant: the case
+/// beside this one holds the instants still.
 ///
 /// The second solution is handed to the host rather than solved for, because a
 /// standalone host has no solver: the two vectors are the two iterates a
@@ -2333,11 +2341,15 @@ fn a_crossing_found_on_a_later_iteration_publishes_no_earlier_than_one_already_p
          first: {crossing_b:.16e} s against {crossing_a:.16e} s"
     );
 
-    for (signal, expected) in [("at_a", crossing_a), ("at_b", crossing_b)] {
+    // `ca` is interior — nothing digital had moved when the first iterate
+    // found it — and reads its own crossing. `cb` was carried across by the
+    // feedback `ca` caused and is dated at the trial's endpoint instead; the
+    // case beside this one is where that rule is pinned.
+    for (signal, expected) in [("at_a", crossing_a), ("at_b", candidate)] {
         let woke = read_real_bits(&driver.host, signal);
         assert!(
             (woke - expected).abs() <= 1.0e-21,
-            "`{signal}` must read its own crossing {expected:.16e} s, read {woke:.16e} s"
+            "`{signal}` must read {expected:.16e} s, read {woke:.16e} s"
         );
     }
 
@@ -2367,6 +2379,224 @@ fn a_crossing_found_on_a_later_iteration_publishes_no_earlier_than_one_already_p
         due >= earliest,
         "the first reaction due after the trial is at {due:.16e} s, before the \
          {earliest:.16e} s one tick after the first publication"
+    );
+}
+
+/// What one Newton iterate of the open trial published, per bridge: the
+/// instant a plain interpolation over the whole step would date the crossing
+/// at, the tick the transition was published into, and the `$abstime` the
+/// process it woke actually read.
+///
+/// Printed rather than only asserted because the defect this pins is a pair of
+/// instants that cannot both be true, and the pair is only legible side by
+/// side.
+fn report_crossings(driver: &CrossingDriver, label: &str, interpolated: [f64; 2]) {
+    for (bridge, at, rt, interpolated) in [
+        ("ca", "at_a", "rt_a", interpolated[0]),
+        ("cb", "at_b", "rt_b", interpolated[1]),
+    ] {
+        println!(
+            "{label}: bridge `{bridge}` interpolates to {interpolated:.16e} s, \
+             published tick {}, $abstime {:.16e} s",
+            read_real_bits(&driver.host, rt),
+            read_real_bits(&driver.host, at),
+        );
+    }
+}
+
+/// **Property 5, case d.** A crossing the discrete half's own feedback caused
+/// is dated at the trial's endpoint, not interpolated as an interior root.
+///
+/// The same two-iterate trial as the case above, read for its *instants*
+/// rather than its ticks. `ca` crosses 0.6 of the way through the step on the
+/// first iterate and is interior: nothing digital has moved the analog
+/// solution, the root is the circuit's own, and it keeps the interpolated
+/// instant. The `posedge ca` process then writes `gain`, which the analog
+/// block reads, so the re-solve is a *different* continuous problem over the
+/// same interval — and `cb`'s threshold is crossed on that re-solve.
+///
+/// Interpolating that crossing over the whole step dates it 0.2 of the way in,
+/// which is before the 0.6 edge that caused it. An effect cannot precede its
+/// cause, and no solve of this interval ever passed `cb` through its threshold
+/// on the way: the step it crossed on is the step the discrete half moved the
+/// equations in, so the crossing is that movement's own and belongs at the
+/// endpoint, exactly where a D/A bridge's movement puts one.
+///
+/// This is the discrete-variable half of "digital to analog feedback". The
+/// module has no D/A bridge at all — the feedback path is a variable the
+/// analog block reads — so a rule that watches only bridge bits leaves it
+/// interpolated.
+#[test]
+fn a_feedback_caused_crossing_is_dated_at_the_trial_endpoint() {
+    const START: f64 = 10.0e-9;
+    const STEP: f64 = 0.9e-9;
+
+    let mut host = MixedSignalHost::compile(
+        FEEDBACK_CROSSINGS,
+        None,
+        "xfeedback",
+        &[1, 0],
+        SchedulerLimits::default(),
+    )
+    .expect("the feedback-crossing module compiles");
+    host.add_adc_bridge("ca", 0, (2, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the first A/D bridge is declarable");
+    host.add_adc_bridge("cb", 0, (3, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the second A/D bridge is declarable");
+
+    let quiet = [0.0, 0.0, 0.0];
+    let mut driver = CrossingDriver::new(host, &quiet);
+    driver.step_to(START, &quiet);
+
+    let candidate = START + STEP;
+    let late = ramp_reaching_threshold_at(0.6 / 0.9);
+    let early = ramp_reaching_threshold_at(0.2 / 0.9);
+    let crossing_a = analytic_crossing(candidate, STEP, late);
+    let crossing_b = analytic_crossing(candidate, STEP, early);
+    assert!(
+        crossing_b < crossing_a,
+        "the fixture must interpolate the second crossing before the first: \
+         {crossing_b:.16e} s against {crossing_a:.16e} s"
+    );
+
+    // The first iterate: nothing digital has moved the analog equations yet,
+    // so `ca`'s root is the circuit's own and is interior.
+    driver.begin_and_settle(candidate, &[0.0, late, 0.0]);
+    report_crossings(&driver, "iterate 1 (`ca` alone)", [crossing_a, crossing_b]);
+    let woke_a = read_real_bits(&driver.host, "at_a");
+    assert!(
+        (woke_a - crossing_a).abs() <= 1.0e-21,
+        "a crossing with no digital feedback before it keeps its interpolated \
+         instant {crossing_a:.16e} s, read {woke_a:.16e} s"
+    );
+
+    // The re-solve `gain` caused, on the same interval.
+    driver.settle(&[0.0, late, early]);
+    report_crossings(
+        &driver,
+        "iterate 2 (the re-solve `gain` caused)",
+        [crossing_a, crossing_b],
+    );
+
+    let woke_b = read_real_bits(&driver.host, "at_b");
+    assert!(
+        (woke_b - candidate).abs() <= 1.0e-21,
+        "a crossing the discrete half's feedback caused is dated at the trial's \
+         endpoint {candidate:.16e} s, read {woke_b:.16e} s (the interpolation over \
+         the whole step would have said {crossing_b:.16e} s)"
+    );
+    assert!(
+        woke_b >= woke_a,
+        "the crossing at {woke_b:.16e} s was caused by the edge at {woke_a:.16e} s \
+         and cannot be dated before it"
+    );
+
+    // The tick follows the instant: the trial's own floored tick, clamped
+    // forward onto the mark the first publication left, exactly as a D/A
+    // movement's transition is dated.
+    let first_tick = read_real_bits(&driver.host, "rt_a");
+    let second_tick = read_real_bits(&driver.host, "rt_b");
+    assert_eq!(
+        second_tick.to_bits(),
+        first_tick.max(floor_ticks(candidate) as f64).to_bits(),
+        "an endpoint-dated crossing belongs on the trial's own tick {}, clamped \
+         forward onto {first_tick}: it landed on {second_tick}",
+        floor_ticks(candidate)
+    );
+}
+
+/// The same feedback as [`FEEDBACK_CROSSINGS`], closed through the deck.
+///
+/// `ca` rising writes `gain`; `gain` sets the source the analog block pushes
+/// into `p`; the deck divides `p` onto `q`, and `cb` senses `q`. With `gain`
+/// at one the sensed node sits below half the supply and with `gain` at two it
+/// sits above, so the edge on `ca` is what carries `cb` across — and no D/A
+/// bridge is anywhere on that path. `ya` and `yb` react a tick later, which is
+/// what makes each publication's tick readable from the trace.
+const FEEDBACK_DECK: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module feedback_deck(p, n, ca, cb, ya, yb);
+    inout p, n;
+    electrical p, n;
+    input ca, cb;
+    output ya, yb;
+    wire ca, cb;
+    reg ya, yb;
+    integer gain;
+    initial begin ya = 1'b0; yb = 1'b0; gain = 1; end
+    always @(posedge ca) begin gain = 2; #1 ya = 1'b1; end
+    always @(posedge cb) #1 yb = 1'b1;
+    analog I(p, n) <+ (V(p, n) - gain * 1.0) / 1000.0;
+endmodule
+"#;
+
+/// **Property 5, case d′.** The engine asks for no interior root on a step its
+/// own digital feedback carried a threshold across.
+///
+/// The standalone cases hand the host two iterates. This one makes the engine
+/// produce them: the ramp on `ca` crosses half the supply at 10.6 ns, R2.2's
+/// boundary refinement lands the step there, the `posedge ca` process writes
+/// `gain`, the re-solve at that same endpoint lifts `q` past its threshold,
+/// and `cb` crosses on it.
+///
+/// What is pinned here is the consequence the deck can see: cause and effect
+/// are published into one tick, so both reactions come due together and `yb`
+/// rises once rather than chattering. The *mechanism* — that
+/// `trial_boundary_refinement_time` offers the controller no root towards the
+/// interpolated instant — is asserted directly in `mixed.rs`'s own
+/// `a_step_a_discrete_read_moved_in_has_no_interior_root`, because a deck
+/// cannot separate the two kinds of re-solve it would take to see it here:
+/// the controller legitimately walks the step down towards `ca`'s own interior
+/// crossing, and lands accepted points a few picoseconds from where the
+/// artefact would have put them. The accepted timeline around the crossing is
+/// printed rather than asserted for that reason.
+#[test]
+fn the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing() {
+    let model = ModelFile::new("feedback_deck", FEEDBACK_DECK);
+    let deck = format!(
+        "* a crossing carried across by the module's own digital feedback\n\
+         vramp ca 0 pwl(0 0 21.2n 3.3)\n\
+         x1 p 0 ca q ya yb feedback_deck\n\
+         rfb p q 1k\n\
+         rq q 0 1meg\n\
+         rya ya 0 10k\n\
+         ryb yb 0 10k\n\
+         .va \"{}\" feedback_deck\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 1.0e-9);
+
+    let accepted: Vec<f64> = result
+        .time
+        .iter()
+        .copied()
+        .filter(|time| *time > 9.5e-9 && *time < 11.5e-9)
+        .collect();
+    println!("accepted timepoints around the crossing: {accepted:?}");
+
+    let rises = |net: &str| -> Vec<f64> {
+        digital_points(&result, net)
+            .iter()
+            .filter(|(_, state)| state.as_str() == "One")
+            .map(|(time, _)| *time)
+            .collect()
+    };
+    let rose_a = rises("ya");
+    let rose_b = rises("yb");
+    println!("`ya` rose at {rose_a:?}, `yb` rose at {rose_b:?}");
+    assert_eq!(
+        rose_b.len(),
+        1,
+        "a crossing dated once is a reaction recorded once: `yb` rose at {rose_b:?}"
+    );
+    assert_eq!(
+        rose_a.first().map(|time| time.to_bits()),
+        rose_b.first().map(|time| time.to_bits()),
+        "the crossing and the edge that caused it are published into one tick, so \
+         both reactions are due together: `ya` at {rose_a:?}, `yb` at {rose_b:?}"
     );
 }
 
