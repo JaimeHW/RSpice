@@ -147,7 +147,16 @@ export async function qualifyAbi(wasm) {
       ["unknown operation", 249, [1]],
       ["query value without a runtime session", 470, []],
       ["query presence without a runtime session", 471, []],
+      // The site-aware integration helpers. A refusal proves the opcode is not
+      // answered as a pure operation, which is as far as a fixture holding no
+      // runtime session can see: the scalar entry point returns this same
+      // value and status whether it asked for a session and found none or
+      // never asked at all. That the primary module really does route these
+      // opcodes through the session is evidence only the worker's solver probe
+      // can produce, by evaluating a model whose Jacobian reads an
+      // integration site.
       ["integral derivative without a runtime session", 480, [1, 0.5, 0.25]],
+      ["time derivative without a runtime session", 482, [1, 0.5, 0.25]],
     ]) {
       reset();
       expect(label, invoke(opcode, operands), 0, -2);

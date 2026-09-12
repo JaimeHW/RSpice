@@ -23,8 +23,11 @@ EXPECTED_STAMPS = 20000
 # are exercised by an independent secondary module against the actual worker.
 # ABI 15 reviewed 2026-09-11 against 6ad3a073f, which added the site-aware
 # integral derivative helpers: scalar opcode 480 and slice opcode 481.
+# 2026-09-12: 2964cdc82 joined the site-aware time-derivative helper, scalar
+# opcode 482, to that same ABI 15 helper set without a note of its own, and the
+# fixture had never enumerated it. It does now, which is one more check.
 EXPECTED_WASM_JIT_ABI_VERSION = 15
-EXPECTED_ABI_CHECKS = 36
+EXPECTED_ABI_CHECKS = 37
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
