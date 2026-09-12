@@ -3685,6 +3685,93 @@ impl CircuitData {
         Ok(earliest)
     }
 
+    /// The earliest activation any Verilog-A or mixed Verilog-AMS instance has
+    /// scheduled strictly after `accepted_time`, and the instance that owns it.
+    ///
+    /// Unlike [`Self::veriloga_transient_event_time`], which answers the
+    /// stepper's question "is there an exact event target I must land on", this
+    /// answers "is anything scheduled at all, and by whom". The two differ for
+    /// a module whose discrete half runs free: its activations reach the solver
+    /// as runtime breakpoints collected from the digital queue rather than as
+    /// an analog event target, so the event-target query is empty while the
+    /// queue is not. Both are folded here, and the mixed instance is named by
+    /// the deck name its discrete half is registered under.
+    ///
+    /// The instance is itself optional: enrolled mixed instances schedule into
+    /// one shared process queue, so an activation reported by that queue names
+    /// an instance only when exactly one is enrolled. A pure code-model event
+    /// net is deliberately not folded in at all — this query exists to
+    /// attribute a schedule to a module, and no answer is better than a
+    /// guessed one.
+    ///
+    /// Called once per accepted transient point, so it allocates nothing and
+    /// borrows the instance name rather than rendering it.
+    pub(crate) fn veriloga_scheduled_activation(
+        &self,
+        accepted_time: Value,
+    ) -> Option<(Option<&str>, Value)> {
+        #[cfg(feature = "veriloga")]
+        let mut owner: Option<(Option<&str>, Value)> = None;
+        #[cfg(not(feature = "veriloga"))]
+        let owner: Option<(Option<&str>, Value)> = None;
+        #[cfg(feature = "veriloga")]
+        {
+            let analog = self.veriloga_devices.iter().flat_map(|device| {
+                device
+                    .try_transient_event_time()
+                    .ok()
+                    .flatten()
+                    .map(|target| (Some(device.name.as_str()), target))
+            });
+            let mixed = self.mixed_signal_hosts.iter().flat_map(|host| {
+                let instance = host.instance_name();
+                let analog_target = host
+                    .analog_device()
+                    .try_transient_event_time()
+                    .ok()
+                    .flatten();
+                // A standalone host runs its own queue. An enrolled one is a
+                // value view, and answers `None` here; its activations are the
+                // coordinator's, folded in below.
+                let digital_target = host.next_event_time().ok().flatten();
+                [analog_target, digital_target]
+                    .into_iter()
+                    .flatten()
+                    .map(move |target| (Some(instance), target))
+            });
+            // The shared process queue every enrolled instance schedules into.
+            // It is one queue for all of them, so the activation it reports is
+            // attributable to an instance only when there is exactly one to
+            // attribute it to; with several, the honest answer is the schedule
+            // without an owner.
+            let shared = self
+                .mixed_digital_coordinator
+                .as_ref()
+                .and_then(|coordinator| coordinator.next_event_time().ok().flatten())
+                .map(|target| {
+                    let instance = match self.mixed_signal_hosts.as_slice() {
+                        [only] => Some(only.instance_name()),
+                        _ => None,
+                    };
+                    (instance, target)
+                });
+            for (instance, target) in analog.chain(mixed).chain(shared) {
+                if !target.is_finite() || target <= accepted_time {
+                    continue;
+                }
+                if owner
+                    .as_ref()
+                    .is_none_or(|(_, earliest)| target < *earliest)
+                {
+                    owner = Some((instance, target));
+                }
+            }
+        }
+        #[cfg(not(feature = "veriloga"))]
+        let _ = accepted_time;
+        owner
+    }
+
     /// Check if all XSPICE instances have converged
     pub fn xspice_converged(&self, tolerance: Value) -> bool {
         self.xspice_instances

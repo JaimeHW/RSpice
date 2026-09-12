@@ -282,6 +282,109 @@ fn landed_veriloga_event_time(
     Ok(landed)
 }
 
+/// How many consecutive accepted points may advance by no more than the
+/// solver's hard minimum, against a Verilog-A/AMS schedule that is still
+/// asking for the next one inside that same window, before the run says so.
+///
+/// A digital schedule finer than the analog solver's minimum step is legal:
+/// [`landed_veriloga_event_time`] coalesces such an activation onto
+/// `accepted + hard_min`, and a free-running discrete process reaches the
+/// stepper as runtime breakpoints it snaps to. Either way the accepted point
+/// moves the clock by at most one hard minimum. What neither contract can
+/// decide on its own is a module that issues another activation from every one
+/// of those points: progress is then pinned at the floor for the rest of the
+/// interval, which under a millisecond maximum step (`delmin = 1e-14`s) is
+/// 1e14 accepted points per second of simulated time.
+///
+/// So the run of such points is counted: reported at a length no genuine
+/// schedule reaches by accident, and refused at sixteen times that instead of
+/// spending the rest of the analysis proving it. There is no `.options` knob
+/// for the thresholds, because there is no existing one for a guard of this
+/// kind — the floor-`dt` livelock streak beside it is a constant too — and the
+/// user-facing levers are the module's own schedule and the requested maximum
+/// timestep the minimum is derived from, both of which the diagnostic names.
+const SUB_MINIMUM_ACTIVATION_REPORT: usize = 1024;
+const SUB_MINIMUM_ACTIVATION_REFUSE: usize = SUB_MINIMUM_ACTIVATION_REPORT * 16;
+
+/// Whether an accepted interval is one the solver cannot subdivide.
+///
+/// [`landed_veriloga_event_time`] nudges its landing up by at most a couple of
+/// ulps and a snapped breakpoint can sit a rounding step either side of the
+/// floor, so the comparison carries a relative slack — far tighter than the
+/// next interval of any schedule that is making progress, which is what keeps
+/// a merely dense cadence out of the count.
+fn interval_is_within_solver_floor(interval: Value, hard_min_dt: Value) -> bool {
+    const SLACK: Value = 1.0e-9;
+    interval.is_finite() && hard_min_dt > 0.0 && interval <= hard_min_dt * (1.0 + SLACK)
+}
+
+/// Fold one accepted point into the sub-minimum activation streak.
+///
+/// The streak is *consecutive*: one accepted point the solver could resolve —
+/// a coarser gap in the schedule, an interval the controller was allowed to
+/// grow into — ends the run and starts the count again, because progress at
+/// any width above the floor means the analysis still reaches `tstop`.
+const fn sub_minimum_activation_streak_after(previous: usize, sub_minimum: bool) -> usize {
+    if sub_minimum {
+        previous.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// What a Verilog-A/AMS schedule says about one accepted transient point.
+#[derive(Clone, Copy)]
+struct AcceptedPointSchedule {
+    /// A module has an activation queued close enough to this point that the
+    /// schedule, not the controller's own truncation feedback, is what sets
+    /// the width of the steps around it.
+    paced: bool,
+    /// That schedule is also finer than the solver can resolve *and* this
+    /// point failed to advance past the floor, so the point after it can do no
+    /// better.
+    sub_minimum: bool,
+}
+
+/// Read one accepted point against the schedule that is driving it.
+///
+/// `paced` deliberately uses the floor-`dt` livelock detector's own ceiling
+/// rather than the hard minimum: that detector asks whether the controller
+/// chose the floor and its own feedback pins it there, and a discrete
+/// activation anywhere inside the ceiling it measures against means the width
+/// was not the controller's to choose. Under a millisecond maximum step the
+/// ceiling is 640 fs, so an ordinary picosecond-scale digital cadence is
+/// entirely inside it — and used to fail as an ill-conditioned circuit.
+///
+/// `sub_minimum` is the stricter two-sided reading, and both halves are
+/// needed. The point *moved* the transient clock by no more than the hard
+/// minimum — a landed event coalesced onto the floor, or a snapped digital
+/// breakpoint the controller stepped past and was pulled back to — and the
+/// same schedule is *already asking* for the next one inside that same window.
+/// A module whose next request is any coarser is making progress and is not
+/// counted, which is what keeps a merely fine schedule out of the count: a
+/// picosecond clock under a nanosecond maximum step, or a femtosecond
+/// follow-up chained onto one analog crossing.
+fn accepted_point_schedule(
+    circuit: &crate::circuit::CircuitData,
+    step_started_at: Value,
+    accepted_time: Value,
+    hard_min_dt: Value,
+    livelock_dt_ceiling: Value,
+) -> AcceptedPointSchedule {
+    let Some((_, next_activation)) = circuit.veriloga_scheduled_activation(accepted_time) else {
+        return AcceptedPointSchedule {
+            paced: false,
+            sub_minimum: false,
+        };
+    };
+    let interval = next_activation - accepted_time;
+    AcceptedPointSchedule {
+        paced: interval.is_finite() && interval <= livelock_dt_ceiling,
+        sub_minimum: interval_is_within_solver_floor(interval, hard_min_dt)
+            && interval_is_within_solver_floor(accepted_time - step_started_at, hard_min_dt),
+    }
+}
+
 #[inline]
 const fn accepted_step_hits_breakpoint(
     landed_device_event: bool,
@@ -4365,6 +4468,10 @@ impl Engine {
         // The streak triggers a breakpoint-style integration restart;
         // re-triggering shortly after fails the run instead of spinning.
         const LIVELOCK_STREAK_RESTART: usize = 32;
+        // Deliberately not carried across a checkpoint resume: a resumed
+        // segment restarts the count at zero, which can only delay the
+        // sub-minimum refusal, never cause one.
+        let mut sub_minimum_activation_streak = 0_usize;
         let livelock_dt_ceiling = (timestep.hard_min_dt() * 64.0).max(1e-22);
         // Two restarts at the same wall mean the restart cannot escape it;
         // a wall further along the time axis gets its own fresh attempt.
@@ -5594,12 +5701,27 @@ impl Engine {
         // A macro rather than a helper because the restart touches a dozen
         // loop locals (histories, controller, estimator, order).
         macro_rules! livelock_check {
-            ($dt:expr) => {
+            ($dt:expr, $schedule_paced:expr) => {
                 if locked_grid.is_none() {
-                    // Honouring an explicit maximum or a model's bound is
-                    // progress, even at the integration floor. Count only
-                    // steps from which the controller was allowed to grow.
-                    let trapped_at_floor = $dt <= livelock_dt_ceiling && {
+                    // Honouring an explicit maximum, a model's bound, or a
+                    // Verilog-A/AMS activation queued inside this detector's
+                    // own ceiling is progress, even at the integration floor.
+                    // Count only steps from which the controller was allowed
+                    // to grow.
+                    //
+                    // The schedule exclusion is there because this detector's
+                    // premise — that the controller chose the floor and its
+                    // own LTE feedback pins it there — does not hold for a
+                    // point a discrete schedule set the width of. The ceiling
+                    // is `64 * delmin`, which under a millisecond maximum step
+                    // is 640 fs, so every picosecond-scale digital cadence sat
+                    // under it and failed as "numerically ill-conditioned"
+                    // after 64 accepted points: the wrong diagnosis and the
+                    // wrong subject, because the circuit is fine and the
+                    // module is the thing to name. A schedule the analog side
+                    // genuinely cannot advance against is bounded by
+                    // `sub_minimum_activation_check!` instead, which names it.
+                    let trapped_at_floor = $dt <= livelock_dt_ceiling && !$schedule_paced && {
                         let requested_max_dt = timestep.max_dt();
                         let requested_max_dt = circuit
                             .veriloga_timestep_bound()
@@ -5682,6 +5804,63 @@ impl Engine {
                     true
                 }
             }};
+        }
+
+        // Runs after every accepted point, beside `livelock_check!`: counts the
+        // run of consecutive accepted points that a Verilog-A/AMS schedule
+        // finer than the solver's own minimum has pinned at that minimum.
+        //
+        // The report names the module while the run is still going; the
+        // refusal ends it with the same name, the floor, the count, and how
+        // many more points the requested interval would take at this rate.
+        macro_rules! sub_minimum_activation_check {
+            ($sub_minimum:expr) => {
+                sub_minimum_activation_streak = sub_minimum_activation_streak_after(
+                    sub_minimum_activation_streak,
+                    $sub_minimum,
+                );
+                if sub_minimum_activation_streak == SUB_MINIMUM_ACTIVATION_REPORT
+                    || sub_minimum_activation_streak >= SUB_MINIMUM_ACTIVATION_REFUSE
+                {
+                    let floor = timestep.hard_min_dt();
+                    let activation = circuit.veriloga_scheduled_activation(t);
+                    let subject = activation
+                        .and_then(|(instance, _)| instance)
+                        .map_or_else(
+                            || "A Verilog-A/AMS schedule".to_string(),
+                            |instance| format!("Verilog-A/AMS instance '{instance}'"),
+                        );
+                    let next_activation = activation.map_or(t, |(_, target)| target);
+                    if sub_minimum_activation_streak >= SUB_MINIMUM_ACTIVATION_REFUSE {
+                        return Err(SimulationError::Circuit(format!(
+                            "{} has scheduled {} consecutive activations closer together than \
+                             the transient solver's minimum timestep {:.3e}s (near t={:.6e}s, \
+                             next activation {:.6e}s): every accepted point advances by at most \
+                             that minimum, so reaching tstop={:.3e}s would take {:.3e} more of \
+                             them. Widen the module's finest scheduled delay past the solver \
+                             minimum, or shorten the analysis interval",
+                            subject,
+                            sub_minimum_activation_streak,
+                            floor,
+                            t,
+                            next_activation,
+                            tstop,
+                            ((tstop - t) / floor).max(0.0)
+                        )));
+                    }
+                    log::warn!(
+                        "{} has held the transient stepper at its minimum timestep {:.3e}s for \
+                         {} consecutive accepted points near t={:.6e}s (next activation \
+                         {:.6e}s): the schedule is finer than the analog side can resolve, so \
+                         the run advances one minimum step per point",
+                        subject,
+                        floor,
+                        sub_minimum_activation_streak,
+                        t,
+                        next_activation
+                    );
+                }
+            };
         }
 
         // Adaptive integration may legitimately take far more attempts than
@@ -6058,6 +6237,11 @@ impl Engine {
                 exact_veriloga_event_time,
             );
             let landed_veriloga_event = exact_veriloga_event_time.is_some();
+            // Where the clock stood before this attempt. The accepted time is
+            // not `t + dt`: a breakpoint snap can pull it back inside the step,
+            // and it is the realized advance — not the attempted width — that
+            // says whether the run is progressing.
+            let step_started_at = t;
             if landed_veriloga_event {
                 // Landing on an event is the other way this step gets cut, and
                 // a run of landings hands the restart the width of the last
@@ -9217,7 +9401,15 @@ impl Engine {
                     if xyce_lte_restart_first_step && !hit_breakpoint {
                         xyce_lte_restart_first_step = false;
                     }
-                    livelock_check!(dt);
+                    let point_schedule = accepted_point_schedule(
+                        &circuit,
+                        step_started_at,
+                        t,
+                        timestep.hard_min_dt(),
+                        livelock_dt_ceiling,
+                    );
+                    livelock_check!(dt, point_schedule.paced);
+                    sub_minimum_activation_check!(point_schedule.sub_minimum);
                     debug_assert_eq!(retry_count, 0);
                     debug_assert_eq!(xyce_step_failure_count, 0);
                     debug_assert_eq!(stale_accept_count, 0);
@@ -9812,7 +10004,15 @@ impl Engine {
             }
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
-            livelock_check!(dt);
+            let point_schedule = accepted_point_schedule(
+                &circuit,
+                step_started_at,
+                t,
+                timestep.hard_min_dt(),
+                livelock_dt_ceiling,
+            );
+            livelock_check!(dt, point_schedule.paced);
+            sub_minimum_activation_check!(point_schedule.sub_minimum);
             debug_assert_eq!(retry_count, 0);
             debug_assert_eq!(xyce_step_failure_count, 0);
             debug_assert_eq!(stale_accept_count, 0);
@@ -11086,6 +11286,49 @@ mod tests {
         let error = landed_veriloga_event_time(1.25, 1.0, Value::NAN)
             .expect_err("an unusable hard minimum has no instant to land on");
         assert!(error.to_string().contains("invalid solver hard minimum"));
+    }
+
+    /// The sub-minimum activation count is a run of *consecutive* points, and
+    /// one resolvable interval ends it however long the run was.
+    ///
+    /// The floor test is what decides "resolvable", and it has to read an
+    /// interval one ulp either side of the floor the way the landing contract
+    /// writes one: `landed_veriloga_event_time` nudges up, a snapped
+    /// breakpoint rounds either way, and a schedule genuinely making progress
+    /// is orders of magnitude clear of both.
+    #[test]
+    fn one_resolvable_interval_ends_the_sub_minimum_activation_run() {
+        assert_eq!(sub_minimum_activation_streak_after(0, true), 1);
+        assert_eq!(
+            sub_minimum_activation_streak_after(SUB_MINIMUM_ACTIVATION_REPORT - 1, true),
+            SUB_MINIMUM_ACTIVATION_REPORT
+        );
+        assert_eq!(
+            sub_minimum_activation_streak_after(SUB_MINIMUM_ACTIVATION_REFUSE - 1, true),
+            SUB_MINIMUM_ACTIVATION_REFUSE
+        );
+        assert_eq!(
+            sub_minimum_activation_streak_after(SUB_MINIMUM_ACTIVATION_REFUSE - 1, false),
+            0,
+            "a resolvable interval one point short of the refusal starts the count again"
+        );
+        assert_eq!(
+            sub_minimum_activation_streak_after(usize::MAX, true),
+            usize::MAX
+        );
+
+        assert!(interval_is_within_solver_floor(1.0e-14, 1.0e-14));
+        assert!(interval_is_within_solver_floor(1.0e-15, 1.0e-14));
+        assert!(
+            interval_is_within_solver_floor(1.0e-14_f64.next_up(), 1.0e-14),
+            "a landing nudged up by an ulp is still the floor"
+        );
+        assert!(
+            !interval_is_within_solver_floor(1.1e-14, 1.0e-14),
+            "eleven femtoseconds against a ten-femtosecond floor is an interval the solver can take"
+        );
+        assert!(!interval_is_within_solver_floor(Value::NAN, 1.0e-14));
+        assert!(!interval_is_within_solver_floor(1.0e-15, 0.0));
     }
 
     #[test]
