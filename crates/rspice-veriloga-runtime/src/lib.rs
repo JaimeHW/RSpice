@@ -1244,6 +1244,27 @@ pub enum GeneratedEvaluationError {
     },
     Integer {
         reason: &'static str,
+        /// Whether the refusal was caused by a non-finite operand.
+        ///
+        /// The interpreter and the native backend split the same
+        /// [`integer::IntegerRuntimeError`] the same way: only
+        /// `NonFiniteOperand` is a property of the point the solver handed the
+        /// device. A finite operand that rounds outside the signed 32-bit
+        /// range, a division by zero, a modulus by zero and zero raised to a
+        /// negative power all fail identically at every iterate.
+        non_finite: bool,
+    },
+    /// A contribution reached the matrix or the right-hand side without being
+    /// finite.
+    ///
+    /// Generated code stamps whatever its arithmetic produced, so an
+    /// expression that leaves its domain at an overshooting iterate — a
+    /// logarithm of a negative, an exponential that overflows — writes NaN or
+    /// infinity into the Newton system instead of refusing the point. The
+    /// stamper observes every value it writes and reports this once for the
+    /// whole evaluation; `target` names which of the two sinks saw it.
+    NonFiniteContribution {
+        target: &'static str,
     },
     DiscontinuityDegree,
     SmallSignal {
@@ -1293,9 +1314,13 @@ impl std::fmt::Display for GeneratedEvaluationError {
                     "generated Verilog-A derivative evaluation failed: {reason}"
                 )
             }
-            Self::Integer { reason } => {
+            Self::Integer { reason, .. } => {
                 write!(f, "generated Verilog-A integer evaluation failed: {reason}")
             }
+            Self::NonFiniteContribution { target } => write!(
+                f,
+                "generated Verilog-A device stamped a non-finite {target}"
+            ),
             Self::DiscontinuityDegree => {
                 f.write_str("$discontinuity degree must have a finite integer value >= -1")
             }
@@ -2202,6 +2227,7 @@ impl<'a> GeneratedEvalContext<'a> {
     pub fn integer_result(&self, result: Result<Value, integer::IntegerRuntimeError>) -> Value {
         result.unwrap_or_else(|source| {
             use integer::IntegerRuntimeError;
+            let non_finite = source.is_non_finite_operand();
             let reason = match source {
                 IntegerRuntimeError::NonFiniteOperand { .. } => {
                     "conversion requires a finite value"
@@ -2217,7 +2243,10 @@ impl<'a> GeneratedEvalContext<'a> {
             };
             if self.evaluation_error.get().is_none() {
                 self.evaluation_error
-                    .set(Some(GeneratedEvaluationError::Integer { reason }));
+                    .set(Some(GeneratedEvaluationError::Integer {
+                        reason,
+                        non_finite,
+                    }));
             }
             Value::NAN
         })
@@ -2665,9 +2694,47 @@ pub struct GeneratedStamper<'a> {
     terminal_currents: Option<&'a mut [Value]>,
     voltages: &'a [Value],
     num_nodes: usize,
+    /// A non-finite value reached the Jacobian.
+    ///
+    /// Accumulated rather than raised: an early exit would leave the rest of
+    /// the device's contributions out of a system the caller is about to throw
+    /// away anyway, and would make the observation depend on the order the
+    /// generated code happens to emit its equations in. One `is_finite` and
+    /// one `|=` per written value is the same audit the runtime route applies
+    /// in `finite_stamp_value`, and it is not feature-gated there either.
+    saw_non_finite_matrix: bool,
+    /// A non-finite value reached the right-hand side. Separate from the
+    /// Jacobian flag because the two sinks fail for different reasons: an
+    /// equivalent source carries `value - J*x`, so it can be non-finite from
+    /// an unknown the solver handed back as well as from the device's own
+    /// arithmetic.
+    saw_non_finite_rhs: bool,
 }
 
 impl<'a> GeneratedStamper<'a> {
+    /// Which sink, if any, received a value that was not finite.
+    ///
+    /// `None` means every value this stamper wrote was finite.
+    #[inline]
+    pub fn non_finite_contribution(&self) -> Option<&'static str> {
+        match (self.saw_non_finite_matrix, self.saw_non_finite_rhs) {
+            (false, false) => None,
+            (true, false) => Some("Jacobian entry"),
+            (false, true) => Some("right-hand-side contribution"),
+            (true, true) => Some("Jacobian entry and right-hand-side contribution"),
+        }
+    }
+
+    #[inline]
+    fn observe_matrix_value(&mut self, value: Value) {
+        self.saw_non_finite_matrix |= !value.is_finite();
+    }
+
+    #[inline]
+    fn observe_rhs_value(&mut self, value: Value) {
+        self.saw_non_finite_rhs |= !value.is_finite();
+    }
+
     #[inline]
     pub fn new(
         matrix: &'a mut StaticMatrix,
@@ -2682,6 +2749,8 @@ impl<'a> GeneratedStamper<'a> {
             terminal_currents: None,
             voltages,
             num_nodes,
+            saw_non_finite_matrix: false,
+            saw_non_finite_rhs: false,
         }
     }
 
@@ -2700,6 +2769,8 @@ impl<'a> GeneratedStamper<'a> {
             terminal_currents: None,
             voltages,
             num_nodes,
+            saw_non_finite_matrix: false,
+            saw_non_finite_rhs: false,
         }
     }
 
@@ -2727,6 +2798,8 @@ impl<'a> GeneratedStamper<'a> {
             terminal_currents: Some(terminal_currents),
             voltages,
             num_nodes,
+            saw_non_finite_matrix: false,
+            saw_non_finite_rhs: false,
         }
     }
 
@@ -2743,6 +2816,8 @@ impl<'a> GeneratedStamper<'a> {
             terminal_currents: None,
             voltages,
             num_nodes,
+            saw_non_finite_matrix: false,
+            saw_non_finite_rhs: false,
         }
     }
 
@@ -2760,6 +2835,8 @@ impl<'a> GeneratedStamper<'a> {
             terminal_currents: None,
             voltages,
             num_nodes,
+            saw_non_finite_matrix: false,
+            saw_non_finite_rhs: false,
         }
     }
 
@@ -3921,6 +3998,7 @@ impl<'a> GeneratedStamper<'a> {
         neg_row: Option<usize>,
         equivalent: Value,
     ) {
+        self.observe_rhs_value(equivalent);
         if let Some(rhs) = &mut self.rhs {
             if let Some(row) = pos_row
                 && let Some(slot) = rhs.get_mut(row)
@@ -4718,6 +4796,7 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_potential_rhs(&mut self, row: usize, equivalent: Value) {
+        self.observe_rhs_value(equivalent);
         if equivalent == 0.0 {
             return;
         }
@@ -4927,6 +5006,7 @@ impl<'a> GeneratedStamper<'a> {
         col_axis: usize,
         value: Value,
     ) {
+        self.observe_matrix_value(value);
         if value == 0.0 {
             return;
         }
@@ -5008,6 +5088,7 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_real_axis(&mut self, row_axis: usize, col_axis: usize, value: Value) {
+        self.observe_matrix_value(value);
         if value == 0.0 {
             return;
         }
@@ -5041,6 +5122,7 @@ impl<'a> GeneratedStamper<'a> {
 
     #[inline]
     fn add_real(&mut self, row: usize, col: usize, value: Value) {
+        self.observe_matrix_value(value);
         if value == 0.0 {
             return;
         }

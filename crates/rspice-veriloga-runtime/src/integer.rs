@@ -50,6 +50,25 @@ pub enum IntegerRuntimeError {
     ZeroToNegativePower { exponent: i32 },
 }
 
+impl IntegerRuntimeError {
+    /// Whether the refusal is a property of the point the solver handed the
+    /// device rather than of the model.
+    ///
+    /// Only a non-finite operand is: `$rdist_uniform(idx)` with `idx` computed
+    /// from an overshooting iterate is an ordinary integer at the accepted
+    /// point and NaN at the iterate, so the consumer may reject the iterate
+    /// and try a smaller step. A finite operand that rounds outside the signed
+    /// 32-bit range, a division or modulus by zero and zero raised to a
+    /// negative power all refuse the same way at every point the solver could
+    /// offer, so retrying one spends the whole convergence ladder to report
+    /// the message it already had. Every backend classifies through this one
+    /// predicate so the three routes cannot drift apart.
+    #[inline]
+    pub const fn is_non_finite_operand(&self) -> bool {
+        matches!(self, Self::NonFiniteOperand { .. })
+    }
+}
+
 impl fmt::Display for IntegerRuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

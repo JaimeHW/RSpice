@@ -1836,6 +1836,13 @@ impl BuiltinVerilogAInstance {
         // event-controlled variables, DDT/IDT history, or limiter anchors.
         let static_dae_state = (evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe)
             .then(|| self.kind.capture_rollback_state());
+        // Whichever sink, if any, received a value that was not finite. The
+        // generated backend emits no finiteness check of its own — the runtime
+        // route's `finite_stamp_value` has no counterpart in generated code —
+        // so without this the module's NaN reaches the matrix and the solver
+        // learns of it only as a failed linear solve, which the transient
+        // reads as "cut dt" and DC as nothing at all.
+        let non_finite_contribution: Option<&'static str>;
         // Static history observes the settled candidate, including event
         // variables and integration state. Only a new dynamic evaluation
         // restarts those lanes from accepted history.
@@ -1855,6 +1862,7 @@ impl BuiltinVerilogAInstance {
                 self.static_stamp_cache.as_ref(),
             );
             self.kind.stamp(&ctx, &mut stamper);
+            non_finite_contribution = stamper.non_finite_contribution();
         } else {
             self.terminal_currents.fill(0.0);
             let mut stamper = GeneratedStamper::new_with_static_cache_and_terminal_currents(
@@ -1866,6 +1874,7 @@ impl BuiltinVerilogAInstance {
                 &mut self.terminal_currents,
             );
             self.kind.stamp(&ctx, &mut stamper);
+            non_finite_contribution = stamper.non_finite_contribution();
         }
         let evaluation_error = ctx.take_evaluation_error();
         if let Some(state) = static_dae_state.as_ref() {
@@ -1873,7 +1882,13 @@ impl BuiltinVerilogAInstance {
         }
         match evaluation_error {
             Some(error) => Err(error),
-            None => Ok(()),
+            // A typed refusal the module raised for itself is the more
+            // specific diagnostic and names the operator; the audit only
+            // speaks when nothing else did.
+            None => match non_finite_contribution {
+                Some(target) => Err(GeneratedEvaluationError::NonFiniteContribution { target }),
+                None => Ok(()),
+            },
         }
     }
 

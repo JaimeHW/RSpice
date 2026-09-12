@@ -472,3 +472,110 @@ fn r3_cmc_operating_point_agrees_across_routes() {
 fn r3_cmc_transient_agrees_across_routes() {
     r3_cmc_row(&format!("V1 in 0 SIN(0 1 1e6)\n{R3_CMC_BODY}")).compare_transient();
 }
+
+// ---------------------------------------------------------------------------
+// Finiteness: what the generated route hands the solver at a wild iterate
+//
+// The runtime route audits every stamped value (`finite_stamp_value` in
+// `rspice-veriloga`'s device adapter) and refuses a point that produced a
+// non-finite one. Generated Rust emits no such check and the adapter around it
+// made none either, so a module whose arithmetic left the reals at the iterate
+// the solver offered wrote NaN or infinity straight into the matrix. The
+// transient then read the failed linear solve as "cut dt" and DC walked the
+// whole ladder with no diagnostic at all.
+// ---------------------------------------------------------------------------
+
+/// Every sink accumulates, and the observation survives to the end of the
+/// evaluation rather than stopping at the first offender.
+///
+/// The audit is deliberately not an early exit: generated code emits its
+/// equations in whatever order the backend scheduled them, and an exit would
+/// make the diagnostic depend on that order while leaving the rest of the
+/// device out of a system the caller is about to discard anyway.
+#[test]
+fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
+    use rspice_core::device::veriloga_builtins::GeneratedStamper;
+    use rspice_core::solver::StaticMatrix;
+
+    let entries = (0..2)
+        .flat_map(|row| (0..2).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let voltages = [1.0, 2.0];
+
+    for (label, value, derivative, expected) in [
+        ("finite", 1.0, 2.0, None),
+        ("value", f64::NAN, 2.0, Some("right-hand-side contribution")),
+        ("derivative", 1.0, f64::INFINITY, Some("Jacobian entry")),
+        (
+            "both",
+            f64::NAN,
+            f64::NAN,
+            Some("Jacobian entry and right-hand-side contribution"),
+        ),
+    ] {
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &entries).expect("dense 2x2");
+        let mut rhs = [0.0; 2];
+        let mut stamper = GeneratedStamper::new(&mut matrix, &mut rhs, &voltages, 2);
+        // Two contributions, the second always finite: an early exit would
+        // lose the first observation or skip the second stamp.
+        stamper.stamp_current_node1(Some(1), Some(2), value, 1, derivative);
+        stamper.stamp_current_node1(Some(1), Some(2), 3.0, 2, 4.0);
+        assert_eq!(
+            stamper.non_finite_contribution(),
+            expected,
+            "{label}: the stamper must report which sink saw a non-finite value"
+        );
+    }
+}
+
+/// A generated device at an iterate its own arithmetic cannot survive is a
+/// rejectable trial naming the instance, not a silent NaN in the matrix.
+///
+/// `f64::MAX` on the anode is a point a diverging Newton step reaches: the
+/// equivalent source a contribution carries is `value - dI/dV * V`, so any
+/// nonzero conductance at that bias overflows the subtraction before the
+/// model's own exponentials are even asked. Before this audit the call below
+/// returned `Ok(())` and left infinities in the matrix and the right-hand
+/// side.
+#[test]
+fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() {
+    use rspice_core::device::StampError;
+    use rspice_core::solver::StaticMatrix;
+
+    let deck = "* generated finiteness\nV1 in 0 0.8\nR1 in a 1k\nX1 a 0 DIODE_CMC\n.end\n";
+    assert!(
+        uses_generated_devices(deck),
+        "the plain X card must resolve to the generated built-in"
+    );
+    let netlist = Netlist::parse_validated(deck).expect("deck parses");
+    let mut circuit = Engine::default()
+        .build_circuit(&netlist)
+        .expect("deck builds");
+
+    let size = circuit.matrix_size();
+    let entries = (0..size)
+        .flat_map(|row| (0..size).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    let mut matrix = StaticMatrix::from_triplets(size, size, &entries).expect("dense structure");
+    let mut rhs = vec![0.0; size];
+    let mut voltages = vec![0.0; size];
+    let anode = circuit.get_or_create_node("a");
+    voltages[anode - 1] = f64::MAX;
+
+    let error = circuit
+        .try_stamp_nonlinear(&mut matrix, &mut rhs, &voltages)
+        .expect_err("a non-finite generated contribution must refuse the point");
+    let StampError::NonFiniteTrial(trial) = &error else {
+        panic!("a non-finite generated contribution must be a rejectable trial: {error}");
+    };
+    assert!(
+        trial.instance.eq_ignore_ascii_case("x1"),
+        "the refusal must name the instance, got {:?}",
+        trial.instance
+    );
+    assert!(
+        trial.detail.contains("non-finite"),
+        "the refusal must say what went wrong: {}",
+        trial.detail
+    );
+}

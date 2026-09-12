@@ -71,6 +71,13 @@ fn generated_veriloga_stamp_error(
         GeneratedEvaluationError::EventControl { source, .. } => {
             matches!(source, GeneratedEventControlError::NonFiniteExpression)
         }
+        // The stamper's own audit: the module's arithmetic left the reals at
+        // the point the solver offered, exactly as `ln(V(p,n)+0.1)` does on
+        // the runtime route.
+        GeneratedEvaluationError::NonFiniteContribution { .. } => true,
+        // The producer already split this: only a non-finite operand is a
+        // property of the iterate. See `IntegerRuntimeError::is_non_finite_operand`.
+        GeneratedEvaluationError::Integer { non_finite, .. } => *non_finite,
         _ => false,
     };
     if rejectable {
@@ -2185,5 +2192,74 @@ mod tests {
         );
 
         assert!(circuit.has_nonlinear_devices());
+    }
+
+    /// The generated route's half of the three-route classification table.
+    ///
+    /// The interpreter's rows are pinned in `rspice-veriloga`'s
+    /// `every_shared_producer_splits_a_refusal_the_same_way_for_every_route`;
+    /// these are the same rows as the generated adapter reports them, and they
+    /// must agree. A generated `Integer` refusal now carries the producer's own
+    /// answer rather than being classified here by guesswork, and the stamper's
+    /// finiteness audit is a rejectable trial for the same reason a runtime
+    /// module's `ln(V(p,n)+0.1)` is.
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn the_generated_route_classifies_a_refusal_as_the_interpreter_does() {
+        use crate::device::StampError;
+        use rspice_veriloga_runtime::{GeneratedEvaluationError, GeneratedVerilogAEvaluationError};
+
+        let classify = |source: GeneratedEvaluationError| {
+            generated_veriloga_stamp_error(GeneratedVerilogAEvaluationError {
+                instance_name: "x1".to_string(),
+                model_name: "m",
+                source,
+            })
+        };
+
+        for (source, rejectable) in [
+            (
+                GeneratedEvaluationError::NonFiniteContribution {
+                    target: "Jacobian entry",
+                },
+                true,
+            ),
+            (
+                GeneratedEvaluationError::Integer {
+                    reason: "conversion requires a finite value",
+                    non_finite: true,
+                },
+                true,
+            ),
+            (
+                GeneratedEvaluationError::Integer {
+                    reason: "conversion rounds outside the signed 32-bit range",
+                    non_finite: false,
+                },
+                false,
+            ),
+            (
+                GeneratedEvaluationError::Integer {
+                    reason: "division by zero",
+                    non_finite: false,
+                },
+                false,
+            ),
+            (
+                GeneratedEvaluationError::SimulationParameter { name: "gmin" },
+                false,
+            ),
+        ] {
+            let rendered = format!("{source}");
+            let error = classify(source);
+            assert_eq!(
+                matches!(error, StampError::NonFiniteTrial(_)),
+                rejectable,
+                "{rendered}: {error}"
+            );
+            if let StampError::NonFiniteTrial(trial) = &error {
+                assert_eq!(trial.instance, "x1");
+            }
+        }
     }
 }
