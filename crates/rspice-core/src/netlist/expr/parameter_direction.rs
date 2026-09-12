@@ -23,6 +23,21 @@ impl ComplexDirection {
         Self::from(0.0)
     }
 
+    /// An undefined direction travels as a NaN tangent so that only the values
+    /// that actually consume it are undefined. An operation whose own result is
+    /// locally constant in the parameter absorbs it instead: a comparison away
+    /// from its switching point, or a step away from its jump, has a defined
+    /// derivative no matter what its argument's tangent is. A dependency whose
+    /// own stored direction is undefined enters a later binding as this same
+    /// tangent, so one definition's kink refuses only the values that read it.
+    pub(crate) fn undefined() -> Self {
+        Self::from(Value::NAN)
+    }
+
+    pub(crate) fn is_undefined(self) -> bool {
+        self.re.binary64().is_nan() || self.im.binary64().is_nan()
+    }
+
     pub(crate) fn is_zero(self) -> bool {
         self.re == 0.0 && self.im == 0.0
     }
@@ -185,7 +200,7 @@ impl<'a, F> ParameterDirection<'a, F> {
             return Err(invalid("parameter direction stack is inconsistent"));
         }
         let direction = self.pop()?;
-        if (self.consumed || undefined(direction))
+        if (self.consumed || direction.is_undefined())
             && let Some(error) = self.error.take()
         {
             return Err(error);
@@ -201,7 +216,7 @@ impl<'a, F> ParameterDirection<'a, F> {
             Ok(direction) => self.directions.push(direction),
             Err(error) => {
                 self.error.get_or_insert(error);
-                self.directions.push(ComplexDirection::from(Value::NAN));
+                self.directions.push(ComplexDirection::undefined());
             }
         }
     }
@@ -209,15 +224,6 @@ impl<'a, F> ParameterDirection<'a, F> {
 
 fn invalid(message: &str) -> ExprError {
     ExprError::InvalidArgument(message.to_owned())
-}
-
-/// An undefined direction travels as a NaN tangent so that only the values
-/// that actually consume it are undefined. An operation whose own result is
-/// locally constant in the parameter absorbs it instead: a comparison away
-/// from its switching point, or a step away from its jump, has a defined
-/// derivative no matter what its argument's tangent is.
-fn undefined(direction: ComplexDirection) -> bool {
-    direction.re.binary64().is_nan() || direction.im.binary64().is_nan()
 }
 
 impl<F> PreparedEvaluation for ParameterDirection<'_, F>
@@ -361,7 +367,9 @@ where
         // undefined or is switching here leaves the result undefined. A
         // condition built from an undefined tangent whose own truth is locally
         // constant has already absorbed it and selects one branch throughout.
-        if undefined(direction) || (condition == ComplexValue::from(0.0) && !direction.is_zero()) {
+        if direction.is_undefined()
+            || (condition == ComplexValue::from(0.0) && !direction.is_zero())
+        {
             self.consumed = true;
             self.error.get_or_insert_with(|| {
                 invalid("conditional boundary has no two-sided parameter derivative")

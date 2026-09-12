@@ -697,12 +697,19 @@ impl ParamContext {
             Ok(self.get_complex(name).map(|value| {
                 let direction = self.parameter_direction(name).unwrap_or_else(|error| {
                     dependency_error.get_or_insert(error);
-                    ComplexDirection::zero()
+                    ComplexDirection::undefined()
                 });
                 (value, direction)
             }))
         })?;
-        let direction = dependency_error.map_or(direction, Err);
+        // A dependency's undefined direction enters as the tangent
+        // `ComplexDirection::undefined` documents: this expression reports the
+        // dependency's own error only where that tangent survives to its
+        // value or is consumed by a condition selecting it.
+        let direction = match direction {
+            Ok(tangent) if !tangent.is_undefined() => Ok(tangent),
+            outcome => dependency_error.map_or(outcome, Err),
+        };
         let value = if self.expression_dialect == ExpressionDialect::Xyce {
             normalize_xyce_expression_result(value)
         } else {

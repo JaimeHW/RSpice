@@ -458,6 +458,44 @@ fn parameter_directions_use_the_authored_random_draws_once() {
 }
 
 #[test]
+fn parameter_direction_bindings_refuse_only_the_values_that_consume_a_kink() {
+    let mut ctx = ParamContext::new();
+    ctx.set("P", 0.0);
+    ctx.seed_parameter_direction("P", false);
+    let (value, direction) = ctx.evaluate_parameter_binding("abs(p)").unwrap();
+    let direction = direction.expect("a seeded coordinate reports a direction");
+    assert_eq!(value, ComplexValue::from(0.0));
+    assert!(direction.is_err(), "|p| has no derivative at zero");
+    ctx.set_complex("CUSP", value);
+    ctx.retain_parameter_direction("CUSP", false, Some(direction));
+    for (source, expected) in [
+        // A comparison away from its switching point, and a select-by-value
+        // that takes the other argument, both absorb the dependency's tangent;
+        // an unrelated dependency in the same expression keeps its own.
+        ("(cusp>1)?2:3", Some(0.0)),
+        ("max(cusp,5)+p", Some(1.0)),
+        // The kink reaches the value, and the condition switches here.
+        ("1+cusp", None),
+        ("(cusp>0)?2:3", None),
+    ] {
+        let (_, direction) = ctx
+            .evaluate_parameter_binding(source)
+            .unwrap_or_else(|error| panic!("{source}: {error}"));
+        let direction = direction.expect("a seeded coordinate reports a direction");
+        match expected {
+            Some(expected) => assert_eq!(
+                direction
+                    .unwrap_or_else(|error| panic!("{source}: {error}"))
+                    .binary64(),
+                ComplexValue::from(expected),
+                "{source}"
+            ),
+            None => assert!(direction.is_err(), "{source}"),
+        }
+    }
+}
+
+#[test]
 fn parsed_parameter_directions_preserve_definition_order_and_namespaces() {
     use crate::netlist::NetlistParseOptions;
     use crate::netlist::parser::{
