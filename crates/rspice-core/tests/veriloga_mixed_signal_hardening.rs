@@ -2545,8 +2545,13 @@ endmodule
 /// rises once rather than chattering. The *mechanism* — that
 /// `trial_boundary_refinement_time` offers the controller no root towards the
 /// interpolated instant — is asserted directly in `mixed.rs`'s own
-/// `a_step_a_discrete_read_moved_in_has_no_interior_root`, because a deck
-/// cannot separate the two kinds of re-solve it would take to see it here:
+/// `a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is`,
+/// which reproduces the seam this deck actually re-solves across: the write
+/// lands in a Newton probe the solver rolls back, so the trial that dates the
+/// crossing it carried cannot read it from the store and the fact is latched
+/// per candidate instead (`mixed.rs`'s `CarriedFeedback`). It is asserted
+/// there rather than here because a deck cannot separate the two kinds of
+/// re-solve it would take to see it:
 /// the controller legitimately walks the step down towards `ca`'s own interior
 /// crossing, and lands accepted points a few picoseconds from where the
 /// artefact would have put them. The accepted timeline around the crossing is
@@ -2620,6 +2625,17 @@ fn the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing() {
 /// that the crossing costs a handful of accepted points and that none of them
 /// is a bisection rung; the tick assertions of the case above pin that the
 /// dating the fix rests on is still the one the deck sees.
+///
+/// The dating that closes it is causal, not positional: `cb` is dated at the
+/// endpoint because the discrete half wrote something the analog equations
+/// read before it was found, and that write is remembered across the Newton
+/// probes the solver rolls back — `mixed.rs`'s `CarriedFeedback`, pinned at the
+/// unit level by
+/// `a_crossing_a_rolled_back_probe_fed_back_into_is_dated_where_its_cause_is`
+/// and by its control
+/// `a_probe_that_moved_nothing_the_analog_block_reads_leaves_the_interior_root`.
+/// Case d‴ below is this same deck with the feedback and the sensing bridge in
+/// two different instances, which is the form no per-instance rule reaches.
 #[test]
 fn a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into() {
     /// The instant `ca`'s ramp reaches half the supply.
