@@ -224,6 +224,10 @@ struct GeneratedDdtLanes<'a> {
     older: &'a [Value],
     derivative_previous: &'a [Value],
     candidate_valid: &'a [bool],
+    /// Whether the site already carried accepted history. The emitter writes
+    /// this lane first, ahead of the `idt` flags and both candidate-valid
+    /// lanes (`rust_backend::state_file`).
+    initialized: &'a [bool],
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -247,12 +251,14 @@ impl<'a> GeneratedDdtLanes<'a> {
         let candidate_valid = state
             .flags
             .get(candidate_valid_offset..candidate_valid_offset.checked_add(ddt_len)?)?;
+        let initialized = state.flags.get(..ddt_len)?;
         Some(Self {
             current,
             previous,
             older,
             derivative_previous,
             candidate_valid,
+            initialized,
         })
     }
 }
@@ -1930,6 +1936,15 @@ impl BuiltinVerilogAInstance {
         // older held, so this is the only moment the fourth charge point still
         // exists. Taking it here is what lets an order-two truncation estimate
         // read four accepted points from a model that stores two.
+        //
+        // A site's first accepted point has no fourth charge behind it, and a
+        // zero is not a neutral placeholder for one: it is a full-scale step
+        // away from the operating-point charge the other three lanes hold, and
+        // the third-order divided difference built from it collapses the
+        // timestep. The rotation itself seeds an uninitialized site's older
+        // lane from the candidate input rather than from a zero, so the fourth
+        // point takes the same seed and the differences start flat, exactly as
+        // the native families' operating-point seeding makes them.
         if !self.dynamic_charge_third_back.is_empty() {
             let retiring = self.kind.capture_rollback_state();
             if let Some(lanes) = GeneratedDdtLanes::of(
@@ -1939,7 +1954,11 @@ impl BuiltinVerilogAInstance {
             ) {
                 for (index, third_back) in self.dynamic_charge_third_back.iter_mut().enumerate() {
                     if lanes.candidate_valid[index] {
-                        *third_back = lanes.older[index];
+                        *third_back = if lanes.initialized[index] {
+                            lanes.older[index]
+                        } else {
+                            lanes.current[index]
+                        };
                     }
                 }
             }
