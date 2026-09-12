@@ -50,6 +50,55 @@ pub use rspice_veriloga::{
 
 use crate::Value;
 
+/// One instance's terminal voltages at the iterate the solver handed it.
+///
+/// The iterate itself is finite — it is the module's own arithmetic that left
+/// its domain — so these are the numbers a user needs to see to understand why
+/// the evaluation failed.
+fn terminal_iterate_summary(device: &VerilogADevice, circuit_voltages: &[Value]) -> String {
+    let terminals = device
+        .terminal_names()
+        .iter()
+        .enumerate()
+        .map(|(terminal, name)| {
+            // Device node ids are 1-based over the MNA solution; 0 is ground.
+            let node = device.node_for_terminal(terminal);
+            let voltage = if node == 0 {
+                Some(0.0)
+            } else {
+                circuit_voltages.get(node - 1).copied()
+            };
+            match voltage {
+                Some(voltage) => format!("{name}={voltage:.6e}"),
+                None => format!("{name}=<unmapped>"),
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", terminals.join(", "))
+}
+
+/// Render one stamping failure, classifying a non-finite evaluation as a
+/// rejectable trial so the Newton loops can cut dt or step the sources instead
+/// of ending the run. Every other fault is structural and keeps its wording.
+fn stamp_failure_message(
+    device: &VerilogADevice,
+    circuit_voltages: &[Value],
+    error: &rspice_veriloga::vm::VmError,
+) -> String {
+    match error {
+        rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => format!(
+            "Verilog-A device '{}' {} {}: {detail}",
+            device.name,
+            crate::analysis::error::NONFINITE_TRIAL_MARKER,
+            terminal_iterate_summary(device, circuit_voltages),
+        ),
+        other => format!(
+            "Verilog-A device '{}' stamping failed: {other}",
+            device.name
+        ),
+    }
+}
+
 /// Adapter trait for integrating VerilogADevice with the simulation engine
 pub trait VerilogADeviceExt {
     /// Stamp the device into the circuit matrix
@@ -99,8 +148,10 @@ impl VerilogADeviceExt for VerilogADevice {
         matrix_add: impl FnMut(usize, usize, Value),
         rhs_add: impl FnMut(usize, Value),
     ) -> Result<(), String> {
-        self.try_stamp(circuit_voltages, matrix_add, rhs_add)
-            .map_err(|err| format!("Verilog-A device '{}' stamping failed: {err}", self.name))
+        match self.try_stamp(circuit_voltages, matrix_add, rhs_add) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(stamp_failure_message(self, circuit_voltages, &error)),
+        }
     }
 
     fn try_stamp_into_matrix_with_mode(
@@ -110,8 +161,10 @@ impl VerilogADeviceExt for VerilogADevice {
         rhs_add: impl FnMut(usize, Value),
         mode: VerilogAEvaluationMode,
     ) -> Result<(), String> {
-        self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode)
-            .map_err(|err| format!("Verilog-A device '{}' stamping failed: {err}", self.name))
+        match self.try_stamp_with_mode(circuit_voltages, matrix_add, rhs_add, mode) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(stamp_failure_message(self, circuit_voltages, &error)),
+        }
     }
 
     fn total_nodes(&self) -> usize {
@@ -304,7 +357,49 @@ impl VerilogADevices {
 
 #[cfg(all(test, feature = "veriloga", not(feature = "veriloga-native")))]
 mod checkpoint_tests {
-    use super::{Compiler, VerilogADevice, VerilogADevices};
+    use super::{Compiler, VerilogADevice, VerilogADeviceExt, VerilogADevices};
+
+    /// The classification the Newton loops read has to survive the trip
+    /// through `SimulationError::Circuit`, and it must carry the iterate: a
+    /// bare "invalid numeric result" tells nobody which instance overshot.
+    #[test]
+    fn a_non_finite_contribution_reports_a_rejectable_trial_with_its_iterate() {
+        let source = r#"
+module domain_edge(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ 1.0e-3 * ln(V(p, n) + 0.1);
+endmodule
+"#;
+        let model = Compiler::default()
+            .compile(source)
+            .expect("compile domain-edge fixture");
+        let mut device = VerilogADevice::try_new("x1", model, &[1, 0]).unwrap();
+        device.try_set_analysis_type(2).unwrap();
+        device.try_set_time(0.0).unwrap();
+        device.try_set_timestep(0.0).unwrap();
+        let message = device
+            .try_stamp_into_matrix(&[-1.0], |_, _, _| {}, |_, _| {})
+            .expect_err("ln() leaves its domain at V(p,n) = -1 V");
+        let error = crate::SimulationError::Circuit(message);
+        let detail = error
+            .nonfinite_trial_detail()
+            .expect("a non-finite contribution is a rejectable trial, not a fatal fault");
+        assert!(detail.contains("x1"), "{detail}");
+        assert!(detail.contains("p=-1.000000e0"), "{detail}");
+        assert!(detail.contains("n=0.000000e0"), "{detail}");
+        assert!(detail.contains("contribution"), "{detail}");
+    }
+
+    /// A structural fault is not a rejectable trial: retrying it forever would
+    /// replace a precise refusal with a convergence failure.
+    #[test]
+    fn a_structural_stamp_failure_is_not_a_rejectable_trial() {
+        let error = crate::SimulationError::Circuit(
+            "Verilog-A device 'x1' stamping failed: invalid compiled model: no such branch".into(),
+        );
+        assert!(error.nonfinite_trial_detail().is_none());
+    }
 
     #[test]
     fn multi_device_acceptance_validates_all_before_mutating_any_instance() {

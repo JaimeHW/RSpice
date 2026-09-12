@@ -797,7 +797,35 @@ impl From<crate::device::veriloga_builtins::BuiltinInstantiationError> for Simul
     }
 }
 
+/// Phrase that marks a `SimulationError::Circuit` diagnostic as a device
+/// evaluation that left its own numeric domain *at the trial point it was
+/// handed*, rather than a structural fault in the circuit or the model.
+///
+/// `ln(V(p,n)+0.1)` is defined at every accepted point of a well-posed deck
+/// and undefined at an overshooting Newton iterate. Spectre and ngspice reject
+/// such an iterate — cut the timestep, step the sources — and end the run only
+/// when every retry is still non-finite. The classification travels inside the
+/// message because the device stamping surface is `Result<(), String>` from
+/// the device adapter to `SimulationError::Circuit`. The marker is written in
+/// exactly one place, the Verilog-A device adapter's stamp_failure_message,
+/// and read in exactly one place, nonfinite_trial_detail below.
+pub(crate) const NONFINITE_TRIAL_MARKER: &str = "produced a non-finite value at a trial iterate";
+
 impl SimulationError {
+    /// The diagnostic of a device evaluation a Newton loop may reject as a
+    /// failed iterate, or `None` when the failure has to end the run.
+    ///
+    /// A rejecting loop is expected to keep the returned detail and hand it
+    /// back when its retry budget is exhausted: the instance, the operator and
+    /// the terminal voltages that produced the non-finite result are the whole
+    /// diagnostic value of the failure.
+    pub(crate) fn nonfinite_trial_detail(&self) -> Option<&str> {
+        match self {
+            Self::Circuit(message) if message.contains(NONFINITE_TRIAL_MARKER) => Some(message),
+            _ => None,
+        }
+    }
+
     /// Return stable metadata without requiring consumers to parse the display
     /// message or duplicate knowledge of nested error variants.
     pub fn descriptor(&self) -> SimulationErrorDescriptor {
