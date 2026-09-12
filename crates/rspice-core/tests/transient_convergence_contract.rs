@@ -323,3 +323,46 @@ fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
     );
     assert_eq!(quality.force_accepted_points, 0);
 }
+
+/// A force-accept arms the conservative step-recovery caps for two recovery
+/// events, not for the rest of the run. The cooldown used to be decremented
+/// only inside the Newton non-convergence arm, so a timepoint force-accepted
+/// out of LTE exhaustion in a run that never failed Newton again held the
+/// accepted-step growth limit at 1.5x all the way to `tstop`.
+///
+/// The deck reaches that path without a single Newton failure: the coupled
+/// inductor pair keeps it off ngspice device-local truncation, so the generic
+/// voltage LTE is the acceptance authority, and the 1 ps edge at t = 0.5 s is a
+/// step the predictor cannot follow at any width above the integration floor.
+/// The diode keeps the deck nonlinear, which is what puts the growth limit on
+/// the cooldown instead of on the strictly linear fast-recovery path.
+#[test]
+fn a_force_accepted_edge_does_not_cap_step_growth_for_the_rest_of_the_run() {
+    let netlist = Netlist::parse(
+        "force accepted edge\nV1 in 0 PULSE(0 1 0.5 1p 1p 10 20)\nR1 in out 1k\nC1 out 0 1n\nD1 0 out dm\n.model dm D(IS=1e-14)\nR3 in p 1k\nL1 p 0 1\nL2 s 0 1\nK1 L1 L2 0.5\nR4 s 0 1k\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine.run_tran(&netlist, 1.0, 1.0).unwrap();
+    let quality = engine.convergence_quality();
+    let last_force_accept = quality
+        .force_accepted_indices
+        .iter()
+        .copied()
+        .max()
+        .expect("the 1 ps edge exhausts LTE recovery at the integration floor");
+    let widths: Vec<f64> = result.time.windows(2).map(|w| w[1] - w[0]).collect();
+    // Two accepted points after the last force-accept the budget is spent, so
+    // the widest growth in the remaining tail is the ordinary 2x limit. While
+    // the cooldown was stuck the same tail grew by exactly 1.5x per step.
+    let widest_growth = widths
+        .windows(2)
+        .skip(last_force_accept + 2)
+        .map(|w| w[1] / w[0])
+        .fold(0.0_f64, f64::max);
+    assert!(
+        widest_growth > 1.9,
+        "growth after the force-accepted edge peaked at {widest_growth}: the recovery caps never \
+         disarmed (1.5 is the armed accepted-step growth limit)"
+    );
+}
