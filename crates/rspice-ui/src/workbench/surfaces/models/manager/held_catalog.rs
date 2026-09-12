@@ -115,7 +115,9 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
             ui,
             "Expires",
             &identity.expires_at,
-            if hub.expired.is_some() {
+            if let Some(reason) = hub.catalog_time_issue.as_deref() {
+                reason
+            } else if hub.expired.is_some() {
                 "passed — the hub offers nothing until this is refreshed"
             } else {
                 "after this the hub offers nothing until it is refreshed"

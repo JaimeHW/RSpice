@@ -32,6 +32,47 @@ fn retained(name: &str, pinned: &[u8], held: &[u8]) -> ModelLibrary {
 }
 
 #[test]
+fn source_verification_retains_findings_without_inventing_a_scan_date() {
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    state.model_library_manager.add_library(retained(
+        "moved",
+        b".model a nmos\n",
+        b".model a pmos\n",
+    ));
+    for epoch in [
+        Err("clock unavailable"),
+        Ok(std::time::Duration::ZERO),
+        Ok(std::time::Duration::MAX),
+    ] {
+        crate::time_compat::with_unix_epoch(epoch, || scan(&mut state));
+        assert!(
+            state
+                .workbench
+                .models_view
+                .source_drift
+                .scanned_at
+                .is_none()
+        );
+        assert_eq!(findings_for(&state, "moved").len(), 1);
+        assert!(!needs_scan(&state));
+    }
+    crate::time_compat::with_unix_epoch(Ok(std::time::Duration::from_secs(1_786_786_200)), || {
+        scan(&mut state)
+    });
+    assert_eq!(
+        state
+            .workbench
+            .models_view
+            .source_drift
+            .scanned_at
+            .as_deref(),
+        Some("2026-08-15 09:30 UTC")
+    );
+    assert_eq!(findings_for(&state, "moved").len(), 1);
+}
+
+#[test]
 fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
     let mut state = AppState::default();
     state.model_library_manager.clear();

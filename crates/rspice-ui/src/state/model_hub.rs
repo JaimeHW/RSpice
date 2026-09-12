@@ -106,6 +106,16 @@ pub enum ModelHubError {
     /// The held catalog states an instant it stops being believable, and this
     /// clock is past it. Only hub offerings are refused; nothing local is.
     CatalogExpired { expires_at: String },
+    /// Catalog offers need a usable wall clock; installed sources do not.
+    CatalogClockUnavailable(&'static str),
+    /// The signed catalog names a validity instant that has no place on the
+    /// Unix timeline — a leap second, or a date the calendar does not
+    /// have. The pack format is not at fault: it authenticates the spelling
+    /// and checks the shape, which is not a claim that the instant exists.
+    CatalogInstantUnplaceable {
+        field: &'static str,
+        instant: String,
+    },
     /// The publisher recalled this release, in these words.
     ReleaseRevoked {
         pack_id: String,
@@ -169,6 +179,15 @@ impl std::fmt::Display for ModelHubError {
                 formatter,
                 "the held catalog is stale: it expired at {expires_at}, so the hub offers nothing \
                  until it is refreshed"
+            ),
+            Self::CatalogClockUnavailable(reason) => write!(
+                formatter,
+                "catalog validity cannot be checked: {reason}; check the system clock before installing model packs"
+            ),
+            Self::CatalogInstantUnplaceable { field, instant } => write!(
+                formatter,
+                "the signed catalog {field} '{instant}' names no instant on the Unix timeline, \r
+                 so the hub offers nothing until the catalog is refreshed"
             ),
             Self::ReleaseRevoked {
                 pack_id,
@@ -264,6 +283,8 @@ pub struct CatalogIdentity {
     /// RFC 3339 instant the publisher generated the snapshot at, covered by
     /// the signature.
     pub generated_at: String,
+    /// Parsed once for freshness checks and catalog-age presentation.
+    pub generated_at_epoch: Option<std::time::Duration>,
     /// RFC 3339 instant after which this catalog must not be believed, covered
     /// by the signature.
     pub expires_at: String,
@@ -273,11 +294,9 @@ pub struct CatalogIdentity {
     /// Kept because a repainting surface asks whether the catalog has expired
     /// on every frame, and re-parsing a date string sixty times a second to
     /// answer is work with a known answer. `None` means the instant did not
-    /// parse — which the signed format's own shape rules make unreachable for
-    /// a snapshot that decoded, and which is read as "no expiry known" rather
-    /// than as "expired", because refusing every hub action over an unparsable
-    /// field would be a client bricking itself on a field it misread.
-    pub expires_at_seconds: Option<u64>,
+    /// parse. The held catalog remains readable, but it cannot authorize an
+    /// offer until its validity period can be interpreted.
+    pub expires_at_epoch: Option<std::time::Duration>,
 }
 
 /// The releases the held catalog recalls, and why.
@@ -482,49 +501,32 @@ pub(crate) fn accept_archive(
     }
 }
 
-/// Seconds since the unix epoch for an RFC 3339 instant in UTC.
+/// Time since the Unix epoch for an RFC 3339 instant in UTC.
 ///
-/// The snapshot format fixes the shape — `YYYY-MM-DDTHH:MM:SSZ` — so this
-/// reads that shape and refuses anything else rather than pulling in a date
-/// library to be lenient about a field the signature already constrains.
-///
-/// It lives here rather than in the service above because two callers need it
-/// and both are about the same signed fields: this module decides whether the
-/// catalog has expired, and the service decides how old it is.
-pub(crate) fn rfc3339_seconds(value: &str) -> Option<u64> {
-    let value = value.strip_suffix('Z')?;
-    let (date, time) = value.split_once('T')?;
-    let mut date = date.split('-');
-    let year: i64 = date.next()?.parse().ok()?;
-    let month: i64 = date.next()?.parse().ok()?;
-    let day: i64 = date.next()?.parse().ok()?;
-    if date.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+/// Preserve the catalog's UTC spelling and validate calendar dates using the
+/// existing time dependency. Signed shape validation alone does not prove
+/// that a date such as February 31 exists. Parsed values are cached with the
+/// catalog identity for expiry and age checks.
+pub(crate) fn rfc3339_epoch(value: &str) -> Option<std::time::Duration> {
+    if !value.ends_with('Z') || value.as_bytes().get(10) != Some(&b'T') {
         return None;
     }
-    let mut time = time.split(':');
-    let hour: i64 = time.next()?.parse().ok()?;
-    let minute: i64 = time.next()?.parse().ok()?;
-    let second: i64 = time
-        .next()?
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .parse()
-        .ok()?;
-    if time.next().is_some() || hour > 23 || minute > 59 || second > 60 {
+    // Unix time cannot name a leap second. Nor may parsing silently discard
+    // significant fractional digits beyond Duration's nanosecond precision.
+    if value.as_bytes().get(17..19) == Some(b"60")
+        || value
+            .strip_suffix('Z')?
+            .split_once('.')
+            .is_some_and(|(_, fraction)| fraction.trim_end_matches('0').len() > 9)
+    {
         return None;
     }
-
-    // Days from the civil calendar, by Howard Hinnant's algorithm: the shift
-    // to a March-based year makes the leap day the last day of the year, which
-    // is what removes every special case from the arithmetic.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    u64::try_from(days * 86_400 + hour * 3600 + minute * 60 + second).ok()
+    let instant =
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()?;
+    Some(std::time::Duration::new(
+        u64::try_from(instant.unix_timestamp()).ok()?,
+        instant.nanosecond(),
+    ))
 }
 
 impl CatalogIdentity {
@@ -537,7 +539,8 @@ impl CatalogIdentity {
             schema: snapshot.schema,
             serial: snapshot.serial,
             generated_at: snapshot.generated_at.clone(),
-            expires_at_seconds: rfc3339_seconds(&snapshot.expires_at),
+            generated_at_epoch: rfc3339_epoch(&snapshot.generated_at),
+            expires_at_epoch: rfc3339_epoch(&snapshot.expires_at),
             expires_at: snapshot.expires_at.clone(),
         }
     }
@@ -549,8 +552,8 @@ impl CatalogIdentity {
     /// which the catalog must not be believed, and a boundary a publisher
     /// named is a boundary they meant.
     #[must_use]
-    pub fn expired_at(&self, now: u64) -> bool {
-        self.expires_at_seconds
+    pub fn expired_at(&self, now: std::time::Duration) -> bool {
+        self.expires_at_epoch
             .is_some_and(|expires_at| now >= expires_at)
     }
 }
@@ -746,13 +749,16 @@ impl ModelHub {
     ///
     /// The clock is read here rather than passed in because this is the
     /// consumer the pack format defers the decision to, and
-    /// [`crate::time_compat::unix_epoch`] answers identically on both targets.
+    /// [`crate::time_compat::checked_unix_time_ms`] reads both targets safely.
     /// It costs a clock read and an integer comparison — no parse, no hash —
-    /// which is what lets a repainting surface ask it per frame.
+    /// which is what lets a repainting surface ask it per frame. Absence does
+    /// not authorize offers; use `require_current_catalog` for that decision.
     pub fn catalog_expired(&self) -> Option<&str> {
         let identity = self.catalog_identity.as_ref()?;
+        let now =
+            std::time::Duration::from_millis(crate::time_compat::checked_unix_time_ms().ok()?);
         identity
-            .expired_at(crate::time_compat::unix_epoch().as_secs())
+            .expired_at(now)
             .then_some(identity.expires_at.as_str())
     }
 
@@ -764,19 +770,42 @@ impl ModelHub {
     /// which never stops answering. That split is the whole of D-D: an expired
     /// catalog silences the shop, not the workshop.
     pub fn offered_snapshot(&self) -> Option<&Snapshot> {
-        if self.catalog_expired().is_some() {
-            return None;
-        }
+        self.require_current_catalog().ok()?;
         self.snapshot.as_ref()
     }
 
     /// Refuses when the held catalog may no longer be offered from.
     pub fn require_current_catalog(&self) -> Result<(), ModelHubError> {
-        match self.catalog_expired() {
-            Some(expires_at) => Err(ModelHubError::CatalogExpired {
-                expires_at: expires_at.to_owned(),
-            }),
-            None => Ok(()),
+        let identity = self
+            .catalog_identity
+            .as_ref()
+            .ok_or(ModelHubError::NoCatalog)?;
+        let now = std::time::Duration::from_millis(
+            crate::time_compat::checked_unix_time_ms()
+                .map_err(ModelHubError::CatalogClockUnavailable)?,
+        );
+        let unplaceable =
+            |field: &'static str, instant: &str| ModelHubError::CatalogInstantUnplaceable {
+                field,
+                instant: instant.to_owned(),
+            };
+        let expires_at = identity
+            .expires_at_epoch
+            .ok_or_else(|| unplaceable("expiry", &identity.expires_at))?;
+        let generated_at = identity
+            .generated_at_epoch
+            .ok_or_else(|| unplaceable("generation date", &identity.generated_at))?;
+        if now < generated_at {
+            return Err(ModelHubError::CatalogClockUnavailable(
+                "the system clock precedes the signed catalog generation date",
+            ));
+        }
+        if now >= expires_at {
+            Err(ModelHubError::CatalogExpired {
+                expires_at: identity.expires_at.clone(),
+            })
+        } else {
+            Ok(())
         }
     }
 

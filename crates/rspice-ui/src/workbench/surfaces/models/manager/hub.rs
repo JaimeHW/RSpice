@@ -434,6 +434,8 @@ pub(super) struct HubCatalog {
     /// reason a page has no releases to show, and the page says so rather than
     /// looking like a catalog that happens to be empty.
     pub expired: Option<String>,
+    /// Offers cannot be dated; installed pack storage is still usable.
+    pub catalog_time_issue: Option<String>,
     /// Whether the catalog this hub cached failed verification and was
     /// discarded. Absent evidence and rejected evidence are different answers.
     pub cache_discarded: bool,
@@ -483,6 +485,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
         unavailable: service.unavailable_reason().map(str::to_owned),
         stale: service.catalog_is_stale(),
         expired: service.catalog_expired().map(str::to_owned),
+        catalog_time_issue: service.catalog_time_issue(),
         cache_discarded: service.catalog_cache_discarded(),
         storage: service.storage_standing(),
         ..HubCatalog::default()
@@ -895,6 +898,10 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                     announced(ui, RichText::new(reason).small().color(t.color.err), reason);
                     return;
                 }
+                if let Some(reason) = hub.catalog_time_issue.as_deref() {
+                    announced(ui, RichText::new(reason).small().color(t.color.err), reason);
+                    return;
+                }
                 let summary = catalog_summary(
                     hub.signed.as_deref(),
                     hub.age_days,
@@ -1168,6 +1175,10 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
         return;
     }
     if hub.packs.is_empty() {
+        if let Some(reason) = hub.catalog_time_issue.as_deref() {
+            page_empty_state(ui, "Catalog validity cannot be checked", reason);
+            return;
+        }
         // An expired catalog is a different emptiness from an unfetched one:
         // this client has a catalog and is declining to offer from it, which
         // is a state a reader can act on and "nothing has been fetched" is

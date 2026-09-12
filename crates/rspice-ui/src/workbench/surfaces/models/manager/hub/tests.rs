@@ -157,6 +157,7 @@ fn catalog(packs: Vec<HubLedgerRow>, age_days: Option<u64>, stale: bool) -> HubC
         unavailable: None,
         stale,
         expired: None,
+        catalog_time_issue: None,
         cache_discarded: false,
         identity: None,
         signing_key: "7ce1".to_owned(),
@@ -752,6 +753,42 @@ fn the_expired_page_and_the_revoked_row_are_both_announced() {
             .is_some_and(|label| label.contains("recalled 1.0.0") && label.contains(REASON))),
         "the recalled row announces which release and why"
     );
+}
+
+#[test]
+fn catalog_clock_failure_is_announced_without_hiding_installed_pack_actions() {
+    const REASON: &str = "Catalog validity cannot be checked; check the system clock.";
+    for installed in [false, true] {
+        let packs = if installed {
+            vec![pack(
+                vec![row("Proving", "1.0.0", HubPackState::Installed)],
+                Some(held("1.0.0", Some(ArchiveEvidence::MatchesCatalog))),
+            )]
+        } else {
+            Vec::new()
+        };
+        let mut catalog = catalog(packs, None, true);
+        catalog.catalog_time_issue = Some(REASON.to_owned());
+        let mut state = AppState::default();
+        let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
+            packs_page(ui, app, &catalog);
+        });
+        assert!(labelled(&nodes, REASON));
+        if installed {
+            let verify =
+                button(&nodes, "Verify installed").expect("local verification remains available");
+            assert!(!verify.is_disabled());
+        } else {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|(_, node)| node.label().is_some_and(|label| {
+                        label.contains("Catalog validity cannot be checked")
+                            && label.contains(REASON)
+                    }))
+            );
+        }
+    }
 }
 
 /// A pack being fetched says so, on its own row, until the receipt lands.

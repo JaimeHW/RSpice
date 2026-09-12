@@ -13,6 +13,8 @@ use std::{
     sync::Mutex,
 };
 
+mod clock;
+
 use rspice_pack::{
     License, ManifestTemplate, Part, PartKind, Requires, Revocation, Snapshot, SnapshotPack,
     SnapshotPart, SnapshotRelease, SourceRef, build_pack, encode_snapshot, sha256_hex, signing_key,
@@ -1658,8 +1660,8 @@ fn a_schema_two_snapshot_round_trips_its_description_and_specifications() {
     assert_eq!(identity.serial, 1);
     assert_eq!(identity.expires_at, STANDS_UNTIL);
     assert_eq!(
-        identity.expires_at_seconds,
-        super::rfc3339_seconds(STANDS_UNTIL)
+        identity.expires_at_epoch,
+        super::rfc3339_epoch(STANDS_UNTIL)
     );
 
     let part = hub
@@ -1690,23 +1692,36 @@ fn a_schema_two_snapshot_round_trips_its_description_and_specifications() {
 
 /// Every instant this module reads is one the format's shape rules admit.
 #[test]
-fn civil_instants_convert_to_the_unix_epoch_seconds_they_name() {
-    use super::rfc3339_seconds;
+fn civil_instants_retain_the_exact_unix_epoch_time_they_name() {
+    use super::rfc3339_epoch;
+    use std::time::Duration;
 
-    assert_eq!(rfc3339_seconds("1970-01-01T00:00:00Z"), Some(0));
-    assert_eq!(rfc3339_seconds("2026-08-15T09:30:00Z"), Some(1_786_786_200));
-    // A leap day, and the instant immediately after it.
-    assert_eq!(rfc3339_seconds("2024-02-29T00:00:00Z"), Some(1_709_164_800));
-    assert_eq!(rfc3339_seconds("2024-03-01T00:00:00Z"), Some(1_709_251_200));
     assert_eq!(
-        rfc3339_seconds("2026-08-15T09:30:00.123Z"),
-        Some(1_786_786_200)
+        rfc3339_epoch("1970-01-01T00:00:00Z"),
+        Some(Duration::from_secs(0))
+    );
+    assert_eq!(
+        rfc3339_epoch("2026-08-15T09:30:00Z"),
+        Some(Duration::from_secs(1_786_786_200))
+    );
+    // A leap day, and the instant immediately after it.
+    assert_eq!(
+        rfc3339_epoch("2024-02-29T00:00:00Z"),
+        Some(Duration::from_secs(1_709_164_800))
+    );
+    assert_eq!(
+        rfc3339_epoch("2024-03-01T00:00:00Z"),
+        Some(Duration::from_secs(1_709_251_200))
+    );
+    assert_eq!(
+        rfc3339_epoch("2026-08-15T09:30:00.123Z"),
+        Some(Duration::new(1_786_786_200, 123_000_000))
     );
 }
 
 #[test]
 fn a_malformed_instant_is_refused_rather_than_guessed() {
-    use super::{CatalogIdentity, rfc3339_seconds};
+    use super::{CatalogIdentity, rfc3339_epoch};
 
     for malformed in [
         "",
@@ -1714,17 +1729,22 @@ fn a_malformed_instant_is_refused_rather_than_guessed() {
         "2026-08-15 09:30:00Z",
         "2026-13-15T09:30:00Z",
         "2026-08-15T25:30:00Z",
+        "2026-02-31T09:30:00Z",
+        "2026-08-15T-1:30:00Z",
+        "2026-08-15T09:30:00.invalidZ",
+        "2026-08-15T09:30:60Z",
+        "2026-08-15T09:30:00.1234567891Z",
         "not-a-date",
     ] {
         assert_eq!(
-            rfc3339_seconds(malformed),
+            rfc3339_epoch(malformed),
             None,
             "{malformed:?} must not parse"
         );
     }
-    // An expiry that did not parse is read as "no expiry known", never as
-    // expired: a client bricking its own hub over a field it misread would be
-    // the failure this reading exists to prevent.
+    // Unknown expiry is distinct from proven expiry. Neither this boolean
+    // nor a readable snapshot authorizes offers; require_current_catalog
+    // refuses an uninterpretable validity period.
     let identity = CatalogIdentity {
         generation: None,
         digest: "ab".repeat(32),
@@ -1732,7 +1752,8 @@ fn a_malformed_instant_is_refused_rather_than_guessed() {
         serial: 1,
         generated_at: SIGNED_AT.to_owned(),
         expires_at: "not-an-instant".to_owned(),
-        expires_at_seconds: None,
+        generated_at_epoch: super::rfc3339_epoch(SIGNED_AT),
+        expires_at_epoch: None,
     };
-    assert!(!identity.expired_at(u64::MAX));
+    assert!(!identity.expired_at(std::time::Duration::MAX));
 }

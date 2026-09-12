@@ -197,6 +197,7 @@ fn catalog(attention: bool) -> hub::HubCatalog {
         unavailable: None,
         stale: false,
         expired: None,
+        catalog_time_issue: None,
         cache_discarded: false,
         identity: Some(identity()),
         signing_key: "7ce1fddbb60d7a3ba6a09d5bf669087cd59104fe9fbaad72bbf42e41762f957a".to_owned(),
@@ -214,8 +215,9 @@ fn identity() -> crate::state::model_hub::CatalogIdentity {
         schema: 2,
         serial: 41,
         generated_at: "2026-08-18T04:12:09Z".to_owned(),
+        generated_at_epoch: crate::state::model_hub::rfc3339_epoch("2026-08-18T04:12:09Z"),
         expires_at: "2026-09-17T04:12:09Z".to_owned(),
-        expires_at_seconds: crate::state::model_hub::rfc3339_seconds("2026-09-17T04:12:09Z"),
+        expires_at_epoch: crate::state::model_hub::rfc3339_epoch("2026-09-17T04:12:09Z"),
     }
 }
 
@@ -231,7 +233,7 @@ fn expired_catalog() -> hub::HubCatalog {
     catalog.expired = Some("2026-08-19T04:12:09Z".to_owned());
     catalog.identity = Some(crate::state::model_hub::CatalogIdentity {
         expires_at: "2026-08-19T04:12:09Z".to_owned(),
-        expires_at_seconds: crate::state::model_hub::rfc3339_seconds("2026-08-19T04:12:09Z"),
+        expires_at_epoch: crate::state::model_hub::rfc3339_epoch("2026-08-19T04:12:09Z"),
         ..identity()
     });
     catalog

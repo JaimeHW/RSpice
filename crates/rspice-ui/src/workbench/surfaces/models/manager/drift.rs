@@ -112,7 +112,7 @@ pub(in crate::workbench::surfaces) fn scan(state: &mut AppState) {
 
 /// The instant of the scan, in UTC, when this platform offers a clock.
 fn scanned_at() -> Option<String> {
-    let seconds = i64::try_from(crate::time_compat::unix_epoch().as_secs()).ok()?;
+    let seconds = i64::try_from(crate::time_compat::checked_unix_time_ms().ok()? / 1_000).ok()?;
     let at = time::OffsetDateTime::from_unix_timestamp(seconds).ok()?;
     Some(format!(
         "{:04}-{:02}-{:02} {:02}:{:02} UTC",

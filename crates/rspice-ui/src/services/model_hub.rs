@@ -296,10 +296,10 @@ impl ModelHubService {
     /// download happened, so a client cannot make a stale catalog look fresh
     /// by re-fetching the same generation.
     pub(crate) fn catalog_age_days(&self) -> Option<u64> {
-        let generated = self.hub.as_ref()?.snapshot()?.generated_at.as_str();
-        let generated = crate::state::model_hub::rfc3339_seconds(generated)?;
-        let now = crate::time_compat::unix_epoch().as_secs();
-        Some(now.saturating_sub(generated) / SECONDS_PER_DAY)
+        let generated = self.hub.as_ref()?.catalog_identity()?.generated_at_epoch?;
+        let now =
+            std::time::Duration::from_millis(crate::time_compat::checked_unix_time_ms().ok()?);
+        Some(now.checked_sub(generated)?.as_secs() / SECONDS_PER_DAY)
     }
 
     /// The instant the held catalog stopped being believable, if it has.
@@ -310,6 +310,14 @@ impl ModelHubService {
     /// past it this client offers nothing from the hub until it refreshes.
     pub(crate) fn catalog_expired(&self) -> Option<&str> {
         self.hub.as_ref()?.catalog_expired()
+    }
+
+    /// An offer-specific failure must not hide installed packs or their actions.
+    pub(crate) fn catalog_time_issue(&self) -> Option<String> {
+        match self.hub.as_ref()?.require_current_catalog() {
+            Ok(()) | Err(ModelHubError::NoCatalog | ModelHubError::CatalogExpired { .. }) => None,
+            Err(error) => Some(error.to_string()),
+        }
     }
 
     /// Whether the cached catalog was present and failed verification.
@@ -390,5 +398,47 @@ mod tests {
         assert!(service.hub().is_some());
         assert_eq!(service.catalog_age_days(), None);
         assert!(service.catalog_is_stale());
+    }
+
+    #[test]
+    fn catalog_age_and_issue_distinguish_missing_time_from_a_current_catalog() {
+        use crate::state::model_hub::MemoryModelHubStore;
+        use crate::state::model_hub::tests::{
+            SIGNED_AT, STANDS_UNTIL, StubTransport, anchor_for, hub_signing_key,
+        };
+        use crate::time_compat::with_unix_epoch;
+        use std::{sync::Arc, time::Duration};
+
+        let key = hub_signing_key();
+        let store = Arc::new(MemoryModelHubStore::new());
+        let mut hub = ModelHub::open(anchor_for(&key), Box::new(store.clone()), None).unwrap();
+        let snapshot = rspice_pack::Snapshot {
+            schema: rspice_pack::SNAPSHOT_SCHEMA,
+            serial: 1,
+            generated_at: SIGNED_AT.to_owned(),
+            expires_at: STANDS_UNTIL.to_owned(),
+            packs: Vec::new(),
+            revocations: Vec::new(),
+        };
+        let signed = rspice_pack::encode_snapshot(&snapshot, &key).unwrap();
+        hub.refresh_catalog(&StubTransport::with_snapshot(signed))
+            .unwrap();
+        let generated = hub.catalog_identity().unwrap().generated_at_epoch.unwrap();
+        let service = ModelHubService::with_store(ModelHubStoreHandle::Memory(store), hub);
+        for epoch in [
+            Err("clock unavailable"),
+            Ok(Duration::ZERO),
+            Ok(generated - Duration::from_secs(1)),
+        ] {
+            with_unix_epoch(epoch, || {
+                assert_eq!(service.catalog_age_days(), None);
+                assert!(service.catalog_time_issue().is_some());
+            });
+        }
+        with_unix_epoch(Ok(generated + Duration::from_secs(3 * 86_400)), || {
+            assert_eq!(service.catalog_age_days(), Some(3));
+            assert!(service.catalog_time_issue().is_none());
+            assert!(!service.catalog_is_stale());
+        });
     }
 }
