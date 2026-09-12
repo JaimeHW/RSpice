@@ -383,7 +383,7 @@ Q1 out base emitter 0 active
                 actual.voltage_waveform(name).view(np.uint64),
                 expected.voltage_waveform(name).view(np.uint64),
             ), name
-        for state in ("rth", "xf1", "xf2"):
+        for state in ("dt", "xf1", "xf2"):
             assert np.max(np.abs(actual.voltage_waveform(f"Q1.__{state}.internal"))) > 1e-8
 
     def test_unresumable_checkpoint_is_refused_during_run_preflight(self, engine):

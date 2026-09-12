@@ -751,7 +751,15 @@ impl Bjt {
             if self.vbic_external_thermal_node {
                 self.node_rth
             } else {
-                alloc("rth")
+                // The promoted self-heating unknown is a temperature rise, so
+                // it carries the identity the VBIC 1.3 reference module gives
+                // it: `dt`, the first internal node the generated `vbic13` and
+                // `vbic13_4t` models declare. A card that reroutes to one of
+                // those keeps the same result column and the same checkpointed
+                // state, which is what lets an image written by one build
+                // resume under the other. `rth` is the thermal-resistance
+                // parameter, not the state.
+                alloc("dt")
             }
         } else {
             0

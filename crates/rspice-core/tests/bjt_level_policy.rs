@@ -959,7 +959,7 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
                     sign * current,
                     1e-5,
                 );
-                let rise = voltage(&result, "q1.__rth.internal");
+                let rise = voltage(&result, "q1.__dt.internal");
                 if control == "SW_ET=0" {
                     assert!(rise.abs() < 1e-10);
                 } else {
@@ -971,7 +971,7 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
                 !grounded
                     .node_names
                     .iter()
-                    .any(|name| name.contains(".__rth."))
+                    .any(|name| name.contains(".__dt."))
             );
             assert_rel_close(
                 "grounded thermal pin",
@@ -980,7 +980,7 @@ fn vbic13_self_heating_switch_matches_xyce710_and_grounded_thermal_pins() {
                 1e-5,
             );
             let floor = op_result(&deck("", "").replace("RTH=1000", "RTH=0"));
-            let rise = voltage(&floor, "q1.__rth.internal");
+            let rise = voltage(&floor, "q1.__dt.internal");
             assert!(
                 rise > 6e-8 && rise < 8e-8,
                 "RTH=0 keeps Xyce's 1 mK/W floor: {rise}"
@@ -1287,7 +1287,7 @@ fn vbic13_junction_leakage_obeys_kcl_and_only_heats_series_resistances() {
             );
             assert!((result.branch_current_named("vb").unwrap() - polarity * base).abs() < 1e-11);
             assert!(
-                (voltage(&result, "q1.__rth.internal") - heat).abs() < 1e-10,
+                (voltage(&result, "q1.__dt.internal") - heat).abs() < 1e-10,
                 "heat must include only the physical series resistances"
             );
         }
@@ -1554,7 +1554,7 @@ fn three_terminal_vbic_ignores_substrate_parameters_in_dc_ac_and_thermal_power()
                 actual.node_names.iter().any(|name| name.contains(".__bp.")),
                 "VBIC 1.3 retains BP through the resistance floor"
             );
-            assert!(voltage(&actual, "q1.__rth.internal") > 1e-4);
+            assert!(voltage(&actual, "q1.__dt.internal") > 1e-4);
             assert_eq!(expected.node_voltages, actual.node_voltages);
             assert_eq!(expected.branch_currents, actual.branch_currents);
             assert_eq!(

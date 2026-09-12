@@ -3562,7 +3562,7 @@ mod wasm_tests {
                     assert_eq!(actual.to_bits(), expected.to_bits());
                 }
             }
-            for state in ["rth", "xf1", "xf2"] {
+            for state in ["dt", "xf1", "xf2"] {
                 let name = format!("Q1.__{state}.internal");
                 let column = full
                     .node_names
