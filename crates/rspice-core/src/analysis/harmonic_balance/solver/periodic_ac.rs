@@ -4117,7 +4117,12 @@ mod matrix_free_tests {
         let error = operator
             .validate("invalid periodic spectrum test")
             .expect_err("out-of-range periodic stamps must fail before solving");
-        assert!(error.to_string().contains("outside its 1-node operator"));
+        assert!(
+            error
+                .to_string()
+                .contains("outside its 1-unknown MNA operator"),
+            "{error}"
+        );
 
         let config = HbConfig::new(1.0e6).with_harmonics(1);
         let mut solver = HbSolver::new(config, 2);
