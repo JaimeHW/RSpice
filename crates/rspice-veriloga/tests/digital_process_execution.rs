@@ -2423,9 +2423,12 @@ fn the_remaining_process_refusals_name_themselves() {
 /// phrasing for invariant violations, and `canonical_ir/digital_lower.rs`
 /// classifies each of its diagnostic sites accordingly.
 ///
-/// One row per reachable refusal site. Each is a program the front end already
-/// refused before the classification existed, so the row set is also the pin
-/// that no refused program quietly started compiling.
+/// One row per construct that was found to reach a refusal. Two of them are
+/// answered by the analyzer before the lowering sees them — an unpacked array
+/// and a run-time select bound — and stay here anyway, because the subject is
+/// what the author is told rather than which pass says it. Every row is a
+/// program the front end already refused, so the set is also the pin that no
+/// refused program quietly started compiling.
 #[test]
 fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
     let cases = [
