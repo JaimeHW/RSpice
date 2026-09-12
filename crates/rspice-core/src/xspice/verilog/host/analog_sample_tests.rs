@@ -148,7 +148,7 @@ endmodule
     // A circuit participant is required; the blocked process must never be
     // reported as a successful, settled result when nobody supplies its read.
     assert!(matches!(
-        host.force_many_from_analog(&drives, 1, 0.75e-9),
+        host.force_many_from_analog_ordered(&drives, 1, 0.75e-9, 0.75e-9),
         Err(DigitalRunError::ExternalExecution { .. })
     ));
     host = accepted;

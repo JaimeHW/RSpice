@@ -431,7 +431,22 @@ pub(crate) struct DigitalHost {
     /// ahead of physical analog time; unrelated timers at that tick stay queued.
     analog_ready: Option<Vec<TargetId>>,
     /// Physical time for causal analog activations whose reporting tick differs.
+    ///
+    /// This is what a process woken by the publication reads as `$abstime`, so
+    /// it is the instant the *event* happened — the interpolated threshold
+    /// crossing for an A/D transition, not the endpoint of the analog step
+    /// that discovered it.
     analog_activation_seconds: Option<f64>,
+    /// The analog candidate instant the continuous half is being evaluated at,
+    /// which is what an external Active participant is handed.
+    ///
+    /// Separate from [`Self::analog_activation_seconds`] because the two are
+    /// different quantities whenever an event is interior to an analog step: a
+    /// crossing has an exact sub-step instant, while the analog solution — and
+    /// so an XSPICE wave assembled against it — exists only at the candidate
+    /// endpoint, and cannot be rewound inside one step. They are equal for
+    /// every publication dated at the endpoint itself.
+    analog_exchange_seconds: Option<f64>,
     /// The kernel's id for each process's driver, interned once at
     /// construction. The [`EventTarget`] behind it — the strings an
     /// oscillation diagnostic prints — stays in the kernel, and an activation
@@ -538,6 +553,7 @@ impl DigitalHost {
             analog_ready: None,
             analog_waiters: Vec::new(),
             analog_activation_seconds: None,
+            analog_exchange_seconds: None,
             targets,
             process_of_target,
             fired: Vec::new(),
@@ -712,17 +728,23 @@ impl DigitalHost {
         Ok(())
     }
 
-    /// Settle only the zero-delay causal consequences of an analog crossing.
-    /// Positive delays are still scheduled relative to its rounded digital
-    /// timestamp, but are consumed only when analog time reaches their tick.
-    pub(crate) fn force_many_from_analog(
+    /// [`Self::force_many_from_analog_at`] for a host that owns its own
+    /// execution, so there is no participant to hand the candidate to.
+    pub(crate) fn force_many_from_analog_ordered(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
-        physical_seconds: f64,
+        clock_seconds: f64,
+        candidate_seconds: f64,
     ) -> Result<(), DigitalRunError> {
         self.require_standalone_execution()?;
-        self.force_many_from_analog_with(drives, tick, physical_seconds, &mut NoActiveParticipant)
+        self.force_many_from_analog_at(
+            drives,
+            tick,
+            clock_seconds,
+            candidate_seconds,
+            &mut NoActiveParticipant,
+        )
     }
 
     pub(crate) fn force_many_from_analog_with(
@@ -732,20 +754,54 @@ impl DigitalHost {
         physical_seconds: f64,
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
+        self.force_many_from_analog_at(
+            drives,
+            tick,
+            physical_seconds,
+            physical_seconds,
+            participant,
+        )
+    }
+
+    /// Publish an analog-caused bank and settle only the zero-delay causal
+    /// consequences of it. Positive delays are still scheduled relative to
+    /// `tick`, but are consumed only when analog time reaches their tick.
+    ///
+    /// The event instant and the analog candidate instant are two arguments
+    /// because they are two quantities.
+    ///
+    /// `clock_seconds` is when the event happened, and is what every process
+    /// this publication wakes reads as `$abstime`. `candidate_seconds` is the
+    /// analog timepoint the continuous half has a solution at, and is what an
+    /// external Active participant assembles its wave against. A crossing
+    /// interior to an analog step separates the two: the digital world learns
+    /// the exact instant, while the analog world still only knows the
+    /// endpoint. Pass the same value twice for a publication dated at the
+    /// endpoint, which is what [`Self::force_many_from_analog_with`] does.
+    pub(crate) fn force_many_from_analog_at(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+        tick: u64,
+        clock_seconds: f64,
+        candidate_seconds: f64,
+        participant: &mut (impl DigitalActiveParticipant + ?Sized),
+    ) -> Result<(), DigitalRunError> {
         for (signal, value) in drives {
             self.store.check_force(*signal, value, &self.plan)?;
         }
-        self.set_event_clock(tick, Some(physical_seconds))?;
+        self.set_event_clock(tick, Some(clock_seconds))?;
         for (signal, value) in drives {
             self.store.force(*signal, value.clone(), &self.plan)?;
         }
         self.analog_ready = Some(Vec::new());
-        self.analog_activation_seconds = Some(physical_seconds);
+        self.analog_activation_seconds = Some(clock_seconds);
+        self.analog_exchange_seconds = Some(candidate_seconds);
         let result = self
             .dispatch(tick)
             .and_then(|()| self.settle_with(tick, participant));
         self.analog_ready = None;
         self.analog_activation_seconds = None;
+        self.analog_exchange_seconds = None;
         result
     }
 
@@ -865,8 +921,11 @@ impl DigitalHost {
             // inactive or nonblocking work may advance. A participant returns
             // after one wave, so feedback through HDL can interrupt its settle.
             self.set_event_clock(tick, None)?;
+            // The participant's own time base, not the event clock's: it is
+            // assembling a continuous candidate, and the only instant it has a
+            // solution for is the analog endpoint.
             let physical_seconds = self
-                .analog_activation_seconds
+                .analog_exchange_seconds
                 .unwrap_or(self.scheduler.resolution().ticks_to_seconds(tick)?);
             let more = participant.settle_active(&mut DigitalActiveExchange {
                 host: self,

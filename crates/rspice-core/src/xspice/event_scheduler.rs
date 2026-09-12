@@ -289,6 +289,50 @@ impl TimeResolution {
         }
         Ok(ticks)
     }
+
+    /// Convert analog seconds to the tick *at or after* them.
+    ///
+    /// This is the conversion an event crossing from *another event kernel*
+    /// into the HDL time wheel is dated with, and it is the third of the three
+    /// mappings this type carries — see the module documentation of
+    /// [`crate::xspice::verilog`], which states all three in one place.
+    ///
+    /// The rule it implements is "not before". An XSPICE code model names its
+    /// event times in seconds and the HDL names them in ticks, so the two
+    /// directions of that boundary are the two halves of one map: an HDL tick
+    /// `T` reaches XSPICE as exactly [`Self::ticks_to_seconds`]`(T)`, and an
+    /// off-grid XSPICE instant reaches the HDL at the least tick whose own
+    /// instant is not before it. Rounding to nearest would date an instant in
+    /// the lower half of a tick *earlier* than it happened, which is what
+    /// makes a `#1` from the woken process elapse in less than one time unit.
+    ///
+    /// Neither of the other two mappings may be rewritten into this one.
+    /// [`Self::seconds_to_floor_ticks`] bounds how far the digital world may
+    /// be advanced; [`Self::seconds_to_ticks`] places an *analog* event, which
+    /// Verilog-AMS LRM 2.4 section 7.3.6.1 fixes at the nearest tick rather
+    /// than at the next one.
+    ///
+    /// # Exactness
+    ///
+    /// Defined as the smallest `t` with `ticks_to_seconds(t) >= seconds`, and
+    /// computed from [`Self::seconds_to_floor_ticks`] so that the two agree by
+    /// construction: an instant that sits exactly on a tick converts to that
+    /// tick in both directions, and only a strictly interior one moves up.
+    ///
+    /// Gated with its caller for the same reason the floor conversion is: the
+    /// mixed interleave is a `veriloga` module, and a build without the
+    /// feature would otherwise carry an orphan that `-D warnings` reports.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn seconds_to_ceil_ticks(self, seconds: f64) -> Result<u64, SchedulerError> {
+        let ticks = self.seconds_to_floor_ticks(seconds)?;
+        if (ticks as f64) * self.seconds_per_tick() >= seconds {
+            return Ok(ticks);
+        }
+        if ticks >= Self::MAX_EXACT_TICKS {
+            return Err(SchedulerError::SecondsNotRepresentable { seconds });
+        }
+        Ok(ticks + 1)
+    }
 }
 
 /// The driver an event updates.
