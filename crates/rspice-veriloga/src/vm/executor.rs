@@ -1598,13 +1598,20 @@ mod tests {
         );
     }
 
+    /// Both halves fail closed; only one of them is worth retrying.
+    ///
+    /// A non-finite operand is what an overshooting iterate produced and the
+    /// next one may not, so it is rejectable. A finite operand that rounds
+    /// outside the signed 32-bit range is what the module's arithmetic
+    /// computes at every point the solver could offer, so walking the
+    /// convergence ladder only delays the same message.
     #[test]
     fn integer_instructions_fail_closed_without_panicking() {
-        for (left, right) in [
-            (f64::NAN, 1.0),
-            (f64::INFINITY, 1.0),
-            (1.0, f64::NAN),
-            (1.0, f64::from(i32::MAX) + 0.5),
+        for (left, right, iterate_dependent) in [
+            (f64::NAN, 1.0, true),
+            (f64::INFINITY, 1.0, true),
+            (1.0, f64::NAN, true),
+            (1.0, f64::from(i32::MAX) + 0.5, false),
         ] {
             let error = execute(vec![
                 Instruction::PushConst(left),
@@ -1612,7 +1619,11 @@ mod tests {
                 Instruction::Shl,
             ])
             .expect_err("invalid integer operation must fail");
-            assert!(matches!(error, VmError::InvalidNumericResult(_)));
+            assert_eq!(
+                matches!(error, VmError::InvalidNumericResult(_)),
+                iterate_dependent,
+                "{left} << {right}: {error:?}"
+            );
         }
     }
 
@@ -1643,10 +1654,19 @@ mod tests {
             "a direction other than -1, 0, or +1 generates no event"
         );
 
-        for (direction, enable) in [(0.6, 1.0), (1.0, 0.5), (f64::NAN, 1.0)] {
+        // A finite operand that is not an integer is the module's own
+        // arithmetic and refuses the same way at every point; a NaN is the
+        // iterate's, and a smaller step may not produce one.
+        for (direction, enable, iterate_dependent) in
+            [(0.6, 1.0, false), (1.0, 0.5, false), (f64::NAN, 1.0, true)]
+        {
             let error = execute_with_context(&mut context, cross(1.0, direction, enable))
                 .expect_err("non-integer event operands must fail closed");
-            assert!(matches!(error, VmError::InvalidNumericResult(_)));
+            assert_eq!(
+                matches!(error, VmError::InvalidNumericResult(_)),
+                iterate_dependent,
+                "direction {direction}, enable {enable}: {error:?}"
+            );
         }
     }
 
@@ -2216,6 +2236,16 @@ mod tests {
         assert_eq!(clamped, 0.0, "clamped td has zero derivative coefficient");
     }
 
+    /// A singular Laplace system is a property of the transfer function and
+    /// the timestep, not of the input, so it is structural on every route.
+    ///
+    /// An ideal integrator has no DC equilibrium at any iterate, and a
+    /// state-space solve that is singular for `(A, dt)` is singular for every
+    /// input the solver could offer. Both used to walk the whole convergence
+    /// ladder — every dt cut in transient, source stepping, pseudo-transient
+    /// and gmin in DC — before reporting the message they already had at the
+    /// first iterate. `LaplaceError::is_iterate_dependent` is what the
+    /// interpreter, the native helpers and the small-signal VM all ask.
     #[test]
     fn singular_laplace_evaluations_are_typed_vm_errors() {
         let mut dc_context = VmContext::default();
@@ -2228,7 +2258,10 @@ mod tests {
             vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
         )
         .expect_err("integrator DC equilibrium is singular");
-        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(
+            matches!(error, VmError::InvalidRuntimeOperation(_)),
+            "{error:?}"
+        );
         assert!(error.to_string().contains("DC equilibrium"));
 
         let mut transient_context = VmContext::default();
@@ -2243,7 +2276,10 @@ mod tests {
             vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
         )
         .expect_err("singular transient state solve must fail");
-        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(
+            matches!(error, VmError::InvalidRuntimeOperation(_)),
+            "{error:?}"
+        );
         assert!(error.to_string().contains("transient"));
     }
 
