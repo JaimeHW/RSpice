@@ -1699,31 +1699,41 @@ endmodule
     );
 }
 
-/// Representable at the canonical level, and still refused by the one backend
-/// that cannot run it.
+/// Representable at the canonical level, and refused only where the backend
+/// genuinely cannot run it.
 ///
-/// This is the contract that lets the canonical level grow without moving any
-/// shipped compilation onto it: `absdelay` and `idtmod` each
-/// own accepted history that the direct generated-Rust backend has no place
-/// for. Each lowers to its own CFG kind — that is the point of
-/// the lane — and each is named at the refusal, so a model reaching one is sent
-/// to a runtime that implements it rather than emitted as something weaker.
+/// The canonical level grows without moving any shipped compilation onto it,
+/// so this has two halves and both are load-bearing. The first names what the
+/// direct generated-Rust backend *has* learned: `idt` and `idtmod` each own
+/// accepted history, and that history is emitted now, so a refusal that
+/// outlived the limitation would send a model to a slower runtime for nothing.
+/// The second pins, by name, every operator the backend still refuses —
+/// `reject_unsupported_kinds` in `rust_backend/canonical.rs` — because each
+/// owns a transport queue, a rate-limiter state or a filter realization that
+/// this backend has no place for, and a model reaching one has to be sent to a
+/// runtime that implements it rather than emitted as something weaker.
+///
+/// Each case names the canonical kind it must reach as well as the outcome, so
+/// a lowering that stopped producing the kind cannot make the row pass for the
+/// wrong reason. A backend that learns one of the refused operators fails here
+/// loudly, which is the point: the list is shortened deliberately, in the same
+/// commit that shortens it, rather than drifting out of date silently.
 #[test]
 fn generated_rust_refuses_operators_without_history_support() {
-    let cases = [
-        (
-            "absdelay",
-            "1.0e-3 * absdelay(V(p, n), 1.0e-9)",
-            "stateful absdelay",
-        ),
-        (
-            "idtmod",
-            "1.0e-3 * idtmod(V(p, n), 0.0, 1.0, -0.5)",
-            "stateful idtmod",
-        ),
-    ];
+    use rspice_veriloga::canonical_ir::CfgValueKind;
 
-    for (name, expression, expected) in cases {
+    /// The canonical kind a row's operator must reach, so that a row cannot
+    /// pass because the lowering stopped producing what it is about.
+    type Reaches = fn(&CfgValueKind) -> bool;
+    /// Spelling, contribution, kind.
+    type EmittedCase = (&'static str, &'static str, Reaches);
+    /// Spelling, contribution, the text the refusal must name, kind.
+    type RefusedCase = (&'static str, &'static str, &'static str, Reaches);
+
+    fn artifact_of(
+        name: &str,
+        expression: &str,
+    ) -> rspice_veriloga::canonical_ir::CanonicalIrArtifact {
         let source = format!(
             r#"
 `include "disciplines.vams"
@@ -1734,20 +1744,95 @@ module generated_rust_{name}(p, n);
 endmodule
 "#
         );
-        let artifact = VerilogACompiler::default()
+        VerilogACompiler::default()
             .compile_canonical_ir(&source)
-            .unwrap_or_else(|error| panic!("{name} must compile to canonical IR: {error}"));
+            .unwrap_or_else(|error| panic!("{name} must compile to canonical IR: {error}"))
+    }
+
+    fn assert_reaches_kind(
+        name: &str,
+        artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        kind: fn(&CfgValueKind) -> bool,
+    ) {
         let cfg = rspice_veriloga::canonical_ir::CfgModel::from_hir(&artifact.hir, &artifact.mir)
             .unwrap_or_else(|diagnostics| panic!("{name} must lower to a CFG: {diagnostics:?}"));
         assert!(
-            cfg.function.values.iter().any(|value| matches!(
-                value.kind,
-                rspice_veriloga::canonical_ir::CfgValueKind::AbsDelay { .. }
-                    | rspice_veriloga::canonical_ir::CfgValueKind::IdtMod { .. }
-            )),
+            cfg.function.values.iter().any(|value| kind(&value.kind)),
             "{name} must reach its own canonical kind"
         );
+    }
 
+    // The integrators the backend keeps history for. `idtmod` was refused here
+    // until the generated circular integrators landed; the refusal is gone and
+    // this is what says so.
+    //
+    // `idt` is written with its initial condition: the one-argument form is
+    // given a solver equation by semantic lowering rather than an integrator
+    // node, so it never reaches the kind this row is about.
+    let emitted: [EmittedCase; 2] = [
+        ("idt", "1.0e-3 * idt(V(p, n), 0.0)", |kind| {
+            matches!(kind, CfgValueKind::Idt { .. })
+        }),
+        (
+            "idtmod",
+            "1.0e-3 * idtmod(V(p, n), 0.0, 1.0, -0.5)",
+            |kind| matches!(kind, CfgValueKind::IdtMod { .. }),
+        ),
+    ];
+    for (name, expression, kind) in emitted {
+        let artifact = artifact_of(name, expression);
+        assert_reaches_kind(name, &artifact, kind);
+        rspice_veriloga::rust_backend::RustTranspiler::default()
+            .transpile(&artifact)
+            .unwrap_or_else(|error| {
+                panic!("{name} must be emitted by the direct Rust backend: {error}")
+            });
+    }
+
+    // What is still refused, in the spelling the refusal reports. A filter is
+    // named by the spelling the source wrote rather than by the form it
+    // reduces to, so both spellings of each filter family are pinned.
+    let refused: [RefusedCase; 6] = [
+        (
+            "absdelay",
+            "1.0e-3 * absdelay(V(p, n), 1.0e-9)",
+            "stateful absdelay",
+            |kind| matches!(kind, CfgValueKind::AbsDelay { .. }),
+        ),
+        (
+            "slew",
+            "1.0e-3 * slew(V(p, n), 1.0e6)",
+            "rate-limited slew",
+            |kind| matches!(kind, CfgValueKind::Slew { .. }),
+        ),
+        (
+            "laplace_nd",
+            "1.0e-3 * laplace_nd(V(p, n), '{1.0, 0.5}, '{1.0, 0.25})",
+            "a laplace_nd filter",
+            |kind| matches!(kind, CfgValueKind::Laplace { .. }),
+        ),
+        (
+            "laplace_zp",
+            "1.0e-3 * laplace_zp(V(p, n), '{0.0, 0.0}, '{-1.0e6, 0.0})",
+            "a laplace_zp filter",
+            |kind| matches!(kind, CfgValueKind::Laplace { .. }),
+        ),
+        (
+            "zi_nd",
+            "1.0e-3 * zi_nd(V(p, n), '{1.0}, '{1.0, 1.0}, 1.0e-9)",
+            "a zi_nd sampled filter",
+            |kind| matches!(kind, CfgValueKind::Zi { .. }),
+        ),
+        (
+            "zi_zp",
+            "1.0e-3 * zi_zp(V(p, n), '{0.0, 0.0}, '{0.5, 0.0}, 1.0e-9)",
+            "a zi_zp sampled filter",
+            |kind| matches!(kind, CfgValueKind::Zi { .. }),
+        ),
+    ];
+    for (name, expression, expected, kind) in refused {
+        let artifact = artifact_of(name, expression);
+        assert_reaches_kind(name, &artifact, kind);
         let error = rspice_veriloga::rust_backend::RustTranspiler::default()
             .transpile(&artifact)
             .err()
