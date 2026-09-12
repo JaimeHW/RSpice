@@ -623,8 +623,9 @@ struct MasterClaim {
     canonical: String,
     /// Spelling as authored, so the warning points at the source token.
     authored: String,
-    /// The `.VERILOGA` source this definition came from, when it came from one.
-    source: Option<std::path::PathBuf>,
+    /// The Verilog-A source this definition came from and the directive that
+    /// named it, when it came from one.
+    veriloga: Option<(std::path::PathBuf, NetlistSourceLocation)>,
 }
 
 /// `.subckt`, `.VERILOGA` and the build-time generated catalog are three
@@ -635,9 +636,9 @@ struct MasterClaim {
 /// Every Verilog-A spelling of one include is one namespace: an alias and a
 /// file stem that agree name the same artifact, which is not a shadow.
 ///
-/// The scan over the source is what supplies a line number — neither
-/// `SubcircuitDef` nor [`VerilogAInclude`] records one — and it runs only for
-/// a name that really is defined twice.
+/// A Verilog-A definition carries the directive's own origin. A `.subckt` does
+/// not, so its line comes from a scan of `source`, which runs only for a name
+/// that really is defined twice.
 pub(super) fn shadowed_instance_master_diagnostics(
     netlist: &Netlist,
     source: &str,
@@ -675,7 +676,7 @@ pub(super) fn shadowed_instance_master_diagnostics(
                     namespace,
                     canonical: authored.to_ascii_uppercase(),
                     authored: authored.to_owned(),
-                    source: Some(path.to_path_buf()),
+                    veriloga: Some((path.to_path_buf(), include.origin.clone())),
                 };
                 match veriloga
                     .iter()
@@ -694,7 +695,7 @@ pub(super) fn shadowed_instance_master_diagnostics(
             namespace: MasterNamespace::GeneratedBuiltin,
             canonical: canonical.to_owned(),
             authored: (*authored).to_owned(),
-            source: None,
+            veriloga: None,
         })
     };
 
@@ -706,7 +707,7 @@ pub(super) fn shadowed_instance_master_diagnostics(
             namespace: MasterNamespace::DeckSubcircuit,
             canonical: canonical.clone(),
             authored: subckt.name.clone(),
-            source: None,
+            veriloga: None,
         }];
         definitions.extend(
             veriloga
@@ -751,11 +752,20 @@ fn shadowed_master_warning(definitions: &[MasterClaim], source: &str) -> ParseDi
         join_master_definitions(&spellings),
         definitions[0].namespace.winner()
     );
-    ParseDiagnostic::warning(described[0].1, "shadowed-instance-master", message)
+    // The message says "line N" whichever source wrote the definition, so the
+    // two dialects word one clash identically; the exact physical location
+    // rides on the diagnostic, where a frontend reads it, and a Verilog-A
+    // directive is the only definition here that records one.
+    match definitions[0].veriloga.as_ref() {
+        Some((_, origin)) => {
+            ParseDiagnostic::warning_at(origin.clone(), "shadowed-instance-master", message)
+        }
+        None => ParseDiagnostic::warning(described[0].1, "shadowed-instance-master", message),
+    }
 }
 
-/// One definition as the warning spells it, with the source line it was found
-/// on — `0` when the scan cannot see it, which is what
+/// One definition as the warning spells it, with the source line it was
+/// written on — `0` when nothing records one, which is what
 /// [`ParseDiagnostic::line`] reserves for a diagnostic with no single line.
 fn describe_master_claim(claim: &MasterClaim, source: &str) -> (String, usize) {
     let at = |line: usize| {
@@ -774,23 +784,24 @@ fn describe_master_claim(claim: &MasterClaim, source: &str) -> (String, usize) {
             format!("the generated built-in model {}", claim.authored),
             0,
         ),
-        namespace => {
-            // Only a Verilog-A definition reaches this arm, and each one
-            // records the source that declared it.
-            let path = claim.source.as_deref().unwrap_or(std::path::Path::new(""));
-            let line = veriloga_include_line(source, path);
-            let spelling = match namespace {
-                MasterNamespace::VerilogAAlias => format!(".VERILOGA alias {}", claim.authored),
-                MasterNamespace::VerilogAModuleSelection => {
-                    format!(".VERILOGA module={}", claim.authored)
-                }
-                _ => ".VERILOGA file stem".to_owned(),
-            };
-            (
-                format!("the {spelling} of '{}'{}", path.display(), at(line)),
-                line,
-            )
-        }
+        namespace => match claim.veriloga.as_ref() {
+            Some((path, origin)) => {
+                let spelling = match namespace {
+                    MasterNamespace::VerilogAAlias => format!(".VERILOGA alias {}", claim.authored),
+                    MasterNamespace::VerilogAModuleSelection => {
+                        format!(".VERILOGA module={}", claim.authored)
+                    }
+                    _ => ".VERILOGA file stem".to_owned(),
+                };
+                (
+                    format!("the {spelling} of '{}'{}", path.display(), at(origin.line)),
+                    origin.line,
+                )
+            }
+            // Unreachable: a Verilog-A definition is built from the directive
+            // that declared it. Naming the spelling alone is still true.
+            None => (namespace.winner().to_owned(), 0),
+        },
     }
 }
 
@@ -812,22 +823,6 @@ fn deck_subcircuit_line(source: &str, name: &str) -> usize {
                     .next()
                     .is_some_and(|declared| declared.eq_ignore_ascii_case(name))
             })
-        })
-        .map_or(0, |index| index + 1)
-}
-
-/// The line a `.VERILOGA`/`.VA` directive names this file on, or `0`.
-fn veriloga_include_line(source: &str, path: &std::path::Path) -> usize {
-    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-        return 0;
-    };
-    source
-        .lines()
-        .position(|line| {
-            let trimmed = line.trim_start();
-            (strip_leading_directive(trimmed, ".veriloga").is_some()
-                || strip_leading_directive(trimmed, ".va").is_some())
-                && trimmed.contains(file_name)
         })
         .map_or(0, |index| index + 1)
 }
