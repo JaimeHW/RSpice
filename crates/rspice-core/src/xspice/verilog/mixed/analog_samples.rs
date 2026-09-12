@@ -67,7 +67,7 @@ impl PreparedAnalogStamp {
                 |row, column, value| self.matrix.push((row, column, value)),
                 |row, value| self.rhs.push((row, value)),
             )
-            .map_err(analog_error)?;
+            .map_err(|error| analog_trial_error(&error))?;
         self.solution.clear();
         self.solution.extend(
             analog_solver_nodes(analog).map(|node| (node, node_voltage(solution, node).to_bits())),

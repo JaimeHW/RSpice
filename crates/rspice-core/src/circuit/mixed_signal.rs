@@ -64,7 +64,16 @@ fn mixed_integration_coefficients(
 }
 
 fn mixed_error(instance: &str, error: MixedSignalError) -> SimulationError {
-    SimulationError::Circuit(format!("mixed Verilog-AMS instance '{instance}': {error}"))
+    let message = format!("mixed Verilog-AMS instance '{instance}': {error}");
+    // The analog half's non-finite trial reaches the Newton loops classified,
+    // so a mixed host retries the same domain edge a plain analog instance
+    // retries. Every other mixed failure is structural and ends the run.
+    match error {
+        MixedSignalError::AnalogNonFinite { .. } => SimulationError::from(
+            crate::device::StampError::nonfinite_trial(instance, message),
+        ),
+        _ => SimulationError::Circuit(message),
+    }
 }
 
 /// Name the host a refusal came from, after the borrow that produced it ended.

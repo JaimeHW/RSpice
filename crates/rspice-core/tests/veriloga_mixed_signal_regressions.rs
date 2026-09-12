@@ -485,6 +485,92 @@ endmodule
     );
 }
 
+/// The R1.4 domain-edge module with a discrete half bolted on, so the builder
+/// routes it to `MixedSignalHost` instead of the plain analog device.
+///
+/// The continuous equation is the same `ln(V(p,n)+0.1)` R1.4 pinned on the
+/// analog route: defined at every accepted point of this deck and undefined at
+/// the iterate plain Newton proposes when a 1 fs, -5 V edge lands inside one
+/// step. The `reg`/`initial` pair is what makes the artifact's discrete plan
+/// non-empty; it contributes nothing to the analog half.
+const MIXED_DOMAIN_EDGE_MODEL: &str = r#"
+module mixed_domain_edge(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    initial begin q = 0; #1 q = 1; end
+    analog I(p, n) <+ 1.0e-3 * ln(V(p, n) + 0.1);
+endmodule
+"#;
+
+/// A non-finite analog evaluation inside a mixed host is a rejected Newton
+/// iterate, exactly as it is for a plain analog instance.
+///
+/// Before R1.14 the mixed route had no classification at all: `analog_error`
+/// formatted every `try_stamp` failure into `MixedSignalError::Analog`, which
+/// `mixed_error` widened into an ordinary `SimulationError::Circuit`, so the
+/// same overshoot R1.4 taught the analog route to retry still ended the run
+/// here. The two halves of the same module must not disagree about it.
+#[test]
+fn a_nonfinite_mixed_analog_trial_is_rejected_and_the_step_retried() {
+    use rspice_core::SimulationConfig;
+
+    let model = ModelFile::new(MIXED_DOMAIN_EDGE_MODEL);
+    let deck = Netlist::parse(&format!(
+        "* a Newton trial overshoots a log singularity inside a mixed host\n\
+         V1 in 0 PULSE(0 -5 0 1e-15 1e-15 1 2)\n\
+         R1 in p 1k\n\
+         Rq q 0 1k\n\
+         X1 p 0 q mixed_domain_edge\n\
+         .va \"{}\" mixed_domain_edge\n\
+         .end\n",
+        model.path()
+    ))
+    .expect("parse the mixed domain-edge deck");
+    let result = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(1.0e-9),
+        ..Default::default()
+    })
+    .run_tran(&deck, 3.0e-9, 1.0e-9)
+    .expect("a non-finite mixed analog trial must reject the iterate, not the run");
+
+    let trace = result.voltages[result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case("p"))
+        .unwrap_or_else(|| panic!("node p in {:?}", result.node_names))]
+    .clone();
+    let source = |time: f64| -> f64 {
+        if time >= 1.0e-15 {
+            -5.0
+        } else {
+            -5.0 * time / 1.0e-15
+        }
+    };
+    assert!(
+        result.time.get(1).copied().unwrap_or(1.0) < 5.0e-16,
+        "the rejected trial must have cut the step: {:?}",
+        &result.time[..result.time.len().min(4)]
+    );
+    for (&time, &voltage) in result.time.iter().zip(&trace) {
+        assert!(
+            voltage > -0.1,
+            "t={time}: accepted V(p)={voltage} is outside the module's domain"
+        );
+        let residual = (voltage - source(time)) * 1.0e-3 + 1.0e-3 * (voltage + 0.1).ln();
+        assert!(
+            residual.abs() < 1.0e-6,
+            "t={time}: V(p)={voltage} leaves KCL residual {residual}"
+        );
+    }
+    assert!(
+        result.time.last().copied().unwrap_or(0.0) >= 3.0e-9 - 1.0e-18,
+        "the run must reach tstop: {:?}",
+        result.time.last()
+    );
+}
+
 /// A mixed module whose continuous half is one conductance and whose discrete
 /// half toggles one bit. Two halves, one instance, so `m=` has something to
 /// scale and something to leave alone.

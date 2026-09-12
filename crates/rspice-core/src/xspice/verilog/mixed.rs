@@ -290,6 +290,10 @@ pub enum MixedSignalError {
     Digital(DigitalRunError),
     /// Analog evaluation or accepted-state handling failed.
     Analog { detail: String },
+    /// The analog half evaluated to NaN or infinity at the trial point the
+    /// solver handed it. Rejectable: the Newton loop cuts dt or steps the
+    /// sources, exactly as it does for a plain analog Verilog-A instance.
+    AnalogNonFinite { detail: String },
     /// The caller violated the begin/stamp/settle/accept-or-reject protocol.
     TrialProtocol { detail: String },
     /// An event boundary was skipped by the analog stepper.
@@ -329,6 +333,10 @@ impl fmt::Display for MixedSignalError {
             Self::Compile { detail } => write!(f, "mixed Verilog compilation failed: {detail}"),
             Self::Digital(error) => write!(f, "mixed Verilog digital execution failed: {error}"),
             Self::Analog { detail } => write!(f, "mixed Verilog analog execution failed: {detail}"),
+            Self::AnalogNonFinite { detail } => write!(
+                f,
+                "mixed Verilog analog half produced a non-finite value at a trial iterate: {detail}"
+            ),
             Self::TrialProtocol { detail } => {
                 write!(f, "mixed Verilog trial protocol error: {detail}")
             }
@@ -2280,7 +2288,7 @@ impl MixedSignalHost {
             self.analog
                 .make_mut()
                 .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
-                .map_err(analog_error)?;
+                .map_err(|error| analog_trial_error(&error))?;
         }
         self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
     }
@@ -2312,7 +2320,7 @@ impl MixedSignalHost {
                 &mut rhs_add,
                 rspice_veriloga::vm::VerilogAEvaluationMode::StaticDaeProbe,
             )
-            .map_err(analog_error)?;
+            .map_err(|error| analog_trial_error(&error))?;
         self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
     }
 
@@ -3671,6 +3679,27 @@ fn node_voltage(values: &[f64], node: usize) -> f64 {
 fn analog_error(error: impl fmt::Display) -> MixedSignalError {
     MixedSignalError::Analog {
         detail: error.to_string(),
+    }
+}
+
+/// Classify the analog half's refusal at a Newton TRIAL evaluation.
+///
+/// A mixed module's continuous equations are the same Verilog-A the plain
+/// analog route runs, so a `ln()` that leaves its domain at an overshooting
+/// iterate is the same rejectable trial here as it is there — the module is
+/// well posed and the *point* is not. Nothing else changes: a structural
+/// refusal, and every failure at an accepted point (`analog_error` above, on
+/// `validate_advance_state`), still ends the run where it happens.
+pub(super) fn analog_trial_error(error: &rspice_veriloga::vm::VmError) -> MixedSignalError {
+    match error {
+        rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => {
+            MixedSignalError::AnalogNonFinite {
+                detail: detail.clone(),
+            }
+        }
+        other => MixedSignalError::Analog {
+            detail: other.to_string(),
+        },
     }
 }
 
