@@ -47,7 +47,7 @@ use crate::xspice::verilog::{
 };
 use crate::{SimulationError, Value};
 
-use super::shared_error;
+use super::{shared_error, swap_candidate_ledgers};
 
 /// How many times one trial may re-settle its boundary before the engine gives
 /// up on it.
@@ -240,12 +240,10 @@ impl CircuitData {
         // Lend every instance the candidate ledger the scheduler parked for it.
         // The swap leaves the instances' place-holders in the parked vector,
         // and the trial's `Drop` swaps them back.
-        let mut ledgers = std::mem::take(&mut self.scheduler.ledgers);
-        ledgers.resize_with(hosts.len(), Default::default);
-        for (host, ledger) in hosts.iter_mut().zip(ledgers.iter_mut()) {
-            host.install_candidate_ledger(ledger);
-        }
-        self.scheduler.ledgers = ledgers;
+        self.scheduler
+            .ledgers
+            .resize_with(hosts.len(), Default::default);
+        swap_candidate_ledgers(&mut hosts, &mut self.scheduler.ledgers);
         let xspice = (kind.captures_xspice() && self.has_coupled_event_nets())
             .then(|| self.capture_xspice_acceptance());
         let mut trial = Trial {
@@ -707,9 +705,7 @@ impl Drop for Trial<'_> {
             log::error!("{error}");
         }
         let mut ledgers = std::mem::take(&mut self.circuit.scheduler.ledgers);
-        for (host, ledger) in self.hosts.iter_mut().zip(ledgers.iter_mut()) {
-            host.install_candidate_ledger(ledger);
-        }
+        swap_candidate_ledgers(&mut self.hosts, &mut ledgers);
         self.circuit.scheduler.ledgers = ledgers;
         self.circuit.scheduler.mixed_digital_coordinator = self.coordinator.take();
         self.circuit.mixed_signal_hosts = std::mem::take(&mut self.hosts);

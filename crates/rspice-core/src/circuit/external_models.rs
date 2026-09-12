@@ -3704,15 +3704,28 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             let mut mixed = self.mixed_signal_hosts.clone();
-            for host in &mut mixed {
-                host.begin_analog_analysis_in_phase(analysis, phase)
-                    .map_err(|error| {
-                        format!(
-                            "mixed Verilog-AMS instance '{}' analysis begin failed: {error}",
-                            host.instance_name()
-                        )
-                    })?;
-            }
+            // A fresh analysis forgets each instance's candidate ledger, and
+            // for an enrolled instance the ledger is parked on the scheduler
+            // between trials — so the instances are lent the live ones for the
+            // length of this loop and `begin_analog_analysis_in_phase`'s own
+            // `clear` reaches the facts rather than the place-holder the last
+            // trial's bracket swapped back. Without it a second analysis on one
+            // circuit — an `.op` before a `.tran`, the next sweep point — opens
+            // a trial at a candidate time the previous analysis still keys, and
+            // dates its first crossings at the endpoint on the strength of a
+            // write that happened in a run that is over.
+            self.with_candidate_ledgers(&mut mixed, |mixed| {
+                for host in mixed.iter_mut() {
+                    host.begin_analog_analysis_in_phase(analysis, phase)
+                        .map_err(|error| {
+                            format!(
+                                "mixed Verilog-AMS instance '{}' analysis begin failed: {error}",
+                                host.instance_name()
+                            )
+                        })?;
+                }
+                Ok::<(), String>(())
+            })?;
             self.veriloga_devices = runtime;
             self.mixed_signal_hosts = mixed;
             self.scheduler.mixed_digital_coordinator = self

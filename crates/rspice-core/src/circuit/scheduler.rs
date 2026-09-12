@@ -364,6 +364,69 @@ impl super::CircuitData {
             host.set_analog_step_floor(floor);
         }
     }
+
+    /// Lend the parked candidate ledgers to `hosts` for the length of `act`.
+    ///
+    /// An enrolled instance's ledger lives on the scheduler between trials —
+    /// see [`CircuitScheduler::ledgers`] — so an instance method that reads or
+    /// clears `self.scratch.ledger` outside a trial acts on the place-holder
+    /// the last trial's bracket swapped back, not on the facts. Anything that
+    /// has to reach the facts from outside a trial borrows them here, through
+    /// the same swap [`Trial`] opens and drops with, so there is one bracket
+    /// and not a second clearing site that has to be kept in step with it.
+    ///
+    /// `hosts` is passed rather than read off the circuit because the one
+    /// caller works on a staged clone: a failed analysis start must leave the
+    /// previous instances in place.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) fn with_candidate_ledgers<R>(
+        &mut self,
+        hosts: &mut [crate::xspice::verilog::MixedSignalHost],
+        act: impl FnOnce(&mut [crate::xspice::verilog::MixedSignalHost]) -> R,
+    ) -> R {
+        self.scheduler
+            .ledgers
+            .resize_with(hosts.len(), Default::default);
+        swap_candidate_ledgers(hosts, &mut self.scheduler.ledgers);
+        let installed = InstalledLedgers {
+            parked: &mut self.scheduler.ledgers,
+            hosts,
+        };
+        act(&mut *installed.hosts)
+    }
+}
+
+/// The parked ledgers, lent to a set of instances for the length of a scope.
+///
+/// A guard rather than a pair of calls because the closure it brackets can
+/// refuse part way through a list of instances, and the facts have to go back
+/// to the scheduler on that path exactly as on the one that succeeds.
+#[cfg(feature = "veriloga")]
+struct InstalledLedgers<'a> {
+    parked: &'a mut Vec<crate::xspice::verilog::CandidateLedger>,
+    hosts: &'a mut [crate::xspice::verilog::MixedSignalHost],
+}
+
+#[cfg(feature = "veriloga")]
+impl Drop for InstalledLedgers<'_> {
+    fn drop(&mut self) {
+        swap_candidate_ledgers(self.hosts, self.parked);
+    }
+}
+
+/// Exchange each instance's candidate ledger with the one parked beside it.
+///
+/// The whole of the bracket: a swap, so exactly one copy of the facts is live
+/// at any instant and calling this a second time puts everything back. Neither
+/// side allocates — both keep the capacity the last candidate left them.
+#[cfg(feature = "veriloga")]
+pub(in crate::circuit) fn swap_candidate_ledgers(
+    hosts: &mut [crate::xspice::verilog::MixedSignalHost],
+    parked: &mut [crate::xspice::verilog::CandidateLedger],
+) {
+    for (host, ledger) in hosts.iter_mut().zip(parked.iter_mut()) {
+        host.install_candidate_ledger(ledger);
+    }
 }
 
 /// A digital-execution failure, as the circuit reports it.

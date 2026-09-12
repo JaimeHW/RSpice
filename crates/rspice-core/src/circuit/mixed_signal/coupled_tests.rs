@@ -1455,3 +1455,83 @@ fn the_candidate_ledger_survives_a_rolled_back_probe() {
         }
     }
 }
+
+/// A new analysis forgets the parked candidate ledger, and a checkpoint cannot
+/// smuggle a stale one back in.
+///
+/// The instances clear their own ledgers at analysis start, and before the
+/// ledger was parked on the scheduler that was the whole of it. It is not any
+/// more: between trials an enrolled instance holds a place-holder and the facts
+/// sit in [`crate::circuit::scheduler::CircuitScheduler`]'s vector, so a `clear`
+/// that reaches only the instance clears nothing that matters. The failure that
+/// leaves is silent and wrong in the worst direction — an `.op` followed by a
+/// `.tran`, or the next point of a sweep, opens a trial at a candidate time the
+/// previous analysis still keys, and the first crossings of the new run are
+/// dated at the trial endpoint on the strength of a write from a run that is
+/// over, so the engine asks for no interior root where there is one.
+///
+/// The second half of the title is the reason there is one call site to fix
+/// rather than two: a mixed checkpoint of an enrolled instance is refused by
+/// name, so no restore can install a ledger from another run either.
+#[test]
+fn a_parked_ledger_is_forgotten_at_analysis_restart_and_checkpoint_restore() {
+    let (mut circuit, mut matrix, mut solution, _resource) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+    solution[stimulus] = 1.0;
+
+    let arm = |circuit: &mut crate::CircuitData, matrix: &mut crate::solver::StaticMatrix| {
+        stamp(circuit, matrix, &solution).unwrap();
+        assert!(
+            circuit
+                .scheduler
+                .ledgers
+                .iter()
+                .any(|ledger| ledger.carried_candidate() == Some(0.0)),
+            "the probe that was rolled back left its candidate latched on the scheduler"
+        );
+    };
+
+    arm(&mut circuit, &mut matrix);
+    circuit
+        .begin_veriloga_analysis(2)
+        .expect("a fresh transient analysis starts");
+    assert!(
+        circuit
+            .scheduler
+            .ledgers
+            .iter()
+            .all(|ledger| ledger.carried_candidate().is_none()),
+        "a new analysis forgets every parked ledger, not the place-holders the \
+         instances are holding between trials"
+    );
+
+    // The fresh analysis handed the coordinator a fresh wheel, which has to be
+    // started before a second trial can open on it — the same order the
+    // fixture's own setup uses.
+    circuit
+        .start_mixed_digital_execution()
+        .expect("the new analysis's wheel starts");
+    arm(&mut circuit, &mut matrix);
+    let refusal = circuit.mixed_signal_hosts[0]
+        .checkpoint()
+        .err()
+        .expect("an enrolled instance has no checkpoint of its own")
+        .to_string();
+    assert!(
+        refusal.contains("a circuit-owned digital domain requires a circuit checkpoint"),
+        "the restore path cannot reinstall another run's ledger because it \
+         cannot reach an enrolled instance at all: {refusal}"
+    );
+    circuit
+        .begin_veriloga_analysis(2)
+        .expect("a second fresh analysis starts");
+    assert!(
+        circuit
+            .scheduler
+            .ledgers
+            .iter()
+            .all(|ledger| ledger.carried_candidate().is_none()),
+        "and the forgetting is the bracket's, so it repeats"
+    );
+}
