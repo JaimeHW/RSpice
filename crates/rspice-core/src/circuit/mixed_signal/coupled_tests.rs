@@ -526,3 +526,51 @@ fn coupled_trial_copy_ratchet() {
         counts.mixed_trial_deep_copies
     );
 }
+
+/// A mixed Verilog-AMS host is an event-driven boundary, exactly as an XSPICE
+/// event-driven code model is.
+///
+/// The transient recovery path disarms `is_excessive_quiet_force_candidate`
+/// and `is_stagnant_force_candidate` on a circuit whose analog solution can be
+/// stepped by a digital edge. Both guards reason from
+/// `max_expected_source_delta`, which sees only the analog independent
+/// sources; a mixed host's D/A bridge steps the solution at an edge no source
+/// delta predicts, so it belongs on the same side of that classification even
+/// though the deck carries no XSPICE instance at all.
+#[test]
+fn a_mixed_host_is_an_event_driven_boundary() {
+    let engine = crate::Engine::new(crate::SimulationConfig::default());
+    let deck = crate::Netlist::parse("mixed boundary\nRp p 0 1k\nRq q 0 1k\n.end\n").unwrap();
+    let mut circuit = engine.build_circuit(&deck).unwrap();
+    assert!(
+        !circuit.has_event_driven_boundaries(),
+        "a resistor network is stepped only by its independent sources"
+    );
+    let p = circuit.get_node_by_name("p").unwrap();
+    let q = circuit.get_node_by_name("q").unwrap();
+    let mut host = compile_unstarted(
+        r#"
+module toggler(p,y);
+ inout p; electrical p; output y; reg y;
+ initial y=0;
+ always #5 y=~y;
+ analog I(p)<+V(p)*1e-6;
+endmodule
+"#,
+        None,
+        "xtoggle",
+        &[p],
+        SchedulerLimits::default(),
+    )
+    .unwrap();
+    host.add_dac_bridge("y", 0, (q, 0), 0.0, 3.3, 20.0).unwrap();
+    circuit.add_mixed_signal_host(host).unwrap();
+    assert!(
+        !circuit.has_xspice_event_driven_devices(),
+        "the deck carries no XSPICE instance to classify it"
+    );
+    assert!(
+        circuit.has_event_driven_boundaries(),
+        "a D/A bridge steps the analog solution at a digital edge"
+    );
+}

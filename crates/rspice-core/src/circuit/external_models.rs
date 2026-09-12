@@ -520,6 +520,31 @@ impl CircuitData {
         self.xspice_has_event_driven_devices
     }
 
+    /// Whether the analog solution can be stepped by a digital edge rather
+    /// than by an independent source.
+    ///
+    /// An XSPICE event-driven code model does that through its D/A bridges,
+    /// and a mixed Verilog-AMS host does the same thing through its own
+    /// Thevenin D/A bridges: at a scheduled edge the bridge's source moves
+    /// discontinuously, and `max_expected_source_delta` — which sees only the
+    /// analog independent sources — predicts none of it. Any recovery guard
+    /// that reasons "the sources are quiet, so a large solution move is
+    /// nonphysical" must therefore be disarmed for both, not just for XSPICE.
+    #[inline]
+    pub(crate) fn has_event_driven_boundaries(&self) -> bool {
+        if self.has_xspice_event_driven_devices() {
+            return true;
+        }
+        #[cfg(feature = "veriloga")]
+        {
+            self.has_mixed_signal_hosts()
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            false
+        }
+    }
+
     /// Rebuild event kinds from the already-renumbered XSPICE connections and
     /// circuit HDL graph. Ground has no event kind.
     pub(crate) fn rebuild_net_kinds(&mut self) {
@@ -4612,12 +4637,20 @@ endmodule"#;
             PortConnection::Analog(1),
         ));
         assert!(!circuit.has_xspice_event_driven_devices());
+        assert!(
+            !circuit.has_event_driven_boundaries(),
+            "an analog-only code model does not step the solution at a digital edge"
+        );
 
         circuit.add_xspice_instance(output_instance(
             PortType::Digital,
             PortConnection::Digital(2),
         ));
         assert!(circuit.has_xspice_event_driven_devices());
+        assert!(
+            circuit.has_event_driven_boundaries(),
+            "an event-driven code model is the XSPICE half of the recovery-guard classification"
+        );
         assert_eq!(
             circuit.xspice_event_node_matrix_rows().collect::<Vec<_>>(),
             vec![1]
