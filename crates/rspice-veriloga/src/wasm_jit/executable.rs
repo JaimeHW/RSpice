@@ -51,6 +51,15 @@ pub(crate) struct WasmJitExecutable {
 }
 
 impl WasmJitExecutable {
+    /// Two readers. In production, device construction selects this backend's
+    /// answer exactly when the native backend is absent and the build is the
+    /// wasm one; a host build asks the canonical artifact instead and would
+    /// carry this unused. The charge proof also compares it against the native
+    /// image, which needs both backends at once and so is a host test.
+    #[cfg(any(
+        all(not(feature = "native"), target_arch = "wasm32"),
+        all(test, feature = "native")
+    ))]
     pub(crate) fn one_step_dae_split_safe(&self) -> bool {
         self.one_step_dae_split_safe
     }
