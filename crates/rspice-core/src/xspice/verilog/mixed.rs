@@ -9,13 +9,16 @@
 //! attached to continuous devices retain their A/D or D/A electrical bridges;
 //! a vector may have both kinds of bit connection.
 //!
-//! # The two time bases
+//! # The three time bases
 //!
 //! The analog side names a timepoint in seconds, chosen by a step controller
 //! answering to local truncation error, and it lands wherever it lands. The
-//! digital side counts ticks of a declared precision. Two different questions
+//! digital side counts ticks of a declared precision. A third kernel — XSPICE
+//! — names its own event times in seconds again. Three different questions
 //! cross between them, and they do not quantize the same way. Conflating them
-//! is the mistake this section exists to prevent.
+//! is the mistake this section exists to prevent. **This is the one place all
+//! three are stated; a call site states which of them it is using and why, and
+//! never invents a fourth.**
 //!
 //! *How far may the digital world be advanced?* is answered from the trial's
 //! own timestamp, **floored** onto the tick grid — see
@@ -32,10 +35,28 @@
 //! against the trial's tick, so this rounding can move a transition later but
 //! never back into a slot the digital world has left.
 //!
+//! *Which tick does a wake from the other event kernel land on?* is answered
+//! by the **ceiling** —
+//! [`TimeResolution::seconds_to_ceil_ticks`](crate::xspice::event_scheduler::TimeResolution::seconds_to_ceil_ticks).
+//! This one is not an analog event and the LRM's nearest-tick rule does not
+//! reach it: XSPICE and the HDL are two discrete kernels on two time bases,
+//! and the two directions of that boundary are the two halves of *one* map.
+//! HDL to XSPICE is exact — an HDL tick `T` is delivered at precisely the
+//! instant `T` names, which is what `external_models.rs` stamps. The inverse
+//! of an exact map is "not before": an off-grid XSPICE instant is delivered at
+//! the least tick whose own instant is not before it. Nearest-tick would date
+//! an instant in the lower half of a tick *earlier* than it happened, and a
+//! `#1` from the process it woke would then elapse in less than one time unit,
+//! which IEEE 1364-2005 section 9.7 does not permit.
+//!
 //! Either way the unquantized analog time is kept for everything that is
 //! answered in seconds: the trial's own bookkeeping, the interpolated instant
-//! an A/D bridge crossed its threshold, and the breakpoint
-//! [`MixedSignalHost::next_event_time`] hands back.
+//! an A/D bridge crossed its threshold — which is also the `$abstime` every
+//! process woken by that crossing reads — and the breakpoint
+//! [`MixedSignalHost::next_event_time`] hands back. The one quantity that
+//! stays at the trial's endpoint is the *analog candidate instant*, because
+//! the continuous half has a solution only there; `DigitalHost`'s
+//! `force_many_from_analog_at` is where the two are carried apart.
 //!
 //! Several analog timepoints therefore share one tick, which is what a declared
 //! precision means, and the host's monotonicity is enforced on the *analog*
@@ -2348,24 +2369,31 @@ impl MixedSignalHost {
         Ok(earliest)
     }
 
-    /// Sample all A/D bridges from one converged candidate, publish their
-    /// changes simultaneously, and settle every same-time delta cycle.
-    /// Returns true when digital activity changed any D/A input and Newton must
-    /// be repeated at the same timestamp.
+    /// Sample all A/D bridges from one converged candidate, publish each
+    /// transition at its own instant in ascending crossing order, and settle
+    /// every same-time delta cycle. Returns true when digital activity changed
+    /// any D/A input and Newton must be repeated at the same timestamp.
     ///
     /// Each transition is dated by interpolating its threshold crossing inside
     /// the trial's step, by the same rule the Xyce DIG code models date theirs
     /// — [`threshold_crossing_time`]. That instant is kept unquantized in the
-    /// accepted state, and the digital slot it is published into is the tick
+    /// accepted state, it is what every process the transition wakes reads as
+    /// `$abstime`, and the digital slot it is published into is the tick
     /// *nearest* it, because Verilog-AMS LRM 2.4 section 7.3.6.1 places an
     /// analog event in the digital domain at the nearest digital time tick.
     ///
+    /// Two bridges that crossed at two instants are two events. They are
+    /// published one after the other, earliest first, each at its own tick —
+    /// not as one bank at the latest of their ticks, which would delay the
+    /// earlier one by a whole tick and report its `$abstime` as the later
+    /// one's.
+    ///
     /// Nearest here and floored in [`Self::begin_trial`] are not a
     /// contradiction, because they quantize two different quantities — see
-    /// this module's "two time bases". That one floors *the trial's* timestamp
-    /// to bound how far the digital world may be advanced. This one rounds
-    /// *the transition's* timestamp to name the tick its event belongs to, and
-    /// the standard fixes that at the nearest tick.
+    /// this module's "three time bases". That one floors *the trial's*
+    /// timestamp to bound how far the digital world may be advanced. This one
+    /// rounds *the transition's* timestamp to name the tick its event belongs
+    /// to, and the standard fixes that at the nearest tick.
     ///
     /// The `max` is what keeps the rounding one-directional. A crossing in the
     /// lower half of the trial's tick rounds to the tick before it, which is a
@@ -2454,7 +2482,6 @@ impl MixedSignalHost {
         scratch.drives.clear();
         scratch.crossings.clear();
         scratch.sampled.clear();
-        let mut publish_tick = tick;
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
                 - node_voltage(circuit_voltages, bridge.negative);
@@ -2501,37 +2528,14 @@ impl MixedSignalHost {
                     threshold,
                 )
             };
-            // Verilog-AMS LRM 2.4 section 7.3.6.1: an analog event crossing
-            // into the digital domain lands on the *nearest* digital time
-            // tick. This is the transition's own timestamp being quantized,
-            // which is not the mapping `begin_trial` applies to the trial's
-            // timestamp — see this module's "two time bases".
-            //
-            // An endpoint-dated transition is exempt, and must be: rounding
-            // the trial's own timestamp would publish into the tick *after*
-            // the one the trial is running, which is the digital world being
-            // run past an instant the integrator has accepted. The trial's
-            // floored tick is where this transition belongs, because the
-            // event that caused it happened on that tick.
-            if !dac_activity {
-                let crossing_tick = self
-                    .resolution
-                    .seconds_to_ticks(crossing)
-                    .map_err(DigitalRunError::from)?;
-                publish_tick = publish_tick.max(crossing_tick);
-            }
             scratch.bit_drives.push((index, bit));
             scratch.crossings.push((index, crossing));
         }
-        // One drive per signal, not per bridge. A vector boundary port is N
-        // bridges over one discrete signal, and the store publishes a whole
-        // signal at a time (`store.rs`'s `force` refuses a value that is not
-        // the declared width), so the bits that moved are composed onto the
-        // value the signal holds now and the port publishes as one transition
-        // — which is what the discrete half's own vector assignment is. Bits
-        // whose bridge is inside its threshold window did not move and keep
-        // what they held.
-        compose_bit_drives(&self.state, &scratch.bit_drives, &mut scratch.drives)?;
+        // Each transition carries its own instant, so the pass publishes in
+        // ascending crossing order rather than as one bank: two bridges that
+        // crossed at different times are two events, and collapsing them onto
+        // the later one's tick delays the earlier one by a whole tick.
+        order_publications_by_crossing(&mut scratch.bit_drives, &mut scratch.crossings);
         // Sampled from the same converged candidate the bridges were, and
         // published into the store *before* the transitions that wake the
         // processes reading it. That ordering is what makes the standard's own
@@ -2542,30 +2546,82 @@ impl MixedSignalHost {
         // real promotion of the digital time", with the two domains at one
         // timepoint and nothing to interpolate between.
         fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
-        if !scratch.drives.is_empty() {
-            if self.state.digital.is_view() {
-                self.state.digital.make_mut().force_many_from_analog(
-                    &scratch.drives,
-                    publish_tick,
-                    time_seconds,
-                )?;
+        let mut published_tick = tick;
+        let mut group = 0;
+        while group < scratch.crossings.len() {
+            let crossing = scratch.crossings[group].1;
+            let end = scratch.crossings[group..]
+                .iter()
+                .position(|(_, other)| *other != crossing)
+                .map_or(scratch.crossings.len(), |offset| group + offset);
+            // One drive per signal, not per bridge. A vector boundary port is
+            // N bridges over one discrete signal, and the store publishes a
+            // whole signal at a time (`store.rs`'s `force` refuses a value
+            // that is not the declared width), so the bits that moved at this
+            // instant are composed onto the value the signal holds now and the
+            // port publishes as one transition — which is what the discrete
+            // half's own vector assignment is. Bits whose bridge is inside its
+            // threshold window, or crossed at another instant, keep what they
+            // hold until their own publication.
+            compose_bit_drives(
+                &self.state,
+                &scratch.bit_drives[group..end],
+                &mut scratch.drives,
+            )?;
+            // Verilog-AMS LRM 2.4 section 7.3.6.1: an analog event crossing
+            // into the digital domain lands on the *nearest* digital time
+            // tick. This is the transition's own timestamp being quantized,
+            // which is not the mapping `begin_trial` applies to the trial's
+            // timestamp — see this module's "three time bases".
+            //
+            // An endpoint-dated transition is exempt, and must be: rounding
+            // the trial's own timestamp would publish into the tick *after*
+            // the one the trial is running, which is the digital world being
+            // run past an instant the integrator has accepted. The trial's
+            // floored tick is where this transition belongs, because the
+            // event that caused it happened on that tick.
+            //
+            // `published_tick` carries the running maximum rather than the
+            // group's own answer, which is what keeps the sequence monotone: a
+            // crossing in the lower half of a tick rounds to a slot the
+            // digital world has already left, and an earlier group in this
+            // same pass may have left a later one still.
+            let crossing_tick = if dac_activity {
+                tick
             } else {
-                self.with_analog_participant(circuit_voltages, |digital, producer| {
-                    digital.sample_analog_probes(&scratch.probes);
-                    digital.force_many_from_analog_with(
+                self.resolution
+                    .seconds_to_ticks(crossing)
+                    .map_err(DigitalRunError::from)?
+            };
+            published_tick = published_tick.max(crossing_tick);
+            if !scratch.drives.is_empty() {
+                if self.state.digital.is_view() {
+                    self.state.digital.make_mut().force_many_from_analog_at(
                         &scratch.drives,
-                        publish_tick,
+                        published_tick,
+                        crossing,
                         time_seconds,
-                        producer,
-                    )
-                })?;
-            }
-            if let Some(trial) = self.trial.as_mut() {
-                for &(index, crossing) in &scratch.crossings {
-                    trial.vectors.transition_times[index] = Some(crossing);
-                    trial.vectors.adc_moved[index] = true;
+                    )?;
+                } else {
+                    self.with_analog_participant(circuit_voltages, |digital, producer| {
+                        digital.sample_analog_probes(&scratch.probes);
+                        digital.force_many_from_analog_at(
+                            &scratch.drives,
+                            published_tick,
+                            crossing,
+                            time_seconds,
+                            producer,
+                        )
+                    })?;
+                }
+                if let Some(trial) = self.trial.as_mut() {
+                    for &(index, _) in &scratch.bit_drives[group..end] {
+                        trial.vectors.transition_times[index] = Some(crossing);
+                        trial.vectors.adc_moved[index] = true;
+                    }
                 }
             }
+            group = end;
         }
         read_dac_bits(&self.state, &mut scratch.dac_after)?;
         // Circuit-owned processes see the complete A/D bank before any analog
@@ -3234,6 +3290,31 @@ impl MixedSignalHost {
 /// [`read_dac_bits`] refuse on.
 ///
 /// [`DigitalHost::force_many`]: super::host::DigitalHost::force_many
+/// Put the bits one settle moved, and their crossing times, into ascending
+/// crossing order — the order the analog world produced them in.
+///
+/// The two vectors are filled in lockstep by `settle_into`, one entry per
+/// moved bridge, and they stay aligned through this: a caller that reads
+/// `bit_drives[i]` and `crossings[i]` is reading one transition either side of
+/// the reordering. A pass moves a handful of bridges at most — an insertion
+/// sort over both at once is what keeps them aligned without a permutation
+/// buffer, and it is stable, so bridges that crossed at the same instant keep
+/// bridge order and publish as one bank.
+fn order_publications_by_crossing(
+    bit_drives: &mut [(usize, FourStateBit)],
+    crossings: &mut [(usize, f64)],
+) {
+    debug_assert_eq!(bit_drives.len(), crossings.len());
+    for index in 1..crossings.len() {
+        let mut slot = index;
+        while slot > 0 && crossings[slot - 1].1 > crossings[slot].1 {
+            crossings.swap(slot - 1, slot);
+            bit_drives.swap(slot - 1, slot);
+            slot -= 1;
+        }
+    }
+}
+
 fn compose_bit_drives(
     state: &MixedState,
     bit_drives: &[(usize, FourStateBit)],

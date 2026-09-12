@@ -180,14 +180,19 @@ impl MixedDigital {
             Self::View(view) => view.force_many(drives),
         }
     }
-    pub(super) fn force_many_from_analog(
+    /// `clock_seconds` dates the event, `candidate_seconds` names the analog
+    /// timepoint. See `DigitalHost::force_many_from_analog_at`.
+    pub(super) fn force_many_from_analog_at(
         &mut self,
         drives: &[(DigitalSignalId, FourStateValue)],
         tick: u64,
-        seconds: f64,
+        clock_seconds: f64,
+        candidate_seconds: f64,
     ) -> Result<(), DigitalRunError> {
         match self {
-            Self::Owned(host) => host.force_many_from_analog(drives, tick, seconds),
+            Self::Owned(host) => {
+                host.force_many_from_analog_ordered(drives, tick, clock_seconds, candidate_seconds)
+            }
             Self::View(view) => view.force_many(drives),
         }
     }
@@ -212,6 +217,24 @@ pub(crate) struct MixedDigitalCoordinator {
     analog_step_floor: f64,
     probes: Vec<Option<f64>>,
     drives: Vec<(DigitalSignalId, FourStateValue)>,
+    /// Every A/D bit one settle pass moved, across every enrolled instance,
+    /// ordered by the instant it crossed. Scratch, refilled per pass.
+    publications: Vec<AdcPublication>,
+}
+
+/// One enrolled instance's A/D bit, dated by the instant it crossed.
+#[derive(Clone, Copy)]
+struct AdcPublication {
+    /// The interpolated threshold crossing, or the trial's endpoint for a
+    /// transition a D/A move inside this interval caused.
+    crossing: f64,
+    /// The tick that instant's event lands on.
+    tick: u64,
+    /// Position in the circuit's host order.
+    host: usize,
+    /// Index into that host's A/D bridge table.
+    bridge: usize,
+    bit: FourStateBit,
 }
 
 impl fmt::Debug for MixedDigitalCoordinator {
@@ -463,6 +486,7 @@ impl MixedDigitalCoordinator {
             analog_step_floor: 0.0,
             probes,
             drives: Vec::new(),
+            publications: Vec::new(),
         })
     }
 
@@ -478,6 +502,7 @@ impl MixedDigitalCoordinator {
             analog_step_floor: self.analog_step_floor,
             probes: vec![None; self.probes.len()],
             drives: Vec::new(),
+            publications: Vec::new(),
         }
     }
 
@@ -755,11 +780,20 @@ impl SharedDigitalTrial<'_> {
         }
         if has_external {
             // An XSPICE event or analog input can be due without an HDL timer.
-            // Run that physical boundary through the causal lane so rounding
+            // Run that physical boundary through the causal lane so quantizing
             // its reporting tick cannot consume an unrelated future timer.
+            //
+            // Dated at the tick *at or after* the instant, not the nearest
+            // one: this is a second event kernel's time base meeting the HDL
+            // wheel, and the reverse direction hands an HDL tick to XSPICE at
+            // exactly the instant that tick names. The inverse of an exact map
+            // is the least tick not before the instant — see this module's
+            // "three time bases". Rounding to nearest dates an instant in the
+            // lower half of a tick earlier than it happened, so a `#1` from
+            // the process it wakes elapses in less than one time unit.
             let tick = coordinator
                 .resolution
-                .seconds_to_ticks(self.time)
+                .seconds_to_ceil_ticks(self.time)
                 .map_err(DigitalRunError::from)?;
             let digital = coordinator.digital.make_mut();
             digital.sample_analog_probes(&coordinator.probes);
@@ -779,78 +813,146 @@ impl SharedDigitalTrial<'_> {
         self.publish_adc_with(hosts, solution, None)
     }
 
-    pub(crate) fn publish_adc_with(
+    /// Every circuit A/D transition of this settle pass, in ascending crossing
+    /// order across all enrolled instances.
+    ///
+    /// Collected rather than published directly because the order is a
+    /// property of the *circuit*, not of any one instance: two instances whose
+    /// sense nodes crossed at different instants inside one analog step are
+    /// two events at two ticks, and the shared wheel has to see them in the
+    /// order the analog world produced them.
+    fn collect_adc_publications(
         &mut self,
-        hosts: &mut [MixedSignalHost],
-        solution: &[f64],
-        participant: Option<&mut dyn DigitalActiveParticipant>,
-    ) -> Result<bool, MixedSignalError> {
+        hosts: &[MixedSignalHost],
+    ) -> Result<(), MixedSignalError> {
+        let trial_tick = self.tick;
         let coordinator = &mut self.coordinator;
-        coordinator.drives.clear();
-        let mut tick = self.tick;
-        for (host, map) in hosts.iter().zip(&coordinator.port_signals) {
-            for (local, _) in &host.scratch.drives {
-                let global = map[usize::from(*local)];
-                let mut value = coordinator
-                    .digital
-                    .read(global)
-                    .expect("mapped A/D port")
-                    .clone();
-                // Preserve event-connected bits of a partly electrical vector.
-                // Only physical A/D decisions are external forces.
-                for &(bridge_index, bit) in &host.scratch.bit_drives {
-                    let bridge = &host.state.bridges.adc[bridge_index];
-                    if bridge.signal == *local {
-                        value.set_bit(bridge.bit, bit);
-                    }
-                }
-                if coordinator.digital.read(global) != Some(&value) {
-                    coordinator.drives.push((global, value));
-                }
-            }
+        coordinator.publications.clear();
+        for (index, host) in hosts.iter().enumerate() {
             // An endpoint-dated transition names no tick of its own — see
             // `settle_into`. Rounding this trial's own timestamp here would
             // publish the shared bank one tick past the instant the
             // integrator accepted, which is the same error in the shared path.
-            if let Some(trial) = &host.trial
-                && !trial.dac_activity
+            let endpoint_dated = host.trial.as_ref().is_none_or(|trial| trial.dac_activity);
+            for (&(bridge, bit), &(_, crossing)) in
+                host.scratch.bit_drives.iter().zip(&host.scratch.crossings)
             {
-                for (moved, crossing) in trial
-                    .vectors
-                    .adc_moved
+                let tick = if endpoint_dated {
+                    trial_tick
+                } else {
+                    coordinator
+                        .resolution
+                        .seconds_to_ticks(crossing)
+                        .map_err(DigitalRunError::from)?
+                };
+                coordinator.publications.push(AdcPublication {
+                    crossing,
+                    tick,
+                    host: index,
+                    bridge,
+                    bit,
+                });
+            }
+        }
+        coordinator.publications.sort_by(|left, right| {
+            left.crossing
+                .total_cmp(&right.crossing)
+                .then(left.host.cmp(&right.host))
+                .then(left.bridge.cmp(&right.bridge))
+        });
+        Ok(())
+    }
+
+    pub(crate) fn publish_adc_with(
+        &mut self,
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
+        mut participant: Option<&mut dyn DigitalActiveParticipant>,
+    ) -> Result<bool, MixedSignalError> {
+        self.collect_adc_publications(hosts)?;
+        // The analog candidate instant, which every group publishes against:
+        // the continuous half has a solution at the trial's endpoint and
+        // nowhere else inside the step, however finely the discrete half dates
+        // the transitions it found there.
+        let candidate_seconds = self.time;
+        let mut published_any = false;
+        // Monotone across the pass: a crossing in the lower half of a tick
+        // rounds to a slot the digital world has already left, and an earlier
+        // group in this pass may have left a later one still.
+        let mut published_tick = self.tick;
+        let mut group = 0;
+        while group < self.coordinator.publications.len() {
+            let coordinator = &mut self.coordinator;
+            let crossing = coordinator.publications[group].crossing;
+            let end = coordinator.publications[group..]
+                .iter()
+                .position(|entry| entry.crossing != crossing)
+                .map_or(coordinator.publications.len(), |offset| group + offset);
+            published_tick = coordinator.publications[group..end]
+                .iter()
+                .map(|entry| entry.tick)
+                .fold(published_tick, u64::max);
+            coordinator.drives.clear();
+            for entry in &coordinator.publications[group..end] {
+                let host = &hosts[entry.host];
+                let bridge = &host.state.bridges.adc[entry.bridge];
+                let global = coordinator.port_signals[entry.host][usize::from(bridge.signal)];
+                // Preserve event-connected bits of a partly electrical vector,
+                // and bits of it that crossed at another instant. Only
+                // physical A/D decisions at *this* instant are external forces.
+                match coordinator
+                    .drives
                     .iter()
-                    .zip(&trial.vectors.transition_times)
+                    .position(|(held, _)| *held == global)
                 {
-                    if *moved && let Some(crossing) = crossing {
-                        tick = tick.max(
-                            coordinator
-                                .resolution
-                                .seconds_to_ticks(*crossing)
-                                .map_err(DigitalRunError::from)?,
-                        );
+                    Some(slot) => coordinator.drives[slot].1.set_bit(bridge.bit, entry.bit),
+                    None => {
+                        let mut value = coordinator
+                            .digital
+                            .read(global)
+                            .expect("mapped A/D port")
+                            .clone();
+                        value.set_bit(bridge.bit, entry.bit);
+                        coordinator.drives.push((global, value));
                     }
                 }
             }
+            let (held, drives) = (&coordinator.digital, &mut coordinator.drives);
+            drives.retain(|(global, value)| held.read(*global) != Some(value));
+            group = end;
+            if coordinator.drives.is_empty() {
+                continue;
+            }
+            let digital = coordinator.digital.make_mut();
+            digital.sample_analog_probes(&coordinator.probes);
+            // Reborrowed through a `match` rather than `Option::map`, which
+            // would hand the closure's return the outer lifetime and so lend
+            // the participant to every later group at once.
+            let external: Option<&mut dyn DigitalActiveParticipant> = match &mut participant {
+                Some(external) => Some(&mut **external),
+                None => None,
+            };
+            let mut active = CircuitAnalogParticipant {
+                hosts: &mut *hosts,
+                maps: &coordinator.maps,
+                solution,
+                external,
+            };
+            // The crossing dates the event — it is what every process this
+            // publication wakes reads as `$abstime`. The trial's own timestamp
+            // stays the analog candidate instant, because that is the only
+            // time the continuous half has a solution at.
+            let result = digital.force_many_from_analog_at(
+                &coordinator.drives,
+                published_tick,
+                crossing,
+                candidate_seconds,
+                &mut active,
+            );
+            result.map_err(|error| coordinator.execution_error(error))?;
+            published_any = true;
         }
-        if coordinator.drives.is_empty() {
-            return Ok(false);
-        }
-        let digital = coordinator.digital.make_mut();
-        digital.sample_analog_probes(&coordinator.probes);
-        let mut participant = CircuitAnalogParticipant {
-            hosts,
-            maps: &coordinator.maps,
-            solution,
-            external: participant,
-        };
-        let published = digital.force_many_from_analog_with(
-            &coordinator.drives,
-            tick,
-            self.time,
-            &mut participant,
-        );
-        published.map_err(|error| coordinator.execution_error(error))?;
-        Ok(true)
+        Ok(published_any)
     }
 
     /// Refresh analog-facing values after shared settlement. No model view can
