@@ -142,34 +142,41 @@ pub fn execute(
     }
 
     // Usage example
+    //
+    // A Verilog-A module is declared by the source directive and instantiated
+    // on an X card that names the module; there is no `.MODEL name VERILOGA`
+    // card in RSpice, and no device family binds a model of that type, so the
+    // example writes instance parameters where the parser reads them.
     if args.show_usage {
-        println!();
-        println!("Usage in SPICE netlist:");
-        println!(
-            "  .VERILOGA {}",
-            args.input
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| args.input.display().to_string())
-        );
-
-        // Generate example device instantiation
+        let source = args
+            .input
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| args.input.display().to_string());
         let terminal_list: String = model
             .terminal_names
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(" ");
-        println!("  X1 {} {}", terminal_list, model.name);
+        let instance_parameters = model
+            .parameters
+            .first()
+            .map(|parameter| format!(" {}={}", parameter.name, parameter.default))
+            .unwrap_or_default();
 
-        if !model.parameters.is_empty() {
-            let param_example = model
-                .parameters
-                .first()
-                .map(|p| format!(".MODEL {} VERILOGA({}={})", model.name, p.name, p.default))
-                .unwrap_or_default();
-            println!("  {}", param_example);
-        }
+        println!();
+        println!("Usage in SPICE netlist:");
+        println!("  .va \"{}\"", source);
+        println!(
+            "  X1 {} {}{}",
+            terminal_list, model.name, instance_parameters
+        );
+        println!();
+        println!(
+            "The .va card compiles the source and the X card instantiates the module by name, \
+             carrying any instance parameters."
+        );
     }
 
     Ok(())
