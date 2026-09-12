@@ -95,7 +95,19 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// digital instant.
 const DECK_A_POINTS: usize = 1132;
 const DECK_A_GRID_HASH: u64 = 0x9485_9e98_f8c7_6df9;
-const DECK_A_VOLT_HASH: u64 = 0x5cda_4227_0d10_7925;
+
+/// Deck A's node waveforms, re-measured after R2.15 took the digital-only nets
+/// out of the analog namespace.
+///
+/// `d_clk` and `d_inv` are the adc output and the inverter output. Nothing
+/// analog touches either, so the only thing the MNA system held for them was
+/// the placeholder row every assembly closes with `v = 0` to restore rank, and
+/// this hash was including two columns of 1132 zeros each. They are empty now,
+/// and the hash moved by exactly that much: `DECK_A_POINTS` and
+/// `DECK_A_GRID_HASH` did not move at all, which is the proof the change is
+/// results-only and left the accepted grid and every solved level alone. The
+/// structure assertions beside the pin say the same thing by name.
+const DECK_A_VOLT_HASH: u64 = 0x1b54_c78e_1859_dae5;
 const DECK_C2_POINTS: usize = 265;
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
