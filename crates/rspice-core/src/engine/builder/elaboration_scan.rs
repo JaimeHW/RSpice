@@ -15,6 +15,15 @@
 //! refusals that legitimately mention Verilog-A, so those are enumerated by
 //! name with the reason each is not an elaboration site. The list is matched
 //! exactly, so removing one is as loud as adding one.
+//!
+//! One site on the seam is deliberately outside all of this: the X-card
+//! fallthrough that no `.VERILOGA` include, generated builtin or subcircuit
+//! definition answered for. A master nothing defines is an undefined
+//! subcircuit whatever route was expected to provide it, so it must read
+//! identically with and without a `.VERILOGA` card in the deck. It raises the
+//! deck's own typed `ParseError::UndefinedSubcircuit` rather than an
+//! `ElaborationError` — which is why it uses neither untyped constructor and
+//! nothing below has to except it.
 
 /// Words that appear in an elaboration refusal's message and essentially
 /// nowhere else in a `SimulationError::Circuit`/`Netlist` argument.
