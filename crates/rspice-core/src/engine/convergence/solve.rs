@@ -15,13 +15,24 @@ pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 /// evaluation, every convergence aid is deforming the same unevaluable
 /// equations; each reports its own exhausted budget. That number tells the
 /// user nothing the original diagnostic does not tell them better.
+///
+/// An exhausted budget is the only thing this replaces. An aid also returns
+/// outcomes that are not about the iterate at all: a cancellation or an
+/// expired time budget, which say the caller stopped the run, and structural
+/// `Circuit`/`Solver` failures, which describe a different fault than the one
+/// the direct Newton could not evaluate. Replacing a stop loses the outcome --
+/// `is_stopped()` answers false, so the materializer files a cancelled run as
+/// a broken deck and a cancelled sweep takes its next point -- and replacing a
+/// structural failure hides it behind a stale diagnostic.
 fn prefer_nonfinite_trial_failure(
     fallback: SimulationError,
     nonfinite_direct_failure: &Option<String>,
 ) -> SimulationError {
-    match nonfinite_direct_failure {
-        Some(detail) => SimulationError::Circuit(detail.clone()),
-        None => fallback,
+    match (&fallback, nonfinite_direct_failure) {
+        (SimulationError::ConvergenceFailed(_), Some(detail)) => {
+            SimulationError::Circuit(detail.clone())
+        }
+        _ => fallback,
     }
 }
 

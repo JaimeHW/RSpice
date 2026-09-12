@@ -1,6 +1,7 @@
 //! End-to-end DC lifecycle pins for runtime-compiled Verilog-A devices.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::abort_signal::CountingAbort;
 use rspice_core::engine::DcSweepRange;
 use rspice_core::{Engine, Netlist, NoAbort};
 use std::io::Write;
@@ -1823,6 +1824,83 @@ fn an_unreachable_verilog_a_domain_names_the_instance_and_its_iterate() {
     );
     assert!(message.contains("contribution"), "{message}");
     assert!(message.contains("p="), "{message}");
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// Cancelling a run inside the last enabled convergence aid stops the run; it
+/// does not convict the device of the failure that put the solve on the
+/// ladder.
+///
+/// Every aid deforms the same equations the direct Newton could not evaluate
+/// finitely, so the solve prefers the device's own diagnostic to whichever
+/// exhausted budget an aid reports. A cancellation is not an exhausted budget.
+/// Reporting the device's message for one makes `is_stopped()` false, and then
+/// a cancelled sweep takes its next point and the materializer files a stopped
+/// run as a broken deck.
+#[test]
+fn a_cancelled_convergence_aid_reports_the_stop_not_the_device() {
+    let model = write_model(
+        "always_nonfinite_cancelled",
+        "module always_nonfinite_cancelled(p,n); inout p,n; electrical p,n;\n\
+             analog I(p,n) <+ 1.0e-3*ln(-1.0 - V(p,n)*V(p,n));\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse_validated(&format!(
+        "* the module's argument is negative at every real bias\n\
+         V1 in 0 DC 1\n\
+         R1 in p 1k\n\
+         X1 p 0 always_nonfinite_cancelled\n\
+         .va \"{}\" always_nonfinite_cancelled\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+
+    // Compiling the module reads its source through the abort-polling reader,
+    // so the first run of a deck polls more often than every later one. Warm
+    // the module cache before measuring, or the measurement counts polls the
+    // cancelled run never makes.
+    let engine = Engine::default();
+    engine
+        .run_dc_op(&netlist)
+        .expect_err("no retry can make this module evaluate finitely");
+
+    // The ladder is deterministic, so the uncancelled failure measures where
+    // its polls are. The last one is inside the last enabled aid: under the
+    // default convergence config source stepping and pseudo-transient
+    // continuation have already escalated, GMIN stepping is running, and
+    // arc-length continuation is off. That is exactly the aid whose `Aborted`
+    // the preference rule used to swallow.
+    let counter = CountingAbort::new(usize::MAX);
+    let uncancelled = engine
+        .run_dc_op_with_abort(&netlist, &counter)
+        .expect_err("no retry can make this module evaluate finitely");
+    assert!(
+        uncancelled
+            .to_string()
+            .contains("non-finite value at a trial iterate"),
+        "{uncancelled}"
+    );
+    let polls = counter.count();
+    assert!(
+        polls > 1,
+        "the DC ladder polled its abort source {polls} time(s), so it has no interior poll to cancel at"
+    );
+
+    let abort = CountingAbort::new(polls - 1);
+    let error = engine
+        .run_dc_op_with_abort(&netlist, &abort)
+        .expect_err("a cancelled operating point produces no solution");
+    assert_eq!(
+        abort.observed_at(),
+        Some(polls),
+        "the cancelled run never reached the poll that cancels it"
+    );
+    assert!(
+        matches!(error, rspice_core::SimulationError::Aborted),
+        "a cancelled DC solve reported the device's failure instead of the stop: {error:?}"
+    );
 
     let _ = std::fs::remove_file(model);
 }
