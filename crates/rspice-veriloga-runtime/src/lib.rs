@@ -4202,11 +4202,7 @@ impl<'a> GeneratedStamper<'a> {
                 self.add_real(row, col, -derivative.value);
             }
         }
-        if let Some(rhs) = &mut self.rhs
-            && let Some(slot) = rhs.get_mut(row)
-        {
-            *slot += equivalent;
-        }
+        self.add_potential_rhs(row, equivalent);
     }
 
     #[inline]
@@ -4245,11 +4241,7 @@ impl<'a> GeneratedStamper<'a> {
                 self.add_real(row, col, -derivative);
             }
         }
-        if let Some(rhs) = &mut self.rhs
-            && let Some(slot) = rhs.get_mut(row)
-        {
-            *slot += equivalent;
-        }
+        self.add_potential_rhs(row, equivalent);
     }
 
     #[inline]

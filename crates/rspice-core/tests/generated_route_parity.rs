@@ -494,19 +494,28 @@ fn r3_cmc_transient_agrees_across_routes() {
 /// device out of a system the caller is about to discard anyway.
 #[test]
 fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
-    use rspice_core::device::veriloga_builtins::GeneratedStamper;
+    use rspice_core::device::veriloga_builtins::{GeneratedStamper, GeneratedStaticStampCache};
     use rspice_core::solver::{ComplexMatrix, StaticMatrix};
 
-    let entries = (0..2)
-        .flat_map(|row| (0..2).map(move |column| (row, column, 0.0)))
+    // The two sinks the Rust backend actually emits for a DC/transient stamp
+    // are `stamp_current_sparse_local` and `stamp_potential_sparse_local`, and
+    // both resolve their rows through the device's static stamp cache: with no
+    // linked cache they return before writing anything, which is exactly how a
+    // fixture can look green while stamping nothing. So the cache is linked
+    // here the way the engine links it — two nodes and one branch unknown.
+    let entries = (0..3)
+        .flat_map(|row| (0..3).map(move |column| (row, column, 0.0)))
         .collect::<Vec<_>>();
-    let voltages = [1.0, 2.0];
+    let voltages = [1.0, 2.0, 0.5];
+    let structure = StaticMatrix::from_triplets(3, 3, &entries).expect("dense 3x3");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&structure, &[1, 2], &[1], 2);
 
     // A DC/transient stamper writes both sinks, and the equivalent source it
     // builds is `value - dI/dV * V`: a non-finite derivative therefore poisons
     // the right-hand side as well, which is why the two flags are reported
     // together rather than as one bit.
-    for (label, value, derivative, expected) in [
+    let cases = [
         ("finite", 1.0, 2.0, None),
         ("value", f64::NAN, 2.0, Some("right-hand-side contribution")),
         (
@@ -515,26 +524,183 @@ fn a_generated_stamper_reports_which_sink_received_a_non_finite_value() {
             f64::INFINITY,
             Some("Jacobian entry and right-hand-side contribution"),
         ),
-    ] {
-        let mut matrix = StaticMatrix::from_triplets(2, 2, &entries).expect("dense 2x2");
-        let mut rhs = [0.0; 2];
-        let mut stamper = GeneratedStamper::new(&mut matrix, &mut rhs, &voltages, 2);
+    ];
+
+    for (label, value, derivative, expected) in cases {
+        let mut matrix = StaticMatrix::from_triplets(3, 3, &entries).expect("dense 3x3");
+        let mut rhs = [0.0; 3];
+        let mut stamper =
+            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache);
         // Two contributions, the second always finite: an early exit would
         // lose the first observation or skip the second stamp.
-        stamper.stamp_current_node1(Some(1), Some(2), value, 1, derivative);
-        stamper.stamp_current_node1(Some(1), Some(2), 3.0, 2, 4.0);
+        stamper.stamp_current_sparse_local::<1, 0>(
+            Some(0),
+            Some(1),
+            value,
+            [0],
+            [derivative],
+            [],
+            [],
+            1.0,
+        );
+        stamper.stamp_current_sparse_local::<1, 0>(Some(0), Some(1), 3.0, [1], [4.0], [], [], 1.0);
+        let reported = stamper.non_finite_contribution();
         assert_eq!(
-            stamper.non_finite_contribution(),
-            expected,
-            "{label}: the stamper must report which sink saw a non-finite value"
+            reported, expected,
+            "{label}: the current sink must report which sink saw a non-finite value"
+        );
+        assert!(
+            rhs.iter().any(|value| *value != 0.0),
+            "{label}: the current sink must have written the right-hand side"
+        );
+    }
+
+    for (label, value, derivative, expected) in cases {
+        let mut matrix = StaticMatrix::from_triplets(3, 3, &entries).expect("dense 3x3");
+        let mut rhs = [0.0; 3];
+        let mut stamper =
+            GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache);
+        stamper.stamp_potential_sparse_local::<1, 0>(0, value, [0], [derivative], [], []);
+        stamper.stamp_potential_sparse_local::<1, 0>(0, 3.0, [1], [4.0], [], []);
+        let reported = stamper.non_finite_contribution();
+        assert_eq!(
+            reported, expected,
+            "{label}: the potential sink must report which sink saw a non-finite value"
+        );
+        assert!(
+            rhs.iter().any(|value| *value != 0.0),
+            "{label}: the potential sink must have written the right-hand side"
         );
     }
 
     // The AC-real stamper has no right-hand side, so it isolates the Jacobian.
-    let structure = StaticMatrix::from_triplets(2, 2, &entries).expect("dense 2x2");
     let mut matrix = ComplexMatrix::from_real_structure(&structure);
-    let mut stamper = GeneratedStamper::new_ac_real(&mut matrix, &voltages, 2);
-    stamper.stamp_current_node1(Some(1), Some(2), 1.0, 1, f64::INFINITY);
-    stamper.stamp_current_node1(Some(1), Some(2), 3.0, 2, 4.0);
+    let mut stamper =
+        GeneratedStamper::new_ac_real_with_static_cache(&mut matrix, &voltages, 2, &cache);
+    stamper.stamp_current_sparse_local::<1, 0>(
+        Some(0),
+        Some(1),
+        1.0,
+        [0],
+        [f64::INFINITY],
+        [],
+        [],
+        1.0,
+    );
+    stamper.stamp_current_sparse_local::<1, 0>(Some(0), Some(1), 3.0, [1], [4.0], [], [], 1.0);
     assert_eq!(stamper.non_finite_contribution(), Some("Jacobian entry"));
+}
+
+/// A generated device whose linearization at the offered iterate is not finite
+/// is a rejectable trial naming the instance, not a silent infinity in the
+/// matrix.
+///
+/// The iterate here is what a singular or badly conditioned linear solve hands
+/// back — `±inf` on a node — and it is the case the model's own defences do
+/// *not* catch: DIODE_CMC's limited exponential and the Newton limiter between
+/// them keep the evaluation itself finite, but the equivalent source every
+/// contribution carries is `value - dI/dV * V` and the stamper computes that
+/// against the raw iterate. So the model is happy, the linearization is
+/// garbage, and before this audit nothing noticed: the assembly returned
+/// `Ok(())`, having written infinities into the matrix and the right-hand
+/// side, and the transient read the failed solve that followed as a reason to
+/// cut dt while DC walked its whole ladder with no diagnostic at all.
+///
+/// The iterate is injected on each of the device's OWN nodes in turn, by name.
+/// A hand-picked solution index proves nothing: R1.15's first attempt at this
+/// fixture wrote `+inf` at `get_or_create_node("a") - 1`, which — after the
+/// build has already canonicalized that node to `A` — *appends a fresh node*
+/// and writes past every node the device owns, so the device stamped an
+/// all-zero point and returned `Ok(())` for a reason that had nothing to do
+/// with the audit.
+#[test]
+fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() {
+    use rspice_core::device::StampError;
+    use rspice_core::solver::StaticMatrix;
+
+    let deck = "* generated finiteness\nV1 in 0 0.8\nR1 in a 1k\nX1 a 0 DIODE_CMC\n.end\n";
+    assert!(
+        uses_generated_devices(deck),
+        "the plain X card must resolve to the generated built-in"
+    );
+    let netlist = Netlist::parse_validated(deck).expect("deck parses");
+    let mut circuit = Engine::default()
+        .build_circuit(&netlist)
+        .expect("deck builds");
+
+    let size = circuit.matrix_size();
+    let entries = (0..size)
+        .flat_map(|row| (0..size).map(move |column| (row, column, 0.0)))
+        .collect::<Vec<_>>();
+    // Index i of this list is node i + 1, i.e. solution index i.
+    let names = circuit.node_names_sorted();
+    let device_nodes = names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| name.eq_ignore_ascii_case("a") || name.starts_with("X1."))
+        .map(|(index, name)| (index, name.clone()))
+        .collect::<Vec<_>>();
+    assert!(
+        device_nodes.len() > 1,
+        "the generated device must own its terminal and its internal nodes: {names:?}"
+    );
+
+    let mut audited = Vec::new();
+    for (index, name) in &device_nodes {
+        let mut matrix =
+            StaticMatrix::from_triplets(size, size, &entries).expect("dense structure");
+        let mut rhs = vec![0.0; size];
+        let mut voltages = vec![0.0; size];
+        voltages[*index] = f64::INFINITY;
+
+        // Generated devices are assembled by `stamp_behavioral`, not by
+        // `try_stamp_nonlinear`: `stamp_behavioral_with_generated_mode` is
+        // where `stamp_all_with_mode` and `generated_veriloga_stamp_error`
+        // live.
+        let refusal = circuit.stamp_behavioral(
+            &mut matrix,
+            &mut rhs,
+            &voltages,
+            0.0,
+            rspice_core::xspice::AnalysisType::DcOp,
+        );
+        let Err(error) = refusal else {
+            panic!("a non-finite iterate on {name} must refuse the point");
+        };
+        let StampError::NonFiniteTrial(trial) = &error else {
+            panic!("a non-finite iterate on {name} must be a rejectable trial: {error}");
+        };
+        assert!(
+            trial.instance.eq_ignore_ascii_case("x1"),
+            "the refusal must name the instance, got {:?}",
+            trial.instance
+        );
+        assert!(
+            trial.detail.contains("generated Verilog-A") && trial.detail.contains("finite"),
+            "the refusal must come from the generated route and say what went wrong: {}",
+            trial.detail
+        );
+        // The assembly is completed rather than abandoned half-written — the
+        // caller is about to clear this matrix and offer another point, and an
+        // early exit would make the diagnostic depend on emission order — so
+        // the infinities are still here. What has changed is that the solver
+        // is told.
+        assert!(
+            rhs.iter().any(|value| !value.is_finite()),
+            "the audit must observe rather than suppress the contribution on {name}: {rhs:?}"
+        );
+        if trial.detail.contains("stamped a non-finite") {
+            audited.push((name.clone(), trial.detail.clone()));
+        }
+    }
+
+    // A typed refusal the module raised for itself wins where it exists (the
+    // anode feeds a `ddt`, which names its own operator). The stamper's audit
+    // is what answers everywhere else, and it must actually be reachable
+    // through a shipped model's own assembly — that is the whole claim, and
+    // it is not provable by driving a sink the backend never emits.
+    assert!(
+        !audited.is_empty(),
+        "the stamper's own audit must refuse at least one of {device_nodes:?}"
+    );
 }
