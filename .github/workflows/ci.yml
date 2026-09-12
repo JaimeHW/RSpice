@@ -141,13 +141,17 @@ jobs:
       - name: Test Verilog-A-gated core suites through the bytecode interpreter
         run: >-
           cargo test --locked -p rspice-core --features veriloga --no-fail-fast
+          --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
+          --test spectre_analog_statements
           --test transient_checkpoint
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle
+          --test veriloga_elaboration_diagnostics
           --test veriloga_hb
+          --test veriloga_include_resolution
           --test veriloga_indirect
           --test veriloga_mfactor
           --test veriloga_mixed_signal_hardening
@@ -158,12 +162,19 @@ jobs:
           --test veriloga_noise_process
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
+          --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
-      # A second invocation rather than four more names above: these suites
+      # A second invocation rather than five more names above: these suites
       # need a generated model compiled in, and adding `veriloga-model-diode-cmc`
-      # to the list above would reroute cards the nineteen suites there assert
-      # about through the generated device instead of the native one.
+      # to the list above would reroute cards the suites there assert about
+      # through the generated device instead of the native one.
+      #
+      # `veriloga_master_shadowing` belongs here and not above for the same
+      # reason read the other way: its case for a `.VERILOGA` stem that shadows a
+      # shipped built-in is gated on `veriloga-builtins-base`, which
+      # `veriloga-model-diode-cmc` implies and plain `veriloga` does not, so the
+      # interpreter-only lane would compile that case out.
       - name: Test the tri-family and generated-route suites through the bytecode interpreter
         run: >-
           cargo test --locked -p rspice-core
@@ -172,6 +183,7 @@ jobs:
           --test tri_family_events
           --test tri_family_small_signal
           --test generated_route_parity
+          --test veriloga_master_shadowing
 
   test-libraries:
     name: Test workspace libraries & tools (Linux)
@@ -292,13 +304,17 @@ jobs:
       - name: Test Verilog-A-gated core suites through the native JIT (Linux x64)
         run: >-
           cargo test --locked -p rspice-core --features veriloga-native --no-fail-fast
+          --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
+          --test spectre_analog_statements
           --test transient_checkpoint
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle
+          --test veriloga_elaboration_diagnostics
           --test veriloga_hb
+          --test veriloga_include_resolution
           --test veriloga_indirect
           --test veriloga_mfactor
           --test veriloga_mixed_signal_hardening
@@ -309,6 +325,7 @@ jobs:
           --test veriloga_noise_process
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
+          --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
           -- --test-threads=1
@@ -321,6 +338,20 @@ jobs:
           --test tri_family_events
           --test tri_family_small_signal
           --test generated_route_parity
+          --test veriloga_master_shadowing
+          -- --test-threads=1
+      # Three suites the native lane never named. `numeric_integrity` and
+      # `device_eval` are ungated, so the libraries job compiles them against the
+      # bytecode interpreter and nothing compiled them against the JIT;
+      # `digital_process_ir` is gated on `native`, which no job outside this one
+      # enables, so it linked nowhere at all.
+      - name: Test Verilog-A native evaluation and digital lowering (Linux x64)
+        run: >-
+          cargo test --locked -p rspice-veriloga
+          --features native-bytecode-contract-tests --no-fail-fast
+          --test numeric_integrity
+          --test device_eval
+          --test digital_process_ir
           -- --test-threads=1
       - name: Test Verilog-A native JIT contracts (Linux x64)
         run: cargo test --locked -p rspice-veriloga --features native-bytecode-contract-tests --test native_contract -- --test-threads=1
