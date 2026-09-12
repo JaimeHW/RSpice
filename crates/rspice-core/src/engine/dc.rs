@@ -1515,6 +1515,9 @@ impl Engine {
                 // Update source value.
                 sweep_source.set_value(&mut circuit, sweep_value);
                 engine.ensure_dc_paths_to_ground(&circuit)?;
+                // This sweep solves its points itself, so it owes the
+                // per-point reset the operating-point solve does.
+                circuit.clear_xspice_evaluation_warning();
 
                 // Solve DC at this point
                 // Key optimization: use previous solution as initial guess for faster convergence

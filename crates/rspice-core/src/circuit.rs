@@ -641,13 +641,13 @@ pub struct CircuitData {
     pub(crate) xspice_evaluation_error: Option<String>,
     /// The last XSPICE evaluation warning already written to the log.
     ///
-    /// A code model that cannot evaluate at a trial point is *not* a
-    /// rejectable iterate here: ngspice ignores a non-finite code-model output
-    /// and the `cm_` ABI has no channel to refuse one, so the engine keeps the
-    /// warning it has always had. What it does not keep is the repetition —
-    /// the same warning was written once per Newton iteration, which on a
-    /// failing timepoint buries the log. Remembering the last line written
-    /// reduces that to once per distinct failure per timepoint.
+    /// A code model's failure is not tolerated — it is latched into
+    /// `xspice_evaluation_error` and ends the run at the next acceptance. This
+    /// field only suppresses the repetition: the same warning was written once
+    /// per Newton iteration, which on a failing timepoint buries the log ahead
+    /// of the error that explains it. It is cleared at every accepted step and
+    /// at every DC solve, so the suppression cannot outlive the point it was
+    /// measured at.
     pub(crate) xspice_evaluation_warning: Option<String>,
     /// A provider that cannot roll back invalidates this circuit and its
     /// in-memory clones. Unlike an evaluation error, this failure is not cleared

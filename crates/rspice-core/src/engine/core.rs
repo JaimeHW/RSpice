@@ -1539,6 +1539,10 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        // Every DC point renders its XSPICE warnings at t = 0, so the de-dup
+        // key cannot separate two of them. Starting each solve from silence is
+        // what keeps it a per-point suppression.
+        circuit.clear_xspice_evaluation_warning();
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
         if !force_initial_conditions {
             self.ensure_dc_paths_to_ground(circuit)?;

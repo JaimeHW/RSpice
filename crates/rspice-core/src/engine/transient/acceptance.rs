@@ -66,6 +66,10 @@ impl Engine {
         if let Some(error) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(error));
         }
+        // The warning de-dup is scoped to the point it was measured at: the
+        // step this accepts is over, so the next one starts from silence and
+        // a failure that repeats at the next timepoint is reported again.
+        circuit.clear_xspice_evaluation_warning();
         let has_xspice = circuit.has_xspice_devices();
         let rollback = has_xspice.then(|| circuit.capture_xspice_acceptance());
         let mut projected = Vec::new();
@@ -206,7 +210,8 @@ impl Engine {
                             "XSPICE candidate acceptance failed: {error}"
                         ))
                     })?;
-                projected = circuit.project_xspice_voltage_outputs(solution, circuit.num_nodes());
+                let num_nodes = circuit.num_nodes();
+                projected = circuit.project_xspice_voltage_outputs(solution, num_nodes);
             }
             #[cfg(feature = "veriloga")]
             if circuit.has_mixed_signal_hosts() {

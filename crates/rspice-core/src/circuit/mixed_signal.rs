@@ -740,9 +740,10 @@ impl CircuitData {
                 };
                 group.settle_with(&mut digital, solution, Some(&mut participant))?;
                 wave = participant.into_wave();
+                let num_nodes = owner.circuit.num_nodes();
                 let updates = owner
                     .circuit
-                    .project_xspice_voltage_outputs(solution, owner.circuit.num_nodes());
+                    .project_xspice_voltage_outputs(solution, num_nodes);
                 if updates.is_empty() {
                     projected_quiet = true;
                     break;

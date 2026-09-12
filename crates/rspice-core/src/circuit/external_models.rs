@@ -762,25 +762,51 @@ impl CircuitData {
     /// Log one XSPICE evaluation failure, naming the iterate it happened at,
     /// and not again while the same failure repeats.
     ///
-    /// Decision (R1.14): a code model that cannot evaluate at a trial point
-    /// stays a warning rather than becoming a rejectable iterate. ngspice
-    /// ignores it — `cm_` functions have no way to refuse a point, the
-    /// dispatch returns `void`, and `stamp_xspice` has no failure channel at
-    /// all — and Spectre has no XSPICE to be compared with. Turning it into a
-    /// rejection would make every code model that writes a NaN on one pass cut
-    /// the timestep, which is a behaviour change with no reference to check
-    /// against. The repetition is the part that was wrong: the Newton loop
-    /// evaluates XSPICE once per iteration and wrote this line every time, so
-    /// a failing timepoint produced dozens of identical lines. The error text
-    /// already names the instance (`"{instance}: {error}"`, the wave stepper);
-    /// this adds the trial iterate and drops the repeats.
+    /// What this is NOT is a decision to tolerate the failure. A code model
+    /// that returns a `CmError` is latched into
+    /// [`Self::xspice_evaluation_error`] by the evaluation itself, deliberately
+    /// outside the trial image, and
+    /// [`Self::take_xspice_evaluation_error`] turns that latch into a
+    /// run-ending `Circuit` at the next accepted timestep, at the end of a DC
+    /// solve, and at transient start and end. So the sequence is: warned here
+    /// at the iterate that produced it, fatal one acceptance later — never
+    /// rejectable, never ignored.
+    ///
+    /// This function exists for the repetition. The Newton loop evaluates
+    /// XSPICE once per iteration and wrote the line every time, so a failing
+    /// timepoint produced dozens of identical warnings before the one error
+    /// that ends the run. The error text already names the instance
+    /// (`"{instance}: {error}"`, the wave stepper); this adds the iterate and
+    /// keeps only the first of each distinct line until the analysis moves on
+    /// (see [`Self::clear_xspice_evaluation_warning`]).
     fn warn_xspice_evaluation(&mut self, time: Value, error: &crate::xspice::CmError) {
-        let line = format!("XSPICE evaluation error at the trial iterate t={time:.6e} s: {error}");
+        self.warn_xspice_once(format!(
+            "XSPICE evaluation error at the trial iterate t={time:.6e} s: {error}"
+        ));
+    }
+
+    /// Write one XSPICE warning line unless it is the line already written.
+    fn warn_xspice_once(&mut self, line: String) {
         if self.xspice_evaluation_warning.as_deref() == Some(line.as_str()) {
             return;
         }
         log::warn!("{line}");
         self.xspice_evaluation_warning = Some(line);
+    }
+
+    /// Forget the last warning written, so the next analysis coordinate starts
+    /// from silence.
+    ///
+    /// The de-dup key is the rendered line, and a rendered line is not unique
+    /// across an analysis: every point of a DC sweep is at t = 0, a `.STEP` or
+    /// Monte-Carlo clone inherits the field with the circuit it was cloned
+    /// from, and two accepted timepoints closer than the `{:.6e}` format can
+    /// separate render identically. Any of those would suppress a real second
+    /// failure. Clearing at each accepted step and at each DC solve bounds the
+    /// key to the one place it is meant to work — the Newton iterations of a
+    /// single point.
+    pub(crate) fn clear_xspice_evaluation_warning(&mut self) {
+        self.xspice_evaluation_warning = None;
     }
 
     /// Fallible XSPICE evaluation for callers that must not report success
@@ -1551,6 +1577,11 @@ impl CircuitData {
     ///
     /// After evaluation, analog code models produce conductance and current
     /// contributions that must be stamped into the MNA system.
+    ///
+    /// A non-finite partial derivative is dropped from the Jacobian rather
+    /// than refused, and one such drop per assembly is warned about here; see
+    /// `note_skipped_partial` for why that is a diagnostic and not yet a
+    /// decision.
     pub fn stamp_xspice(&mut self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         let num_nodes = self.num_nodes;
 
@@ -1873,6 +1904,37 @@ impl CircuitData {
             instance: &'b crate::xspice::XspiceInstance,
             port: &'b crate::xspice::PortSpec,
             num_nodes: usize,
+            /// The first non-finite output partial this assembly dropped, if
+            /// any: see [`note_skipped_partial`].
+            skipped: &'a mut Option<String>,
+        }
+
+        /// Record the first non-finite output partial dropped from the
+        /// Jacobian, so the assembly is not silent about it.
+        ///
+        /// A code model that hands back a NaN derivative gets that term left
+        /// out rather than refused — the `cm_` ABI has no channel to refuse a
+        /// point — which means the Newton system it is solved in is not the
+        /// one the model described. Whether this should instead reject the
+        /// iterate is open (R1.15); until it is decided, the one thing that
+        /// must not happen is that it happens quietly.
+        #[inline]
+        fn note_skipped_partial(
+            skipped: &mut Option<String>,
+            instance: &crate::xspice::XspiceInstance,
+            port: &crate::xspice::PortSpec,
+            control_port: &str,
+            partial: Value,
+        ) {
+            if skipped.is_some() {
+                return;
+            }
+            *skipped = Some(format!(
+                "XSPICE instance '{}' output port '{}' has a non-finite derivative \
+                 ({partial}) with respect to input '{control_port}' at this iterate; \
+                 that term was left out of the Jacobian",
+                instance.name, port.name
+            ));
         }
 
         fn stamp_current_output_port(
@@ -1888,10 +1950,12 @@ impl CircuitData {
                 instance,
                 port,
                 num_nodes,
+                skipped,
             } = stamp;
             let mut equivalent_current = current;
             for (control_port, partial) in instance.output_input_partials(&port.name) {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 equivalent_current -= partial * instance.analog_input_value(&control_port);
@@ -1909,6 +1973,7 @@ impl CircuitData {
             for (control_port, index, partial) in instance.output_input_vector_partials(&port.name)
             {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 equivalent_current -=
@@ -1949,12 +2014,14 @@ impl CircuitData {
                 instance,
                 port,
                 num_nodes,
+                skipped,
             } = stamp;
             let mut equivalent_current = current;
             for (control_port, partial) in
                 instance.output_vector_input_partials(&port.name, output_index)
             {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 equivalent_current -= partial * instance.analog_input_value(&control_port);
@@ -1973,6 +2040,7 @@ impl CircuitData {
                 instance.output_vector_input_vector_partials(&port.name, output_index)
             {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 equivalent_current -=
@@ -2042,6 +2110,7 @@ impl CircuitData {
                 instance,
                 port,
                 num_nodes,
+                skipped,
             } = stamp;
             let br_mna = num_nodes + branch_ordinal;
             let br = br_mna - 1;
@@ -2055,6 +2124,7 @@ impl CircuitData {
                 instance.output_vector_input_partials(&port.name, output_index)
             {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 branch_rhs -= partial * instance.analog_input_value(&control_port);
@@ -2072,6 +2142,7 @@ impl CircuitData {
                 instance.output_vector_input_vector_partials(&port.name, output_index)
             {
                 if !partial.is_finite() {
+                    note_skipped_partial(skipped, instance, port, &control_port, partial);
                     continue;
                 }
                 branch_rhs -= partial * instance.analog_vector_input_value(&control_port, index);
@@ -2098,6 +2169,8 @@ impl CircuitData {
             );
         }
 
+        let mut skipped_partial: Option<String> = None;
+        let skipped = &mut skipped_partial;
         for slot in &mut self.xspice_instances {
             let instance = &**slot;
             for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
@@ -2131,6 +2204,7 @@ impl CircuitData {
                                                     instance,
                                                     port,
                                                     num_nodes,
+                                                    skipped,
                                                 },
                                                 index,
                                                 branch_ordinal,
@@ -2151,6 +2225,7 @@ impl CircuitData {
                                                 instance,
                                                 port,
                                                 num_nodes,
+                                                skipped,
                                             },
                                             index,
                                             node,
@@ -2184,6 +2259,7 @@ impl CircuitData {
                                                             instance,
                                                             port,
                                                             num_nodes,
+                                                            skipped,
                                                         },
                                                         index,
                                                         branch_ordinal,
@@ -2204,6 +2280,7 @@ impl CircuitData {
                                                         instance,
                                                         port,
                                                         num_nodes,
+                                                        skipped,
                                                     },
                                                     index,
                                                     *node,
@@ -2238,6 +2315,7 @@ impl CircuitData {
                                                         instance,
                                                         port,
                                                         num_nodes,
+                                                        skipped,
                                                     },
                                                     index,
                                                     branch_ordinal,
@@ -2258,6 +2336,7 @@ impl CircuitData {
                                                     instance,
                                                     port,
                                                     num_nodes,
+                                                    skipped,
                                                 },
                                                 index,
                                                 *pos,
@@ -2279,6 +2358,7 @@ impl CircuitData {
                                                 instance,
                                                 port,
                                                 num_nodes,
+                                                skipped,
                                             },
                                             index,
                                             *pos,
@@ -2307,6 +2387,7 @@ impl CircuitData {
                                 instance,
                                 port,
                                 num_nodes,
+                                skipped,
                             },
                             *pos,
                             *neg,
@@ -2336,6 +2417,13 @@ impl CircuitData {
                                     instance.output_input_partials(&port.name)
                                 {
                                     if !partial.is_finite() {
+                                        note_skipped_partial(
+                                            skipped,
+                                            instance,
+                                            port,
+                                            &control_port,
+                                            partial,
+                                        );
                                         continue;
                                     }
                                     branch_rhs -=
@@ -2356,6 +2444,13 @@ impl CircuitData {
                                     instance.output_input_vector_partials(&port.name)
                                 {
                                     if !partial.is_finite() {
+                                        note_skipped_partial(
+                                            skipped,
+                                            instance,
+                                            port,
+                                            &control_port,
+                                            partial,
+                                        );
                                         continue;
                                     }
                                     branch_rhs -= partial
@@ -2445,6 +2540,7 @@ impl CircuitData {
                                     instance,
                                     port,
                                     num_nodes,
+                                    skipped,
                                 },
                                 pos,
                                 neg,
@@ -2470,6 +2566,9 @@ impl CircuitData {
                     add_rhs_if_present(rhs, node, value);
                 }
             }
+        }
+        if let Some(line) = skipped_partial {
+            self.warn_xspice_once(line);
         }
     }
 
@@ -2518,8 +2617,14 @@ impl CircuitData {
     /// Project evaluated ideal XSPICE voltage outputs into the candidate
     /// solution vector after event-driven models settle. The returned writes
     /// restore the original candidate when replayed in reverse order.
+    ///
+    /// A port whose value is not finite is skipped rather than written, which
+    /// leaves the candidate holding the previous value for that node with no
+    /// trace that the model asked for another. That silence is what the
+    /// warning below ends; whether a non-finite code-model OUTPUT should
+    /// instead reject the iterate is open (R1.15).
     pub(crate) fn project_xspice_voltage_outputs(
-        &self,
+        &mut self,
         solution: &mut [Value],
         num_nodes: usize,
     ) -> Vec<(usize, Value)> {
@@ -2582,6 +2687,21 @@ impl CircuitData {
             return rollback;
         }
 
+        let mut non_finite_output: Option<String> = None;
+        let mut note_non_finite_output =
+            |instance: &crate::xspice::XspiceInstance,
+             port: &crate::xspice::PortSpec,
+             value: Value| {
+                if value.is_finite() || non_finite_output.is_some() {
+                    return;
+                }
+                non_finite_output = Some(format!(
+                    "XSPICE instance '{}' output port '{}' evaluated to {value} at this iterate; \
+                     the projection of that port into the candidate solution was skipped",
+                    instance.name, port.name
+                ));
+            };
+
         for instance in &self.xspice_instances {
             let ports = instance.ports();
             for (port_idx, connection) in instance.connections().iter().enumerate() {
@@ -2613,6 +2733,7 @@ impl CircuitData {
                                 }
                                 let (_, value) =
                                     instance.analog_vector_contribution_at(port_idx, index);
+                                note_non_finite_output(instance, port, value);
                                 project_voltage_pair(solution, node, 0, value, &mut rollback);
                             }
                         }
@@ -2626,6 +2747,7 @@ impl CircuitData {
                                 }
                                 let (_, value) =
                                     instance.analog_vector_contribution_at(port_idx, index);
+                                note_non_finite_output(instance, port, value);
                                 match element {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
                                         project_voltage_pair(
@@ -2668,6 +2790,7 @@ impl CircuitData {
                 let Some((_, value)) = instance.get_analog_contribution(port_idx) else {
                     continue;
                 };
+                note_non_finite_output(instance, port, value);
                 match connection {
                     crate::xspice::PortConnection::Analog(node) => {
                         project_voltage_pair(solution, *node, 0, value, &mut rollback);
@@ -2679,6 +2802,9 @@ impl CircuitData {
                     _ => {}
                 }
             }
+        }
+        if let Some(line) = non_finite_output {
+            self.warn_xspice_once(line);
         }
         rollback
     }
@@ -5025,7 +5151,8 @@ endmodule"#;
 
         let mut solution = vec![0.0; circuit.matrix_size()];
         circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
-        let _ = circuit.project_xspice_voltage_outputs(&mut solution, circuit.num_nodes);
+        let num_nodes = circuit.num_nodes;
+        let _ = circuit.project_xspice_voltage_outputs(&mut solution, num_nodes);
 
         assert_eq!(solution[out_node - 1], 1.0);
     }
