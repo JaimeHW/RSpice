@@ -128,18 +128,77 @@ use crate::source::Span;
 use smol_str::SmolStr;
 use std::collections::{BTreeSet, HashMap};
 
+/// Whether a diagnostic is the author's to fix or the compiler's.
+///
+/// The distinction decides what the author is told. A *refusal* is a construct
+/// they wrote: legal enough to reach this pass, and one the discrete-domain
+/// lowering has no form for. It is reported the way every other refused
+/// construct is — a semantic error naming the construct at its offset. An
+/// *invariant* is a property this pass established itself: a graph it built, a
+/// scope it prepared, a classification it ran. Violating one can only mean the
+/// compiler is broken, so it keeps the `Internal error` rendering that says so.
+///
+/// Telling an author that their `string` declaration is an internal error
+/// tells them the wrong thing to do about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DigitalLoweringClass {
+    Refusal,
+    Invariant,
+}
+
+/// One diagnostic from the discrete-domain lowering, with the class that
+/// decides how it reaches the author.
+#[derive(Debug, Clone)]
+pub(crate) struct DigitalLoweringDiagnostic {
+    pub(crate) class: DigitalLoweringClass,
+    pub(crate) diagnostic: IrDiagnostic,
+}
+
+impl DigitalLoweringDiagnostic {
+    fn refusal(message: impl Into<String>, span: SourceSpanRef) -> Self {
+        Self {
+            class: DigitalLoweringClass::Refusal,
+            diagnostic: IrDiagnostic::error(CompilerPhase::CfgLowering, message, span),
+        }
+    }
+
+    fn invariant(message: impl Into<String>, span: SourceSpanRef) -> Self {
+        Self {
+            class: DigitalLoweringClass::Invariant,
+            diagnostic: IrDiagnostic::error(CompilerPhase::CfgLowering, message, span),
+        }
+    }
+
+    /// Adopt a diagnostic raised by a pass that only checks its own output.
+    fn from_invariant(diagnostic: IrDiagnostic) -> Self {
+        Self {
+            class: DigitalLoweringClass::Invariant,
+            diagnostic,
+        }
+    }
+}
+
 /// Lower the analyzed discrete-domain content of a module.
 ///
 /// Returns the plan on success, or every refusal at once — the same
 /// accumulate-then-report discipline the rest of the front end uses, so an
 /// author with three unsupported constructs learns about three.
+///
+/// The classification is dropped here: this entry point reports the raw
+/// diagnostics, and the compiler's own path ([`lower_module`]) keeps it so the
+/// author's constructs and the compiler's invariants are rendered apart.
 pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
-    lower_with_analog_variables(digital, &HashMap::new())
+    lower_with_analog_variables(digital, &HashMap::new()).map_err(|diagnostics| {
+        diagnostics
+            .into_iter()
+            .map(|entry| entry.diagnostic)
+            .collect()
+    })
 }
 
 pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
-) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
+) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
     use super::digital::DigitalAnalogQuantity;
     let variables = module
         .variables
@@ -167,7 +226,7 @@ pub(crate) fn lower_module(
 fn lower_with_analog_variables(
     digital: &AnalyzedDigital,
     analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
-) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
+) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
     if digital.is_empty() {
         return Ok(CanonicalDigitalPlan::default());
     }
@@ -379,6 +438,15 @@ fn lower_with_analog_variables(
         analog_probes: probes,
     }
     .seal()
+    // Structural validation of the plan this pass just built, reached only
+    // after every construct in it was accepted: an author cannot write their
+    // way to one of these.
+    .map_err(|diagnostics| {
+        diagnostics
+            .into_iter()
+            .map(DigitalLoweringDiagnostic::from_invariant)
+            .collect()
+    })
 }
 
 /// Refuse a plain `wreal` that more than one driver drives.
@@ -399,7 +467,7 @@ fn lower_with_analog_variables(
 fn reject_overdriven_real_nets(
     signals: &[DigitalSignal],
     drivers: &[DigitalDriver],
-) -> Vec<IrDiagnostic> {
+) -> Vec<DigitalLoweringDiagnostic> {
     let mut diagnostics = Vec::new();
     for signal in signals {
         if signal.kind != DigitalSignalKind::Real(DigitalRealResolution::Single) {
@@ -420,8 +488,7 @@ fn reject_overdriven_real_nets(
             continue;
         };
         let count = on_this_net.len();
-        diagnostics.push(IrDiagnostic::error(
-            CompilerPhase::CfgLowering,
+        diagnostics.push(DigitalLoweringDiagnostic::refusal(
             format!(
                 "`{}` is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section 6.5.3 \
                  permits a maximum of one driver of a real-valued net, and the standard defines \
@@ -461,7 +528,7 @@ fn lower_continuous_assign(
     drivers: &mut Vec<DigitalDriver>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
-) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
+) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         time_scale,
         signals,
@@ -542,8 +609,7 @@ fn lower_continuous_assign(
         return Err(lowerer.diagnostics);
     }
     let function = lowerer.builder.finish(entry).map_err(|error| {
-        vec![IrDiagnostic::error(
-            CompilerPhase::CfgLowering,
+        vec![DigitalLoweringDiagnostic::invariant(
             format!("lowering a continuous assignment produced an invalid graph: {error}"),
             assignment.span.into(),
         )]
@@ -626,7 +692,7 @@ fn lower_process(
     analog_variables: &HashMap<SmolStr, super::digital::DigitalAnalogQuantity>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
-) -> Result<CfgDigitalProcess, Vec<IrDiagnostic>> {
+) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         time_scale,
         signals,
@@ -696,8 +762,7 @@ fn lower_process(
     }
 
     let function = lowerer.builder.finish(entry).map_err(|error| {
-        vec![IrDiagnostic::error(
-            CompilerPhase::CfgLowering,
+        vec![DigitalLoweringDiagnostic::invariant(
             format!("lowering process {id} produced an invalid graph: {error}"),
             process.span.into(),
         )]
@@ -944,7 +1009,7 @@ struct ProcessLowerer<'a> {
     /// the processes lowered before and after it.
     probes: &'a mut Vec<DigitalAnalogProbe>,
     builder: ProcessBuilder,
-    diagnostics: Vec<IrDiagnostic>,
+    diagnostics: Vec<DigitalLoweringDiagnostic>,
     /// Every variable declared in the process, by id.
     locals: Vec<ProcessLocal>,
     /// Declarative regions, innermost last (IEEE 1364-2005 section 9.8.1).
@@ -956,9 +1021,19 @@ struct ProcessLowerer<'a> {
 }
 
 impl ProcessLowerer<'_> {
+    /// Refuse a construct the author wrote. See [`DigitalLoweringClass`]: this
+    /// reaches them as a semantic error at `span`, naming what is missing.
     fn error(&mut self, message: impl Into<String>, span: Span) {
-        self.diagnostics.push(IrDiagnostic::error(
-            CompilerPhase::CfgLowering,
+        self.diagnostics.push(DigitalLoweringDiagnostic::refusal(
+            message,
+            SourceSpanRef::from(span),
+        ));
+    }
+
+    /// Report a violation of something this pass established itself. Nothing
+    /// an author can write reaches one, so it stays an internal error.
+    fn invariant(&mut self, message: impl Into<String>, span: Span) {
+        self.diagnostics.push(DigitalLoweringDiagnostic::invariant(
             message,
             SourceSpanRef::from(span),
         ));
@@ -1378,7 +1453,7 @@ impl ProcessLowerer<'_> {
             DigitalStatement::Null(_) => block,
             DigitalStatement::Block(inner) => {
                 let Some(scope) = self.static_scopes.get(&inner.span).cloned() else {
-                    self.error(
+                    self.invariant(
                         "process block has no prepared declaration scope",
                         inner.span,
                     );
@@ -2264,7 +2339,7 @@ impl ProcessLowerer<'_> {
                 Ok((function, outputs)) => self.builder.push(block, ty,
                     CfgValueKind::DigitalExpression { function: Box::new(function), result: outputs[0] }),
                 Err(detail) => {
-                    self.error(format!("invalid event expression CFG: {detail}"), term.span);
+                    self.invariant(format!("invalid event expression CFG: {detail}"), term.span);
                     self.real_constant(0.0)
                 }
             };
@@ -2470,7 +2545,7 @@ impl ProcessLowerer<'_> {
     fn analog_probe(&mut self, block: BlockId, access: &BranchAccess) -> ValueId {
         use super::digital::DigitalAnalogProbeTarget;
         let Some(quantity) = access.kind() else {
-            self.error(
+            self.invariant(
                 "analog probe has no resolved physical quantity",
                 access.span(),
             );
@@ -2900,7 +2975,7 @@ impl ProcessLowerer<'_> {
 
     /// A real-classified identifier must resolve to real storage or a constant.
     fn not_a_real(&mut self, name: &str, what: &str, span: Span) -> ValueId {
-        self.error(
+        self.invariant(
             format!("`{name}` resolved to {what} after real type classification"),
             span,
         );
@@ -3725,7 +3800,7 @@ impl ProcessLowerer<'_> {
         let width = context.width;
         match unary.op {
             UnaryOp::ToInteger => {
-                self.error(
+                self.invariant(
                     "analog integer conversion reached four-state lowering",
                     unary.span,
                 );
@@ -3826,7 +3901,7 @@ impl ProcessLowerer<'_> {
             | BinaryOp::IntDiv
             | BinaryOp::IntMod
             | BinaryOp::IntPow => {
-                self.error(
+                self.invariant(
                     "an internal analog integer operator cannot appear in a digital process",
                     binary.span,
                 );

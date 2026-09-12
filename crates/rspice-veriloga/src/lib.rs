@@ -1123,8 +1123,8 @@ impl VerilogACompiler {
         // artifact that silently omitted a driver would describe a different
         // circuit, which is the failure the old blanket refusal existed to
         // prevent.
-        let digital =
-            canonical_ir::digital_lower::lower_module(module).map_err(Self::canonical_ir_error)?;
+        let digital = canonical_ir::digital_lower::lower_module(module)
+            .map_err(Self::digital_lowering_error)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;
@@ -1246,6 +1246,63 @@ impl VerilogACompiler {
     ) -> CompileResult<std::borrow::Cow<'a, semantic::AnalyzedModule>> {
         let selected = self.select_analyzed_module(analyzed, module_name)?;
         semantic::lower_flow_probes(semantic::elaborate_executable_module(analyzed, selected)?)
+    }
+
+    /// Report what the discrete-domain lowering refused.
+    ///
+    /// A construct the lowering has no form for is the author's to fix, so it
+    /// is reported the way every other refused construct is: a semantic error
+    /// naming the construct at its offset, through
+    /// [`error::SemanticErrorKind::UnsupportedFeature`] and nothing new. Telling an
+    /// author that their `string` declaration is an "internal error" tells
+    /// them the compiler is broken and leaves them nothing to do about it;
+    /// Spectre and Virtuoso reserve that phrasing for invariant violations and
+    /// so does this.
+    ///
+    /// Several refusals are reported together the way the analyzer reports
+    /// collected errors. A single invariant violation anywhere in the batch
+    /// puts the whole batch back on the `Internal error` path: at that point
+    /// the compiler *is* broken, and hiding that behind a construct's name
+    /// would lose the one diagnostic worth keeping.
+    fn digital_lowering_error(
+        diagnostics: Vec<canonical_ir::digital_lower::DigitalLoweringDiagnostic>,
+    ) -> CompileError {
+        use canonical_ir::digital_lower::DigitalLoweringClass;
+        if diagnostics
+            .iter()
+            .any(|entry| entry.class == DigitalLoweringClass::Invariant)
+        {
+            return Self::canonical_ir_error(
+                diagnostics
+                    .into_iter()
+                    .map(|entry| entry.diagnostic)
+                    .collect(),
+            );
+        }
+        let mut refusals: Vec<CompileError> = diagnostics
+            .into_iter()
+            .map(|entry| {
+                let span = entry.diagnostic.span.map_or_else(Span::dummy, |span| {
+                    Span::new(SourceId::new(span.source_file_id), span.start, span.end)
+                });
+                CompileError::Semantic(error::SemanticError::new(
+                    error::SemanticErrorKind::UnsupportedFeature(entry.diagnostic.message),
+                    span,
+                ))
+            })
+            .collect();
+        match refusals.len() {
+            1 => refusals.remove(0),
+            // An empty batch cannot happen — the lowering returns `Ok` when it
+            // collected nothing — but a compiler that reported "no errors" as
+            // a failure would be worse than one that says what it did.
+            0 => {
+                CompileError::CodeGen(error::CodeGenError::new(error::CodeGenErrorKind::Internal(
+                    "the discrete-domain lowering failed without a diagnostic".into(),
+                )))
+            }
+            _ => CompileError::Multiple(refusals),
+        }
     }
 
     fn canonical_ir_error(diagnostics: Vec<canonical_ir::IrDiagnostic>) -> CompileError {

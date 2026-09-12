@@ -2349,6 +2349,10 @@ fn the_real_net_refusals_name_themselves() {
             rendered.contains(expected),
             "expected `{expected}` to be named in: {rendered}"
         );
+        assert!(
+            !rendered.contains("Internal error"),
+            "a construct the author wrote is not an internal error: {rendered}"
+        );
     }
 }
 
@@ -2399,6 +2403,110 @@ fn the_remaining_process_refusals_name_themselves() {
         assert!(
             rendered.contains(expected),
             "expected `{expected}` to be named in: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Internal error"),
+            "a construct the author wrote is not an internal error: {rendered}"
+        );
+    }
+}
+
+/// Every construct the discrete-domain lowering refuses reaches its author the
+/// way a refused construct should: a semantic error naming the construct at its
+/// offset. None of them arrives as `Internal error`.
+///
+/// That distinction is the whole point of the row set. `Internal error` says
+/// the compiler is broken and leaves the author nothing to do; a program that
+/// declares a `string` inside a process is not a broken compiler, it is a
+/// construct this lowering does not build, and the author can only know that
+/// if the compiler says so. Spectre and Virtuoso reserve the internal-error
+/// phrasing for invariant violations, and `canonical_ir/digital_lower.rs`
+/// classifies each of its diagnostic sites accordingly.
+///
+/// One row per reachable refusal site. Each is a program the front end already
+/// refused before the classification existed, so the row set is also the pin
+/// that no refused program quietly started compiling.
+#[test]
+fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
+    let cases = [
+        // Verilog-AMS LRM 2.4 section 6.5.3: one driver of a `wreal`.
+        (
+            "    wreal a, b, bus;\n\
+             \x20   assign bus = a;\n\
+             \x20   assign bus = b;",
+            "section 6.5.3",
+        ),
+        // A process-local declaration this lowering has no storage for.
+        (
+            "    reg q;\n\
+             \x20   initial begin : work string s; q = 1'b0; end",
+            "process-local `string`",
+        ),
+        // An unpacked array inside a process: the analyzer owns this one and
+        // the lowering's own array arms are unreachable behind it. The row
+        // stays because the suite's subject is what an author is told, not
+        // which pass says it.
+        (
+            "    reg q;\n\
+             \x20   initial begin : work reg [1:0] m [0:3]; q = 1'b0; end",
+            "unpacked array dimensions on the process-local `m`",
+        ),
+        // A process-local is an SSA value, so neither a deferred update nor a
+        // partial write has anywhere to land.
+        (
+            "    reg q;\n\
+             \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
+            "nonblocking assignment to the process-local `i`",
+        ),
+        (
+            "    reg q;\n\
+             \x20   initial begin : work reg [3:0] t; t[0] = 1'b1; q = t[0]; end",
+            "select on the process-local `t`",
+        ),
+        // A module-level variable the discrete domain has taken over, whose
+        // initializer the continuous domain no longer schedules.
+        (
+            "    real bias = 1.0;\n\
+             \x20   reg q;\n\
+             \x20   initial begin q = 1'b0; bias = 2.0; end",
+            "module-level",
+        ),
+        // A select whose bound is only known at run time. The analyzer owns
+        // this one now; the lowering's constant fold stands behind it.
+        (
+            "    reg [3:0] q;\n\
+             \x20   initial begin : work integer i; i = 0; q[i] = 1'b1; end",
+            "must have constant bounds",
+        ),
+        // `@*` over a statement that reads nothing would never resume.
+        (
+            "    reg q;\n\
+             \x20   always @* q = 1'b1;",
+            "names no signal",
+        ),
+        // No row for `sized`'s "a real value has no four-state form here": an
+        // assignment and a `repeat` count both reach a real through VAMS-2023
+        // 4.2.1's numeric conversion and lower, so no program was found that
+        // reaches that arm. It stays classified as a refusal — if a position
+        // ever does reach it, the author is told what they wrote, not that the
+        // compiler broke.
+    ];
+    for (section, expected) in cases {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("the construct must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected `{expected}` to be named in: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Internal error"),
+            "a construct the author wrote is not an internal error: {rendered}"
+        );
+        assert!(
+            rendered.contains("Semantic error at offset"),
+            "a refused construct is reported at its offset: {rendered}"
         );
     }
 }
