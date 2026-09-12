@@ -1033,6 +1033,20 @@ struct TransientCapturePlan {
     event_nodes: Vec<bool>,
 }
 
+/// The node namespace a run compiles its capture plan against.
+///
+/// The two halves travel together because retention has to answer both
+/// questions at once: whether the deck selected this name, and whether the
+/// name has a voltage to select at all. A digital-only net answers no to the
+/// second whatever the deck said.
+#[derive(Clone, Copy)]
+struct TransientNodeNamespace<'a> {
+    /// MNA-ordered node names; `names[i]` is node `i + 1`.
+    names: &'a [String],
+    /// Aligned with `names`: which of them only the event domain resolves.
+    digital_only: &'a [bool],
+}
+
 /// Resolve a run's bus declarations onto the node ids the sample hook keys by.
 ///
 /// The hook is a layer-0 leaf and publishes ids, while a declaration names
@@ -1258,14 +1272,17 @@ impl TransientCapturePlan {
 
     fn compile(
         netlist: &Netlist,
-        node_names: &[String],
-        digital_only_nodes: &[bool],
+        nodes: TransientNodeNamespace<'_>,
         branch_names: &[String],
         retain_xyce_voltage_source_currents: bool,
         voltage_source_names: &[String],
         external_wildcard_nodes: Option<&HashSet<String>>,
         digital_buses: &[DigitalBusDeclaration],
     ) -> Self {
+        let TransientNodeNamespace {
+            names: node_names,
+            digital_only: digital_only_nodes,
+        } = nodes;
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
         // measurement decks so output projection cannot change their result.
@@ -4952,8 +4969,10 @@ impl Engine {
         let mut digital_buses = mixed_module_bus_declarations(&circuit, &node_names)?;
         let capture_plan = TransientCapturePlan::compile(
             netlist,
-            &node_names,
-            &digital_only_nodes,
+            TransientNodeNamespace {
+                names: &node_names,
+                digital_only: &digital_only_nodes,
+            },
             &branch_names,
             retain_xyce_voltage_source_currents,
             &circuit.voltage_sources.names,

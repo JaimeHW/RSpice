@@ -1430,12 +1430,29 @@ struct WildcardVoltageNode {
     display_name: String,
 }
 
-fn ordered_wildcard_voltage_nodes(
-    names: &[String],
+/// What a real output projection knows about the result's node namespace.
+///
+/// The three travel together because `V(*)` needs all of them at once: the
+/// names in MNA order, the count it must agree with, and which of those names
+/// the result carries as logic rather than as a voltage. An analysis with no
+/// event domain leaves `digital_only` empty.
+#[derive(Clone, Copy)]
+struct RealOutputNodeMetadata<'a> {
+    names: &'a [String],
     voltage_count: usize,
+    digital_only: &'a [bool],
+}
+
+fn ordered_wildcard_voltage_nodes(
+    metadata: RealOutputNodeMetadata<'_>,
     netlist: &Netlist,
     namespace: &OutputNodeNamespace,
 ) -> Result<Vec<WildcardVoltageNode>, String> {
+    let RealOutputNodeMetadata {
+        names,
+        voltage_count,
+        digital_only,
+    } = metadata;
     if names.len() != voltage_count {
         return Err(format!(
             "V(*) requires complete node-name metadata, but the result has {} name(s) for {voltage_count} voltage vector(s)",
@@ -1445,11 +1462,18 @@ fn ordered_wildcard_voltage_nodes(
 
     let mut seen = HashSet::new();
     let mut nodes = Vec::with_capacity(names.len());
-    for name in names {
+    for (index, name) in names.iter().enumerate() {
         if name.trim().is_empty() {
             return Err("V(*) encountered an unnamed circuit node".to_string());
         }
         if netlist.ground_policy().is_ground(name) {
+            continue;
+        }
+        // A wildcard asks for whatever the run has and asserts nothing about
+        // any one net, so a net only the event domain resolves is skipped here
+        // exactly as a net outside the public namespace is. Only a named
+        // operand is refused.
+        if digital_only.get(index).copied().unwrap_or(false) {
             continue;
         }
         let canonical = canonical_symbol(name);
@@ -1477,7 +1501,7 @@ fn preflight_real_output_requests(
     requests: &[&OutputRequest],
     analysis: OutputAnalysisKind,
     point_count: usize,
-    node_metadata: Option<(&[String], usize)>,
+    node_metadata: Option<RealOutputNodeMetadata<'_>>,
     netlist: &Netlist,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
@@ -1515,7 +1539,7 @@ fn preflight_real_output_requests(
                 && matches!(signal, SaveSignal::Voltage(node) if node == "*")
             {
                 if wildcard_voltage_nodes.is_none() {
-                    let Some((names, voltage_count)) = node_metadata else {
+                    let Some(metadata) = node_metadata else {
                         return Err(output_request_error(
                             request,
                             analysis,
@@ -1544,10 +1568,11 @@ fn preflight_real_output_requests(
                         }
                     };
                     wildcard_voltage_nodes = Some(
-                        ordered_wildcard_voltage_nodes(names, voltage_count, netlist, &namespace)
-                            .map_err(|detail| {
-                            output_request_error(request, analysis, operand_index, None, detail)
-                        })?,
+                        ordered_wildcard_voltage_nodes(metadata, netlist, &namespace).map_err(
+                            |detail| {
+                                output_request_error(request, analysis, operand_index, None, detail)
+                            },
+                        )?,
                     );
                 }
                 column_count = column_count
@@ -1582,11 +1607,16 @@ fn evaluate_tran_output_columns_with_abort(
     let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
     };
+    let digital_only = result.digital_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
         result.time.len(),
-        Some((&result.node_names, result.voltages.len())),
+        Some(RealOutputNodeMetadata {
+            names: &result.node_names,
+            voltage_count: result.voltages.len(),
+            digital_only: &digital_only,
+        }),
         netlist,
         limits,
         abort,
@@ -1663,11 +1693,16 @@ pub fn evaluate_tran_four_output_requests_with_abort(
             ))
         })?;
     let requests = [request];
+    let digital_only = result.digital_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
         result.time.len(),
-        Some((&result.node_names, result.voltages.len())),
+        Some(RealOutputNodeMetadata {
+            names: &result.node_names,
+            voltage_count: result.voltages.len(),
+            digital_only: &digital_only,
+        }),
         netlist,
         limits,
         abort,
@@ -1735,11 +1770,16 @@ pub(crate) fn evaluate_tran_fft_output_with_abort(
             ))
         })?;
     let requests = [request];
+    let digital_only = result.digital_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
         result.time.len(),
-        Some((&result.node_names, result.voltages.len())),
+        Some(RealOutputNodeMetadata {
+            names: &result.node_names,
+            voltage_count: result.voltages.len(),
+            digital_only: &digital_only,
+        }),
         netlist,
         limits,
         abort,
@@ -1817,9 +1857,13 @@ fn evaluate_dc_output_columns_with_abort(
     let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
     };
-    let node_metadata = sweep
-        .first()
-        .map(|(_, result)| (result.node_names.as_slice(), result.node_voltages.len()));
+    // A DC sweep has no event domain to exclude: `.OP`/`.DC` on a mixed deck
+    // is refused outright, and that namespace belongs to its own lane.
+    let node_metadata = sweep.first().map(|(_, result)| RealOutputNodeMetadata {
+        names: result.node_names.as_slice(),
+        voltage_count: result.node_voltages.len(),
+        digital_only: &[],
+    });
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Dc,
