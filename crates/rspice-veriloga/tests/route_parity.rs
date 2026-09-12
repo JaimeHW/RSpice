@@ -1010,6 +1010,41 @@ fn switch_branch_agrees_across_lowerings() {
     );
 }
 
+/// The retained value of a switch branch is `CheckedValue(value, ...)`, and a
+/// charge contributed through one arm puts that value's *derivative* in the
+/// reactive stamp. The two lowerings differentiate it in different places — the
+/// bytecode one while interleaving shadows (`ir.rs`, `BinaryOp::CheckedValue =>
+/// dr`), the canonical one in the native backend's own expression lowering —
+/// so this row is where those two rules meet. The canonical route refused the
+/// operator outright until the backend carried it, which is the shape that kept
+/// DIODE_CMC off the native route.
+#[test]
+fn reactive_switch_branch_agrees_across_lowerings() {
+    compare_routes(
+        "module route_switch_charge(p, n); inout p, n; electrical p, n;
+         parameter real c = 0.5; parameter real nqs = 1.0; real qn;
+         analog begin qn = c * V(p, n) * V(p, n);
+           if (nqs > 0.0) I(p, n) <+ ddt(qn);
+           else V(p, n) <+ 0.0; end endmodule",
+        &[1, 0],
+        0,
+        |probe: &mut Probe| {
+            probe.device.set_internal_node_indices(&[2]);
+            probe.dc("dc", &[0.0, 0.0]);
+            probe.accept("dc");
+            // The charge only reaches a stamp on a transient step, so the three
+            // biases the capacitance is read at are transient points.
+            for (index, bias) in [-0.75, 0.5, 1.5].into_iter().enumerate() {
+                let label = format!("t{index}");
+                let time = 1.0e-9 * (index as f64 + 1.0);
+                probe.tran(&label, time, 1.0e-9, &[bias, 0.0]);
+                probe.reactive(&label, &[bias, 0.0]);
+                probe.accept(&label);
+            }
+        },
+    );
+}
+
 #[test]
 fn indirect_source_agrees_across_lowerings() {
     compare_routes(
