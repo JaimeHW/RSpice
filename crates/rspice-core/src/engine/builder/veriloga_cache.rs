@@ -3541,4 +3541,65 @@ endmodule
         std::fs::remove_dir_all(PathBuf::from("__rspice_project__").join(unique))
             .expect("remove adversarial ambient path");
     }
+
+    /// The record key is the file, not the words the deck used to name it.
+    ///
+    /// Two decks in two directories both write `.va "d.va"`; one file reached
+    /// from two directories is written two ways. The netlist parser resolves
+    /// each spelling against the file that wrote it before the key is taken,
+    /// which is what makes the first pair two records and the second pair one.
+    #[test]
+    fn a_cache_key_follows_the_resolved_source_path_not_its_spelling() {
+        let root = unique_test_root("resolved-key");
+        let first_directory = root.join("first");
+        let second_directory = root.join("second");
+        std::fs::create_dir_all(&first_directory).expect("create the first source directory");
+        std::fs::create_dir_all(&second_directory).expect("create the second source directory");
+        let first = first_directory.join("d.va");
+        let second = second_directory.join("d.va");
+        std::fs::write(&first, "// the first deck's model\n").expect("write the first source");
+        std::fs::write(&second, "// the second deck's model\n").expect("write the second source");
+
+        let first_key = VerilogASourceKey::new(&first, None);
+        let second_key = VerilogASourceKey::new(&second, None);
+        assert_ne!(
+            first_key, second_key,
+            "two files of one name in two directories are two records"
+        );
+        assert_ne!(
+            cache_record_path_with_root(&first_key, &root),
+            cache_record_path_with_root(&second_key, &root),
+            "two keys must address two record files"
+        );
+
+        let detour = second_directory.join("..").join("first").join("d.va");
+        let detour_key = VerilogASourceKey::new(&detour, None);
+        assert_eq!(
+            detour_key, first_key,
+            "one file written two ways is one record"
+        );
+        assert_eq!(
+            cache_record_path_with_root(&detour_key, &root),
+            cache_record_path_with_root(&first_key, &root),
+            "one key must address one record file"
+        );
+
+        // A module selection still separates records taken from one file.
+        assert_ne!(
+            VerilogASourceKey::new(&first, Some("one")),
+            VerilogASourceKey::new(&first, Some("two")),
+            "a module selection is part of the key"
+        );
+
+        // And the reason resolution has to happen first: an unresolved
+        // relative spelling has nothing to canonicalize against, so it becomes
+        // its own key and every deck that wrote it would share one record.
+        assert_eq!(
+            canonicalize_for_cache(Path::new("no-such-relative-source.va")),
+            PathBuf::from("no-such-relative-source.va"),
+            "an unresolvable relative spelling is its own key"
+        );
+
+        std::fs::remove_dir_all(&root).expect("remove the fixture root");
+    }
 }

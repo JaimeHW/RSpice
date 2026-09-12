@@ -118,6 +118,11 @@ pub(super) fn parse_veriloga_directive(line: &str) -> Option<VerilogAInclude> {
         file_path: std::path::PathBuf::from(path),
         model_name,
         selected_module,
+        // The tokenizer sees one line with no file or position around it. A
+        // netlist parse replaces this with the physical location that wrote
+        // the directive, which is the directory a relative path resolves
+        // against.
+        origin: NetlistSourceLocation::in_memory(0),
     })
 }
 

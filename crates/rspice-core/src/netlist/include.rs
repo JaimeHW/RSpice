@@ -442,6 +442,36 @@ impl IncludeResolution {
 /// every configured search path has missed.
 const CONVENTIONAL_LIBRARY_DIRECTORIES: [&str; 4] = ["lib", "models", "../lib", "../models"];
 
+/// The directive family a failed resolution names.
+///
+/// `.include`/`.inc`/`.lib` and the Verilog-A source directives — `.va`,
+/// `.veriloga`, `.hdl`, `.vams`, `.verilog`, and the Spectre `ahdl_include`
+/// that lowers to them — walk one chain. Only the noun in a refusal differs,
+/// so a deck can never disagree with itself about what a relative path means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourceDirectiveKind {
+    Include,
+    VerilogSource,
+}
+
+impl SourceDirectiveKind {
+    /// The refusal that names the whole chain it walked.
+    const fn chain_failure(self) -> &'static str {
+        match self {
+            Self::Include => "Include file not found",
+            Self::VerilogSource => "Verilog-A source file not found",
+        }
+    }
+
+    /// The refusal for a path that named its own location and was not there.
+    const fn absolute_failure(self) -> &'static str {
+        match self {
+            Self::Include => "File not found",
+            Self::VerilogSource => "Verilog-A source file not found",
+        }
+    }
+}
+
 /// The ordered chain, written out for a failure message.
 fn describe_search_chain(tried: &[IncludeSearchCandidate]) -> String {
     tried
@@ -793,6 +823,50 @@ impl IncludeProcessor {
         filename: &str,
         abort: &dyn AbortSignal,
     ) -> Result<IncludeResolution, ParseWithAbortError> {
+        self.resolve_source_from_with_abort(
+            owner_path,
+            filename,
+            SourceDirectiveKind::Include,
+            abort,
+        )
+    }
+
+    /// Resolve a Verilog-A source directive through the chain `.include` walks.
+    ///
+    /// `.va`, `.veriloga`, `.hdl`, `.vams` and `.verilog` — and the Spectre
+    /// `ahdl_include` that lowers to `.veriloga` — all arrive here, so a model
+    /// file named beside its deck is found from any working directory and an
+    /// included file names its models beside itself. The resolved path is what
+    /// the builder keys its compiled-module cache on, so two decks that each
+    /// write `.va "d.va"` name two records rather than one.
+    pub(crate) fn resolve_verilog_source_from_with_abort(
+        &self,
+        owner_path: &Path,
+        filename: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<IncludeResolution, ParseWithAbortError> {
+        self.resolve_source_from_with_abort(
+            owner_path,
+            filename,
+            SourceDirectiveKind::VerilogSource,
+            abort,
+        )
+    }
+
+    /// Whether this processor resolves only from an authenticated bundle.
+    pub(crate) const fn is_sealed(&self) -> bool {
+        self.sealed_sources.is_some()
+    }
+
+    /// The one chain every external source directive walks. `kind` decides
+    /// only what a refusal calls the thing it could not find.
+    fn resolve_source_from_with_abort(
+        &self,
+        owner_path: &Path,
+        filename: &str,
+        kind: SourceDirectiveKind,
+        abort: &dyn AbortSignal,
+    ) -> Result<IncludeResolution, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
         // Remove quotes if present
         let clean_name = filename.trim_matches('"').trim_matches('\'');
@@ -819,7 +893,8 @@ impl IncludeProcessor {
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!(
-                    "Include file not found: {} (searched {} ({}))",
+                    "{}: {} (searched {} ({}))",
+                    kind.chain_failure(),
                     clean_name,
                     candidate.display(),
                     IncludeSearchStage::DriveRelative
@@ -838,7 +913,7 @@ impl IncludeProcessor {
             }
             return Err(ParseError::Syntax {
                 line: 0,
-                message: format!("File not found: {}", clean_name),
+                message: format!("{}: {}", kind.absolute_failure(), clean_name),
             }
             .into());
         }
@@ -897,7 +972,8 @@ impl IncludeProcessor {
             return Err(ParseError::Syntax {
                 line: 0,
                 message: format!(
-                    "Include file not found: {} (searched {})",
+                    "{}: {} (searched {})",
+                    kind.chain_failure(),
                     clean_name,
                     describe_search_chain(&tried)
                 ),
@@ -2659,6 +2735,43 @@ R1 1 0 {selected}
             processor.resolved_dependencies()[0].resolution().stage(),
             IncludeSearchStage::IncludingFile
         );
+    }
+
+    /// A Verilog-A source directive is resolved by the same chain, and says so
+    /// in its own words when nothing on the chain holds the file.
+    #[test]
+    fn a_verilog_a_source_walks_the_include_chain_and_names_what_it_tried() {
+        let (_root, deck_path, first, _second) = search_path_fixture("va-chain");
+        let deck_dir = deck_path.parent().expect("deck directory");
+        std::fs::write(deck_dir.join("d.va"), "// beside the deck\n").expect("write the model");
+        std::fs::write(first.join("d.va"), "// on the search path\n").expect("write the shadow");
+
+        let mut processor = IncludeProcessor::new(&deck_path);
+        processor.add_lib_path(first.clone());
+
+        let resolution = processor
+            .resolve_verilog_source_from_with_abort(&deck_path, "d.va", &NoAbort)
+            .expect("the including file's directory wins");
+        assert_eq!(resolution.stage(), IncludeSearchStage::IncludingFile);
+        assert_eq!(resolution.resolved(), deck_dir.join("d.va"));
+
+        let error = processor
+            .resolve_verilog_source_from_with_abort(&deck_path, "absent.va", &NoAbort)
+            .expect_err("no chain stage holds the file");
+        let ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) = error else {
+            panic!("a missing Verilog-A source is a syntax failure");
+        };
+        assert!(
+            message.starts_with("Verilog-A source file not found: absent.va (searched "),
+            "{message}"
+        );
+        for expected in [deck_dir.join("absent.va"), first.join("absent.va")] {
+            assert!(
+                message.contains(&expected.display().to_string()),
+                "the failure must name {}: {message}",
+                expected.display()
+            );
+        }
     }
 
     fn extract(content: &str, section: &str) -> String {

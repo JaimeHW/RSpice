@@ -1246,12 +1246,20 @@ pub struct ControlCommandRecord {
 /// Usage: `.VERILOGA filename.va [MODELNAME] [module=MODULE]`.
 #[derive(Debug, Clone)]
 pub struct VerilogAInclude {
-    /// Path to the Verilog-A source file
+    /// Path to the Verilog-A source file.
+    ///
+    /// A path-backed parse replaces the authored spelling with the file the
+    /// directive resolved to, walking the chain `.include` walks from the
+    /// directory of the file that wrote the directive. An in-memory parse has
+    /// no such directory and keeps the spelling as authored.
     pub file_path: std::path::PathBuf,
     /// Optional model name override (defaults to module name in VA file)
     pub model_name: Option<String>,
     /// Explicit, case-sensitive Verilog module selection, independent of the alias.
     pub selected_module: Option<String>,
+    /// The file and line that wrote the directive, which is also the directory
+    /// a relative source path resolves against.
+    pub origin: NetlistSourceLocation,
 }
 
 impl VerilogAInclude {
@@ -1666,6 +1674,7 @@ impl Netlist {
         Self::normalize_model_string_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, file_path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, file_path, abort)?;
+        netlist.resolve_veriloga_source_paths_with_abort(&include_processor, file_path, abort)?;
         if !allow_filesystem_spef && !netlist.spef_includes.is_empty() {
             return Err(ParseError::Syntax {
                 line: 0,
@@ -2027,6 +2036,7 @@ impl Netlist {
         Self::normalize_model_string_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_source_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
+        netlist.resolve_veriloga_source_paths_with_abort(&processor, path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, path, options.resource_limits, abort)?;
         netlist.source_path = Some(path.to_path_buf());
         let mut initcond_resource_limits = options.resource_limits;
@@ -2650,6 +2660,62 @@ impl Netlist {
         ensure_parse_not_aborted(abort)
     }
 
+    /// Resolve every Verilog-A source directive against the file that wrote it.
+    ///
+    /// `.va` and its aliases walk exactly the chain `.include` walks — the
+    /// including file's directory, the top-level deck's, the execution
+    /// directory, the configured search paths, then the conventional library
+    /// directories beside the including file. Before this, the authored
+    /// spelling went to the builder untouched and was opened relative to the
+    /// process working directory, so one deck's two directives disagreed about
+    /// what a relative path means and a deck in a subdirectory ran only from
+    /// its own.
+    ///
+    /// The resolved path is also what the compiled-module cache is keyed on
+    /// (`engine::builder::veriloga_cache::VerilogASourceKey::new`), so two
+    /// decks that each write `.va "d.va"` no longer name one record and one
+    /// file reached through two spellings still names one.
+    fn resolve_veriloga_source_paths_with_abort(
+        &mut self,
+        include_processor: &IncludeProcessor,
+        file_path: &std::path::Path,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        if include_processor.is_sealed() {
+            // A sealed bundle addresses its Verilog-A runtimes by the virtual,
+            // content-addressed key they were registered under. There is no
+            // directory to resolve one against and no filesystem to search.
+            return Ok(());
+        }
+        for (index, include) in self.veriloga_includes.iter_mut().enumerate() {
+            poll_parse_abort(abort, index)?;
+            let Some(spelling) = include.file_path.to_str().map(str::to_owned) else {
+                continue;
+            };
+            if is_registered_virtual_source_key(&spelling) {
+                continue;
+            }
+            let origin = include.origin.clone();
+            let owner = origin
+                .path
+                .clone()
+                .unwrap_or_else(|| file_path.to_path_buf());
+            let resolution = include_processor
+                .resolve_verilog_source_from_with_abort(&owner, &spelling, abort)
+                .map_err(|error| match error {
+                    ParseWithAbortError::Parse(ParseError::Syntax { message, .. }) => {
+                        ParseWithAbortError::from(ParseError::Syntax {
+                            line: origin.line,
+                            message: format!("{message}, named at {origin}"),
+                        })
+                    }
+                    other => other,
+                })?;
+            include.file_path = resolution.resolved().to_path_buf();
+        }
+        ensure_parse_not_aborted(abort)
+    }
+
     fn normalize_measure_file_paths_with_abort(
         &mut self,
         file_path: &std::path::Path,
@@ -2680,6 +2746,25 @@ impl Netlist {
     pub fn is_global(&self, node: &str) -> bool {
         self.global_nodes.contains(&node.to_uppercase())
     }
+}
+
+/// Whether a Verilog-A source spelling names a registered runtime rather than
+/// a file.
+///
+/// A project, PDK or model-library runtime registered for browser execution is
+/// addressed by a virtual, content-addressed key — `__rspice_project__/...`,
+/// `__rspice_pdk__/...`, `__rspice_model_library__/...` — which names a record
+/// in the module cache, not a path on disk. No directory resolves one, so the
+/// key is passed through untouched. The builder applies the same rule twelve
+/// architectural layers above this one
+/// (`engine::builder::veriloga_cache::is_sealed_veriloga_virtual_path`), which
+/// is why the roots are spelled out in both places.
+fn is_registered_virtual_source_key(spelling: &str) -> bool {
+    spelling.split(['/', '\\']).next().is_some_and(|root| {
+        root.eq_ignore_ascii_case("__rspice_project__")
+            || root.eq_ignore_ascii_case("__rspice_pdk__")
+            || root.eq_ignore_ascii_case("__rspice_model_library__")
+    })
 }
 
 fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Path) {

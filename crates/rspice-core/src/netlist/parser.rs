@@ -855,10 +855,13 @@ fn parse_netlist_impl(
 
         // Handle .VERILOGA directive directly (before continuation handling)
         if head.eq_ignore_ascii_case(".veriloga") || head.eq_ignore_ascii_case(".va") {
-            let include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
+            let mut include = parse_veriloga_directive(trimmed).ok_or_else(|| ParseError::Syntax {
                 line: line_num,
                 message: "Invalid Verilog-A include; expected .VERILOGA filename [MODELNAME] [module=MODULE] with closed quotes and no extra fields".to_owned(),
             })?;
+            // The file that wrote the directive owns the directory a relative
+            // source path resolves against, exactly as it does for `.include`.
+            include.origin = origin.clone();
             log::debug!("Found .VERILOGA include: {:?}", include.file_path);
             state.push_veriloga_include(include);
             continue; // Skip normal processing
