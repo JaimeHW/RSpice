@@ -5,7 +5,11 @@
 //! which node kind a `<=` produced — rather than as a rendering. A test that
 //! matched a debug string would pass while the graph underneath it changed.
 
-#![cfg(feature = "native")]
+// Nothing here is native: every name it reads comes out of `canonical_ir`,
+// which is not feature-gated. The `native` gate this file carried meant the
+// whole suite compiled to zero tests under the default feature set every CI job
+// uses, and no job runs it under `native` either — so both of the expectations
+// repaired on 2026-09-12 had never once been executed by CI.
 
 use rspice_veriloga::canonical_ir::cfg::{CfgTerminator, CfgValueKind, CfgValueType, DigitalWait};
 use rspice_veriloga::canonical_ir::digital::{
@@ -1452,6 +1456,14 @@ fn the_deferred_constructs_now_lower() {
         "    reg signed [7:0] a;\n\
          \x20   reg [7:0] q;\n\
          \x20   initial q = a >>> 2;",
+        // A module-level `integer` a process writes. `090c4c1d5` gives
+        // module-level real and integer storage to its writing context
+        // (VAMS-2023 7.2.2), so this `i` is the process's own signed [31:0]
+        // four-state signal instead of an analog variable a process cannot
+        // assign.
+        "    reg [3:0] q;\n\
+         \x20   integer i;\n\
+         \x20   initial begin : work i = 0; q = 4'b0000; end",
     ] {
         let process = only_process(section);
         process
@@ -1467,12 +1479,9 @@ fn the_deferred_constructs_now_lower() {
 #[test]
 fn unlowered_constructs_refuse_by_name() {
     let cases = [
-        (
-            "    reg [3:0] q;\n\
-             \x20   integer i;\n\
-             \x20   initial begin : work i = 0; q = 4'b0000; end",
-            "module-level",
-        ),
+        // The module-level `integer` this list opened with lowers now and has
+        // moved to `the_deferred_constructs_now_lower`.
+        //
         // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section 3.7
         // brought real values into the discrete domain and section 6.5.3's own
         // example reads a `wreal` into one. A `string` still does not.
