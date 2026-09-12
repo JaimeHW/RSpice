@@ -4866,7 +4866,8 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                     .position(|actual| actual.eq_ignore_ascii_case(name))
                     .expect("resistor exists");
                 let actual = circuit.resistors.conductances[index].recip();
-                if !((actual / expected - 1.0).abs() < 1e-14) {
+                let relative = (actual / expected - 1.0).abs();
+                if !relative.is_finite() || relative >= 1e-14 {
                     failures.push(format!(
                         "{variation_scope:?}, {function_count} extra functions, {name}: sampled resistance {actual}, expected {expected}"
                     ));
@@ -4880,7 +4881,8 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                 .expect("source exists");
             let actual = circuit.voltage_sources.dc_values[source_index];
             let expected = source_sample + 1.0;
-            if !((actual / expected - 1.0).abs() < 1e-14) {
+            let relative = (actual / expected - 1.0).abs();
+            if !relative.is_finite() || relative >= 1e-14 {
                 failures.push(format!(
                     "{variation_scope:?}: sampled source {actual}, expected {expected}"
                 ));
@@ -4929,7 +4931,8 @@ V1 inside b DC {1+img(next)} AC {1+img(next)}
                         ("waveform start", at_time(0.0), local),
                         ("waveform peak", at_time(peak_time), local + 2.0 * sampled),
                     ] {
-                        if !((actual / expected - 1.0).abs() < 1e-14) {
+                        let relative = (actual / expected - 1.0).abs();
+                        if !relative.is_finite() || relative >= 1e-14 {
                             failures.push(format!(
                                 "{variation_scope:?}, {name} {field}: {actual}, expected {expected}"
                             ));

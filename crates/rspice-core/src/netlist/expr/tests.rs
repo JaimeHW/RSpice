@@ -408,7 +408,8 @@ fn parameter_directions_preserve_complex_values_and_small_effects() {
             } else {
                 expected.norm()
             };
-            if !((actual - expected).norm() / scale < 2e-13) {
+            let relative = (actual - expected).norm() / scale;
+            if !relative.is_finite() || relative >= 2e-13 {
                 failures.push(format!(
                     "{dialect:?} {source}: {actual:?}, expected {expected:?}"
                 ));
