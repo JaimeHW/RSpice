@@ -503,6 +503,12 @@ fn computed_event_expression_with_no_inputs_is_legal() {
 // Statements
 // ===========================================================================
 
+/// The written bit select inside the `for` names a constant bit deliberately.
+/// This row is about which *statements* parse and analyze, and a select
+/// assigned at a position computed at run time is refused by name — see
+/// `digital_process_execution::a_run_time_select_bound_is_refused_by_the_analyzer`
+/// — so writing `q[i]` here would refuse the module for a reason that has
+/// nothing to do with the statement list.
 #[test]
 fn every_wave_one_behavioral_statement_parses() {
     let analyzed = analyze(&digital_module(
@@ -523,7 +529,7 @@ fn every_wave_one_behavioral_statement_parses() {
          \x20           4'b1xx0: q = 4'b0011;\n\
          \x20           default: q = 4'b0100;\n\
          \x20       endcase\n\
-         \x20       for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;\n\
+         \x20       for (i = 0; i < 4; i = i + 1) q[2] = 1'b0;\n\
          \x20       while (i > 0) i = i - 1;\n\
          \x20       repeat (3) i = i + 1;\n\
          \x20       ;\n\

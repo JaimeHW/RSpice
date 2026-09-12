@@ -546,6 +546,30 @@ enum Resolution {
     Undeclared,
 }
 
+/// What a select's position has to be known by, which is not the same question
+/// on both sides of an assignment.
+///
+/// The lowering answers it three different ways, and this is the analyzer's
+/// copy of that answer — held here so a construct the lowering cannot build is
+/// refused where a user construct is refused from, naming the construct and
+/// the offset it was written at, instead of arriving as an internal
+/// canonical-IR failure that reads like a broken compiler.
+#[derive(Clone, Copy)]
+enum SelectBound {
+    /// A bit select being *read*. `q[i]` on the right-hand side lowers to a
+    /// node that takes its position as a value, so a run-time index is a
+    /// program this backend runs rather than one it refuses.
+    Read,
+    /// A bit select being *written*. The lowered write names the bits it
+    /// replaces, so the position is part of the instruction and has to be
+    /// known when the CFG is built.
+    Written,
+    /// Either bound of a part select, read or written. IEEE 1364-2005 section
+    /// 4.2.1 makes them constant expressions: the width of a part select is
+    /// its type, and a type is not computed at run time.
+    Part,
+}
+
 impl SemanticAnalyzer {
     /// Resolve and validate the module's discrete-domain content.
     ///
@@ -1586,7 +1610,7 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 if self.check_assignable(name, *span, signals, index, procedural) {
-                    self.check_bit_index(name, bit, signals, index);
+                    self.check_bit_index(name, bit, signals, index, SelectBound::Written);
                 }
                 self.check_digital_expression(bit, signals, index);
             }
@@ -1597,8 +1621,8 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 if self.check_assignable(name, *span, signals, index, procedural) {
-                    let high = self.check_bit_index(name, msb, signals, index);
-                    let low = self.check_bit_index(name, lsb, signals, index);
+                    let high = self.check_bit_index(name, msb, signals, index, SelectBound::Part);
+                    let low = self.check_bit_index(name, lsb, signals, index, SelectBound::Part);
                     self.check_part_select_direction(name, *span, high, low);
                 }
                 self.check_digital_expression(msb, signals, index);
@@ -1690,14 +1714,19 @@ impl SemanticAnalyzer {
     /// Answers the range it checked against and the index it checked, so that
     /// a part select's two bounds do not have to be resolved a second time to
     /// ask which of them is the more significant. `None` whenever there is
-    /// nothing to answer: a refusal was recorded, or the index is not constant
-    /// and belongs to a later wave.
+    /// nothing to answer: a refusal was recorded, or the index is a run-time
+    /// value the lowering takes as one.
+    ///
+    /// `bound` says which of those the position is allowed to be here, and a
+    /// position that is not constant where it has to be is refused in this
+    /// pass — see [`SelectBound`].
     fn check_bit_index(
         &mut self,
         name: &SmolStr,
         expression: &Expression,
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
+        bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
         let (range, kind) = match self.resolve_digital_name(name, index) {
             Resolution::Digital(position) if signals[position].class.is_real() => {
@@ -1738,9 +1767,15 @@ impl SemanticAnalyzer {
             }
             Resolution::Analog(_) | Resolution::Undeclared => return None,
         };
-        // A non-constant index is checked at run time by a later wave; only a
-        // constant one can be refused here.
-        let value = self.eval_const_invariant_value(expression)?;
+        // A bit select being read carries its position as a value, so a
+        // non-constant one is a program rather than a refusal. Everywhere else
+        // the position is part of the instruction the lowering builds, and a
+        // run-time one has to be refused — here, where the construct and the
+        // offset it was written at are still in hand.
+        let Some(value) = self.eval_const_invariant_value(expression) else {
+            self.refuse_run_time_select_bound(name, expression, bound);
+            return None;
+        };
         let Some(selected) = value.as_exact_i64() else {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
@@ -1777,6 +1812,37 @@ impl SemanticAnalyzer {
         }
         // A scalar has one bit numbered zero, which is what `[0:0]` names.
         Some((range.unwrap_or(VectorBounds::SCALAR), selected))
+    }
+
+    /// Refuse a select position the lowering has to know and this one does not.
+    ///
+    /// Both of these are user constructs — one legal Verilog the compiler does
+    /// not build yet, one the standard does not admit at all — so both are
+    /// reported the way a user construct is reported: a semantic error that
+    /// names what was written and carries its offset. The same two shapes
+    /// reach `digital_lower`'s constant fold as well, and that check stays
+    /// where it is: once this pass refuses them it is an invariant of the
+    /// lowering rather than a message anybody reads.
+    fn refuse_run_time_select_bound(
+        &mut self,
+        name: &SmolStr,
+        expression: &Expression,
+        bound: SelectBound,
+    ) {
+        let kind = match bound {
+            SelectBound::Read => return,
+            SelectBound::Written => SemanticErrorKind::UnsupportedFeature(format!(
+                "a bit select on the left-hand side must have constant bounds: writing one bit \
+                 of `{name}` at a position computed at run time is a read-modify-write this \
+                 lowering has no node for, so select a constant bit or assign all of `{name}`"
+            )),
+            SelectBound::Part => SemanticErrorKind::InvalidExpression(format!(
+                "a part select of `{name}` must have constant bounds; IEEE 1364-2005 section \
+                 4.2.1 makes both bounds of a part select constant expressions, because the \
+                 width they name is the select's type"
+            )),
+        };
+        self.record_error_at(kind, expression.span());
     }
 
     /// IEEE 1364-2005 section 4.2.1: a part select is written in the direction
@@ -1879,8 +1945,20 @@ impl SemanticAnalyzer {
                             digital.span(),
                         );
                     } else if let DigitalExpr::PartSelect(select) = digital {
-                        let high = self.check_bit_index(name, &select.msb, signals, index);
-                        let low = self.check_bit_index(name, &select.lsb, signals, index);
+                        let high = self.check_bit_index(
+                            name,
+                            &select.msb,
+                            signals,
+                            index,
+                            SelectBound::Part,
+                        );
+                        let low = self.check_bit_index(
+                            name,
+                            &select.lsb,
+                            signals,
+                            index,
+                            SelectBound::Part,
+                        );
                         self.check_part_select_direction(name, select.span, high, low);
                     }
                 }
@@ -1900,7 +1978,13 @@ impl SemanticAnalyzer {
                         access.span,
                     );
                 } else {
-                    self.check_bit_index(&access.array, &access.index, signals, index);
+                    self.check_bit_index(
+                        &access.array,
+                        &access.index,
+                        signals,
+                        index,
+                        SelectBound::Read,
+                    );
                 }
                 self.check_digital_expression(&access.index, signals, index);
             }

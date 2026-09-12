@@ -2360,10 +2360,16 @@ fn the_real_net_refusals_name_themselves() {
 #[test]
 fn the_remaining_process_refusals_name_themselves() {
     let cases = [
+        // A module-level `integer` that only a process writes is that
+        // process's own signal now, so the refusal that remains in the
+        // module-level family is the *initial value*: an initializer is
+        // scheduled by the domain that owns the variable, and a variable the
+        // discrete domain has taken over has no continuous-domain schedule to
+        // be initialized from.
         (
-            "    reg [3:0] q;\n\
-             \x20   integer i;\n\
-             \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
+            "    real bias = 1.0;\n\
+             \x20   reg q;\n\
+             \x20   initial begin q = 1'b0; bias = 2.0; end",
             "module-level",
         ),
         // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section
@@ -2395,6 +2401,67 @@ fn the_remaining_process_refusals_name_themselves() {
             "expected `{expected}` to be named in: {rendered}"
         );
     }
+}
+
+/// A run-time select position is refused by the analyzer, not by an invariant.
+///
+/// `q[i] = 1'b0` is legal Verilog — IEEE 1364-2005 section 4.2.1 admits a
+/// variable bit select on the left-hand side — and this lowering has no
+/// read-modify-write node for one. That is a limitation of this compiler, so
+/// it is reported the way a user construct is reported: a semantic error that
+/// names what was written and carries the offset it was written at. It used to
+/// reach `digital_lower`'s constant fold instead and come back as "Internal
+/// error: canonical IR validation failed", which tells an author that the
+/// compiler is broken rather than that their program is not supported yet.
+///
+/// The last case is the boundary the refusal must not cross: a bit select
+/// being *read* lowers to a node that takes its position as a value, so a
+/// run-time position there is a program rather than a refusal.
+#[test]
+fn a_run_time_select_bound_is_refused_by_the_analyzer() {
+    for (section, expected) in [
+        (
+            "    reg [3:0] q;\n\
+         \x20   integer i;\n\
+         \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
+            "a bit select on the left-hand side must have constant bounds",
+        ),
+        (
+            "    reg [3:0] q;\n\
+         \x20   integer i;\n\
+         \x20   initial begin i = 1; q[i:0] = 2'b01; end",
+            "a part select of `q` must have constant bounds",
+        ),
+        (
+            "    reg [3:0] q;\n\
+         \x20   reg [1:0] seen;\n\
+         \x20   integer i;\n\
+         \x20   initial begin i = 1; seen = q[i:0]; end",
+            "a part select of `q` must have constant bounds",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&digital_module(section))
+            .expect_err("a run-time select position must be refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.starts_with("Semantic error"),
+            "a user construct must be refused by the analyzer: {rendered}"
+        );
+        assert!(
+            rendered.contains(expected),
+            "expected `{expected}` to be named in: {rendered}"
+        );
+    }
+
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(&digital_module(
+            "    reg [3:0] q;\n\
+         \x20   reg seen;\n\
+         \x20   integer i;\n\
+         \x20   initial begin i = 1; seen = q[i]; end",
+        ))
+        .expect("a bit select read at a run-time position still lowers");
 }
 
 // ===========================================================================
