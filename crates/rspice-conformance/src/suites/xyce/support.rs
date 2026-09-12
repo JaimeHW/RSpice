@@ -2462,6 +2462,8 @@ impl XyceTestRunner {
             tnom,
             seed,
             allow_simplified_mos,
+            connect_rules,
+            connect_rules_source,
             auto_bridge,
             auto_bridge_show_generated,
             auto_bridge_family,
@@ -2556,6 +2558,11 @@ impl XyceTestRunner {
             && tnom.is_none()
             && seed.is_none()
             && allow_simplified_mos.is_none()
+            // A connection-rule selection (and the source alias that scopes it)
+            // steers how a mixed deck's boundaries are built, which is exactly
+            // the kind of steering this predicate claims the deck does not do.
+            && connect_rules.is_none()
+            && connect_rules_source.is_none()
             && auto_bridge.is_none()
             && auto_bridge_show_generated.is_none()
             && auto_bridge_family.is_none()
