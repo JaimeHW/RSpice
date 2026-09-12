@@ -755,8 +755,32 @@ impl CircuitData {
     /// * `voltages` - Current MNA solution vector, with node voltages followed by branch currents
     pub fn evaluate_xspice(&mut self, time: Value, voltages: &[Value]) {
         if let Err(e) = self.try_evaluate_xspice(time, voltages) {
-            log::warn!("XSPICE evaluation error: {e}");
+            self.warn_xspice_evaluation(time, &e);
         }
+    }
+
+    /// Log one XSPICE evaluation failure, naming the iterate it happened at,
+    /// and not again while the same failure repeats.
+    ///
+    /// Decision (R1.14): a code model that cannot evaluate at a trial point
+    /// stays a warning rather than becoming a rejectable iterate. ngspice
+    /// ignores it — `cm_` functions have no way to refuse a point, the
+    /// dispatch returns `void`, and `stamp_xspice` has no failure channel at
+    /// all — and Spectre has no XSPICE to be compared with. Turning it into a
+    /// rejection would make every code model that writes a NaN on one pass cut
+    /// the timestep, which is a behaviour change with no reference to check
+    /// against. The repetition is the part that was wrong: the Newton loop
+    /// evaluates XSPICE once per iteration and wrote this line every time, so
+    /// a failing timepoint produced dozens of identical lines. The error text
+    /// already names the instance (`"{instance}: {error}"`, the wave stepper);
+    /// this adds the trial iterate and drops the repeats.
+    fn warn_xspice_evaluation(&mut self, time: Value, error: &crate::xspice::CmError) {
+        let line = format!("XSPICE evaluation error at the trial iterate t={time:.6e} s: {error}");
+        if self.xspice_evaluation_warning.as_deref() == Some(line.as_str()) {
+            return;
+        }
+        log::warn!("{line}");
+        self.xspice_evaluation_warning = Some(line);
     }
 
     /// Fallible XSPICE evaluation for callers that must not report success
@@ -798,7 +822,7 @@ impl CircuitData {
         analysis: crate::xspice::AnalysisType,
     ) {
         if let Err(e) = self.try_evaluate_xspice_with_analysis(time, timestep, voltages, analysis) {
-            log::warn!("XSPICE evaluation error: {e}");
+            self.warn_xspice_evaluation(time, &e);
         }
     }
 
@@ -1406,7 +1430,7 @@ impl CircuitData {
                 xyce_one_step_order2,
             },
         ) {
-            log::warn!("XSPICE evaluation error: {e}");
+            self.warn_xspice_evaluation(time, &e);
         }
         self.stamp_xspice(matrix, rhs);
         self.restore_xspice_trial_state(snapshot);

@@ -93,6 +93,7 @@ impl CircuitData {
             xspice_dispatch_next_pending: Vec::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
+            xspice_evaluation_warning: None,
             xspice_resource_failure: None,
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
