@@ -143,20 +143,44 @@ impl PyTransientResult {
             .try_voltage_waveform(node)
             .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))?;
         // An empty column is an unretained channel, and an empty array is the
-        // honest answer for one. A digital-only net is not that: it has no
+        // honest answer for one. An event-only net is not that: it has no
         // voltage to retain in the first place, so it is refused by name.
-        if let Some(name) = self.digital_only_node_name(node) {
-            return Err(digital_only_node_error(&name));
+        if let Some((name, kind)) = self.event_only_node(node) {
+            return Err(event_only_node_error(&name, kind));
         }
         Ok(waveform.to_vec())
     }
 
-    /// The node's name when the result carries it as logic and not a voltage.
-    fn digital_only_node_name(&self, node: usize) -> Option<String> {
+    /// The node's name and event domain when the result carries it as events
+    /// and not as a voltage.
+    fn event_only_node(
+        &self,
+        node: usize,
+    ) -> Option<(String, rspice_core::analysis::transient::EventOnlyNetKind)> {
         let name = self.inner.node_names.get(node.checked_sub(1)?)?;
         self.inner
-            .is_digital_only_node_named(name)
-            .then(|| name.clone())
+            .event_only_node_kind(name)
+            .map(|kind| (name.clone(), kind))
+    }
+
+    /// The refusal `signal(spec)` owes an event-only net, decided before the
+    /// core resolver is asked.
+    ///
+    /// `signal("v(clk)")` and `voltage_waveform("clk")` refuse the same net for
+    /// the same reason, so they have to raise the same exception type. The core
+    /// resolver reports the miss as a netlist error, which the binding renders
+    /// as a `ValueError`; recognising the spelling here — with the same parser
+    /// the output cards use — makes the contract "an event-only net is a
+    /// `KeyError`" whichever accessor was called. Only the single-node voltage
+    /// spelling qualifies, the same restriction the core probe applies.
+    fn event_only_probe_refusal(&self, spec: &str) -> Option<ResultAccessError> {
+        let rspice_core::netlist::SaveSignal::Voltage(node) =
+            rspice_core::netlist::parse_save_probe(spec.trim())?
+        else {
+            return None;
+        };
+        let kind = self.inner.event_only_node_kind(&node)?;
+        Some(event_only_node_error(&node, kind))
     }
 
     fn checked_waveform_named(&self, name: &str) -> AccessResult<Vec<f64>> {
@@ -187,6 +211,9 @@ impl PyTransientResult {
     /// `.FOUR` card. The binding layer only maps the typed failure onto an
     /// exception.
     pub(crate) fn probe_waveform(&self, spec: &str) -> PyResult<Vec<f64>> {
+        if let Some(refusal) = self.event_only_probe_refusal(spec) {
+            return Err(PyErr::from(refusal));
+        }
         rspice_core::analysis::evaluate_transient_probe_with_abort(
             None,
             &self.inner,
@@ -223,9 +250,9 @@ impl PyTransientResult {
     ///
     /// Raises:
     ///     IndexError: If the node index is out of range
-    ///     KeyError: If the node name does not exist, or names a digital-only
-    ///         net, which carries four-state logic rather than a voltage and
-    ///         is read through `digital_trace` instead
+    ///     KeyError: If the node name does not exist, or names an event-only
+    ///         net, which carries event values rather than a voltage and is
+    ///         read through `digital_events` or `real_trace` instead
     ///
     /// Example:
     ///     >>> v_out = result.voltage_waveform(2)
@@ -352,16 +379,16 @@ impl PyTransientResult {
     ///
     /// Raises:
     ///     IndexError: If the node or time index is out of range
-    ///     KeyError: If the node is a digital-only net, which carries
-    ///         four-state logic rather than a voltage
+    ///     KeyError: If the node is an event-only net, which carries event
+    ///         values rather than a voltage
     pub fn voltage_at(&self, node: usize, time_index: usize) -> PyResult<f64> {
         self.checked_time_index(time_index).map_err(PyErr::from)?;
         if node == 0 {
             return Ok(0.0);
         }
 
-        if let Some(name) = self.digital_only_node_name(node) {
-            return Err(PyErr::from(digital_only_node_error(&name)));
+        if let Some((name, kind)) = self.event_only_node(node) {
+            return Err(PyErr::from(event_only_node_error(&name, kind)));
         }
         self.inner
             .try_voltage_at(node, time_index)

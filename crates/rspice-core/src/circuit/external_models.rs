@@ -17,6 +17,7 @@ mod coupled;
 pub(crate) use coupled::{XspiceDigitalBindings, XspiceDigitalParticipant};
 
 use super::*;
+use crate::analysis::transient::EventOnlyNetKind;
 use crate::xspice::{
     EventInputKind, ResourceTransaction, XspiceEventInputs, XspiceInstanceCheckpoint,
 };
@@ -662,26 +663,35 @@ impl CircuitData {
         self.net_kinds.discrete_nodes().map(|node| node - 1)
     }
 
-    /// Whether a node identity is digital-only: an event kind is registered
-    /// for it and no analog stamp reaches it.
+    /// Which event domain owns a node identity outright: an event kind is
+    /// registered for it and no analog stamp reaches it.
     ///
-    /// This is the one predicate the analog result namespace is built from. A
-    /// digital-only net owns an MNA placeholder row that the assembly closes
+    /// This is the one predicate the analog result namespace is built from. An
+    /// event-only net owns an MNA placeholder row that the assembly closes
     /// with the identity equation `v = 0`; that row is a rank repair, not a
     /// solved level, so publishing it as `V(net)` publishes 0 V for a net that
-    /// carries four-state logic.
+    /// carries events. The kind comes back with the answer because the refusal
+    /// has to name the carrier that does exist, and the two domains publish
+    /// under different spellings.
     ///
     /// [`Self::is_discrete_net`] alone is not the predicate. An auto-bridged
     /// node carries a digital identity *and* a bridge that conducts on it, so
     /// it keeps `V()` and `D()` both — the same hybrid ngspice publishes on
     /// both sides.
     #[inline]
-    pub(crate) fn is_digital_only_net(&self, node: NodeId) -> bool {
-        self.is_discrete_net(node)
-            && self
-                .analog_touched_nodes
-                .as_ref()
-                .is_some_and(|touched| !touched.get(node).copied().unwrap_or(false))
+    pub(crate) fn event_only_net_kind(&self, node: NodeId) -> Option<EventOnlyNetKind> {
+        if self
+            .analog_touched_nodes
+            .as_ref()
+            .is_none_or(|touched| touched.get(node).copied().unwrap_or(false))
+        {
+            return None;
+        }
+        match self.net_kinds.kind(node) {
+            NetKind::Continuous => None,
+            NetKind::Digital | NetKind::DigitalAndReal => Some(EventOnlyNetKind::Digital),
+            NetKind::Real => Some(EventOnlyNetKind::Real),
+        }
     }
 
     /// Record the analog-touch classification the netlist build computed.

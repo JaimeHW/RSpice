@@ -908,15 +908,15 @@ impl AnalysisResultDocument {
         )?;
 
         let mut signals = Vec::with_capacity(result.voltages.len() + result.branch_currents.len());
-        // A digital-only net gets no voltage descriptor at all, not an
+        // An event-only net gets no voltage descriptor at all, not an
         // unprojected one: `NotProjected` promises that the descriptor is
         // evidence the signal exists and this run chose not to keep it, and
-        // the voltage of a logic net does not exist. The net reaches the
-        // document through `payload.digitalTraces`, which is its carrier.
-        let digital_only = result.digital_only_node_mask();
+        // the voltage of an event net does not exist. The net reaches the
+        // document through its event trace, which is its carrier.
+        let event_only = result.event_only_node_mask();
         for (index, (name, waveform)) in result.node_names.iter().zip(&result.voltages).enumerate()
         {
-            if digital_only.get(index).copied().unwrap_or(false) {
+            if event_only.get(index).copied().unwrap_or(false) {
                 continue;
             }
             signals.push(projected_real_series(
@@ -1120,20 +1120,26 @@ impl AnalysisResultDocument {
         let mut device_columns: BTreeMap<String, Vec<DeviceParameterSeries>> = BTreeMap::new();
         let mut device_order: Vec<String> = Vec::new();
         // The same rule the uncompressed builder applies: a node whose voltage
-        // is unretained while its digital trace is present is a digital-only
-        // net and gets no voltage descriptor. The channel itself stays in the
-        // container, because that inventory is the compressed result's node
-        // namespace and has to keep its MNA alignment.
-        let digital_only_node = |node: &str| {
+        // is unretained while an event trace of that name is present is an
+        // event-only net and gets no voltage descriptor. Both event domains
+        // count, because a real-valued event net is as absent from the analog
+        // system as a digital one. The channel itself stays in the container,
+        // because that inventory is the compressed result's node namespace and
+        // has to keep its MNA alignment.
+        let event_only_node = |node: &str| {
             compressed
                 .digital_traces
                 .iter()
                 .any(|trace| trace.node_name.eq_ignore_ascii_case(node))
+                || compressed
+                    .real_traces
+                    .iter()
+                    .any(|trace| trace.node_name.eq_ignore_ascii_case(node))
         };
         for channel in &compressed.channels {
             if let TransientChannelRole::NodeVoltage { node, .. } = channel.descriptor.role()
                 && channel.availability == TransientChannelAvailability::NotProjected
-                && digital_only_node(node)
+                && event_only_node(node)
             {
                 continue;
             }

@@ -8846,8 +8846,8 @@ impl Engine {
         //
         // Two questions need this one answer. The mixed-boundary classifier
         // below tells an event-only net from an analog node whose only driver
-        // is a connect module; the transient result namespace tells a
-        // digital-only net — whose MNA row is a pinned placeholder, not a
+        // is a connect module; the transient result namespace tells an
+        // event-only net — whose MNA row is a pinned placeholder, not a
         // voltage — from a bridged one. A pure-XSPICE deck in a build without
         // the `veriloga` feature asks the second question too, so the set is
         // computed unconditionally and lives on the circuit rather than inside

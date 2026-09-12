@@ -77,23 +77,68 @@ impl PyCompressedTransientResult {
         }
     }
 
-    /// The node's name when the container carries it as logic, not a voltage.
+    /// The node's name and event domain when the container carries it as
+    /// events, not as a voltage.
     ///
     /// The channel stays in the inventory because that inventory is this
-    /// container's node namespace, so the pair "unretained voltage plus a
-    /// digital trace under the same name" is what identifies the net — the
-    /// same test the uncompressed result uses.
-    fn digital_only_node_name(&self, index: usize) -> Option<String> {
+    /// container's node namespace, so the pair "unretained voltage plus an
+    /// event trace under the same name" is what identifies the net — the
+    /// same test the uncompressed result uses, in both event domains.
+    fn event_only_node(
+        &self,
+        index: usize,
+    ) -> Option<(String, rspice_core::analysis::transient::EventOnlyNetKind)> {
         let channel = self.inner.node_voltage_channel(index)?;
         if channel.availability != rspice_core::engine::TransientChannelAvailability::NotProjected {
             return None;
         }
         let name = channel.descriptor.owner_name();
-        self.inner
+        self.event_only_name_kind(name)
+            .map(|kind| (name.to_string(), kind))
+    }
+
+    /// The event domain that owns a name outright, judged the same way for a
+    /// channel accessor and for the two listing methods.
+    fn event_only_name_kind(
+        &self,
+        name: &str,
+    ) -> Option<rspice_core::analysis::transient::EventOnlyNetKind> {
+        use rspice_core::analysis::transient::EventOnlyNetKind;
+        if self
+            .inner
             .digital_traces
             .iter()
             .any(|trace| trace.node_name.eq_ignore_ascii_case(name))
-            .then(|| name.to_string())
+        {
+            Some(EventOnlyNetKind::Digital)
+        } else if self
+            .inner
+            .real_traces
+            .iter()
+            .any(|trace| trace.node_name.eq_ignore_ascii_case(name))
+        {
+            Some(EventOnlyNetKind::Real)
+        } else {
+            None
+        }
+    }
+
+    /// Whether one channel of this container is an event-only net's voltage.
+    ///
+    /// The document builder drops exactly these descriptors, so the listing
+    /// methods have to apply the same test or the compressed Python surface
+    /// advertises a channel the document says does not exist.
+    fn channel_is_event_only(
+        &self,
+        channel: &rspice_core::engine::TransientCompressedChannel,
+    ) -> bool {
+        matches!(
+            channel.descriptor.role(),
+            rspice_core::engine::TransientChannelRole::NodeVoltage { .. }
+        ) && channel.availability == rspice_core::engine::TransientChannelAvailability::NotProjected
+            && self
+                .event_only_name_kind(channel.descriptor.owner_name())
+                .is_some()
     }
 
     /// Dense retained samples of one channel, refusing to invent a number for
@@ -119,11 +164,25 @@ impl PyCompressedTransientResult {
         &self,
         canonical_name: &str,
     ) -> PyResult<&rspice_core::engine::TransientCompressedChannel> {
-        self.inner.channel_named(canonical_name).ok_or_else(|| {
+        let channel = self.inner.channel_named(canonical_name).ok_or_else(|| {
             crate::errors::key_error(format!(
                 "unknown compressed transient channel '{canonical_name}'"
             ))
-        })
+        })?;
+        // The container keeps an event-only net's channel so the inventory
+        // stays the node namespace, but the net has no voltage channel to
+        // describe. Answering "not-projected" here would say the run chose
+        // not to keep something it never had, which is the opposite of what
+        // the document says by omitting the descriptor entirely.
+        if self.channel_is_event_only(channel)
+            && let Some(kind) = self.event_only_name_kind(channel.descriptor.owner_name())
+        {
+            return Err(PyErr::from(event_only_node_error(
+                channel.descriptor.owner_name(),
+                kind,
+            )));
+        }
+        Ok(channel)
     }
 
     fn branch_current_values(&self, name: &str) -> PyResult<Vec<f64>> {
@@ -346,11 +405,17 @@ impl PyCompressedTransientResult {
     }
 
     /// Canonical names of every descriptor-keyed channel in this container.
+    ///
+    /// An event-only net's voltage channel is not one of them: the container
+    /// keeps it so the inventory stays the node namespace with its MNA
+    /// alignment, but the document publishes no descriptor for it, and this
+    /// listing is a listing of descriptors.
     #[getter]
     fn channel_names(&self) -> Vec<String> {
         self.inner
             .channels
             .iter()
+            .filter(|channel| !self.channel_is_event_only(channel))
             .map(|channel| channel.descriptor.canonical_name().to_string())
             .collect()
     }
@@ -679,8 +744,8 @@ impl PyCompressedTransientResult {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let values = match self.node_index(&node)? {
             Some(index) => {
-                if let Some(name) = self.digital_only_node_name(index) {
-                    return Err(PyErr::from(digital_only_node_error(&name)));
+                if let Some((name, kind)) = self.event_only_node(index) {
+                    return Err(PyErr::from(event_only_node_error(&name, kind)));
                 }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
@@ -703,8 +768,8 @@ impl PyCompressedTransientResult {
         }
         match self.node_index(&node)? {
             Some(index) => {
-                if let Some(name) = self.digital_only_node_name(index) {
-                    return Err(PyErr::from(digital_only_node_error(&name)));
+                if let Some((name, kind)) = self.event_only_node(index) {
+                    return Err(PyErr::from(event_only_node_error(&name, kind)));
                 }
                 let channel = self.inner.node_voltage_channel(index).ok_or_else(|| {
                     crate::errors::value_error("malformed compressed transient voltage inventory")
@@ -737,8 +802,8 @@ impl PyCompressedTransientResult {
             return Err(crate::errors::value_error("num_points must be at least 2"));
         }
         let resolved = self.node_index(&node)?;
-        if let Some(name) = resolved.and_then(|index| self.digital_only_node_name(index)) {
-            return Err(PyErr::from(digital_only_node_error(&name)));
+        if let Some((name, kind)) = resolved.and_then(|index| self.event_only_node(index)) {
+            return Err(PyErr::from(event_only_node_error(&name, kind)));
         }
         match resolved {
             Some(index) => self
@@ -835,5 +900,97 @@ impl PyCompressedTransientResult {
                 compression_report_persistence_state(&self.inner.compression_report),
             ),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EVENT_DECK: &str = "\
+* an analog clock crossing into the digital world
+vclk clk 0 pulse(0 3.3 1n 0.2n 0.2n 4n 8n)
+rclk clk 0 1k
+aadc [clk] [d] adc
+.model adc adc_bridge (in_low=1.0 in_high=2.0)
+ainv [d] [q] inv
+.model inv d_inverter (rise_delay=0.3n fall_delay=0.3n)
+.end
+";
+
+    fn compressed_event_run() -> PyCompressedTransientResult {
+        let netlist = rspice_core::Netlist::parse(EVENT_DECK).expect("the deck parses");
+        let engine = rspice_core::engine::Engine::default();
+        let inner = engine
+            .run_tran_compressed_with_abort(
+                &netlist,
+                2.0e-8,
+                2.0e-10,
+                rspice_core::engine::CompressionConfig {
+                    abs_tol: 1.0e-6,
+                    rel_tol: 1.0e-4,
+                    enabled: true,
+                    maximum_retained_interval: 0.0,
+                },
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .expect("the compressed transient solves");
+        PyCompressedTransientResult::new(inner)
+    }
+
+    /// The compressed listing agrees with the document it is a listing of.
+    ///
+    /// The container keeps an event-only net's channel because that inventory
+    /// *is* the node namespace and dropping one would renumber it — but the
+    /// document publishes no descriptor for it, so a listing that still names
+    /// it advertises a channel nothing can describe, and `channel_availability`
+    /// answered "not-projected", which claims the run chose not to keep a
+    /// voltage this net never had.
+    #[test]
+    fn the_channel_listing_omits_an_event_only_net_the_document_drops() {
+        let result = compressed_event_run();
+
+        let nodes = result.node_names();
+        for event_only in ["d", "q"] {
+            assert!(
+                nodes
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(event_only)),
+                "{event_only} must keep its place in the node namespace, got {nodes:?}"
+            );
+        }
+
+        let channels = result.channel_names();
+        for event_only in ["v(d)", "v(q)"] {
+            assert!(
+                !channels
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(event_only)),
+                "{event_only} must not be listed as a channel, got {channels:?}"
+            );
+        }
+        assert!(
+            channels
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("v(clk)")),
+            "the loaded analog node is still listed, got {channels:?}"
+        );
+
+        // And the predicate the listing filters on is the one the accessors
+        // refuse through, in the domain the net actually carries.
+        assert_eq!(
+            result
+                .event_only_node(
+                    nodes
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case("d"))
+                        .expect("d is a node")
+                )
+                .map(|(name, kind)| (name.to_ascii_lowercase(), kind)),
+            Some((
+                "d".to_string(),
+                rspice_core::analysis::transient::EventOnlyNetKind::Digital
+            ))
+        );
     }
 }

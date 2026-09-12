@@ -14,6 +14,7 @@ use super::{
     TransientResult,
 };
 use crate::abort_signal::{AbortSignal, DigitalEventCode, NoAbort, TransientDigitalBus};
+use crate::analysis::transient::EventOnlyNetKind;
 // Only the unit tests below construct these records directly; the
 // production paths in this module receive them already built.
 use crate::circuit::SolutionDependentCompanionStep;
@@ -1037,14 +1038,16 @@ struct TransientCapturePlan {
 ///
 /// The two halves travel together because retention has to answer both
 /// questions at once: whether the deck selected this name, and whether the
-/// name has a voltage to select at all. A digital-only net answers no to the
-/// second whatever the deck said.
+/// name has a voltage to select at all. An event-only net answers no to the
+/// second whatever the deck said, and the kind it carries is what the refusal
+/// names as its carrier.
 #[derive(Clone, Copy)]
 struct TransientNodeNamespace<'a> {
     /// MNA-ordered node names; `names[i]` is node `i + 1`.
     names: &'a [String],
-    /// Aligned with `names`: which of them only the event domain resolves.
-    digital_only: &'a [bool],
+    /// Aligned with `names`: the event domain that owns each of them outright,
+    /// and `None` for a name the analog system resolves.
+    event_only: &'a [Option<EventOnlyNetKind>],
 }
 
 /// Resolve a run's bus declarations onto the node ids the sample hook keys by.
@@ -1281,7 +1284,7 @@ impl TransientCapturePlan {
     ) -> Self {
         let TransientNodeNamespace {
             names: node_names,
-            digital_only: digital_only_nodes,
+            event_only: event_only_nodes,
         } = nodes;
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
@@ -1328,12 +1331,12 @@ impl TransientCapturePlan {
             .iter()
             .enumerate()
             .map(|(index, name)| {
-                // A digital-only net has no voltage to retain, whatever the
+                // An event-only net has no voltage to retain, whatever the
                 // deck selected. Its name stays in the namespace so the
-                // digital traces keep being named through it and every
+                // event traces keep being named through it and every
                 // consumer keeps its MNA alignment; the empty column is what
                 // "no channel" already means at every reader.
-                if digital_only_nodes.get(index).copied().unwrap_or(false) {
+                if event_only_nodes.get(index).is_some_and(Option::is_some) {
                     return false;
                 }
                 let externally_visible = external_wildcard_nodes
@@ -1658,7 +1661,7 @@ impl Engine {
             || !circuit.veriloga_one_step_dae_split_safe()
     }
 
-    /// Refuse every authored voltage operand that names a digital-only net.
+    /// Refuse every authored voltage operand that names an event-only net.
     ///
     /// The card said `V(q)` of a net the analog solver does not resolve, and
     /// the only answer the run could give is the placeholder row's zero. That
@@ -1668,33 +1671,54 @@ impl Engine {
     ///
     /// Wildcards are deliberately exempt. `V(*)` and `.SAVE ALL` ask for
     /// whatever the run has; they assert nothing about any one net, so they
-    /// skip a digital-only net silently, exactly as they skip a node the deck
-    /// never mentions. Only a named operand is an assertion. `.SAVE` is exempt
-    /// for the reason given at the check itself.
+    /// skip an event-only net silently, exactly as they skip a node the deck
+    /// never mentions. Only a named operand is an assertion. A `.SAVE` is an
+    /// assertion only in its typed spelling, for the reason given at the check
+    /// itself.
     ///
     /// A bare symbol in a `.MEAS` (`.MEASURE TRAN t FIND q WHEN ...`) is not
     /// an accessor call and so is not among a card's typed dependencies; that
     /// spelling meets the same sentence after the run, from the measurement
     /// resolver, because its signal table has no entry for the net either.
-    fn refuse_authored_digital_only_voltages(
+    fn refuse_authored_event_only_voltages(
         netlist: &Netlist,
         node_names: &[String],
-        digital_only_nodes: &[bool],
+        event_only_nodes: &[Option<EventOnlyNetKind>],
     ) -> Result<(), SimulationError> {
-        if !digital_only_nodes.iter().any(|digital| *digital) {
+        if !event_only_nodes.iter().any(Option::is_some) {
             return Ok(());
         }
-        let digital_only_name = |symbol: &str| -> Option<String> {
+        let event_only_name = |symbol: &str| -> Option<(String, EventOnlyNetKind)> {
             if symbol.contains('*') || symbol.contains('?') {
                 return None;
             }
             let wanted = TransientCapturePlan::canonical_symbol(symbol);
             node_names
                 .iter()
-                .enumerate()
-                .filter(|(index, _)| digital_only_nodes.get(*index).copied().unwrap_or(false))
-                .find(|(_, name)| TransientCapturePlan::canonical_symbol(name) == wanted)
-                .map(|(_, name)| name.clone())
+                .zip(event_only_nodes)
+                .filter_map(|(name, kind)| kind.map(|kind| (name, kind)))
+                .find(|(name, _)| TransientCapturePlan::canonical_symbol(name.as_str()) == wanted)
+                .map(|(name, kind)| (name.clone(), kind))
+        };
+        // A `.SAVE` is a retention selector rather than a request for a
+        // number, but only its BARE spelling is kind-agnostic: `.save q` and
+        // the CLI's `--save q` become `SaveSignal::Raw`, and a raw name
+        // selects the event trace, which is a retention this net really has.
+        // `.save v(q)` is the typed spelling, and event retention explicitly
+        // does not answer to it — the capture plan selects event vectors on
+        // `selects_raw_name` alone — so a typed save of an event-only net
+        // keeps nothing at all and has to be refused like every other typed
+        // operand. The frontend override path synthesizes a `V(q)` dependency
+        // from a `Raw`, so the two are told apart by the save set, not by the
+        // dependency.
+        let typed_save = |name: &str| {
+            netlist.saves.signals.iter().any(|signal| match signal {
+                SaveSignal::Voltage(saved) => saved.eq_ignore_ascii_case(name),
+                SaveSignal::VoltageDiff(pos, neg) => {
+                    pos.eq_ignore_ascii_case(name) || neg.eq_ignore_ascii_case(name)
+                }
+                _ => false,
+            })
         };
         for request in &netlist.output_requests {
             // A card qualified for another analysis is that analysis's
@@ -1703,17 +1727,6 @@ impl Engine {
                 .analysis
                 .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
             {
-                continue;
-            }
-            // `.SAVE` is a retention selector, not a request for a number: it
-            // says "keep this net", and for a digital-only net the retention
-            // that exists — its event trace — is exactly what a save of that
-            // name selects. A bare `--save q` is also synthesized into a
-            // `V(q)` dependency by the frontend override path, so refusing
-            // saves would refuse the one spelling that does work. Every other
-            // card asks for a value at a timepoint, which is the assertion
-            // this net cannot answer.
-            if request.directive == crate::netlist::OutputDirectiveKind::Save {
                 continue;
             }
             for dependency in &request.dependencies {
@@ -1726,15 +1739,21 @@ impl Engine {
                 ) {
                     continue;
                 }
-                let Some(name) = digital_only_name(&dependency.symbol) else {
+                let Some((name, kind)) = event_only_name(&dependency.symbol) else {
                     continue;
                 };
+                if request.directive == crate::netlist::OutputDirectiveKind::Save
+                    && !typed_save(&dependency.symbol)
+                {
+                    continue;
+                }
                 return Err(SimulationError::Netlist(
-                    crate::analysis::measure_signals::digital_only_voltage_operand_refusal(
+                    crate::analysis::measure_signals::event_only_voltage_operand_refusal(
                         request,
                         OutputAnalysisKind::Tran,
                         format!("{}({})", dependency.operator, dependency.symbol),
                         &name,
+                        kind,
                     ),
                 ));
             }
@@ -4874,15 +4893,15 @@ impl Engine {
         // memristor resistance remains a typed store trace and never enters
         // this voltage namespace.
         let node_names = circuit.node_names_sorted();
-        // Which of those names is a digital-only net, by the circuit's own
-        // classification. `node_names[i]` is node `i + 1`.
-        let digital_only_nodes: Vec<bool> = (1..=node_names.len())
-            .map(|node| circuit.is_digital_only_net(node))
+        // Which of those names is an event-only net, and in which domain, by
+        // the circuit's own classification. `node_names[i]` is node `i + 1`.
+        let event_only_nodes: Vec<Option<EventOnlyNetKind>> = (1..=node_names.len())
+            .map(|node| circuit.event_only_net_kind(node))
             .collect();
         // An authored `V()` of one is an assertion the run cannot honour, so
         // it is refused here rather than answered with the placeholder row's
         // zero — before the first timepoint is solved.
-        Self::refuse_authored_digital_only_voltages(netlist, &node_names, &digital_only_nodes)?;
+        Self::refuse_authored_event_only_voltages(netlist, &node_names, &event_only_nodes)?;
 
         log::debug!("Transient node mapping contains {} nodes", node_names.len());
         if log::log_enabled!(log::Level::Trace) {
@@ -4971,7 +4990,7 @@ impl Engine {
             netlist,
             TransientNodeNamespace {
                 names: &node_names,
-                digital_only: &digital_only_nodes,
+                event_only: &event_only_nodes,
             },
             &branch_names,
             retain_xyce_voltage_source_currents,
@@ -11088,14 +11107,14 @@ fn accepted_transient_channels(
             + result.device_op_traces.len()
             + result.store_traces.len(),
     );
-    // A digital-only net keeps its node-voltage channel here, empty and
+    // An event-only net keeps its node-voltage channel here, empty and
     // `NotProjected`, and loses it at the document boundary instead.
     //
     // This inventory is not merely a list of channels: it *is* the compressed
     // result's node namespace. `TransientResultCompressed::node_names` and
     // `num_nodes` are derived from these channels, and every index-addressed
     // accessor resolves through `NodeVoltage { node_index }`, so dropping one
-    // channel would renumber the namespace and take the digital-only net's
+    // channel would renumber the namespace and take the event-only net's
     // name out of it — exactly the MNA alignment the run is required to keep.
     // The document builders read the same emptiness test the uncompressed path
     // does and publish no voltage descriptor for such a node.

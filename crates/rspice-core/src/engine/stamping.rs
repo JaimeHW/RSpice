@@ -101,7 +101,7 @@ impl Engine {
         for row in circuit.xspice_event_node_matrix_rows() {
             let deficient = deficient_rows.binary_search(&row).is_ok();
             // The result namespace drops the voltage of every net
-            // `is_digital_only_net` claims, on the grounds that its row is one
+            // `event_only_net_kind` claims, on the grounds that its row is one
             // of these placeholders. If such a row carried an analog stamp
             // after all, the two would disagree: an author would lose `V()` of
             // a net the solver really does solve. The `.OPTIONS RSHUNT` shunt
@@ -111,8 +111,8 @@ impl Engine {
             debug_assert!(
                 deficient
                     || circuit.global_shunt_conductance != 0.0
-                    || !circuit.is_digital_only_net(row + 1),
-                "row {row} belongs to a net classified digital-only but carries an analog \
+                    || circuit.event_only_net_kind(row + 1).is_none(),
+                "row {row} belongs to a net classified event-only but carries an analog \
                  stamp; the pinned placeholder rows and the published analog namespace \
                  have drifted apart"
             );

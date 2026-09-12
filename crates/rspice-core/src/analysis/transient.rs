@@ -734,21 +734,64 @@ impl TransientPostResults {
     }
 }
 
-/// The one sentence every surface renders when a voltage of a digital-only
-/// net is asked for.
+/// Which event domain resolves a net that the analog system does not.
+///
+/// The two domains publish their values under different spellings, so the
+/// refusal has to know which one it is naming: recommending a carrier that
+/// does not carry this net is the same defect as publishing a placeholder
+/// zero. A net that registered both domains is named as digital, because that
+/// is the domain whose column an exported table carries for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventOnlyNetKind {
+    /// Four-state logic with drive strength.
+    Digital,
+    /// Real-valued event data.
+    Real,
+}
+
+impl EventOnlyNetKind {
+    /// The column label an exported table gives this net's event trace.
+    ///
+    /// `D(..)` for digital is what the flattened projection writes
+    /// ([`crate::execution::transient_projection_signals`]) and what the
+    /// rawfile event plot declares; `E(..)` for real is the rawfile event
+    /// plot's spelling, which the workbench event sheet reads back.
+    fn column_label(self, name: &str) -> String {
+        match self {
+            Self::Digital => format!("D({name})"),
+            Self::Real => format!("E({name})"),
+        }
+    }
+
+    /// The Python accessor on a transient result that returns this net's
+    /// event trace.
+    fn python_accessor(self, name: &str) -> String {
+        match self {
+            Self::Digital => format!("digital_events('{name}')"),
+            Self::Real => format!("real_trace('{name}')"),
+        }
+    }
+}
+
+/// The one sentence every surface renders when a voltage of an event-only net
+/// is asked for.
 ///
 /// A net that only the event domain resolves has no `V()`: the MNA row it owns
 /// is a placeholder the assembly closes with `v = 0` to restore rank, so
-/// publishing it as a voltage publishes 0 V for a net that carries logic. The
+/// publishing it as a voltage publishes 0 V for a net that carries events. The
 /// carriers that do exist are named in the sentence, so a reader never has to
-/// guess which spelling replaces the one that was refused. One function
+/// guess which spelling replaces the one that was refused — and each is named
+/// as what it is, a column an export publishes and an accessor a binding
+/// answers, rather than as another operand to write on a card. One function
 /// because the namespace build, the post-run resolvers and the bindings all
 /// have to say the same thing.
-pub fn digital_only_voltage_refusal(name: &str) -> String {
+pub fn event_only_voltage_refusal(name: &str, kind: EventOnlyNetKind) -> String {
+    let label = kind.column_label(name);
+    let accessor = kind.python_accessor(name);
     format!(
-        "V({name}) names '{name}', a digital-only net: it carries four-state logic, not a \
-         voltage. Read it as D({name}), its logic level on the analysis grid, or through its \
-         digital event trace."
+        "V({name}) names '{name}', an event-only net: it carries event values, not a voltage. \
+         Its values are published as its event trace ({label}; {accessor}), not as an \
+         output-card operand."
     )
 }
 
@@ -1116,37 +1159,59 @@ impl TransientResult {
             .map(|trace| trace.points.as_slice())
     }
 
-    /// Whether a named node reached this result as logic and not as a voltage.
+    /// Which event domain a named node reached this result through, when it
+    /// reached it as events and not as a voltage.
     ///
-    /// The run leaves a digital-only net's name in `node_names` — the digital
+    /// The run leaves an event-only net's name in `node_names` — the event
     /// traces are named through it and every consumer is aligned by MNA index
     /// — and leaves its voltage column empty, which is what "no channel"
-    /// already means at every reader. A node whose column is empty while its
-    /// digital trace is present is therefore exactly a digital-only net, and
-    /// no save shape can produce that pair by accident: a raw `.SAVE name`
-    /// retains `V(name)` as well as the trace, so a hybrid node never keeps
-    /// its trace while losing its voltage.
-    pub fn is_digital_only_node_named(&self, name: &str) -> bool {
-        self.node_index_named(name)
+    /// already means at every reader. A node whose column is empty while an
+    /// event trace of that name is present is therefore exactly an event-only
+    /// net, and no save shape can produce that pair by accident: a raw
+    /// `.SAVE name` retains `V(name)` as well as the trace, so a hybrid node
+    /// never keeps its trace while losing its voltage.
+    ///
+    /// The real domain answers the same way the digital one does. A net whose
+    /// only endpoint is a code model's `Real` port is as absent from the
+    /// analog system as one whose only endpoint is a digital port, so the
+    /// typed document, the measurement signal table and the bindings have to
+    /// treat the two alike; only the carrier they name differs.
+    pub fn event_only_node_kind(&self, name: &str) -> Option<EventOnlyNetKind> {
+        let empty = self
+            .node_index_named(name)
             .filter(|node| *node > 0)
             .and_then(|node| self.try_voltage_waveform(node))
-            .is_some_and(|waveform| waveform.is_empty())
-            && self.digital_trace_named(name).is_some()
+            .is_some_and(|waveform| waveform.is_empty());
+        if !empty {
+            return None;
+        }
+        if self.digital_trace_named(name).is_some() {
+            Some(EventOnlyNetKind::Digital)
+        } else if self.real_trace_named(name).is_some() {
+            Some(EventOnlyNetKind::Real)
+        } else {
+            None
+        }
     }
 
-    /// [`Self::is_digital_only_node_named`] for every node at once, aligned
+    /// [`Self::event_only_node_kind`] for every node at once, aligned
     /// with `node_names`.
     ///
     /// The document and channel builders walk the whole namespace, so they ask
     /// this once instead of resolving a name per node.
-    pub(crate) fn digital_only_node_mask(&self) -> Vec<bool> {
-        if self.digital_traces.is_empty() {
+    pub(crate) fn event_only_node_mask(&self) -> Vec<bool> {
+        if self.digital_traces.is_empty() && self.real_traces.is_empty() {
             return vec![false; self.node_names.len()];
         }
         let traced: HashSet<String> = self
             .digital_traces
             .iter()
             .map(|trace| trace.node_name.to_ascii_lowercase())
+            .chain(
+                self.real_traces
+                    .iter()
+                    .map(|trace| trace.node_name.to_ascii_lowercase()),
+            )
             .collect();
         self.node_names
             .iter()

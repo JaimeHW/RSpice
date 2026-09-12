@@ -453,4 +453,52 @@ mod tests {
         assert!(error.contains("cannot be dumped exactly"), "{error}");
         assert!(error.contains("femtoseconds"), "{error}");
     }
+
+    /// The Python accessor the event-only refusal recommends is one this
+    /// binding really publishes, per event domain.
+    ///
+    /// The defect this pins is a recommendation that does not work: the author
+    /// who is told to read `D(clk)` writes `.PRINT TRAN D(clk)` and gets
+    /// "Unknown function: D". So each half of the sentence is checked against
+    /// the surface it names — the published type stub, which `stubtest` holds
+    /// to the real class, and the body the accessor resolves through.
+    #[test]
+    fn the_refusals_python_accessor_is_one_this_binding_publishes() {
+        use rspice_core::analysis::transient::{EventOnlyNetKind, event_only_voltage_refusal};
+
+        let stub = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/rspice.pyi"))
+            .expect("the published type stub is beside the crate manifest");
+        let (digital_traces, real_traces) = traces();
+        let result = TransientResult {
+            time: vec![0.0, 3.0e-8],
+            step_sizes: vec![0.0, 3.0e-8],
+            voltages: vec![Vec::new(), Vec::new()],
+            branch_currents: Vec::new(),
+            num_nodes: 2,
+            node_names: vec!["clk".to_string(), "ctrl".to_string()],
+            branch_names: Vec::new(),
+            digital_traces,
+            digital_buses: Vec::new(),
+            real_traces,
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        };
+
+        let digital = event_only_voltage_refusal("clk", EventOnlyNetKind::Digital);
+        assert!(digital.contains("digital_events('clk')"), "{digital}");
+        assert!(stub.contains("def digital_events("), "the stub declares it");
+        assert!(
+            result.digital_trace_named("clk").is_some(),
+            "and the accessor's own lookup answers for that net"
+        );
+
+        let real = event_only_voltage_refusal("ctrl", EventOnlyNetKind::Real);
+        assert!(real.contains("real_trace('ctrl')"), "{real}");
+        assert!(stub.contains("def real_trace("), "the stub declares it");
+        assert_eq!(
+            real_trace(&result, "ctrl").expect("the accessor answers for that net"),
+            vec![(0.0, 0.0), (2e-8, -1.5)]
+        );
+    }
 }

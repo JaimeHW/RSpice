@@ -285,7 +285,7 @@ fn deck_e_digital_only_net_carries_no_analog_channel() {
         "clk must still reach the result as logic"
     );
     assert!(
-        result.is_digital_only_node_named("clk"),
+        result.event_only_node_kind("clk").is_some(),
         "the result-side test must recognise clk"
     );
 
@@ -298,8 +298,8 @@ fn deck_e_digital_only_net_carries_no_analog_channel() {
         "qdiv keeps its digital trace as well"
     );
     assert!(
-        !result.is_digital_only_node_named("qdiv"),
-        "a loaded discrete output is not digital-only"
+        result.event_only_node_kind("qdiv").is_none(),
+        "a loaded discrete output is not event-only"
     );
 }
 
@@ -340,8 +340,8 @@ fn deck_e_authored_voltage_of_a_digital_only_net_is_refused() {
     for expected in [
         "OUTPUT OPERAND 0 'V(CLK)'",
         "AT LINE 6",
-        "A DIGITAL-ONLY NET: IT CARRIES FOUR-STATE LOGIC, NOT A VOLTAGE",
-        "READ IT AS D(CLK)",
+        "AN EVENT-ONLY NET: IT CARRIES EVENT VALUES, NOT A VOLTAGE",
+        "(D(CLK); DIGITAL_EVENTS('CLK'))",
     ] {
         assert!(
             rendered.contains(expected),

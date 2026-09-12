@@ -514,12 +514,12 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
         .filter(|name| !name.is_empty())
         .map(|name| name.to_ascii_lowercase())
         .collect::<HashSet<_>>();
-    // A digital-only net contributes no voltage spelling at all. Inserting its
+    // An event-only net contributes no voltage spelling at all. Inserting its
     // empty column would make `V(q)` resolve to a signal with no samples,
     // which fails later with a row complaint instead of saying what is wrong.
-    let digital_only = result.digital_only_node_mask();
+    let event_only = result.event_only_node_mask();
     for (index, waveform) in result.voltages.iter().enumerate() {
-        if digital_only.get(index).copied().unwrap_or(false) {
+        if event_only.get(index).copied().unwrap_or(false) {
             continue;
         }
         let fallback = (index + 1).to_string();
@@ -1325,6 +1325,7 @@ pub fn evaluate_tran_equation_measurements(
     alias_projection.augment(&mut signals)?;
     evaluate_equation_measurements(netlist, "TRAN", &result.time, &signals, -1.0, None)
         .map(|traces| retain_equation_traces(netlist, "TRAN", traces))
+        .map_err(|error| event_only_signal_miss(&error, result).unwrap_or(error))
 }
 
 /// Evaluate Xyce continuous equation measurements over a DC sweep.
@@ -1435,12 +1436,12 @@ struct WildcardVoltageNode {
 /// The three travel together because `V(*)` needs all of them at once: the
 /// names in MNA order, the count it must agree with, and which of those names
 /// the result carries as logic rather than as a voltage. An analysis with no
-/// event domain leaves `digital_only` empty.
+/// event domain leaves `event_only` empty.
 #[derive(Clone, Copy)]
 struct RealOutputNodeMetadata<'a> {
     names: &'a [String],
     voltage_count: usize,
-    digital_only: &'a [bool],
+    event_only: &'a [bool],
 }
 
 fn ordered_wildcard_voltage_nodes(
@@ -1451,7 +1452,7 @@ fn ordered_wildcard_voltage_nodes(
     let RealOutputNodeMetadata {
         names,
         voltage_count,
-        digital_only,
+        event_only,
     } = metadata;
     if names.len() != voltage_count {
         return Err(format!(
@@ -1473,7 +1474,7 @@ fn ordered_wildcard_voltage_nodes(
         // any one net, so a net only the event domain resolves is skipped here
         // exactly as a net outside the public namespace is. Only a named
         // operand is refused.
-        if digital_only.get(index).copied().unwrap_or(false) {
+        if event_only.get(index).copied().unwrap_or(false) {
             continue;
         }
         let canonical = canonical_symbol(name);
@@ -1607,7 +1608,7 @@ fn evaluate_tran_output_columns_with_abort(
     let Some(&first_request) = requests.first() else {
         return Ok(Vec::new());
     };
-    let digital_only = result.digital_only_node_mask();
+    let event_only = result.event_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
@@ -1615,7 +1616,7 @@ fn evaluate_tran_output_columns_with_abort(
         Some(RealOutputNodeMetadata {
             names: &result.node_names,
             voltage_count: result.voltages.len(),
-            digital_only: &digital_only,
+            event_only: &event_only,
         }),
         netlist,
         limits,
@@ -1693,7 +1694,7 @@ pub fn evaluate_tran_four_output_requests_with_abort(
             ))
         })?;
     let requests = [request];
-    let digital_only = result.digital_only_node_mask();
+    let event_only = result.event_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
@@ -1701,7 +1702,7 @@ pub fn evaluate_tran_four_output_requests_with_abort(
         Some(RealOutputNodeMetadata {
             names: &result.node_names,
             voltage_count: result.voltages.len(),
-            digital_only: &digital_only,
+            event_only: &event_only,
         }),
         netlist,
         limits,
@@ -1770,7 +1771,7 @@ pub(crate) fn evaluate_tran_fft_output_with_abort(
             ))
         })?;
     let requests = [request];
-    let digital_only = result.digital_only_node_mask();
+    let event_only = result.event_only_node_mask();
     let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
@@ -1778,7 +1779,7 @@ pub(crate) fn evaluate_tran_fft_output_with_abort(
         Some(RealOutputNodeMetadata {
             names: &result.node_names,
             voltage_count: result.voltages.len(),
-            digital_only: &digital_only,
+            event_only: &event_only,
         }),
         netlist,
         limits,
@@ -1862,7 +1863,7 @@ fn evaluate_dc_output_columns_with_abort(
     let node_metadata = sweep.first().map(|(_, result)| RealOutputNodeMetadata {
         names: result.node_names.as_slice(),
         voltage_count: result.node_voltages.len(),
-        digital_only: &[],
+        event_only: &[],
     });
     let projection = preflight_real_output_requests(
         &requests,
@@ -1959,7 +1960,7 @@ fn frontend_output_error(error: OutputProjectionError) -> SimulationError {
     }
 }
 
-/// The refusal an authored voltage operand naming a digital-only net gets,
+/// The refusal an authored voltage operand naming an event-only net gets,
 /// rendered in the same card-and-operand shape as every other operand failure.
 ///
 /// The namespace build is the one place that can refuse this before a run
@@ -1967,16 +1968,31 @@ fn frontend_output_error(error: OutputProjectionError) -> SimulationError {
 /// to a string here rather than returned as a projection error: the shape is
 /// what makes the card and the operand visible, and the sentence is the
 /// engine's single wording for the refusal.
-pub(crate) fn digital_only_voltage_operand_refusal(
+///
+/// The operand index is the authored operand's own position when the card
+/// spells it exactly, and otherwise the position of the first authored operand
+/// that mentions the symbol — an expression operand such as `{V(clk)*2}` is
+/// not spelled `V(clk)`, and reporting it as operand 0 would point at the
+/// wrong one.
+pub(crate) fn event_only_voltage_operand_refusal(
     request: &OutputRequest,
     analysis: OutputAnalysisKind,
     operand: String,
     node: &str,
+    kind: crate::analysis::transient::EventOnlyNetKind,
 ) -> String {
+    let trimmed = operand.trim();
     let operand_index = request
         .operands
         .iter()
-        .position(|authored| authored.trim().eq_ignore_ascii_case(operand.trim()))
+        .position(|authored| authored.trim().eq_ignore_ascii_case(trimmed))
+        .or_else(|| {
+            let wanted = trimmed.to_ascii_lowercase();
+            request
+                .operands
+                .iter()
+                .position(|authored| authored.to_ascii_lowercase().contains(&wanted))
+        })
         .unwrap_or(0);
     OutputProjectionError::Operand {
         analysis,
@@ -1984,7 +2000,7 @@ pub(crate) fn digital_only_voltage_operand_refusal(
         operand_index,
         operand,
         row: None,
-        detail: crate::analysis::transient::digital_only_voltage_refusal(node),
+        detail: crate::analysis::transient::event_only_voltage_refusal(node, kind),
     }
     .to_string()
 }
@@ -6008,13 +6024,13 @@ pub fn evaluate_transient_probe_with_abort(
         Ok(column) => Ok(column.into_parts().2),
         Err(OutputOperandEvaluationError::Aborted) => Err(SimulationError::Aborted),
         Err(OutputOperandEvaluationError::Detail { .. }) => {
-            // A miss on a net the result carries as logic is not an unknown
+            // A miss on a net the result carries as events is not an unknown
             // signal: the net exists and was recorded, in the only domain that
             // resolves it. Saying so beats "unavailable", which reads as a
             // retention problem the author could fix with a `.SAVE`.
-            if let Some(node) = digital_only_probe_node(&kind, result) {
+            if let Some((node, net_kind)) = event_only_probe_node(&kind, result) {
                 return Err(SimulationError::Netlist(
-                    crate::analysis::transient::digital_only_voltage_refusal(&node),
+                    crate::analysis::transient::event_only_voltage_refusal(&node, net_kind),
                 ));
             }
             Err(SimulationError::requested_signal_unavailable(
@@ -6024,18 +6040,21 @@ pub fn evaluate_transient_probe_with_abort(
     }
 }
 
-/// The digital-only net a failed voltage probe named, if that is what it was.
+/// The event-only net a failed voltage probe named, if that is what it was.
 ///
 /// Only a single-node voltage operand qualifies. A differential probe spans
 /// two nets and a raw name may have missed for any number of reasons, so
 /// neither is turned into this refusal on a guess.
-fn digital_only_probe_node(kind: &OutputOperandKind, result: &TransientResult) -> Option<String> {
+fn event_only_probe_node(
+    kind: &OutputOperandKind,
+    result: &TransientResult,
+) -> Option<(String, crate::analysis::transient::EventOnlyNetKind)> {
     let OutputOperandKind::Probe(SaveSignal::Voltage(node)) = kind else {
         return None;
     };
     result
-        .is_digital_only_node_named(node)
-        .then(|| node.clone())
+        .event_only_node_kind(node)
+        .map(|net_kind| (node.clone(), net_kind))
 }
 
 /// Evaluate the netlist's transient .MEAS statements against a result.
@@ -6064,7 +6083,42 @@ pub fn evaluate_tran_measurements_with_abort(
         return Err(SimulationError::Aborted);
     }
     let signals = transient_signal_map(result);
-    evaluate_tran_measurements_with_signals_and_abort(netlist, &result.time, &signals, abort)
+    let mut measurements =
+        evaluate_tran_measurements_with_signals_and_abort(netlist, &result.time, &signals, abort)?;
+    for measurement in &mut measurements {
+        let refusal = measurement
+            .error
+            .as_deref()
+            .and_then(|error| event_only_signal_miss(error, result));
+        if let Some(refusal) = refusal {
+            measurement.error = Some(refusal);
+        }
+    }
+    Ok(measurements)
+}
+
+/// Rewrite a measurement's "signal not found" into the event-only refusal when
+/// the missing name is a net the result carries as events.
+///
+/// A bare `.MEASURE TRAN t FIND q WHEN ...` names `q` without an accessor, so
+/// it is not among the card's typed dependencies and the pre-run refusal never
+/// sees it; the miss surfaces here instead, from a signal table that
+/// deliberately holds no entry for the net. "Signal 'q' not found" is then the
+/// wrong diagnosis — the net is not missing, its voltage is — so the one
+/// sentence replaces it, including for the `V(q)` spelling that reaches the
+/// resolver through an equation rather than a dependency.
+fn event_only_signal_miss(error: &str, result: &TransientResult) -> Option<String> {
+    let rest = error.strip_prefix("Signal '")?;
+    let name = rest.strip_suffix("' not found")?;
+    let bare = name
+        .trim()
+        .strip_prefix("V(")
+        .or_else(|| name.trim().strip_prefix("v("))
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(name.trim());
+    result
+        .event_only_node_kind(bare)
+        .map(|kind| crate::analysis::transient::event_only_voltage_refusal(bare, kind))
 }
 
 /// Re-evaluate the netlist's transient `.MEAS` statements over a serialized

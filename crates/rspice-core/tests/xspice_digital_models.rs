@@ -1,6 +1,7 @@
 //! Native XSPICE digital code models pinned against ngspice code-model semantics.
 
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
+use rspice_core::analysis::transient::EventOnlyNetKind;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{
@@ -4169,7 +4170,7 @@ fn an_event_only_net_publishes_no_voltage_and_keeps_its_name() {
             "{digital_only} must still reach the result as logic"
         );
         assert!(
-            result.is_digital_only_node_named(digital_only),
+            result.event_only_node_kind(digital_only).is_some(),
             "the result-side test must recognise {digital_only}"
         );
     }
@@ -4181,16 +4182,235 @@ fn an_event_only_net_publishes_no_voltage_and_keeps_its_name() {
         !real_event_values(&result, "watched").is_empty(),
         "the real event trace is that net's carrier"
     );
+    // The result-side test has to recognise the real-valued twin too: the
+    // typed document, the measurement signal table and the bindings all decide
+    // through it, and a predicate that only knows the digital domain leaves a
+    // real-only net publishing an empty `V()` channel nothing refuses.
+    assert_eq!(
+        result.event_only_node_kind("watched"),
+        Some(EventOnlyNetKind::Real),
+        "a real-only event net must be recognised, and as the real domain"
+    );
+    for digital_only in ["d", "q"] {
+        assert_eq!(
+            result.event_only_node_kind(digital_only),
+            Some(EventOnlyNetKind::Digital),
+            "{digital_only} is owned by the digital domain"
+        );
+    }
     for loaded in ["clk", "out"] {
         assert!(
             !transient_node_series(&result, loaded).is_empty(),
             "{loaded} is loaded and keeps its analog channel"
         );
         assert!(
-            !result.is_digital_only_node_named(loaded),
-            "{loaded} is not digital-only"
+            result.event_only_node_kind(loaded).is_none(),
+            "{loaded} is not event-only"
         );
     }
+}
+
+/// Every carrier the refusal recommends is a spelling that really exists.
+///
+/// The defect this pins is the one a wrong hint causes: the author who is told
+/// to read `D(q)` writes it, and the surface named has no such column. So both
+/// halves of the sentence are checked against the surfaces that produce them —
+/// the flattened projection every exported table is built from, and the
+/// rawfile event plots — for both event domains, on the run that raised it.
+#[test]
+fn the_refusals_carriers_are_spellings_the_export_surfaces_really_publish() {
+    let netlist = Netlist::parse(&event_state_deck("")).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect("transient solves");
+
+    let digital = rspice_core::analysis::transient::event_only_voltage_refusal(
+        "q",
+        EventOnlyNetKind::Digital,
+    );
+    let real = rspice_core::analysis::transient::event_only_voltage_refusal(
+        "watched",
+        EventOnlyNetKind::Real,
+    );
+    assert!(digital.contains("D(q)"), "{digital}");
+    assert!(real.contains("E(watched)"), "{real}");
+
+    // `D(q)` is a column of the projection the CSV, HDF5 and table exporters
+    // are all built from.
+    let projected = rspice_core::execution::transient_projection_signals(&result)
+        .expect("the run projects onto export signals");
+    let columns: Vec<&str> = projected
+        .iter()
+        .map(|signal| signal.descriptor().display_name())
+        .collect();
+    assert!(
+        columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case("D(q)")),
+        "the flattened projection must publish D(q), got {columns:?}"
+    );
+    assert!(
+        !columns
+            .iter()
+            .any(|column| column.eq_ignore_ascii_case("V(q)")),
+        "and no voltage column for the same net, got {columns:?}"
+    );
+
+    // `E(watched)` is the variable a rawfile event plot declares, and it
+    // parses back to the net it names.
+    let mut raw = Vec::new();
+    rspice_core::io::write_event_plots(
+        &mut raw,
+        &rspice_core::execution::transient_event_plots(&result.digital_traces, &result.real_traces),
+        &[],
+        rspice_core::io::RawFormat::Ascii,
+    )
+    .expect("the run's event histories write as rawfile plots");
+    let text = String::from_utf8(raw.clone()).expect("an ASCII rawfile is text");
+    for spelling in ["D(q)", "E(watched)"] {
+        assert!(
+            text.to_ascii_lowercase()
+                .contains(&spelling.to_ascii_lowercase()),
+            "the rawfile must declare {spelling}, got:\n{text}"
+        );
+    }
+    let file = rspice_core::io::parse_raw_plots_reader_with_limits(
+        &mut std::io::Cursor::new(raw),
+        rspice_core::resource::ResourceLimits::default(),
+    )
+    .expect("the rawfile parses back");
+    let decoded = rspice_core::execution::decode_event_plots(&file).expect("the plots decode");
+    assert!(
+        decoded
+            .digital_traces
+            .iter()
+            .any(|trace| trace.node_name.eq_ignore_ascii_case("q")),
+        "D(q) must parse back to the net q"
+    );
+    assert!(
+        decoded
+            .real_traces
+            .iter()
+            .any(|trace| trace.node_name.eq_ignore_ascii_case("watched")),
+        "E(watched) must parse back to the net watched"
+    );
+}
+
+/// A deck that names no ground is classified too.
+///
+/// The build classifies which nodes an analog stamp reaches, and only then
+/// does `ensure_ground_reference` renumber the nodes of a deck that never
+/// named `0`. Dropping the classification at that renumbering left every such
+/// deck unclassified, which silently restored the pinned 0 V column for every
+/// event-only net it has — the fix off for a whole class of decks, with no
+/// symptom but the wrong number.
+#[test]
+fn a_deck_with_no_named_ground_still_leaves_its_event_nets_out_of_the_namespace() {
+    let netlist = Netlist::parse(
+        "\
+* no node is named 0 or gnd: the build picks vss and renumbers
+vclk clk vss pulse(0 3.3 1n 0.2n 0.2n 4n 8n)
+rclk clk vss 1k
+aadc [clk] [d] adc
+.model adc adc_bridge (in_low=1.0 in_high=2.0)
+ainv [d] [q] inv
+.model inv d_inverter (rise_delay=0.3n fall_delay=0.3n)
+.end
+",
+    )
+    .expect("groundless deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 2.0e-8, 2.0e-10)
+        .expect("transient solves");
+
+    assert!(
+        !result.time.is_empty(),
+        "the run must produce samples for the assertion to mean anything"
+    );
+    for event_only in ["d", "q"] {
+        assert!(
+            transient_node_series(&result, event_only).is_empty(),
+            "{event_only} kept a voltage column of {} samples after the ground remap",
+            transient_node_series(&result, event_only).len()
+        );
+        assert!(
+            result.event_only_node_kind(event_only).is_some(),
+            "{event_only} must be recognised as event-only after the ground remap"
+        );
+    }
+    assert!(
+        !transient_node_series(&result, "clk").is_empty(),
+        "the loaded analog node keeps its channel through the same remap"
+    );
+}
+
+/// A typed `.SAVE V()` of an event-only net is refused; a bare save is not.
+///
+/// `.save q` and the command line's `--save q` are raw selections, and a raw
+/// name is exactly what event retention answers to, so that spelling keeps the
+/// trace and is left alone. `.save v(q)` is the typed spelling, which event
+/// retention explicitly does not answer to: it kept nothing at all and said
+/// nothing, so the author got neither the voltage nor the trace.
+#[test]
+fn a_typed_save_of_an_event_only_net_is_refused_and_a_bare_save_is_not() {
+    let netlist = Netlist::parse(&event_state_deck(".save v(q)\n")).expect("typed save parses");
+    let error = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect_err("a typed save of an event-only net must be refused");
+    let rendered = error.to_string().to_ascii_uppercase();
+    assert!(
+        rendered.contains("AN EVENT-ONLY NET"),
+        "the typed save must meet the one sentence, got: {rendered}"
+    );
+
+    let netlist = Netlist::parse(&event_state_deck(".save q\n")).expect("bare save parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect("a bare save selects the trace and is not refused");
+    assert!(
+        !digital_tokens(&result, "q").is_empty(),
+        "a bare save of an event-only net retains the carrier it does have"
+    );
+    assert!(
+        transient_node_series(&result, "q").is_empty(),
+        "and still publishes no voltage for it"
+    );
+}
+
+/// A bare `.MEAS ... FIND q` names the net without an accessor, and meets the
+/// same sentence after the run.
+///
+/// The pre-run refusal sees a card's typed dependencies, and a bare symbol is
+/// not one, so this spelling used to come back as "Signal 'q' not found" — a
+/// diagnosis that sends the author looking for a typo in a net that exists and
+/// was recorded.
+#[test]
+fn a_bare_measure_operand_naming_an_event_only_net_meets_the_same_sentence() {
+    let netlist = Netlist::parse(&event_state_deck(
+        ".meas tran first_q find q when v(out)=1.0\n",
+    ))
+    .expect("measure deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 4.0e-8, 2.0e-10)
+        .expect("the run itself is not refused");
+    let measurements = rspice_core::analysis::evaluate_tran_measurements(&netlist, &result);
+    let errors: Vec<String> = measurements
+        .iter()
+        .filter_map(|measurement| measurement.error.clone())
+        .collect();
+    // Case-insensitively, because the resolver names the net as the parser's
+    // upper-case namespace spells it.
+    assert!(
+        errors.iter().any(|error| {
+            let rendered = error.to_ascii_uppercase();
+            rendered.contains("AN EVENT-ONLY NET") && rendered.contains("(D(Q); DIGITAL_EVENTS(")
+        }),
+        "the miss must carry the one sentence and the carrier, got {errors:?}"
+    );
+    assert!(
+        !errors.iter().any(|error| error.contains("not found")),
+        "and must not still read as an unknown signal, got {errors:?}"
+    );
 }
 
 /// An authored `V()` of an event-only XSPICE net is refused before the run,
@@ -4209,8 +4429,8 @@ fn an_authored_voltage_of_an_event_only_net_is_refused_with_its_carrier() {
     for expected in [
         "OUTPUT OPERAND 0 'V(Q)'",
         "AT LINE 14",
-        "A DIGITAL-ONLY NET: IT CARRIES FOUR-STATE LOGIC, NOT A VOLTAGE",
-        "READ IT AS D(Q)",
+        "AN EVENT-ONLY NET: IT CARRIES EVENT VALUES, NOT A VOLTAGE",
+        "(D(Q); DIGITAL_EVENTS('Q'))",
     ] {
         assert!(
             rendered.contains(expected),
@@ -4226,8 +4446,8 @@ fn an_authored_voltage_of_an_event_only_net_is_refused_with_its_carrier() {
 /// loaded, so the analog system really does solve it; the auto-bridge planted
 /// for `a_digital`'s digital input registers a digital identity on the same
 /// node. A raw `.SAVE` selects the voltage as well as the event trace — which
-/// is why "voltage column empty AND a digital trace present" is an
-/// unambiguous test for a digital-only net: no save shape produces that pair
+/// is why "voltage column empty AND an event trace present" is an
+/// unambiguous test for an event-only net: no save shape produces that pair
 /// for a hybrid.
 #[test]
 fn a_loaded_net_with_an_event_identity_keeps_its_voltage_and_its_trace() {
@@ -4256,7 +4476,7 @@ a_digital [mix] converted dtr
         "the same raw save must retain its digital trace"
     );
     assert!(
-        !result.is_digital_only_node_named("mix"),
-        "a hybrid node is not digital-only"
+        result.event_only_node_kind("mix").is_none(),
+        "a hybrid node is not event-only"
     );
 }

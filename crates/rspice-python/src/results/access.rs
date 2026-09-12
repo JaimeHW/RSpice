@@ -35,14 +35,17 @@ pub(super) enum ResultAccessError {
     UnknownBranchName {
         name: String,
     },
-    /// A named net the result carries as logic, asked for as a voltage.
+    /// A named net the result carries as events, asked for as a voltage.
     ///
     /// Distinct from [`Self::UnknownNodeName`] because the net is not unknown:
     /// it exists, it was recorded, and it was recorded in the only domain that
     /// resolves it. Telling a caller "unknown node" would send them looking
-    /// for a typo.
-    DigitalOnlyNode {
+    /// for a typo. The kind travels with the name because the refusal names
+    /// the carrier, and the two event domains publish under different
+    /// spellings.
+    EventOnlyNode {
         name: String,
+        kind: rspice_core::analysis::transient::EventOnlyNetKind,
     },
 }
 
@@ -79,8 +82,8 @@ impl From<ResultAccessError> for PyErr {
             ResultAccessError::UnknownBranchName { name } => {
                 crate::errors::key_error(format!("unknown branch '{name}'"))
             }
-            ResultAccessError::DigitalOnlyNode { name } => crate::errors::key_error(
-                rspice_core::analysis::transient::digital_only_voltage_refusal(&name),
+            ResultAccessError::EventOnlyNode { name, kind } => crate::errors::key_error(
+                rspice_core::analysis::transient::event_only_voltage_refusal(&name, kind),
             ),
         }
     }
@@ -128,9 +131,13 @@ pub(super) fn unknown_node_name_error(name: &str) -> ResultAccessError {
     }
 }
 
-pub(super) fn digital_only_node_error(name: &str) -> ResultAccessError {
-    ResultAccessError::DigitalOnlyNode {
+pub(super) fn event_only_node_error(
+    name: &str,
+    kind: rspice_core::analysis::transient::EventOnlyNetKind,
+) -> ResultAccessError {
+    ResultAccessError::EventOnlyNode {
         name: name.to_string(),
+        kind,
     }
 }
 
