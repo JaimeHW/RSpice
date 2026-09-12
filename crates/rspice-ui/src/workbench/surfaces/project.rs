@@ -37,8 +37,21 @@ use technology::{poll_browser_recovery_completions, poll_browser_technology_chec
 
 const PROJECT_TAB_HEIGHT: f32 = 24.0;
 const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
-const WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT: f32 = 27.0;
-const WORKSPACE_TABLE_ROW_HEIGHT: f32 = 36.0;
+
+/// Height of one ledger row.
+///
+/// The density token is the same one the navigator and inspector lists read,
+/// so a ledger row, a tree row and a property row line up at every density
+/// instead of the ledger holding a desktop-only 36 px that reads loose beside
+/// them and still misses a touch target.
+fn workspace_table_row_height(ui: &Ui) -> f32 {
+    Tokens::get(ui.ctx()).metrics.row_h
+}
+
+/// Height of a ledger's column header, drawn tighter than its rows.
+fn workspace_table_column_header_height(ui: &Ui) -> f32 {
+    (workspace_table_row_height(ui) - 4.0).max(22.0)
+}
 
 /// Width that is both allocated to this UI and actually visible through the
 /// current clip. Split-pane children can otherwise inherit the unconstrained
@@ -49,6 +62,19 @@ fn visible_workspace_width(ui: &Ui) -> f32 {
         .width()
         .max(1.0)
 }
+/// Height that is both allocated to this UI and actually visible through the
+/// current clip.
+///
+/// A page rendered inside the surface's vertical `ScrollArea` is offered an
+/// unbounded `available_height`, so a panel that wants to reach the bottom of
+/// the workspace has to ask the clip how far that is.
+fn visible_workspace_height(ui: &Ui) -> f32 {
+    ui.available_rect_before_wrap()
+        .intersect(ui.clip_rect())
+        .height()
+        .max(1.0)
+}
+
 #[cfg(test)]
 const TECHNOLOGY_SURFACE_TITLE: &str = "Model-library technology contract";
 const TECHNOLOGY_SURFACE_ACTION: &str = "Attach model technology\u{2026}";
@@ -630,20 +656,43 @@ fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, meta_color
     );
 }
 
+/// How one ledger row is painted.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkspaceRowKind {
+    /// The column header: tighter, filled, and unclickable.
+    Header,
+    /// An ordinary body row.
+    Body,
+    /// The body row the page's selection points at.
+    Selected,
+}
+
+impl WorkspaceRowKind {
+    const fn is_header(self) -> bool {
+        matches!(self, Self::Header)
+    }
+
+    /// The selected row for a boolean the caller already holds.
+    const fn body(selected: bool) -> Self {
+        if selected { Self::Selected } else { Self::Body }
+    }
+}
+
 fn workspace_table_row<const N: usize>(
     ui: &mut Ui,
     width: f32,
     cells: [&str; N],
     fractions: [f32; N],
-    header: bool,
+    kind: WorkspaceRowKind,
     mono_columns: &[usize],
     colored_cells: &[(usize, Color32)],
 ) -> (egui::Response, Vec<Rect>) {
     let tokens = Tokens::get(ui.ctx());
+    let header = kind.is_header();
     let height = if header {
-        WORKSPACE_TABLE_COLUMN_HEADER_HEIGHT
+        workspace_table_column_header_height(ui)
     } else {
-        WORKSPACE_TABLE_ROW_HEIGHT
+        workspace_table_row_height(ui)
     };
     let (rect, response) = ui.allocate_exact_size(
         vec2(width, height),
@@ -654,14 +703,27 @@ fn workspace_table_row<const N: usize>(
         },
     );
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    // A row the reader can select has to answer the pointer. Marking the
+    // selection with a two-pixel rule alone left the table looking painted on.
     if header {
         painter.rect_filled(rect, 0.0, tokens.color.bg_panel_2);
+    } else if kind == WorkspaceRowKind::Selected {
+        painter.rect_filled(rect, 0.0, tokens.color.bg_active);
+    } else if response.hovered() {
+        painter.rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
     painter.hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, tokens.color.border),
     );
+    if kind == WorkspaceRowKind::Selected {
+        painter.rect_filled(
+            Rect::from_min_size(rect.left_top(), vec2(2.0, rect.height())),
+            0.0,
+            tokens.color.accent,
+        );
+    }
     let mut left = rect.left();
     let mut cell_rects = Vec::with_capacity(N);
     for (index, (text, fraction)) in cells.iter().zip(fractions.iter()).enumerate() {
@@ -702,7 +764,16 @@ fn workspace_table_row<const N: usize>(
         left = right;
     }
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), cells.join(", "))
+        if header {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), cells.join(", "))
+        } else {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                kind == WorkspaceRowKind::Selected,
+                cells.join(", "),
+            )
+        }
     });
     // No-ops for a header, which senses hover only and can never hold focus.
     theme::paint_focus_ring(ui, &response, rect);
@@ -712,7 +783,7 @@ fn workspace_table_row<const N: usize>(
 fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
     let tokens = Tokens::get(ui.ctx());
     let (rect, response) =
-        ui.allocate_exact_size(vec2(width, WORKSPACE_TABLE_ROW_HEIGHT), Sense::hover());
+        ui.allocate_exact_size(vec2(width, workspace_table_row_height(ui)), Sense::hover());
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -1115,17 +1186,24 @@ mod tests {
             std::fs::write(&path, canvas.png(height)).expect("write the render");
             writeln!(report_output, "{}", path.display()).ok();
         }
-        for size in [egui::vec2(820.0, 1180.0), egui::vec2(390.0, 844.0)] {
-            let mut app = populated_project_app();
-            app.state.workbench.project_page = ProjectPage::Overview;
-            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
-            let height = canvas.content_height().max(1).max(size.y as usize);
-            let path = directory.join(format!(
-                "project-overview-{}x{}.png",
-                size.x as usize, size.y as usize
-            ));
-            std::fs::write(&path, canvas.png(height)).expect("write the render");
-            writeln!(report_output, "{}", path.display()).ok();
+        // Overview and Dependencies are the two pages whose composition
+        // changes with width — one drops to a single column, the other drops
+        // its split and its digest column — so both are reviewed narrow.
+        for page in [ProjectPage::Overview, ProjectPage::Dependencies] {
+            for size in [egui::vec2(820.0, 1180.0), egui::vec2(390.0, 844.0)] {
+                let mut app = populated_project_app();
+                app.state.workbench.project_page = page;
+                let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+                let height = canvas.content_height().max(1).max(size.y as usize);
+                let path = directory.join(format!(
+                    "project-{}-{}x{}.png",
+                    page.label().to_lowercase().replace(' ', "-"),
+                    size.x as usize,
+                    size.y as usize
+                ));
+                std::fs::write(&path, canvas.png(height)).expect("write the render");
+                writeln!(report_output, "{}", path.display()).ok();
+            }
         }
         let mut app = netlist_first_project_app();
         let size = egui::vec2(1440.0, 900.0);
