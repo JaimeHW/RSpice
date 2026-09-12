@@ -4410,7 +4410,7 @@ impl VerilogADevice {
         use crate::canonical_ir::state::CanonicalStateOperator;
 
         let mut slots = Vec::new();
-        let mut scan_program = |program: &BytecodeProgram| {
+        let mut scan_program = |program: &crate::codegen::BytecodeProgram| {
             for instruction in &program.instructions {
                 // `DdtDerivativeState` addresses the same record as its
                 // primal site, so the dedup below keeps one entry for both.
@@ -4420,7 +4420,10 @@ impl VerilogADevice {
             }
         };
 
-        fn scan_steps(steps: &[AssignmentStep], scan_program: &mut impl FnMut(&BytecodeProgram)) {
+        fn scan_steps(
+            steps: &[AssignmentStep],
+            scan_program: &mut impl FnMut(&crate::codegen::BytecodeProgram),
+        ) {
             for step in steps {
                 match step {
                     AssignmentStep::Initialization { body, .. } => scan_steps(body, scan_program),
