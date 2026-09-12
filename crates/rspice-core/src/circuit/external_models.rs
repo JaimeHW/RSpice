@@ -56,6 +56,23 @@ impl XspiceActiveWave {
     pub(crate) fn skip_opening_dispatch(&mut self) {
         self.pass = self.pass.max(1);
     }
+
+    /// Keep the transitions a wave published when a re-settling candidate
+    /// reopens it at another physical time.
+    ///
+    /// A wave that opens past its opening dispatch runs only the instances an
+    /// event or the projection marked. Everything else keeps the answer it
+    /// gave in the wave being replaced -- including the analog transitions its
+    /// readers take out of this map -- so dropping them would leave an
+    /// unmarked instance's transition invisible to a marked reader that had
+    /// seen it a moment earlier. An entry the new wave publishes describes
+    /// this physical time and wins.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn inherit_analog_transitions(&mut self, previous: &Self) {
+        for (key, transition) in &previous.analog_transitions {
+            self.analog_transitions.entry(*key).or_insert(*transition);
+        }
+    }
 }
 
 /// Copy-on-write event/model state staged by circuit probe/acceptance transactions.

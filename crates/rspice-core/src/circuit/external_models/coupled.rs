@@ -278,6 +278,12 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                 wave.skip_opening_dispatch();
                 let projected = self.projected;
                 self.circuit.record_xspice_analog_input_dispatch(projected);
+                // Only the marked instances run in the new wave, so what the
+                // unmarked ones published has to come with it or a marked
+                // reader loses a transition it could see before the reopen.
+                if let Some(previous) = self.wave.as_ref() {
+                    wave.inherit_analog_transitions(previous);
+                }
             }
             self.wave = Some(wave);
         }
