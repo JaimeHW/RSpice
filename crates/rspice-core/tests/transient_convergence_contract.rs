@@ -330,16 +330,35 @@ fn successful_gmin_rescue_is_not_counted_as_a_rejected_timestep() {
 /// out of LTE exhaustion in a run that never failed Newton again held the
 /// accepted-step growth limit at 1.5x all the way to `tstop`.
 ///
-/// The deck reaches that path without a single Newton failure: the coupled
-/// inductor pair keeps it off ngspice device-local truncation, so the generic
-/// voltage LTE is the acceptance authority, and the 1 ps edge at t = 0.5 s is a
-/// step the predictor cannot follow at any width above the integration floor.
+/// The deck reaches that path without a single Newton failure, and three things
+/// put it there:
+///
+/// * the coupled inductor pair keeps the stressed node off ngspice device-local
+///   truncation, so the generic voltage LTE is the acceptance authority there.
+///   On any node a device limit covers, that limit rejects the candidate before
+///   the voltage LTE is even formed, so this branch is unreachable;
+/// * the 1 ps edge at t = 0.5 s leaves curvature on that node four decades
+///   sharper than anything else in the run; and
+/// * `reltol` 1e-9 with `abstol` 1e-12 puts the width that curvature demands
+///   below this deck's integration floor of 1.0e-11 s. The tolerances are
+///   load-bearing, not decoration: a predictor with an order is entitled to an
+///   estimate that falls with a power of the width, so it always satisfies a
+///   default `reltol` somewhere above the floor — at the defaults this same
+///   deck refines to 4.4e-7 s and accepts.
+///
+/// The deck used to reach the floor at the default tolerances for a reason that
+/// is no longer a rejection at all: after the edge's breakpoint the predictor
+/// was restarted to a single point, and a constant cannot follow a ramp at any
+/// width, so the demand was `abstol/slope`. R2.24 stopped forming a verdict
+/// where the predictor is a constant, which is why the provocation here has to
+/// be a curvature demand the tolerances cannot meet.
+///
 /// The diode keeps the deck nonlinear, which is what puts the growth limit on
 /// the cooldown instead of on the strictly linear fast-recovery path.
 #[test]
 fn a_force_accepted_edge_does_not_cap_step_growth_for_the_rest_of_the_run() {
     let netlist = Netlist::parse(
-        "force accepted edge\nV1 in 0 PULSE(0 1 0.5 1p 1p 10 20)\nR1 in out 1k\nC1 out 0 1n\nD1 0 out dm\n.model dm D(IS=1e-14)\nR3 in p 1k\nL1 p 0 1\nL2 s 0 1\nK1 L1 L2 0.5\nR4 s 0 1k\n.end\n",
+        "force accepted edge\n.options reltol=1e-9 abstol=1e-12\nV1 in 0 PULSE(0 1 0.5 1p 1p 10 20)\nR1 in out 1k\nC1 out 0 1n\nD1 0 out dm\n.model dm D(IS=1e-14)\nR3 in p 1k\nL1 p 0 1\nL2 s 0 1\nK1 L1 L2 0.5\nR4 s 0 1k\n.end\n",
     )
     .unwrap();
     let engine = Engine::new(SimulationConfig::default());
@@ -351,6 +370,20 @@ fn a_force_accepted_edge_does_not_cap_step_growth_for_the_rest_of_the_run() {
         .copied()
         .max()
         .expect("the 1 ps edge exhausts LTE recovery at the integration floor");
+    // The provocation has to be the edge rather than anything else in a one
+    // second run, and it has to be LTE exhaustion rather than a rescued Newton
+    // failure - the arm this pins is the one the old cooldown never reached.
+    let force_accepted_time = result.time[last_force_accept];
+    assert!(
+        (force_accepted_time - 0.5).abs() < 1.0e-6,
+        "the force-accepted point is at {force_accepted_time} rather than on the 1 ps edge at 0.5 s"
+    );
+    assert_eq!(
+        (quality.gmin_stepping_count, quality.source_stepping_count),
+        (0, 0),
+        "no convergence aid may run: a Newton failure would decay the cooldown \
+         under the old rule too, and the case would stop discriminating"
+    );
     let widths: Vec<f64> = result.time.windows(2).map(|w| w[1] - w[0]).collect();
     // Two accepted points after the last force-accept the budget is spent, so
     // the widest growth in the remaining tail is the ordinary 2x limit. While
