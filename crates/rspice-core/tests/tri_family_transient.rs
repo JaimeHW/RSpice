@@ -456,45 +456,37 @@ fn deck_a_tri_family_transient_sequence_golden() {
 /// A digital edge must not restart the analog stepper anywhere near its floor.
 ///
 /// The bound is ten femtoseconds rather than the picosecond this case was
-/// first written with, and the difference is the deck rather than the defect.
-/// Two mechanisms put small steps after an edge here, and only one of them is
-/// a defect:
+/// first written with, and the difference is the deck rather than the defect:
+/// ngspice's own restart policy is a tenth of the approach step capped by the
+/// gap to the next breakpoint, and `a_adc` publishes `in_low` at 1.6 V and
+/// `in_high` at 1.7 V, which on a 0.1 ns 3.3 V ramp are 2.5 ps apart, so the
+/// restart between that pair is 0.25 ps by the rule every native deck uses.
+/// Demanding a picosecond here would be demanding a different breakpoint policy
+/// for every deck in the engine. Ten femtoseconds is six doublings above this
+/// deck's hard floor and twenty-five times below the smallest legitimate
+/// restart it takes, so it separates a ladder from a policy cleanly.
 ///
-/// * the one this lane owns — an A/D crossing interpolated inside a step a
-///   D/A bridge had already jumped, chased to the solver's hard minimum, whose
-///   last width then became the post-breakpoint restart. Measured on the lane
-///   base it restarted deck A at 6.1e-17 s and doubled fifteen times; the
-///   smallest restart this deck now takes is 1.1e-13 s.
-/// * ngspice's own restart policy, which is a tenth of the approach step
-///   capped by the gap to the next breakpoint. `a_adc` publishes `in_low` at
-///   1.6 V and `in_high` at 1.7 V, which on a 0.1 ns 3.3 V ramp are 2.5 ps
-///   apart, so the restart between that pair is 0.25 ps by the rule every
-///   native deck uses. Demanding a picosecond here would be demanding a
-///   different breakpoint policy for every deck in the engine, which is not
-///   this lane's to change.
+/// # What is still open, measured on this deck
 ///
-/// Ten femtoseconds is six doublings above the solver's hard floor for this
-/// deck and twenty-five times below the smallest legitimate restart it takes,
-/// so it separates the two cleanly.
+/// Three mechanisms have put sub-femtosecond steps here, and two are closed;
+/// `deck_a_takes_a_controller_sized_step_after_every_digital_edge` pins both
+/// live. The third owns every one of the 78 accepted steps that remain, and
+/// all of them are at a `y` ramp *leaving* zero volts — 6.55, 16.55 … 56.55 ns,
+/// thirteen each:
 ///
-/// # Why this is still ignored after the refinement fix
-///
-/// The restart mechanism is fixed and measured: no breakpoint restart in this
-/// deck is now finer than 1.1e-13 s, against 6.1e-17 s on the lane base. What
-/// remains is a *third* mechanism, on the approach rather than the restart.
-/// Instrumenting the step controller at every proposal below ten femtoseconds
-/// shows the collapse at the 10.05 ns edge reaching `dt` = 1.105e-18 s with
-/// `at_breakpoint` false, no landed event, no pending event, the next
-/// breakpoint 50 ps away, the hard minimum four orders lower at 1e-20, and the
-/// controller's own proposal equal to that `dt` — so it is neither clamped at
-/// the floor nor cut by a breakpoint. It is the retry path halving the step
-/// about twenty-three times over successive rejections of one timepoint at a
-/// D/A edge, which is a truncation/convergence defect at an ideal bridge step
-/// and not the refinement storm this lane owns. Reassigning rather than
-/// widening the bound: a picosecond or a femtosecond, the deck still walks up
-/// from 1e-18.
+/// there the predictor holds `p` at 0 V and the candidate has `p` = 1.65e10·dt,
+/// so `|curr − pred|` and the reference are the same number and the reference
+/// floors at `abstol/reltol` = 1e-3 V. The estimate is `x/(1 + x)` with
+/// `x` = 1.65e10·dt/1e-3, which reaches `reltol` at dt = 6.07e-17 s — thirteen
+/// doublings below this bound, and the estimator's own arithmetic rather than a
+/// stale-history artefact: at a corner out of zero volts the relative measure
+/// has nothing to be relative to, and the demand becomes `abstol/slope`. Any
+/// native `PULSE` into a divider crosses the same regime, so the answer is the
+/// controller's rather than this deck's. R2.24 owns it; it was 54 steps before
+/// R2.14 and is 78 after, the 24 being the breakpoint 2.4 ps into each ramp,
+/// where the predictor restart hands the same demand a node 40 mV from ground.
 #[test]
-#[ignore = "R2.x: step-controller retry collapses to 1.1e-18 at a D/A edge, a separate mechanism from the refinement restart"]
+#[ignore = "R2.24: a ramp leaving zero volts demands abstol/slope = 6.1e-17 s, which is 78 accepted steps below this bound"]
 fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
     const FLOOR_LADDER_BOUND: f64 = 1e-14;
     let result = run_deck_a();
@@ -521,6 +513,86 @@ fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
         tiny.len(),
         tiny.iter().take(6).collect::<Vec<_>>()
     );
+}
+
+/// The two retry ladders R2.14 closed, pinned where each of them happened.
+///
+/// Deck A's mixed module drives `q` from its discrete half, and every flip used
+/// to cost seventy-odd rejections of one timepoint: the D/A output was inside
+/// the generic voltage-LTE norm, so the predictor carried the pre-edge slope
+/// across the edge and reported the jump as truncation error at every candidate
+/// width, down to 1.1e-18 s. The same stale history at the far end of each `y`
+/// ramp cost sixty-odd more. Both are node- and breakpoint-scoped facts about
+/// the accepted grid, and this case states them as such.
+///
+/// A picosecond is the separator. The controller's own first proposal after an
+/// edge here is 2.4 ps; the width-gated acceptance floor R2.14 first proposed
+/// would have accepted 0.125 ps at the same instant and called the ladder gone,
+/// so a bound between the two is what tells "ended" from "masked". The second
+/// assertion is what a masked ladder cannot satisfy at all: the edge is taken
+/// whole, in the one accepted point that lands on it, at the level `q` still
+/// holds 2.5 ns later.
+#[test]
+fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
+    const CONTROLLER_STEP_BOUND: f64 = 1e-12;
+    const FLOOR_LADDER_BOUND: f64 = 1e-14;
+    let result = run_deck_a();
+    let waveforms = waveforms_by_name(&result);
+    let q = &waveforms["Q"];
+    let y = &waveforms["Y"];
+
+    let edges: Vec<usize> = (1..result.time.len())
+        .filter(|index| (q[*index] - q[index - 1]).abs() > 1.0)
+        .collect();
+    assert_eq!(
+        edges.len(),
+        6,
+        "the mixed module halves a 10 ns clock over 60 ns, so `q` flips six \
+         times; got {:?}",
+        edges
+            .iter()
+            .map(|index| result.time[*index])
+            .collect::<Vec<_>>()
+    );
+
+    for index in edges {
+        let edge = result.time[index];
+        let step = result.time[index + 1] - edge;
+        assert!(
+            step >= CONTROLLER_STEP_BOUND,
+            "the step after the D/A edge at {edge:e} is {step:e}, below \
+             {CONTROLLER_STEP_BOUND:e}: the retry ladder at the edge is back, \
+             or something is accepting a width the controller did not propose"
+        );
+        let settled = sample_at(&result, "Q", edge + DECK_A_INSTANT_OFFSET);
+        assert!(
+            (q[index] - settled).abs() < 1e-6,
+            "V(q) at the edge instant {edge:e} is {}, and the level it settles \
+             at is {settled}: the edge was not taken in the point that landed \
+             on it",
+            q[index]
+        );
+    }
+
+    // Every step still below the floor bound belongs to the one class that is
+    // open (R2.24): a `y` ramp leaving zero volts. A returning edge on `q`, or
+    // the far end of a `y` ramp, would land here and fail — both are flat 50 ps
+    // later, and the rising ramp is at 1.65 V by then.
+    for (index, times) in result.time.windows(2).enumerate() {
+        if times[1] - times[0] >= FLOOR_LADDER_BOUND {
+            continue;
+        }
+        let soon = sample_at(&result, "Y", times[0] + 5e-11);
+        assert!(
+            y[index] < 0.5 && soon > 1.0,
+            "the accepted step {:e} at {:e} is below {FLOOR_LADDER_BOUND:e} \
+             somewhere other than a `y` ramp leaving zero volts: V(y) is {} \
+             there and {soon} fifty picoseconds later",
+            times[1] - times[0],
+            times[0],
+            y[index]
+        );
+    }
 }
 
 /// The accepted grid is allowed to move; the waveform is not.
