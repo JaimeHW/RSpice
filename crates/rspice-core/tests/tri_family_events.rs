@@ -24,6 +24,9 @@
 //! in one pass without asserting any of them.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/digital_trace_invariants.rs"]
+mod digital_trace_invariants;
+
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
@@ -169,9 +172,11 @@ fn digital_pair() -> (ModelFile, ModelFile) {
 
 fn run(deck: &str, tstop: f64, step: f64) -> TransientResult {
     let netlist = Netlist::parse(deck).expect("deck parses");
-    Engine::default()
+    let result = Engine::default()
         .run_tran(&netlist, tstop, step)
-        .unwrap_or_else(|error| panic!("{error}\n--- deck ---\n{deck}"))
+        .unwrap_or_else(|error| panic!("{error}\n--- deck ---\n{deck}"));
+    digital_trace_invariants::assert_one_digital_value_per_instant(&result, deck);
+    result
 }
 
 //=============================================================================

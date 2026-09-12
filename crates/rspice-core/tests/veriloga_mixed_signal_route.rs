@@ -44,6 +44,9 @@
 //!   left declared bound calls out.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/digital_trace_invariants.rs"]
+mod digital_trace_invariants;
+
 use rspice_core::abort_signal::{AbortSignal, DigitalEventCode, TransientSample};
 use rspice_core::engine::{DigitalBusSource, TransientResult};
 use rspice_core::{Engine, Netlist, SimulationConfig};
@@ -276,9 +279,11 @@ fn unsupported_analog_control_reaches_the_engine_as_a_refusal() {
 
 fn run(deck: &str, tstop: f64, max_step: f64) -> TransientResult {
     let netlist = Netlist::parse(deck).expect("the deck parses");
-    Engine::new(SimulationConfig::default())
+    let result = Engine::new(SimulationConfig::default())
         .run_tran(&netlist, tstop, max_step)
-        .expect("the deck runs")
+        .expect("the deck runs");
+    digital_trace_invariants::assert_one_digital_value_per_instant(&result, deck);
+    result
 }
 
 fn error_for(deck: &str, tstop: f64, max_step: f64) -> String {

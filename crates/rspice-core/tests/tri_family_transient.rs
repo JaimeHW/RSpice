@@ -33,6 +33,9 @@
 //! different grids — and re-run without the variable.
 #![cfg(feature = "veriloga")]
 
+#[path = "common/digital_trace_invariants.rs"]
+mod digital_trace_invariants;
+
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
@@ -362,9 +365,11 @@ fn deck_a() -> (Vec<ModelFile>, Netlist) {
 
 fn run_deck_a() -> TransientResult {
     let (_models, netlist) = deck_a();
-    Engine::default()
+    let result = Engine::default()
         .run_tran(&netlist, DECK_A_TSTOP, DECK_A_STEP)
-        .expect("deck A transient")
+        .expect("deck A transient");
+    digital_trace_invariants::assert_one_digital_value_per_instant(&result, "deck A");
+    result
 }
 
 /// Point count and both sequence hashes, in the order the goldens list them.
@@ -592,9 +597,17 @@ endmodule
 /// Deck C carries a 10k load on the shared digital net `dq`; deck C2 is the
 /// same deck with that load removed.
 fn deck_c(load_dq: bool) -> (Vec<ModelFile>, Netlist) {
+    deck_c_with_load(if load_dq { "rdq dq 0 10k\n" } else { "" })
+}
+
+/// Deck C's circuit with an arbitrary load on the shared digital net.
+///
+/// The load is the whole variable: it decides whether `dq` is an event net at
+/// all, and — once it is analog — how far behind the driver's D/A flip the
+/// receiver's A/D crossing falls.
+fn deck_c_with_load(load: &str) -> (Vec<ModelFile>, Netlist) {
     let driver = ModelFile::new(DRIVER_MODULE);
     let receiver = ModelFile::new(RECEIVER_MODULE);
-    let load = if load_dq { "rdq dq 0 10k\n" } else { "" };
     let deck = format!(
         "* mixed module to mixed module over one deck node\n\
          .param vcc=3.3\n\
@@ -622,6 +635,10 @@ fn run_deck_c_with_rejections(load_dq: bool) -> (TransientResult, usize) {
         .run_tran(&netlist, 100e-9, 0.5e-9)
         .expect("deck C transient");
     let rejections = engine.convergence_quality().timestep_reductions;
+    digital_trace_invariants::assert_one_digital_value_per_instant(
+        &result,
+        if load_dq { "deck C" } else { "deck C2" },
+    );
     (result, rejections)
 }
 
@@ -700,8 +717,56 @@ fn deck_c_load_does_not_multiply_the_accepted_grid() {
     );
 }
 
+/// Deck C3: deck C with the shared digital net slowed down by a capacitor.
+///
+/// Deck C's own load is resistive, so the receiver's A/D crossing falls inside
+/// the very trial the driver's D/A bridge flipped in and both halves of `dq`
+/// move at one accepted timepoint. That agreement is a property of the deck,
+/// not of the trace channel. Add 100 pF to the same net and the crossing lands
+/// a nanosecond and a half later — several accepted points after the flip —
+/// so through that window the driver says one thing about `dq` and the reader
+/// says the other. The net still holds exactly one value at each of those
+/// instants: the one its driver put there.
+const DECK_C3_LOAD: &str = "rdq dq 0 10k\ncdq dq 0 100p\n";
+
 #[test]
-#[ignore = "R2.3: loaded digital-to-digital net records zero-width glitches"]
+fn deck_c3_a_lagging_reader_does_not_glitch_the_net_its_driver_drives() {
+    let (_models, netlist) = deck_c_with_load(DECK_C3_LOAD);
+    let result = Engine::default()
+        .run_tran(&netlist, 100e-9, 0.5e-9)
+        .expect("deck C3 transient");
+    digital_trace_invariants::assert_one_digital_value_per_instant(&result, "deck C3");
+
+    let points = trace_points(&result, "dq");
+    let glitches: Vec<_> = points
+        .windows(2)
+        .filter(|pair| pair[0].0 == pair[1].0 && pair[0].1 != pair[1].1)
+        .map(|pair| (pair[0].0, pair[0].1, pair[1].1))
+        .collect();
+    println!(
+        "TRIFAMILY deck_c3_points={} deck_c3_dq_points={} deck_c3_glitches={}",
+        result.time.len(),
+        points.len(),
+        glitches.len()
+    );
+    assert!(
+        glitches.is_empty(),
+        "a reader lagging its driver must not publish a second value for dq at one \
+         instant; got {glitches:?}"
+    );
+
+    // And the value the net carries is the driver's schedule, not the sampled
+    // crossing: the driver toggles on its own 5 ns timer.
+    for (time, _) in &points {
+        let ticks = time / 5e-9;
+        assert!(
+            (ticks - ticks.round()).abs() < 1e-9,
+            "dq must carry the driver's 5 ns schedule, got an event at {time:e}; {points:?}"
+        );
+    }
+}
+
+#[test]
 fn deck_c_and_c2_agree_on_the_shared_digital_net() {
     let loaded = run_deck_c(true);
     let unloaded = run_deck_c(false);
@@ -758,9 +823,11 @@ fn deck_d(x_card_first: bool) -> (Vec<ModelFile>, Netlist) {
 
 fn run_deck_d(x_card_first: bool) -> TransientResult {
     let (_models, netlist) = deck_d(x_card_first);
-    Engine::default()
+    let result = Engine::default()
         .run_tran(&netlist, 30e-9, 0.5e-9)
-        .expect("deck D transient")
+        .expect("deck D transient");
+    digital_trace_invariants::assert_one_digital_value_per_instant(&result, "deck D");
+    result
 }
 
 #[test]
