@@ -4835,6 +4835,31 @@ impl ComplexMatrix {
         }
     }
 
+    /// Rows whose entries are all exactly zero (or absent), the complex twin
+    /// of [`StaticMatrix::deficient_rows`]: the immediate structural suspects
+    /// when a small-signal factorization reports a singular system. A row
+    /// counts as constrained as soon as either component of any stored entry
+    /// is nonzero, so a purely reactive row is never reported.
+    pub fn deficient_rows(&self) -> Vec<usize> {
+        let mut constrained = vec![false; self.nrows];
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..self.ncols {
+            let span = col_ptr[col]..col_ptr[col + 1];
+            for (&row, value) in row_idx[span.clone()].iter().zip(&self.values[span]) {
+                if value.re != 0.0 || value.im != 0.0 {
+                    constrained[row] = true;
+                }
+            }
+        }
+        constrained
+            .iter()
+            .enumerate()
+            .filter(|entry| !*entry.1)
+            .map(|(row, _)| row)
+            .collect()
+    }
+
     /// Multiply the current sparse matrix by a complex vector without
     /// factorizing it.
     ///
