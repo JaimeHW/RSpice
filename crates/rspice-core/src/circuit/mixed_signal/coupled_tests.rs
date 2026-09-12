@@ -1,5 +1,6 @@
 use super::*;
 use crate::xspice::event_scheduler::SchedulerLimits;
+use crate::xspice::verilog::MixedSignalError;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortConnection, PortSpec, PortType,
     TransactionalContextResource, XspiceInstance,
@@ -1142,6 +1143,314 @@ fn the_analog_step_floor_is_one_stored_value_every_lane_reads() {
                 host.analog_step_floor(),
                 stored,
                 "every module measures against the circuit's one floor"
+            );
+        }
+    }
+}
+
+/// One mixed instance with a plain electrical A/D bridge and nothing the
+/// discrete half feeds back into.
+///
+/// Deliberately *not* the coupled fixture above: every bridge there sits on an
+/// event net, so the electrical bridge tables are empty after enrollment and
+/// there is no threshold crossing for a settle to date. This one has exactly
+/// one crossing to date, no D/A output and no discrete read, so the causal
+/// latch never arms and two settles of the same candidate are comparable.
+fn sampler_fixture() -> (crate::CircuitData, Vec<f64>) {
+    let engine = crate::Engine::new(crate::SimulationConfig::default());
+    let deck = crate::Netlist::parse("one sampler\nRa a 0 1k\n.end\n").unwrap();
+    let mut circuit = engine.build_circuit(&deck).unwrap();
+    let a = circuit.get_node_by_name("a").unwrap();
+    let mut host = compile_unstarted(
+        r#"
+module sampler(a,sense);
+ inout a; electrical a;
+ input sense; wire sense;
+ reg seen; initial seen=0;
+ always @(sense) seen=sense;
+ analog I(a) <+ V(a)*1e-6;
+endmodule
+"#,
+        None,
+        "xsample",
+        &[a],
+        SchedulerLimits::default(),
+    )
+    .unwrap();
+    host.add_adc_bridge("sense", 0, (a, 0), 0.4, 0.6).unwrap();
+    circuit.add_mixed_signal_host(host).unwrap();
+    circuit
+        .finalize_mixed_digital(
+            &std::collections::BTreeSet::new(),
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    circuit.begin_veriloga_analysis(2).unwrap();
+    circuit.start_mixed_digital_execution().unwrap();
+    let size = circuit.matrix_size();
+    let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+    let matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries).unwrap();
+    circuit.link_indices(&matrix);
+    let solution = vec![0.0; size];
+    (circuit, solution)
+}
+
+fn backward_euler() -> crate::numerics::integration::CompanionCoefficients {
+    crate::numerics::integration::CompanionCoefficients::backward_euler()
+}
+
+/// A probe, an inspection and an acceptance of the same candidate settle the
+/// same way.
+///
+/// The four trial kinds are four callers of one settle body, and the only
+/// things that separate them are whether the trial may ever commit, whether it
+/// owns the code-model rollback image, and which evaluation phase the code
+/// models see. None of those is allowed to reach the boundary: a crossing the
+/// Newton probe interpolated at one instant, published into one tick, must be
+/// the same crossing at the same instant in the same tick when the converged
+/// candidate is inspected and again when the timepoint is accepted — otherwise
+/// the engine chases a root the acceptance then dates somewhere else.
+///
+/// Asserted on a candidate nothing feeds back into, so the causal latch stays
+/// disarmed and the three settles really are asking the same question. R2.22's
+/// carried case is the deliberate exception to this equality and has its own
+/// pins.
+#[test]
+fn a_probe_an_inspection_and_an_acceptance_publish_one_settle() {
+    let (mut circuit, mut solution) = sampler_fixture();
+    let node = circuit.get_node_by_name("a").unwrap() - 1;
+
+    // Accept t = 0 at 0 V so the bridge has a far end to interpolate from.
+    let mut projected = Vec::new();
+    circuit
+        .accept_mixed_transient_with(
+            0.0,
+            0.0,
+            &mut solution,
+            XspiceCompanionPolicy {
+                coefficients: &backward_euler(),
+                xyce_one_step_order2: false,
+            },
+            true,
+            false,
+            None,
+            false,
+            &mut projected,
+            |_, _, _, _| Ok::<(), SimulationError>(()),
+        )
+        .expect("the origin is accepted");
+
+    solution[node] = 1.0;
+    let settle = |circuit: &mut crate::CircuitData, kind| {
+        let mut trial = circuit
+            .open_trial(
+                Candidate {
+                    time: 1.0e-9,
+                    dt: 1.0e-9,
+                    analysis_step: Some((false, false)),
+                },
+                kind,
+                XspiceCompanionPolicy {
+                    coefficients: &backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+                None,
+            )
+            .expect("the candidate opens on every kind");
+        trial.settle(&solution).expect("the boundary settles");
+        let record = trial.settle_record();
+        // Dropped rather than committed, on every kind including the
+        // acceptance: what is compared is the settle, not the promotion.
+        drop(trial);
+        record
+    };
+
+    let probe = settle(&mut circuit, TrialKind::Probe);
+    let [(moved, crossing)] = probe.1[0][..] else {
+        panic!("the instance has exactly one A/D bridge: {:?}", probe.1)
+    };
+    let crossing = crossing.expect("the bridge crossed inside this step");
+    assert!(
+        moved && crossing > 0.0 && crossing < 1.0e-9,
+        "the rise crosses the 0.6 V threshold strictly inside the step: {crossing:e}"
+    );
+    assert_eq!(
+        settle(&mut circuit, TrialKind::Inspection),
+        probe,
+        "the inspection of the converged candidate publishes the probe's crossings"
+    );
+    assert_eq!(
+        settle(&mut circuit, TrialKind::Acceptance),
+        probe,
+        "the accepted timepoint publishes the probe's crossings"
+    );
+}
+
+/// A trial that can never commit is refused a reservation, by name.
+///
+/// `prepare` is the acceptance barrier's validate-all half, and what makes it
+/// safe is that nothing before `commit` promotes anything. A probe or an
+/// inspection has no promotion to reserve — a probe exists so a residual can be
+/// assembled at a timepoint the solver is not committing, and an inspection
+/// exists so the engine can read a root it will then land on with a fresh
+/// trial — so asking for one is a protocol error and is reported as one rather
+/// than quietly promoting a speculative candidate.
+#[test]
+fn only_an_acceptance_trial_may_be_prepared_for_commit() {
+    let (mut circuit, solution) = sampler_fixture();
+    for (kind, expected) in [
+        (TrialKind::Probe, "numerical probe"),
+        (TrialKind::Inspection, "candidate inspection"),
+        (TrialKind::OperatingPoint, "operating-point"),
+    ] {
+        let mut trial = circuit
+            .open_trial(
+                Candidate {
+                    time: 0.0,
+                    dt: 0.0,
+                    analysis_step: Some((true, false)),
+                },
+                kind,
+                XspiceCompanionPolicy {
+                    coefficients: &backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+                None,
+            )
+            .expect("the candidate opens");
+        trial.settle(&solution).expect("the boundary settles");
+        let refusal = trial
+            .prepare()
+            .err()
+            .expect("a trial that cannot commit is refused a reservation")
+            .to_string();
+        assert!(
+            refusal.contains(expected) && refusal.contains("cannot be prepared for acceptance"),
+            "{kind:?} is refused by naming what it is for: {refusal}"
+        );
+    }
+}
+
+/// The candidate ledger outlives the probe that armed it, and belongs to the
+/// candidate rather than to the run.
+///
+/// The engine's re-solve is not a later pass of one trial: a write that lands
+/// in Newton probe *k* is rolled back before probe *k+1* opens, while its
+/// effect — the analog solution it moved — is precisely what probe *k+1*
+/// solves. So the fact that this candidate was fed back into has to survive the
+/// rollback, or the crossing that write caused is interpolated into the
+/// interval instead of dated at the endpoint and the controller bisects into a
+/// root it has already landed on. That is the mechanism that makes the
+/// two-instance form, `a_crossing_carried_between_two_instances_is_landed_on_once`,
+/// land once.
+///
+/// Where it survives is the scheduler: the instances are moved out of the
+/// circuit for the life of a trial and their ledgers are lent to them for
+/// exactly that long, so between trials the live copy is the parked one and a
+/// rolled-back probe cannot reach it. The keying is the candidate's own
+/// timestamp, so a candidate at another time carries nothing, and an acceptance
+/// clears it — a new accepted point is a new interval.
+#[test]
+fn the_candidate_ledger_survives_a_rolled_back_probe() {
+    let (mut circuit, mut matrix, mut solution, _resource) =
+        fixture(crate::xspice::EvaluationPhase::CircuitTrial);
+    let stimulus = circuit.get_node_by_name("stimulus").unwrap() - 1;
+
+    assert!(
+        circuit
+            .scheduler
+            .ledgers
+            .iter()
+            .all(|ledger| ledger.carried_candidate().is_none()),
+        "nothing is latched before the first trial"
+    );
+
+    // The rising trigger runs the controller's process, which writes the
+    // discrete `sampled` its own analog block reads: the candidate has been fed
+    // back into.
+    solution[stimulus] = 1.0;
+    stamp(&mut circuit, &mut matrix, &solution).unwrap();
+    assert!(
+        circuit
+            .scheduler
+            .ledgers
+            .iter()
+            .any(|ledger| ledger.carried_candidate() == Some(0.0)),
+        "the probe that was rolled back left its candidate latched on the scheduler"
+    );
+    assert!(
+        circuit.scheduler.ledgers[0].carries_at(0.0, 0),
+        "a crossing found on this candidate is carried by the write"
+    );
+    assert!(
+        !circuit.scheduler.ledgers[0].carries_at(1.0e-9, 0),
+        "a candidate at another time carries nothing"
+    );
+
+    // A second Newton probe of the same candidate still sees the latch: this
+    // is the probe whose crossing would otherwise be interpolated.
+    stamp(&mut circuit, &mut matrix, &solution).unwrap();
+    assert_eq!(
+        circuit.scheduler.ledgers[0].carried_candidate(),
+        Some(0.0),
+        "arming is once per candidate, not once per probe"
+    );
+
+    // Acceptance is the other half of the keying rule, and it needs a fixture
+    // whose code models expect the accepted phase. A refused acceptance is
+    // rolled back like a probe and leaves the latch standing; the one that
+    // commits clears it.
+    let (mut accepting, _, mut solution, _) = fixture(crate::xspice::EvaluationPhase::AcceptedStep);
+    let stimulus = accepting.get_node_by_name("stimulus").unwrap() - 1;
+    solution[stimulus] = 1.0;
+    for refuse in [true, false] {
+        let rollback = accepting.capture_xspice_acceptance();
+        let mut projected = Vec::new();
+        let result = accepting.accept_mixed_transient_with(
+            0.0,
+            0.0,
+            &mut solution,
+            XspiceCompanionPolicy {
+                coefficients: &backward_euler(),
+                xyce_one_step_order2: false,
+            },
+            true,
+            false,
+            Some(rollback.resources()),
+            false,
+            &mut projected,
+            |_, _, _, _| {
+                if refuse {
+                    Err(SimulationError::Circuit("injected refusal".into()))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        if refuse {
+            result.expect_err("the injected refusal ends this acceptance");
+            for (index, value) in projected.into_iter().rev() {
+                solution[index] = value;
+            }
+            accepting.restore_xspice_acceptance(rollback).unwrap();
+            assert!(
+                accepting
+                    .scheduler
+                    .ledgers
+                    .iter()
+                    .any(|ledger| ledger.carried_candidate() == Some(0.0)),
+                "a refused acceptance is rolled back like a probe and the latch stands"
+            );
+        } else {
+            result.expect("the retry is accepted");
+            rollback.resources().commit();
+            assert!(
+                accepting
+                    .scheduler
+                    .ledgers
+                    .iter()
+                    .all(|ledger| ledger.carried_candidate().is_none()),
+                "a new accepted point is a new interval and the latch is cleared"
             );
         }
     }
