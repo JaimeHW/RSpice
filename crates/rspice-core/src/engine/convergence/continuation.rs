@@ -464,6 +464,15 @@ impl Engine {
                     if error.nonfinite_trial_detail().is_none() {
                         return Err(error);
                     }
+                    // Nothing a reduced stage changes reaches this failure:
+                    // the pseudo conductance deforms the matrix, while the
+                    // stamp that refused to evaluate depends only on the
+                    // iterate it was handed. Re-entering at that iterate would
+                    // fail its first stamp again at every reduction, so the
+                    // stage would die without taking a single Newton step.
+                    // Restart it from the anchor, which is the last point the
+                    // devices did evaluate at.
+                    solution = anchor_solution.clone();
                     break;
                 }
                 let solve_result = if uses_vbic_correction {
