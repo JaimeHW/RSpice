@@ -179,13 +179,37 @@ impl CompiledExpr {
 /// How `ln`, `log` and `log10` treat an argument outside their domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum LogarithmDomain {
-    /// SPICE's guarded logarithm: raise the argument to
+    /// RSpice's guarded logarithm: raise the argument to
     /// [`LOGARITHM_MIN_ARGUMENT`] first, so the result is always finite.
     ///
-    /// This is what `.param`, `.measure`, output expressions and source
-    /// waveforms get, and what ngspice and Xyce do everywhere. It is the
-    /// default because an expression evaluated once, outside any Newton loop,
-    /// has nothing to reject.
+    /// What actually takes this is every user of this VM that is not a `B`
+    /// source, and they are of two kinds. Most have no Newton unknown in them
+    /// at all — the file-table lookups (`expr::file_table`), the Taylor jets
+    /// of prescribed time expressions (`expr::time_derivatives`) and their
+    /// interval enclosures (`expr::time_enclosure`), the breakpoint and
+    /// periodicity analyses of a prescribed waveform
+    /// (`device::behavioral::breakpoints`, `::periodicity`) — so they have no
+    /// iterate to reject, which is why this is the default. The exceptions are
+    /// the solution-dependent passive expressions, a behavioral capacitance
+    /// and a switch control (`device::passive::capacitor`, `device::switch`):
+    /// those do run at a point Newton offered and simply have not been moved,
+    /// which is a decision of their own. Their value and their Jacobian share
+    /// this switch either way, so neither can fabricate a tangent plane for a
+    /// value it never published.
+    ///
+    /// It is NOT what `.param` gets: a parameter binding is evaluated by
+    /// `netlist::expr::eval`'s complex evaluator, whose `LN`/`LOG`/`LOG10` are
+    /// the principal branch (`complex_ln`) with the real part taken, so
+    /// `.param k={ln(-4.9)}` is `ln(4.9)` = 1.589 and never passes through
+    /// here at all.
+    ///
+    /// Nor is the clamp what SPICE does. ngspice's B-source logarithm
+    /// (`PTlog`/`PTlog10`, ptfuncs.c) returns `HUGE_VAL` for a negative
+    /// argument — which its caller reports as an error — and `-1e99` at
+    /// exactly zero, "when starting iteration for op or dc simulation"; there
+    /// is no 1e-38 clamp anywhere in it. The clamp is RSpice's own, and the
+    /// finite stand-in at zero is the only part of it this evaluator keeps for
+    /// a circuit equation.
     #[default]
     Guarded,
     /// Guard only the removable singularity at zero; evaluate a negative
@@ -197,8 +221,22 @@ pub(crate) enum LogarithmDomain {
     /// outside the domain, and clamping it both fabricates a value and hands
     /// the solver a `1/1e-38` slope, which pins the node and makes the
     /// convergence check pass on an unchanged iterate at a point that does not
-    /// satisfy KCL. Spectre evaluates IEEE here and rejects the iterate;
-    /// R1.14's non-finite trial classification is the channel that does it.
+    /// satisfy KCL. ngspice destroys the same iterate less legibly — `PTlog`
+    /// hands `HUGE_VAL` to the matrix — so the clamp was never SPICE
+    /// behaviour; R1.14's non-finite trial classification is the channel that
+    /// turns the NaN into a rejected iterate rather than a refused run.
+    ///
+    /// Exactly zero keeps the stand-in, as a convergence convenience and not
+    /// as a claim about the equation: the zero initial guess puts an
+    /// offset-free `ln(v(a))` at argument 0 on iteration 0, and every rung of
+    /// the source-stepping ladder restarts there, so IEEE at zero would refuse
+    /// such a deck outright after the whole ladder. Measured, not assumed —
+    /// `V1 in 0 DC 5 / R1 in a 1k / B1 a 0 I={ln(v(a))} / .OP` climbs out of
+    /// the zero guess to V(a) = 1.0040039906467049 with a KCL residual of
+    /// −1.1e-15 (pinned by
+    /// `a_logarithm_at_exactly_zero_still_converges_from_the_zero_guess`).
+    /// ngspice's `-1e99` at exactly zero is the same convenience for the same
+    /// stated reason.
     Ieee,
 }
 
@@ -206,7 +244,7 @@ impl LogarithmDomain {
     /// The argument to hand the logarithm, or NaN when the point is outside
     /// its domain.
     #[inline]
-    fn argument(self, value: Value) -> Value {
+    pub(crate) fn argument(self, value: Value) -> Value {
         match self {
             Self::Guarded => value.max(LOGARITHM_MIN_ARGUMENT),
             Self::Ieee if value < 0.0 => Value::NAN,

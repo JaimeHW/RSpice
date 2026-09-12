@@ -274,3 +274,55 @@ fn pss_rejects_time_activated_nonfinite_voltage_and_current_sources() {
         }
     }
 }
+
+/// The logarithm's guard at exactly zero is a convergence convenience, and it
+/// is measured rather than assumed.
+///
+/// `ln(0)` is the boundary of the domain approached from inside it, not a
+/// point outside it, and the zero initial guess puts an offset-free
+/// `ln(v(a))` there on iteration 0 — as does every rung of the
+/// source-stepping ladder, which restarts from the same guess. IEEE at zero
+/// (−inf, hence a rejected iterate) would therefore refuse this deck outright
+/// after the whole ladder, so the clamp stays and this fixture is what says
+/// the cost is bounded: Newton climbs out of the guess to the deck's real
+/// operating point, V(a) = 1.0040039906467049, where
+/// `(V-5)/1k + ln(V) = -1.1e-15`.
+///
+/// ngspice makes the same exception for the same stated reason — `PTlog`
+/// returns −1e99 at exactly zero because "arg 0 may happen, when starting
+/// iteration for op or dc simulation" (ptfuncs.c) — while a *negative*
+/// argument gets no stand-in there either. That asymmetry is the whole of
+/// RSpice's policy for a circuit equation;
+/// `a_behavioral_logarithm_outside_its_domain_is_rejected_not_clamped` pins
+/// its other half.
+#[test]
+fn a_logarithm_at_exactly_zero_still_converges_from_the_zero_guess() {
+    let deck = "logarithm whose argument is exactly zero at the initial guess\n\
+                V1 in 0 DC 5\n\
+                R1 in a 1k\n\
+                B1 a 0 I={ln(v(a))}\n\
+                .OP\n\
+                .END\n";
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&parse(deck))
+        .expect("the stand-in at zero must leave this deck solvable");
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("a"))
+        .expect("node a is absent from the operating point");
+    let voltage = result.node_voltages[index];
+    assert!(
+        voltage > 0.0,
+        "the reported operating point must be inside ln's domain, got V(a) = {voltage}"
+    );
+    assert!(
+        (voltage - 1.0040039906467049).abs() < 1.0e-6,
+        "Newton must climb out of the zero guess to the deck's own root, got V(a) = {voltage}"
+    );
+    let residual = (voltage - 5.0) * 1.0e-3 + voltage.ln();
+    assert!(
+        residual.abs() < 1.0e-9,
+        "V(a) = {voltage} leaves KCL residual {residual}"
+    );
+}

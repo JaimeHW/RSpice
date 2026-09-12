@@ -7,9 +7,9 @@
 use crate::Value;
 use crate::config::ExpressionDialect;
 use crate::expr::{
-    BinaryOp, CompiledExpr, Context, EXPR_ZERO_TOLERANCE, Expr, Function, UnaryOp, Vm, compile,
-    lookup_table_interpolate_with_derivative, normalize_expression_boundary, ordered_limit,
-    ordered_sign, parse_expression_strict, real_function_pow_with_derivative,
+    BinaryOp, CompiledExpr, Context, EXPR_ZERO_TOLERANCE, Expr, Function, LogarithmDomain, UnaryOp,
+    Vm, compile, lookup_table_interpolate_with_derivative, normalize_expression_boundary,
+    ordered_limit, ordered_sign, parse_expression_strict, real_function_pow_with_derivative,
     real_function_pwr_with_derivative, real_function_pwrs_with_derivative,
     real_pow_with_derivative, resolve_file_lookup_functions_with_limits,
 };
@@ -143,6 +143,14 @@ pub(crate) struct BehavioralEnvironment {
     pub(crate) temperature: Value,
     pub(crate) gmin: Value,
     pub(crate) expression_dialect: ExpressionDialect,
+    /// Whether a logarithm outside its domain is guarded or left to IEEE.
+    ///
+    /// The same switch the bytecode VM carries on its `Context`, and named
+    /// rather than defaulted for the same reason: a `B` source's value comes
+    /// from the VM and its Jacobian entry from this evaluator, so a caller
+    /// that lets the two disagree has fabricated a tangent plane for a value
+    /// it never published.
+    pub(crate) logarithm_domain: LogarithmDomain,
 }
 
 fn try_stamp_behavioral_matrix_coefficient(
@@ -200,6 +208,10 @@ struct BehavioralDerivativeContext<'a> {
     temperature: Value,
     gmin: Value,
     expression_dialect: ExpressionDialect,
+    /// Whether a logarithm outside its domain is guarded or left to IEEE. The
+    /// evaluator that owns the expression decides, exactly as it does for the
+    /// bytecode VM's `Context`.
+    logarithm_domain: LogarithmDomain,
     target: DerivativeTarget<'a>,
 }
 
@@ -269,6 +281,9 @@ impl BehavioralVoltageSource {
             temperature: self.temperature,
             gmin: self.gmin,
             expression_dialect: self.expression_dialect,
+            // The VM call below opts into IEEE, and this derivative is
+            // compared against that value: they must be the same evaluator.
+            logarithm_domain: LogarithmDomain::Ieee,
             target: DerivativeTarget::Time,
         };
         let (outgoing, derivative) = eval_behavioral_expr_with_derivative(&self.ast, &context)?;
@@ -659,6 +674,7 @@ impl BehavioralVoltageSource {
                         temperature: self.temperature,
                         gmin: self.gmin,
                         expression_dialect: self.expression_dialect,
+                        logarithm_domain: LogarithmDomain::Ieee,
                     },
                     DerivativeTarget::Node(idx),
                 )
@@ -681,6 +697,7 @@ impl BehavioralVoltageSource {
                         temperature: self.temperature,
                         gmin: self.gmin,
                         expression_dialect: self.expression_dialect,
+                        logarithm_domain: LogarithmDomain::Ieee,
                     },
                     DerivativeTarget::Branch(idx),
                 )
@@ -1035,6 +1052,7 @@ fn analytic_expression_partial(
         temperature,
         gmin,
         expression_dialect,
+        logarithm_domain,
     } = environment;
     let context = BehavioralDerivativeContext {
         program,
@@ -1045,6 +1063,7 @@ fn analytic_expression_partial(
         temperature,
         gmin,
         expression_dialect,
+        logarithm_domain,
         target,
     };
     let (_, derivative) = eval_behavioral_expr_with_derivative_at_boundary(expr, &context)?;
@@ -1064,25 +1083,12 @@ pub(crate) fn compiled_expression_node_partial(
     environment: BehavioralEnvironment,
     node_index: usize,
 ) -> Option<Value> {
-    let BehavioralEnvironment {
-        time,
-        frequency,
-        temperature,
-        gmin,
-        expression_dialect,
-    } = environment;
     analytic_expression_partial(
         expr,
         program,
         node_values,
         branch_values,
-        BehavioralEnvironment {
-            time,
-            frequency,
-            temperature,
-            gmin,
-            expression_dialect,
-        },
+        environment,
         DerivativeTarget::Node(node_index),
     )
 }
@@ -1098,25 +1104,12 @@ pub(crate) fn compiled_expression_branch_partial(
     environment: BehavioralEnvironment,
     branch_index: usize,
 ) -> Option<Value> {
-    let BehavioralEnvironment {
-        time,
-        frequency,
-        temperature,
-        gmin,
-        expression_dialect,
-    } = environment;
     analytic_expression_partial(
         expr,
         program,
         node_values,
         branch_values,
-        BehavioralEnvironment {
-            time,
-            frequency,
-            temperature,
-            gmin,
-            expression_dialect,
-        },
+        environment,
         DerivativeTarget::Branch(branch_index),
     )
 }
@@ -1147,6 +1140,7 @@ pub(crate) fn compiled_expression_node_direction(
             temperature: environment.temperature,
             gmin: environment.gmin,
             expression_dialect: environment.expression_dialect,
+            logarithm_domain: environment.logarithm_domain,
             target: DerivativeTarget::NodeDirection(node_directions),
         },
     )
@@ -1219,30 +1213,26 @@ pub fn evaluate_parameter_directional_derivative(
     ))
 }
 
-/// The argument a `B` source's logarithm is evaluated at, and its slope.
+/// The argument this evaluator's logarithm is evaluated at, and its slope.
 ///
-/// A behavioral expression is a circuit equation, so this evaluator only ever
-/// runs at a point a Newton loop offered. The guard against `ln(0)` stays —
-/// zero is the boundary of the domain and a finite stand-in there costs
-/// nothing — but a strictly negative argument is outside the domain, and
-/// clamping it is what let the R1.14 deck `B1 a 0 I={ln(v(a)+0.1)}` report
+/// The policy is the caller's, carried on the context as
+/// [`LogarithmDomain`] — the same switch the bytecode VM keeps on its
+/// `Context`. The two must agree for any one expression, because a `B`
+/// source's value comes from the VM and its Jacobian entry comes from here;
+/// this function existing with a rule of its own is what made them two
+/// policies instead of one.
+///
+/// Under [`LogarithmDomain::Ieee`] a strictly negative argument is NaN.
+/// Clamping it is what let the R1.14 deck `B1 a 0 I={ln(v(a)+0.1)}` report
 /// V(a) = -4.999995 as an operating point: the clamp fabricates
 /// `ln(1e-38) = -87.5` for the value and `1/1e-38 = 1e38` for the slope, and a
 /// 1e38 conductance pins the node so hard that the next Newton update is zero
-/// and the `vntol` check calls it converged. NaN here is what Spectre
-/// evaluates, and R1.14's `StampError::NonFiniteTrial` is what turns it into a
-/// rejected iterate rather than a refused run.
-///
-/// `expr::LogarithmDomain::Ieee` is the same rule for the bytecode VM; the two
-/// must agree, because a `B` source's value and its Jacobian entry come from
-/// these two evaluators respectively.
+/// and the `vntol` check calls it converged. R1.14's
+/// `StampError::NonFiniteTrial` is what turns the NaN into a rejected iterate
+/// rather than a refused run.
 #[inline]
-fn behavioral_logarithm_argument(value: Value) -> Value {
-    if value < 0.0 {
-        Value::NAN
-    } else {
-        value.max(crate::expr::LOGARITHM_MIN_ARGUMENT)
-    }
+fn behavioral_logarithm_argument(domain: LogarithmDomain, value: Value) -> Value {
+    domain.argument(value)
 }
 
 fn eval_behavioral_expr_with_derivative_at_boundary(
@@ -1505,7 +1495,7 @@ fn eval_function_with_derivative(
         Function::Exp => unary_derivative(eval_arg(0)?, |x| x.exp(), |x| x.exp()),
         Function::Log => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = behavioral_logarithm_argument(x);
+            let clamped = behavioral_logarithm_argument(context.logarithm_domain, x);
             if context.expression_dialect == ExpressionDialect::Xyce {
                 derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
             } else {
@@ -1514,12 +1504,12 @@ fn eval_function_with_derivative(
         }
         Function::Ln => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = behavioral_logarithm_argument(x);
+            let clamped = behavioral_logarithm_argument(context.logarithm_domain, x);
             derivative_pair(clamped.ln(), dx / clamped)
         }
         Function::Log10 => {
             let (x, dx) = eval_arg(0)?;
-            let clamped = behavioral_logarithm_argument(x);
+            let clamped = behavioral_logarithm_argument(context.logarithm_domain, x);
             derivative_pair(clamped.log10(), dx / clamped / std::f64::consts::LN_10)
         }
         Function::Sin => unary_derivative(eval_arg(0)?, |x| x.sin(), |x| x.cos()),
@@ -2408,6 +2398,7 @@ impl BehavioralCurrentSource {
                         temperature: self.temperature,
                         gmin: self.gmin,
                         expression_dialect: self.expression_dialect,
+                        logarithm_domain: LogarithmDomain::Ieee,
                     },
                     DerivativeTarget::Node(idx),
                 )
@@ -2430,6 +2421,7 @@ impl BehavioralCurrentSource {
                         temperature: self.temperature,
                         gmin: self.gmin,
                         expression_dialect: self.expression_dialect,
+                        logarithm_domain: LogarithmDomain::Ieee,
                     },
                     DerivativeTarget::Branch(idx),
                 )
@@ -3373,6 +3365,7 @@ mod tests {
             temperature: 27.0,
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
+            logarithm_domain: LogarithmDomain::Ieee,
             target: DerivativeTarget::Node(0),
         };
         eval_behavioral_expr_with_derivative(&ast, &context)
@@ -3536,6 +3529,7 @@ mod tests {
                         temperature: 27.0,
                         gmin: crate::constants::GMIN,
                         expression_dialect: dialect,
+                        logarithm_domain: LogarithmDomain::Guarded,
                     },
                 )
                 .unwrap();
@@ -3617,6 +3611,7 @@ mod tests {
                         temperature: 27.0,
                         gmin: crate::constants::GMIN,
                         expression_dialect: dialect,
+                        logarithm_domain: LogarithmDomain::Guarded,
                     },
                 )
                 .unwrap();
@@ -3808,6 +3803,7 @@ mod tests {
             temperature: 27.0,
             gmin: crate::constants::GMIN,
             expression_dialect,
+            logarithm_domain: LogarithmDomain::Ieee,
             target: DerivativeTarget::Node(0),
         };
         eval_behavioral_expr_with_derivative_at_boundary(&ast, &context)

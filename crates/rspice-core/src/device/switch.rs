@@ -37,7 +37,8 @@
 use super::behavioral::BehavioralEnvironment;
 use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::expr::{
-    BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
+    BinaryOp, CompiledExpr, Context, Expr, Function, LogarithmDomain, UnaryOp, Vm, compile,
+    parse_expression_strict,
 };
 use crate::{NodeId, Value};
 
@@ -1919,6 +1920,10 @@ impl GenericSwitch {
                     temperature: self.temperature,
                     gmin: self.gmin,
                     expression_dialect: self.expression_dialect,
+                    // The control expression's value comes from the VM
+                    // without opting into IEEE, so its Jacobian keeps the
+                    // same guard.
+                    logarithm_domain: LogarithmDomain::Guarded,
                 },
                 idx,
             );
@@ -1959,6 +1964,10 @@ impl GenericSwitch {
                     temperature: self.temperature,
                     gmin: self.gmin,
                     expression_dialect: self.expression_dialect,
+                    // The control expression's value comes from the VM
+                    // without opting into IEEE, so its Jacobian keeps the
+                    // same guard.
+                    logarithm_domain: LogarithmDomain::Guarded,
                 },
                 idx,
             );

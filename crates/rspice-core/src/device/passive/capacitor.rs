@@ -6,7 +6,7 @@ use crate::device::behavioral::{
 };
 use crate::device::traits::{DynamicDevice, MatrixStamper};
 use crate::expr::{
-    CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
+    CompiledExpr, Context, Expr, LogarithmDomain, Vm, compile, parse_expression_strict,
     resolve_file_lookup_functions_with_limits,
 };
 use crate::{NodeId, Value};
@@ -287,6 +287,10 @@ impl SolutionDependentCapacitor {
                     temperature: self.temperature,
                     gmin: self.gmin,
                     expression_dialect: self.expression_dialect,
+                    // A behavioral capacitance's value comes from the VM
+                    // without opting into IEEE, so its Jacobian keeps the same
+                    // guard; the two must be one policy, not two.
+                    logarithm_domain: LogarithmDomain::Guarded,
                 },
                 index,
             )
@@ -309,6 +313,10 @@ impl SolutionDependentCapacitor {
                     temperature: self.temperature,
                     gmin: self.gmin,
                     expression_dialect: self.expression_dialect,
+                    // A behavioral capacitance's value comes from the VM
+                    // without opting into IEEE, so its Jacobian keeps the same
+                    // guard; the two must be one policy, not two.
+                    logarithm_domain: LogarithmDomain::Guarded,
                 },
                 index,
             )

@@ -9,7 +9,7 @@ use crate::config::ExpressionDialect;
 use crate::device::behavioral::{
     BehavioralEnvironment, compiled_expression_node_direction, eval_binary_with_derivative,
 };
-use crate::expr::{BinaryOp, CompiledExpr, Derivative, Expr, Function, compile};
+use crate::expr::{BinaryOp, CompiledExpr, Derivative, Expr, Function, LogarithmDomain, compile};
 use std::collections::HashMap;
 
 pub(super) struct ScalarDirection<'a, F> {
@@ -195,6 +195,10 @@ where
                 temperature: ctx.get("TEMP").unwrap_or(27.0),
                 gmin: ctx.get("GMIN").unwrap_or(crate::constants::GMIN),
                 expression_dialect: ctx.expression_dialect(),
+                // A scalar direction program is a one-shot output-domain
+                // derivative with no Newton unknown in it: nothing here has an
+                // iterate to reject, so the guarded logarithm stays.
+                logarithm_domain: LogarithmDomain::Guarded,
             },
         )
         .ok_or_else(|| {
