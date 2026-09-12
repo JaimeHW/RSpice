@@ -149,11 +149,23 @@ const MAX_EVENT_WORLD_DEEP_COPIES: u64 = 1_800;
 
 /// Ceiling on whole-circuit nonlinear device images captured over the run.
 ///
-/// Measured at 38. This deck holds no nonlinear native device at all — it is
-/// 72 NAND code models, a supply and its loads — so every image the engine
-/// takes of the device tables here is an image of nothing that moved; what is
-/// left is the transient stepper's own, taken once at the top and refreshed in
-/// place thereafter, and the step-rejection captures.
+/// Measured at 4 (2026-09-12, lowered from 40). This deck holds no nonlinear
+/// native device at all — it is 72 NAND code models, a supply and its loads —
+/// so every image the engine takes of the device tables here is an image of
+/// nothing that moved. Four is what remains: the merit globalization base's
+/// first capture, the transient stepper's own, and the two the DC residual
+/// probe takes (`engine::convergence::residuals`).
+///
+/// It read 38 when this ratchet landed and 120 after `6098a8872` ("Restart the
+/// native predictor history when a transient point lands on a breakpoint"),
+/// which took more steps through the merit path without making any of them
+/// cost more — `capture_transient_merit_rollback` refreshes a buffer it
+/// already holds and allocates a whole-circuit image when it does not, and the
+/// buffer was declared inside the step loop, so the deck paid one image per
+/// step. Hoisting it beside the run's own state left every other count on this
+/// deck bit-identical (13,641 evaluations, 13,562 instance copies, 853 + 863
+/// event-world copies before and after) and took this one to 4, which is what
+/// the rollback work here actually is.
 ///
 /// The regression this exists for is the XSPICE trial stamp undoing its
 /// code-model evaluation with a clone of every device family in the circuit —
@@ -164,7 +176,7 @@ const MAX_EVENT_WORLD_DEEP_COPIES: u64 = 1_800;
 /// tree and re-running this deck reads 3,491 against the 38 here — a factor of
 /// 92 on a deck with no devices to copy, and on a deck with real ones a copy of
 /// every one of them 3,453 more times than the run needs.
-const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 40;
+const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 4;
 
 /// How far under its ceiling a count may sit before the ceiling is considered
 /// stale and must be lowered, as a percentage of the ceiling.
