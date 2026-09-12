@@ -348,6 +348,13 @@ jobs:
       # One required key per suite, so a suite that linked to nothing fails
       # here instead of quietly shrinking the comparison; --min-keys is the
       # loose floor underneath that.
+      #
+      # Measured on 8bb2742 (2026-09-13): the two builds agree on all fifty
+      # gated records, and on all fifty-seven under --gate-all, so faer's
+      # serial reductions land on the same accepted grid and the same solved
+      # levels as its parallel ones for every deck here. No key is
+      # allow-listed; the first one that needs to be is a finding, and it is
+      # recorded with both values rather than by loosening a pin.
       - name: Diff the two emitted fingerprint sets
         run: >-
           python3 tools/ci/compare_trifamily_fingerprints.py
