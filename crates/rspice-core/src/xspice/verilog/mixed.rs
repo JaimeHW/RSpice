@@ -2258,12 +2258,50 @@ impl MixedSignalHost {
     }
 
     /// Stamp both the module's continuous equations and every active D/A
-    /// bridge. Call this on every Newton evaluation.
+    /// bridge at a point the solver has already settled on.
+    ///
+    /// The accepted-point evaluation, the candidate inspection and the
+    /// module's own tests all take this entry: whatever the analog half
+    /// refuses here, there is no iterate left to throw away, so the refusal is
+    /// the run's. [`Self::stamp_trial`] is the Newton-loop entry.
     pub fn stamp<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+    ) -> Result<(), MixedSignalError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        self.stamp_classified(circuit_voltages, matrix_add, rhs_add, analog_accepted_error)
+    }
+
+    /// The same stamp at a Newton TRIAL point, where a non-finite analog value
+    /// is a property of the candidate rather than of the module.
+    ///
+    /// One entry per answer instead of one entry and a classification: the
+    /// wording a mixed host's failure carries — "at a trial iterate" — is a
+    /// claim about which loop asked, and only the caller knows that.
+    pub(crate) fn stamp_trial<M, R>(
+        &mut self,
+        circuit_voltages: &[f64],
+        matrix_add: M,
+        rhs_add: R,
+    ) -> Result<(), MixedSignalError>
+    where
+        M: FnMut(usize, usize, f64),
+        R: FnMut(usize, f64),
+    {
+        self.stamp_classified(circuit_voltages, matrix_add, rhs_add, analog_trial_error)
+    }
+
+    fn stamp_classified<M, R>(
         &mut self,
         circuit_voltages: &[f64],
         mut matrix_add: M,
         mut rhs_add: R,
+        classify: AnalogRefusal,
     ) -> Result<(), MixedSignalError>
     where
         M: FnMut(usize, usize, f64),
@@ -2282,13 +2320,14 @@ impl MixedSignalHost {
                 self.analog.make_mut(),
                 &self.discrete_inputs,
                 circuit_voltages,
+                classify,
             )?;
             self.prepared_analog.stamp(&mut matrix_add, &mut rhs_add);
         } else {
             self.analog
                 .make_mut()
                 .try_stamp(circuit_voltages, &mut matrix_add, &mut rhs_add)
-                .map_err(|error| analog_trial_error(&error))?;
+                .map_err(|error| classify(&error))?;
         }
         self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
     }
@@ -2320,7 +2359,7 @@ impl MixedSignalHost {
                 &mut rhs_add,
                 rspice_veriloga::vm::VerilogAEvaluationMode::StaticDaeProbe,
             )
-            .map_err(|error| analog_trial_error(&error))?;
+            .map_err(analog_error)?;
         self.stamp_dac_bridges(&mut matrix_add, &mut rhs_add)
     }
 
@@ -3682,14 +3721,30 @@ fn analog_error(error: impl fmt::Display) -> MixedSignalError {
     }
 }
 
+/// How one stamping path words the analog half's refusal.
+///
+/// The same stamping code serves the Newton loop and the accepted-point
+/// evaluation, and the two cannot answer the same way: only the first has an
+/// iterate to reject. The entry the caller picks carries the answer, rather
+/// than the stamp inferring it from state it does not have.
+pub(super) type AnalogRefusal = fn(&rspice_veriloga::vm::VmError) -> MixedSignalError;
+
+/// Classify the analog half's refusal at an ACCEPTED point.
+///
+/// Nothing here is speculative: the solver has settled on this solution, so a
+/// refusal is the run's however numeric it looks.
+pub(super) fn analog_accepted_error(error: &rspice_veriloga::vm::VmError) -> MixedSignalError {
+    analog_error(error)
+}
+
 /// Classify the analog half's refusal at a Newton TRIAL evaluation.
 ///
 /// A mixed module's continuous equations are the same Verilog-A the plain
 /// analog route runs, so a `ln()` that leaves its domain at an overshooting
 /// iterate is the same rejectable trial here as it is there — the module is
 /// well posed and the *point* is not. Nothing else changes: a structural
-/// refusal, and every failure at an accepted point (`analog_error` above, on
-/// `validate_advance_state`), still ends the run where it happens.
+/// refusal, and every failure at an accepted point
+/// (`analog_accepted_error` above), still ends the run where it happens.
 pub(super) fn analog_trial_error(error: &rspice_veriloga::vm::VmError) -> MixedSignalError {
     match error {
         rspice_veriloga::vm::VmError::InvalidNumericResult(detail) => {

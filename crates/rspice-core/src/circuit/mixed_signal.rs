@@ -67,7 +67,9 @@ fn mixed_error(instance: &str, error: MixedSignalError) -> SimulationError {
     let message = format!("mixed Verilog-AMS instance '{instance}': {error}");
     // The analog half's non-finite trial reaches the Newton loops classified,
     // so a mixed host retries the same domain edge a plain analog instance
-    // retries. Every other mixed failure is structural and ends the run.
+    // retries. Every other mixed failure is structural and ends the run —
+    // including a non-finite value at an ACCEPTED point, which only
+    // `MixedSignalHost::stamp_trial` can ever produce this variant for.
     match error {
         MixedSignalError::AnalogNonFinite { .. } => SimulationError::from(
             crate::device::StampError::nonfinite_trial(instance, message),
@@ -606,7 +608,7 @@ impl CircuitData {
             // weight. Enrolled XSPICE stamps above already apply their policy.
             let weight = if companion.xyce_one_step_order2 { 0.5 } else { 1.0 };
             for host in group.hosts.iter_mut() {
-                let stamped = host.stamp(voltages, |row, col, value| {
+                let stamped = host.stamp_trial(voltages, |row, col, value| {
                     if matrix.get_index(row, col).is_some() { matrix.add(row, col, weight * value); }
                     else { log::debug!("mixed Verilog-AMS stamp ({row}, {col}) missing from matrix topology"); }
                 }, |row, value| {

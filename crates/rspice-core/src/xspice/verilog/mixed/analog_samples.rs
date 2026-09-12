@@ -42,6 +42,7 @@ impl PreparedAnalogStamp {
         analog: &mut VerilogADevice,
         inputs: &[DiscreteAnalogInput],
         solution: &[f64],
+        classify: AnalogRefusal,
     ) -> Result<(), MixedSignalError> {
         if self.valid
             && self.inputs.len() == inputs.len()
@@ -67,7 +68,7 @@ impl PreparedAnalogStamp {
                 |row, column, value| self.matrix.push((row, column, value)),
                 |row, value| self.rhs.push((row, value)),
             )
-            .map_err(|error| analog_trial_error(&error))?;
+            .map_err(|error| classify(&error))?;
         self.solution.clear();
         self.solution.extend(
             analog_solver_nodes(analog).map(|node| (node, node_voltage(solution, node).to_bits())),
@@ -165,7 +166,11 @@ impl AnalogModelParticipant<'_> {
                         .map_err(analog_error)?;
                 }
             }
-            self.prepared.prepare(analog, self.inputs, self.solution)?;
+            // Whatever this refuses is wrapped into a `DigitalRunError` two
+            // lines below and ends the run, so wording it as a rejectable
+            // iterate would describe an outcome that does not happen.
+            self.prepared
+                .prepare(analog, self.inputs, self.solution, analog_accepted_error)?;
             // The retained assignment roots are published by this evaluation.
             // Do not call observe_variables: it may replay the model body.
             for (index, probe) in self.probes.iter().enumerate() {

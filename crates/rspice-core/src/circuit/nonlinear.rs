@@ -1575,15 +1575,25 @@ impl CircuitData {
                 // has rejected the iterate, not the run: the message names the
                 // instance and the bias it was handed, and the Newton loop cuts
                 // dt or steps the sources exactly as it does for Verilog-A.
+                //
+                // The bias belongs to that sentence and only to it. A
+                // structural refusal fails the same way at every bias, so
+                // naming one would invite the reader to look for what was
+                // special about it.
                 .map_err(|fault| {
                     let message = format!(
-                        "{} memristor '{}': {fault} at the trial iterate [v+={v_pos:.6e}, v-={v_neg:.6e}, x={x:.6e}]",
+                        "{} memristor '{}': {fault}",
                         binding.device.family_name(),
                         binding.name
                     );
                     match fault {
                         crate::device::MemristorEvaluationFault::NonFinite(_) => {
-                            StampError::nonfinite_trial(binding.name.clone(), message)
+                            StampError::nonfinite_trial(
+                                binding.name.clone(),
+                                format!(
+                                    "{message} at the trial iterate [v+={v_pos:.6e}, v-={v_neg:.6e}, x={x:.6e}]"
+                                ),
+                            )
                         }
                         crate::device::MemristorEvaluationFault::Structural(_) => {
                             StampError::Structural(message)
