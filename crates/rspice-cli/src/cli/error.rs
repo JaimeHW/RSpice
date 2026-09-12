@@ -494,6 +494,16 @@ impl CliError {
                     rspice_core::SimulationError::UnsupportedCapability(refusal) => {
                         details.capability = Some(refusal.capability);
                     }
+                    // A Verilog-A or mixed binding refusal. The category and
+                    // the exit status already follow the kind, because the
+                    // engine's descriptor decides both; what a script still
+                    // needs from the payload is which instance failed and
+                    // which of the eleven things went wrong, and those are the
+                    // two fields this schema already carries for exactly that.
+                    rspice_core::SimulationError::Elaboration(refusal) => {
+                        details.instance_name = refusal.instance.clone();
+                        details.reason = Some(refusal.kind.as_str());
+                    }
                     _ => {}
                 }
                 details
@@ -821,6 +831,59 @@ mod tests {
         assert_eq!(details.capability, Some("device.ltra.rg_finite_length"));
         assert_eq!(details.line, Some(12));
         assert_eq!(details.path.as_deref(), Some("deck.cir"));
+    }
+
+    /// A Verilog-A binding refusal exits as bad input and says which instance
+    /// and which kind, so a build script does not have to read the sentence.
+    ///
+    /// The exit status is the point. This whole class used to reach the CLI as
+    /// an untyped circuit error at some sites and an untyped netlist error at
+    /// others, so a wrong terminal count exited as a failed simulation while an
+    /// unreadable `.va` exited as bad input — the same mistake by the same
+    /// author, told apart by nothing an automation could see.
+    #[test]
+    fn elaboration_refusals_exit_as_bad_input_and_publish_their_kind() {
+        let error = CliError::from(rspice_core::SimulationError::from(
+            rspice_core::ElaborationError {
+                instance: Some("x1".to_string()),
+                module: Some("counter".to_string()),
+                kind: rspice_core::ElaborationErrorKind::PortCount,
+                span: Some(rspice_core::netlist::NetlistSourceLocation::in_file(
+                    "counter.va",
+                    0,
+                )),
+                detail: "the master declares at most 3 terminal(s) and the card connects 4"
+                    .to_string(),
+            },
+        ));
+
+        assert_eq!(error.exit_code(), ExitCode::InputError);
+        let details = error.details();
+        assert_eq!(details.category, "netlist");
+        assert_eq!(details.code, "netlist_error");
+        assert_eq!(details.reason, Some("port_count"));
+        assert_eq!(details.instance_name.as_deref(), Some("x1"));
+        assert_eq!(details.path.as_deref(), Some("counter.va"));
+        assert_eq!(details.line, Some(0));
+    }
+
+    /// The two kinds no deck can cause are engine failures instead, and the
+    /// category the exit status is taken from says so.
+    #[test]
+    fn an_internal_elaboration_failure_exits_as_a_failed_simulation() {
+        let error = CliError::from(rspice_core::SimulationError::from(
+            rspice_core::ElaborationError {
+                instance: Some("x1".to_string()),
+                module: None,
+                kind: rspice_core::ElaborationErrorKind::Internal,
+                span: None,
+                detail: "the plan the boundary was handed contradicts itself".to_string(),
+            },
+        ));
+        assert_eq!(error.exit_code(), ExitCode::SimulationFailed);
+        let details = error.details();
+        assert_eq!(details.category, "simulation");
+        assert_eq!(details.reason, Some("internal"));
     }
 
     #[test]
