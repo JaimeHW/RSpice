@@ -4444,29 +4444,43 @@ endmodule
             "the control needs an activation inside the step, got {due:e}"
         );
 
-        // One step from 0 to 4 ns: the tick-3 activation runs inside it, and
-        // the sense node crosses the 0.6 V threshold on the way.
-        host.begin_trial(
-            4.0e-9,
-            4.0e-9,
-            IntegrationCoefficients::inactive(),
-            false,
-            false,
-        )
-        .expect("the crossing step begins");
-        let target = boundary_root_of_trial(&mut host, &[0.0, 0.0, 1.0, 0.0]).expect(
+        // One step from zero that ends ON the activation, which is where the
+        // step controller has to put it: a trial ending past a scheduled
+        // activation is the missed breakpoint `begin_trial` refuses. The
+        // endpoint is the wheel's own instant rather than the `3.0e-9` that
+        // spells it, because `3.0e-9` parses a hair below three ticks and
+        // would floor into tick 2 — the activation would then not run inside
+        // the step at all and this would stop being a control.
+        host.begin_trial(due, due, IntegrationCoefficients::inactive(), false, false)
+            .expect("the crossing step begins");
+        while host
+            .settle_analog_bridges(&[0.0, 0.0, 1.0, 0.0])
+            .expect("bridges settle")
+        {}
+        // Vacuity: the discrete half has to have run inside this interval, or
+        // the case says nothing about a wheel that ticks quietly.
+        assert_eq!(
+            host.next_event_time().expect("the wheel is readable"),
+            None,
+            "the tick-3 activation must run inside this trial for it to be a control"
+        );
+        let target = host
+            .trial_boundary_refinement_time(1.0e-20)
+            .expect("the inspection succeeds");
+        host.reject_trial().expect("a settled trial rolls back");
+        let target = target.expect(
             "a wheel that ticks without moving a boundary must leave the circuit's own \
              crossing an interior root",
         );
         assert!(
-            target > 0.0 && target < 4.0e-9,
+            target > 0.0 && target < due,
             "the root must be inside the step, got {target:e}"
         );
         // And it is the interpolated crossing, not the endpoint: 0 V to 1 V
-        // across the step puts the 0.6 V threshold at 2.4 ns.
+        // across the step puts the 0.6 V threshold at 1.8 ns.
         assert!(
-            (target - 2.4e-9).abs() < 1.0e-12,
-            "the root must be the interpolated crossing at 2.4 ns, got {target:e}"
+            (target - 1.8e-9).abs() < 1.0e-12,
+            "the root must be the interpolated crossing at 1.8 ns, got {target:e}"
         );
     }
 
