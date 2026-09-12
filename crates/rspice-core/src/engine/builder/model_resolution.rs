@@ -80,6 +80,84 @@ pub(super) fn base_eval_context(netlist: &Netlist) -> crate::netlist::ParamConte
     ctx
 }
 
+/// The context one instance's own scalar parameter expressions are evaluated
+/// in: the deck's `.param` scope plus the temperature scalars an instance
+/// expression may name.
+///
+/// `temperature_kelvin` is *that instance's* operating temperature, not
+/// necessarily the circuit's, so an instance carrying `DTEMP` sees its own
+/// `TEMPER` and `VT` — the same rule [`resolve_passive_eval_context`] applies
+/// to a resistor. A deck that binds one of these names itself keeps its own
+/// binding: a `.param TEMPER=...` is a parameter like any other, and the
+/// engine's value is a default for the name, not an override of it.
+pub(super) fn instance_parameter_eval_context(
+    netlist: &Netlist,
+    temperature_kelvin: f64,
+) -> crate::netlist::ParamContext {
+    let mut context = base_eval_context(netlist);
+    let temp_c = crate::constants::kelvin_to_celsius(temperature_kelvin);
+    for (name, value) in [
+        ("TEMP", temp_c),
+        ("TEMPER", temp_c),
+        ("VT", crate::constants::thermal_voltage(temperature_kelvin)),
+    ] {
+        if !context.has_parameter_binding(name) {
+            context.set(name, value);
+        }
+    }
+    if !context.has_any_parameter_binding("TNOM") {
+        context.set("TNOM", netlist.options.tnom.unwrap_or(27.0));
+    }
+    context
+}
+
+/// [`instance_parameter_eval_context`] built at most once per instance, and
+/// only for an instance that has an expression to evaluate.
+///
+/// The context is a clone of the whole `.param` scope, so building one per
+/// card would put a copy of the deck's parameters behind every instance of
+/// every family that consults it. Most cards carry only resolved numbers and
+/// need none.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+pub(super) struct InstanceParameterContext<'a> {
+    netlist: &'a Netlist,
+    temperature_kelvin: f64,
+    context: Option<crate::netlist::ParamContext>,
+}
+
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+impl<'a> InstanceParameterContext<'a> {
+    pub(super) fn new(netlist: &'a Netlist, temperature_kelvin: f64) -> Self {
+        Self {
+            netlist,
+            temperature_kelvin,
+            context: None,
+        }
+    }
+
+    /// Re-target the context at this instance's own temperature.
+    ///
+    /// Discards an already-built context only when the temperature actually
+    /// moved, so the common instance — the one at the circuit temperature —
+    /// builds nothing twice.
+    ///
+    /// Only the Verilog-A routes re-target: the generated route reads its
+    /// card's temperature keys as numbers and needs no second context.
+    #[cfg(feature = "veriloga")]
+    pub(super) fn retarget(&mut self, temperature_kelvin: f64) {
+        if temperature_kelvin != self.temperature_kelvin {
+            self.temperature_kelvin = temperature_kelvin;
+            self.context = None;
+        }
+    }
+
+    pub(super) fn get(&mut self) -> &crate::netlist::ParamContext {
+        self.context.get_or_insert_with(|| {
+            instance_parameter_eval_context(self.netlist, self.temperature_kelvin)
+        })
+    }
+}
+
 /// Build the expression-evaluation context for a passive instance (R/C/L),
 /// honoring instance `TEMP`/`DTEMP` overrides and the model card's `TNOM`.
 ///

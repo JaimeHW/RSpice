@@ -136,6 +136,167 @@ fn veriloga_construction_kind(error: &rspice_veriloga::vm::VmError) -> crate::El
     }
 }
 
+/// What a Verilog-A instance's temperature key says, once the master has
+/// declined to claim the name.
+#[cfg(feature = "veriloga")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VerilogAInstanceTemperature {
+    /// `TEMP=` — this instance's operating temperature in Celsius, absolute.
+    Absolute,
+    /// `DTEMP=`/`TRISE=` — an offset from the circuit temperature, in kelvin.
+    /// The two spellings are one parameter, as they are on a native VBIC
+    /// (`model_policy::validate_bjt_instance_controls`).
+    Offset,
+}
+
+/// The engine-owned temperature keys on a Verilog-A instance card.
+///
+/// A master that declares one of these names owns it: the value is an
+/// ordinary parameter override and the engine applies no temperature of its
+/// own — the same precedence the `m`/`$mfactor` carve-out has (pinned by
+/// `model_declared_m_parameter_takes_precedence`), because a module that
+/// models its own self-heating must not also be moved by the engine.
+#[cfg(feature = "veriloga")]
+fn veriloga_instance_temperature_key(
+    name: &str,
+    declares: &dyn Fn(&str) -> bool,
+) -> Option<VerilogAInstanceTemperature> {
+    let role = if name.eq_ignore_ascii_case("temp") {
+        VerilogAInstanceTemperature::Absolute
+    } else if name.eq_ignore_ascii_case("dtemp") || name.eq_ignore_ascii_case("trise") {
+        VerilogAInstanceTemperature::Offset
+    } else {
+        return None;
+    };
+    (!declares(name)).then_some(role)
+}
+
+/// Resolve one Verilog-A instance's operating temperature, in kelvin.
+///
+/// An absolute `TEMP=` wins over an offset, which is the precedence
+/// `model_resolution::resolve_passive_eval_context` gives a resistor and what
+/// `branch_form_noise_honors_quiet_dtemp_and_absolute_temp_precedence` pins
+/// for one. Two offset spellings that disagree are refused rather than
+/// silently ordered: they are one parameter, so a card giving both has said
+/// two things about it.
+#[cfg(feature = "veriloga")]
+fn veriloga_instance_temperature(
+    instance: &str,
+    module: &str,
+    params: &[(String, crate::netlist::ParametricValue)],
+    declares: &dyn Fn(&str) -> bool,
+    context: &mut InstanceParameterContext<'_>,
+    circuit_temperature_kelvin: f64,
+) -> Result<f64, SimulationError> {
+    let mut absolute: Option<f64> = None;
+    let mut offset: Option<(&str, f64)> = None;
+    for (name, value) in params {
+        let Some(role) = veriloga_instance_temperature_key(name, declares) else {
+            continue;
+        };
+        let resolved = veriloga_instance_numeric_value(instance, module, name, value, context)?;
+        if !resolved.is_finite() {
+            return Err(refuse_veriloga_instance(
+                instance,
+                module,
+                crate::ElaborationErrorKind::ParameterValue,
+                format!("instance temperature '{name}' must be finite, got {resolved}"),
+            ));
+        }
+        match role {
+            VerilogAInstanceTemperature::Absolute => {
+                if absolute.is_some_and(|previous| previous != resolved) {
+                    return Err(refuse_veriloga_instance(
+                        instance,
+                        module,
+                        crate::ElaborationErrorKind::ParameterValue,
+                        "the card sets TEMP twice with different values".to_owned(),
+                    ));
+                }
+                absolute = Some(resolved);
+            }
+            VerilogAInstanceTemperature::Offset => {
+                if let Some((previous_name, previous)) = offset
+                    && previous != resolved
+                {
+                    return Err(refuse_veriloga_instance(
+                        instance,
+                        module,
+                        crate::ElaborationErrorKind::ParameterValue,
+                        format!(
+                            "{} and {} are two spellings of one temperature offset and this card \
+                             gives them different values ({previous} and {resolved})",
+                            previous_name.to_ascii_uppercase(),
+                            name.to_ascii_uppercase()
+                        ),
+                    ));
+                }
+                offset = Some((name, resolved));
+            }
+        }
+    }
+    Ok(match (absolute, offset) {
+        (Some(celsius), _) => crate::constants::celsius_to_kelvin(celsius),
+        (None, Some((_, offset))) => circuit_temperature_kelvin + offset,
+        (None, None) => circuit_temperature_kelvin,
+    })
+}
+
+/// One instance parameter's numeric value, evaluated the way every other
+/// element's parameter expressions are.
+///
+/// An expression here is a deck expression, not a behavioral one: it may name
+/// `.param`s, the temperature scalars and a statistical draw, and it may not
+/// read circuit state, which is a solution-dependent quantity and not a value
+/// an instance can be built with.
+#[cfg(feature = "veriloga")]
+fn veriloga_instance_numeric_value(
+    instance: &str,
+    module: &str,
+    name: &str,
+    value: &crate::netlist::ParametricValue,
+    context: &mut InstanceParameterContext<'_>,
+) -> Result<Value, SimulationError> {
+    match value {
+        crate::netlist::ParametricValue::Resolved(value) => Ok(*value),
+        crate::netlist::ParametricValue::Expression(expression) => {
+            // A circuit probe, not every runtime quantity: `TEMPER` and `VT`
+            // are values the instance is built *with*, and the context below
+            // binds them. `V(...)`/`I(...)` are the solution itself.
+            if crate::netlist::expr::parameter_expression_circuit_probe(expression).is_some() {
+                return Err(refuse_veriloga_instance(
+                    instance,
+                    module,
+                    crate::ElaborationErrorKind::ParameterValue,
+                    format!(
+                        "parameter '{name}' is built from circuit state ({expression}); an \
+                         instance parameter is fixed when the instance is built"
+                    ),
+                ));
+            }
+            context
+                .get()
+                .evaluate_parameter_binding(expression)
+                .map(|(value, _)| value.re)
+                .map_err(|error| {
+                    refuse_veriloga_instance(
+                        instance,
+                        module,
+                        crate::ElaborationErrorKind::ParameterValue,
+                        format!("parameter '{name}': {error}"),
+                    )
+                })
+        }
+        crate::netlist::ParametricValue::String(_)
+        | crate::netlist::ParametricValue::StringExpression(_) => Err(refuse_veriloga_instance(
+            instance,
+            module,
+            crate::ElaborationErrorKind::ParameterValue,
+            format!("parameter '{name}' expects a numeric value, got string value"),
+        )),
+    }
+}
+
 #[cfg(feature = "veriloga")]
 fn bind_veriloga_model(
     bindings: &mut HashMap<String, VerilogAModelBinding>,
@@ -5536,23 +5697,8 @@ impl Engine {
                         && !netlist.params.has_retained_parameter_expressions();
                     let mut direction = None;
                     let primary_value = if scalar_primary {
-                        let mut context = base_eval_context(netlist);
-                        let temp_c = crate::constants::kelvin_to_celsius(self.config.temperature);
-                        for (name, value) in [
-                            ("TEMP", temp_c),
-                            ("TEMPER", temp_c),
-                            (
-                                "VT",
-                                crate::constants::thermal_voltage(self.config.temperature),
-                            ),
-                        ] {
-                            if !context.has_parameter_binding(name) {
-                                context.set(name, value);
-                            }
-                        }
-                        if !context.has_any_parameter_binding("TNOM") {
-                            context.set("TNOM", netlist.options.tnom.unwrap_or(27.0));
-                        }
+                        let context =
+                            instance_parameter_eval_context(netlist, self.config.temperature);
                         let (value, tangent) = context
                             .evaluate_parameter_binding(
                                 authored_value_expr.expect("scalar expression"),
@@ -8031,34 +8177,35 @@ impl Engine {
 
                             // Resolve overrides before construction: range constraints apply
                             // to the complete instance, including dependent defaults.
+                            let declares = |name: &str| model.parameter_index(name).is_some();
+                            let mut context =
+                                InstanceParameterContext::new(netlist, self.config.temperature);
+                            // The instance's own temperature first: an
+                            // expression on this card sees the temperature
+                            // this device runs at, not the circuit's, exactly
+                            // as a resistor's does.
+                            let instance_temperature = veriloga_instance_temperature(
+                                &element.name,
+                                subckt_name,
+                                params,
+                                &declares,
+                                &mut context,
+                                self.config.temperature,
+                            )?;
+                            context.retarget(instance_temperature);
                             let mut overrides = Vec::with_capacity(params.len());
                             let mut multiplicity = None;
                             for (name, value) in params {
-                                let resolved = match value {
-                                    crate::netlist::ParametricValue::Resolved(v) => *v,
-                                    crate::netlist::ParametricValue::Expression(expr) => {
-                                        crate::netlist::expr::eval_expression(expr, &netlist.params)
-                                            .map_err(|e| {
-                                                refuse_veriloga_instance(
-                                                    &element.name,
-                                                    subckt_name,
-                                                    crate::ElaborationErrorKind::ParameterValue,
-                                                    format!("parameter '{name}': {e}"),
-                                                )
-                                            })?
-                                    }
-                                    crate::netlist::ParametricValue::String(_)
-                                    | crate::netlist::ParametricValue::StringExpression(_) => {
-                                        return Err(refuse_veriloga_instance(
-                                            &element.name,
-                                            subckt_name,
-                                            crate::ElaborationErrorKind::ParameterValue,
-                                            format!(
-                                                "parameter '{name}' expects a numeric value, got string value"
-                                            ),
-                                        ));
-                                    }
-                                };
+                                if veriloga_instance_temperature_key(name, &declares).is_some() {
+                                    continue;
+                                }
+                                let resolved = veriloga_instance_numeric_value(
+                                    &element.name,
+                                    subckt_name,
+                                    name,
+                                    value,
+                                    &mut context,
+                                )?;
                                 // Model-owned names and aliases take precedence over $mfactor.
                                 if name.eq_ignore_ascii_case("m")
                                     && model.parameter_index(name).is_none()
@@ -8160,7 +8307,7 @@ impl Engine {
                                 device.set_multiplicity(multiplicity);
                             }
                             device
-                                .try_set_temperature(self.config.temperature)
+                                .try_set_temperature(instance_temperature)
                                 .map_err(|err| {
                                     refuse_veriloga_instance(
                                         &element.name,

@@ -206,44 +206,41 @@ pub(super) fn try_build_mixed_signal_instance(
         return Ok(false);
     }
 
+    let declares = |name: &str| entry.model.parameter_index(name).is_some();
+    let mut context = super::InstanceParameterContext::new(netlist, temperature);
+    // A mixed module's continuous half runs at the temperature its card
+    // names, exactly as the analog route's device does, and its parameter
+    // expressions are evaluated at that temperature.
+    let instance_temperature = super::veriloga_instance_temperature(
+        &element.name,
+        subckt_name,
+        params,
+        &declares,
+        &mut context,
+        temperature,
+    )?;
+    context.retarget(instance_temperature);
     let mut overrides = Vec::with_capacity(params.len());
     let mut multiplicity = None;
     for (name, value) in params {
-        let value = match value {
-            crate::netlist::ParametricValue::Resolved(value) => *value,
-            crate::netlist::ParametricValue::Expression(expression) => {
-                crate::netlist::expr::eval_expression(expression, &netlist.params).map_err(
-                    |error| {
-                        refuse(
-                            &element.name,
-                            subckt_name,
-                            ElaborationErrorKind::ParameterValue,
-                            format!("parameter '{name}': {error}"),
-                        )
-                    },
-                )?
-            }
-            _ => {
-                return Err(refuse(
-                    &element.name,
-                    subckt_name,
-                    ElaborationErrorKind::ParameterValue,
-                    format!("parameter '{name}' requires a numeric value"),
-                ));
-            }
-        };
-        // `m` is the one reserved instance parameter the analog Verilog-A
-        // route carves out of the override list (`builder.rs`), and a mixed
-        // module's continuous half must scale exactly as that route's device
-        // does. The carve-out is that one name and no other. `dtemp` and
-        // `trise` are not reserved for a Verilog-A instance either: they are
-        // handed to the compiled model as ordinary overrides and refused
-        // there as unknown parameters, so mirroring the carve-out means
-        // leaving them to the refusal below, which says the same thing one
-        // step earlier. A module that declares `m` owns the name and scales
-        // itself, so the engine must not also apply it — the precedence
+        // `m` and the temperature keys are the instance parameters the
+        // analog Verilog-A route carves out of the override list
+        // (`builder.rs`), and a mixed module's continuous half must scale and
+        // heat exactly as that route's device does. A module that declares
+        // one of those names owns it and handles it itself, so the engine
+        // must not also apply it — the precedence
         // `model_declared_m_parameter_takes_precedence` pins for the analog
         // route.
+        if super::veriloga_instance_temperature_key(name, &declares).is_some() {
+            continue;
+        }
+        let value = super::veriloga_instance_numeric_value(
+            &element.name,
+            subckt_name,
+            name,
+            value,
+            &mut context,
+        )?;
         if name.eq_ignore_ascii_case("m") && entry.model.parameter_index(name).is_none() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(refuse(
@@ -419,14 +416,15 @@ pub(super) fn try_build_mixed_signal_instance(
         })?;
     }
 
-    host.set_temperature(temperature).map_err(|error| {
-        refuse(
-            &element.name,
-            subckt_name,
-            host_failure_kind(&error),
-            format!("temperature update failed: {error}"),
-        )
-    })?;
+    host.set_temperature(instance_temperature)
+        .map_err(|error| {
+            refuse(
+                &element.name,
+                subckt_name,
+                host_failure_kind(&error),
+                format!("temperature update failed: {error}"),
+            )
+        })?;
 
     let node_names = circuit.node_names_sorted();
     for port in boundary {

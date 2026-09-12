@@ -263,6 +263,90 @@ fn a_value_outside_its_domain_is_parameter_value_on_both_routes() {
     assert_eq!(mixed_error.instance.as_deref(), Some("x1"));
 }
 
+/// A string where the master declares a number is a parameter-value refusal,
+/// not a parse failure and not a silent zero.
+///
+/// A Verilog-A `parameter string` is a declaration this engine's runtime
+/// cannot execute — no compiled module can read one, because a string literal
+/// in an expression has no lowering — so every instance parameter is numeric
+/// and a quoted value on the card is a value the master will not take.
+#[test]
+fn a_string_value_for_a_numeric_parameter_is_parameter_value_on_both_routes() {
+    let analog = ModelFile::new("analog_string_value", ANALOG_RESISTOR);
+    let analog_error = elaboration_error(&format!(
+        "* a quoted value for a real parameter\n\
+         v1 a 0 1\n\
+         x1 a 0 ares r=\"wide\"\n\
+         r1 a 0 1k\n\
+         .va \"{}\" ares\n\
+         .op\n\
+         .end\n",
+        analog.deck_path()
+    ));
+    assert_eq!(analog_error.kind, ElaborationErrorKind::ParameterValue);
+    assert_eq!(analog_error.instance.as_deref(), Some("x1"));
+    assert!(analog_error.detail.contains("'r'"), "{analog_error}");
+
+    let mixed = ModelFile::new("mixed_string_value", MIXED_DIVIDER);
+    let mixed_error = elaboration_error(&format!(
+        "* the same quoted value on the mixed route\n\
+         v1 a 0 1\n\
+         x1 a 0 q mdiv r=\"wide\"\n\
+         rq q 0 1k\n\
+         r1 a 0 1k\n\
+         .va \"{}\" mdiv\n\
+         .tran 1n 20n\n\
+         .end\n",
+        mixed.deck_path()
+    ));
+    assert_eq!(mixed_error.kind, ElaborationErrorKind::ParameterValue);
+    assert_eq!(mixed_error.instance.as_deref(), Some("x1"));
+}
+
+/// An instance parameter is fixed when the instance is built, so an
+/// expression reading a node voltage or a branch current is refused rather
+/// than evaluated against whatever the solver happens to hold.
+#[test]
+fn an_instance_parameter_built_from_circuit_state_is_parameter_value() {
+    let model = ModelFile::new("state_parameter", ANALOG_RESISTOR);
+    let error = elaboration_error(&format!(
+        "* an instance parameter reading the solution\n\
+         v1 a 0 1\n\
+         x1 a 0 ares r={{1k*V(a)}}\n\
+         r1 a 0 1k\n\
+         .va \"{}\" ares\n\
+         .op\n\
+         .end\n",
+        model.deck_path()
+    ));
+    assert_eq!(error.kind, ElaborationErrorKind::ParameterValue);
+    assert_eq!(error.instance.as_deref(), Some("x1"));
+    assert!(error.detail.contains("circuit state"), "{error}");
+}
+
+/// `DTEMP` and `TRISE` are one temperature offset, so a card giving them two
+/// values has said two things about one parameter.
+#[test]
+fn two_temperature_offset_spellings_that_disagree_are_parameter_value() {
+    let model = ModelFile::new("offset_conflict", ANALOG_RESISTOR);
+    let error = elaboration_error(&format!(
+        "* one offset, two values\n\
+         v1 a 0 1\n\
+         x1 a 0 ares dtemp=10 trise=20\n\
+         r1 a 0 1k\n\
+         .va \"{}\" ares\n\
+         .op\n\
+         .end\n",
+        model.deck_path()
+    ));
+    assert_eq!(error.kind, ElaborationErrorKind::ParameterValue);
+    assert_eq!(error.instance.as_deref(), Some("x1"));
+    assert!(
+        error.detail.contains("DTEMP") && error.detail.contains("TRISE"),
+        "{error}"
+    );
+}
+
 #[test]
 fn the_wrong_number_of_nets_is_port_count_on_both_routes() {
     let analog = ModelFile::new("analog_port_count", ANALOG_RESISTOR);
