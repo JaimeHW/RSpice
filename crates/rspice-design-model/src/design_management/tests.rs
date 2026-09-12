@@ -4,8 +4,8 @@ use super::*;
 
 mod annotation_allocation;
 mod drawing_sheet_release;
-mod sheet_lifecycle;
 mod manual_annotation;
+mod sheet_lifecycle;
 
 fn sheet(name: &str, page: u32) -> SheetDefinition {
     SheetDefinition {
