@@ -85,9 +85,15 @@ impl SignalView {
 
 /// Standalone hosts execute locally. Enrolled circuit models hold only values;
 /// the owning circuit supplies every process activation and resolved output.
+///
+/// The host is boxed because an enrolled instance carries the `View` variant
+/// and every mixed instance's digital state is cloned out of its `Arc` on the
+/// trial path: inlining the host would make each of those clones allocate and
+/// copy a whole `DigitalHost`'s worth of bytes to hold a handful of signal
+/// values.
 #[derive(Clone)]
 pub(super) enum MixedDigital {
-    Owned(DigitalHost),
+    Owned(Box<DigitalHost>),
     View(SignalView),
 }
 
@@ -103,7 +109,7 @@ impl MixedDigital {
     }
     pub(super) fn fresh(&self) -> Self {
         match self {
-            Self::Owned(host) => Self::Owned(host.fresh()),
+            Self::Owned(host) => Self::Owned(Box::new(host.fresh())),
             Self::View(view) => Self::View(SignalView::new(Arc::clone(&view.plan))),
         }
     }
@@ -469,16 +475,15 @@ impl MixedDigitalCoordinator {
                 host.analog_probes
                     .iter()
                     .enumerate()
-                    .filter_map(move |(index, probe)| {
-                        matches!(probe, AnalogProbeWiring::Variable { .. }).then(|| {
-                            (
-                                map.analog_probes[index],
-                                host.discrete_inputs
-                                    .iter()
-                                    .map(|input| map.signals[usize::from(input.signal)])
-                                    .collect(),
-                            )
-                        })
+                    .filter(|(_, probe)| matches!(probe, AnalogProbeWiring::Variable { .. }))
+                    .map(move |(index, _)| {
+                        (
+                            map.analog_probes[index],
+                            host.discrete_inputs
+                                .iter()
+                                .map(|input| map.signals[usize::from(input.signal)])
+                                .collect(),
+                        )
                     })
             })
             .collect();
@@ -1072,10 +1077,10 @@ impl SharedDigitalTrial<'_> {
                         .digital
                         .read_real(global)
                         .expect("linked real signal");
-                } else if let Some(value) = self.coordinator.digital.read(global) {
-                    if view.bits[local] != *value {
-                        view.bits[local].clone_from(value);
-                    }
+                } else if let Some(value) = self.coordinator.digital.read(global)
+                    && view.bits[local] != *value
+                {
+                    view.bits[local].clone_from(value);
                 }
             }
             if let Some(trial) = &mut host.trial {

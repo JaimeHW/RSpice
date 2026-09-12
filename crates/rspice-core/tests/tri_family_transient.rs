@@ -260,11 +260,14 @@ fn sample_at(result: &TransientResult, name: &str, time: f64) -> f64 {
     }
     let (before, after) = (result.time[position - 1], result.time[position]);
     let span = after - before;
-    if !(span > 0.0) {
-        return values[position];
+    // A span that is not strictly positive — zero, negative or NaN — leaves
+    // nothing to interpolate across, so the later sample stands.
+    if span > 0.0 {
+        let weight = (time - before) / span;
+        values[position - 1] * (1.0 - weight) + values[position] * weight
+    } else {
+        values[position]
     }
-    let weight = (time - before) / span;
-    values[position - 1] * (1.0 - weight) + values[position] * weight
 }
 
 fn trace_points(result: &TransientResult, name: &str) -> Vec<(f64, DigitalState)> {

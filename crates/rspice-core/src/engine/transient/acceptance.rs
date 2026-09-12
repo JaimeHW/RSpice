@@ -437,7 +437,7 @@ mod tests {
                 ],
             };
             let mut instance = XspiceInstance::new(
-                &format!("A{index}"),
+                format!("A{index}"),
                 Arc::new(model),
                 vec![PortConnection::Analog(bad), PortConnection::Analog(p)],
                 &[],

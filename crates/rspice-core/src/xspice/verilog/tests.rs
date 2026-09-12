@@ -473,7 +473,8 @@ fn delayed_nonblocking_updates_preserve_capture_order_and_nba_regions() {
         .iter()
         .map(|row| row.values.iter().map(|(_, value)| value.clone()).collect())
         .collect();
-    for tick in 0..7 {
+    assert_eq!(values.len(), 7);
+    for (tick, row) in values.iter().enumerate() {
         let q = if tick < 2 {
             0
         } else if tick < 5 {
@@ -484,7 +485,7 @@ fn delayed_nonblocking_updates_preserve_capture_order_and_nba_regions() {
         let held = if tick < 3 { 0 } else { 0xa1 };
         let before_nba = if tick < 5 { 0 } else { 2 };
         assert_eq!(
-            values[tick],
+            *row,
             [
                 format!("{q:08b}"),
                 format!("{held:08b}"),

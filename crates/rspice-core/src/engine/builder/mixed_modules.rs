@@ -138,6 +138,12 @@ struct BoundaryLayout {
 /// `Ok(false)` means the model's canonical artifact carries no discrete plan,
 /// which is every analog `.va` there has ever been: the caller takes the device
 /// route it always took.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one private step of the element loop in `builder.rs`, called from \
+              exactly one place: the parameters are that loop's own locals, and \
+              a struct to carry them would exist only for this call"
+)]
 pub(super) fn try_build_mixed_signal_instance(
     circuit: &mut CircuitData,
     netlist: &crate::Netlist,

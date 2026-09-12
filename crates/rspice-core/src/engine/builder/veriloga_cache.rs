@@ -2255,6 +2255,13 @@ pub struct ProjectVerilogAConnectionLibraryRegistration {
 /// One source in an atomic project/package registration transaction.
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "every variant already owns a whole compiled artifact, and this \
+              one-shot install list is moved straight into the transaction, so \
+              boxing would only add an allocation and take the `Runtime` \
+              constructor away from the callers that pass it to `map`"
+)]
 pub enum ProjectVerilogASourceRegistration {
     Runtime(ProjectVerilogARuntimeRegistration),
     Connections(ProjectVerilogAConnectionLibraryRegistration),

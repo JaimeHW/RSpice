@@ -1302,13 +1302,12 @@ impl MixedSignalHost {
         let dependencies: Vec<_> = analog_probes
             .iter()
             .enumerate()
-            .filter_map(|(index, probe)| {
-                matches!(probe, AnalogProbeWiring::Variable { .. }).then(|| {
-                    (
-                        DigitalAnalogProbeId::from(index),
-                        discrete_inputs.iter().map(|input| input.signal).collect(),
-                    )
-                })
+            .filter(|(_, probe)| matches!(probe, AnalogProbeWiring::Variable { .. }))
+            .map(|(index, _)| {
+                (
+                    DigitalAnalogProbeId::from(index),
+                    discrete_inputs.iter().map(|input| input.signal).collect(),
+                )
             })
             .collect();
         digital.bind_analog_variable_inputs(&dependencies)?;
@@ -1330,7 +1329,7 @@ impl MixedSignalHost {
             analog: MixedCell::new(analog),
             analog_inputs: AnalogSolverInputs::analysis_start(2),
             state: MixedState {
-                digital: MixedCell::new(MixedDigital::Owned(digital)),
+                digital: MixedCell::new(MixedDigital::Owned(Box::new(digital))),
                 initial_digital: None,
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
@@ -1643,16 +1642,16 @@ impl MixedSignalHost {
             .terminal_names()
             .iter()
             .enumerate()
-            .filter_map(|(index, name)| {
-                (!self
+            .filter(|(_, name)| {
+                !self
                     .state
                     .digital
                     .plan()
                     .signals
                     .iter()
-                    .any(|signal| signal.name == *name))
-                .then(|| self.analog.node_for_terminal(index))
+                    .any(|signal| signal.name == **name)
             })
+            .map(|(index, _)| self.analog.node_for_terminal(index))
     }
 
     /// Called only at fresh circuit elaboration after all connection validation.

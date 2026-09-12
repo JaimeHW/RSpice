@@ -1328,10 +1328,10 @@ impl DigitalHost {
                 .range(..transition.sequence)
                 .copied(),
         );
-        for id in candidates.iter().copied() {
+        for id in &candidates {
             let capture = self
                 .event_updates
-                .get_mut(&id)
+                .get_mut(id)
                 .expect("indexed event capture");
             let satisfied = match &transition.values {
                 TransitionValues::FourState { previous, next } => {
@@ -1342,9 +1342,9 @@ impl DigitalHost {
                 }
             };
             if satisfied && capture.remaining.consume() {
-                let capture = self.event_updates.remove(&id).unwrap();
+                let capture = self.event_updates.remove(id).unwrap();
                 for term in &capture.terms {
-                    self.event_waiters[usize::from(term.signal)].remove(&id);
+                    self.event_waiters[usize::from(term.signal)].remove(id);
                 }
                 self.store.release_event_capture(capture);
             }

@@ -3169,8 +3169,7 @@ fn a_sub_minimum_toggling_clock_is_bounded_by_its_schedule_and_not_by_the_flip_c
     const MAX_STEP: f64 = 1.0e-3;
 
     let error = toggling_clock_run("0.001", TSTOP, MAX_STEP)
-        .err()
-        .expect("a schedule ten times finer than the solver's minimum must be refused");
+        .expect_err("a schedule ten times finer than the solver's minimum must be refused");
     let lowered = error.to_lowercase();
     assert!(
         lowered.contains("instance 'x1'"),

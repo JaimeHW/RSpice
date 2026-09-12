@@ -337,7 +337,7 @@ endmodule
     assert_eq!(bit(&digital, "immediate"), "1");
     assert_eq!(bit(&digital, "unrelated_timer"), "0");
     assert_eq!(bit(&digital, "delayed"), "0");
-    assert!(bank.clocks.iter().any(|clock| *clock == (101, physical)));
+    assert!(bank.clocks.contains(&(101, physical)));
     digital.advance_to_with(101, &mut bank).unwrap();
     assert_eq!(bit(&digital, "unrelated_timer"), "1");
     assert_eq!(bit(&digital, "delayed"), "0");

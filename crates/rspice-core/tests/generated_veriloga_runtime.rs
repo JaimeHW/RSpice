@@ -129,7 +129,10 @@ fn generated_utsoi_nqs_capacitors_reference_global_ground() {
     // as an internal node leaves the NQS network floating instead of grounded.
     assert!(!Instance::INTERNAL_NODE_NAMES.contains(&"gndnqs"));
     let nodes = (1..=Instance::NODE_COUNT).collect::<Vec<_>>();
-    let branches = (1..=Instance::BRANCH_COUNT).collect::<Vec<_>>();
+    // Counted from one rather than written `1..=BRANCH_COUNT`: this module
+    // declares no branch unknowns, and an inclusive range ending at zero is an
+    // empty range spelled backwards.
+    let branches = (1..).take(Instance::BRANCH_COUNT).collect::<Vec<_>>();
     let width = nodes.len() + branches.len();
     let entries = (0..width)
         .flat_map(|row| (0..width).map(move |column| (row, column, 0.0)))
