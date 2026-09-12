@@ -681,6 +681,7 @@ impl MixedDigitalCoordinator {
             rollback: Some(rollback),
             time,
             tick,
+            published_tick: tick,
             probe,
         })
     }
@@ -692,6 +693,17 @@ pub(crate) struct SharedDigitalTrial<'a> {
     rollback: Option<MixedCell<DigitalHost>>,
     time: f64,
     tick: u64,
+    /// The highest tick this trial has published an A/D bank at, carried for
+    /// the life of the trial rather than for one settle pass.
+    ///
+    /// The same running maximum `ActiveTrial::published_tick` keeps on the
+    /// standalone path, and monotone for the same reason: a settle pass is one
+    /// Newton iteration of this trial, the next one solves a different
+    /// candidate over the same interval, and a root it finds can interpolate
+    /// behind a crossing this pass already published and ran the discrete half
+    /// on. Re-seeding at the trial's floored tick each pass would let the
+    /// store's clock go backwards inside one trial.
+    published_tick: u64,
     probe: bool,
 }
 
@@ -876,22 +888,24 @@ impl SharedDigitalTrial<'_> {
         // the transitions it found there.
         let candidate_seconds = self.time;
         let mut published_any = false;
-        // Monotone across the pass: a crossing in the lower half of a tick
-        // rounds to a slot the digital world has already left, and an earlier
-        // group in this pass may have left a later one still.
-        let mut published_tick = self.tick;
         let mut group = 0;
         while group < self.coordinator.publications.len() {
-            let coordinator = &mut self.coordinator;
-            let crossing = coordinator.publications[group].crossing;
-            let end = coordinator.publications[group..]
+            let crossing = self.coordinator.publications[group].crossing;
+            let end = self.coordinator.publications[group..]
                 .iter()
                 .position(|entry| entry.crossing != crossing)
-                .map_or(coordinator.publications.len(), |offset| group + offset);
-            published_tick = coordinator.publications[group..end]
+                .map_or(self.coordinator.publications.len(), |offset| group + offset);
+            // Monotone across the trial, not merely across this pass: a
+            // crossing in the lower half of a tick rounds to a slot the
+            // digital world has already left, and an earlier group — of this
+            // pass or of an earlier Newton iteration of this same trial — may
+            // have left a later one still.
+            self.published_tick = self.coordinator.publications[group..end]
                 .iter()
                 .map(|entry| entry.tick)
-                .fold(published_tick, u64::max);
+                .fold(self.published_tick, u64::max);
+            let published_tick = self.published_tick;
+            let coordinator = &mut self.coordinator;
             coordinator.drives.clear();
             for entry in &coordinator.publications[group..end] {
                 let host = &hosts[entry.host];

@@ -1783,6 +1783,11 @@ fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
 // * Two bridges that crossed at two instants are two events at two ticks,
 //   published earliest first. One bank at the latest of their ticks delays the
 //   earlier transition by a whole tick.
+// * The ticks one trial publishes at never decrease, however far back into the
+//   step a later Newton iteration's crossing interpolates. The instant stays
+//   the crossing's own; the tick is clamped forward onto the trial's
+//   high-water mark, because a wheel that runs backwards dates an effect
+//   before its cause.
 // * A wake from the other event kernel — an XSPICE code model's output — is
 //   dated at the tick *at or after* it, because the reverse direction hands an
 //   HDL tick to XSPICE at exactly the instant that tick names. Nearest-tick
@@ -1868,6 +1873,44 @@ module two_crossings(p, n, ca, cb, ya, yb);
 endmodule
 "#;
 
+/// Two A/D bridges whose processes record the digital tick they ran on as well
+/// as the physical instant that woke them.
+///
+/// `gain` is the discrete quantity the first crossing's process writes and the
+/// analog half reads back — the feedback that makes the solver re-solve the
+/// same trial and find the second bridge's crossing on a later Newton
+/// iteration.
+const FEEDBACK_CROSSINGS: &str = r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module feedback_crossings(p, n, ca, cb, ya, yb);
+    inout p, n;
+    electrical p, n;
+    input ca, cb;
+    output ya, yb;
+    wire ca, cb;
+    reg ya, yb;
+    reg [63:0] at_a, at_b, rt_a, rt_b;
+    integer gain;
+    initial begin
+        ya = 1'b0; yb = 1'b0; gain = 1;
+        at_a = 64'd0; at_b = 64'd0; rt_a = 64'd0; rt_b = 64'd0;
+    end
+    always @(posedge ca) begin
+        gain = 2;
+        at_a = $realtobits($abstime);
+        rt_a = $realtobits($realtime);
+        #1 ya = ~ya;
+    end
+    always @(posedge cb) begin
+        at_b = $realtobits($abstime);
+        rt_b = $realtobits($realtime);
+        #1 yb = ~yb;
+    end
+    analog I(p, n) <+ gain * V(p, n) / 1000000.0;
+endmodule
+"#;
+
 /// Drive one standalone host the way a transient stepper without boundary
 /// refinement drives it: accept a point, open the next trial over the whole
 /// interval to it, settle, accept.
@@ -1902,6 +1945,19 @@ impl CrossingDriver {
         self.host
             .begin_trial(time, dt, IntegrationCoefficients::inactive(), first, false)
             .unwrap_or_else(|error| panic!("a trial at {time:e} s begins: {error}"));
+        self.settle(voltages);
+    }
+
+    /// Settle the open trial against one solution, to quiescence.
+    ///
+    /// Called a second time on the same trial with a different solution, this
+    /// is the next Newton iteration: the solver re-solved the same candidate
+    /// timepoint because the discrete half moved something the analog half
+    /// reads, and the bridges are sampled again against the new iterate. The
+    /// trial is the same trial — a crossing found here is found *after* every
+    /// crossing the earlier iterations published.
+    fn settle(&mut self, voltages: &[f64]) {
+        let time = self.open;
         while self
             .host
             .settle_analog_bridges(voltages)
@@ -2089,6 +2145,107 @@ fn two_crossings_in_one_step_publish_at_their_own_ticks_in_order() {
             .expect("the second reaction is readable"),
         "1",
         "the later crossing must still reach its own process"
+    );
+}
+
+/// **Property 5, case b′.** A crossing a later Newton iteration of the same
+/// trial finds is never published at a tick the trial has already left.
+///
+/// The interpolated instant of such a crossing is not ordered against the
+/// instants of the crossings already published: the second iterate is a
+/// different solution over the *whole* step, so its root can sit anywhere
+/// inside the interval — including before a crossing the first iterate
+/// published and the discrete half has already reacted to. Here `ca` crosses
+/// 0.6 of the way through the step on the first iterate and publishes at the
+/// tick after the trial's; the `posedge ca` process writes `gain`, the analog
+/// half reads it, and the re-solve puts `cb`'s root 0.2 of the way through the
+/// step, which rounds back onto the tick the trial started on.
+///
+/// The digital clock may not run backwards inside one trial. `$abstime` still
+/// answers "when did this happen" and is each crossing's own instant — the two
+/// are separately reported precisely so the tick can be clamped without lying
+/// about the physics — but `$realtime` is where the process sits on the wheel,
+/// and an effect dated a tick before a cause it followed is not a time base.
+/// The second publication is therefore clamped forward onto the trial's
+/// high-water mark, exactly as an interior crossing is clamped forward onto
+/// the trial's own tick.
+///
+/// The second solution is handed to the host rather than solved for, because a
+/// standalone host has no solver: the two vectors are the two iterates a
+/// coupled engine would have produced.
+#[test]
+fn a_crossing_found_on_a_later_iteration_publishes_no_earlier_than_one_already_published() {
+    const START: f64 = 10.0e-9;
+    const STEP: f64 = 0.9e-9;
+
+    let mut host = MixedSignalHost::compile(
+        FEEDBACK_CROSSINGS,
+        None,
+        "xfeedback",
+        &[1, 0],
+        SchedulerLimits::default(),
+    )
+    .expect("the feedback-crossing module compiles");
+    host.add_adc_bridge("ca", 0, (2, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the first A/D bridge is declarable");
+    host.add_adc_bridge("cb", 0, (3, 0), CROSSING_THRESHOLD, CROSSING_THRESHOLD)
+        .expect("the second A/D bridge is declarable");
+
+    let quiet = [0.0, 0.0, 0.0];
+    let mut driver = CrossingDriver::new(host, &quiet);
+    driver.step_to(START, &quiet);
+
+    let candidate = START + STEP;
+    let late = ramp_reaching_threshold_at(0.6 / 0.9);
+    let early = ramp_reaching_threshold_at(0.2 / 0.9);
+    // The first iterate: only `ca` has moved, and it crossed in the upper half
+    // of the trial's tick, so it publishes at the tick after it.
+    driver.begin_and_settle(candidate, &[0.0, late, 0.0]);
+    // The re-solve `gain` caused: `cb` now crosses too, in the lower half.
+    driver.settle(&[0.0, late, early]);
+
+    let crossing_a = analytic_crossing(candidate, STEP, late);
+    let crossing_b = analytic_crossing(candidate, STEP, early);
+    assert!(
+        crossing_b < crossing_a,
+        "the fixture must find the second crossing at an earlier instant than the \
+         first: {crossing_b:.16e} s against {crossing_a:.16e} s"
+    );
+
+    for (signal, expected) in [("at_a", crossing_a), ("at_b", crossing_b)] {
+        let woke = read_real_bits(&driver.host, signal);
+        assert!(
+            (woke - expected).abs() <= 1.0e-21,
+            "`{signal}` must read its own crossing {expected:.16e} s, read {woke:.16e} s"
+        );
+    }
+
+    // `$realtime` is in module units, which are ticks here.
+    let first_tick = read_real_bits(&driver.host, "rt_a");
+    let second_tick = read_real_bits(&driver.host, "rt_b");
+    let nearest_a = (crossing_a / tick_seconds()).round();
+    assert_eq!(
+        first_tick.to_bits(),
+        nearest_a.to_bits(),
+        "the fixture needs the first publication past the trial's own tick {}: it \
+         landed on {first_tick}",
+        floor_ticks(candidate)
+    );
+    assert!(
+        second_tick >= first_tick,
+        "a crossing published after another one in the same trial may not be dated \
+         before it: $realtime was {second_tick} after {first_tick}"
+    );
+
+    // And the wheel agrees: nothing the second publication scheduled comes due
+    // before the reaction of the publication it followed.
+    driver.accept();
+    let due = driver.next_event();
+    let earliest = tick_to_seconds(nearest_a as u64 + 1);
+    assert!(
+        due >= earliest,
+        "the first reaction due after the trial is at {due:.16e} s, before the \
+         {earliest:.16e} s one tick after the first publication"
     );
 }
 

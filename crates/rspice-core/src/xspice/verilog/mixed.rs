@@ -770,6 +770,25 @@ struct ActiveTrial {
     /// name a time the run never accepted.
     analog_inputs: AnalogSolverInputs,
     tick: u64,
+    /// The highest tick this trial has published an A/D transition at.
+    ///
+    /// A crossing is dated by interpolating between the accepted solution and
+    /// the candidate one, and every settle pass of a trial is a Newton
+    /// iteration against a *different* candidate over that same interval: a
+    /// root one of them finds can sit anywhere inside it, including before a
+    /// crossing an earlier pass published and the discrete half has already
+    /// run on. Dating that root on its own would set the store's clock back
+    /// inside one trial — `$realtime` running backwards, an effect dated
+    /// before the cause it followed — so its tick is clamped forward onto this
+    /// mark, exactly as an interior crossing is clamped forward onto the
+    /// trial's own tick. The instant is untouched either way: `$abstime` still
+    /// reports where the root is.
+    ///
+    /// Trial-scoped, because a rejected trial takes its publications back with
+    /// it, and an accepted one leaves the next trial a floored tick that is
+    /// never below this mark — every crossing is interpolated inside
+    /// `[time - dt, time]` and rounds no further than `ceil(time)`.
+    published_tick: u64,
     time_seconds: f64,
     timestep_seconds: f64,
     /// Whether this trial was opened as a probe by
@@ -2016,6 +2035,7 @@ impl MixedSignalHost {
             rollback,
             analog_inputs: previous_inputs,
             tick,
+            published_tick: tick,
             time_seconds,
             timestep_seconds,
             probe,
@@ -2399,12 +2419,17 @@ impl MixedSignalHost {
     /// lower half of the trial's tick rounds to the tick before it, which is a
     /// slot the digital world has already left, so the clamp publishes it here
     /// instead; a crossing in the upper half rounds to the tick after, which is
-    /// still ahead and is left alone. Nothing is queued between the crossing
-    /// and here to reorder against, because [`Self::begin_trial`] has already
-    /// refused a step that passed a scheduled event.
+    /// still ahead and is left alone. The mark it is clamped against belongs to
+    /// the *trial*, not to this pass (`ActiveTrial::published_tick`), because a
+    /// later Newton iteration of the same trial can interpolate a root behind
+    /// one already published. Nothing is queued between the crossing and here
+    /// to reorder against, because [`Self::begin_trial`] has already refused a
+    /// step that passed a scheduled event.
     ///
     /// Only the crossing's zero-delay consequences execute at this physical
-    /// time. Its rounded reporting tick does not authorize draining unrelated
+    /// time. Its reporting tick — nearest to the crossing, then clamped
+    /// forward, which is this lane's quantization and not the ceiling the
+    /// other event kernel's wakes take — does not authorize draining unrelated
     /// timers; those remain pending until analog time reaches their timestamp.
     pub fn settle_analog_bridges(
         &mut self,
@@ -2546,7 +2571,12 @@ impl MixedSignalHost {
         // real promotion of the digital time", with the two domains at one
         // timepoint and nothing to interpolate between.
         fill_analog_probes(&self.analog_probes, circuit_voltages, &mut scratch.probes);
-        let mut published_tick = tick;
+        // Carried by the trial rather than seeded here, so the running maximum
+        // spans every Newton iteration of it — see `ActiveTrial::published_tick`.
+        let mut published_tick = self
+            .trial
+            .as_ref()
+            .map_or(tick, |trial| trial.published_tick);
         let mut group = 0;
         while group < scratch.crossings.len() {
             let crossing = scratch.crossings[group].1;
@@ -2584,8 +2614,9 @@ impl MixedSignalHost {
             // `published_tick` carries the running maximum rather than the
             // group's own answer, which is what keeps the sequence monotone: a
             // crossing in the lower half of a tick rounds to a slot the
-            // digital world has already left, and an earlier group in this
-            // same pass may have left a later one still.
+            // digital world has already left, and an earlier group — of this
+            // pass or of an earlier Newton iteration of this same trial — may
+            // have left a later one still.
             let crossing_tick = if dac_activity {
                 tick
             } else {
@@ -2594,6 +2625,9 @@ impl MixedSignalHost {
                     .map_err(DigitalRunError::from)?
             };
             published_tick = published_tick.max(crossing_tick);
+            if let Some(trial) = self.trial.as_mut() {
+                trial.published_tick = published_tick;
+            }
             if !scratch.drives.is_empty() {
                 if self.state.digital.is_view() {
                     self.state.digital.make_mut().force_many_from_analog_at(
