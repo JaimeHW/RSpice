@@ -1204,8 +1204,7 @@ impl Mosfet {
     ///
     /// Call once, after model and instance parameters are applied.
     pub(crate) fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
-        use crate::constants::{K_BOLTZMANN, Q_ELECTRON, TEMP_REFERENCE};
-        const KOVERQ: Value = K_BOLTZMANN / Q_ELECTRON;
+        use crate::constants::{TEMP_REFERENCE, VT_REFERENCE, thermal_voltage};
 
         let temp = temp_kelvin;
         let tnom = tnom_kelvin;
@@ -1214,21 +1213,25 @@ impl Mosfet {
         }
         self.linearization_cache_valid = false;
 
-        let vt = KOVERQ * temp;
+        // The engine's single SI k/q ratio, not a local quotient of the two
+        // rounded CODATA constants: those differ in the last bit, and a device
+        // that used its own spelling landed one ulp away from
+        // [`crate::constants::VT_REFERENCE`] at the reference temperature.
+        let vt = thermal_voltage(temp);
         self.vt = vt;
         if self.legacy_bsim_model.is_some() {
             return;
         }
 
-        let vtnom = KOVERQ * tnom;
+        let vtnom = thermal_voltage(tnom);
         let ratio = temp / tnom;
         let fact1 = tnom / TEMP_REFERENCE;
         let fact2 = temp / TEMP_REFERENCE;
         let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
         let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
         // ngspice's CHARGE*arg terms, folded through k/q to stay in volts.
-        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * KOVERQ * TEMP_REFERENCE);
-        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * KOVERQ * TEMP_REFERENCE);
+        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * VT_REFERENCE);
+        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * VT_REFERENCE);
         let pbfact = -2.0 * vt * (1.5 * fact2.ln() + arg);
         let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + arg1);
         let ratio4 = ratio * ratio.sqrt();
