@@ -1771,6 +1771,123 @@ fn a_femtosecond_follow_up_activation_lands_instead_of_ending_the_run() {
     );
 }
 
+/// A module whose digital half chains a fifty-femtosecond delay onto an
+/// activation of its own, rather than onto an analog crossing.
+///
+/// `timescale 1ps/1fs` makes `#1000` a nanosecond and `#0.05` fifty
+/// femtoseconds. The nanosecond activation is one the stepper lands on
+/// exactly; the follow-up is scheduled *by that landing*, and it is the one
+/// the breakpoint manager's merge tolerance used to swallow.
+///
+/// `spin` is internal on purpose. A D/A bridge that changes level at an
+/// accepted point makes that point a `$discontinuity`, and a discontinuity
+/// restarts through `mark_external_breakpoint_solved`, which leaves the
+/// runtime schedule alone. The window this case is about belongs to the
+/// ordinary restart — so the nanosecond activation here moves no boundary, and
+/// only the follow-up does.
+const MERGE_WINDOW_FOLLOW: &str = r#"
+`timescale 1ps/1fs
+`include "disciplines.vams"
+module merge_window_follow(p, n, qd);
+    inout p, n;
+    electrical p, n;
+    output qd;
+    reg spin, qd;
+    initial begin spin = 1'b0; qd = 1'b0; end
+    always begin
+        #1000 spin = ~spin;
+        #0.05 qd = ~qd;
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+fn merge_window_deck(model: &ModelFile) -> String {
+    format!(
+        "* a fifty-femtosecond follow-up chained onto a nanosecond activation\n\
+         x1 p 0 qd merge_window_follow\n\
+         rp p 0 1meg\n\
+         rqd qd 0 10k\n\
+         .va \"{}\" merge_window_follow\n\
+         .tran 1n 20n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// **Property 4, case c.** An activation inside the breakpoint manager's merge
+/// tolerance — but above the solver's hard minimum — is delivered.
+///
+/// This is the window between the two contracts either side of it, and it used
+/// to be the one place a *correct* deck was refused. ngspice's `delmin` is
+/// `1e-11 * tmax` and its breakpoint tolerance ten times that, so a
+/// millisecond maximum step puts the floor at ten femtoseconds and the
+/// tolerance at a hundred. Fifty femtoseconds is therefore an interval the
+/// stepper can take — case (b)'s landing contract does not apply, the
+/// activation is genuinely reachable — and yet the manager treats it as
+/// coincident with the point just solved.
+///
+/// What that cost: the activation was registered as a runtime breakpoint by
+/// the accepted point that scheduled it, and deleted by the same accepted
+/// point's `mark_breakpoint_solved`, which discards every runtime breakpoint
+/// within the merge tolerance. The next attempt had nothing to land on, stepped
+/// over the tick, and the module refused the run —
+/// `MixedSignalError::MissedDigitalBreakpoint`, reporting an activation the
+/// engine itself had dropped. Under a default `tmax` the window is
+/// `(2e-13, 2e-12) * tstop`: a picosecond follow-up in a millisecond transient
+/// is inside it.
+///
+/// The fix is a delivery-path one — a mixed module's next activation is folded
+/// into the stepper's own landing targets, where no merge tolerance can reach
+/// it — so this asserts the delivery rather than the absence of one error: the
+/// run reaches `tstop`, and every nanosecond activation has its follow-up.
+#[test]
+fn an_activation_inside_the_breakpoint_merge_tolerance_is_delivered() {
+    const TSTOP: f64 = 20.0e-9;
+    const MAX_STEP: f64 = 1.0e-3;
+    const FOLLOW_UP: f64 = 50.0e-15;
+
+    // The window this case is about, stated as the rules that produce it
+    // rather than as the two numbers they come to.
+    let hard_minimum = MAX_STEP * 1.0e-11;
+    let merge_tolerance = MAX_STEP * 1.0e-10;
+    assert!(
+        FOLLOW_UP > hard_minimum && FOLLOW_UP <= merge_tolerance,
+        "the follow-up must be reachable ({hard_minimum:e}s) and inside the merge \
+         tolerance ({merge_tolerance:e}s), it is {FOLLOW_UP:e}s"
+    );
+
+    let model = ModelFile::new("merge_window_follow", MERGE_WINDOW_FOLLOW);
+    let result = run(&merge_window_deck(&model), TSTOP, MAX_STEP);
+
+    let last = result.time.last().copied().unwrap_or(0.0);
+    assert!(
+        last >= TSTOP - 1.0e-12,
+        "the run must reach tstop {TSTOP:e}s, it stopped at {last:e}s"
+    );
+    // One follow-up per period of the `always` block, which is a nanosecond
+    // plus the follow-up delay, minus the initial level the trace opens with.
+    let period = 1.0e-9 + FOLLOW_UP;
+    let expected = (TSTOP / period).floor() as usize;
+    let qd = digital_points(&result, "qd");
+    let edges = qd.len().saturating_sub(1);
+    assert_eq!(
+        edges, expected,
+        "a {period:e}s cadence over {TSTOP:e}s owes {expected} follow-ups, saw {edges}: {qd:?}"
+    );
+    // Each one is the follow-up of the nanosecond activation before it, so it
+    // lands on its own tick, one period after the last.
+    for (index, point) in qd.iter().enumerate().skip(1) {
+        let scheduled = index as f64 * period;
+        assert!(
+            (point.0 - scheduled).abs() <= merge_tolerance,
+            "follow-up {index} is scheduled at {scheduled:e}s and must be delivered within \
+             the merge tolerance {merge_tolerance:e}s of it, landed at {:e}s",
+            point.0
+        );
+    }
+}
+
 //=============================================================================
 // Crossing instants
 //=============================================================================

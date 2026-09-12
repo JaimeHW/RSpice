@@ -222,6 +222,38 @@ fn accepted_veriloga_event_time(
     {
         target = Some(target.map_or(event, |target| target.min(event)));
     }
+    // A mixed module's digital queue is the third scheduler with that same
+    // contract, and the fold above cannot see it: its activations belong to the
+    // discrete half rather than to any analog device. Reaching the stepper only
+    // through the breakpoint manager is what made them droppable.
+    // `mark_breakpoint_solved` discards every runtime breakpoint within the
+    // merge tolerance — ten times `delmin` — of the point just solved, and an
+    // activation the accepted point itself scheduled into that window was
+    // registered and deleted by the same accepted point. The next attempt had
+    // nothing to land on, stepped over a tick the module considered reachable,
+    // and the run ended as a missed digital breakpoint over an activation the
+    // engine had dropped. Folded in here it is a landing target the stepper
+    // owns, so delivering it no longer depends on a tolerance whose job is to
+    // merge coincident times rather than to move events.
+    //
+    // Only an activation the module itself calls reachable is folded, on the
+    // same `>= hard_min_dt` test its missed-breakpoint guard applies. One
+    // closer than that has no analog instant between the accepted point and
+    // it: the module coalesces it onto the next timepoint and never reports it
+    // as missed, so a landing target for it would buy nothing — and it would
+    // cost, because landing a sub-minimum target means marching at the floor
+    // through times that are `accepted + hard_min` nudged up to survive
+    // subtraction. Over the ten thousand points a femtosecond schedule takes
+    // to cross a decade those nudges accumulate thousands of ulps, and the
+    // last interval to `tstop` ends up a hair under the integration floor,
+    // which `breakpoints::fit_model_interval` refuses as an unreachable
+    // mandatory time.
+    #[cfg(feature = "veriloga")]
+    if let Some(event) = circuit.next_mixed_event_time()?
+        && event - accepted_time >= hard_min_dt
+    {
+        target = Some(target.map_or(event, |target| target.min(event)));
+    }
     let Some(target) = target else {
         return Ok(None);
     };
