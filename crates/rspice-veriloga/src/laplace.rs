@@ -2350,7 +2350,13 @@ endmodule
         let error = device
             .try_evaluate()
             .expect_err("DC integrator evaluation must fail closed");
-        assert!(matches!(error, crate::vm::VmError::InvalidNumericResult(_)));
+        // An integrator's DC equilibrium is singular at every iterate, so
+        // `LaplaceError::is_iterate_dependent` classifies it as a runtime
+        // operation rather than a value the solver could step away from.
+        assert!(
+            matches!(error, crate::vm::VmError::InvalidRuntimeOperation(_)),
+            "{error:?}"
+        );
         assert!(error.to_string().contains("DC equilibrium"));
     }
 
