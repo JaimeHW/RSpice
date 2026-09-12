@@ -604,20 +604,6 @@ impl MixedDigitalCoordinator {
         scheduled_seconds - accepted >= self.analog_step_floor
     }
 
-    /// Whether the shared wheel has an activation due inside a trial that ends
-    /// at `time` — the predicate [`Self::begin_trial`] records for the trial it
-    /// opens, asked before one is open.
-    pub(crate) fn digital_activity_within(&self, time: f64) -> Result<bool, MixedSignalError> {
-        let Some(next) = self.digital.next_tick() else {
-            return Ok(false);
-        };
-        let tick = self
-            .resolution
-            .seconds_to_floor_ticks(time)
-            .map_err(DigitalRunError::from)?;
-        Ok(next <= tick)
-    }
-
     /// Open a trial at an analog time.
     ///
     /// # Contract for a schedule finer than the analog resolution
@@ -664,7 +650,6 @@ impl MixedDigitalCoordinator {
                 });
             }
         }
-        let digital_activity = self.digital.next_tick().is_some_and(|next| next <= tick);
         let rollback = self.digital.clone();
         Ok(SharedDigitalTrial {
             coordinator: self,
@@ -672,7 +657,6 @@ impl MixedDigitalCoordinator {
             time,
             tick,
             probe,
-            digital_activity,
         })
     }
 }
@@ -684,9 +668,6 @@ pub(crate) struct SharedDigitalTrial<'a> {
     time: f64,
     tick: u64,
     probe: bool,
-    /// Whether the shared wheel had an activation due inside this trial,
-    /// recorded before the first advance consumed it.
-    digital_activity: bool,
 }
 
 struct CircuitAnalogParticipant<'a, 'p> {
@@ -733,11 +714,6 @@ impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
 }
 
 impl SharedDigitalTrial<'_> {
-    /// Whether the shared discrete half runs inside this trial's interval.
-    pub(crate) fn digital_activity(&self) -> bool {
-        self.digital_activity
-    }
-
     /// Read every process probe before allowing any instance to run.
     pub(crate) fn advance(
         &mut self,
@@ -837,7 +813,7 @@ impl SharedDigitalTrial<'_> {
             // publish the shared bank one tick past the instant the
             // integrator accepted, which is the same error in the shared path.
             if let Some(trial) = &host.trial
-                && !trial.digital_activity
+                && !trial.dac_activity
             {
                 for (moved, crossing) in trial
                     .vectors

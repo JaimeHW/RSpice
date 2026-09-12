@@ -53,8 +53,8 @@ const EMIT_ENV: &str = "RSPICE_TRI_FAMILY_EMIT";
 const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 
 const DECK_A_POINTS: usize = 1458;
-const DECK_A_GRID_HASH: u64 = 0xe539_8482_dcfa_bb71;
-const DECK_A_VOLT_HASH: u64 = 0x21de_645e_56e5_6f83;
+const DECK_A_GRID_HASH: u64 = 0x3e5f_36d3_ad4e_30bd;
+const DECK_A_VOLT_HASH: u64 = 0xbc9a_9ba1_03f5_f494;
 const DECK_C2_POINTS: usize = 265;
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2

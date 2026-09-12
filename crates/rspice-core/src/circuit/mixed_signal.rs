@@ -149,17 +149,26 @@ impl<'a> MixedHostTrialGroup<'a> {
             None => digital.advance(self.hosts, voltages),
         }
         .map_err(shared_error)?;
-        if digital.digital_activity() {
-            // The coordinator ran the wheel for every enrolled instance at
-            // once, and an instance reads that wheel through a view it cannot
-            // question. Tell each of them before their bridges are sampled:
-            // a boundary that moves in a step the discrete half acted inside
-            // was moved by the event, not by a root inside the interval.
+        digital.synchronize(self.hosts).map_err(shared_error)?;
+        // After the synchronize, because an enrolled instance reads its
+        // boundary through a view and that is what refreshes one: asking
+        // before it compares the view against itself and always answers no.
+        //
+        // The coordinator ran the wheel for every enrolled instance at once,
+        // so whether that run moved a D/A output is a question about the whole
+        // circuit rather than about any one instance: one instance's bridge
+        // and another's A/D input can share a deck node. Ask every instance
+        // whether its own outputs moved, and report the disjunction to all of
+        // them before any of their bridges are sampled.
+        let mut boundary_moved = false;
+        for host in self.hosts.iter() {
+            boundary_moved |= named(host, host.dac_moved_since_trial_start())?;
+        }
+        if boundary_moved {
             for host in self.hosts.iter_mut() {
-                host.note_shared_digital_activity();
+                host.note_shared_dac_movement();
             }
         }
-        digital.synchronize(self.hosts).map_err(shared_error)?;
         for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
             let mut moved = false;
             for host in self.hosts.iter_mut() {
@@ -823,29 +832,6 @@ impl CircuitData {
         if self.mixed_signal_hosts.is_empty() {
             return Ok((None, false));
         }
-        let shared_digital_activity = match &self.mixed_digital_coordinator {
-            Some(coordinator) => coordinator
-                .digital_activity_within(time)
-                .map_err(shared_error)?,
-            None => false,
-        };
-        let mut boundary_root: Option<Value> = None;
-        for host in &self.mixed_signal_hosts {
-            if let Some(target) = named(
-                host,
-                host.analog_boundary_refinement_time(
-                    time,
-                    voltages,
-                    minimum_timestep,
-                    shared_digital_activity,
-                ),
-            )? {
-                boundary_root = Some(boundary_root.map_or(target, |current| current.min(target)));
-            }
-        }
-        if boundary_root.is_some() {
-            return Ok((boundary_root, false));
-        }
         let integration = mixed_integration_coefficients(time, dt, companion)?;
         let bindings = self.mixed_xspice_bindings.clone();
         self.with_mixed_probe(|circuit, coordinator, hosts, resources| {
@@ -875,6 +861,25 @@ impl CircuitData {
                 group.settle_with(&mut digital, voltages, Some(&mut participant))?;
             } else {
                 group.settle(&mut digital, voltages)?;
+            }
+            // An A/D crossing this settled trial placed strictly inside its
+            // own interval is a root the solver is asked to land on. It is
+            // read from the trial rather than predicted before one was opened,
+            // because whether a D/A bridge moved in this interval — the fact
+            // that decides whether the crossing is interior at all — is only
+            // established by running the discrete half. The trial rolls back
+            // either way, so nothing this settle published survives the
+            // refusal.
+            for host in group.hosts.iter() {
+                if let Some(target) =
+                    named(host, host.trial_boundary_refinement_time(minimum_timestep))?
+                {
+                    refinement =
+                        Some(refinement.map_or(target, |current: Value| current.min(target)));
+                }
+            }
+            if refinement.is_some() {
+                return Ok((refinement, false));
             }
             for host in group.hosts.iter_mut() {
                 let inspected = (|| {
