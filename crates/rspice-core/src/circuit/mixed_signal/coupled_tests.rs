@@ -803,6 +803,37 @@ endmodule
         .unwrap();
     circuit.begin_veriloga_analysis(2).unwrap();
     circuit.start_mixed_digital_execution().unwrap();
+    // Accept the run's first point, as the transient stepper does. Until tick
+    // zero has run, every process is pending *at* tick zero and that is the
+    // only thing either lane has queued — nothing ahead of an accepted point
+    // for the fold to be asked about. Running it leaves the module blocked on
+    // its `#3`, which is the activation this fixture exists to hold.
+    let size = circuit.matrix_size();
+    let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+    let matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries).unwrap();
+    circuit.link_indices(&matrix);
+    let mut solution = vec![0.0; size];
+    let coefficients = crate::numerics::integration::CompanionCoefficients::backward_euler();
+    let rollback = circuit.capture_xspice_acceptance();
+    let mut projected = Vec::new();
+    circuit
+        .accept_mixed_transient_with(
+            0.0,
+            0.0,
+            &mut solution,
+            XspiceCompanionPolicy {
+                coefficients: &coefficients,
+                xyce_one_step_order2: false,
+            },
+            true,
+            false,
+            Some(rollback.resources()),
+            false,
+            &mut projected,
+            |_, _, _, _| Ok(()),
+        )
+        .expect("the run's first point settles");
+    rollback.resources().commit();
     circuit
 }
 
@@ -855,10 +886,29 @@ fn one_fold_answers_the_activation_each_caller_used_to_fold_for_itself() {
         Some("Verilog-A/AMS instance 'xtick'"),
         "the wheel names the instance that owns the process"
     );
+    // The opening accepted point may leave the inverter's own first output in
+    // the code-model queue. Drain it, so that what the fold answers below is
+    // what this test queued rather than what the fixture came up with.
+    for _ in 0..8 {
+        let Some(due) = circuit.next_xspice_activation().map(|a| a.seconds()) else {
+            break;
+        };
+        assert!(
+            due < wheel / 4.0,
+            "the fixture's opening code-model events must fall well inside the \
+             module's first activation, got {due:e} against {wheel:e}"
+        );
+        circuit
+            .scheduler
+            .xspice_event_queue
+            .make_mut()
+            .run_due_events(due, |_| {})
+            .expect("the opening code-model events settle");
+    }
     assert_eq!(
         circuit.next_xspice_activation().map(|a| a.seconds()),
         None,
-        "no code model has queued anything yet"
+        "no code model has queued anything the fold has to account for yet"
     );
     // The one fold, rendered so that two answers can be compared.
     fn folded(

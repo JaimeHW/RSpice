@@ -669,11 +669,12 @@ impl MixedDigitalCoordinator {
     /// a schedule the analog side is simply too coarse to resolve, which is
     /// not what Spectre/AMS Designer does with one.
     fn activation_was_reachable(&self, scheduled_seconds: f64) -> bool {
-        if self.analog_step_floor <= 0.0 {
+        let floor = self.analog_step_floor();
+        if floor <= 0.0 {
             return true;
         }
         let accepted = self.accepted_time.unwrap_or(0.0);
-        scheduled_seconds - accepted >= self.analog_step_floor
+        scheduled_seconds - accepted >= floor
     }
 
     /// Open a trial at an analog time.

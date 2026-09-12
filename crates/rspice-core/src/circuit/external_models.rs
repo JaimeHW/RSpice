@@ -96,11 +96,9 @@ fn veriloga_schedule_owner(name: &str) -> ScheduleOwner<'_> {
 
 /// Keep the earlier of the activation held so far and one more candidate.
 ///
-/// Shared by the feature-gated arms of
-/// [`CircuitData::veriloga_scheduled_activation`] so that every scheduler is
-/// folded on one rule: strictly after the accepted point, finite, earliest
-/// wins, and the first to claim a time keeps it.
-#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+/// Shared by the arms of [`CircuitData::veriloga_scheduled_activation`] so
+/// that every scheduler is folded on one rule: strictly after the accepted
+/// point, finite, earliest wins, and the first to claim a time keeps it.
 fn fold_scheduled_activation<'a>(
     owner: &mut Option<(Option<ScheduleOwner<'a>>, Value)>,
     candidate: Option<(Option<ScheduleOwner<'a>>, Value)>,
@@ -1631,8 +1629,7 @@ impl CircuitData {
     /// grid's replay arithmetic; everything that folds the lanes asks
     /// [`Self::next_activation`] instead.
     pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
-        self.next_xspice_activation()
-            .map(scheduler::Activation::seconds)
+        self.scheduler.xspice_event_queue.next_event_time()
     }
 
     /// Drain absolute transient breakpoint requests emitted by XSPICE models.
@@ -4284,10 +4281,7 @@ impl CircuitData {
         &self,
         accepted_time: Value,
     ) -> Option<(Option<ScheduleOwner<'_>>, Value)> {
-        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         let mut owner: Option<(Option<ScheduleOwner<'_>>, Value)> = None;
-        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
-        let owner: Option<(Option<ScheduleOwner<'_>>, Value)> = None;
         #[cfg(feature = "veriloga")]
         {
             let analog = self.veriloga_devices.iter().flat_map(|device| {
@@ -4323,16 +4317,19 @@ impl CircuitData {
             // landed on the same contract a mixed activation is, so a point
             // landed at the floor for one is paced by a schedule exactly as a
             // mixed tick is.
-            let scheduled = self
-                .scheduler
-                .next_activation(scheduler::ActivationLanes::scheduled(accepted_time))
-                .ok()
-                .flatten()
-                .map(|activation| (activation.owner, activation.seconds()));
-            for candidate in analog.chain(mixed).chain(scheduled) {
+            for candidate in analog.chain(mixed) {
                 fold_scheduled_activation(&mut owner, Some(candidate), accepted_time);
             }
         }
+        fold_scheduled_activation(
+            &mut owner,
+            self.scheduler
+                .next_activation(scheduler::ActivationLanes::scheduled(accepted_time))
+                .ok()
+                .flatten()
+                .map(|activation| (activation.owner, activation.seconds())),
+            accepted_time,
+        );
         // A generated built-in device's timer is an absolute event target the
         // same fold lands — `veriloga_transient_event_time` folds it beside
         // the JIT devices' — so a run it pins is this bound's business too,
@@ -4345,8 +4342,6 @@ impl CircuitData {
                 .map(|(instance, target)| (Some(ScheduleOwner::generated(instance)), target)),
             accepted_time,
         );
-        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
-        let _ = accepted_time;
         // The single-host fallback, for the wakeups the shared wheel holds
         // that belong to no process of the design: its own nonblocking-update
         // wakeup, external bit drivers. Every other lane names an owner, so
