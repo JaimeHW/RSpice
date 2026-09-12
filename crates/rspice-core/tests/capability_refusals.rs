@@ -385,3 +385,154 @@ mod veriloga_pole_zero {
         let _ = std::fs::remove_file(model);
     }
 }
+
+/// The analyses a mixed Verilog-AMS deck is still refused by, after `.op`
+/// stopped being one of them.
+///
+/// D3 opened exactly one door: `.op` solves a mixed deck with its discrete
+/// half at the state its initial blocks left, and nothing advances. Every
+/// analysis here asks a different question — what the circuit does around a
+/// discrete state that has *settled*, which is a state no run has produced
+/// yet — and each must still refuse rather than assemble a system with the
+/// module's continuous half silently absent from it.
+///
+/// Named as a table of routes rather than one test per route, because the
+/// claim is about the set: the refusal comes from one producer
+/// (`CircuitData::ensure_no_mixed_signal_hosts`) and every entry point that
+/// reaches it must carry the same token and say the same thing about what is
+/// missing.
+#[cfg(feature = "veriloga")]
+mod mixed_signal_discrete_state {
+    use super::{Engine, SimulationError, capability_token, node, parse};
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    /// A module with both halves: a process that never settles, and a
+    /// conductance the analog solver would have to stamp.
+    const CLOCK_DIVIDER: &str = "`include \"disciplines.vams\"\n\
+         module clock_divider(p, n, qdiv);\n\
+         \x20 inout p, n; electrical p, n;\n\
+         \x20 output qdiv; reg clk, qdiv;\n\
+         \x20 initial clk = 1'b0;\n\
+         \x20 initial qdiv = 1'b0;\n\
+         \x20 always #5 clk = ~clk;\n\
+         \x20 always @(posedge clk) qdiv <= ~qdiv;\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n";
+
+    fn write_model() -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("rspice_mixed_capability_{}.va", std::process::id()));
+        let mut file = std::fs::File::create(&path).expect("create model file");
+        file.write_all(CLOCK_DIVIDER.as_bytes())
+            .expect("write model");
+        path
+    }
+
+    #[test]
+    fn every_analysis_around_a_settled_discrete_state_is_refused_by_name() {
+        let model = write_model();
+        let deck = format!(
+            "* a mixed module asked about a discrete state no run has settled\n\
+             v1 in 0 dc 1 ac 1\n\
+             r1 in p 1k\n\
+             x1 p 0 qdiv clock_divider\n\
+             rq qdiv 0 10k\n\
+             .va \"{}\" clock_divider\n\
+             .end\n",
+            model.display().to_string().replace('\\', "/"),
+        );
+        let netlist = parse(&deck);
+        let probe = node(&netlist, "p");
+        let input = node(&netlist, "in");
+        let engine = Engine::default();
+
+        // Route, the name its refusal must carry, and the outcome it produced.
+        let routes: [(&str, &str, Result<String, SimulationError>); 6] = [
+            (
+                ".dc",
+                "dc sweep",
+                engine
+                    .run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5)
+                    .map(|points| format!("{} sweep points", points.len())),
+            ),
+            (
+                ".ac",
+                "ac analysis",
+                engine
+                    .run_ac(&netlist, &[1.0e3])
+                    .map(|points| format!("{} frequencies", points.len())),
+            ),
+            (
+                ".noise",
+                "noise analysis",
+                engine
+                    .run_noise(&netlist, probe, &[1.0e3], 300.15)
+                    .map(|points| format!("{} noise points", points.len())),
+            ),
+            (
+                ".pz",
+                "pole-zero analysis",
+                engine
+                    .run_pz(&netlist, input, probe)
+                    .map(|result| format!("{:?}", result.poles)),
+            ),
+            (
+                ".sens",
+                "sensitivity analysis",
+                engine
+                    .run_sensitivity_linearized(&netlist, probe, None)
+                    .map(|result| format!("{result:?}")),
+            ),
+            (
+                ".tf",
+                "ac analysis",
+                engine
+                    .run_transfer_function(&netlist, "p", None, false, "v1")
+                    .map(|result| format!("{result:?}")),
+            ),
+        ];
+
+        for (route, analysis, outcome) in routes {
+            let error = match outcome {
+                Ok(answer) => panic!(
+                    "{route} must refuse a mixed module rather than answer without its \
+                     continuous half; it answered with {answer}"
+                ),
+                Err(error) => error,
+            };
+            assert_eq!(
+                capability_token(&error),
+                "analysis.mixed_signal.discrete_state",
+                "{route} must refuse through the one mixed-signal producer: {error}"
+            );
+            let lowered = error.to_string().to_ascii_lowercase();
+            for expected in [
+                analysis,
+                "x1",
+                "around a settled discrete state is not available yet",
+            ] {
+                assert!(
+                    lowered.contains(expected),
+                    "the {route} refusal must contain {expected:?}: {error}"
+                );
+            }
+        }
+
+        // The door D3 opened, in the same deck, so the refusals above are a
+        // statement about these analyses and not about the deck.
+        let operating_point = engine
+            .run_dc_op(&netlist)
+            .expect("`.op` solves a mixed deck at its initial discrete state");
+        assert!(
+            operating_point
+                .node_names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case("p")),
+            "the operating point must carry the deck's analog nodes: {:?}",
+            operating_point.node_names
+        );
+
+        let _ = std::fs::remove_file(model);
+    }
+}

@@ -366,7 +366,8 @@ const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body whose only dy
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "a mixed Verilog-AMS module's discrete half is executed by a transient event \
      interleave, which has no periodic steady-state, small-signal or \
-     continuation form; only `.tran` runs a mixed module";
+     continuation form; `.tran` runs a mixed module and `.op` solves one at the state its \
+     initial blocks left, but an analysis around a settled discrete state is not available yet";
 
 /// The declaration table.
 ///
@@ -1838,8 +1839,9 @@ mod tests {
                 );
             };
             assert!(
-                missing.contains("only `.tran` runs a mixed module"),
-                "{capability:?} must say what does run a mixed module: {missing}"
+                missing.contains("around a settled discrete state is not available yet"),
+                "{capability:?} must name the capability a mixed module is still missing: \
+                 {missing}"
             );
         }
     }

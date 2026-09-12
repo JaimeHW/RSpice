@@ -517,8 +517,8 @@ fn every_analysis_that_copies_the_circuit_refuses_a_mixed_module_first() {
             "the {analysis} refusal must name the analysis and the instance: {error}"
         );
         assert!(
-            lowered.contains("only `.tran` runs a mixed module"),
-            "the refusal must say what does run one: {error}"
+            lowered.contains("around a settled discrete state is not available yet"),
+            "the refusal must name the capability it is missing: {error}"
         );
     };
 
@@ -549,7 +549,7 @@ fn every_analysis_that_copies_the_circuit_refuses_a_mixed_module_first() {
 /// mixed module too, and refuse it for the same reason and in the same words.
 ///
 /// These are the routes the refusal was missing from. `ensure_no_mixed_signal_analysis`
-/// was called by AC, DC, distortion, HB, noise, PSS, PSS-noise, sensitivity and
+/// was called by AC, the DC sweep, distortion, HB, noise, PSS, PSS-noise, sensitivity and
 /// STB, but by nothing under `engine/hb/`. So a deck whose periodic operating
 /// point was solved by PAC or driven pnoise itself — no retained `.PSS` or
 /// `.HB` carrier in front of it — reached the harmonic solver with the mixed
@@ -601,8 +601,8 @@ fn every_periodic_small_signal_analysis_refuses_a_mixed_module_first() {
             "the {route} refusal must name the instance: {error}"
         );
         assert!(
-            lowered.contains("only `.tran` runs a mixed module"),
-            "the {route} refusal must say what does run one: {error}"
+            lowered.contains("around a settled discrete state is not available yet"),
+            "the {route} refusal must name the capability it is missing: {error}"
         );
     };
 

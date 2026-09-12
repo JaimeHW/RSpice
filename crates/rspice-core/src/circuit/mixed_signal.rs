@@ -557,6 +557,17 @@ impl CircuitData {
     /// or harmonic-balance assembly has nothing to ask it for — and assembling
     /// one anyway would silently omit the module's continuous half too, which
     /// is a plausible answer to a question the deck did not ask.
+    ///
+    /// # What is missing, and why `.op` is not an exemption
+    ///
+    /// What every caller here wants is narrower than "a mixed module", so the
+    /// refusal names it: each of them sweeps, linearizes or shoots around a
+    /// discrete state that has *settled*, and settling one is a capability this
+    /// build does not have. `.op` does not need it — it answers at the state a
+    /// module's initial blocks left, which exists before anything has settled
+    /// and before any time has passed — so `.op` does not call this at all.
+    /// That is why the answer is a capability refusal rather than a circuit
+    /// error: the deck is understood and the analysis is the gap.
     pub(crate) fn ensure_no_mixed_signal_hosts(
         &self,
         analysis: &str,
@@ -564,12 +575,17 @@ impl CircuitData {
         let Some(host) = self.mixed_signal_hosts.first() else {
             return Ok(());
         };
-        Err(SimulationError::Circuit(format!(
-            "mixed Verilog-AMS instance '{}' cannot take part in {analysis}: the module's \
-             discrete half is executed by a transient event interleave, which has no \
-             small-signal or steady-state form. Only `.tran` runs a mixed module",
-            host.instance_name()
-        )))
+        Err(SimulationError::unsupported_capability(
+            "analysis.mixed_signal.discrete_state",
+            format!(
+                "mixed Verilog-AMS instance '{}' cannot take part in {analysis}: the module's \
+                 discrete half is executed by a transient event interleave, which has no \
+                 small-signal or steady-state form. `.tran` runs a mixed module and `.op` \
+                 solves one at the state its initial blocks left; an analysis around a \
+                 settled discrete state is not available yet",
+                host.instance_name()
+            ),
+        ))
     }
 
     /// Stamp every mixed module for one Newton evaluation, committing nothing.
@@ -660,6 +676,18 @@ impl CircuitData {
     /// which is IEEE 1364-2005's own answer to what a design holds before the
     /// first event. The trial is a probe like every other, so an operating
     /// point that is solved several times over does not advance the module once.
+    /// Stamp every mixed module into an operating-point system at `time`.
+    ///
+    /// The one assembly two callers share: the transient's t = 0 startup, and
+    /// `.op` on a mixed deck, which is that startup with no advance after it.
+    /// Both reach it through `Engine::try_stamp_operating_point_devices`.
+    ///
+    /// The trial it opens is a probe with a zero interval, so nothing here
+    /// commits: the shared queue is drained only to this time's tick, and an
+    /// activation scheduled past it stays pending on the queue. At t = 0 that
+    /// is the whole of "no time advance" — a `#delay` or an `@(posedge)` a
+    /// module's initial block scheduled for a later tick is still pending when
+    /// the operating point is published, and is discarded with the circuit.
     pub(crate) fn stamp_mixed_operating_point(
         &mut self,
         matrix: &mut crate::solver::StaticMatrix,
