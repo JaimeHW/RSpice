@@ -956,9 +956,24 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
     }
 }
 
+/// Opcodes the scalar capability answers out of the active runtime session.
+///
+/// `eval_op_v1` lends the session to exactly these, so an emitted opcode
+/// missing from the set is refused in the browser worker while the
+/// interpreter and the machine backends — which never consult this predicate
+/// — evaluate the same model. 480 and 482 were missing: an `idt` carrying an
+/// initial condition and every `ddt` tangent respectively.
+///
+/// The variable-arity operations 421, 429, 445 and 481 are included although
+/// they arrive at `eval_op_slice_v1`, which lends the session
+/// unconditionally: the scalar entry point rejects those four by name, and
+/// that rejection only reaches its diagnostic when it is given the session.
 #[cfg(any(test, target_arch = "wasm32"))]
 fn is_stateful_opcode(opcode: i32) -> bool {
-    matches!(opcode, 400..=429 | 432 | 440..=449 | 460..=462 | 470..=471)
+    matches!(
+        opcode,
+        400..=429 | 432 | 440..=449 | 460..=462 | 470..=471 | 480..=482
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1155,9 +1170,24 @@ use std::mem::{align_of, size_of};
 mod tests {
     use super::*;
 
+    /// Every opcode `helper_descriptor` can address through the scalar
+    /// capability, so the predicate deciding whether `eval_op_v1` lends the
+    /// session covers the whole emitted set. An omitted opcode takes the
+    /// session-free path, refuses, and fails only in the browser worker: the
+    /// interpreter and the machine backends never consult this predicate, so
+    /// the same model runs everywhere else. 480 and 482 shipped that way.
+    ///
+    /// The four variable-arity operations arrive at `eval_op_slice_v1`, which
+    /// lends the session unconditionally. They are classified here as well so
+    /// that the scalar entry point's own refusal -- "the slice helper is
+    /// required" -- stays reachable with its diagnostic rather than as a bare
+    /// frame status.
     #[test]
-    fn history_and_task_helpers_require_the_active_runtime_session() {
-        for opcode in [447, 448, 449, 460, 461, 462] {
+    fn emitted_stateful_helpers_require_the_active_runtime_session() {
+        for opcode in [
+            400, 401, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432, 440,
+            442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482,
+        ] {
             assert!(
                 is_stateful_opcode(opcode),
                 "opcode {opcode} must dispatch through the session"
