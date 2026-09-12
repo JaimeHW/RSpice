@@ -2033,7 +2033,7 @@ impl CmContext {
     /// `transactional_resource` so circuit acceptance can capture its undo image.
     /// Register each independently mutable resource once; aliases must share the
     /// registration rather than independently journal the same external state.
-    pub fn set_transactional_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
+    pub(crate) fn set_transactional_resource<T>(&mut self, key: impl Into<String>, resource: Arc<T>)
     where
         T: TransactionalContextResource,
     {
@@ -2048,7 +2048,7 @@ impl CmContext {
     /// in an acceptance transaction. Failed restoration permanently invalidates
     /// the registration, including registrations in cloned contexts.
     /// Unregistered resources retain their existing access behavior.
-    pub fn transactional_resource<T>(&self, key: &str) -> CmResult<Option<Arc<T>>>
+    pub(crate) fn transactional_resource<T>(&self, key: &str) -> CmResult<Option<Arc<T>>>
     where
         T: Any + Send + Sync + 'static,
     {

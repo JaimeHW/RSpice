@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 /// Register through `CmContext::set_transactional_resource` and obtain every
 /// access through `CmContext::transactional_resource`. Do not retain a resource
 /// handle across evaluations or mutate it through an independently held alias.
-pub trait TransactionalContextResource: Any + Send + Sync {
+pub(crate) trait TransactionalContextResource: Any + Send + Sync {
     fn capture_transaction_state(&self) -> CmResult<Vec<u8>>;
     fn restore_transaction_state(&self, state: &[u8]) -> CmResult<()>;
 }

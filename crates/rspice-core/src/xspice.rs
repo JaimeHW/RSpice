@@ -117,9 +117,8 @@ pub(crate) use instance::{
     XspiceInstanceCheckpoint,
 };
 pub use registry::CodeModelRegistry;
-pub use resource_transaction::TransactionalContextResource;
 pub(crate) use resource_transaction::{
-    ResourceEntry, ResourceTransaction, ResourceTransactionScope,
+    ResourceEntry, ResourceTransaction, ResourceTransactionScope, TransactionalContextResource,
 };
 pub use traits::{
     CmError, CmResult, CodeModel, ParamSpec, ParamType, PortDirection, PortSpec, PortType,

@@ -504,12 +504,12 @@ impl MultiWindingTransformer {
     }
 
     /// Number of windings.
-    pub fn num_windings(&self) -> usize {
+    pub(crate) fn num_windings(&self) -> usize {
         self.inductances.len()
     }
 
     /// Terminal pairs in winding order.
-    pub fn nodes(&self) -> &[(NodeId, NodeId)] {
+    pub(crate) fn nodes(&self) -> &[(NodeId, NodeId)] {
         &self.nodes
     }
 
@@ -518,7 +518,7 @@ impl MultiWindingTransformer {
     }
 
     /// Self-inductances in winding order.
-    pub fn inductances(&self) -> &[Value] {
+    pub(crate) fn inductances(&self) -> &[Value] {
         &self.inductances
     }
 
@@ -528,7 +528,7 @@ impl MultiWindingTransformer {
     }
 
     /// One-based MNA branch indices, absent until assigned.
-    pub fn branches(&self) -> &[Option<NodeId>] {
+    pub(crate) fn branches(&self) -> &[Option<NodeId>] {
         &self.branches
     }
 

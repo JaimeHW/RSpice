@@ -731,7 +731,68 @@ use rspice_core::analysis::harmonic_balance::{
 // after the last ratchet: InterfaceNodeAliases, its resolve method, and
 // collect_requested_interface_node_aliases_with_abort. The core-only imported
 // thermal-voltage constant is now private and adds no public statement.
-const MAX_PUBLIC_ITEMS: usize = 4964;
+// 2026-09-11, -11 narrowed and +24 kept (4,964 -> 4,988): the 35 public
+// statements the September landings added after `f5b1636ca`, which measured
+// exactly 4,964, triaged one at a time.
+//
+// Narrowed to `pub(crate)`, because every caller is inside this crate:
+//
+// - The transactional code-model resource: the `TransactionalContextResource`
+//   trait, the `pub use` in `xspice.rs` that surfaced it (folded into the
+//   `pub(crate) use` group beside it), and the `CmContext` pair that drives it,
+//   `set_transactional_resource` and `transactional_resource`. The only
+//   implementor is the compiled-in digital co-simulation model and the only
+//   callers are it and this crate's tests; the two integration tests that do
+//   implement `CodeModel` name none of the four.
+// - `xspice::verilog`'s `pub use ...digital_link::DigitalLinkNet`, now a plain
+//   private import. Its one consumer is the crate-private `linked_tests`, which
+//   reaches it through `use super::*`; `mixed/shared.rs` imports the type from
+//   `rspice-veriloga` directly.
+// - `SourceStepper::is_exhausted`, read by the DC source-stepping and the HB
+//   Newton driver.
+// - `VerilogACompanionRules::from_policy`, whose own type is already
+//   `pub(crate)`, so the statement was public without the item being reachable.
+// - Four `MultiWindingTransformer` accessors, `num_windings`, `nodes`,
+//   `inductances` and `branches`, read by the linear, force-accept and HB
+//   stamping surfaces, beside the `nodes_mut` that was already `pub(crate)`.
+//
+// Kept public, and what needs each:
+//
+// - 12 in `analysis/sensitivity.rs`: `SensitivityValue`,
+//   `SensitivityUnavailability` and the ten operations that make an
+//   unavailable sensitivity a typed refusal rather than a `NaN`.
+//   `rspice-python`'s `results/sensitivity.rs`, `rspice-wasm`'s `exports.rs`
+//   and the GUI's worker contract, result digest, retained payload and
+//   visualization stage all name the two enums, and `unavailable`, `reason`,
+//   `as_str`, `value`, `scaled`, `magnitude` and `decibels` between them.
+//   `map`, `zip` and `normalized` have no caller outside this crate today and
+//   are kept with the family: a vocabulary whose combinators are private is one
+//   every consumer writes again.
+// - 2 in `engine/sensitivity.rs`: `run_output_sensitivity_with_abort` and
+//   `run_output_sensitivity_ac_with_abort`, driven by
+//   `tests/ac_physical_dependents.rs` — an integration test is an external
+//   crate — and by the GUI's sensitivity bridge.
+// - 4 in `engine/builder/veriloga_cache.rs`:
+//   `ProjectVerilogAConnectionLibraryRegistration`,
+//   `ProjectVerilogASourceRegistration` and the two
+//   `register_project_veriloga_sources_for_session` entries. The GUI's
+//   `simulation/veriloga.rs` and `veriloga/connections.rs` call them and
+//   `tests/veriloga_connect_source_closure.rs` drives both.
+// - 2 that `private_interfaces` makes public by construction:
+//   `ResistorFlickerNoise`, the type of `Resistors::flicker`, and
+//   `PeriodicFlickerNoise`, the type of `PeriodicNoiseSource::flicker`.
+// - 3 in `xspice/verilog.rs`: `CompiledDigitalDesign::time_resolution`, `link`
+//   and `link_with_control`. Arrears rather than growth — they are the
+//   linked-design entry path of the mixed-HDL program that is still landing,
+//   and today their only callers are this crate's `linked_tests`. Recorded here
+//   so the next raise cannot mistake them for headroom; narrowing them is the
+//   change that lowers this number again once that program's consumers land.
+// - `MultiWindingTransformer::coupling_matrix`, which has no caller anywhere.
+//   Named rather than hidden, like the six items listed under 2026-09-03:
+//   narrowing it makes dead code that `-D warnings` then deletes, and deleting
+//   a read-only accessor for a field the struct holds is the magnetics
+//   package's decision, not a visibility pass's.
+const MAX_PUBLIC_ITEMS: usize = 4988;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

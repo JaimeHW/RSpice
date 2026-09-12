@@ -120,7 +120,7 @@ mod tests;
 use std::sync::Arc;
 
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
-pub use rspice_veriloga::canonical_ir::digital_link::DigitalLinkNet;
+use rspice_veriloga::canonical_ir::digital_link::DigitalLinkNet;
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use rspice_veriloga::four_state::FourStateBit;

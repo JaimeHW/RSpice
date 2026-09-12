@@ -93,7 +93,7 @@ impl SourceStepper {
 
     /// Whether the source-step solve budget has been consumed.
     #[inline]
-    pub fn is_exhausted(&self) -> bool {
+    pub(crate) fn is_exhausted(&self) -> bool {
         self.steps >= self.max_steps
     }
 
