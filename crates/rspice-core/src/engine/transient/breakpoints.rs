@@ -1295,12 +1295,12 @@ mod tests {
                 .unwrap(),
             2e-11,
         );
-        let time = 2.010059999998316589e-8;
-        let target = 2.010060000000000067e-8;
+        let time = 2.0100599999983166e-8;
+        let target = 2.01006e-8;
         let dt = fit_model_interval(
             time,
             target,
-            8.4173899133396096e-21,
+            8.41738991333961e-21,
             1e-20,
             2e-11,
             2e-11,
