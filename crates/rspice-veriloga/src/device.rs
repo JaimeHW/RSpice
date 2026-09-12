@@ -976,6 +976,20 @@ pub struct VerilogADevice {
     /// Mapping from internal node index to circuit node ID
     /// When the solver allocates circuit nodes for internal nodes, this maps them
     internal_node_indices: Vec<usize>,
+    /// The module's own declaration name for each internal node, index-aligned
+    /// with `internal_node_indices`.
+    ///
+    /// The compiled bytecode keeps only a count, because nothing it executes
+    /// needs a name; the names live in the canonical artifact the same
+    /// compilation produced. A host installs them here so an operating point
+    /// can publish an internal node under the name the module declares rather
+    /// than a positional `__int1` no user can type. The list belongs to the
+    /// module rather than to the instance, and a Newton line search clones a
+    /// device per candidate point, so it is shared between clones.
+    ///
+    /// Empty when the host installed none; every reader falls back to the
+    /// positional spelling then.
+    internal_node_names: std::sync::Arc<[SmolStr]>,
     /// Number of internal nodes in this device
     num_internal_nodes: usize,
     /// Mapping from branch-current unknown ordinal to circuit node ID
@@ -2939,6 +2953,7 @@ impl VerilogADevice {
             context,
             node_mapping,
             internal_node_indices: vec![0; num_internal_nodes],
+            internal_node_names: std::sync::Arc::from([]),
             num_internal_nodes,
             branch_current_indices: vec![0; num_branch_unknowns],
             program_active: vec![true; num_stamp_programs],
@@ -3555,6 +3570,58 @@ impl VerilogADevice {
     /// Get the number of internal nodes.
     pub fn num_internal_nodes(&self) -> usize {
         self.num_internal_nodes
+    }
+
+    /// Install the module's own name for each internal node.
+    ///
+    /// Rejected unless the list has exactly one name per internal node, so a
+    /// mismatched artifact cannot silently rename part of a device.
+    pub fn try_set_internal_node_names(
+        &mut self,
+        names: std::sync::Arc<[SmolStr]>,
+    ) -> Result<(), VmError> {
+        if names.len() != self.num_internal_nodes {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "internal-node naming requires exactly {} name(s), got {}",
+                self.num_internal_nodes,
+                names.len()
+            )));
+        }
+        self.internal_node_names = names;
+        Ok(())
+    }
+
+    /// The module's declaration names for the internal nodes, or an empty
+    /// slice when the host installed none.
+    pub fn internal_node_names(&self) -> &[SmolStr] {
+        &self.internal_node_names
+    }
+
+    /// Each named internal node paired with the circuit node it was bound to.
+    ///
+    /// Yields nothing when no names were installed: an observable has to be
+    /// nameable, and a positional index is not a name.
+    pub fn internal_nodes(&self) -> impl Iterator<Item = (&str, usize)> + '_ {
+        self.internal_node_names
+            .iter()
+            .map(SmolStr::as_str)
+            .zip(self.internal_node_indices.iter().copied())
+    }
+
+    /// Each branch-current unknown the module declared a name for, paired with
+    /// the circuit node holding its current. An unnamed source has no name to
+    /// publish and is skipped.
+    pub fn named_branch_unknowns(&self) -> impl Iterator<Item = (&str, usize)> + '_ {
+        self.model
+            .branch_sources
+            .iter()
+            .zip(self.branch_current_indices.iter().copied())
+            .filter_map(|(source, node)| {
+                source
+                    .declared_name
+                    .as_ref()
+                    .map(|name| (name.as_str(), node))
+            })
     }
 
     /// Get terminal names
@@ -10750,6 +10817,7 @@ endmodule
             context,
             node_mapping: vec![0; num_terminals],
             internal_node_indices: vec![0; num_internal_nodes],
+            internal_node_names: std::sync::Arc::from([]),
             num_internal_nodes,
             branch_current_indices: vec![0; num_branch_unknowns],
             program_active: vec![true; num_stamp_programs],
