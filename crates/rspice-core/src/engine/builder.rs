@@ -11722,6 +11722,18 @@ set auto_bridge_parm_d = vdd
     /// disagree with each other — the same module, the same port, and a
     /// resistor as the only difference between a net that read its supply level
     /// and a net that read 0 V.
+    ///
+    /// The last row is that ruling read the other way round: a lone A/D INPUT
+    /// port is analog for the same reason a lone D/A output is — one discrete
+    /// endpoint does not make a net event-only — and it keeps both its bridge
+    /// and its row. The row is not the bridge's doing. `coupled_nodes` spans
+    /// every terminal the host's analog device carries and a module's discrete
+    /// ports are terminals too, so every net this classifier leaves out of
+    /// `event_nodes` keeps one. What differs is whether anything stamps into it:
+    /// a D/A net needs the row because its Thevenin source lands there, while an
+    /// A/D net only reads its node, so the row stays a reserved entry nothing
+    /// fills — kept nonsingular by the nodal gmin floor, leaving the reader to
+    /// sample the 0 V an undriven analog node holds.
     #[cfg(feature = "veriloga")]
     #[test]
     fn mixed_boundary_topologies_classify_event_nodes_bridges_and_rows() {
@@ -11747,49 +11759,70 @@ set auto_bridge_parm_d = vdd
              always @(d) seen=1;\nendmodule\n",
         );
 
-        // Cards added beside `X1 q driver`, then: is `q` event-only, how many
-        // boundary bridges still land on it, and does a host still claim its row.
-        for (label, cards, event_only, bridges, coupled) in [
-            ("a lone discrete port", String::new(), false, 1, true),
+        // The deck body, the boundary net it is asked about, then: is that net
+        // event-only, how many boundary bridges still land on it, and does a
+        // host still claim its matrix row.
+        for (label, body, probe, event_only, bridges, coupled) in [
             (
-                "a discrete port and a resistor",
-                "R1 q 0 1k\n".to_string(),
+                "a lone discrete output port",
+                format!("X1 q driver\n.va \"{driver}\"\n"),
+                "q",
+                false,
+                1,
+                true,
+            ),
+            (
+                "a discrete output port and a resistor",
+                format!("X1 q driver\nR1 q 0 1k\n.va \"{driver}\"\n"),
+                "q",
                 false,
                 1,
                 true,
             ),
             (
                 "two mixed boundary ports",
-                format!("X2 q reader\n.va \"{reader}\"\n"),
+                format!("X1 q driver\nX2 q reader\n.va \"{driver}\"\n.va \"{reader}\"\n"),
+                "q",
                 true,
                 0,
                 false,
             ),
             (
                 "a discrete port and an XSPICE digital port",
-                "apull [q] pull\n.model pull d_pullup()\n".to_string(),
+                format!("X1 q driver\napull [q] pull\n.model pull d_pullup()\n.va \"{driver}\"\n"),
+                "q",
                 true,
                 0,
                 false,
             ),
             (
                 "a discrete port and an XSPICE analog port",
-                "A1 q qo amp\n.model amp gain(gain=1)\nR2 qo 0 1k\n".to_string(),
+                format!(
+                    "X1 q driver\nA1 q qo amp\n.model amp gain(gain=1)\nR2 qo 0 1k\n.va \"{driver}\"\n"
+                ),
+                "q",
+                false,
+                1,
+                true,
+            ),
+            (
+                "a lone discrete input port",
+                format!("X1 d reader\n.va \"{reader}\"\n"),
+                "d",
                 false,
                 1,
                 true,
             ),
         ] {
-            let deck =
-                format!("* mixed boundary topology\nX1 q driver\n{cards}.va \"{driver}\"\n.end\n");
+            let deck = format!("* mixed boundary topology\n{body}.end\n");
             let netlist =
                 Netlist::parse(&deck).unwrap_or_else(|error| panic!("{label} parses: {error}"));
             let circuit = Engine::default()
                 .build_circuit(&netlist)
                 .unwrap_or_else(|error| panic!("{label} builds: {error}"));
             let node = circuit
-                .get_node_by_name("q")
-                .unwrap_or_else(|| panic!("{label}: the deck named node q"));
+                .get_node_by_name(probe)
+                .unwrap_or_else(|| panic!("{label}: the deck named node {probe}"));
 
             let classified = circuit
                 .mixed_digital_coordinator
