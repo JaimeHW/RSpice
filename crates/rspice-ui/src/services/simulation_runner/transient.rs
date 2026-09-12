@@ -253,9 +253,12 @@ pub fn run_simulation_with_options_and_source_path_and_abort(
         Ok(result) => {
             let mut ops = Vec::new();
 
+            // A net only the event domain resolves has no operating-point
+            // voltage to annotate the schematic with: its row is the
+            // placeholder the assembly closed to restore rank.
             for (idx, &v) in result.node_voltages.iter().enumerate() {
                 ensure_not_aborted(abort)?;
-                if idx > 0 {
+                if idx > 0 && result.event_only_node_kind(idx).is_none() {
                     let node_name = result
                         .node_names
                         .get(idx)

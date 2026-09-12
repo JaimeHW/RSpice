@@ -237,7 +237,7 @@ impl EngineBridge {
                 retain_dc_quantity_basis(&mut evidence, first_result)?;
                 for (node_idx, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    if node_idx == 0 {
+                    if node_idx == 0 || first_result.event_only_node_kind(node_idx).is_some() {
                         continue;
                     }
                     let mut voltages = Vec::with_capacity(sweep_results.len());
@@ -357,7 +357,7 @@ impl EngineBridge {
                 let member = usize::from(branch == HYSTERESIS_REVERSE);
                 for (index, node_name) in first_result.node_names.iter().enumerate() {
                     ensure_not_aborted(abort)?;
-                    if index == 0 {
+                    if index == 0 || first_result.event_only_node_kind(index).is_some() {
                         continue;
                     }
                     let trace_name = evidence
@@ -411,7 +411,9 @@ impl EngineBridge {
             retain_dc_quantity_basis(&mut evidence, first_result)?;
             for (i, name) in first_result.node_names.iter().enumerate() {
                 ensure_not_aborted(abort)?;
-                if i == 0 {
+                // Ground is a constant zero column; a net only the event
+                // domain resolves has no voltage column at all.
+                if i == 0 || first_result.event_only_node_kind(i).is_some() {
                     continue;
                 }
                 let mut voltages = Vec::with_capacity(sweep_results.len());
@@ -695,9 +697,15 @@ fn convert_dc_result(
         ..Default::default()
     };
 
+    // The MNA vectors above are the solver's own evidence and stay whole: the
+    // placeholder row an event-only net owns is part of the system that was
+    // solved. What the workspace reads as a voltage is this table, and a net
+    // only the event domain resolves has none — publishing the placeholder
+    // row here is what put 0 V beside a logic net on the schematic, in the
+    // operating-point sheet and in every saved project.
     for (i, &voltage) in core_result.node_voltages.iter().enumerate() {
         ensure_not_aborted(abort)?;
-        if i > 0 {
+        if i > 0 && core_result.event_only_node_kind(i).is_none() {
             let name = core_result.node_names[i].clone();
             result.node_voltages.insert(name, voltage);
         }
@@ -818,6 +826,42 @@ mod operating_point_contract_tests {
 
     const DIVIDER: &str =
         "divider\nV1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.ic V(out)=2\n.op\n.end\n";
+
+    /// The workspace's operating-point table drops a net only the event
+    /// domain resolves, and keeps the MNA evidence whole.
+    ///
+    /// The two are different facts. `node_voltages` is what the schematic
+    /// annotates, the operating-point sheet lists and a saved project keeps,
+    /// so publishing the placeholder row there put 0 V beside a logic net on
+    /// every one of those surfaces. `mna_solution` is the solver's own
+    /// evidence of the system it solved, placeholder row included, and its
+    /// length is checked against the name vectors elsewhere — so it stays
+    /// dense.
+    #[test]
+    fn the_operating_point_table_drops_an_event_only_net_and_keeps_the_mna_evidence() {
+        let mut core = rspice_core::SimulationResult::new(2, 0);
+        core.node_names = vec!["0".to_owned(), "clk".to_owned(), "out".to_owned()];
+        core.node_voltages = vec![0.0, 0.0, 1.25];
+        core.set_event_only_nodes(vec![
+            None,
+            Some(rspice_core::analysis::transient::EventOnlyNetKind::Digital),
+            None,
+        ]);
+
+        let converted = convert_dc_result(&core, &rspice_core::abort_signal::NoAbort)
+            .expect("the conversion succeeds");
+        assert!(
+            !converted.node_voltages.contains_key("clk"),
+            "an event-only net has no operating-point voltage, got {:?}",
+            converted.node_voltages
+        );
+        assert_eq!(converted.node_voltages.get("out"), Some(&1.25));
+        assert_eq!(
+            converted.mna_solution.len(),
+            converted.mna_node_names.len() + converted.mna_branch_names.len(),
+            "the MNA evidence stays aligned with its own names"
+        );
+    }
 
     #[test]
     fn force_ic_reaches_the_ui_as_an_exact_hard_constrained_result() {

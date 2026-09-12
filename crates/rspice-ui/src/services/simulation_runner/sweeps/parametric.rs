@@ -169,6 +169,25 @@ pub fn run_parametric_analysis_with_base_and_source_path_and_abort(
     })
 }
 
+/// The named analog voltages of one solved DC point, ground excluded.
+///
+/// Ground is index 0 and is never a corner quantity. A net only the event
+/// domain resolves is dropped with its name, keeping the two vectors aligned:
+/// its slot holds the placeholder row the assembly closed with `v = 0`, so
+/// carrying it would put a corner distribution under a net that has no
+/// voltage.
+fn analog_node_voltages(result: &rspice_core::SimulationResult) -> (Vec<String>, Vec<f64>) {
+    result
+        .node_names
+        .iter()
+        .zip(&result.node_voltages)
+        .enumerate()
+        .skip(1)
+        .filter(|(node, _)| result.event_only_node_kind(*node).is_none())
+        .map(|(_, (name, value))| (name.clone(), *value))
+        .unzip()
+}
+
 fn run_base_analysis(
     engine: &Engine,
     netlist: &mut rspice_core::Netlist,
@@ -178,10 +197,7 @@ fn run_base_analysis(
     match mode {
         CornerBaseMode::Op => {
             let result = engine.run_dc_op_with_abort(netlist, abort)?;
-            Ok((
-                result.node_names.into_iter().skip(1).collect(),
-                result.node_voltages.into_iter().skip(1).collect(),
-            ))
+            Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::DcSweep {
             source_name,
@@ -199,10 +215,7 @@ fn run_base_analysis(
                     )
                 })?
                 .1;
-            Ok((
-                result.node_names.into_iter().skip(1).collect(),
-                result.node_voltages.into_iter().skip(1).collect(),
-            ))
+            Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::DcSweepNested {
             source_name,
@@ -240,10 +253,7 @@ fn run_base_analysis(
                     )
                 })?
                 .1;
-            Ok((
-                result.node_names.into_iter().skip(1).collect(),
-                result.node_voltages.into_iter().skip(1).collect(),
-            ))
+            Ok(analog_node_voltages(&result))
         }
         CornerBaseMode::Transient {
             stop_time,

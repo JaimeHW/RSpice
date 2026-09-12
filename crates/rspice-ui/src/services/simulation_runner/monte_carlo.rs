@@ -308,7 +308,24 @@ pub(crate) fn run_statistical_monte_carlo_with_environment_and_source_path_and_a
         // cancellation stops the analysis.
         match engine.run_dc_op_with_abort(&trial_netlist, abort) {
             Ok(result) => {
-                trials.push((result.node_voltages, result.node_names));
+                // A net only the event domain resolves has no node voltage to
+                // put a distribution under, and its slot holds the placeholder
+                // row's zero, so it is dropped from the trial's evidence by
+                // blanking its name — the same filter an unnamed MNA quantity
+                // already meets below.
+                let node_names: Vec<String> = result
+                    .node_names
+                    .iter()
+                    .enumerate()
+                    .map(|(node, name)| {
+                        if result.event_only_node_kind(node).is_some() {
+                            String::new()
+                        } else {
+                            name.clone()
+                        }
+                    })
+                    .collect();
+                trials.push((result.node_voltages, node_names));
                 retained.push((trial, seed));
             }
             Err(rspice_core::SimulationError::Aborted) => {

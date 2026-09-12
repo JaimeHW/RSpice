@@ -192,36 +192,52 @@ pub(crate) fn parse_output_voltage_spec(
     })
 }
 
+/// One node's DC voltage, or the reason the solve published none for it.
+///
+/// Ground is the constant zero. A net only the event domain resolves has no
+/// voltage at all — its MNA row is the placeholder the assembly closed with
+/// `v = 0` — so the spec is refused with the engine's own sentence instead of
+/// being answered with that zero. `role` names which half of a differential
+/// spec failed, since both halves come through here.
+fn dc_node_voltage(
+    dc_result: &rspice_core::SimulationResult,
+    node: usize,
+    role: &str,
+) -> Result<Value, String> {
+    if node == 0 {
+        return Ok(0.0);
+    }
+    if let Some(kind) = dc_result.event_only_node_kind(node) {
+        let name = dc_result
+            .node_names
+            .get(node)
+            .cloned()
+            .unwrap_or_else(|| node.to_string());
+        return Err(
+            rspice_core::analysis::transient::event_only_voltage_refusal(
+                &name,
+                kind,
+                rspice_core::analysis::transient::EventTraceSurface::SolvedPoint,
+            ),
+        );
+    }
+    dc_result.node_voltages.get(node).copied().ok_or_else(|| {
+        format!(
+            "Voltage {role} node index {node} is out of range ({} available)",
+            dc_result.node_voltages.len()
+        )
+    })
+}
+
 pub(crate) fn dc_output_value(
     dc_result: &rspice_core::SimulationResult,
     output_spec: &OutputSpec,
 ) -> Result<Value, String> {
     match output_spec {
         OutputSpec::Voltage(vspec) => {
-            let v_pos = if vspec.pos == 0 {
-                0.0
-            } else {
-                dc_result
-                    .node_voltages
-                    .get(vspec.pos)
-                    .copied()
-                    .ok_or_else(|| {
-                        format!(
-                            "Voltage output node index {} is out of range ({} available)",
-                            vspec.pos,
-                            dc_result.node_voltages.len()
-                        )
-                    })?
-            };
+            let v_pos = dc_node_voltage(dc_result, vspec.pos, "output")?;
             let v_neg = match vspec.neg {
-                Some(0) => 0.0,
-                Some(idx) => dc_result.node_voltages.get(idx).copied().ok_or_else(|| {
-                    format!(
-                        "Voltage reference node index {} is out of range ({} available)",
-                        idx,
-                        dc_result.node_voltages.len()
-                    )
-                })?,
+                Some(idx) => dc_node_voltage(dc_result, idx, "reference")?,
                 None => 0.0,
             };
             Ok(v_pos - v_neg)

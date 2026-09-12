@@ -451,12 +451,29 @@ fn evaluate_optimization_objective(
         ))
     })?;
 
-    let node_v = *dc.node_voltages.get(node_idx).ok_or_else(|| {
-        ServiceRunError::Failure("Optimization node voltage index out of bounds".to_string())
-    })?;
-    let ref_v = *dc.node_voltages.get(ref_idx).ok_or_else(|| {
-        ServiceRunError::Failure("Optimization reference voltage index out of bounds".to_string())
-    })?;
+    // `try_voltage` answers `None` both for an index the result does not have
+    // and for a net only the event domain resolves; the second is the one an
+    // objective can be written against by mistake, so it says so.
+    let event_only = |node: usize, role: &str| -> ServiceRunError {
+        match dc.event_only_node_kind(node) {
+            Some(kind) => ServiceRunError::Failure(
+                rspice_core::analysis::transient::event_only_voltage_refusal(
+                    dc.node_names.get(node).map_or(role, |name| name.as_str()),
+                    kind,
+                    rspice_core::analysis::transient::EventTraceSurface::SolvedPoint,
+                ),
+            ),
+            None => {
+                ServiceRunError::Failure(format!("Optimization {role} voltage index out of bounds"))
+            }
+        }
+    };
+    let node_v = dc
+        .try_voltage(node_idx)
+        .ok_or_else(|| event_only(node_idx, "node"))?;
+    let ref_v = dc
+        .try_voltage(ref_idx)
+        .ok_or_else(|| event_only(ref_idx, "reference"))?;
     ensure_not_aborted(abort)?;
     let objective = node_v - ref_v;
     if !objective.is_finite() {
