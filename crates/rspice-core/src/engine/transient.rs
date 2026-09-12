@@ -235,9 +235,8 @@ fn accepted_veriloga_event_time(
     // The scheduler answers for both lanes on one rule, which is where the
     // reachability filter and the coupling test now live: see
     // `circuit::ActivationLanes::landing`.
-    if let Some(activation) = circuit.next_activation(
-        crate::circuit::ActivationLanes::landing(accepted_time, hard_min_dt),
-    )? {
+    let lanes = crate::circuit::ActivationLanes::landing(accepted_time, hard_min_dt);
+    if let Some(activation) = circuit.next_activation(lanes)? {
         let event = activation.seconds();
         target = Some(target.map_or(event, |target| target.min(event)));
     }
