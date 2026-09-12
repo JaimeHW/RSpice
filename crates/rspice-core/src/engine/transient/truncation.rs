@@ -55,6 +55,7 @@ pub(super) struct ChargeSamples {
 /// charges would have its refusal masked by a route that has no instances at
 /// all — and the deck would claim a charge-truncation shortcut for a step
 /// nobody estimated.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum VerilogaRouteBound {
     /// The route carries no instance in this deck, so it bounds nothing and
