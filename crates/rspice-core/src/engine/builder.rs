@@ -50,6 +50,7 @@ pub use model_resolution::{
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
+mod boundary_supply;
 mod builtin_models;
 mod transmission_lines;
 mod xspice_ports;
@@ -2006,6 +2007,10 @@ struct PlannedXspiceAutoBridge {
     node: usize,
     kind: XspiceAutoBridgeKind,
     vcc: crate::Value,
+    /// Where [`Self::vcc`] came from, for the one pass that says so or refuses
+    /// to guess. `None` is a bridge with no supply at all: real-valued event
+    /// traffic carries a number rather than a logic level.
+    supply: Option<boundary_supply::SupplyDerivation>,
     family: Option<String>,
     /// The Verilog-AMS connect module selected for this boundary, when the
     /// design has a `connectrules` block that reaches it.
@@ -2523,7 +2528,7 @@ fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
     bridge_metadata: &BTreeMap<usize, XspiceAutoBridgeNodeMetadata>,
-    default_vcc: crate::Value,
+    supplies: &boundary_supply::BoundarySupplies,
 ) -> Vec<PlannedXspiceAutoBridge> {
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
@@ -2574,6 +2579,7 @@ fn plan_xspice_auto_bridges(
         }
     }
 
+    let node_names = circuit.node_names_sorted();
     let mut planned: Vec<PlannedXspiceAutoBridge> = digital_nodes
         .into_iter()
         .filter_map(|(node, usage)| {
@@ -2585,21 +2591,28 @@ fn plan_xspice_auto_bridges(
                 .copied()
                 .unwrap_or_default();
             let metadata = bridge_metadata.get(&node);
-            usage
-                .bridge_kind(coverage)
-                .map(|kind| PlannedXspiceAutoBridge {
+            usage.bridge_kind(coverage).map(|kind| {
+                // The scoped `vcc` a hierarchical instance carries outranks
+                // the design-wide parameter, which outranks whatever reaches
+                // the net: one precedence, stated once, in the resolver both
+                // boundary routes use.
+                let supply = supplies.resolve(
+                    &xspice_auto_bridge_node_label(Some(&node_names), node),
+                    metadata.and_then(|metadata| metadata.vcc),
+                );
+                PlannedXspiceAutoBridge {
                     node,
                     kind,
-                    vcc: metadata
-                        .and_then(|metadata| metadata.vcc)
-                        .unwrap_or(default_vcc),
+                    vcc: supply.level,
+                    supply: Some(supply.derivation),
                     family: digital_node_families
                         .get(&node)
                         .map(|candidate: &XspiceAutoBridgeFamilyCandidate| candidate.family.clone())
                         .or_else(|| metadata.and_then(|metadata| metadata.family.clone())),
                     #[cfg(feature = "veriloga")]
                     connect_module: None,
-                })
+                }
+            })
         })
         .collect();
 
@@ -2631,6 +2644,7 @@ fn plan_xspice_auto_bridges(
             node,
             kind,
             vcc: 0.0,
+            supply: None,
             family: None,
             // Real-valued event traffic is not a discipline boundary: a
             // `wreal` carries a real number, not a discipline's potential and
@@ -2643,13 +2657,39 @@ fn plan_xspice_auto_bridges(
     planned
 }
 
-fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
-    let param_name = netlist.options.auto_bridge_param_name("d").unwrap_or("vcc");
-    netlist
-        .params
-        .get(param_name)
-        .filter(|value| value.is_finite())
-        .unwrap_or(3.3)
+/// Say where each planned bridge's supply came from, or refuse to guess.
+///
+/// This runs after clause 7 has attached its connect modules and before any
+/// bridge is materialized, because a `connectrules` block stating `vsup` is
+/// the answer for that boundary: the rail the deck happens to have is then
+/// neither used nor worth a sentence. Everything else is either the deck's own
+/// parameter (silent, as always), one rail (named), no rail (the 3.3 V default,
+/// named), or more than one rail, which is the refusal.
+fn report_planned_xspice_auto_bridge_supplies(
+    circuit: &CircuitData,
+    bridges: &[PlannedXspiceAutoBridge],
+    supplies: &boundary_supply::BoundarySupplies,
+) -> Result<(), SimulationError> {
+    if bridges.iter().all(|bridge| bridge.supply.is_none()) {
+        return Ok(());
+    }
+    let node_names = circuit.node_names_sorted();
+    for bridge in bridges {
+        let Some(derivation) = bridge.supply.as_ref() else {
+            continue;
+        };
+        #[cfg(feature = "veriloga")]
+        if bridge
+            .connect_module
+            .as_ref()
+            .is_some_and(connect_modules::PlannedConnectModule::states_supply)
+        {
+            continue;
+        }
+        let node_label = xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
+        supplies.report(&node_label, derivation)?;
+    }
+    Ok(())
 }
 
 /// Resolve the analog-interface parameters carried by a PSpice/Xyce `DIG`
@@ -5206,6 +5246,12 @@ impl Engine {
         let dc_floating_component_is_certain = floating_nodes.floating_component_is_certain;
         circuit.no_dc_path_nodes = floating_nodes.no_dc_path_nodes;
 
+        // One answer per boundary net for the whole build, consulted by the
+        // mixed instances the element loop creates below and by the XSPICE
+        // auto-bridge planner after it. Built from the same flattened elements
+        // the DC topology walk above reads.
+        let boundary_supplies = boundary_supply::BoundarySupplies::new(netlist, &flat_elements);
+
         for (element_index, element) in flat_elements.iter().enumerate() {
             if element_index.is_multiple_of(64) {
                 check_build_abort(abort)?;
@@ -7750,6 +7796,7 @@ impl Engine {
                                 entry,
                                 &mut mixed_specializations,
                                 &design_connect_rules,
+                                &boundary_supplies,
                                 self.config.temperature,
                                 abort,
                             )? {
@@ -8797,7 +8844,6 @@ impl Engine {
             }
         }
 
-        let default_auto_bridge_vcc = xspice_auto_bridge_vcc(netlist);
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
         #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
@@ -8805,7 +8851,7 @@ impl Engine {
             &circuit,
             &flat_elements,
             &scoped_auto_bridge_metadata,
-            default_auto_bridge_vcc,
+            &boundary_supplies,
         );
         // Clause 7 runs over the boundaries the one planner found, never
         // instead of it. A design with no `connectrules` block leaves every
@@ -8818,6 +8864,11 @@ impl Engine {
         )?;
         if !auto_bridges.is_empty() {
             if netlist.options.auto_bridge.unwrap_or(true) {
+                report_planned_xspice_auto_bridge_supplies(
+                    &circuit,
+                    &auto_bridges,
+                    &boundary_supplies,
+                )?;
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &auto_bridges,
@@ -11558,6 +11609,94 @@ set auto_bridge_parm_d = vdd
             single_xspice_param(&circuit, "dac_bridge", "out_high"),
             1.8,
             "auto_bridge_parm_d should select vdd instead of the default vcc parameter"
+        );
+    }
+
+    /// A deck with one rail and no `vcc` parameter converts against that rail
+    /// rather than against 3.3 V.
+    #[test]
+    fn auto_bridge_derives_the_supply_from_the_only_rail_that_reaches_it() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge with a rail and no vcc parameter
+v1 vdd 0 dc 5
+rpull mix vdd 10k
+.model pull d_pullup
+apull [mix] pull
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            5.0,
+            "the 5 V rail reaches the boundary through rpull, so it is the supply"
+        );
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            0.0,
+            "the low level is still ground"
+        );
+    }
+
+    /// Ground is not a path. Every rail touches it, so a walk through it would
+    /// put every rail on every net.
+    #[test]
+    fn auto_bridge_does_not_reach_a_rail_through_ground() {
+        let netlist = Netlist::parse(
+            "\
+* the rail and the boundary share only ground
+v1 vdd 0 dc 5
+rvdd vdd 0 1k
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            3.3,
+            "no rail reaches the boundary, so the default stands"
+        );
+    }
+
+    /// Two rails at different levels is the case a silent default used to
+    /// swallow; picking one of them is the same mistake with extra steps.
+    #[test]
+    fn auto_bridge_refuses_two_rails_reaching_one_boundary() {
+        let netlist = Netlist::parse(
+            "\
+* a 1.8 V core rail and a 5 V I/O rail on one boundary net
+vcore vcore 0 dc 1.8
+vio vio 0 dc 5
+rcore mix vcore 10k
+rio mix vio 10k
+.model pull d_pullup
+apull [mix] pull
+.end
+",
+        )
+        .expect("deck parses");
+
+        let message = Engine::default()
+            .build_circuit(&netlist)
+            .expect_err("two supplies on one boundary are refused")
+            .to_string();
+        assert!(
+            message.contains("VCORE = 1.8 V") && message.contains("VIO = 5 V"),
+            "the refusal names both rails, got: {message}"
         );
     }
 

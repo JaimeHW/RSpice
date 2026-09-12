@@ -87,6 +87,21 @@ impl PlannedConnectModule {
             .find(|(parameter, _)| parameter.eq_ignore_ascii_case(name))
             .map(|(_, value)| *value)
     }
+
+    /// The supply this connect statement states for the boundary, if it states
+    /// one.
+    ///
+    /// Section 7.7.3's `vsup` is authoritative for the boundary it is written
+    /// on, which is why the deck's supply is neither derived nor spoken about
+    /// when it is present: see [`delegated_parameters`], which prefers it.
+    pub(super) fn stated_supply(&self) -> Option<f64> {
+        self.parameter("vsup")
+    }
+
+    /// Whether this connect statement answers the supply question itself.
+    pub(super) fn states_supply(&self) -> bool {
+        self.stated_supply().is_some()
+    }
 }
 
 /// Which of Table 7-2's kinds a planned bridge needs, and the port direction
@@ -198,11 +213,12 @@ fn connect_error(
 /// derives them, and a code-model parameter with no section 7.7.3 override
 /// keeps the code model's own default.
 ///
-/// The supply is the *deck's* `vcc` rather than the connect module's declared
+/// The supply is the *deck's* rather than the connect module's declared
 /// `vsup` default, because a node's supply is a property of the deck and the
 /// module's default exists so the module is well formed standing alone. The
-/// two are the same number by construction — both 3.3 V — which
-/// `rspice_veriloga::connect::library`'s parameter pin holds still.
+/// library's default is 3.3 V, which `rspice_veriloga::connect::library`'s
+/// parameter pin holds still, and which is also what the deck's supply falls
+/// back to when nothing in the deck says otherwise.
 pub(super) fn delegated_parameters(
     selected: &PlannedConnectModule,
     kind: super::XspiceAutoBridgeKind,
@@ -210,7 +226,7 @@ pub(super) fn delegated_parameters(
 ) -> Result<Vec<(String, crate::Value)>, SimulationError> {
     use super::XspiceAutoBridgeKind as Kind;
 
-    let supply = selected.parameter("vsup").unwrap_or(vcc);
+    let supply = selected.stated_supply().unwrap_or(vcc);
     let half_supply = supply / 2.0;
     let mut parameters: Vec<(String, crate::Value)> = match kind {
         Kind::Adc => vec![

@@ -151,6 +151,7 @@ pub(super) fn try_build_mixed_signal_instance(
     entry: &CachedVerilogAModel,
     specializations: &mut MixedSpecializations,
     connect_rules: &DesignConnectRules,
+    supplies: &super::boundary_supply::BoundarySupplies,
     temperature: f64,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<bool, SimulationError> {
@@ -356,7 +357,6 @@ pub(super) fn try_build_mixed_signal_instance(
         ))
     })?;
 
-    let vcc = super::xspice_auto_bridge_vcc(netlist);
     let node_names = circuit.node_names_sorted();
     for port in boundary {
         let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), port.node);
@@ -367,6 +367,23 @@ pub(super) fn try_build_mixed_signal_instance(
             &element.name,
             &port.signal,
         )?;
+        // The same resolution the XSPICE auto-bridge planner makes, for the
+        // same net, from the same resolver: a deck carrying both routes gets
+        // one supply per boundary net rather than one per route. A connect
+        // statement's own `vsup` answers first, and then nothing is derived --
+        // the delegation below would override the derived number anyway, and a
+        // warning about a rail nothing consulted is noise.
+        let vcc = match selected
+            .as_ref()
+            .and_then(connect_modules::PlannedConnectModule::stated_supply)
+        {
+            Some(supply) => supply,
+            None => {
+                let resolved = supplies.resolve(&node_label, None);
+                supplies.report(&node_label, &resolved.derivation)?;
+                resolved.level
+            }
+        };
         let parameters = match selected.as_ref() {
             Some(selected) => {
                 connect_modules::check_delegable(selected, kind, &node_label)?;

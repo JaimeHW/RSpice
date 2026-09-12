@@ -474,6 +474,154 @@ fn independent_current_is_zero_at_dc(spec: &super::SourceSpec) -> bool {
     }
 }
 
+/// A constant supply rail: one node a `V` card holds at a DC level above
+/// ground, and the card that holds it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SupplyRail {
+    /// The source card, upper-cased, so a diagnostic names what the author
+    /// wrote rather than an index.
+    pub source: String,
+    /// The node the card holds, in the same normalized spelling the rest of
+    /// this module's diagnostics use.
+    pub node: String,
+    /// The rail's DC level relative to ground, in volts. Always positive:
+    /// ground and the rails below it are not supplies for a logic level.
+    pub level: Value,
+}
+
+/// Which supply rails reach each node through the passive network.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SupplyReachability {
+    rails_by_component: BTreeMap<usize, Vec<SupplyRail>>,
+    component_by_node: HashMap<String, usize>,
+}
+
+impl SupplyReachability {
+    /// The rails a resistive path joins to `node`, in deck order, one entry
+    /// per source card.
+    ///
+    /// A node this circuit never mentions reaches nothing, which is the same
+    /// answer as a node no rail reaches: the caller that has to pick a supply
+    /// treats both as "the deck did not say".
+    pub(crate) fn rails_reaching(&self, node: &str) -> &[SupplyRail] {
+        self.component_by_node
+            .get(&node_key(node))
+            .and_then(|component| self.rails_by_component.get(component))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Find which supply rails reach each node through resistors and shorts.
+///
+/// This is a deliberately narrower walk than [`analyze_dc_ground_paths`]'s.
+/// That one asks whether *anything* determines a node's DC voltage, so it must
+/// tie a MOSFET's channel together and treat every element it cannot model as
+/// conducting. Here the question is which rail a boundary net belongs to, and
+/// a walk that conducted through channels and junctions would join a 1.8 V
+/// core to a 5 V I/O ring through the first level shifter and then report both
+/// rails on every net in the design. So the edges are the ones whose
+/// conduction no bias decides -- resistors, inductors, and voltage sources
+/// stating zero volts, which are shorts -- and none of them may pass through
+/// ground, which every rail touches by definition.
+///
+/// A rail is an independent voltage source with a constant DC value and
+/// exactly one terminal on ground. A source carrying a waveform is stimulus
+/// rather than a supply: its level is a property of the excitation and not of
+/// the design's power, so it is neither a rail nor an edge. A source between
+/// two non-ground nodes states a difference and not a level, so it is neither
+/// either.
+pub(crate) fn analyze_supply_reachability(elements: &[Element]) -> SupplyReachability {
+    let mut union = NodeUnion::default();
+    for element in elements {
+        union.collect_element_nodes(element);
+    }
+    for element in elements {
+        for (left, right) in passive_short_pairs(element) {
+            if is_ground_name(left) || is_ground_name(right) {
+                continue;
+            }
+            union.union_nodes(left, right);
+        }
+    }
+
+    let mut rails_by_component: BTreeMap<usize, Vec<SupplyRail>> = BTreeMap::new();
+    for element in elements {
+        let Some(rail) = supply_rail_of(element) else {
+            continue;
+        };
+        let Some(index) = union.index_by_key.get(&node_key(&rail.node)) else {
+            continue;
+        };
+        rails_by_component
+            .entry(union.root_of(*index))
+            .or_default()
+            .push(rail);
+    }
+
+    let component_by_node = union
+        .index_by_key
+        .iter()
+        .map(|(key, index)| (key.clone(), union.root_of(*index)))
+        .collect();
+
+    SupplyReachability {
+        rails_by_component,
+        component_by_node,
+    }
+}
+
+/// The node pairs an element shorts together regardless of bias.
+fn passive_short_pairs(element: &Element) -> Vec<(&str, &str)> {
+    let pair = || match element.nodes.as_slice() {
+        [left, right, ..] => vec![(left.as_str(), right.as_str())],
+        _ => Vec::new(),
+    };
+    match &element.kind {
+        ElementKind::Resistor { .. }
+        | ElementKind::Inductor { .. }
+        | ElementKind::JilesAthertonInductor { .. } => pair(),
+        ElementKind::VoltageSource(spec) => match constant_dc_level(spec) {
+            Some(level) if level == 0.0 => pair(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// The rail this element establishes, if it establishes one.
+fn supply_rail_of(element: &Element) -> Option<SupplyRail> {
+    let ElementKind::VoltageSource(spec) = &element.kind else {
+        return None;
+    };
+    let level = constant_dc_level(spec)?;
+    let [positive, negative] = element.nodes.as_slice() else {
+        return None;
+    };
+    let (node, level) = match (is_ground_name(positive), is_ground_name(negative)) {
+        (false, true) => (positive, level),
+        (true, false) => (negative, -level),
+        _ => return None,
+    };
+    (level.is_finite() && level > 0.0).then(|| SupplyRail {
+        source: element.name.to_ascii_uppercase(),
+        node: normalize_node_name(node),
+        level,
+    })
+}
+
+/// The DC level of a source that carries no waveform and no AC excitation.
+fn constant_dc_level(spec: &super::SourceSpec) -> Option<Value> {
+    match spec {
+        super::SourceSpec::Dc(value) => Some(*value),
+        super::SourceSpec::DcAc {
+            dc_value,
+            ac_magnitude,
+            ..
+        } if *ac_magnitude == 0.0 => Some(*dc_value),
+        _ => None,
+    }
+}
+
 /// Terminal sets an element ties together through DC conduction.
 ///
 /// An empty result means the element conducts between none of its terminals.
