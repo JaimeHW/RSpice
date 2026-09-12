@@ -142,8 +142,31 @@ use std::collections::{BTreeSet, HashMap};
 /// tells them the wrong thing to do about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DigitalLoweringClass {
-    Refusal,
+    Refusal(DigitalRefusalKind),
     Invariant,
+}
+
+/// Which kind of refused program this is.
+///
+/// Two different defects wear the word "refused" and must not read the same.
+/// A program that violates the standard is illegal in every tool that reads
+/// it, and the author has to change it. A construct this lowering does not
+/// build yet is legal Verilog that this compiler is behind on, and the author
+/// may reasonably expect it to work one day. The analyzer already spells that
+/// difference — [`SemanticErrorKind::InvalidContribution`] for what the
+/// standard does not let drive a net, [`SemanticErrorKind::UnsupportedFeature`]
+/// for what is not built — so a refusal raised here carries the same kind
+/// rather than inventing a third, and one construct does not change its error
+/// class according to which pass happened to catch it.
+///
+/// [`SemanticErrorKind::InvalidContribution`]: crate::error::SemanticErrorKind::InvalidContribution
+/// [`SemanticErrorKind::UnsupportedFeature`]: crate::error::SemanticErrorKind::UnsupportedFeature
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DigitalRefusalKind {
+    /// Legal Verilog the discrete-domain lowering has no form for.
+    NotLowered,
+    /// A driver the standard does not admit on the net it drives.
+    InvalidContribution,
 }
 
 /// One diagnostic from the discrete-domain lowering, with the class that
@@ -155,9 +178,20 @@ pub(crate) struct DigitalLoweringDiagnostic {
 }
 
 impl DigitalLoweringDiagnostic {
+    /// Refuse a construct this lowering has no form for yet.
     fn refusal(message: impl Into<String>, span: SourceSpanRef) -> Self {
+        Self::refusal_with_kind(DigitalRefusalKind::NotLowered, message, span)
+    }
+
+    /// Refuse a construct the standard does not admit, naming which kind of
+    /// illegality it is so the author is not told it is merely unsupported.
+    fn refusal_with_kind(
+        kind: DigitalRefusalKind,
+        message: impl Into<String>,
+        span: SourceSpanRef,
+    ) -> Self {
         Self {
-            class: DigitalLoweringClass::Refusal,
+            class: DigitalLoweringClass::Refusal(kind),
             diagnostic: IrDiagnostic::error(CompilerPhase::CfgLowering, message, span),
         }
     }
@@ -488,12 +522,17 @@ fn reject_overdriven_real_nets(
             continue;
         };
         let count = on_this_net.len();
-        diagnostics.push(DigitalLoweringDiagnostic::refusal(
+        // Not `UnsupportedFeature`: the LRM admits one driver of a real-valued
+        // net and this design has two, so the program is illegal rather than
+        // ahead of the compiler. The message is phrased to complete
+        // `InvalidContribution`'s "cannot contribute to …".
+        diagnostics.push(DigitalLoweringDiagnostic::refusal_with_kind(
+            DigitalRefusalKind::InvalidContribution,
             format!(
-                "`{}` is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section 6.5.3 \
-                 permits a maximum of one driver of a real-valued net, and the standard defines \
-                 no resolution to combine two — declare it `wrealsum`, `wrealavg`, `wrealmin` \
-                 or `wrealmax` to say which one you want",
+                "`{}`, which is a `wreal` with {count} drivers; Verilog-AMS LRM 2.4 section \
+                 6.5.3 permits a maximum of one driver of a real-valued net, and the standard \
+                 defines no resolution to combine two — declare it `wrealsum`, `wrealavg`, \
+                 `wrealmin` or `wrealmax` to say which one you want",
                 signal.name
             ),
             second.span,

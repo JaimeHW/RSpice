@@ -1252,12 +1252,18 @@ impl VerilogACompiler {
     ///
     /// A construct the lowering has no form for is the author's to fix, so it
     /// is reported the way every other refused construct is: a semantic error
-    /// naming the construct at its offset, through
-    /// [`error::SemanticErrorKind::UnsupportedFeature`] and nothing new. Telling an
-    /// author that their `string` declaration is an "internal error" tells
-    /// them the compiler is broken and leaves them nothing to do about it;
-    /// Spectre and Virtuoso reserve that phrasing for invariant violations and
-    /// so does this.
+    /// naming the construct at its offset, through an existing
+    /// [`error::SemanticErrorKind`] and nothing new. Telling an author that
+    /// their `string` declaration is an "internal error" tells them the
+    /// compiler is broken and leaves them nothing to do about it; Spectre and
+    /// Virtuoso reserve that phrasing for invariant violations and so does
+    /// this.
+    ///
+    /// Which kind is the refusal's own
+    /// ([`DigitalRefusalKind`](canonical_ir::digital_lower::DigitalRefusalKind)),
+    /// because "illegal" and "not built yet" are different news. It is the kind
+    /// the analyzer would have used for the same construct, so a program does
+    /// not change its error class according to which pass caught it.
     ///
     /// Several refusals are reported together the way the analyzer reports
     /// collected errors. A single invariant violation anywhere in the batch
@@ -1267,7 +1273,7 @@ impl VerilogACompiler {
     fn digital_lowering_error(
         diagnostics: Vec<canonical_ir::digital_lower::DigitalLoweringDiagnostic>,
     ) -> CompileError {
-        use canonical_ir::digital_lower::DigitalLoweringClass;
+        use canonical_ir::digital_lower::{DigitalLoweringClass, DigitalRefusalKind};
         if diagnostics
             .iter()
             .any(|entry| entry.class == DigitalLoweringClass::Invariant)
@@ -1285,10 +1291,16 @@ impl VerilogACompiler {
                 let span = entry.diagnostic.span.map_or_else(Span::dummy, |span| {
                     Span::new(SourceId::new(span.source_file_id), span.start, span.end)
                 });
-                CompileError::Semantic(error::SemanticError::new(
-                    error::SemanticErrorKind::UnsupportedFeature(entry.diagnostic.message),
-                    span,
-                ))
+                let kind = match entry.class {
+                    DigitalLoweringClass::Refusal(DigitalRefusalKind::InvalidContribution) => {
+                        error::SemanticErrorKind::InvalidContribution(entry.diagnostic.message)
+                    }
+                    // Every other refusal is a construct this lowering does not
+                    // build. An invariant cannot arrive here — the check above
+                    // returned — and reads the same way if one ever does.
+                    _ => error::SemanticErrorKind::UnsupportedFeature(entry.diagnostic.message),
+                };
+                CompileError::Semantic(error::SemanticError::new(kind, span))
             })
             .collect();
         match refusals.len() {

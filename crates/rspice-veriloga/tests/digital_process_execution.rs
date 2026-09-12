@@ -2423,6 +2423,12 @@ fn the_remaining_process_refusals_name_themselves() {
 /// phrasing for invariant violations, and `canonical_ir/digital_lower.rs`
 /// classifies each of its diagnostic sites accordingly.
 ///
+/// Each row also pins the error *kind* the refusal is reported under, because
+/// "illegal" and "not built yet" are different news: the `wreal` with two
+/// drivers is a program the standard forbids and is reported as the analyzer
+/// reports one, while everything else here is legal Verilog this compiler is
+/// behind on.
+///
 /// One row per construct that was found to reach a refusal. Two of them are
 /// answered by the analyzer before the lowering sees them — an unpacked array
 /// and a run-time select bound — and stay here anyway, because the subject is
@@ -2431,19 +2437,23 @@ fn the_remaining_process_refusals_name_themselves() {
 /// refused program quietly started compiling.
 #[test]
 fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
+    // (source, what the message must name, the error kind it is reported under)
     let cases = [
-        // Verilog-AMS LRM 2.4 section 6.5.3: one driver of a `wreal`.
+        // Verilog-AMS LRM 2.4 section 6.5.3: one driver of a `wreal`. The only
+        // row here that is an illegal program rather than an unbuilt one.
         (
             "    wreal a, b, bus;\n\
              \x20   assign bus = a;\n\
              \x20   assign bus = b;",
             "section 6.5.3",
+            "Invalid contribution: cannot contribute to ",
         ),
         // A process-local declaration this lowering has no storage for.
         (
             "    reg q;\n\
              \x20   initial begin : work string s; q = 1'b0; end",
             "process-local `string`",
+            "Unsupported feature: ",
         ),
         // An unpacked array inside a process: the analyzer owns this one and
         // the lowering's own array arms are unreachable behind it. The row
@@ -2453,6 +2463,7 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "    reg q;\n\
              \x20   initial begin : work reg [1:0] m [0:3]; q = 1'b0; end",
             "unpacked array dimensions on the process-local `m`",
+            "Unsupported feature: ",
         ),
         // A process-local is an SSA value, so neither a deferred update nor a
         // partial write has anywhere to land.
@@ -2460,11 +2471,13 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "    reg q;\n\
              \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
             "nonblocking assignment to the process-local `i`",
+            "Unsupported feature: ",
         ),
         (
             "    reg q;\n\
              \x20   initial begin : work reg [3:0] t; t[0] = 1'b1; q = t[0]; end",
             "select on the process-local `t`",
+            "Unsupported feature: ",
         ),
         // A module-level variable the discrete domain has taken over, whose
         // initializer the continuous domain no longer schedules.
@@ -2473,6 +2486,7 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
              \x20   reg q;\n\
              \x20   initial begin q = 1'b0; bias = 2.0; end",
             "module-level",
+            "Unsupported feature: ",
         ),
         // A select whose bound is only known at run time. The analyzer owns
         // this one now; the lowering's constant fold stands behind it.
@@ -2480,12 +2494,14 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "    reg [3:0] q;\n\
              \x20   initial begin : work integer i; i = 0; q[i] = 1'b1; end",
             "must have constant bounds",
+            "Unsupported feature: ",
         ),
         // `@*` over a statement that reads nothing would never resume.
         (
             "    reg q;\n\
              \x20   always @* q = 1'b1;",
             "names no signal",
+            "Unsupported feature: ",
         ),
         // No row for `sized`'s "a real value has no four-state form here": an
         // assignment and a `repeat` count both reach a real through VAMS-2023
@@ -2494,7 +2510,7 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
         // ever does reach it, the author is told what they wrote, not that the
         // compiler broke.
     ];
-    for (section, expected) in cases {
+    for (section, expected, kind) in cases {
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(&digital_module(section))
             .expect_err("the construct must be refused");
@@ -2510,6 +2526,10 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
         assert!(
             rendered.contains("Semantic error at offset"),
             "a refused construct is reported at its offset: {rendered}"
+        );
+        assert!(
+            rendered.contains(kind),
+            "expected the `{kind}` error kind in: {rendered}"
         );
     }
 }
