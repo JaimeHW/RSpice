@@ -451,3 +451,71 @@ endmodule
     assert_eq!(first.to_bits(), 1.0_f64.to_bits());
     assert_eq!(first.to_bits(), repeated.to_bits());
 }
+
+/// A reactive stamp between the value pass and acceptance leaves the `ddt`
+/// history for `advance_state` to rotate.
+///
+/// A transient step is a nonlinear value pass, the small-signal observations
+/// of that same point, and then the acceptance that commits it. An
+/// observation may not reopen the integration candidate: it runs only the
+/// assignment pass and the entries it was asked for, and this route's
+/// reactive Jacobian is `dQ/dx` alone, so nothing in it republishes a
+/// candidate the pass discarded and the acceptance rotates nothing. A 1 nF
+/// capacitor driven 0 V, 1 V, 0.5 V, -0.25 V on 1 ns, 1 ns and 2 ns
+/// backward-Euler steps then read +0.5005 A at t = 2 ns — a capacitor
+/// charging from zero a second time — where its accepted history gives
+/// -0.4995 A, and it stayed at the operating point for the whole walk.
+#[test]
+fn a_reactive_observation_before_acceptance_leaves_the_ddt_history_to_rotate() {
+    const SOURCE: &str = r#"
+`include "disciplines.vams"
+module reactive_observation_before_accept(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-9;
+    analog I(p, n) <+ c * ddt(V(p, n)) + V(p, n) * 1.0e-3;
+endmodule
+"#;
+
+    let walk = |observe: bool| {
+        let mut device = device(SOURCE);
+        device.set_analysis_type(0);
+        assert_eq!(evaluate(&mut device, 0.0, 0.0), 0.0);
+        device.advance_state();
+
+        device.set_analysis_type(2);
+        let mut currents = Vec::new();
+        for (time, dt, bias) in [
+            (1.0e-9, 1.0e-9, 1.0),
+            (2.0e-9, 1.0e-9, 0.5),
+            (4.0e-9, 2.0e-9, -0.25),
+        ] {
+            device.set_timestep(dt);
+            currents.push(evaluate(&mut device, time, bias));
+            if observe {
+                device
+                    .try_stamp_reactive(&[bias], |_, _, _| {})
+                    .expect("reactive observation of the point just evaluated");
+            }
+            device.advance_state();
+        }
+        currents
+    };
+
+    let observed = walk(true);
+    let plain = walk(false);
+    for (index, (with, without)) in observed.iter().zip(&plain).enumerate() {
+        assert_eq!(
+            with.to_bits(),
+            without.to_bits(),
+            "point {index}: {with} with the reactive observation, {without} without it"
+        );
+    }
+    for (index, (current, expected)) in observed.iter().zip([1.001, -0.4995, -0.37525]).enumerate()
+    {
+        assert!(
+            (current - expected).abs() <= 1.0e-12,
+            "point {index}: expected {expected}, got {current} (walk {observed:?})"
+        );
+    }
+}

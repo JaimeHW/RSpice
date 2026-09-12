@@ -6178,8 +6178,27 @@ impl VerilogADevice {
         self.begin_evaluation_with_tasks(mode, true);
     }
 
+    /// Begin a pass that observes the point the value pass already evaluated.
+    ///
+    /// A reactive stamp and a noise-source read are both taken at a solution
+    /// some evaluation has already loaded, and neither is the pass whose
+    /// result is accepted; the engine's order is a nonlinear value pass, the
+    /// small-signal observations of that same point, and then the acceptance
+    /// that commits it. So an observation must leave the candidate exactly as
+    /// it found it, and cannot go through [`Self::begin_evaluation`]: an
+    /// observation runs only the assignment pass and the entries it asked
+    /// for, so nothing in it is obliged to republish an integration candidate
+    /// that pass reopened. The bytecode lowering's reactive Jacobian is
+    /// `dQ/dx` alone and republishes none, which is how a reactive stamp
+    /// between the value pass and `advance_state` used to leave a `ddt` site's
+    /// accepted history standing at the operating point for a whole run.
+    ///
+    /// The evaluation mode is still installed: the observation surfaces
+    /// evaluate under small-signal rules, which is what keeps a named limiter
+    /// out of their assignment pass.
     fn begin_observation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
-        self.begin_evaluation_with_tasks(mode, false);
+        self.context.evaluation_mode = mode;
+        self.context.begin_stateful_observation();
     }
 
     fn begin_evaluation_with_tasks(

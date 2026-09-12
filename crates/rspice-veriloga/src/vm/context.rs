@@ -1589,13 +1589,28 @@ impl VmContext {
         self.begin_stateful_evaluation_with_tasks(true);
     }
 
+    /// Begin a pass that observes the point an evaluation already published.
+    ///
+    /// An observation reads the current candidate, including its
+    /// integration-valid flags and event variables. It cannot restart that
+    /// candidate from accepted history or emit task effects — the acceptance
+    /// that may follow rotates exactly that candidate, and an observation
+    /// that reopened it would leave nothing to rotate, so
+    /// [`Self::apply_validated_advance_state`] would promote accepted history
+    /// that is one point stale.
+    ///
+    /// The two facts this does set are about the pass, not about the
+    /// candidate: an observation appends nothing to the task journal, and it
+    /// is not the numerical evaluation whose variable image a caller may read
+    /// back.
+    pub(crate) fn begin_stateful_observation(&mut self) {
+        self.record_task_effects = false;
+        self.numerical_evaluation_valid = false;
+    }
+
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
         if !self.evaluation_mode.dynamic_operators_enabled() {
-            // A static observation reads the current candidate, including its
-            // integration-valid flags and event variables. It cannot restart
-            // that candidate from accepted history or emit task effects.
-            self.record_task_effects = false;
-            self.numerical_evaluation_valid = false;
+            self.begin_stateful_observation();
             return;
         }
         for origin in self.idtmod_origins.values_mut() {
