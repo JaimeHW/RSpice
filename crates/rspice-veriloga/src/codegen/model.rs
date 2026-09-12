@@ -927,14 +927,10 @@ pub enum Instruction {
     /// A named limiter's previous Newton iterate, seeded from the oriented
     /// proposal before the limiter has produced a candidate.
     /// Stack: `[oriented proposed] -> [previous]`.
-    ///
-    /// Appended to preserve every preceding serialized discriminant.
     NamedLimiterPrevious(usize),
     /// Publish a named limiter's candidate as the iterate the next evaluation
     /// reads back, returning what the limiter admitted.
     /// Stack: `[oriented proposed, candidate] -> [limited]`.
-    ///
-    /// Appended to preserve every preceding serialized discriminant.
     NamedLimiterStore(usize),
 }
 

@@ -5407,9 +5407,11 @@ impl VerilogADevice {
     /// sixty-four — or an interpreted pass over the assignment steps the
     /// `CompiledModel` already carries. The second costs nothing until it is
     /// called, and the readback it serves is not on any hot path in a browser.
-    /// Plans rooted on observable variables already published the readback.
-    /// Skip their replay, including custom limiters whose canonical callbacks
-    /// cannot execute through the bytecode interpreter.
+    /// Plans rooted on observable variables already published the readback, so
+    /// their replay is skipped. What does replay runs as an observation and not
+    /// as a Newton iterate: the interpreter executes named limiters, so the
+    /// pass bypasses limiting rather than letting a readback publish a
+    /// limiter candidate and advance its history.
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
     pub fn observe_variables(&mut self, artifact: &CanonicalIrArtifact) -> Result<(), VmError> {
         self.context.record_task_effects = false;
@@ -5421,8 +5423,15 @@ impl VerilogADevice {
         if context.variables.len() < self.model.num_variables {
             context.variables.resize(self.model.num_variables, 0.0);
         }
+        // A readback is not an iterate. Bypass limiting for the pass and give
+        // the solver its mode back, so a plan that ever routes a named-limiter
+        // model through here cannot advance a limiter by being observed.
+        let solver_mode = context.evaluation_mode;
+        context.evaluation_mode = crate::vm::VerilogAEvaluationMode::StaticProbe;
         let mut vm = Vm::new(context);
-        Self::execute_assignment_steps(&mut vm, &self.model.assignment_steps)
+        let replayed = Self::execute_assignment_steps(&mut vm, &self.model.assignment_steps);
+        self.context.evaluation_mode = solver_mode;
+        replayed
     }
 
     /// [`Self::observe_variables`] on the interpreter route, where there is
