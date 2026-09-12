@@ -46,6 +46,11 @@ struct SpectreStatement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SpectreStatementKind {
     Lowered(String),
+    /// A Verilog-A source the deck compiles in. Which masters it declares is
+    /// the Verilog-A compiler's answer, not this front end's, so the statement
+    /// is typed rather than plain: its presence is what makes an otherwise
+    /// unclaimed master a module instantiation instead of a refusal.
+    VerilogASource(String),
     Model {
         name: String,
         canonical_type: String,
@@ -106,6 +111,12 @@ struct SpectreSymbols {
     /// names the Spectre instance, while the analysis card must name the
     /// lowered one.
     sources: HashMap<String, String>,
+    /// Whether the source compiles in a Verilog-A file. Every module such a
+    /// file declares is a master here, exactly as it is in Spectre, where an
+    /// instance's master may be a primitive, a model, a subckt or a Verilog-A
+    /// module; the names are bound after the front end, by the same builder
+    /// step the canonical `.VERILOGA` route uses.
+    declares_veriloga_modules: bool,
 }
 
 /// Adapt a supported Spectre model-library source without changing its line
@@ -150,10 +161,13 @@ pub fn adapt_spectre_model_library<'a>(
             SpectreStatementKind::Subcircuit { .. } => "subcircuit",
             SpectreStatementKind::Statistics(_) => "statistics",
             SpectreStatementKind::Instance(_) => "instance",
-            SpectreStatementKind::Lowered(_) => "statement",
+            SpectreStatementKind::Lowered(_) | SpectreStatementKind::VerilogASource(_) => {
+                "statement"
+            }
         };
         let lowered = match statement.kind {
             SpectreStatementKind::Lowered(lowered)
+            | SpectreStatementKind::VerilogASource(lowered)
             | SpectreStatementKind::Model { lowered, .. }
             | SpectreStatementKind::Subcircuit { lowered, .. } => lowered,
             SpectreStatementKind::Statistics(statistics) => lower_statistics(&statistics)?,
@@ -352,10 +366,14 @@ fn parse_spectre_statements(
                 statements.push(lowered_statement(line_number, format!(".global {rest}")));
             }
             "ahdl_include" => {
-                statements.push(lowered_statement(
-                    line_number,
-                    adapt_ahdl_include(rest, line_number)?,
-                ));
+                statements.push(SpectreStatement {
+                    line: line_number,
+                    consumed_lines: 1,
+                    kind: SpectreStatementKind::VerilogASource(adapt_ahdl_include(
+                        rest,
+                        line_number,
+                    )?),
+                });
             }
             "statistics" => {
                 let (statistics, consumed) = parse_statistics_block(lines, index)?;
@@ -1008,7 +1026,7 @@ spectre_constructs! {
     StatementSave => (SpectreNamespace::Statement, SpectreSupport::Lowered, ["save"]),
     StatementAhdlInclude => (
         SpectreNamespace::Statement,
-        SpectreSupport::OwnedElsewhere("the separate Verilog-A/AHDL effort"),
+        SpectreSupport::Lowered,
         ["ahdl_include"],
     ),
     StatementSaveOptions => (
@@ -1256,6 +1274,9 @@ impl SpectreSymbols {
                         format!("{prefix}{}", instance.name),
                     );
                 }
+                SpectreStatementKind::VerilogASource(_) => {
+                    symbols.declares_veriloga_modules = true;
+                }
                 SpectreStatementKind::Lowered(_) | SpectreStatementKind::Statistics(_) => {}
             }
         }
@@ -1487,6 +1508,19 @@ fn lower_spectre_instance(
         "nmos" | "pmos" => Ok(render_model_or_subcircuit_instance(instance, "M")),
         "npn" | "pnp" => Ok(render_model_or_subcircuit_instance(instance, "Q")),
         "njf" | "pjf" | "njfet" | "pjfet" => Ok(render_model_or_subcircuit_instance(instance, "J")),
+        // A Verilog-A source the deck compiles in declares masters of its own,
+        // and only the Verilog-A compiler knows their names. So an unclaimed
+        // master becomes the same subcircuit card the canonical `.VERILOGA`
+        // route writes, which the flattener preserves as an external module
+        // (`netlist::flattener`'s `defer_external_module_binding`) for the
+        // builder to bind by module name or refuse by name
+        // (`engine::builder`'s `VerilogABindingPriority::ModuleName`). The
+        // deck's own subcircuits and models are matched above, so they shadow
+        // a module of the same name on this route exactly as they do on that
+        // one.
+        _ if symbols.declares_veriloga_modules => {
+            Ok(render_model_or_subcircuit_instance(instance, "X"))
+        }
         _ => Err(unsupported_construct(
             SpectreNamespace::Master,
             &instance.master,

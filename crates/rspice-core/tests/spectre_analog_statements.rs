@@ -503,6 +503,41 @@ fn lowered_transient_and_ac_analyses_match_their_spice_equivalents() {
 }
 
 #[test]
+fn a_module_source_makes_its_masters_instantiable_and_nothing_else_does() {
+    let declared = adapt(
+        "ahdl-include-master",
+        "simulator lang=spectre\n\
+         ahdl_include \"r31_device.va\"\n\
+         x1 (a k) my_diode is=1e-14\n",
+    );
+    let instance = declared
+        .elements
+        .iter()
+        .find(|element| element.name.eq_ignore_ascii_case("Xx1"))
+        .unwrap_or_else(|| panic!("the ahdl_include master lowers to a subcircuit instance"));
+    assert!(
+        matches!(
+            &instance.kind,
+            ElementKind::Subcircuit { subckt_name, .. }
+                if subckt_name.eq_ignore_ascii_case("my_diode")
+        ),
+        "{:?}",
+        instance.kind
+    );
+
+    // Without a Verilog-A source in the deck the very same line names nothing,
+    // and the adapter must still refuse it rather than mint a dangling master.
+    let undeclared = refuse(
+        "ahdl-include-absent",
+        "simulator lang=spectre\nx1 (a k) my_diode is=1e-14\n",
+    );
+    assert!(
+        undeclared.contains("unknown native Spectre instance master 'my_diode'"),
+        "{undeclared}"
+    );
+}
+
+#[test]
 fn a_verilog_a_file_reached_through_include_is_refused_in_favour_of_ahdl_include() {
     let message = refuse(
         "include-verilog-a",
@@ -510,4 +545,218 @@ fn a_verilog_a_file_reached_through_include_is_refused_in_favour_of_ahdl_include
     );
     assert!(message.contains("ahdl_include"), "{message}");
     assert!(message.contains("r31_device.va"), "{message}");
+}
+
+/// A Verilog-A module a Spectre deck pulls in with `ahdl_include` is a master
+/// like any other: the deck instantiates it by module name with its own
+/// parameters, and the same module reached through the SPICE `.va` route must
+/// solve to the same bits.
+#[cfg(feature = "veriloga")]
+mod ahdl_include_masters {
+    use super::{Netlist, adapt, engine};
+    use std::path::PathBuf;
+
+    /// A linear conductance whose value is an instance parameter, so the
+    /// operating point proves the parameter reached the module rather than
+    /// only that the master resolved.
+    const PROBE: &str = "\
+module r31_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real rnom = 1000.0;
+    analog I(p, n) <+ V(p, n) / rnom;
+endmodule
+";
+
+    /// The library file is named after nothing the decks mention, so a master
+    /// can only resolve through the module name the source declares.
+    struct Library(PathBuf);
+
+    impl Library {
+        fn write(label: &str) -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock follows the Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "rspice_r31_{label}_{}_{nonce}.va",
+                std::process::id()
+            ));
+            std::fs::write(&path, PROBE).expect("write the Verilog-A library");
+            Self(path)
+        }
+
+        fn quoted(&self) -> String {
+            self.0.display().to_string().replace('\\', "/")
+        }
+    }
+
+    impl Drop for Library {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn spectre_deck(library: &Library, parameters: &str) -> String {
+        format!(
+            "simulator lang=spectre\n\
+             ahdl_include \"{}\"\n\
+             V1 (in 0) vsource dc=1\n\
+             R1 (in out) resistor r=1k\n\
+             x1 (out 0) r31_probe {parameters}\n\
+             op1 dc\n",
+            library.quoted()
+        )
+    }
+
+    fn spice_deck(library: &Library, parameters: &str) -> String {
+        format!(
+            "equivalent SPICE deck\n\
+             .va \"{}\"\n\
+             VV1 in 0 1\n\
+             RR1 in out 1k\n\
+             Xx1 out 0 r31_probe {parameters}\n\
+             .op\n\
+             .end\n",
+            library.quoted()
+        )
+    }
+
+    #[test]
+    fn an_ahdl_included_module_solves_exactly_as_the_spice_route_does() {
+        let library = Library::write("parity");
+        let spectre = adapt("ahdl-include-parity", &spectre_deck(&library, "rnom=3000"));
+        let spice = Netlist::parse(&spice_deck(&library, "rnom=3000"))
+            .expect("the SPICE route parses the same module");
+
+        let engine = engine();
+        let from_spectre = engine
+            .run_dc_op(&spectre)
+            .expect("the Spectre deck's operating point converges");
+        let from_spice = engine
+            .run_dc_op(&spice)
+            .expect("the SPICE deck's operating point converges");
+        for node in ["in", "out"] {
+            let lowered = from_spectre
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("V({node}) from the Spectre deck"));
+            let authored = from_spice
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("V({node}) from the SPICE deck"));
+            assert_eq!(
+                lowered.to_bits(),
+                authored.to_bits(),
+                "V({node}) differs: {lowered} vs {authored}"
+            );
+        }
+        let out = from_spectre
+            .try_voltage_named("out")
+            .expect("out is a solved node");
+        assert!(
+            (out - 0.75).abs() < 1e-9,
+            "the instance parameter must set the divider ratio, got {out}"
+        );
+    }
+
+    #[test]
+    fn an_ahdl_include_path_that_does_not_exist_is_refused_by_path() {
+        let netlist = adapt(
+            "ahdl-include-missing",
+            "simulator lang=spectre\n\
+             ahdl_include \"r31_absent_library.va\"\n\
+             V1 (in 0) vsource dc=1\n\
+             R1 (in 0) resistor r=1k\n\
+             op1 dc\n",
+        );
+        let message = engine()
+            .run_dc_op(&netlist)
+            .expect_err("a Verilog-A source that is not there must fail closed")
+            .to_string();
+        assert!(message.contains("r31_absent_library.va"), "{message}");
+    }
+
+    #[test]
+    fn a_parameter_the_module_does_not_declare_is_refused_by_name_on_both_routes() {
+        let library = Library::write("unknown-parameter");
+        let spectre = adapt(
+            "ahdl-include-unknown-parameter",
+            &spectre_deck(&library, "nosuch=1"),
+        );
+        let spice = Netlist::parse(&spice_deck(&library, "nosuch=1"))
+            .expect("the SPICE route parses the same instance");
+        let engine = engine();
+        for (route, netlist) in [("Spectre", &spectre), ("SPICE", &spice)] {
+            let message = engine
+                .run_dc_op(netlist)
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{route} accepted a parameter the module does not declare")
+                })
+                .to_string();
+            assert!(
+                message.to_ascii_lowercase().contains("nosuch"),
+                "{route}: {message}"
+            );
+        }
+    }
+
+    /// Both dialects resolve a master against the deck's own subcircuits
+    /// before the modules a Verilog-A source declares, so a `subckt` shadows
+    /// an `ahdl_include`d module of the same name on either route.
+    #[test]
+    fn a_deck_subcircuit_shadows_an_ahdl_included_module_of_the_same_name() {
+        let library = Library::write("shadow");
+        let spectre = adapt(
+            "ahdl-include-shadow",
+            &format!(
+                "simulator lang=spectre\n\
+                 ahdl_include \"{}\"\n\
+                 subckt r31_probe (p n)\n\
+                 RS (p n) resistor r=3k\n\
+                 ends r31_probe\n\
+                 V1 (in 0) vsource dc=1\n\
+                 R1 (in out) resistor r=1k\n\
+                 x1 (out 0) r31_probe\n\
+                 op1 dc\n",
+                library.quoted()
+            ),
+        );
+        let spice = Netlist::parse(&format!(
+            "equivalent SPICE deck\n\
+             .va \"{}\"\n\
+             .subckt r31_probe p n\n\
+             RRS p n 3k\n\
+             .ends r31_probe\n\
+             VV1 in 0 1\n\
+             RR1 in out 1k\n\
+             Xx1 out 0 r31_probe\n\
+             .op\n\
+             .end\n",
+            library.quoted()
+        ))
+        .expect("the SPICE route parses the shadowing deck");
+
+        let engine = engine();
+        let from_spectre = engine
+            .run_dc_op(&spectre)
+            .expect("the shadowing Spectre deck solves");
+        let from_spice = engine
+            .run_dc_op(&spice)
+            .expect("the shadowing SPICE deck solves");
+        let lowered = from_spectre
+            .try_voltage_named("out")
+            .expect("out is a solved node");
+        let authored = from_spice
+            .try_voltage_named("out")
+            .expect("out is a solved node");
+        assert_eq!(
+            lowered.to_bits(),
+            authored.to_bits(),
+            "{lowered} {authored}"
+        );
+        assert!(
+            (lowered - 0.75).abs() < 1e-9,
+            "the deck's own subcircuit must supply the 3k leg, got {lowered}"
+        );
+    }
 }
