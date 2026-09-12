@@ -1421,6 +1421,65 @@ mod tests {
         );
     }
 
+    /// Which evaluator gets SPICE's guarded logarithm and which gets IEEE.
+    ///
+    /// The guard exists for `ln(0)`: the boundary of the domain, approached
+    /// from inside it, where a large finite stand-in costs nothing and a `-inf`
+    /// would poison everything downstream. Applying the same clamp to a
+    /// strictly negative argument is a different thing entirely — the function
+    /// is not defined there at all — and an evaluator that does it hands back
+    /// a fabricated value and, worse, a `1/1e-38` slope.
+    ///
+    /// So the policy is per-evaluator, and the default stays guarded: a
+    /// `.param`, a `.measure` or an output expression is evaluated once,
+    /// outside any Newton loop, and has no iterate to reject. Only a circuit
+    /// equation — a `B` source's own expression — asks for IEEE, because that
+    /// is the one an overshooting iterate can carry outside the domain and the
+    /// one a rejection can fix.
+    #[test]
+    fn a_logarithm_is_guarded_by_default_and_ieee_for_a_circuit_equation() {
+        let guarded_natural = LOGARITHM_MIN_ARGUMENT.ln();
+        let guarded_base10 = LOGARITHM_MIN_ARGUMENT.log10();
+        let outside = [-4.9];
+        let boundary = [0.0];
+        for (expression, expected) in [
+            ("ln(V(a))", guarded_natural),
+            // ngspice's `log` is the natural logarithm.
+            ("log(V(a))", guarded_natural),
+            ("log10(V(a))", guarded_base10),
+        ] {
+            let program =
+                compile(&parse_expression_strict(expression).expect("logarithm expression parses"));
+
+            let guarded = Vm::new().execute(&program, &Context::dc(&outside, &[]));
+            assert!(
+                (guarded - expected).abs() < 1.0e-12,
+                "{expression}: the default evaluator keeps SPICE's guarded logarithm, \
+                 got {guarded} instead of {expected}"
+            );
+
+            let ieee =
+                Vm::new().execute(&program, &Context::dc(&outside, &[]).with_ieee_logarithm());
+            assert!(
+                ieee.is_nan(),
+                "{expression}: a circuit equation outside the domain must be NaN, got {ieee}"
+            );
+
+            // Zero itself keeps the guard on both policies: it is the
+            // removable boundary, not a point outside the domain.
+            for context in [
+                Context::dc(&boundary, &[]),
+                Context::dc(&boundary, &[]).with_ieee_logarithm(),
+            ] {
+                let value = Vm::new().execute(&program, &context);
+                assert!(
+                    (value - expected).abs() < 1.0e-12,
+                    "{expression}: the guard at zero moved: {value}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn distinct_sdt_occurrences_have_independent_state_slots() {
         let program = compile(&parse_expression_strict("sdt(1)+sdt(2)").expect("SDTs parse"));

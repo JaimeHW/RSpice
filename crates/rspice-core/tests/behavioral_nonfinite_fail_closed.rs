@@ -196,34 +196,6 @@ fn a_behavioral_logarithm_outside_its_domain_is_rejected_not_clamped() {
     );
 }
 
-/// The clamp is a circuit-equation rule, not a global one: a `.param` still
-/// gets SPICE's guarded logarithm, because a parameter is evaluated once and
-/// has no iterate to reject.
-#[test]
-fn a_parameter_logarithm_keeps_the_guarded_spice_value() {
-    let deck = "guarded parameter logarithm\n\
-                .param G={ln(-1)}\n\
-                V1 in 0 DC 1\n\
-                R1 in 0 {1k*abs(G)}\n\
-                .OP\n\
-                .END\n";
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&parse(deck))
-        .expect("a guarded parameter logarithm is an ordinary finite number");
-    let index = result
-        .branch_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("V1"))
-        .expect("the source branch is absent from the operating point");
-    // ln(1e-38) = -87.4982..., so the resistance is 87.498 kOhm.
-    let expected = -1.0 / (1.0e3 * (1.0e-38f64).ln().abs());
-    assert!(
-        (result.branch_currents[index] - expected).abs() < 1.0e-12,
-        "the guarded parameter value moved: {} vs {expected}",
-        result.branch_currents[index]
-    );
-}
-
 #[test]
 fn dc_op_rejects_nonfinite_voltage_and_current_source_values() {
     for (source, kind, name) in source_cases("1e308*1e308") {
