@@ -547,6 +547,18 @@ fn a_verilog_a_file_reached_through_include_is_refused_in_favour_of_ahdl_include
     assert!(message.contains("r31_device.va"), "{message}");
 }
 
+#[test]
+fn spectre_instance_multiplicity_lowers_to_the_canonical_m_parameter() {
+    let source = "simulator lang=spectre\n\
+                  subckt cell (p n)\n\
+                  R1 (p n) resistor r=1k\n\
+                  ends cell\n\
+                  x1 (a 0) cell mfactor=2\n";
+    let adapted = adapt_spectre_model_library(&PathBuf::from("multiplicity.scs"), source)
+        .expect("a Spectre multiplicity lowers");
+    assert!(adapted.contains("Xx1 a 0 cell m=2"), "{adapted}");
+}
+
 /// A Verilog-A module a Spectre deck pulls in with `ahdl_include` is a master
 /// like any other: the deck instantiates it by module name with its own
 /// parameters, and the same module reached through the SPICE `.va` route must

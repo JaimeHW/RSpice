@@ -1970,9 +1970,35 @@ fn render_model_or_subcircuit_instance(instance: &SpectreInstance, prefix: &str)
     );
     if !instance.parameters.is_empty() {
         lowered.push(' ');
-        lowered.push_str(&render_assignments(&instance.parameters));
+        lowered.push_str(
+            &instance
+                .parameters
+                .iter()
+                .map(|assignment| {
+                    format!(
+                        "{}={}",
+                        canonical_instance_parameter_name(&assignment.name),
+                        assignment.value
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
     }
     lowered
+}
+
+/// Spectre spells an instance's multiplicity `m` or `mfactor`; the canonical
+/// card knows only the first. Left as authored, `mfactor` would reach a model
+/// or a Verilog-A module as a device parameter of that name and be refused, or
+/// worse, silently absorbed — so the long spelling is folded into the short one
+/// here, where every model, subcircuit and module instance is rendered.
+fn canonical_instance_parameter_name(name: &str) -> &str {
+    if name.eq_ignore_ascii_case("mfactor") {
+        "m"
+    } else {
+        name
+    }
 }
 
 fn canonical_instance_prefix(canonical_type: &str) -> Option<&'static str> {
