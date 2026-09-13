@@ -4,6 +4,58 @@ mod support;
 use support::DeviceFixture;
 
 #[test]
+fn static_topology_refresh_does_not_evaluate_uninitialized_dynamic_equations() {
+    // VBIC initializes a temperature divisor at initial_step. Topology is
+    // needed before that event, but its ddt operands are not defined yet.
+    let fixture = DeviceFixture::compile(
+        r#"module initial_step_charge(p,n);
+inout p,n; electrical p,n;
+parameter integer enabled=1;
+real divisor;
+analog begin
+    @(initial_step) divisor=2;
+    if (enabled) I(p,n)<+V(p,n);
+    I(p,n)<+ddt(V(p,n)/divisor);
+end
+endmodule"#,
+    );
+    assert!(
+        fixture
+            .stamp_programs
+            .iter()
+            .any(|stamp| stamp.static_condition.is_some())
+    );
+    let mut device = fixture
+        .try_device("XCHARGE", &[1, 0])
+        .expect("topology discovery must not evaluate an uninitialized charge");
+    #[cfg(feature = "native")]
+    assert!(device.is_using_native());
+    for enabled in [0.0, 1.0] {
+        device.try_set_parameter("enabled", enabled).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        device.try_set_temperature(320.0).unwrap();
+        assert_eq!(device.variable("divisor"), Some(0.0));
+    }
+    // Discovery must not suppress a real numerical failure when equations
+    // are actually requested before their initial event.
+    device.update_voltages(&[2.0]);
+    assert!(device.try_evaluate().is_err());
+
+    device.try_set_analysis_step(true, false).unwrap();
+    assert_eq!(device.try_evaluate().unwrap(), vec![2.0, 0.0]);
+    device.try_advance_state().unwrap();
+    device.try_set_analysis_step(false, false).unwrap();
+    assert_eq!(device.try_evaluate().unwrap(), vec![2.0, 0.0]);
+    let mut reactive = Vec::new();
+    device
+        .try_stamp_reactive(&[2.0], |row, column, value| {
+            reactive.push((row, column, value));
+        })
+        .unwrap();
+    assert_eq!(reactive, vec![(0, 0, 0.5)]);
+}
+
+#[test]
 fn failed_analysis_initialization_preserves_the_previous_accepted_analysis() {
     let fixture = DeviceFixture::compile(
         r#"module failing_restart(p,n);

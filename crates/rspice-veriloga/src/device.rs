@@ -5100,7 +5100,10 @@ impl VerilogADevice {
             refresh_context.record_task_effects = false;
             let context = &mut refresh_context;
             let mut vm = Vm::new(context);
-            Self::run_assignment_pass(&mut vm, model, native)?;
+            // Static-condition entries are postfix programs that read variable
+            // slots. The CFG prelude produces dynamic residuals/Jacobians and
+            // must wait until the engine requests a numerical evaluation.
+            Self::run_variable_assignment_pass(&mut vm, model, native)?;
 
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = if program.static_condition.is_some() {
@@ -5172,7 +5175,7 @@ impl VerilogADevice {
             refresh_context.record_task_effects = false;
             let context = &mut refresh_context;
             let mut vm = Vm::new(context);
-            Self::run_assignment_pass(&mut vm, model, wasm)?;
+            Self::run_variable_assignment_pass(&mut vm, model, wasm)?;
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = if program.static_condition.is_some() {
                     let condition = Self::run_value_program(
@@ -6921,6 +6924,27 @@ impl VerilogADevice {
         model: &CompiledModel,
         native: &NativeModel,
     ) -> Result<(), VmError> {
+        Self::run_variable_assignment_pass(vm, model, native)?;
+        // The CFG prelude writes the residual/Jacobian slots once per
+        // numerical evaluation. Static topology queries never read them.
+        Self::validate_native_branch_unknowns(vm.context, native.prelude_branch_unknowns())?;
+        let ctx = Self::eval_context_from(vm.context);
+        let vars_ptr = vm.context.variables.as_mut_ptr();
+        ctx.clear_runtime_error();
+        native.run_prelude(&ctx, vars_ptr);
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
+        }
+        Ok(())
+    }
+
+    /// Refresh variable slots without evaluating the CFG's dynamic equations.
+    #[cfg(feature = "native")]
+    fn run_variable_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        native: &NativeModel,
+    ) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
@@ -6936,22 +6960,10 @@ impl VerilogADevice {
         )?;
         Self::validate_native_prior_currents(vm.context, native.assignment_prior_currents())?;
         Self::validate_native_branch_unknowns(vm.context, native.assignment_branch_unknowns())?;
-        // The prelude reads the branch unknowns its entries used to read for
-        // themselves, so its read-set is validated here — before it runs — and
-        // not before each of the entries it publishes for.
-        Self::validate_native_branch_unknowns(vm.context, native.prelude_branch_unknowns())?;
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_mut_ptr();
         ctx.clear_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
-        if let Some(error) = ctx.take_native_runtime_error() {
-            return Err(Self::native_runtime_error_to_vm(error));
-        }
-        // The CFG route's assignment pass, once per evaluation, between the
-        // assignment pass it reads the variables of and the first value entry
-        // that reads one of its slots. A postfix plan has none and this is a
-        // predicate test that returns `false`.
-        native.run_prelude(&ctx, vars_ptr);
         if let Some(error) = ctx.take_native_runtime_error() {
             return Err(Self::native_runtime_error_to_vm(error));
         }
@@ -7065,14 +7077,20 @@ impl VerilogADevice {
         model: &CompiledModel,
         wasm: &WasmJitExecutable,
     ) -> Result<(), VmError> {
+        Self::run_variable_assignment_pass(vm, model, wasm)?;
+        wasm.run_prelude(vm.context).map_err(VmError::WasmJit)
+    }
+
+    #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
+    fn run_variable_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        wasm: &WasmJitExecutable,
+    ) -> Result<(), VmError> {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
-        wasm.run_assignments(vm.context).map_err(VmError::WasmJit)?;
-        // The CFG route's assignment pass, between the assignment pass whose
-        // variables it reads and the first value entry that reads one of its
-        // slots. A postfix plan has no prelude export and this returns `Ok`.
-        wasm.run_prelude(vm.context).map_err(VmError::WasmJit)
+        wasm.run_assignments(vm.context).map_err(VmError::WasmJit)
     }
 
     #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
