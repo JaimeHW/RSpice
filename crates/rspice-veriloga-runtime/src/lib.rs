@@ -21,6 +21,7 @@
 mod analog_effects;
 mod analog_lifecycle;
 pub mod arithmetic;
+pub mod array_index;
 mod compatibility_catalog;
 mod event_control;
 pub mod integer;
@@ -1242,6 +1243,10 @@ pub enum GeneratedEvaluationError {
     Derivative {
         reason: &'static str,
     },
+    ArrayIndex {
+        reason: &'static str,
+        non_finite: bool,
+    },
     Integer {
         reason: &'static str,
         /// Whether the refusal was caused by a non-finite operand.
@@ -1313,6 +1318,9 @@ impl std::fmt::Display for GeneratedEvaluationError {
                     f,
                     "generated Verilog-A derivative evaluation failed: {reason}"
                 )
+            }
+            Self::ArrayIndex { reason, .. } => {
+                write!(f, "generated Verilog-A array index failed: {reason}")
             }
             Self::Integer { reason, .. } => {
                 write!(f, "generated Verilog-A integer evaluation failed: {reason}")
@@ -2220,6 +2228,34 @@ impl<'a> GeneratedEvalContext<'a> {
             }
             Value::NAN
         })
+    }
+
+    /// Validate a zero-based SSA array selection before any source publication.
+    pub fn checked_array_index(&self, raw: f64, len: usize, lower: i64) -> Value {
+        match array_index::checked_array_slot(raw, 0, len, lower) {
+            Ok(offset) => offset as f64,
+            Err(error) => {
+                use array_index::ArrayIndexError;
+                let non_finite = matches!(error, ArrayIndexError::NonFinite { .. });
+                let reason = match error {
+                    ArrayIndexError::NonFinite { .. } => "index must be finite",
+                    ArrayIndexError::RoundedOutOfRange { .. } => {
+                        "index rounds outside the signed 64-bit range"
+                    }
+                    ArrayIndexError::Empty => "array is empty",
+                    ArrayIndexError::OutOfBounds { .. } => "index is outside declared array bounds",
+                    ArrayIndexError::SlotOverflow => "array slot arithmetic overflows",
+                };
+                if self.evaluation_error.get().is_none() {
+                    self.evaluation_error
+                        .set(Some(GeneratedEvaluationError::ArrayIndex {
+                            reason,
+                            non_finite,
+                        }));
+                }
+                Value::NAN
+            }
+        }
     }
 
     /// Retain integer failures even when the result only controls a branch.
@@ -7621,6 +7657,24 @@ mod fixed_lane_tests {
                 ctx.take_evaluation_error(),
                 Some(GeneratedEvaluationError::SmallSignal { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn generated_array_errors_preserve_the_first_failure_and_trial_class() {
+        for (raw, non_finite) in [
+            (f64::NAN, true),
+            (f64::INFINITY, true),
+            (2.0, false),
+            (2.0_f64.powi(63), false),
+        ] {
+            let ctx = GeneratedEvalContext::new(&[0.0], 300.15, 1);
+            assert_eq!(ctx.checked_array_index(-0.5, 3, -1), 0.0);
+            assert!(ctx.checked_array_index(raw, 3, -1).is_nan());
+            ctx.report_initialization_error(0);
+            assert!(
+                matches!(ctx.take_evaluation_error(),Some(GeneratedEvaluationError::ArrayIndex{non_finite:actual,..}) if actual==non_finite)
+            );
         }
     }
 

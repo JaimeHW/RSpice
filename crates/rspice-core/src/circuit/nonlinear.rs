@@ -82,7 +82,8 @@ fn generated_veriloga_stamp_error(
         GeneratedEvaluationError::NonFiniteContribution { .. } => true,
         // The producer already split this: only a non-finite operand is a
         // property of the iterate. See `IntegerRuntimeError::is_non_finite_operand`.
-        GeneratedEvaluationError::Integer { non_finite, .. } => *non_finite,
+        GeneratedEvaluationError::Integer { non_finite, .. }
+        | GeneratedEvaluationError::ArrayIndex { non_finite, .. } => *non_finite,
         _ => false,
     };
     if rejectable {
