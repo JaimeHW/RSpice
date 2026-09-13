@@ -310,7 +310,9 @@ use super::*;
 // Version 92 lowers a digital `!` to the one negation section 4.1.8 describes
 // instead of negating a `!!x` truth value, so a cached process function carries
 // two fewer `DigitalLogicalNot` values per logical negation (2026-09-12).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 92;
+// Version 93 retains ordinary procedural entry values separately from current
+// assignments and records their zero-seeded derivative lifetimes (HIR 59).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 93;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
