@@ -1213,9 +1213,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertNotIn('test "$runtime_gz" -le', publisher)
 
     def test_macos_intel_ci_executes_native_veriloga_jit(self) -> None:
-        workflow = read_text(".github/workflows/ci.yml")
+        workflow = workflow_job_body(
+            read_text(".github/workflows/ci.yml"), "test-macos-x64-native"
+        )
 
-        self.assertIn("test-macos-x64-native:", workflow)
         self.assertIn("runs-on: macos-15-intel", workflow)
         self.assertIn('test "$(uname -m)" = "x86_64"', workflow)
         self.assertIn("Test Verilog-A native JIT (macOS Intel x64)", workflow)
@@ -1228,6 +1229,33 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("Gate Verilog-A native JIT performance", workflow)
+
+    def test_native_shipped_census_executes_on_each_required_platform_job(self) -> None:
+        workflow = read_text(".github/workflows/ci.yml")
+        for job_name, step_name in (
+            (
+                "test-linux-native",
+                "Qualify full shipped device census through the x64 JIT (Linux x64)",
+            ),
+            (
+                "test-macos-x64-native",
+                "Qualify full shipped device census through the x64 JIT (macOS Intel x64)",
+            ),
+            (
+                "test-aarch64-native",
+                "Qualify full shipped device census through the AArch64 JIT",
+            ),
+        ):
+            with self.subTest(job=job_name):
+                step = workflow_step_body(workflow_job_body(workflow, job_name), step_name)
+                self.assertRegex(
+                    step,
+                    r"cargo test --locked --release -p rspice-veriloga --features native\s+"
+                    r"--test native_shipped_models -- --ignored --nocapture --test-threads=1",
+                )
+                self.assertIn('RUST_MIN_STACK: "67108864"', step)
+                self.assertNotIn("RSPICE_NATIVE_SHIPPED_MODEL_FILTER", step)
+                self.assertNotRegex(step, r"(?m)^\s*(?:if|continue-on-error):")
 
     def test_aarch64_desktop_ci_executes_native_veriloga_jit(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
@@ -1242,14 +1270,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("Test public host-native qualification report", workflow)
         self.assertIn("Qualify full shipped device census through the AArch64 JIT", workflow)
         self.assertIn("Gate AArch64 native JIT performance", workflow)
-        # The two machine backends encode, allocate, and verify independently,
-        # so the census qualifies only the architecture it runs on.
-        self.assertIn(
-            "Qualify full shipped device census through the x64 JIT (Linux x64)",
-            workflow,
-        )
-        self.assertEqual(workflow.count("--test native_shipped_models"), 2)
-        self.assertEqual(workflow.count('RUST_MIN_STACK: "67108864"'), 2)
         self.assertIn("--min-dense-speedup 1.50", aarch64_job)
         self.assertIn("--min-speedup 3.00", aarch64_job)
         self.assertIn("--min-full-stamp-speedup 2.00", aarch64_job)
