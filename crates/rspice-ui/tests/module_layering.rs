@@ -1578,7 +1578,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("simulation/controller/prepared_run.rs", 2_900),
     ("simulation/execution/snapshot.rs", 3_047),
     ("state/model_library/manager.rs", 3_847),
-    ("state/pdk_config/technology_package.rs", 4_742),
+    ("state/pdk_config/technology_package.rs", 4_598),
     // 2026-09-05, +9 (3,455 -> 3,464): the `stimulus_library` project field,
     // its doc comment, its wrapped serde attribute and its `Default`
     // initializer. The field cannot live anywhere else — a stimulus definition

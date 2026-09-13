@@ -12,6 +12,8 @@
 
 use sha2::{Digest as _, Sha256};
 
+use crate::state::model_library::compilation::unified_runtime_compiler_options;
+
 mod connections;
 use connections::PreparedVerilogAConnectionLibrary;
 pub(crate) mod build_profile;
@@ -580,15 +582,6 @@ impl PreparedVerilogARuntimeSet {
                 .chain(additional.connections)
                 .collect(),
         )
-    }
-}
-
-/// All product compilation routes retain the canonical digital plan and
-/// install it through the unified engine's mixed host when required.
-pub(crate) fn unified_runtime_compiler_options() -> rspice_veriloga::CompilerOptions {
-    rspice_veriloga::CompilerOptions {
-        enable_ams: true,
-        ..Default::default()
     }
 }
 

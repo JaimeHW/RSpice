@@ -11,6 +11,7 @@
 
 mod authoring;
 mod compatibility;
+pub(crate) mod compilation;
 mod corner;
 mod corner_expansion;
 mod correlation;
