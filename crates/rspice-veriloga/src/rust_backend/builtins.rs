@@ -3071,9 +3071,10 @@ fn write_registry(
         out.push('\n');
     }
     out.push_str("    pub fn visit_equation_abstols(&self, num_nodes: usize, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {\n");
-    if devices.is_empty() {
-        out.push_str("        let _ = (num_nodes, current_abstol, &mut visit);\n");
-    } else {
+    // A populated catalog can still compile with every model feature disabled.
+    // Its match then has no device arms, just like an empty generated catalog.
+    out.push_str("        let _ = (num_nodes, current_abstol, &mut visit);\n");
+    if !devices.is_empty() {
         out.push_str("        match self {\n");
         for (index, feature) in feature_names.iter().enumerate() {
             writeln!(

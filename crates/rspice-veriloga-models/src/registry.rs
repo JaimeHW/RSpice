@@ -1381,6 +1381,7 @@ impl GeneratedBuiltinKind {
     }
 
     pub fn visit_equation_abstols(&self, num_nodes: usize, current_abstol: f64, mut visit: impl FnMut(usize, f64)) {
+        let _ = (num_nodes, current_abstol, &mut visit);
         match self {
             #[cfg(feature = "veriloga-model-diode-cmc")]
             Self::Device0(device) => device.visit_equation_abstols(num_nodes, current_abstol, &mut visit),
