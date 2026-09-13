@@ -61,10 +61,21 @@ class TestSensitivity:
                 f"E1 out 0 in 0 {{{expression}}}\n.end\n"
             )
             if nominal == 0.0:
-                with pytest.raises(rspice.SimulationError, match="could not resolve"):
+                # The owning expression now diagnoses the cusp during replay.
+                with pytest.raises(
+                    rspice.SimulationError, match="magnitude has no two-sided derivative at zero"
+                ) as dc_error:
                     engine.run_sensitivity(netlist, "out", "gain", nominal)
-                with pytest.raises(rspice.SimulationError, match="could not resolve"):
+                with pytest.raises(
+                    rspice.SimulationError, match="magnitude has no two-sided derivative at zero"
+                ) as ac_error:
                     engine.run_sensitivity_ac(netlist, "out", "gain", nominal, [1.0])
+                for error in (dc_error.value, ac_error.value):
+                    assert error.kind == "netlist"
+                    assert error.code == "netlist_error"
+                    assert error.category == "netlist"
+                    assert error.retryable is False
+                    assert "GAIN" in str(error)
             else:
                 expected = 100.0 * np.exp(100.0)
                 assert engine.run_sensitivity(netlist, "out", "gain", nominal) == pytest.approx(expected, rel=1e-5)
@@ -76,10 +87,22 @@ class TestSensitivity:
             "E1 out 0 in 0 {1+gain}\nVFAIL conflict 0 1\n"
             "RFAIL conflict 0 {if(gain<0,0,1)}\n.end\n"
         )
-        with pytest.raises(rspice.SimulationError, match="last trial failure"):
+        # RFAIL's discontinuous value is diagnosed before a failed numerical
+        # trial could be mistaken for a one-sided parameter domain.
+        with pytest.raises(
+            rspice.SimulationError, match="expression boundary has no two-sided parameter derivative"
+        ) as dc_error:
             engine.run_sensitivity(netlist, "out", "gain", 0.0)
-        with pytest.raises(rspice.SimulationError, match="last trial failure"):
+        with pytest.raises(
+            rspice.SimulationError, match="expression boundary has no two-sided parameter derivative"
+        ) as ac_error:
             engine.run_sensitivity_ac(netlist, "out", "gain", 0.0, [1.0])
+        for error in (dc_error.value, ac_error.value):
+            assert error.kind == "circuit"
+            assert error.code == "circuit_error"
+            assert error.category == "simulation"
+            assert error.retryable is False
+            assert "RFAIL" in str(error)
 
     def test_zero_model_parameter_sensitivity_resolves_body_effect(self, engine):
         netlist = rspice.Netlist.parse_spice(
