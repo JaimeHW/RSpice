@@ -126,11 +126,13 @@ fn browser_project_copy_never_changes_canonical_save_name() {
 }
 
 #[test]
-fn launcher_continue_closes_through_the_reviewed_lifecycle_into_empty_workbench() {
+fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     let mut state = AppState::default();
-    state.workbench.open_project_launcher();
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
 
-    assert!(request_close_project_to_empty_workbench(&mut state));
+    assert!(request_close_project(&mut state));
     assert!(matches!(
         state.dialogs.project_review_dialog.request,
         Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
@@ -143,6 +145,10 @@ fn launcher_continue_closes_through_the_reviewed_lifecycle_into_empty_workbench(
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Project
+    );
+    assert_eq!(
+        state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::Project
     );
 }
 

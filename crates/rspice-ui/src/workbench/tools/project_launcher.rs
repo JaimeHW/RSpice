@@ -474,7 +474,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
             LauncherAction::Close => dismiss_launcher(app),
             LauncherAction::EmptyWorkbench => {
                 if app.state.project_lifecycle.project_open {
-                    crate::workbench::workflows::project_workflow::request_close_project_to_empty_workbench(
+                    crate::workbench::workflows::project_workflow::request_close_project(
                         &mut app.state,
                     );
                 } else {

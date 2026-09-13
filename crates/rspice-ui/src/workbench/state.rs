@@ -611,11 +611,11 @@ impl LocalSafeModeOptions {
 /// transition without inferring intent from whichever surface is visible later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ProjectCloseDestination {
+    /// The no-project landing: `Workspace::Project` with nothing open.
     #[default]
-    Launcher,
     EmptyWorkbench,
-    /// Joining a live session: after the close transaction, this install
-    /// waits for the session host's project snapshot instead of a launcher.
+    /// Joining a live session: the same landing, where this install then
+    /// waits for the session host's project snapshot.
     LiveMirror,
 }
 
@@ -1502,7 +1502,7 @@ impl Default for WorkbenchState {
             project_launcher_recovery: crate::workbench::lifecycle::recovery::RecoveryCatalog::default(),
             safe_mode: LocalSafeModeState::default(),
             live_write_locks: LiveWriteLocks::default(),
-            project_close_destination: ProjectCloseDestination::Launcher,
+            project_close_destination: ProjectCloseDestination::EmptyWorkbench,
             live_mirror_entry_pending: false,
             focus_project_launcher_search: false,
             navigator_width: default_navigator_width(),
@@ -1657,7 +1657,7 @@ impl WorkbenchState {
     }
 
     pub(crate) fn cancel_project_close(&mut self) {
-        self.project_close_destination = ProjectCloseDestination::Launcher;
+        self.project_close_destination = ProjectCloseDestination::EmptyWorkbench;
     }
 
     pub(crate) fn take_project_close_destination(&mut self) -> ProjectCloseDestination {

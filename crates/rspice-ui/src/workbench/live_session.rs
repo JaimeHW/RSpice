@@ -515,7 +515,7 @@ impl LiveSessionEngine {
         }
         state
             .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::Launcher);
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
         if crate::workbench::workflows::project_workflow::close_project_discard(state) {
             self.mirror_discard_pending = false;
         }
@@ -633,7 +633,7 @@ impl LiveSessionEngine {
         }
         state
             .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::Launcher);
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
         if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
             self.mirror_discard_pending = true;
         }

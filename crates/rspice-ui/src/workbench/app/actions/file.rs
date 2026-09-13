@@ -916,6 +916,12 @@ mod tests {
         app.begin_close_project_after_save();
 
         assert!(!app.state.project_lifecycle.project_open);
+        // Saving first changes nothing about where the close lands.
+        assert!(!app.state.workbench.project_launcher_open);
+        assert_eq!(
+            app.state.workbench.workspace,
+            crate::workbench::state::Workspace::Project
+        );
         assert!(app.state.dialogs.project_review_dialog.request.is_none());
         assert!(saved_paths.borrow().is_empty());
         let persisted = crate::io::load_project_file(&path).expect("reload closed project");

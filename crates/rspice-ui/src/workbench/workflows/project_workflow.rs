@@ -939,18 +939,9 @@ pub(crate) fn close_active_document(state: &mut AppState) -> bool {
     }
 }
 
+/// Open the data-safe close review. The validated close transaction leaves
+/// the application on the no-project landing, not in the project launcher.
 pub(crate) fn request_close_project(state: &mut AppState) -> bool {
-    request_close_project_for(state, ProjectCloseDestination::Launcher)
-}
-
-/// Request the same data-safe close review as File > Close Project, but leave
-/// the application in the mockup's explicit no-project workbench after the
-/// validated close transaction completes.
-pub(crate) fn request_close_project_to_empty_workbench(state: &mut AppState) -> bool {
-    request_close_project_for(state, ProjectCloseDestination::EmptyWorkbench)
-}
-
-fn request_close_project_for(state: &mut AppState, destination: ProjectCloseDestination) -> bool {
     if !state.project_lifecycle.project_open {
         lifecycle_error(
             state,
@@ -959,7 +950,9 @@ fn request_close_project_for(state: &mut AppState, destination: ProjectCloseDest
         );
         return false;
     }
-    state.workbench.begin_project_close(destination);
+    state
+        .workbench
+        .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
     state.dialogs.project_review_dialog.show_close_project();
     true
 }
@@ -1000,21 +993,13 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     emit_session_model_restore_errors(state, "project close", model_restore_errors);
-    match state.workbench.take_project_close_destination() {
-        ProjectCloseDestination::Launcher => state.workbench.open_project_launcher(),
-        ProjectCloseDestination::EmptyWorkbench => {
-            state.workbench.project_launcher_open = false;
-            state
-                .workbench
-                .activate(crate::workbench::state::Workspace::Project);
-        }
-        ProjectCloseDestination::LiveMirror => {
-            state.workbench.project_launcher_open = false;
-            state
-                .workbench
-                .activate(crate::workbench::state::Workspace::Project);
-            state.workbench.request_live_mirror_entry();
-        }
+    let destination = state.workbench.take_project_close_destination();
+    state.workbench.project_launcher_open = false;
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Project);
+    if destination == ProjectCloseDestination::LiveMirror {
+        state.workbench.request_live_mirror_entry();
     }
     state.push_user_message(ConsoleMessage::info("Closed project"));
     true
