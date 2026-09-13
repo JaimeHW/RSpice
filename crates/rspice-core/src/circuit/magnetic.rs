@@ -291,6 +291,7 @@ impl CircuitData {
         // substitute for the Xyce Core DAE.
         self.xyce_core_trial_invalid = false;
         self.xyce_core_transient_residuals.clear();
+        self.xyce_core_transient_roundoff.clear();
         let hidden_base = self.num_nodes + self.num_branches;
         // The hidden-M residual is assembled in integrated form,
         // `M-M_old-(dt/Path)P*R`.  Scale that row by Xyce's m-equation
@@ -949,6 +950,7 @@ impl CircuitData {
                 let mut q_current = 0.0;
                 let mut q_previous_reconstructed = 0.0;
                 let mut q_previous_previous = 0.0;
+                let mut current_roundoff = 0.0;
                 let mut q_delta = 0.0;
                 let mut q_delta_correction = 0.0;
                 let mut q_previous_delta = 0.0;
@@ -968,6 +970,11 @@ impl CircuitData {
                     q_previous_reconstructed += l0 * previous[j];
                     q_previous_previous += l0 * previous_previous[j];
                     if group.device.is_xyce_core_level2() {
+                        // Half an outward current ULP, propagated through the
+                        // constant-Q derivative. Accepted currents remain fixed.
+                        let magnitude = currents[j].abs();
+                        let spacing = magnitude.next_up() - magnitude;
+                        current_roundoff += (charge_coeff * l0 / dt).abs() * spacing * 0.5;
                         accumulate_charge_difference(
                             &mut q_delta,
                             &mut q_delta_correction,
@@ -1028,6 +1035,31 @@ impl CircuitData {
                 } else {
                     static_branch - charge_derivative + history
                 };
+                if group.device.is_xyce_core_level2() {
+                    // Current-coordinate quantization is confined to the
+                    // dynamic flux mode. Independently qualify the ideal
+                    // winding voltage law before allowing that rounding bound.
+                    let turn_scale = first_turns.abs().max(winding_i.turns.abs());
+                    let own_weight = first_turns / turn_scale;
+                    let first_weight = winding_i.turns / turn_scale;
+                    let own = own_weight * entry;
+                    let reference = first_weight * first_voltage;
+                    let voltage_error = own - reference;
+                    let voltage_limit = 1.0e-13 * own_weight.abs().min(first_weight.abs())
+                        + 8.0 * Value::EPSILON * (own.abs() + reference.abs());
+                    let bound = if turn_scale.is_finite()
+                        && turn_scale > 0.0
+                        && current_roundoff.is_finite()
+                        && voltage_error.is_finite()
+                        && voltage_limit.is_finite()
+                        && voltage_error.abs() <= voltage_limit
+                    {
+                        current_roundoff
+                    } else {
+                        Value::NAN
+                    };
+                    self.xyce_core_transient_roundoff.push((branch_i - 1, bound));
+                }
                 if f0.is_finite() {
                     self.xyce_core_transient_residuals.push((branch_i - 1, f0));
                 }

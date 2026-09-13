@@ -612,6 +612,10 @@ pub struct CircuitData {
     /// companion/history terms are much larger than the Core equation, so the
     /// stamp retains the exact residual for the branch rows it owns.
     pub(crate) xyce_core_transient_residuals: Vec<(usize, Value)>,
+    /// Freshly stamped LEVEL=2 current-coordinate rounding bounds. NaN
+    /// refuses a winding-voltage constraint that does not close. This is
+    /// assembly scratch, not accepted device or checkpoint state.
+    pub(crate) xyce_core_transient_roundoff: Vec<(usize, Value)>,
     /// Circuit-level transient step-size hint for synthesized distributed
     /// structures that need finer temporal resolution than the user-level
     /// `.tran` print/max-step request to preserve propagation fidelity.

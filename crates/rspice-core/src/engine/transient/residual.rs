@@ -1326,9 +1326,12 @@ impl Engine {
             .collect();
         let tolerance = circuit.xyce_core_branch_residual_tolerance();
         let core_branch_converged = rows.iter().all(|&row| {
-            residual
-                .get(row)
-                .is_some_and(|value| value.is_finite() && value.abs() <= tolerance)
+            let rounding = circuit.xyce_core_transient_roundoff.iter()
+                .find_map(|&(index, bound)| (index == row).then_some(bound)).unwrap_or(0.0);
+            residual.get(row).is_some_and(|value| {
+                value.is_finite() && rounding.is_finite() && rounding >= 0.0
+                    && value.abs() <= tolerance + rounding
+            })
         });
         // The global RHSTOL must inspect those same physical rows; checking
         // the rounded affine rows again would reintroduce false rejections.
@@ -2587,9 +2590,208 @@ mod tests {
             false,
             None,
         ));
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &[0.0],
+            &[0.25],
+            false,
+            None
+        ));
+    }
+
+    fn xyce_core_residual_fixture() -> (Engine, crate::circuit::CircuitData, usize) {
+        let netlist = Netlist::parse(
+            "Core residual cancellation\n\
+             V1 in 0 0\n\
+             R1 in p 1k\n\
+             R2 s 0 1k\n\
+             L1 p 0 10\n\
+             L2 s 0 100\n\
+             K1 L1 L2 1 nlcore\n\
+             .model nlcore core level=2 c=.001\n\
+             .tran 1u 1m\n\
+             .end\n",
+        )
+        .expect("shared core deck parses");
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.transient_nonlinear_rhstol = Some(1e-7);
+        let circuit = engine.build_circuit(&netlist).expect("shared core builds");
+        assert!(circuit.has_xyce_core_shared_level2());
+        let row = circuit.get_branch_matrix_index(circuit.inductors.branch_indices[0]) - 1;
+        (engine, circuit, row)
+    }
+
+    #[test]
+    fn xyce_core_residual_refuses_error_lost_in_companion_rhs_rounding() {
+        let (engine, mut circuit, row) = xyce_core_residual_fixture();
+        let size = circuit.matrix_size();
+        let large = 2.0_f64.powi(54);
+        let physical_error = 0.001;
+        let entries: Vec<_> = (0..size)
+            .map(|i| (i, i, if i == row { large } else { 1.0 }))
+            .collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries)
+            .expect("synthetic companion matrix");
+        let solution = vec![1.0; size];
+        let mut rhs = vec![1.0; size];
+        rhs[row] = large - physical_error;
+        assert_eq!(rhs[row], large, "the affine RHS loses the physical error");
+        assert_eq!(matrix.raw_residual_inf_norm(&solution, &rhs).unwrap(), 0.0);
+        circuit.xyce_core_transient_residuals = vec![(row, physical_error)];
+
         assert!(
-            !engine.transient_residual_convergence_met(&circuit, &mut matrix, &[0.0], &[0.25], false, None)
+            !engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                false,
+                None
+            ),
+            "a rounded affine zero cannot erase a nonzero constitutive residual"
         );
+    }
+
+    #[test]
+    fn xyce_core_residual_accepts_closure_despite_companion_sum_cancellation() {
+        let (engine, mut circuit, row) = xyce_core_residual_fixture();
+        let size = circuit.matrix_size();
+        let large = 2.0_f64.powi(54);
+        let entries: Vec<_> = (0..size)
+            .filter(|&i| i != row)
+            .map(|i| (i, i, 1.0))
+            .chain([(row, 0, large), (row, 1, 0.25), (row, 2, -large)])
+            .collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries)
+            .expect("synthetic companion matrix");
+        let solution = vec![1.0; size];
+        let mut rhs = vec![1.0; size];
+        rhs[row] = 0.25;
+        // In exact arithmetic, 2^54 + 1/4 - 2^54 is 1/4. Ordinary
+        // accumulation loses the middle term and invents a branch error.
+        assert_eq!(matrix.raw_residual_inf_norm(&solution, &rhs).unwrap(), 0.25);
+        assert_eq!(
+            matrix
+                .componentwise_backward_error_by_rows(&solution, &rhs, &[row])
+                .unwrap(),
+            0.0
+        );
+        circuit.xyce_core_transient_residuals = vec![(row, 0.0)];
+
+        assert!(
+            engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                false,
+                None
+            ),
+            "the complete constitutive equation closes exactly"
+        );
+    }
+
+    #[test]
+    fn xyce_core_residual_includes_one_step_static_history_exactly_once() {
+        let (engine, mut circuit, row) = xyce_core_residual_fixture();
+        let size = circuit.matrix_size();
+        let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries)
+            .expect("identity matrix");
+        let solution = vec![1.0; size];
+        let rhs = solution.clone();
+        let mut history = vec![0.0; size];
+        circuit.xyce_core_transient_residuals = vec![(row, 2.0)];
+        history[row] = -4.0;
+
+        assert!(engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            true,
+            Some(&history),
+        ));
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            Some(&history),
+        ));
+        for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            history[row] = invalid;
+            assert!(!engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                true,
+                Some(&history),
+            ));
+        }
+    }
+
+    #[test]
+    fn xyce_core_residual_preserves_branch_floor_and_other_equation_guards() {
+        let (engine, mut circuit, row) = xyce_core_residual_fixture();
+        let size = circuit.matrix_size();
+        let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+        let mut matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries)
+            .expect("identity matrix");
+        let solution = vec![1.0; size];
+        let mut rhs = solution.clone();
+        let floor = circuit.xyce_core_branch_residual_tolerance();
+        circuit.xyce_core_transient_residuals = vec![(row, floor)];
+        assert!(engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None,
+        ));
+        for invalid in [floor.next_up(), Value::NAN, Value::INFINITY] {
+            circuit.xyce_core_transient_residuals[0].1 = invalid;
+            assert!(!engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                false,
+                None,
+            ));
+        }
+
+        circuit.xyce_core_transient_residuals[0].1 = 0.0;
+        // A physical core row cannot waive an unrelated nodal residual.
+        assert_ne!(row, 0);
+        for invalid in [1.001, Value::NAN, Value::INFINITY] {
+            rhs[0] = invalid;
+            assert!(!engine.transient_residual_convergence_met(
+                &circuit,
+                &mut matrix,
+                &solution,
+                &rhs,
+                false,
+                None,
+            ));
+        }
+        rhs[0] = 1.0;
+        // Nor can it waive an inconsistent affine linearization: the
+        // independently computed componentwise backward-error guard remains.
+        rhs[row] = 1.001;
+        assert!(!engine.transient_residual_convergence_met(
+            &circuit,
+            &mut matrix,
+            &solution,
+            &rhs,
+            false,
+            None,
+        ));
     }
 
     #[test]
