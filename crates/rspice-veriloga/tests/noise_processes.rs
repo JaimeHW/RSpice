@@ -188,15 +188,26 @@ fn noise_gain_arrays_do_not_block_scalar_metadata() {
 
 #[test]
 fn runtime_array_metadata_dependencies_remain_explicit() {
-    for body in [
-        r#"I(p,n)<+V(p,n)+white_noise(values[index],"array_psd");"#,
-        r#"power=values[index]; copy=power; I(p,n)<+V(p,n)+white_noise(copy,"array_psd");"#,
-        r#"I(p,n)<+V(p,n); if(values[index]>0.0) I(p,n)<+white_noise(1.0,"array_guard");"#,
+    for (body, guarded) in [
+        (
+            r#"I(p,n)<+V(p,n)+white_noise(values[index],"array_psd");"#,
+            false,
+        ),
+        (
+            r#"power=values[index]; copy=power; I(p,n)<+V(p,n)+white_noise(copy,"array_psd");"#,
+            false,
+        ),
+        (
+            r#"I(p,n)<+V(p,n); if(values[index]>3.0) I(p,n)<+white_noise(1.0,"array_guard");"#,
+            true,
+        ),
     ] {
         let source = format!(
             "module array_metadata(p,n); inout p,n; electrical p,n;
-            real values[0:1],power,copy; integer index;
-            analog begin index=V(p,n)>0.0; values[index]=2.0; {body} end endmodule"
+            parameter integer offset=0; real values[0:1],power,copy; integer index;
+            analog begin index=(V(p,n)>0.0)+offset;
+            values[0]=2.0; values[1]=5.0; values[index]=3.0+index;
+            {body} end endmodule"
         );
         let report = VerilogACompiler::default()
             .compile_runtime(&source, None)
@@ -209,10 +220,54 @@ fn runtime_array_metadata_dependencies_remain_explicit() {
         )
         .unwrap();
         device.try_set_analysis_type(3).unwrap();
-        let error = device
+        // At the two indices the authored PSDs are 3 and 4. The guarded
+        // source is active only at index 1 and then has unit PSD. Unit current
+        // injection gives the same output power, including the inactive case.
+        for bias in [-1.0, 1.0, -1.0] {
+            let processes = device
+                .try_noise_processes_at_frequency(&[bias], 1.0)
+                .unwrap();
+            let expected = if guarded {
+                if bias > 0.0 { 1.0 } else { 0.0 }
+            } else if bias > 0.0 {
+                4.0
+            } else {
+                3.0
+            };
+            let power: f64 = processes
+                .iter()
+                .map(|process| {
+                    let gain: num_complex::Complex64 = process
+                        .injections
+                        .iter()
+                        .map(|injection| injection.gain)
+                        .sum();
+                    process.psd * gain.norm_sqr()
+                })
+                .sum();
+            assert_eq!(power, expected, "{body}, bias={bias}");
+            if expected > 0.0 {
+                assert_eq!(processes.len(), 1);
+                assert_eq!(processes[0].psd, expected);
+                assert_eq!(processes[0].injections.len(), 1);
+                assert_eq!(processes[0].injections[0].gain.re, -1.0);
+                assert_eq!(processes[0].injections[0].gain.im, 0.0);
+            }
+        }
+        for offset in [-2.0, 2.0] {
+            device.try_set_parameter("offset", offset).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            let error = device
+                .try_noise_processes_at_frequency(&[0.0], 1.0)
+                .expect_err("invalid metadata indices must remain errors");
+            assert!(error.to_string().contains("index"), "{body}: {error}");
+        }
+        device.try_set_parameter("offset", 0.0).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        let processes = device
             .try_noise_processes_at_frequency(&[1.0], 1.0)
-            .expect_err("runtime arrays actually used by metadata still need CFG support");
-        assert!(error.to_string().contains("array"), "{body}: {error}");
+            .unwrap();
+        assert_eq!(processes[0].psd, if guarded { 1.0 } else { 4.0 });
     }
 }
 
@@ -1304,15 +1359,42 @@ endmodule
     }
 
     #[test]
-    fn runtime_indexed_noise_assignment_fails_closed() {
+    #[cfg(feature = "native")]
+    fn indexed_noise_shadows_require_a_declared_process_identity() {
+        let source = r#"module bad_noise(p,n); inout p,n; electrical p,n;
+            real values[0:1]; integer index;
+            analog begin index=V(p,n)>0.0; values[index]=white_noise(1.0,"source");
+                I(p,n)<+values[index]; end endmodule"#;
+        let compiler = rspice_veriloga::VerilogACompiler::default();
+        let mut model = compiler.compile(source).unwrap();
+        let canonical = compiler.compile_canonical_ir(source).unwrap();
+        let shadow = model
+            .variable_names
+            .iter_mut()
+            .find(|name| name.contains("@dN0"))
+            .expect("fixture carries an array noise shadow");
+        *shadow = shadow.replace("@dN0", "@dN999999").into();
+        let Err(error) =
+            VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model), &canonical, &[1, 0])
+        else {
+            panic!("an undeclared noise identity must not be discarded");
+        };
+        assert!(
+            error.to_string().contains("malformed derivative shadow"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn runtime_indexed_noise_assignment_preserves_power_and_index_errors() {
         let source = r#"
 module indexed_noise_metadata(p, n);
     inout p, n; electrical p, n;
-    real values[0:1]; integer index;
+    parameter integer offset=0; real values[0:1]; integer index;
     analog begin
-        index = V(p, n) > 0.0;
-        values[index] = white_noise(1.0, "indexed");
-        I(p, n) <+ values[index];
+        index = (V(p, n) > 0.0)+offset;
+        values[index] = white_noise(1.0+index, "indexed");
+        I(p, n) <+ (2.0+index)*values[index];
     end
 endmodule
 "#;
@@ -1322,23 +1404,42 @@ endmodule
         let canonical = compiler
             .compile_canonical_ir(source)
             .expect("indexed canonical IR compiles");
-        // Two separate refusals stand between this model and a PSD, and which
-        // one lands first depends on the configured backend: the native
-        // backend will not compile an indexed assignment of a noise value at
-        // all, and the canonical CFG will not lower the run-time index behind
-        // the metadata. The contract is that neither is skipped, so drive the
-        // model all the way to a noise evaluation and require that some
-        // refusal, naming the array, stops it.
-        let error =
+        let mut device =
             VerilogADevice::try_new_with_canonical_ir("A1", Arc::new(model), &canonical, &[1, 0])
-                .and_then(|mut device| {
-                    device.try_set_analysis_type(3)?;
-                    device
-                        .try_noise_processes_at_frequency(&[0.0], 1.0e3)
-                        .map(|_| ())
-                })
-                .expect_err("runtime-indexed grouped-noise metadata must fail closed");
-        assert!(error.to_string().contains("values"), "{error}");
+                .unwrap();
+        device.try_set_analysis_type(3).unwrap();
+        // PSD times squared injection gain gives 1*2^2=4 and 2*3^2=18.
+        for (bias, psd, gain, power) in [
+            (-1.0, 1.0, -2.0, 4.0),
+            (1.0, 2.0, -3.0, 18.0),
+            (-1.0, 1.0, -2.0, 4.0),
+        ] {
+            let processes = device
+                .try_noise_processes_at_frequency(&[bias], 1.0e3)
+                .unwrap();
+            assert_eq!(processes.len(), 1);
+            assert_eq!(processes[0].psd, psd);
+            assert_eq!(processes[0].injections.len(), 1);
+            let injection = &processes[0].injections[0];
+            assert_eq!(injection.gain.re, gain);
+            assert_eq!(injection.gain.im, 0.0);
+            assert_eq!(processes[0].psd * injection.gain.norm_sqr(), power);
+        }
+        for offset in [-2.0, 2.0] {
+            device.try_set_parameter("offset", offset).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            let error = device
+                .try_noise_processes_at_frequency(&[0.0], 1.0e3)
+                .expect_err("invalid noise assignment indices must remain errors");
+            assert!(error.to_string().contains("index"), "{error}");
+        }
+        device.try_set_parameter("offset", 0.0).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        let processes = device
+            .try_noise_processes_at_frequency(&[1.0], 1.0e3)
+            .unwrap();
+        assert_eq!(processes[0].psd, 2.0);
+        assert_eq!(processes[0].injections[0].gain.re, -3.0);
     }
 
     #[test]

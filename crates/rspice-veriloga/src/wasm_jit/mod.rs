@@ -2109,6 +2109,44 @@ endmodule
     }
 
     #[test]
+    fn wasm_indexed_noise_shadows_use_the_grouped_noise_entries() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = r#"module indexed_noise(p,n); inout p,n; electrical p,n;
+            real values[0:1]; integer index;
+            analog begin index=V(p,n)>0.0; values[index]=white_noise(1.0+index,"source");
+                I(p,n)<+V(p,n)+(2.0+index)*values[index]; end endmodule"#;
+        for postfix in [false, true] {
+            let mut harness =
+                FusedKernelHarness::for_source_with_plan(source, "indexed_noise", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let psd = harness
+                .executable
+                .export(WasmJitExecutableEntry::NoisePsd(0))
+                .expect("PSD export")
+                .to_owned();
+            for voltage in [-1.0_f64, 1.0, -1.0] {
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                assert_eq!(harness.call(&value), 0);
+                assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), voltage);
+                assert_eq!(harness.call(&psd), 0);
+                assert_eq!(
+                    harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                    if voltage > 0.0 { 2.0 } else { 1.0 }
+                );
+            }
+        }
+    }
+
+    #[test]
     fn wasm_canonical_indexed_arrays_preserve_higher_derivatives() {
         use super::abi::FRAME_RESULT_OFFSET;
         let source = "module indexed(p,n); inout p,n; electrical p,n;

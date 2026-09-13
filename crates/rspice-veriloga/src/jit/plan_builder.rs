@@ -3049,7 +3049,7 @@ pub(crate) fn live_canonical_assignment_slots(
 struct AssignmentShadowIndex {
     scalar: HashMap<String, Vec<ScalarDerivativeShadow>>,
     arrays: HashMap<String, Vec<ArrayDerivativeShadow>>,
-    malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>>,
+    other_arrays: HashMap<String, Vec<OtherArrayDerivativeShadow>>,
 }
 
 #[derive(Default)]
@@ -3217,9 +3217,11 @@ struct ArrayDerivativeShadow {
     lower: i64,
 }
 
-struct MalformedArrayDerivativeShadow {
+struct OtherArrayDerivativeShadow {
+    slot: usize,
     logical_index: i64,
     name: SmolStr,
+    grouped_noise: bool,
 }
 
 struct ArrayDerivativeShadowAccumulator {
@@ -3233,8 +3235,7 @@ impl AssignmentShadowIndex {
         let mut array_accumulators: HashMap<(String, String), ArrayDerivativeShadowAccumulator> =
             HashMap::new();
         let mut array_order: Vec<(String, String)> = Vec::new();
-        let mut malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>> =
-            HashMap::new();
+        let mut other_arrays: HashMap<String, Vec<OtherArrayDerivativeShadow>> = HashMap::new();
 
         for (slot, name) in model.variable_names.iter().enumerate() {
             let name_str = name.as_str();
@@ -3254,12 +3255,14 @@ impl AssignmentShadowIndex {
                             .slots
                             .push((logical_index, slot));
                     } else {
-                        malformed_arrays
+                        other_arrays
                             .entry(array_name.to_string())
                             .or_default()
-                            .push(MalformedArrayDerivativeShadow {
+                            .push(OtherArrayDerivativeShadow {
+                                slot,
                                 logical_index,
                                 name: name.clone(),
+                                grouped_noise: grouped_noise_shadow_suffix(model, raw_suffix),
                             });
                     }
                 }
@@ -3332,7 +3335,7 @@ impl AssignmentShadowIndex {
         Ok(Self {
             scalar,
             arrays,
-            malformed_arrays,
+            other_arrays,
         })
     }
 
@@ -3344,10 +3347,8 @@ impl AssignmentShadowIndex {
         self.arrays.get(array_name).map_or(&[], Vec::as_slice)
     }
 
-    fn malformed_array_shadows(&self, array_name: &str) -> &[MalformedArrayDerivativeShadow] {
-        self.malformed_arrays
-            .get(array_name)
-            .map_or(&[], Vec::as_slice)
+    fn other_array_shadows(&self, array_name: &str) -> &[OtherArrayDerivativeShadow] {
+        self.other_arrays.get(array_name).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -3901,13 +3902,21 @@ fn canonical_array_shadow_assignments(
 ) -> JitResult<Vec<NativeAssignment>> {
     let mut assignments = Vec::new();
     let source_upper = checked_logical_upper_bound(model, array_name, source_lower, source_len)?;
-    for malformed in shadow_index.malformed_array_shadows(array_name) {
-        if malformed.logical_index >= source_lower && malformed.logical_index < source_upper {
+    for shadow in shadow_index.other_array_shadows(array_name) {
+        if shadow.logical_index >= source_lower && shadow.logical_index < source_upper {
+            // Grouped noise owns derivatives with respect to its unit process
+            // sources. Those are not node/current derivatives and the normal
+            // assignment pass must not recreate them. Only omit a recognized
+            // source shadow when this pass has no consumer for its slot; the
+            // grouped-noise CFG computes the actual PSD and complex gain.
+            if shadow.grouped_noise && !live.get(shadow.slot).copied().unwrap_or(true) {
+                continue;
+            }
             return Err(JitError::InvalidCanonicalIr {
                 model: model.name.clone(),
                 detail: format!(
                     "canonical indexed assignment '{array_name}' has malformed derivative shadow '{}'",
-                    malformed.name
+                    shadow.name
                 )
                 .into(),
             });
@@ -4210,6 +4219,31 @@ pub(crate) fn derivative_shadow_axes_from_suffix(
         axes.push(derivative_shadow_axis(part)?);
     }
     (!axes.is_empty()).then_some(axes)
+}
+
+fn grouped_noise_shadow_suffix(model: &CompiledModel, suffix: &str) -> bool {
+    if model.noise_process_schema < 1 {
+        return false;
+    }
+    let mut noise = false;
+    for part in suffix.split('@') {
+        if let Some(index) = part.strip_prefix("dN") {
+            let Ok(index) = index.parse::<usize>() else {
+                return false;
+            };
+            if !model
+                .noise_sources
+                .iter()
+                .any(|source| source.process_id == index)
+            {
+                return false;
+            }
+            noise = true;
+        } else if derivative_shadow_axis(part).is_none() {
+            return false;
+        }
+    }
+    noise
 }
 
 fn derivative_shadow_axis(part: &str) -> Option<CanonicalDerivativeAxis> {
