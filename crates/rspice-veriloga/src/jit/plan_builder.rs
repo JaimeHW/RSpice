@@ -32,7 +32,9 @@ use crate::codegen::{
 };
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+mod staged_assignments;
 
 /// What keeps a lowered assignment alive in the plan a model will execute.
 ///
@@ -3085,31 +3087,75 @@ struct AssignmentProgramCursor<'a> {
             crate::canonical_ir::SourceSpanRef,
         >,
     >,
-    scalar: HashMap<usize, Vec<&'a BytecodeProgram>>,
+    scalar: HashMap<usize, Vec<ScalarAssignmentSite<'a>>>,
     scalar_next: HashMap<usize, usize>,
-    indexed: HashMap<(usize, usize, i64), Vec<(&'a BytecodeProgram, &'a BytecodeProgram)>>,
+    indexed: HashMap<(usize, usize, i64), Vec<IndexedAssignmentSite<'a>>>,
     indexed_next: HashMap<(usize, usize, i64), usize>,
+    staging_slots: HashSet<usize>,
+    emitted_staging: HashSet<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct ScalarAssignmentSite<'a> {
+    program: &'a BytecodeProgram,
+    staging: Option<&'a [AssignmentStep]>,
+}
+
+#[derive(Clone, Copy)]
+struct IndexedAssignmentSite<'a> {
+    index: &'a BytecodeProgram,
+    value: &'a BytecodeProgram,
+    staging: Option<&'a [AssignmentStep]>,
 }
 
 impl<'a> AssignmentProgramCursor<'a> {
-    fn for_steps(steps: &'a [AssignmentStep]) -> Self {
-        let mut cursor = Self::default();
-        cursor.collect_steps(steps);
-        cursor
+    fn for_model(model: &'a CompiledModel, hir: &HirModel) -> JitResult<Self> {
+        let declared: HashSet<_> = hir.variables.iter().map(|var| var.name.as_str()).collect();
+        let mut cursor = Self {
+            staging_slots: model
+                .variable_names
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, name)| {
+                    (name.starts_with("@ddx_update") && !declared.contains(name.as_str()))
+                        .then_some(slot)
+                })
+                .collect(),
+            ..Self::default()
+        };
+        cursor.collect_steps(model, &model.assignment_steps)?;
+        Ok(cursor)
     }
 
-    fn collect_steps(&mut self, steps: &'a [AssignmentStep]) {
-        for step in steps {
+    fn collect_steps(
+        &mut self,
+        model: &CompiledModel,
+        steps: &'a [AssignmentStep],
+    ) -> JitResult<()> {
+        let mut positions = HashMap::new();
+        for (position, step) in steps.iter().enumerate() {
             match step {
                 AssignmentStep::Initialization { .. } => {}
                 AssignmentStep::Task(task) => {
                     self.tasks.insert(task.site, task);
                 }
                 AssignmentStep::Assign(assignment) => {
-                    self.scalar
-                        .entry(assignment.var_index)
-                        .or_default()
-                        .push(&assignment.program);
+                    let staging = staged_assignments::prefix_start(
+                        model,
+                        &assignment.program,
+                        &self.staging_slots,
+                        &positions,
+                    )?
+                    .map(|start| &steps[start..=position]);
+                    self.scalar.entry(assignment.var_index).or_default().push(
+                        ScalarAssignmentSite {
+                            program: &assignment.program,
+                            staging,
+                        },
+                    );
+                    if self.staging_slots.contains(&assignment.var_index) {
+                        positions.insert(assignment.var_index, position);
+                    }
                 }
                 AssignmentStep::AssignIndexed {
                     base,
@@ -3118,17 +3164,39 @@ impl<'a> AssignmentProgramCursor<'a> {
                     index,
                     value,
                 } => {
-                    self.indexed
-                        .entry((*base, *len, *lower))
-                        .or_default()
-                        .push((index, value));
+                    let start = [index, value]
+                        .into_iter()
+                        .filter_map(|program| {
+                            staged_assignments::prefix_start(
+                                model,
+                                program,
+                                &self.staging_slots,
+                                &positions,
+                            )
+                            .transpose()
+                        })
+                        .collect::<JitResult<Vec<_>>>()?
+                        .into_iter()
+                        .min();
+                    self.indexed.entry((*base, *len, *lower)).or_default().push(
+                        IndexedAssignmentSite {
+                            index,
+                            value,
+                            staging: start.map(|start| &steps[start..=position]),
+                        },
+                    );
                 }
-                AssignmentStep::Loop { body, .. } => self.collect_steps(body),
+                AssignmentStep::Loop { body, .. } => self.collect_steps(model, body)?,
             }
         }
+        Ok(())
     }
 
     fn next_scalar(&mut self, var_index: usize) -> Option<&'a BytecodeProgram> {
+        self.next_scalar_site(var_index).map(|site| site.program)
+    }
+
+    fn next_scalar_site(&mut self, var_index: usize) -> Option<ScalarAssignmentSite<'a>> {
         let next = self.scalar_next.entry(var_index).or_default();
         let program = self
             .scalar
@@ -3144,7 +3212,7 @@ impl<'a> AssignmentProgramCursor<'a> {
         base: usize,
         len: usize,
         lower: i64,
-    ) -> Option<(&'a BytecodeProgram, &'a BytecodeProgram)> {
+    ) -> Option<IndexedAssignmentSite<'a>> {
         let key = (base, len, lower);
         let next = self.indexed_next.entry(key).or_default();
         let programs = self
@@ -3374,22 +3442,8 @@ fn lower_live_canonical_assignment_statements(
     policy: AssignmentRootPolicy,
 ) -> JitResult<Vec<NativeAssignment>> {
     let live = live_canonical_assignment_slots(model, mir, limits, policy)?;
-    // The portable AD pass stages simultaneous ddx self-updates. The MIR
-    // replay does not yet carry those writes; refusing a live staging slot
-    // prevents it from publishing derivatives computed from partially updated
-    // state. CFG simulation kernels that need no assignment replay still run.
-    if model.variable_names.iter().zip(&live).any(|(name, live)| {
-        *live
-            && name.starts_with("@ddx_update")
-            && !hir.variables.iter().any(|variable| variable.name == *name)
-    }) {
-        return Err(JitError::UnsupportedCanonicalOp {
-            model: model.name.clone(),
-            op: "simultaneous ddx self-update in the assignment/readback pass".into(),
-        });
-    }
     let shadow_index = AssignmentShadowIndex::for_model(model)?;
-    let mut program_cursor = AssignmentProgramCursor::for_steps(&model.assignment_steps);
+    let mut program_cursor = AssignmentProgramCursor::for_model(model, hir)?;
     let snapshots = ReachingSnapshotCopies::for_model(model)?;
     let mut assignments = snapshots.lower_after(model, None, &live, &mut program_cursor, limits)?;
     for (index, statement) in hir.statements.iter().enumerate() {
@@ -3411,6 +3465,7 @@ fn lower_live_canonical_assignment_statements(
             limits,
         )?);
     }
+    staged_assignments::validate_complete(model, &live, &program_cursor)?;
     Ok(assignments)
 }
 
@@ -3630,7 +3685,21 @@ fn lower_canonical_assignment(
     }
 
     let var_index = validate_canonical_scalar_assignment_target(model, assignment)?;
-    let bytecode_program = program_cursor.next_scalar(var_index);
+    let site = program_cursor.next_scalar_site(var_index);
+    if let Some(staging) = site.and_then(|site| site.staging) {
+        return staged_assignments::lower(
+            model,
+            hir,
+            mir,
+            assignment,
+            staging,
+            live,
+            shadow_index,
+            program_cursor,
+            limits,
+        );
+    }
+    let bytecode_program = site.map(|site| site.program);
     let mut assignments = canonical_scalar_shadow_assignments(
         model,
         mir,
@@ -3675,7 +3744,21 @@ fn lower_canonical_indexed_assignment(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let (base, len, lower) = canonical_assignment_array_range(model, hir, assignment)?;
-    let bytecode_programs = program_cursor.next_indexed(base, len, lower);
+    let site = program_cursor.next_indexed(base, len, lower);
+    if let Some(staging) = site.and_then(|site| site.staging) {
+        return staged_assignments::lower(
+            model,
+            hir,
+            mir,
+            assignment,
+            staging,
+            live,
+            shadow_index,
+            program_cursor,
+            limits,
+        );
+    }
+    let bytecode_programs = site.map(|site| (site.index, site.value));
     let mut assignments = canonical_array_shadow_assignments(
         model,
         mir,

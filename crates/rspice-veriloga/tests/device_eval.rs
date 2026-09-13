@@ -1090,7 +1090,6 @@ fn hypot_dynamic_operands_preserve_history_and_small_signal_slopes() {
     }
 }
 
-#[cfg(not(feature = "native"))]
 #[test]
 fn ddx_array_self_assignment_preserves_values_through_aliasing_indices() {
     for (target, operand) in [("q[idx]", "q[2]"), ("q[2]", "q[idx]"), ("q[idx]", "q[idx]")] {
@@ -1167,24 +1166,125 @@ fn nested_ddx_observation_preserves_loop_carried_derivatives() {
     }
 }
 
-#[cfg(feature = "native")]
 #[test]
-fn nested_ddx_readback_refuses_unimplemented_simultaneous_shadow_writes() {
-    for (tail, expected) in [
-        ("reported=ddx(x,V(p,n)); I(p,n)<+reported;", 7.5),
-        ("I(p,n)<+V(p,n);", 1.25),
+fn ddx_self_update_readback_preserves_the_value_and_its_derivatives() {
+    for (tail, derivative_output) in [
+        ("reported=ddx(x,V(p,n)); I(p,n)<+reported;", true),
+        ("I(p,n)<+V(p,n);", false),
     ] {
         let fixture = compile(&format!(
             "module self_readback(p,n); inout p,n; electrical p,n; real x,reported; analog begin x=V(p,n)*V(p,n)*V(p,n); x=ddx(x,V(p,n)); {tail} end endmodule"
         ));
         let mut device = fixture.device("X", &[1, 0]);
-        device.update_voltages(&[1.25]);
-        assert_eq!(device.try_evaluate().unwrap(), vec![expected]);
-        let error = device
-            .observe_variables(&fixture.canonical_ir)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("simultaneous ddx self-update"), "{error}");
+        #[cfg(feature = "native")]
+        assert!(device.is_using_native());
+        for voltage in [-0.75_f64, 0.0, 1.25, -0.75] {
+            let expected = if derivative_output {
+                6.0 * voltage
+            } else {
+                voltage
+            };
+            device.update_voltages(&[voltage]);
+            assert_eq!(device.try_evaluate().unwrap(), vec![expected]);
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("x").unwrap(), 3.0 * voltage * voltage);
+            if derivative_output {
+                assert_eq!(device.variable("reported").unwrap(), expected);
+            }
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            assert_eq!(matrix[&(0, 0)], if derivative_output { 6.0 } else { 1.0 });
+        }
+    }
+}
+
+#[test]
+fn ddx_self_update_with_initial_step_state_constructs_and_executes() {
+    let fixture = compile(
+        "module staged_lifecycle(p,n); inout p,n; electrical p,n; real x,marker; analog begin @(initial_step) marker=0; x=V(p,n)*V(p,n)*V(p,n); x=ddx(x,V(p,n)); I(p,n)<+x+marker; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    #[cfg(feature = "native")]
+    assert!(device.is_using_native());
+    device.try_set_analysis_step(true, false).unwrap();
+    device.update_voltages(&[0.0]);
+    device.try_evaluate().unwrap();
+    device.advance_state();
+    device.try_set_analysis_step(false, false).unwrap();
+    for voltage in [-0.75_f64, 0.0, 1.25, -0.75] {
+        device.update_voltages(&[voltage]);
+        assert_eq!(
+            device.try_evaluate().unwrap(),
+            vec![3.0 * voltage * voltage]
+        );
+        let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+        assert_eq!(matrix.get(&(0, 0)).copied().unwrap_or(0.0), 6.0 * voltage);
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("x").unwrap(), 3.0 * voltage * voltage);
+        assert_eq!(device.variable("marker").unwrap(), 0.0);
+    }
+}
+
+#[test]
+fn ddx_self_updates_keep_separate_occurrences_and_loop_iterations() {
+    for body in [
+        "x=ddx(x,V(p,n)); x=ddx(x,V(p,n));",
+        "for(k=0;k<2;k=k+1) x=ddx(x,V(p,n));",
+    ] {
+        let fixture = compile(&format!(
+            "module repeated(p,n); inout p,n; electrical p,n; real x; integer k; analog begin x=V(p,n)*V(p,n)*V(p,n); {body} I(p,n)<+x; end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1, 0]);
+        for voltage in [-0.75_f64, 0.0, 1.25, -0.75] {
+            device.update_voltages(&[voltage]);
+            assert_eq!(
+                device.try_evaluate().unwrap(),
+                vec![6.0 * voltage],
+                "{body}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            assert_eq!(matrix[&(0, 0)], 6.0, "{body}");
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("x").unwrap(), 6.0 * voltage, "{body}");
+        }
+    }
+}
+
+#[test]
+fn ddx_self_update_keeps_the_unselected_conditional_value() {
+    let fixture = compile(
+        "module conditional_update(p,n); inout p,n; electrical p,n; real x; analog begin x=V(p,n)*V(p,n)*V(p,n); if(V(p,n)>0) x=ddx(x,V(p,n)); I(p,n)<+x; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 0]);
+    for voltage in [1.25_f64, -0.75, 0.0, 1.25, -0.75] {
+        let (value, slope) = if voltage > 0.0 {
+            (3.0 * voltage * voltage, 6.0 * voltage)
+        } else {
+            (voltage * voltage * voltage, 3.0 * voltage * voltage)
+        };
+        device.update_voltages(&[voltage]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![value]);
+        let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+        assert_eq!(matrix.get(&(0, 0)).copied().unwrap_or(0.0), slope);
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("x").unwrap(), value);
+    }
+}
+
+#[test]
+fn ddx_self_update_readback_preserves_mixed_partial_derivatives() {
+    let fixture = compile(
+        "module mixed_partial(p,q); inout p,q; electrical p,q; real x,reported; analog begin x=V(p)*V(p)*V(q); x=ddx(x,V(p)); reported=ddx(x,V(q)); I(p)<+reported; end endmodule",
+    );
+    let mut device = fixture.device("X", &[1, 2]);
+    for (p, q) in [(-0.75, 2.0), (0.0, -0.5), (1.25, 0.0), (-0.75, 2.0)] {
+        device.update_voltages(&[p, q]);
+        assert_eq!(device.try_evaluate().unwrap(), vec![2.0 * p]);
+        let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+        assert_eq!(matrix[&(0, 0)], 2.0);
+        assert_eq!(matrix.get(&(0, 1)).copied().unwrap_or(0.0), 0.0);
+        fixture.observe(&mut device);
+        assert_eq!(device.variable("x").unwrap(), 2.0 * p * q);
+        assert_eq!(device.variable("reported").unwrap(), 2.0 * p);
     }
 }
 

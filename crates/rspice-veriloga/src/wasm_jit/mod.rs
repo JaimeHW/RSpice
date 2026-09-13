@@ -129,7 +129,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 39 preserves initial-condition and modulus derivatives of integrals.
 /// Version 40 retains the initialization rule of each DDT derivative site.
 /// Version 41 retires the ddt companion Jacobian opcode 441 from the emitted set.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 41;
+/// Version 42 stages ddx self-updates before publishing their values and shadows.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 42;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -4059,6 +4060,48 @@ endmodule
                 assert_eq!(harness.call(&jacobian_export), 0);
                 let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
                 assert!((value - 6.0).abs() < 1e-10, "{body}: {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_ddx_self_updates_stage_values_shadows_and_array_indices() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for body in [
+            "real x; analog begin x=V(p)*V(p)*V(p); x=ddx(x,V(p)); I(p)<+ddx(x,V(p)); end",
+            "real q[2:3]; integer idx; analog begin idx=2; q[idx]=V(p)*V(p)*V(p); q[idx]=ddx(q[idx],V(p)); I(p)<+ddx(q[idx],V(p)); end",
+            "real q[2:3]; analog begin q[2]=2*V(p); q[3]=9; q[ddx(q[2],V(p))]=3*V(p); I(p)<+q[2]+q[3]; end",
+            "real x; integer k; analog begin x=V(p)*V(p)*V(p); for(k=0;k<2;k=k+1) x=ddx(x,V(p)); I(p)<+x; end",
+        ] {
+            let indexed_index = body.contains("q[ddx");
+            let source = format!("module staged_wasm(p); inout p; electrical p; {body} endmodule");
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "staged_wasm", postfix);
+                let value_export = harness.stamp_value_export(0);
+                let jacobian_export = harness.jacobian_export(0, 0);
+                harness.reset();
+                for voltage in [-0.75, 0.0, 1.25, -0.75] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    assert_eq!(harness.call(&value_export), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if indexed_index {
+                            3.0 * voltage + 9.0
+                        } else {
+                            6.0 * voltage
+                        },
+                        "postfix={postfix}: {body}"
+                    );
+                    assert_eq!(harness.call(&jacobian_export), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        if indexed_index { 3.0 } else { 6.0 },
+                        "postfix={postfix}: {body}"
+                    );
+                }
             }
         }
     }
