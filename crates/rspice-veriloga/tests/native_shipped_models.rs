@@ -136,10 +136,17 @@ fn shipped_models_compile_and_execute_through_the_public_native_jit() {
         ),
     ];
 
-    for (name, path, module) in cases {
-        if shipped_model_filter_allows(name) {
-            qualify_shipped_model(name, &path, module);
-        }
+    let filter = match std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER") {
+        Ok(filter) => Some(filter),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => panic!("invalid RSPICE_NATIVE_SHIPPED_MODEL_FILTER: {error}"),
+    };
+    let names = cases.iter().map(|(name, _, _)| *name).collect::<Vec<_>>();
+    let selected = selected_shipped_indices(&names, filter.as_deref())
+        .unwrap_or_else(|error| panic!("invalid RSPICE_NATIVE_SHIPPED_MODEL_FILTER: {error}"));
+    for index in selected {
+        let (name, path, module) = &cases[index];
+        qualify_shipped_model(name, path, *module);
     }
 }
 
@@ -280,14 +287,63 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     );
 }
 
-fn shipped_model_filter_allows(name: &str) -> bool {
-    let Ok(filter) = std::env::var("RSPICE_NATIVE_SHIPPED_MODEL_FILTER") else {
-        return true;
+/// Resolve the complete requested census before running a model. A misspelled
+/// member of an otherwise valid list must not silently reduce qualification.
+fn selected_shipped_indices(names: &[&str], filter: Option<&str>) -> Result<Vec<usize>, String> {
+    let Some(filter) = filter else {
+        return Ok((0..names.len()).collect());
     };
-    filter
-        .split(',')
-        .map(str::trim)
-        .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    let mut selected = Vec::new();
+    for candidate in filter.split(',').map(str::trim) {
+        if candidate.is_empty() {
+            return Err("empty model name".into());
+        }
+        let index = names
+            .iter()
+            .position(|name| candidate.eq_ignore_ascii_case(name))
+            .ok_or_else(|| {
+                format!(
+                    "unknown model '{candidate}'; expected one of {}",
+                    names.join(", ")
+                )
+            })?;
+        if selected.contains(&index) {
+            return Err(format!("duplicate model '{}'", names[index]));
+        }
+        selected.push(index);
+    }
+    // A filter narrows the declared corpus without changing its execution order.
+    selected.sort_unstable();
+    Ok(selected)
+}
+
+#[test]
+fn shipped_filter_preserves_the_declared_census_order() {
+    let names = ["juncap200", "r3_cmc", "vbic13_4t"];
+    assert_eq!(selected_shipped_indices(&names, None).unwrap(), [0, 1, 2]);
+    assert_eq!(
+        selected_shipped_indices(&names, Some(" VBIC13_4T , R3_CMC ")).unwrap(),
+        [1, 2]
+    );
+}
+
+#[test]
+fn shipped_filter_rejects_empty_unknown_and_duplicate_requests() {
+    let names = ["juncap200", "r3_cmc", "vbic13_4t"];
+    for filter in ["", " ", ",", "r3_cmc,", ",r3_cmc"] {
+        assert_eq!(
+            selected_shipped_indices(&names, Some(filter)).unwrap_err(),
+            "empty model name"
+        );
+    }
+    for filter in ["missing", "r3_cmc,missing"] {
+        let error = selected_shipped_indices(&names, Some(filter)).unwrap_err();
+        assert!(error.contains("unknown model 'missing'"), "{error}");
+    }
+    assert_eq!(
+        selected_shipped_indices(&names, Some("r3_cmc,R3_CMC")).unwrap_err(),
+        "duplicate model 'r3_cmc'"
+    );
 }
 
 fn terminal_bias(name: &str, terminal: usize) -> f64 {
