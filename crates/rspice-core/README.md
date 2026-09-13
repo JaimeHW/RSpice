@@ -143,6 +143,16 @@ parameters at all; RSpice therefore requires the instance value and rejects
 instance `L` is present, rather than silently ignoring an authored geometry.
 Nonlinear `CORE` mutual-inductor geometry is a separate contract.
 
+`CORE LEVEL=1/2` model coefficients `TC1` and `TC2` scale every winding's
+effective turns by `1 + TC1*(T-TNOM) + TC2*(T-TNOM)^2`. Both the material
+field and the full self/mutual inductance matrix use those effective turns.
+Model `TNOM` takes precedence over the global nominal temperature (default
+27 C); authored temperatures are Celsius and the engine configuration uses
+Kelvin. Expressions for these thermal parameters use the analysis temperature.
+Each build starts from the authored turns, so repeated temperature runs do
+not accumulate scaling. Coefficients must be finite and the resulting turns
+factor must remain positive; invalid domains identify the CORE model.
+
 For `CORE LEVEL=2`, AC, noise and pole-zero analysis use the material
 susceptibility at the DC winding bias, including all windings' ampere-turns
 and the authored gap. The small-signal winding matrix is

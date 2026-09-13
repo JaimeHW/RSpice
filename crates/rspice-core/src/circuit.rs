@@ -342,7 +342,8 @@ pub struct JilesAthertonBinding {
 pub struct XyceCoreWindingBinding {
     /// Index into the circuit's inductor SoA storage.
     pub inductor_index: usize,
-    /// Physical winding turns as authored on the L-card.
+    /// Effective winding turns: authored L-card count times the CORE model's
+    /// TC1/TC2 temperature factor at the analysis temperature.
     pub turns: Value,
 }
 

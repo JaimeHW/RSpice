@@ -5428,6 +5428,7 @@ impl Engine {
             model: String,
             coefficient: f64,
             windings: Vec<String>,
+            winding_temperature_factor: f64,
         }
 
         #[derive(Clone, Debug)]
@@ -5466,20 +5467,23 @@ impl Engine {
                     element.name, model
                 )));
             }
-            if find_model_def(netlist, model)
-                .is_none_or(|definition| !definition.model_type.eq_ignore_ascii_case("CORE"))
-            {
+            let Some(model_def) = find_model_def(netlist, model)
+                .filter(|definition| definition.model_type.eq_ignore_ascii_case("CORE"))
+            else {
                 return Err(SimulationError::Circuit(format!(
                     "Nonlinear magnetic coupling '{}' references '{}' which is not a CORE model",
                     element.name, model
                 )));
-            }
+            };
+            let winding_temperature_factor =
+                resolve_xyce_core_temperature_factor(netlist, model_def, self.config.temperature)?;
             let group_index = xyce_core_groups.len();
             xyce_core_groups.push(XyceCoreGroupPlan {
                 core_name: element.name.clone(),
                 model: model.clone(),
                 coefficient: *coefficient,
                 windings: inductors.clone(),
+                winding_temperature_factor,
             });
             for winding in inductors {
                 let winding_key = winding.to_ascii_uppercase();
@@ -6001,12 +6005,13 @@ impl Engine {
                         xyce_core_by_winding.get(&element.name.to_ascii_uppercase())
                     {
                         let group = &xyce_core_groups[core_plan.group_index];
+                        let effective_turns = *value * group.winding_temperature_factor;
                         if group.windings.len() == 1 {
                             add_xyce_core_inductor_element(
                                 &mut circuit,
                                 netlist,
                                 element,
-                                *value,
+                                effective_turns,
                                 &core_plan.model,
                                 format!("YMIN!{}", core_plan.core_name),
                                 *initial_current,
@@ -6016,7 +6021,7 @@ impl Engine {
                                 &mut circuit,
                                 netlist,
                                 element,
-                                *value,
+                                effective_turns,
                                 &core_plan.model,
                                 *initial_current,
                             )?;
@@ -9459,11 +9464,12 @@ impl Engine {
                         group.core_name, winding_name, value
                     )));
                 }
-                first_turns.get_or_insert(*value);
+                let effective_turns = *value * group.winding_temperature_factor;
+                first_turns.get_or_insert(effective_turns);
                 first_index.get_or_insert(index);
                 winding_bindings.push(crate::circuit::XyceCoreWindingBinding {
                     inductor_index: index,
-                    turns: *value,
+                    turns: effective_turns,
                 });
             }
             let first_turns = first_turns.expect("multi-winding Core has at least two windings");

@@ -1,5 +1,55 @@
 use super::*;
 
+/// Xyce applies CORE temperature coefficients to the winding turn counts,
+/// before constructing either the aggregate field or the inductance matrix.
+/// Keep this separate from linear-inductor temperature scaling: squaring the
+/// turns factor in L alone would omit its effect on the material bias.
+pub(in crate::engine::builder) fn resolve_xyce_core_temperature_factor(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    temperature_kelvin: f64,
+) -> Result<f64, SimulationError> {
+    let (context, _, tnom_celsius) =
+        resolve_passive_eval_context(netlist, Some(model_def), &[], temperature_kelvin)?;
+    let tnom_kelvin = crate::constants::celsius_to_kelvin(tnom_celsius);
+    if !temperature_kelvin.is_finite()
+        || temperature_kelvin <= 0.0
+        || !tnom_kelvin.is_finite()
+        || tnom_kelvin <= 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "CORE model '{}' requires finite positive absolute temperature and TNOM (temperature={temperature_kelvin} K, TNOM={tnom_celsius} C)",
+            model_def.name,
+        )));
+    }
+    let tc1 = resolve_model_param(model_def, &["TC1"], &context)?.unwrap_or(0.0);
+    let tc2 = resolve_model_param(model_def, &["TC2"], &context)?.unwrap_or(0.0);
+    for (name, value) in [("TC1", tc1), ("TC2", tc2)] {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "CORE model '{}' temperature coefficient {name}={value} must be finite",
+                model_def.name,
+            )));
+        }
+    }
+    // Match the source equation's Kelvin difference and product order.
+    let difference = temperature_kelvin - tnom_kelvin;
+    let factor = 1.0 + tc1 * difference + tc2 * difference * difference;
+    if !factor.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "CORE model '{}' has an unrepresentable winding temperature factor",
+            model_def.name,
+        )));
+    }
+    if factor <= 0.0 {
+        return Err(SimulationError::ParameterDomain(format!(
+            "CORE model '{}' winding temperature factor is {factor}; effective turns must remain positive",
+            model_def.name,
+        )));
+    }
+    Ok(factor)
+}
+
 pub(in crate::engine::builder) fn positive_model_param(
     model_def: &crate::netlist::ModelDef,
     names: &[&str],
