@@ -16,7 +16,7 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 504];
+		let mut prepared = [0.0; 506];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
@@ -54,69 +54,69 @@ impl Instance {
 		let E=parameters[22];
 		let F=parameters[23];
 		let G=parameters[18];
-		let H=staged[24];
+		let H=staged[25];
 		let I=parameters[19];
-		let J=staged[37];
+		let J=staged[38];
 		let K=parameters[20];
-		let L=staged[49];
+		let L=staged[50];
 		let M=0.29214664f64;
 		let N=0.5178164370971076f64;
 		let O=2f64;
 		let P=0.26992878119627894f64;
 		let Q=0.43792457880372104f64;
-		let R=staged[31];
+		let R=staged[32];
 		let S=parameters[53];
 		let T=parameters[54];
 		let U=parameters[55];
-		let V=staged[32];
-		let W=staged[44];
-		let X=staged[56];
-		let Y=staged[154];
-		let Z=staged[125];
-		let AA=staged[166];
-		let AB=staged[176];
-		let AC=staged[186];
+		let V=staged[33];
+		let W=staged[45];
+		let X=staged[57];
+		let Y=staged[16];
+		let Z=staged[12];
+		let AA=staged[165];
+		let AB=staged[175];
+		let AC=staged[185];
 		let AD=parameters[6];
-		let AE=staged[224]!=0.0;
+		let AE=staged[226]!=0.0;
 		let AG=staged[152];
 		let AH=230.25850929940458f64;
 		let AI=1e-100f64;
 		let AJ=0.3333333333333333f64;
 		let AK=1e100f64;
-		let AL=staged[230]!=0.0;
-		let AM=staged[231]!=0.0;
-		let AN=staged[232]!=0.0;
-		let AO=staged[157];
-		let AP=staged[233]!=0.0;
+		let AL=staged[232]!=0.0;
+		let AM=staged[233]!=0.0;
+		let AN=staged[234]!=0.0;
+		let AO=staged[156];
+		let AP=staged[235]!=0.0;
 		let AQ=0.375f64;
 		let AR=parameters[10];
 		let AW=staged[126];
 		let BG=staged[130];
-		let BN=staged[472]!=0.0;
+		let BN=staged[474]!=0.0;
 		let BO=staged[133];
 		let BT=staged[135];
-		let CC=staged[471]!=0.0;
-		let DH=staged[481]!=0.0;
-		let DI=staged[479]!=0.0;
-		let DN=staged[480]!=0.0;
-		let EH=staged[482]!=0.0;
-		let FK=staged[483]!=0.0;
-		let FL=staged[484]!=0.0;
-		let GB=staged[485]!=0.0;
-		let GS=staged[489]!=0.0;
-		let GT=staged[487]!=0.0;
-		let GW=staged[488]!=0.0;
-		let HR=staged[490]!=0.0;
-		let IW=staged[491]!=0.0;
-		let IX=staged[492]!=0.0;
-		let JM=staged[493]!=0.0;
-		let KC=staged[497]!=0.0;
-		let KD=staged[495]!=0.0;
-		let KG=staged[496]!=0.0;
-		let LB=staged[498]!=0.0;
-		let MG=staged[499]!=0.0;
-		let MH=staged[500]!=0.0;
-		let MW=staged[501]!=0.0;
+		let CC=staged[473]!=0.0;
+		let DH=staged[483]!=0.0;
+		let DI=staged[481]!=0.0;
+		let DN=staged[482]!=0.0;
+		let EH=staged[484]!=0.0;
+		let FK=staged[485]!=0.0;
+		let FL=staged[486]!=0.0;
+		let GB=staged[487]!=0.0;
+		let GS=staged[491]!=0.0;
+		let GT=staged[489]!=0.0;
+		let GW=staged[490]!=0.0;
+		let HR=staged[492]!=0.0;
+		let IW=staged[493]!=0.0;
+		let IX=staged[494]!=0.0;
+		let JM=staged[495]!=0.0;
+		let KC=staged[499]!=0.0;
+		let KD=staged[497]!=0.0;
+		let KG=staged[498]!=0.0;
+		let LB=staged[500]!=0.0;
+		let MG=staged[501]!=0.0;
+		let MH=staged[502]!=0.0;
+		let MW=staged[503]!=0.0;
 		let AF=if AE{
 		AD
 		}else{
@@ -240,11 +240,11 @@ impl Instance {
 		let CX=(-AS)+ (O* (Y* ((((O* CW)+ C)+ (((C+ CW)* (C+ (3f64* CW))).sqrt())).ln())));
 		CX
 		};
-		let CZ=staged[155]- CY;
+		let CZ=staged[154]- CY;
 		let DA=AS- CZ;
-		let DB=B* ((AS+ CZ)- (((DA* DA)+ staged[156]).sqrt()));
+		let DB=B* ((AS+ CZ)- (((DA* DA)+ staged[155]).sqrt()));
 		let DC=AS- AO;
-		let DD=B* ((AS+ AO)- (((DC* DC)+ staged[158]).sqrt()));
+		let DD=B* ((AS+ AO)- (((DC* DC)+ staged[157]).sqrt()));
 		let DE=B* ((AS+ A)- (((AS* AS)+ 4e-12f64).sqrt()));
 		DF=CS;
 		DJ=DB;
@@ -272,7 +272,7 @@ impl Instance {
 		IU=A;
 		NL=A;
 		}else{
-		let DG=staged[159]* DF;
+		let DG=staged[158]* DF;
 		let DY;
 		let DZ;
 		let EK;
@@ -285,12 +285,12 @@ impl Instance {
 		FI=A;
 		GL=A;
 		}else{
-		let DK=staged[160]- DJ;
+		let DK=staged[159]- DJ;
 		let DM=C- ((C- (DL/ DK)).sqrt());
 		let DP=if DN{
 		A
 		}else{
-		let DO=((((DM* DM)* (DM.ln()))/ (C- DM))+ DM)* staged[161];
+		let DO=((((DM* DM)* (DM.ln()))/ (C- DM))+ DM)* staged[160];
 		DO
 		};
 		let DQ=DM+ DP;
@@ -301,8 +301,8 @@ impl Instance {
 		let DS=(DK* H).powf(D);
 		DS
 		};
-		let DU=staged[25]* DT;
-		let DW=staged[162]* ((DV- C)* DU);
+		let DU=staged[26]* DT;
+		let DW=staged[161]* ((DV- C)* DU);
 		let DX=parameters[30]* (DW* DQ);
 		DY=DU;
 		DZ=DK;
@@ -314,8 +314,8 @@ impl Instance {
 		if DH{
 		GM=A;
 		}else{
-		let EA=staged[163]* ((DY* staged[26])/ DZ);
-		let EB=staged[164]/ EA;
+		let EA=staged[162]* ((DY* staged[27])/ DZ);
+		let EB=staged[163]/ EA;
 		let EC=EB* EB;
 		let ED=EC* EC;
 		let EE=(ED/ (ED+ C)).sqrt();
@@ -325,7 +325,7 @@ impl Instance {
 		let EI=C/ (C+ (EA* EG));
 		EI
 		}else{
-		let EJ=(C+ (EA* EG)).powf(staged[165]);
+		let EJ=(C+ (EA* EG)).powf(staged[164]);
 		EJ
 		};
 		let EM=(EK* EL)/ (EK+ EL);
@@ -381,8 +381,8 @@ impl Instance {
 		let FO=((G- FM)* H).powf(D);
 		FO
 		};
-		let FQ=staged[4]* (((G- FM)* staged[28])/ FP);
-		let FR=staged[167]/ FQ;
+		let FQ=staged[4]* (((G- FM)* staged[29])/ FP);
+		let FR=staged[166]/ FQ;
 		let FS=(FR.abs())< AH;
 		let FY;
 		if FS{
@@ -407,7 +407,7 @@ impl Instance {
 		if GB{
 		GO=C;
 		}else{
-		let GD=GC> staged[168];
+		let GD=GC> staged[167];
 		let GP;
 		if GD{
 		let GE=S== 4f64;
@@ -422,7 +422,7 @@ impl Instance {
 		let GJ=C/ (C- GI);
 		GP=GJ;
 		}else{
-		let GK=staged[34]+ ((GC+ (R* parameters[50]))* staged[33]);
+		let GK=staged[35]+ ((GC+ (R* parameters[50]))* staged[34]);
 		GP=GK;
 		}
 		GO=GP;
@@ -446,7 +446,7 @@ impl Instance {
 		ME=IU;
 		NM=A;
 		}else{
-		let GR=staged[169]* DF;
+		let GR=staged[168]* DF;
 		let HG;
 		let HI;
 		let HU;
@@ -459,12 +459,12 @@ impl Instance {
 		IT=IU;
 		JV=A;
 		}else{
-		let GU=staged[170]- DJ;
+		let GU=staged[169]- DJ;
 		let GV=C- ((C- (DL/ GU)).sqrt());
 		let GY=if GW{
 		A
 		}else{
-		let GX=((((GV* GV)* (GV.ln()))/ (C- GV))+ GV)* staged[171];
+		let GX=((((GV* GV)* (GV.ln()))/ (C- GV))+ GV)* staged[170];
 		GX
 		};
 		let GZ=GV+ GY;
@@ -475,8 +475,8 @@ impl Instance {
 		let HB=(GU* J).powf(E);
 		HB
 		};
-		let HD=staged[38]* HC;
-		let HE=staged[172]* ((DV- C)* HD);
+		let HD=staged[39]* HC;
+		let HE=staged[171]* ((DV- C)* HD);
 		let HF=parameters[31]* (HE* GZ);
 		HG=HD;
 		HI=GU;
@@ -488,8 +488,8 @@ impl Instance {
 		if GS{
 		JW=A;
 		}else{
-		let HK=staged[173]* ((HG* staged[39])/ HI);
-		let HL=staged[174]/ HK;
+		let HK=staged[172]* ((HG* staged[40])/ HI);
+		let HL=staged[173]/ HK;
 		let HM=HL* HL;
 		let HN=HM* HM;
 		let HO=(HN/ (HN+ C)).sqrt();
@@ -499,7 +499,7 @@ impl Instance {
 		let HS=C/ (C+ (HK* HQ));
 		HS
 		}else{
-		let HT=(C+ (HK* HQ)).powf(staged[175]);
+		let HT=(C+ (HK* HQ)).powf(staged[174]);
 		HT
 		};
 		let HX=(HU* HW)/ (HU+ HW);
@@ -555,8 +555,8 @@ impl Instance {
 		let IZ=((I- FM)* J).powf(E);
 		IZ
 		};
-		let JB=staged[5]* (((I- FM)* staged[41])/ JA);
-		let JC=staged[177]/ JB;
+		let JB=staged[5]* (((I- FM)* staged[42])/ JA);
+		let JC=staged[176]/ JB;
 		let JD=(JC.abs())< AH;
 		let JJ;
 		if JD{
@@ -581,7 +581,7 @@ impl Instance {
 		if JM{
 		JY=C;
 		}else{
-		let JN=GC> staged[178];
+		let JN=GC> staged[177];
 		let JZ;
 		if JN{
 		let JO=T== 4f64;
@@ -596,7 +596,7 @@ impl Instance {
 		let JT=C/ (C- JS);
 		JZ=JT;
 		}else{
-		let JU=staged[46]+ ((GC+ (R* parameters[51]))* staged[45]);
+		let JU=staged[47]+ ((GC+ (R* parameters[51]))* staged[46]);
 		JZ=JU;
 		}
 		JY=JZ;
@@ -612,7 +612,7 @@ impl Instance {
 		if AN{
 		NN=A;
 		}else{
-		let KB=staged[179]* DF;
+		let KB=staged[178]* DF;
 		let KQ;
 		let KS;
 		let LE;
@@ -625,12 +625,12 @@ impl Instance {
 		MD=ME;
 		NF=A;
 		}else{
-		let KE=staged[180]- DJ;
+		let KE=staged[179]- DJ;
 		let KF=C- ((C- (DL/ KE)).sqrt());
 		let KI=if KG{
 		A
 		}else{
-		let KH=((((KF* KF)* (KF.ln()))/ (C- KF))+ KF)* staged[181];
+		let KH=((((KF* KF)* (KF.ln()))/ (C- KF))+ KF)* staged[180];
 		KH
 		};
 		let KJ=KF+ KI;
@@ -641,8 +641,8 @@ impl Instance {
 		let KL=(KE* L).powf(F);
 		KL
 		};
-		let KN=staged[50]* KM;
-		let KO=staged[182]* ((DV- C)* KN);
+		let KN=staged[51]* KM;
+		let KO=staged[181]* ((DV- C)* KN);
 		let KP=parameters[32]* (KO* KJ);
 		KQ=KN;
 		KS=KE;
@@ -654,8 +654,8 @@ impl Instance {
 		if KC{
 		NG=A;
 		}else{
-		let KU=staged[183]* ((KQ* staged[51])/ KS);
-		let KV=staged[184]/ KU;
+		let KU=staged[182]* ((KQ* staged[52])/ KS);
+		let KV=staged[183]/ KU;
 		let KW=KV* KV;
 		let KX=KW* KW;
 		let KY=(KX/ (KX+ C)).sqrt();
@@ -665,7 +665,7 @@ impl Instance {
 		let LC=C/ (C+ (KU* LA));
 		LC
 		}else{
-		let LD=(C+ (KU* LA)).powf(staged[185]);
+		let LD=(C+ (KU* LA)).powf(staged[184]);
 		LD
 		};
 		let LH=(LE* LG)/ (LE+ LG);
@@ -721,8 +721,8 @@ impl Instance {
 		let MJ=((K- FM)* L).powf(F);
 		MJ
 		};
-		let ML=staged[6]* (((K- FM)* staged[53])/ MK);
-		let MM=staged[187]/ ML;
+		let ML=staged[6]* (((K- FM)* staged[54])/ MK);
+		let MM=staged[186]/ ML;
 		let MN=(MM.abs())< AH;
 		let MT;
 		if MN{
@@ -747,7 +747,7 @@ impl Instance {
 		if MW{
 		NI=C;
 		}else{
-		let MX=GC> staged[188];
+		let MX=GC> staged[187];
 		let NJ;
 		if MX{
 		let MY=U== 4f64;
@@ -762,7 +762,7 @@ impl Instance {
 		let ND=C/ (C- NC);
 		NJ=ND;
 		}else{
-		let NE=staged[58]+ ((GC+ (R* parameters[52]))* staged[57]);
+		let NE=staged[59]+ ((GC+ (R* parameters[52]))* staged[58]);
 		NJ=NE;
 		}
 		NI=NJ;
@@ -770,7 +770,7 @@ impl Instance {
 		let NK=(AR* (((KB+ NF)+ NG)+ NH))* NI;
 		NN=NK;
 		}
-		let NO=((staged[16]* NL)+ (staged[17]* NM))+ (staged[18]* NN);
+		let NO=((staged[17]* NL)+ (staged[18]* NM))+ (staged[19]* NN);
 		NP=NO;
 		}
 		let NQ=(AF* parameters[7])* (3.2043836e-19f64* (NP.abs()));

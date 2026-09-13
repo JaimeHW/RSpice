@@ -1687,6 +1687,7 @@ impl Emitter<'_> {
                 | CfgValueKind::Parameter(_)
                 | CfgValueKind::ParameterGiven(_)
                 | CfgValueKind::EventState(_)
+                | CfgValueKind::EvaluationInput(_)
                 | CfgValueKind::Temperature
                 | CfgValueKind::ThermalVoltage
                 | CfgValueKind::Multiplicity
@@ -1715,6 +1716,7 @@ impl Emitter<'_> {
                 | CfgValueKind::Parameter(_)
                 | CfgValueKind::ParameterGiven(_)
                 | CfgValueKind::EventState(_)
+                | CfgValueKind::EvaluationInput(_)
                 | CfgValueKind::Temperature
                 | CfgValueKind::ThermalVoltage
                 | CfgValueKind::Multiplicity
@@ -1810,7 +1812,7 @@ impl Emitter<'_> {
             // constant-connected contract; this leaf is emitted only by the
             // runtime grouped-noise metadata entrypoint.
             CfgValueKind::PortConnected(_) => "true".into(),
-            CfgValueKind::EventState(slot) => {
+            CfgValueKind::EventState(slot) | CfgValueKind::EvaluationInput(slot) => {
                 format!("{}[{slot}]", bindings.event_state)
             }
             CfgValueKind::Temperature => bindings.temperature.clone(),

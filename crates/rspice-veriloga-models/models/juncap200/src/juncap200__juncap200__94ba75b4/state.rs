@@ -344,7 +344,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 51];
+pub(crate) type CanonicalModelValues = [f64; 52];
 pub struct Instance {
 	pub nodes: [usize; 2],
 	pub branches: [usize; 0],
@@ -357,9 +357,11 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+	pub(crate) event_state_accepted: Box<[f64; 10]>,
+	pub(crate) event_state_candidate: Box<[f64; 10]>,
 	pub(crate) canonical_reactive: Box<[f64; 5]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 504]>,
+	pub(crate) canonical_staged: Box<[f64; 506]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -381,6 +383,8 @@ impl Clone for Instance {
 			time: self.time,
 			timestep: self.timestep,
 			ddt_coefficients: self.ddt_coefficients,
+			event_state_accepted: self.event_state_accepted.clone(),
+			event_state_candidate: self.event_state_candidate.clone(),
 			canonical_reactive: self.canonical_reactive.clone(),
 			canonical_model_values: self.canonical_model_values.clone(),
 			canonical_staged: self.canonical_staged.clone(),
@@ -473,8 +477,8 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 1;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([142, 110, 215, 45, 168, 190, 149, 51, 30, 131, 10, 223, 102, 226, 96, 79, 14, 97, 68, 95, 218, 142, 139, 124, 97, 28, 238, 110, 220, 149, 84, 124]);
-	pub const EVENT_STATE_COUNT: usize = 0;
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([145, 141, 157, 210, 154, 190, 168, 77, 122, 92, 239, 254, 18, 43, 147, 48, 173, 166, 20, 241, 191, 109, 164, 244, 128, 58, 190, 233, 215, 217, 8, 1]);
+	pub const EVENT_STATE_COUNT: usize = 10;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "6eec3cd708bb79b3dc3bebd3c461bade6d86e0e2bb3d0743441329d6ea91b119";
@@ -508,6 +512,8 @@ impl Instance {
 			time: 0.0,
 			timestep: 0.0,
 			ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+			event_state_accepted: boxed_zero_f64_array(),
+			event_state_candidate: boxed_zero_f64_array(),
 			canonical_reactive: boxed_zero_f64_array(),
 			canonical_model_values: None,
 			canonical_staged: boxed_zero_f64_array(),
@@ -522,7 +528,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(5);
+		let mut values = Vec::with_capacity(25);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -534,6 +540,8 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.idt_previous);
 		values.extend_from_slice(&self.stamp_state.idt_older);
 		values.extend_from_slice(&self.stamp_state.idt_input_previous);
+		values.extend_from_slice(&*self.event_state_accepted);
+		values.extend_from_slice(&*self.event_state_candidate);
 		let mut flags = Vec::with_capacity(2);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
@@ -544,7 +552,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 5);
+		debug_assert_eq!(state.values.len(), 25);
 		debug_assert_eq!(state.flags.len(), 2);
 		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
@@ -580,6 +588,12 @@ impl Instance {
 		rollback_values = remaining;
 		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_input_previous.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::EVENT_STATE_COUNT);
+		self.event_state_accepted.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::EVENT_STATE_COUNT);
+		self.event_state_candidate.copy_from_slice(field);
 		rollback_values = remaining;
 		let mut rollback_flags = state.flags.as_slice();
 		let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);
@@ -625,6 +639,8 @@ impl Instance {
 		self.stamp_state.ddt_derivative_previous.fill(0.0);
 		self.stamp_state.ddt_initialized.fill(false);
 		self.stamp_state.ddt_candidate_valid.fill(false);
+		self.event_state_accepted.fill(0.0);
+		self.event_state_candidate.fill(0.0);
 		self.reset_analog_tasks();
 		self.time = 0.0;
 		self.timestep = 0.0;
@@ -634,7 +650,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_persistent_state(&self) -> GeneratedVerilogAPersistentState {
-		let event_variables = Vec::new();
+		let event_variables = self.event_state_accepted.to_vec();
 		GeneratedVerilogAPersistentState {
 			ddt_previous: self.stamp_state.ddt_previous.to_vec(),
 			ddt_older: self.stamp_state.ddt_older.to_vec(),
@@ -660,8 +676,8 @@ impl Instance {
 		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
 			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));
 		}
-		if state.event_variables.len() != 0 {
-			return Err(format!("generated event-state checkpoint shape mismatch: expected 0, found {}", state.event_variables.len()));
+		if state.event_variables.len() != 10 {
+			return Err(format!("generated event-state checkpoint shape mismatch: expected 10, found {}", state.event_variables.len()));
 		}
 		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
 			return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
@@ -688,6 +704,8 @@ impl Instance {
 		self.stamp_state.idt_input_previous.copy_from_slice(&state.idt_input_previous);
 		self.stamp_state.idt_input_current.copy_from_slice(&state.idt_input_previous);
 		self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
+		self.event_state_accepted.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);
+		self.event_state_candidate.copy_from_slice(&state.event_variables[..Self::EVENT_STATE_COUNT]);
 		self.stamp_state.ddt_candidate_valid.fill(false);
 		self.stamp_state.idt_candidate_valid.fill(false);
 		self.reset_analog_tasks();
@@ -879,6 +897,7 @@ impl Instance {
 
 	#[inline]
 	pub fn begin_event_state_evaluation(&mut self) {
+		self.event_state_candidate.copy_from_slice(&*self.event_state_accepted);
 	}
 
 	#[inline]
@@ -888,6 +907,9 @@ impl Instance {
 	}
 
 	pub fn validate_advance_state(&self) -> Result<(), String> {
+		if self.event_state_accepted.iter().chain(&*self.event_state_candidate).any(|value| value.is_nan()) {
+			return Err("generated event-state accepted/candidate storage contains NaN".to_string());
+		}
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
 			for (lane, value) in [("previous", self.stamp_state.ddt_previous[index]), ("older", self.stamp_state.ddt_older[index]), ("derivative_previous", self.stamp_state.ddt_derivative_previous[index])] {
@@ -917,6 +939,7 @@ impl Instance {
 
 	pub fn apply_validated_advance_state(&mut self) {
 		debug_assert!(self.validate_advance_state().is_ok());
+		self.event_state_accepted.copy_from_slice(&*self.event_state_candidate);
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
 			if self.stamp_state.ddt_candidate_valid[index] {

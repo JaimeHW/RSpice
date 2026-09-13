@@ -4542,6 +4542,44 @@ endmodule
         );
     }
 
+    #[test]
+    fn retained_inputs_match_bytecode_finite_oracle() {
+        let name = "retained_finite_oracle";
+        let runtime = VerilogACompiler::new(CompilerOptions::default())
+            .compile_runtime(
+                r#"
+module retained_finite_oracle(p, n);
+  inout p, n;
+  electrical p, n;
+  real held, seen;
+  analog begin
+    seen = held;
+    held = 2.0 * V(p, n);
+    I(p, n) <+ (held + seen + 0.001) * V(p, n);
+  end
+endmodule
+"#,
+                Some(name),
+            )
+            .expect("compile retained-input oracle fixture");
+        assert_eq!(runtime.model.evaluation_input_variables.len(), 1);
+        assert!(!runtime.model.evaluation_input_derivatives.is_empty());
+        let native = compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir)
+            .expect("compile retained-input native fixture");
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        context.voltages[0] = 1.25;
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("retained source values and derivatives match after initialization");
+        assert!(stats.variables >= 2 && stats.stamps > 0 && stats.jacobians > 0);
+        assert_eq!(stats.skipped_nonfinite, 0);
+    }
+
     /// One shipped model through the finite oracle. A compile failure is a
     /// panic — the corpus is not in question — but an oracle failure is
     /// returned, so the caller can run every model and report them all.
@@ -5556,17 +5594,24 @@ endmodule
                 &model.assignment_steps,
                 model.num_variables,
             );
-        // The engine's protocol rather than a bare evaluation: an
-        // `@(initial_step)` pass first, then the ordinary pass over the
-        // variables it left behind. A compact model does its once-only work
+        // Prepare procedural state with an `@(initial_step)` assignment pass,
+        // then begin an ordinary trial from those accepted inputs. This is a
+        // finite-entry fixture, not a converged operating point: publishing
+        // initialization must not advance uncomputed analog histories.
+        // A compact model does its once-only work
         // under that event — VBIC writes `tiniK = TABS + tnom` there and the
         // body divides by it — so a single pass with the flag clear evaluates
         // a body production never runs, and both routes compute it with
         // hundreds of non-finite variables that this oracle then has to skip.
         vm.context.analysis_initial_step = true;
+        vm.context.begin_stateful_evaluation();
         execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
+        vm.context
+            .commit_initialization()
+            .map_err(|error| error.to_string())?;
         vm.context.analysis_initial_step = false;
+        vm.context.begin_stateful_evaluation();
         execute_bytecode_assignment_steps(&mut vm, &pre_current_assignment_steps)
             .map_err(|error| error.to_string())?;
 
@@ -5576,13 +5621,18 @@ endmodule
             .currents
             .resize(model.stamp_programs.len(), 0.0);
         native_context.analysis_initial_step = true;
+        native_context.begin_stateful_evaluation();
         {
             let ctx = eval_context_from_vm_context(&mut native_context);
             ctx.clear_runtime_error();
             run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());
             require_clean_native_context(&ctx, "initial-step assignments")?;
         }
+        native_context
+            .commit_initialization()
+            .map_err(|error| error.to_string())?;
         native_context.analysis_initial_step = false;
+        native_context.begin_stateful_evaluation();
         let mut ctx = eval_context_from_vm_context(&mut native_context);
         ctx.clear_runtime_error();
         run_assignment_and_prelude(&native, &ctx, native_context.variables.as_mut_ptr());
@@ -5943,6 +5993,15 @@ endmodule
             .collect();
         context.param_given = vec![0; model.parameters.len()];
         context.variables = vec![0.0; model.num_variables.max(1)];
+        context
+            .configure_event_state_variables(&model.event_state_variables)
+            .expect("native fixture state layout configures");
+        context
+            .configure_evaluation_inputs(
+                &model.evaluation_input_variables,
+                &model.evaluation_input_derivatives,
+            )
+            .expect("native fixture evaluation-input layout configures");
         context.currents = vec![0.0; model.stamp_programs.len()];
         context.branch_current_values = vec![0.0; model.branch_sources.len()];
         context.lookup_tables = model.lookup_tables.clone();
@@ -6874,6 +6933,8 @@ endmodule
             num_variables,
             variable_names: Vec::new(),
             event_state_variables: Vec::new(),
+            evaluation_input_variables: Vec::new(),
+            evaluation_input_derivatives: Vec::new(),
             switch_branch_variables: Vec::new(),
             initialization_prologue_variables: Vec::new(),
             assignment_steps: Vec::new(),

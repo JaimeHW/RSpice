@@ -199,6 +199,7 @@ pub(crate) fn insert_equation_snapshots(
                     variables.push(VarDef {
                         name: snapshot.clone(),
                         is_state: false,
+                        evaluation_input: None,
                     });
                     // Immediately after the reaching definition: no write to
                     // the slot separates that point from the read, so it is
@@ -634,6 +635,7 @@ endmodule
         let mut variables = vec![VarDef {
             name: "tmp".into(),
             is_state: false,
+            evaluation_input: None,
         }];
         let mut equations = {
             let name = arena.intern("tmp");

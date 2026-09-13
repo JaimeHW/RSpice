@@ -254,8 +254,8 @@ pub struct DeviceIR {
     pub parameters: Vec<ParamDef>,
     /// Internal variables (state)
     pub variables: Vec<VarDef>,
-    /// Sorted, duplicate-free variable slots written from event-controlled
-    /// procedural bodies.
+    /// Sorted, duplicate-free procedural slots requiring accepted state,
+    /// including event writes, initialization and retained entry inputs.
     pub event_state_variables: Vec<usize>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
@@ -338,6 +338,10 @@ pub struct ParamDef {
 pub struct VarDef {
     pub name: SmolStr,
     pub is_state: bool,
+    /// Source variable whose immutable evaluation input owns this value's
+    /// derivative lineage. The source owns itself; its AD descendants must
+    /// start every numerical evaluation at zero.
+    pub evaluation_input: Option<usize>,
 }
 
 /// Variable assignment in IR form
@@ -722,10 +726,11 @@ impl DeviceIR {
         }
 
         // Build variables
-        for var in &module.variables {
+        for (slot, var) in module.variables.iter().enumerate() {
             ir.variables.push(VarDef {
                 name: var.name.clone(),
                 is_state: var.is_state,
+                evaluation_input: var.retains_input.then_some(slot),
             });
         }
 
@@ -2894,6 +2899,7 @@ pub mod autodiff {
         variables.push(VarDef {
             name: name.clone(),
             is_state: false,
+            evaluation_input: None,
         });
         assignments.push(IrAssignmentItem::Assign(VarAssignment {
             var_index: slot,
@@ -3085,6 +3091,14 @@ pub mod autodiff {
         }
 
         let span = crate::metrics::FineSpan::new("ir.shadow_layout");
+        let mut input_owners: HashMap<_, _> = variables
+            .iter()
+            .filter_map(|variable| {
+                variable
+                    .evaluation_input
+                    .map(|owner| (variable.name.clone(), owner))
+            })
+            .collect();
         let mut ctx = ShadowContext {
             num_nodes,
             ..ShadowContext::default()
@@ -3126,14 +3140,22 @@ pub mod autodiff {
                                 .map(|member| ShadowContext::shadow_name(member, &wrt))
                                 .collect::<Vec<_>>()
                         });
-                        for slot_name in shadow_members
+                        let parents = members.as_deref().unwrap_or(std::slice::from_ref(&name));
+                        for (slot_name, parent) in shadow_members
                             .as_deref()
                             .unwrap_or(std::slice::from_ref(&shadow))
+                            .iter()
+                            .zip(parents)
                         {
+                            let evaluation_input = input_owners.get(parent).copied();
+                            if let Some(owner) = evaluation_input {
+                                input_owners.insert(slot_name.clone(), owner);
+                            }
                             shadow_index.insert(slot_name.clone(), variables.len());
                             variables.push(VarDef {
                                 name: slot_name.clone(),
                                 is_state: false,
+                                evaluation_input,
                             });
                         }
                         next.push((shadow, shadow_members));
@@ -3826,6 +3848,14 @@ pub mod autodiff {
         } = ir;
 
         let span = crate::metrics::FineSpan::new("ir.auxiliary_shadow_layout");
+        let input_owners: HashMap<_, _> = variables
+            .iter()
+            .filter_map(|variable| {
+                variable
+                    .evaluation_input
+                    .map(|owner| (variable.name.clone(), owner))
+            })
+            .collect();
         let array_members = arrays
             .iter()
             .filter(|array| deps.get(&array.name).is_some_and(|axes| !axes.is_empty()))
@@ -3851,6 +3881,7 @@ pub mod autodiff {
                 variables.push(VarDef {
                     name: shadow,
                     is_state: false,
+                    evaluation_input: input_owners.get(&name).copied(),
                 });
             }
         }
@@ -3867,6 +3898,7 @@ pub mod autodiff {
                     variables.push(VarDef {
                         name: shadow,
                         is_state: false,
+                        evaluation_input: input_owners.get(element.as_str()).copied(),
                     });
                 }
             }

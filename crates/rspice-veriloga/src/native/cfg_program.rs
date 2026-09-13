@@ -820,6 +820,22 @@ impl Lowerer<'_> {
                     })?;
                 push(NativeOp::LoadVariable(index), &[])
             }
+            CfgValueKind::EvaluationInput(slot) => {
+                let slot = *slot as usize;
+                if self
+                    .bindings
+                    .event_state_variables
+                    .get(slot)
+                    .copied()
+                    .flatten()
+                    .is_none()
+                {
+                    return Err(self.refuse(format!(
+                        "CFG evaluation-input slot {slot} has no runtime binding"
+                    )));
+                }
+                push(NativeOp::LoadEvaluationState(slot), &[])
+            }
             CfgValueKind::Temperature => push(NativeOp::LoadTemperature, &[]),
             CfgValueKind::ThermalVoltage => push(NativeOp::LoadThermalVoltage, &[]),
             CfgValueKind::Multiplicity => push(NativeOp::LoadMfactor, &[]),
@@ -1565,6 +1581,7 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         | CfgValueKind::BooleanConstant(_)
         | CfgValueKind::Parameter(_)
         | CfgValueKind::EventState(_)
+        | CfgValueKind::EvaluationInput(_)
         | CfgValueKind::Temperature
         | CfgValueKind::ThermalVoltage
         | CfgValueKind::Multiplicity

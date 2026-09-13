@@ -135,8 +135,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 16;
 /// Version 44 shares exact operand-only math calls in executable SSA.
 /// 44 to 45 preserves derivative demand at each assignment: later value-only
 /// writes no longer publish every shadow allocated for an earlier definition.
+/// Version 47 lowers retained procedural entries separately from current assignments.
 /// Version 46 emits bounded reads of immutable procedural evaluation inputs.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 46;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 47;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1701,6 +1702,7 @@ endmodule
         const SEQUENTIAL_CURRENTS: u32 = 9344;
         const PAIR_CURRENTS: u32 = 9472;
         const JACOBIANS: u32 = 9728;
+        const EVALUATION_INPUTS: u32 = 10240;
         /// Where the assignment prelude publishes.
         ///
         /// Past every other region, because it is the only one whose length is
@@ -1725,14 +1727,15 @@ endmodule
 
             use super::abi::{
                 FRAME_ABI_VERSION_OFFSET, FRAME_BYTE_LEN_OFFSET, FRAME_CURRENTS_LEN_OFFSET,
-                FRAME_CURRENTS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET, FRAME_JACOBIANS_PTR_OFFSET,
-                FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET, FRAME_PARAMETERS_PTR_OFFSET,
-                FRAME_PRELUDE_SLOTS_LEN_OFFSET, FRAME_PRELUDE_SLOTS_PTR_OFFSET,
-                FRAME_PRIOR_CURRENTS_LEN_OFFSET, FRAME_PRIOR_CURRENTS_PTR_OFFSET,
-                FRAME_PROGRAM_ACTIVE_LEN_OFFSET, FRAME_PROGRAM_ACTIVE_PTR_OFFSET,
-                FRAME_TERMINAL_VOLTAGES_LEN_OFFSET, FRAME_TERMINAL_VOLTAGES_PTR_OFFSET,
-                FRAME_VARIABLES_LEN_OFFSET, FRAME_VARIABLES_PTR_OFFSET,
-                WASM_JIT_MAX_EVAL_FRAME_BYTES,
+                FRAME_CURRENTS_PTR_OFFSET, FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET,
+                FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET, FRAME_JACOBIANS_LEN_OFFSET,
+                FRAME_JACOBIANS_PTR_OFFSET, FRAME_MAGIC_OFFSET, FRAME_PARAMETERS_LEN_OFFSET,
+                FRAME_PARAMETERS_PTR_OFFSET, FRAME_PRELUDE_SLOTS_LEN_OFFSET,
+                FRAME_PRELUDE_SLOTS_PTR_OFFSET, FRAME_PRIOR_CURRENTS_LEN_OFFSET,
+                FRAME_PRIOR_CURRENTS_PTR_OFFSET, FRAME_PROGRAM_ACTIVE_LEN_OFFSET,
+                FRAME_PROGRAM_ACTIVE_PTR_OFFSET, FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
+                FRAME_TERMINAL_VOLTAGES_PTR_OFFSET, FRAME_VARIABLES_LEN_OFFSET,
+                FRAME_VARIABLES_PTR_OFFSET, WASM_JIT_MAX_EVAL_FRAME_BYTES,
             };
             use super::{
                 WASM_JIT_ABI_VERSION, WASM_JIT_FRAME_MAGIC, WASM_JIT_IMPORT_MODULE,
@@ -1801,6 +1804,12 @@ endmodule
             context.variables.resize(report.model.num_variables, 0.0);
             context
                 .configure_event_state_variables(&report.model.event_state_variables)
+                .unwrap();
+            context
+                .configure_evaluation_inputs(
+                    &report.model.evaluation_input_variables,
+                    &report.model.evaluation_input_derivatives,
+                )
                 .unwrap();
             let mut store =
                 Store::new(&engine, super::runtime::WasmJitRuntimeSession::new(context));
@@ -1888,6 +1897,18 @@ endmodule
                     FRAME_TERMINAL_VOLTAGES_LEN_OFFSET,
                     report.model.num_terminals as u32,
                 );
+                write(
+                    FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET,
+                    Self::EVALUATION_INPUTS,
+                );
+                write(
+                    FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET,
+                    report.model.event_state_variables.len() as u32,
+                );
+                assert!(
+                    Self::EVALUATION_INPUTS as usize + report.model.event_state_variables.len() * 8
+                        <= Self::PRELUDE_SLOTS as usize
+                );
                 write(FRAME_VARIABLES_PTR_OFFSET, Self::VARIABLES);
                 write(
                     FRAME_VARIABLES_LEN_OFFSET,
@@ -1947,6 +1968,15 @@ endmodule
         /// entries that read prelude slots root nothing, so a module can have
         /// no pass at all and still be whole.
         fn call_assignments(&mut self) {
+            let inputs = self
+                .store
+                .data()
+                .context()
+                .evaluation_state_inputs()
+                .to_vec();
+            for (slot, value) in inputs.into_iter().enumerate() {
+                self.write_f64(Self::EVALUATION_INPUTS as usize + slot * 8, value);
+            }
             let Some(export) = self.artifact.assignment_export().map(str::to_owned) else {
                 return;
             };
@@ -2073,6 +2103,75 @@ endmodule
                 .export(WasmJitExecutableEntry::Jacobian { stamp, entry })
                 .expect("Jacobian export")
                 .to_owned()
+        }
+    }
+
+    #[test]
+    fn wasm_retained_inputs_preserve_values_and_derivatives_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = "module retained(p,n); inout p,n; electrical p,n; real held,seen;
+            analog begin seen=held; held=2*V(p,n); I(p,n)<+(held+seen+0.001)*V(p,n); end endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "retained", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            let mut accepted = 0.0;
+            for voltage in [0.5_f64, -0.25, 0.75] {
+                let checkpoint = harness.store.data().context().clone();
+                for (trial, restore) in [(1.25_f64, false), (voltage, false), (voltage, true)] {
+                    let context = harness.store.data_mut().context_mut();
+                    if restore {
+                        context.clone_from(&checkpoint);
+                    }
+                    context.begin_stateful_evaluation();
+                    let inputs = context.variables.clone();
+                    for (slot, input) in inputs.iter().copied().enumerate() {
+                        harness.write_f64(FusedKernelHarness::VARIABLES as usize + slot * 8, input);
+                    }
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, trial);
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for _ in 0..2 {
+                        assert_eq!(harness.call(&value), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = (accepted + 2.0 * trial + 0.001) * trial;
+                        assert!(
+                            (actual - expected).abs() < 1e-12,
+                            "postfix={postfix}: {actual} != {expected}"
+                        );
+                        assert_eq!(harness.call(&jacobian), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        let expected = accepted + 4.0 * trial + 0.001;
+                        assert!(
+                            (actual - expected).abs() < 1e-12,
+                            "postfix={postfix}: {actual} != {expected}"
+                        );
+                    }
+                    assert_eq!(
+                        harness.read_f64(FusedKernelHarness::VARIABLES as usize),
+                        2.0 * trial
+                    );
+                    assert_eq!(
+                        harness.read_f64(FusedKernelHarness::VARIABLES as usize + 8),
+                        accepted
+                    );
+                    let candidate = (0..inputs.len())
+                        .map(|slot| {
+                            harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot * 8)
+                        })
+                        .collect::<Vec<_>>();
+                    harness.store.data_mut().context_mut().variables = candidate;
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
+                accepted = 2.0 * voltage;
+            }
         }
     }
 

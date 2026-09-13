@@ -278,6 +278,8 @@ pub struct HirVariable {
     pub name: SmolStr,
     pub value_type: CanonicalValueType,
     pub is_state: bool,
+    /// Reads may consume the immutable entry input before the current write.
+    pub retains_input: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -991,6 +993,7 @@ impl HirModel {
                     name: variable.name.clone(),
                     value_type: CanonicalValueType::from(variable.value_type),
                     is_state: variable.is_state,
+                    retains_input: variable.retains_input,
                 })
                 .collect(),
             arrays,
@@ -1065,6 +1068,16 @@ impl HirModel {
         validate_dense_port_ids(&mut diagnostics, &self.ports);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
+        if self
+            .variables
+            .iter()
+            .any(|variable| variable.retains_input && !variable.is_state)
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "retained procedural inputs must have accepted state storage",
+            ));
+        }
         if self
             .digital_observations
             .windows(2)

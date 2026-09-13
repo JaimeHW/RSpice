@@ -1141,15 +1141,10 @@ endmodule
     );
 }
 
-/// LRM 4.4: a module-scope variable is not reinitialized between evaluations,
-/// so a read before assignment yields the value the previous *accepted*
-/// evaluation left. The bytecode lowering executes every assignment step of
-/// the body on every evaluation and therefore carries it; the CFG lowering
-/// treats the variable as block-local and starts from zero. The row asserts
-/// the LRM answer — `seen` must equal the previous step's `held` — and the
-/// route comparison beneath it is what shows which lowering is wrong.
+/// VAMS-2023 4.6.2 carries analog variables between DC sweep points.
+/// RSpice's transaction boundary preserves that accepted input across repeated
+/// Newton probes and publishes the current assignment for observation.
 #[test]
-#[ignore = "R4.1: read-before-assign persistence differs by route"]
 fn read_before_assign_persistence_agrees_across_lowerings() {
     const SOURCE: &str = r#"
 `include "disciplines.vams"

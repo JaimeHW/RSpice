@@ -538,8 +538,8 @@ pub struct Instance {
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
 	pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-	pub(crate) event_state_accepted: Box<[f64; 11]>,
-	pub(crate) event_state_candidate: Box<[f64; 11]>,
+	pub(crate) event_state_accepted: Box<[f64; 14]>,
+	pub(crate) event_state_candidate: Box<[f64; 14]>,
 	pub(crate) canonical_reactive: Box<[f64; 86]>,
 }
 
@@ -877,8 +877,8 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 15;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const IDTMOD_STATE_COUNT: usize = 0;
-	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([189, 157, 228, 88, 72, 68, 122, 24, 140, 150, 227, 134, 102, 25, 199, 117, 44, 123, 95, 129, 231, 51, 248, 239, 81, 124, 54, 237, 51, 89, 255, 156]);
-	pub const EVENT_STATE_COUNT: usize = 11;
+	pub const ACCEPTED_STATE_SHAPE_IDENTITY: GeneratedVerilogAAcceptedStateShapeIdentity = GeneratedVerilogAAcceptedStateShapeIdentity::from_bytes([90, 24, 62, 187, 133, 62, 13, 43, 8, 37, 19, 96, 181, 0, 246, 33, 92, 113, 117, 110, 56, 89, 189, 65, 207, 12, 62, 224, 210, 87, 122, 204]);
+	pub const EVENT_STATE_COUNT: usize = 14;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "99f1436fe65c38469833be0b2c5ad6c9eef4fc28b75c23888c031902ab6d4493";
@@ -922,7 +922,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn capture_rollback_state(&self) -> GeneratedVerilogARollbackState {
-		let mut values = Vec::with_capacity(97);
+		let mut values = Vec::with_capacity(103);
 		values.extend_from_slice(&self.stamp_state.ddt_current);
 		values.extend_from_slice(&self.stamp_state.ddt_previous);
 		values.extend_from_slice(&self.stamp_state.ddt_older);
@@ -946,7 +946,7 @@ impl Instance {
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
-		debug_assert_eq!(state.values.len(), 97);
+		debug_assert_eq!(state.values.len(), 103);
 		debug_assert_eq!(state.flags.len(), 30);
 		debug_assert_eq!(state.idtmod.len(), Self::IDTMOD_STATE_COUNT);
 		let mut rollback_values = state.values.as_slice();
@@ -1070,8 +1070,8 @@ impl Instance {
 		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
 			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));
 		}
-		if state.event_variables.len() != 11 {
-			return Err(format!("generated event-state checkpoint shape mismatch: expected 11, found {}", state.event_variables.len()));
+		if state.event_variables.len() != 14 {
+			return Err(format!("generated event-state checkpoint shape mismatch: expected 14, found {}", state.event_variables.len()));
 		}
 		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
 			return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
@@ -1079,9 +1079,6 @@ impl Instance {
 		if state.event_variables.iter().any(|value| value.is_nan()) {
 			return Err("generated Verilog-A checkpoint event state contains NaN".to_string());
 		}
-		if !matches!(state.event_variables[0], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
-		if !matches!(state.event_variables[1], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
-		if !matches!(state.event_variables[2], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		if !matches!(state.event_variables[3], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		if !matches!(state.event_variables[4], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		if !matches!(state.event_variables[5], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
@@ -1090,6 +1087,9 @@ impl Instance {
 		if !matches!(state.event_variables[8], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		if !matches!(state.event_variables[9], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		if !matches!(state.event_variables[10], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[11], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[12], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
+		if !matches!(state.event_variables[13], 0.0 | 1.0) { return Err("invalid checkpoint switch-branch source kind".to_string()); }
 		Ok(())
 	}
 
@@ -1379,9 +1379,6 @@ impl Instance {
 			}
 			index += 1;
 		}
-		if !matches!(self.event_state_candidate[0], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
-		if !matches!(self.event_state_candidate[1], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
-		if !matches!(self.event_state_candidate[2], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		if !matches!(self.event_state_candidate[3], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		if !matches!(self.event_state_candidate[4], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		if !matches!(self.event_state_candidate[5], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
@@ -1390,6 +1387,9 @@ impl Instance {
 		if !matches!(self.event_state_candidate[8], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		if !matches!(self.event_state_candidate[9], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		if !matches!(self.event_state_candidate[10], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[11], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[12], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
+		if !matches!(self.event_state_candidate[13], 0.0 | 1.0) { return Err("invalid switch-branch source kind".to_string()); }
 		Ok(())
 	}
 
@@ -1476,7 +1476,7 @@ impl Instance {
 	#[inline]
 	pub fn transient_step_bound(&self) -> Result<Option<f64>, String> { Ok(None) }
 	#[inline]
-	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[0] != self.event_state_accepted[0] || self.event_state_candidate[1] != self.event_state_accepted[1] || self.event_state_candidate[2] != self.event_state_accepted[2] || self.event_state_candidate[3] != self.event_state_accepted[3] || self.event_state_candidate[4] != self.event_state_accepted[4] || self.event_state_candidate[5] != self.event_state_accepted[5] || self.event_state_candidate[6] != self.event_state_accepted[6] || self.event_state_candidate[7] != self.event_state_accepted[7] || self.event_state_candidate[8] != self.event_state_accepted[8] || self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] }
+	pub fn discontinuity_rising(&self) -> bool { self.event_state_candidate[3] != self.event_state_accepted[3] || self.event_state_candidate[4] != self.event_state_accepted[4] || self.event_state_candidate[5] != self.event_state_accepted[5] || self.event_state_candidate[6] != self.event_state_accepted[6] || self.event_state_candidate[7] != self.event_state_accepted[7] || self.event_state_candidate[8] != self.event_state_accepted[8] || self.event_state_candidate[9] != self.event_state_accepted[9] || self.event_state_candidate[10] != self.event_state_accepted[10] || self.event_state_candidate[11] != self.event_state_accepted[11] || self.event_state_candidate[12] != self.event_state_accepted[12] || self.event_state_candidate[13] != self.event_state_accepted[13] }
 	#[inline]
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]

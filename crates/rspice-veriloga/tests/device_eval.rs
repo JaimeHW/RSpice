@@ -18,6 +18,153 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn retained_input_has_zero_trial_derivative_and_stable_readback() {
+    for (declarations, held, observed, initial) in [
+        ("real held, seen;", "held", "held", 0.0),
+        ("real held=3, seen;", "held", "held", 3.0),
+        ("real held[0:1], seen;", "held[1]", "held[1]", 0.0),
+        (
+            "parameter integer slot=1; real held[0:1], seen;",
+            "held[slot]",
+            "held[1]",
+            0.0,
+        ),
+    ] {
+        for conditional in [false, true] {
+            let guard = if conditional { "if (V(p)>0)" } else { "" };
+            let fixture = compile(&format!(
+                "module retained(p); inout p; electrical p; {declarations}
+                 analog begin seen={held}; {guard} {held}=2*V(p); I(p)<+({held}+seen+0.001)*V(p); end endmodule",
+            ));
+            let mut device = fixture.device("RETAINED", &[1]);
+            for _ in 0..2 {
+                let mut accepted = initial;
+                device.update_voltages(&[0.0]);
+                device.try_evaluate().unwrap();
+                for voltage in [0.5_f64, -0.25, 0.75] {
+                    let checkpoint = device.checkpoint_state().unwrap();
+                    for (trial, restore) in [(1.25_f64, false), (voltage, false), (voltage, true)] {
+                        if restore {
+                            device.validate_checkpoint_state(&checkpoint).unwrap();
+                            device.apply_validated_checkpoint_state(&checkpoint);
+                        }
+                        device.update_voltages(&[trial]);
+                        let candidate = if conditional && trial <= 0.0 {
+                            accepted
+                        } else {
+                            2.0 * trial
+                        };
+                        let expected = (accepted + candidate + 0.001) * trial;
+                        let slope = accepted
+                            + candidate
+                            + 0.001
+                            + if conditional && trial <= 0.0 {
+                                0.0
+                            } else {
+                                2.0 * trial
+                            };
+                        for _ in 0..2 {
+                            let current = device.try_evaluate().unwrap()[0];
+                            assert!(
+                                (current - expected).abs() < 1e-12,
+                                "{held}, conditional={conditional}: {current} != {expected}"
+                            );
+                            let (matrix, rhs) = collect_stamps(&mut device, &[trial]);
+                            let actual_slope = matrix.get(&(0, 0)).copied().unwrap_or(0.0);
+                            assert!(
+                                (actual_slope - slope).abs() < 1e-12,
+                                "{held}, conditional={conditional}: {actual_slope} != {slope}"
+                            );
+                            assert!(
+                                (rhs.get(&0).copied().unwrap_or(0.0) - (slope * trial - expected))
+                                    .abs()
+                                    < 1e-12
+                            );
+                            fixture.observe(&mut device);
+                            assert_eq!(device.variable("seen").unwrap(), accepted);
+                            assert_eq!(device.variable(observed).unwrap(), candidate);
+                            let static_current = device
+                                .try_evaluate_with_mode(
+                                    rspice_veriloga::vm::VerilogAEvaluationMode::StaticDaeProbe,
+                                )
+                                .unwrap()[0];
+                            assert!(
+                                (static_current - expected).abs() < 1e-12,
+                                "static DAE {held}: {static_current} != {expected}"
+                            );
+                        }
+                    }
+                    device.try_advance_state().unwrap();
+                    if !conditional || voltage > 0.0 {
+                        accepted = 2.0 * voltage;
+                    }
+                    fixture.observe(&mut device);
+                    assert_eq!(device.variable(observed).unwrap(), accepted);
+                }
+                device.try_begin_analysis(0).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_input_reactive_replay_preserves_the_numerical_candidate() {
+    let fixture = compile(
+        "module retained_charge(p); inout p; electrical p; real held,seen;
+         analog begin seen=held; held=2*V(p);
+         I(p)<+(held+seen+0.001)*V(p); I(p)<+ddt((held+seen+0.001)*V(p)); end endmodule",
+    );
+    let mut device = fixture.device("RETAINED_CHARGE", &[1]);
+    let mut accepted = 0.0;
+    for bias in [0.5_f64, -0.25, 0.75] {
+        device.update_voltages(&[bias]);
+        device.try_evaluate().unwrap();
+        for _ in 0..2 {
+            let mut slope = 0.0;
+            device
+                .try_stamp_reactive(&[bias], |row, col, value| {
+                    assert_eq!((row, col), (0, 0));
+                    slope += value;
+                })
+                .unwrap();
+            let expected = accepted + 4.0 * bias + 0.001;
+            assert!((slope - expected).abs() < 1e-12, "{slope} != {expected}");
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("seen").unwrap(), accepted);
+            assert_eq!(device.variable("held").unwrap(), 2.0 * bias);
+        }
+        device.try_advance_state().unwrap();
+        accepted = 2.0 * bias;
+    }
+}
+
+#[test]
+fn retained_input_higher_derivatives_start_at_zero() {
+    let fixture = compile(
+        "module retained_ddx(p); inout p; electrical p; real held, old, y;
+         analog begin old=held; held=V(p)*V(p)*V(p);
+         y=ddx(old*V(p)+held,V(p)); I(p)<+y; end endmodule",
+    );
+    let mut device = fixture.device("RETAINED_DDX", &[1]);
+    let mut accepted = 0.0;
+    for bias in [0.5_f64, -0.25, 0.75] {
+        for trial in [1.25_f64, bias, bias] {
+            device.update_voltages(&[trial]);
+            let expected = accepted + 3.0 * trial * trial;
+            let actual = device.try_evaluate().unwrap()[0];
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+            let (matrix, _) = collect_stamps(&mut device, &[trial]);
+            assert!((matrix[&(0, 0)] - 6.0 * trial).abs() < 1e-12, "{matrix:?}");
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("old").unwrap(), accepted);
+            assert!((device.variable("y").unwrap() - expected).abs() < 1e-12);
+        }
+        device.try_advance_state().unwrap();
+        accepted = bias * bias * bias;
+    }
+}
+
+#[test]
 fn guarded_ddt_preserves_charge_jacobians_and_rejected_trial_history() {
     use rspice_veriloga::vm::IntegrationCoefficients;
 

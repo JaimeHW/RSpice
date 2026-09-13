@@ -1782,6 +1782,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::BranchFlow(_)
         | CfgValueKind::BranchUnknownFlow(_)
         | CfgValueKind::EventState(_)
+        | CfgValueKind::EvaluationInput(_)
         | CfgValueKind::Ddt { .. }
         // `idt` accumulates into per-instance history on every evaluation, so
         // caching it at a coarser class would integrate a step the solver did

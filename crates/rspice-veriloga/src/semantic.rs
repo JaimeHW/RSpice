@@ -377,6 +377,7 @@ mod elaboration;
 mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
+mod retained_inputs;
 mod switch_branches;
 mod symbols;
 
@@ -1632,6 +1633,8 @@ impl SemanticAnalyzer {
                     var_type: var_decl.var_type,
                     value_type,
                     is_state: false,
+                    retains_input: false,
+                    is_event_controlled: false,
                 });
 
                 self.define_symbol(Symbol {
@@ -1677,6 +1680,8 @@ impl SemanticAnalyzer {
                 },
                 value_type,
                 is_state: false,
+                retains_input: false,
+                is_event_controlled: false,
             });
 
             let expression =
@@ -1919,6 +1924,7 @@ impl SemanticAnalyzer {
 
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
+        retained_inputs::record(&mut analyzed);
         Ok(analyzed)
     }
 
@@ -2164,6 +2170,8 @@ impl SemanticAnalyzer {
                 var_type,
                 value_type,
                 is_state: false,
+                retains_input: false,
+                is_event_controlled: false,
             });
         }
         Some(AnalyzedArray { base, lower, len })
@@ -2321,6 +2329,8 @@ impl SemanticAnalyzer {
             var_type,
             value_type: Self::value_type_for_var_type(var_type),
             is_state: false,
+            retains_input: false,
+            is_event_controlled: false,
         });
         self.define_symbol(Symbol {
             name,
@@ -2779,6 +2789,8 @@ impl SemanticAnalyzer {
                             var_type: var_decl.var_type,
                             value_type,
                             is_state: false,
+                            retains_input: false,
+                            is_event_controlled: false,
                         });
                         self.define_symbol(Symbol {
                             name: hoisted.clone(),
@@ -3194,7 +3206,7 @@ impl SemanticAnalyzer {
                 self.dynamic_analog_operator_guard_depth -= 1;
                 body_result?;
                 let then_body = self.close_region();
-                Self::record_event_state_variables(&sink[body_start..], module);
+                Self::record_transactional_variables(&sink[body_start..], module, true);
                 if unfiltered_initial_step {
                     self.unfiltered_initial_step_guards.pop();
                 }
@@ -3560,6 +3572,8 @@ impl SemanticAnalyzer {
             var_type: VarType::Real,
             value_type: ValueType::Real,
             is_state: false,
+            retains_input: false,
+            is_event_controlled: false,
         });
         self.define_symbol(Symbol {
             name: name.clone(),
@@ -3597,7 +3611,11 @@ impl SemanticAnalyzer {
     /// contiguous storage because the selected element is not known until an
     /// evaluation runs. Loop bodies are recursive assignment streams and are
     /// walked here rather than relying on source-level control-flow shape.
-    fn record_event_state_variables(statements: &[AnalyzedStatement], module: &mut AnalyzedModule) {
+    fn record_transactional_variables(
+        statements: &[AnalyzedStatement],
+        module: &mut AnalyzedModule,
+        event_controlled: bool,
+    ) {
         fn collect(
             statements: &[AnalyzedStatement],
             module: &AnalyzedModule,
@@ -3628,8 +3646,16 @@ impl SemanticAnalyzer {
             }
         }
 
-        let mut slots = std::mem::take(&mut module.event_state_variables);
+        let mut slots = Vec::new();
         collect(statements, module, &mut slots);
+        if event_controlled {
+            for &slot in &slots {
+                if let Some(variable) = module.variables.get_mut(slot) {
+                    variable.is_event_controlled = true;
+                }
+            }
+        }
+        slots.append(&mut module.event_state_variables);
         slots.sort_unstable();
         slots.dedup();
         for &slot in &slots {
@@ -3646,7 +3672,7 @@ impl SemanticAnalyzer {
         module_variable_count: usize,
     ) {
         let previous = module.event_state_variables.clone();
-        Self::record_event_state_variables(statements, module);
+        Self::record_transactional_variables(statements, module, false);
         module
             .event_state_variables
             .retain(|&slot| slot < module_variable_count || previous.binary_search(&slot).is_ok());
@@ -3778,6 +3804,8 @@ impl SemanticAnalyzer {
                 var_type: VarType::Real,
                 value_type: ValueType::Real,
                 is_state: false,
+                retains_input: false,
+                is_event_controlled: false,
             });
             this.define_symbol(Symbol {
                 name: name.clone(),
@@ -4731,6 +4759,8 @@ impl SemanticAnalyzer {
             var_type: VarType::Real,
             value_type: ValueType::Real,
             is_state: false,
+            retains_input: false,
+            is_event_controlled: false,
         });
         self.task_vars.insert(name.into(), var_index);
         // The reset runs unconditionally: every evaluation starts neutral

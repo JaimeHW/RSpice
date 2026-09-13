@@ -146,6 +146,14 @@ fn compiled_model_layout_identity(model: &CompiledModel) -> CompiledModelLayoutI
     for slot in &model.event_state_variables {
         usize_field(&mut hasher, *slot);
     }
+    usize_field(&mut hasher, model.evaluation_input_variables.len());
+    for &slot in &model.evaluation_input_variables {
+        usize_field(&mut hasher, slot);
+    }
+    usize_field(&mut hasher, model.evaluation_input_derivatives.len());
+    for &slot in &model.evaluation_input_derivatives {
+        usize_field(&mut hasher, slot);
+    }
     usize_field(&mut hasher, model.switch_branch_variables.len());
     for &slot in &model.switch_branch_variables {
         usize_field(&mut hasher, slot);
@@ -2853,6 +2861,10 @@ impl VerilogADevice {
         context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
         context.configure_event_state_variables(&model.event_state_variables)?;
+        context.configure_evaluation_inputs(
+            &model.evaluation_input_variables,
+            &model.evaluation_input_derivatives,
+        )?;
         if model
             .switch_branch_variables
             .windows(2)
@@ -6279,6 +6291,7 @@ impl VerilogADevice {
     fn begin_observation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
         self.context.evaluation_mode = mode;
         self.context.begin_stateful_observation();
+        self.context.prepare_procedural_replay();
     }
 
     fn begin_evaluation_with_tasks(
@@ -10810,6 +10823,12 @@ endmodule
         context
             .configure_event_state_variables(&model.event_state_variables)
             .expect("native test model event-state layout configures");
+        context
+            .configure_evaluation_inputs(
+                &model.evaluation_input_variables,
+                &model.evaluation_input_derivatives,
+            )
+            .expect("native test model evaluation-input layout configures");
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();

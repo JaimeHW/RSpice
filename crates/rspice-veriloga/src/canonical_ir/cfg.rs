@@ -293,9 +293,14 @@ pub enum CfgValueKind {
     ParameterGiven(ParamId),
     /// Runtime connection state of one external terminal.
     PortConnected(u32),
-    /// Accepted procedural state for a variable written by an event-controlled
-    /// body. The dense slot is stable within one generated model.
+    /// Procedural state in dense declaration order. Generated kernels read the
+    /// accepted value; executable kernels read the published event candidate.
+    /// Ordinary executable entry reads use EvaluationInput instead.
     EventState(u32),
+    /// Procedural input pinned before this evaluation's assignment pass.
+    /// Uses the same dense state-slot order as EventState, with an immutable
+    /// input lifetime rather than a read of the published candidate.
+    EvaluationInput(u32),
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -1196,6 +1201,7 @@ impl CfgValueKind {
             | Self::ParameterGiven(_)
             | Self::PortConnected(_)
             | Self::EventState(_)
+            | Self::EvaluationInput(_)
             | Self::Temperature
             | Self::ThermalVoltage
             | Self::Multiplicity
@@ -2561,6 +2567,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
             | CfgValueKind::ParameterGiven(_)
             | CfgValueKind::PortConnected(_)
             | CfgValueKind::EventState(_)
+            | CfgValueKind::EvaluationInput(_)
             | CfgValueKind::Temperature
             | CfgValueKind::ThermalVoltage
             | CfgValueKind::Multiplicity

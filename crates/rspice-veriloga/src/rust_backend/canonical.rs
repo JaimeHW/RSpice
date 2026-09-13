@@ -415,6 +415,7 @@ fn kernel_region_metrics(
             ),
             CfgValueKind::PortConnected(port) => write!(out, "port-connected:{port}"),
             CfgValueKind::EventState(slot) => write!(out, "event-state:{slot}"),
+            CfgValueKind::EvaluationInput(slot) => write!(out, "evaluation-input:{slot}"),
             CfgValueKind::Temperature => write!(out, "temperature"),
             CfgValueKind::ThermalVoltage => write!(out, "thermal-voltage"),
             CfgValueKind::Multiplicity => write!(out, "multiplicity"),
@@ -5358,7 +5359,9 @@ impl Wants {
             }
             CfgValueKind::Parameter(_) => self.parameters = true,
             CfgValueKind::ParameterGiven(_) => self.parameter_given = true,
-            CfgValueKind::EventState(_) => self.event_state = true,
+            CfgValueKind::EventState(_) | CfgValueKind::EvaluationInput(_) => {
+                self.event_state = true
+            }
             CfgValueKind::NodePotential(_) => self.node_potentials = true,
             CfgValueKind::BranchUnknownFlow(_) => self.branch_unknown_flows = true,
             CfgValueKind::Temperature => self.temperature = true,

@@ -443,6 +443,7 @@ enum LeafKey {
     ParameterGiven(ParamId),
     PortConnected(u32),
     EventState(u32),
+    EvaluationInput(u32),
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -1149,17 +1150,27 @@ impl<'a> CfgLowerer<'a> {
             .collect::<Vec<_>>();
         for (slot, variable) in event_state_variables.iter().copied().enumerate() {
             let slot = u32::try_from(slot).expect("event-state slot count fits u32");
-            let accepted = self.leaf(
-                LeafKey::EventState(slot),
-                CfgValueType::Real,
-                CfgValueKind::EventState(slot),
-            );
+            let retains_input = self.hir.variables[variable.index() as usize].retains_input;
+            let accepted = if retains_input && self.frozen_event_state {
+                self.leaf(
+                    LeafKey::EvaluationInput(slot),
+                    CfgValueType::Real,
+                    CfgValueKind::EvaluationInput(slot),
+                )
+            } else {
+                self.leaf(
+                    LeafKey::EventState(slot),
+                    CfgValueType::Real,
+                    CfgValueKind::EventState(slot),
+                )
+            };
             self.builder
                 .write_variable(CfgVariable::Local(variable), entry, accepted);
             // Switch kinds are reset and assigned at ordinary source sites.
             // Their reaching definitions select which earlier source values
             // survive; substituting the final candidate would change that order.
             if self.frozen_event_state
+                && !retains_input
                 && self
                     .hir
                     .switch_branch_variables

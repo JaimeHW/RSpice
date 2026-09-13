@@ -495,6 +495,25 @@ impl CodeGenerator {
             num_variables: ir.variables.len(),
             variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
             event_state_variables: ir.event_state_variables.clone(),
+            evaluation_input_variables: ir
+                .variables
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, variable)| {
+                    (variable.evaluation_input == Some(slot)).then_some(slot)
+                })
+                .collect(),
+            evaluation_input_derivatives: ir
+                .variables
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, variable)| {
+                    variable
+                        .evaluation_input
+                        .filter(|&owner| owner != slot)
+                        .map(|_| slot)
+                })
+                .collect(),
             switch_branch_variables: ir.switch_branch_variables.clone(),
             initialization_prologue_variables: ir.initialization_prologue_variables.clone(),
             assignment_steps: Vec::new(),

@@ -39,6 +39,8 @@ impl SwitchState {
                 var_type: VarType::Real,
                 value_type: ValueType::Real,
                 is_state: false,
+                retains_input: false,
+                is_event_controlled: false,
             });
             (name, index)
         });

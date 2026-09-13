@@ -740,6 +740,8 @@ impl SemanticAnalyzer {
                     },
                     value_type,
                     is_state: true,
+                    retains_input: false,
+                    is_event_controlled: false,
                 });
                 // A digital port already has its header identity in the
                 // symbol table. Its numeric analog read is a state input,
@@ -764,6 +766,7 @@ impl SemanticAnalyzer {
                 }
                 slot
             };
+            analyzed.variables[slot].is_event_controlled = true;
             analyzed.event_state_variables.push(slot);
         }
         analyzed.event_state_variables.sort_unstable();

@@ -329,9 +329,13 @@ pub struct VmContext {
     /// point because they are written by analog event-control bodies.
     ///
     /// These slots use [`Self::accepted_event_variables`] as their committed
-    /// lane. Ordinary procedural variables remain evaluation-local and are
-    /// deliberately not copied on every Newton pass.
+    /// lane, including ordinary variables whose entry reads retain a value.
+    /// Locals defined before every read do not need this per-trial copy.
     event_state_indices: Vec<usize>,
+    /// Compact accepted-state slots owned by ordinary procedural entry inputs.
+    evaluation_input_slots: Vec<usize>,
+    /// Compiler-owned AD descendants of immutable procedural entry inputs.
+    evaluation_input_derivatives: Vec<usize>,
     /// Accepted values corresponding one-for-one with
     /// [`Self::event_state_indices`]. Runtime-only: checkpoints retain the
     /// canonical full variable vector after overlaying this committed lane.
@@ -476,6 +480,8 @@ impl Default for VmContext {
             analysis_initialized: false,
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
+            evaluation_input_slots: Vec::new(),
+            evaluation_input_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -672,6 +678,8 @@ impl VmContext {
             analysis_initialized: false,
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
+            evaluation_input_slots: Vec::new(),
+            evaluation_input_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -728,6 +736,8 @@ impl VmContext {
             analysis_initialized: false,
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
+            evaluation_input_slots: Vec::new(),
+            evaluation_input_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -784,6 +794,8 @@ impl VmContext {
             analysis_initialized: false,
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
+            evaluation_input_slots: Vec::new(),
+            evaluation_input_derivatives: Vec::new(),
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
@@ -846,11 +858,49 @@ impl VmContext {
 
         self.event_state_indices.clear();
         self.event_state_indices.extend_from_slice(indices);
+        self.evaluation_input_slots.clear();
+        self.evaluation_input_derivatives.clear();
         self.accepted_event_variables.clear();
         self.accepted_event_variables
             .extend(indices.iter().map(|&index| self.variables[index]));
         self.evaluation_state_inputs
             .clone_from(&self.accepted_event_variables);
+        Ok(())
+    }
+
+    pub(crate) fn configure_evaluation_inputs(
+        &mut self,
+        variables: &[usize],
+        indices: &[usize],
+    ) -> Result<(), VmError> {
+        if variables.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "evaluation-input variables must be sorted and unique".into(),
+            ));
+        }
+        let slots = variables
+            .iter()
+            .map(|index| {
+                self.event_state_indices.binary_search(index).map_err(|_| {
+                    VmError::InvalidRuntimeConfiguration(format!(
+                        "evaluation-input variable {index} has no accepted state slot"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if indices.windows(2).any(|pair| pair[0] >= pair[1])
+            || indices.iter().any(|&index| {
+                index >= self.variables.len()
+                    || self.event_state_indices.binary_search(&index).is_ok()
+            })
+        {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "evaluation-input derivative slots must be sorted, unique, in bounds and separate from retained values".into(),
+            ));
+        }
+        self.evaluation_input_slots = slots;
+        self.evaluation_input_derivatives.clear();
+        self.evaluation_input_derivatives.extend_from_slice(indices);
         Ok(())
     }
 
@@ -899,6 +949,22 @@ impl VmContext {
         {
             return Err(invalid(
                 "accepted event-variable storage shape is inconsistent".into(),
+            ));
+        }
+        if self
+            .evaluation_input_slots
+            .iter()
+            .any(|&slot| slot >= self.event_state_indices.len())
+        {
+            return Err(invalid(
+                "evaluation-input source storage is inconsistent".into(),
+            ));
+        }
+        if self.evaluation_input_derivatives.iter().any(|&index| {
+            index >= self.variables.len() || self.event_state_indices.binary_search(&index).is_ok()
+        }) {
+            return Err(invalid(
+                "evaluation-input derivative storage is inconsistent".into(),
             ));
         }
         let mut previous = None;
@@ -1633,13 +1699,35 @@ impl VmContext {
         self.numerical_evaluation_valid = false;
     }
 
+    /// Seed an assignment replay from the original numerical input. Observing
+    /// a candidate must not use the assignments' already-published final values.
+    /// Event-owned variables and analog operator candidates remain untouched.
+    pub(crate) fn prepare_procedural_replay(&mut self) {
+        for &slot in &self.evaluation_input_slots {
+            if let Some(variable) = self
+                .event_state_indices
+                .get(slot)
+                .and_then(|&index| self.variables.get_mut(index))
+            {
+                *variable = self.evaluation_state_inputs[slot];
+            }
+        }
+        for &index in &self.evaluation_input_derivatives {
+            if let Some(variable) = self.variables.get_mut(index) {
+                *variable = 0.0;
+            }
+        }
+    }
+
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
         if !self.evaluation_mode.dynamic_operators_enabled() {
             self.begin_stateful_observation();
+            self.prepare_procedural_replay();
             return;
         }
         self.evaluation_state_inputs
             .clone_from(&self.accepted_event_variables);
+        self.prepare_procedural_replay();
         for origin in self.idtmod_origins.values_mut() {
             origin.candidate = None;
         }
@@ -2305,6 +2393,31 @@ mod tests {
             site,
             Box::new([AnalogTaskArgument::Integer(value)]),
         )
+    }
+
+    #[test]
+    fn evaluation_input_derivatives_reset_only_at_numerical_entry() {
+        let mut context = VmContext::new(1);
+        context.variables = vec![3.0, 7.0, 11.0];
+        context.configure_event_state_variables(&[0]).unwrap();
+        context.configure_evaluation_inputs(&[0], &[1]).unwrap();
+        for invalid in [&[0][..], &[3], &[1, 1], &[2, 1]] {
+            assert!(context.configure_evaluation_inputs(&[0], invalid).is_err());
+        }
+        context.begin_stateful_evaluation_with_tasks(false);
+        assert_eq!(context.variables, [3.0, 0.0, 11.0]);
+        context.variables[0] = 5.0;
+        context.variables[1] = 2.0;
+        context.begin_stateful_observation();
+        assert_eq!(context.variables, [5.0, 2.0, 11.0]);
+        context.prepare_procedural_replay();
+        assert_eq!(context.variables, [3.0, 0.0, 11.0]);
+        context.variables[0] = 5.0;
+        context.advance_state().unwrap();
+        context.begin_stateful_evaluation_with_tasks(false);
+        assert_eq!(context.variables, [5.0, 0.0, 11.0]);
+        context.variables.truncate(1);
+        assert!(context.validate_event_state_layout().is_err());
     }
 
     #[test]

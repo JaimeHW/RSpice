@@ -78,11 +78,17 @@ pub struct CompiledModel {
     /// Variable names (index-aligned with the runtime variable storage);
     /// used for operating-point reporting and debugging
     pub variable_names: Vec<SmolStr>,
-    /// Sorted, duplicate-free variable slots written by event-controlled
-    /// procedural bodies. Runtime instances use this metadata to isolate
-    /// speculative Newton evaluations from accepted-point state.
+    /// Sorted, duplicate-free procedural slots requiring accepted state.
+    /// Runtime instances isolate initialization, event writes and retained
+    /// ordinary inputs from speculative Newton assignments.
     #[serde(default)]
     pub event_state_variables: Vec<usize>,
+    /// Sorted retained source-variable slots, a subset of event_state_variables.
+    pub evaluation_input_variables: Vec<usize>,
+    /// Sorted derivative slots of retained procedural inputs. Each starts at
+    /// zero at numerical entry, before assignments publish current derivatives.
+    /// Required so old serialized artifacts cannot omit the lifetime contract.
+    pub evaluation_input_derivatives: Vec<usize>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
     pub switch_branch_variables: Vec<usize>,

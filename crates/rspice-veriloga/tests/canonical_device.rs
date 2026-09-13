@@ -1926,7 +1926,7 @@ for (voltage, expected) in [(1.0,1.0),(-1.0,0.0)] {
     instance.stamp(&ctx, &mut runtime::GeneratedStamper { sink: Some(&mut sink) });
     assert_eq!(sink[0],expected);
     assert!(!ctx.evaluation_failed());
-    assert_eq!(&*instance.event_state_accepted, &[1.0]);
+    assert_eq!(&*instance.event_state_accepted, &[1.0,0.0]);
 }
 "#,
     )
@@ -5181,6 +5181,52 @@ assert_eq!(instance.capture_persistent_state().event_variables, vec![1.0]);
         body,
     )
     .unwrap_or_else(|report| panic!("generated UIC initial-step lifecycle failed:\n{report}"));
+}
+
+#[test]
+fn generated_retained_inputs_preserve_values_jacobians_and_rollback() {
+    let (state, stamp, noise) = generated_parts(
+        "module retained(p,n); inout p,n; electrical p,n; real held,seen;
+         analog begin seen=held; held=2*V(p,n); I(p,n)<+(held+seen+0.001)*V(p,n); end endmodule",
+        "retained procedural inputs",
+    );
+    run_generated_main(
+        "retained procedural inputs",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+assert_eq!(device::state::Instance::EVENT_STATE_COUNT,1);
+let mut accepted=0.0;
+for voltage in [0.5_f64,-0.25,0.75] {
+    let checkpoint=instance.capture_rollback_state();
+    for (trial,restore) in [(1.25_f64,false),(voltage,false),(voltage,true)] {
+        if restore { instance.restore_rollback_state(&checkpoint); }
+        for _ in 0..2 {
+            instance.begin_stateful_evaluation();
+            let bias=[trial,0.0];
+            let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.15};
+            let mut sink=[0.0;32];
+            instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+            assert!(!ctx.evaluation_failed());
+            let current=(accepted+2.0*trial+0.001)*trial;
+            let slope=accepted+4.0*trial+0.001;
+            assert!((sink[28]-current).abs()<1e-12,"{:?}",sink);
+            assert!((sink[12]-slope).abs()<1e-12,"{:?}",sink);
+            assert!((sink[13]+slope).abs()<1e-12,"{:?}",sink);
+            assert_eq!(instance.capture_persistent_state().event_variables,vec![accepted]);
+        }
+    }
+    instance.validate_advance_state().unwrap();
+    instance.apply_validated_advance_state();
+    accepted=2.0*voltage;
+    assert_eq!(instance.capture_persistent_state().event_variables,vec![accepted]);
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
 }
 
 #[test]

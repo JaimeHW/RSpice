@@ -578,12 +578,12 @@ pub(super) fn grouped_noise_extension(
         out.push_str("        if !self.initialization_is_ready(ctx) { return Err(GeneratedNoiseEvaluationError::UninitializedAnalogState); }\n");
     }
 
-    if plan
-        .function
-        .values
-        .iter()
-        .any(|value| matches!(value.kind, CfgValueKind::EventState(_)))
-    {
+    if plan.function.values.iter().any(|value| {
+        matches!(
+            value.kind,
+            CfgValueKind::EventState(_) | CfgValueKind::EvaluationInput(_)
+        )
+    }) {
         out.push_str("        let event_state = &*self.event_state_accepted;\n");
     }
     writeln!(

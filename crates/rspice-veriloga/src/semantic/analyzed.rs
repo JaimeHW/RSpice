@@ -70,10 +70,9 @@ pub struct AnalyzedModule {
     /// resolving to entries of `parameters`
     pub param_aliases: Vec<AnalyzedParamAlias>,
     pub variables: Vec<AnalyzedVariable>,
-    /// Sorted, duplicate-free variable slots written by an event-controlled
-    /// procedural body. These slots require accepted/candidate lifecycle
-    /// handling at runtime; ordinary procedural variables deliberately remain
-    /// outside that transaction set.
+    /// Sorted, duplicate-free procedural slots requiring accepted/candidate
+    /// storage for initialization, event writes or retained evaluation inputs.
+    /// Locals defined before every read do not require this storage.
     pub event_state_variables: Vec<usize>,
     /// Sorted event-state slots holding the retained kind of each switch branch.
     /// A change from the accepted kind implies an order-zero discontinuity.
@@ -357,6 +356,11 @@ pub struct AnalyzedVariable {
     pub var_type: VarType,
     pub value_type: ValueType,
     pub is_state: bool,
+    /// A procedural entry read can precede the current evaluation's writes.
+    pub retains_input: bool,
+    /// Written by an analog event body or the discrete-domain scheduler.
+    /// Distinct from declaration/analog initialization and ordinary retention.
+    pub is_event_controlled: bool,
 }
 
 /// Analyzed internal node (not connected to external ports)

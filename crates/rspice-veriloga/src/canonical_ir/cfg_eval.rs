@@ -935,7 +935,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     .unwrap_or(false);
                 S::from_f64(f64::from(u8::from(connected)))
             }
-            CfgValueKind::EventState(slot) => *self
+            CfgValueKind::EventState(slot) | CfgValueKind::EvaluationInput(slot) => *self
                 .inputs
                 .event_state
                 .get(slot as usize)

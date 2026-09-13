@@ -1060,6 +1060,24 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 .position(|name| *name == variable.name)
         })
         .collect();
+    // EvaluationInput addresses the compact VM snapshot directly. Require
+    // declaration-order slots to match that exact accepted-state layout.
+    if artifact
+        .hir
+        .variables
+        .iter()
+        .any(|variable| variable.retains_input)
+        && (event_state_variables.len() != model.event_state_variables.len()
+            || event_state_variables
+                .iter()
+                .zip(&model.event_state_variables)
+                .any(|(actual, expected)| *actual != Some(*expected)))
+    {
+        return Err(refuse(
+            CfgPlanRefusal::ShippedPlan,
+            "retained input slots disagree with the runtime state layout".into(),
+        ));
+    }
     let bindings = CfgRuntimeBindings::from_mir(
         module.as_str(),
         &artifact.mir,
