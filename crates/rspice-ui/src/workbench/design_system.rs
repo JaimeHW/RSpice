@@ -1842,6 +1842,7 @@ const ACTION_ROW_HEIGHT: f32 = 51.0;
 /// rect in egui's hit test and takes every press that lands on the text, so
 /// the control never sees the click. This claims the label's own slot with a
 /// hover sense, which the hit test passes over, and paints the galley into it.
+/// Text the slot elides stays one hover away, as a truncated label's does.
 pub(crate) fn painted_label(
     ui: &mut Ui,
     text: impl Into<egui::WidgetText>,
@@ -1854,9 +1855,13 @@ pub(crate) fn painted_label(
         egui::FontSelection::Default,
     );
     let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    let elided = galley.elided.then(|| galley.text().to_owned());
     ui.painter()
         .galley(rect.min, galley, ui.visuals().text_color());
-    response
+    match elided {
+        Some(full_text) => response.on_hover_text(full_text),
+        None => response,
+    }
 }
 
 /// One landing-style action row: an icon, a title, and a one-line detail.
@@ -2124,6 +2129,51 @@ mod tests {
             clicked,
             "a press on the title at {title:?} did not click the row"
         );
+    }
+
+    /// A painted label that truncates keeps its full text one hover away, as
+    /// a truncated `egui::Label` does: the text is painted once in the slot
+    /// and once more in the tooltip.
+    #[test]
+    fn a_truncated_painted_label_shows_its_full_text_on_hover() {
+        const FULL: &str = "//lab-server/projects/analog/precision-afe-front-end.rspiceproj";
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.all_styles_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        let mut slot = Rect::NOTHING;
+        let mut output = None;
+        // One pass to lay the slot out, then hover its centre.
+        for pass in 0..4 {
+            let events = if pass == 0 {
+                Vec::new()
+            } else {
+                vec![egui::Event::PointerMoved(slot.center())]
+            };
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 200.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.allocate_ui(Vec2::new(120.0, 20.0), |ui| {
+                            slot = painted_label(ui, FULL, egui::TextWrapMode::Truncate).rect;
+                        });
+                    });
+                },
+            ));
+        }
+        let copies = output
+            .expect("four passes ran")
+            .shapes
+            .iter()
+            .filter(|clipped| painted_text_rect(&clipped.shape, FULL).is_some())
+            .count();
+        assert_eq!(copies, 2, "the elided slot and its tooltip");
     }
 
     fn shape_contains_text(shape: &Shape) -> bool {
