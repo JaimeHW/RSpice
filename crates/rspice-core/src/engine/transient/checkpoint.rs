@@ -183,7 +183,8 @@ fn checkpoint_operation_result<T>(
 /// Version 40 separates runtime Verilog-A transient and Newton discontinuity hints.
 /// Version 41 retains runtime Verilog-A limiter history across checkpoint restore.
 /// Version 42 retains external BJT BC displacement current across integration resets.
-const FORMAT_VERSION: u32 = 43;
+/// Version 44 records implementation-only unknowns excluded from the Xyce LTE domain.
+const FORMAT_VERSION: u32 = 44;
 // Generated circular integrators retain an exact dyadic wrap origin.
 const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
 const BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION: u32 = 42;
@@ -4195,7 +4196,8 @@ impl AcceptedIntegrationRuntimeCheckpoint {
             self.lte.reltol,
             self.lte.abstol,
             self.lte.reference,
-        );
+        )
+        .with_auxiliary_indices(self.lte.auxiliary_indices.clone(), accepted_solution.len())?;
         validator.validate_accepted_boundary_checkpoint(&self.lte, accepted_solution)?;
 
         if !(1..=2).contains(&self.next_trap_order) {
@@ -4435,7 +4437,7 @@ fn write_accepted_integration_runtime(
             );
             let lte = &runtime.lte;
             out.push_str(&format!(
-                "accepted_integration_lte {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+                "accepted_integration_lte {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
                 lte.version,
                 lte.solution_dimension,
                 lte.history_count,
@@ -4450,7 +4452,13 @@ fn write_accepted_integration_runtime(
                 lte.xyce_attempt_dt,
                 lte.xyce_attempt_prev_dt,
                 lte.xyce_attempt_prev_prev_dt,
+                lte.auxiliary_indices.len(),
             ));
+            for (index, auxiliary) in lte.auxiliary_indices.iter().enumerate() {
+                poll_checkpoint_abort(abort, index)?;
+                out.push_str(&format!(" {auxiliary}"));
+            }
+            out.push('\n');
             write_value_vector(
                 out,
                 "accepted_integration_lte_prev",
@@ -4812,7 +4820,7 @@ fn read_accepted_integration_runtime(
     let lte_version = next_runtime_field(&mut lte_fields, "version")?
         .parse::<u32>()
         .map_err(|_| "accepted integration LTE header has invalid version".to_string())?;
-    if lte_version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
+    if lte_version != 1 && lte_version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
         return Err(format!(
             "unsupported accepted-boundary LTE checkpoint version {lte_version} (runtime requires {ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION})"
         ));
@@ -4877,6 +4885,31 @@ fn read_accepted_integration_runtime(
         next_runtime_field(&mut lte_fields, "second previous psi coefficient")?,
         "second previous psi coefficient",
     )?;
+    // Version one used the full solution domain. Preserve that declaration:
+    // restoring it into a circuit with auxiliary unknowns fails the topology
+    // check rather than silently changing its historical error weights.
+    let mut auxiliary_indices = Vec::new();
+    if lte_version >= 2 {
+        let count = parse_usize(
+            next_runtime_field(&mut lte_fields, "auxiliary count")?,
+            "auxiliary count",
+        )?;
+        if count > solution_dimension {
+            return Err("LTE auxiliary count exceeds the solution dimension".to_string());
+        }
+        auxiliary_indices = allocate_checkpoint_capacity(count, "LTE auxiliary indices", budget)?;
+        for index in 0..count {
+            if index.is_multiple_of(CHECKPOINT_ABORT_POLL_INTERVAL)
+                && lines.abort.is_some_and(AbortSignal::is_aborted)
+            {
+                return Err("checkpoint parsing was aborted".to_string());
+            }
+            auxiliary_indices.push(parse_usize(
+                next_runtime_field(&mut lte_fields, "auxiliary index")?,
+                "auxiliary index",
+            )?);
+        }
+    }
     if let Some(extra) = lte_fields.next() {
         return Err(format!(
             "accepted integration LTE header has extra field '{extra}'"
@@ -4936,8 +4969,9 @@ fn read_accepted_integration_runtime(
         budget,
     )?;
     let lte = AcceptedBoundaryLteEstimatorCheckpoint {
-        version: lte_version,
+        version: ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION,
         solution_dimension,
+        auxiliary_indices,
         history_count,
         prev_solution,
         prev_prev_solution,
@@ -10108,8 +10142,9 @@ mod tests {
                     version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
                     resume_blockers: Vec::new(),
                     lte: AcceptedBoundaryLteEstimatorCheckpoint {
-                        version: 1,
+                        version: ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION,
                         solution_dimension: 5,
+                        auxiliary_indices: Vec::new(),
                         history_count: 3,
                         prev_solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
                         prev_prev_solution: vec![0.4, -3.0, 0.0, 0.0, -0.0],
@@ -11477,14 +11512,20 @@ mod tests {
         );
 
         let wrong_lte_version = text.replacen(
-            "accepted_integration_lte 1 ",
-            "accepted_integration_lte 2 ",
+            &format!(
+                "accepted_integration_lte {ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION} "
+            ),
+            "accepted_integration_lte 4294967295 ",
             1,
+        );
+        assert_ne!(
+            wrong_lte_version, text,
+            "the corruption must change the live header"
         );
         let error = TransientCheckpoint::from_text(&wrong_lte_version)
             .expect_err("unsupported LTE versions must fail before history allocations");
         assert!(
-            error.contains("unsupported accepted-boundary LTE checkpoint version 2"),
+            error.contains("unsupported accepted-boundary LTE checkpoint version 4294967295"),
             "unexpected error: {error}"
         );
 

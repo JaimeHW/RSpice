@@ -54,7 +54,7 @@ impl TransientLteReference {
 }
 
 /// Current internal wire contract for accepted-boundary LTE estimator state.
-pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 1;
+pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 2;
 
 /// Versioned snapshot of the estimator state needed to make the next
 /// predictor and LTE decision identical after a transient restart.
@@ -66,6 +66,7 @@ pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 1;
 pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
     pub(crate) version: u32,
     pub(crate) solution_dimension: usize,
+    pub(crate) auxiliary_indices: Vec<usize>,
     pub(crate) history_count: usize,
     pub(crate) prev_solution: Vec<Value>,
     pub(crate) prev_prev_solution: Vec<Value>,
@@ -106,6 +107,10 @@ pub(crate) struct LtePrefixWindow<'a> {
 }
 
 pub struct LteEstimator {
+    /// Implementation-only algebraic unknowns absent from the reference DAE.
+    /// Unlike device masks, these contribute neither weights nor WRMS dimension.
+    /// Their full solution/predictor histories remain available to Newton.
+    auxiliary_indices: Vec<usize>,
     /// Previous solution vector (t - dt)
     prev_solution: Vec<Value>,
     /// Solution before previous (t - 2*dt)
@@ -233,6 +238,7 @@ impl LteEstimator {
         };
 
         Self {
+            auxiliary_indices: Vec::new(),
             prev_solution: Vec::new(),
             prev_prev_solution: Vec::new(),
             prev_prev_prev_solution: Vec::new(),
@@ -255,6 +261,28 @@ impl LteEstimator {
         }
     }
 
+    /// Configure the reference DAE domain before recording any history.
+    /// Indices must be canonical so checkpoints can verify topology ownership.
+    pub(crate) fn with_auxiliary_indices(
+        mut self,
+        auxiliary_indices: Vec<usize>,
+        solution_dimension: usize,
+    ) -> Result<Self, String> {
+        if self.history_count != 0 || !self.accepted_reference_solution.is_empty() {
+            return Err("cannot change the LTE domain after recording history".to_string());
+        }
+        if auxiliary_indices.windows(2).any(|pair| pair[0] >= pair[1])
+            || auxiliary_indices
+                .last()
+                .is_some_and(|index| *index >= solution_dimension)
+            || (!auxiliary_indices.is_empty() && !self.uses_accepted_solution_reference())
+        {
+            return Err("invalid auxiliary indices for the LTE solution domain".to_string());
+        }
+        self.auxiliary_indices = auxiliary_indices;
+        Ok(self)
+    }
+
     /// Capture a restart snapshot at an accepted solution boundary.
     ///
     /// `latest_accepted_solution` is supplied independently by the caller so
@@ -267,6 +295,7 @@ impl LteEstimator {
         let checkpoint = AcceptedBoundaryLteEstimatorCheckpoint {
             version: ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION,
             solution_dimension: latest_accepted_solution.len(),
+            auxiliary_indices: self.auxiliary_indices.clone(),
             history_count: self.history_count,
             prev_solution: self.prev_solution.clone(),
             prev_prev_solution: self.prev_prev_solution.clone(),
@@ -314,6 +343,16 @@ impl LteEstimator {
                 "accepted-boundary LTE reference mode mismatch: checkpoint {:?}, runtime {:?}",
                 checkpoint.reference, self.reference
             ));
+        }
+        if checkpoint.auxiliary_indices != self.auxiliary_indices
+            || self
+                .auxiliary_indices
+                .last()
+                .is_some_and(|index| *index >= latest_accepted_solution.len())
+        {
+            return Err(
+                "accepted-boundary LTE auxiliary domain does not match the circuit".to_string(),
+            );
         }
         for (checkpoint_value, runtime_value, name) in [
             (checkpoint.reltol, self.reltol, "relative tolerance"),
@@ -425,7 +464,9 @@ impl LteEstimator {
                 }
                 let accepted_max = latest_accepted_solution
                     .iter()
-                    .map(|value| value.abs())
+                    .enumerate()
+                    .filter(|(index, _)| self.auxiliary_indices.binary_search(index).is_err())
+                    .map(|(_, value)| value.abs())
                     .fold(0.0, Value::max);
                 if checkpoint.signal_global_reference < accepted_max {
                     return Err(
@@ -592,11 +633,7 @@ impl LteEstimator {
 
     #[inline]
     fn accepted_point_global_reference(&self) -> Option<Value> {
-        self.accepted_reference_solution
-            .iter()
-            .try_fold(0.0_f64, |reference, value| {
-                value.is_finite().then(|| reference.max(value.abs()))
-            })
+        self.accepted_point_global_reference_prefix(self.accepted_reference_solution.len())
     }
 
     #[inline]
@@ -604,7 +641,9 @@ impl LteEstimator {
         self.accepted_reference_solution
             .iter()
             .take(prefix_len)
-            .try_fold(0.0_f64, |reference, value| {
+            .enumerate()
+            .filter(|(index, _)| self.auxiliary_indices.binary_search(index).is_err())
+            .try_fold(0.0_f64, |reference, (_, value)| {
                 value.is_finite().then(|| reference.max(value.abs()))
             })
     }
@@ -632,8 +671,11 @@ impl LteEstimator {
             TransientLteReference::SignalGlobal => {
                 let accepted_max = solution[..reference_len]
                     .iter()
-                    .filter(|value| value.is_finite())
-                    .map(|value| value.abs())
+                    .enumerate()
+                    .filter(|(index, value)| {
+                        value.is_finite() && self.auxiliary_indices.binary_search(index).is_err()
+                    })
+                    .map(|(_, value)| value.abs())
                     .fold(0.0, Value::max);
                 self.signal_global_reference = self.signal_global_reference.max(accepted_max);
             }
@@ -1245,11 +1287,12 @@ impl LteEstimator {
             excluded_indices,
         } = window;
         let len = prefix_len.min(current.len());
+        let domain_len = len - self.auxiliary_indices.partition_point(|index| *index < len);
         if predicted_solution.is_some_and(|predicted| predicted.len() < len) {
             return (Value::INFINITY, false);
         }
         // Need at least one previous point to estimate
-        if len == 0 || self.history_count < 1 || self.prev_solution.len() < len {
+        if domain_len == 0 || self.history_count < 1 || self.prev_solution.len() < len {
             return (0.0, true); // Accept, no history yet
         }
 
@@ -1274,6 +1317,14 @@ impl LteEstimator {
         // For trapezoidal, LTE ~ (dt^3 / 12) * d^3v/dt^3
         // We approximate by comparing predicted (linear extrapolation) vs actual
         for (i, &curr_val) in current.iter().take(len).enumerate() {
+            if self.auxiliary_indices.binary_search(&i).is_ok() {
+                if !curr_val.is_finite()
+                    || predicted_solution.is_some_and(|predicted| !predicted[i].is_finite())
+                {
+                    return (Value::INFINITY, false);
+                }
+                continue;
+            }
             if excluded_indices.binary_search(&i).is_ok() {
                 continue;
             }
@@ -1331,8 +1382,9 @@ impl LteEstimator {
         } else {
             // Xyce's device-mask entries receive effectively infinite weights,
             // so they contribute zero to the sum but remain in the WRMS global
-            // vector length used as the denominator.
-            let one_over_len = 1.0 / len as Value;
+            // reference DAE length used as the denominator. Implementation
+            // auxiliaries are absent from that DAE, rather than device-masked.
+            let one_over_len = 1.0 / domain_len as Value;
             (aggregate * one_over_len).sqrt()
         };
         let lte = raw_lte * error_coefficient;
@@ -2214,6 +2266,116 @@ mod lte_estimator_tests {
 
         assert!(!strict.estimate(&[0.05], 1.0).1);
         assert!(loose.estimate(&[0.05], 1.0).1);
+    }
+
+    #[test]
+    fn auxiliary_unknowns_preserve_the_reference_dae_norm_and_history() {
+        for reference in [
+            TransientLteReference::PointLocal,
+            TransientLteReference::PointGlobal,
+            TransientLteReference::SignalLocal,
+            TransientLteReference::SignalGlobal,
+        ] {
+            let mut estimator = LteEstimator::with_tolerances_and_reference(0.1, 0.01, reference)
+                .with_auxiliary_indices(vec![1, 4], 5)
+                .unwrap();
+            let initial = [1.0, 1e9, 2.0, 10.0, -1e12];
+            let accepted = [1.0, -1e8, 2.0, 5.0, 1e11];
+            estimator.seed_initial_solution(&initial);
+            estimator.record(&accepted, 1.0);
+            let candidate = [1.1, 5e7, 2.2, 500.0, -1e10];
+            let predicted = [1.0, 0.0, 2.0, 0.0, 0.0];
+            // The masked physical row still sets global reference weights and
+            // counts in WRMS. The two auxiliary rows do neither.
+            let (lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
+                &candidate,
+                &predicted,
+                LtePrefixWindow {
+                    prefix_len: 5,
+                    dt: 1.0,
+                    excluded_indices: &[3],
+                },
+                IntegrationMethod::BackwardEuler,
+                1,
+            );
+            let weights: [f64; 2] = match reference {
+                TransientLteReference::PointLocal | TransientLteReference::SignalLocal => {
+                    [0.11, 0.21]
+                }
+                TransientLteReference::PointGlobal => [0.51, 0.51],
+                TransientLteReference::SignalGlobal => [1.01, 1.01],
+                _ => unreachable!(),
+            };
+            let expected = 0.5
+                * (((candidate[0] - predicted[0]) / weights[0]).powi(2)
+                    + ((candidate[2] - predicted[2]) / weights[1]).powi(2))
+                .sqrt()
+                / 3f64.sqrt();
+            assert!(
+                (lte - expected).abs() < 2e-15,
+                "{reference:?}: {lte} != {expected}"
+            );
+            // Complete auxiliary predictor/state survives for the constitutive
+            // equations and exact checkpoint continuation.
+            let checkpoint = estimator
+                .capture_accepted_boundary_checkpoint(&accepted)
+                .unwrap();
+            assert_eq!(checkpoint.prev_solution, accepted);
+            assert_eq!(checkpoint.auxiliary_indices, vec![1, 4]);
+            let mut restored = LteEstimator::with_tolerances_and_reference(0.1, 0.01, reference)
+                .with_auxiliary_indices(vec![1, 4], 5)
+                .unwrap();
+            restored
+                .restore_accepted_boundary_checkpoint(&checkpoint, &accepted)
+                .unwrap();
+            assert_eq!(
+                restored.predict_solution(0.4, IntegrationMethod::Trapezoidal, 2),
+                estimator.predict_solution(0.4, IntegrationMethod::Trapezoidal, 2)
+            );
+            assert_eq!(
+                restored.estimate(&candidate, 0.4),
+                estimator.estimate(&candidate, 0.4)
+            );
+            let mut invalid = candidate;
+            invalid[1] = f64::NAN;
+            assert_eq!(restored.estimate(&invalid, 0.4), (f64::INFINITY, false));
+            let mut wrong_domain =
+                LteEstimator::with_tolerances_and_reference(0.1, 0.01, reference);
+            assert!(
+                wrong_domain
+                    .restore_accepted_boundary_checkpoint(&checkpoint, &accepted)
+                    .unwrap_err()
+                    .contains("auxiliary domain")
+            );
+            assert_eq!(wrong_domain.history_count, 0);
+        }
+    }
+
+    #[test]
+    fn auxiliary_domain_rejects_noncanonical_indices_and_late_reconfiguration() {
+        for indices in [vec![1, 1], vec![2, 1], vec![3]] {
+            assert!(
+                LteEstimator::with_tolerances_and_reference(
+                    0.1,
+                    0.01,
+                    TransientLteReference::PointGlobal
+                )
+                .with_auxiliary_indices(indices, 3)
+                .is_err()
+            );
+        }
+        assert!(
+            LteEstimator::with_tolerances(0.1, 0.01)
+                .with_auxiliary_indices(vec![1], 3)
+                .is_err()
+        );
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            0.01,
+            TransientLteReference::SignalGlobal,
+        );
+        estimator.seed_initial_solution(&[1.0, 2.0]);
+        assert!(estimator.with_auxiliary_indices(vec![1], 2).is_err());
     }
 
     #[test]
