@@ -61,6 +61,101 @@ fn paranoia_decks_named_by_env_meet_their_contracts() {
     );
 }
 
+/// Actual producer/consumer qualification is opt-in; ordinary tests only read
+/// checked-in references and never invoke an external simulator.
+#[test]
+#[ignore = "requires NGSPICE_EXE pointing to an explicitly selected console binary"]
+fn analysis_oracle_capture_matches_independent_linear_circuits() {
+    use rspice_conformance::suites::execution::capture_ngspice_oracles;
+    let executable =
+        PathBuf::from(std::env::var_os("NGSPICE_EXE").expect("NGSPICE_EXE is required"));
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path().join("paranoia");
+    std::fs::create_dir(&root).unwrap();
+    for (name, source, expected_analyses) in [
+        (
+            "dc.sp",
+            "two independent DC analyses\nV1 in 0 1\nV2 out 0 10\nR1 in out 1k\n.dc v1 0 1 1\n.dc v2 10 11 1\n.end\n",
+            2,
+        ),
+        (
+            "linear.sp",
+            "linear circuit analyses\nVIN in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.op\n.ac lin 3 1k 3k\n.ac dec 2 10k 100k\n.tran 1u 10u\n.end\n",
+            4,
+        ),
+        (
+            "noise.sp",
+            "thermal noise\nVIN in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\n.noise v(out) VIN lin 2 100 1000\n.print noise onoise_spectrum\n.end\n",
+            1,
+        ),
+    ] {
+        let path = root.join(name);
+        std::fs::write(&path, source).unwrap();
+        let capture = capture_ngspice_oracles(
+            ExecutionCorpus::Paranoia,
+            temporary.path(),
+            &executable,
+            Some(name),
+            30_000,
+            true,
+        )
+        .unwrap();
+        assert_eq!(capture.written, 1, "{capture:?}");
+        assert_eq!(capture.failed(), 0, "{capture:?}");
+        let content = std::fs::read_to_string(path.with_extension("oracle.out")).unwrap();
+        assert!(content.starts_with("# RSPICE-NGSPICE-ORACLE 2\n"));
+        assert_eq!(
+            content
+                .lines()
+                .filter(|line| line.starts_with("# analysis: "))
+                .count(),
+            expected_analyses
+        );
+        let runner = ExecutionRunner::new(
+            ExecutionCorpus::Paranoia,
+            temporary.path(),
+            ExecutionConfig::default(),
+        );
+        let result = runner.run_deck(name);
+        assert!(result.passed, "{name}: {}", result.outcome.summary());
+        assert!(result.oracle_compared, "{name}");
+        assert_eq!(result.analyses.len(), expected_analyses, "{name}");
+        eprintln!("qualified {name}: {expected_analyses} independently captured analyses");
+        if name == "dc.sp" {
+            let mut lines: Vec<String> = content.lines().map(str::to_owned).collect();
+            let row = lines
+                .iter_mut()
+                .find(|line| line.starts_with("0 "))
+                .unwrap();
+            let mut fields: Vec<_> = row.split_whitespace().collect();
+            *fields.last_mut().unwrap() = "999";
+            *row = fields.join(" ");
+            std::fs::write(path.with_extension("oracle.out"), lines.join("\n")).unwrap();
+            let corrupted = runner.run_deck(name);
+            assert!(!corrupted.passed, "a changed numerical output must fail");
+            assert!(corrupted.oracle_compared);
+            let prior = std::fs::read(path.with_extension("oracle.out")).unwrap();
+            std::fs::write(&path, "invalid recapture\n.tran bogus invalid\n.end\n").unwrap();
+            let refused = capture_ngspice_oracles(
+                ExecutionCorpus::Paranoia,
+                temporary.path(),
+                &executable,
+                Some(name),
+                30_000,
+                true,
+            )
+            .unwrap();
+            assert_eq!(refused.failed(), 1, "{refused:?}");
+            assert_eq!(refused.written, 0);
+            assert_eq!(
+                std::fs::read(path.with_extension("oracle.out")).unwrap(),
+                prior,
+                "a failed recapture must preserve the prior reference"
+            );
+        }
+    }
+}
+
 fn run_corpus(corpus: ExecutionCorpus) {
     let runner = ExecutionRunner::new(corpus, &tests_dir(), config());
 

@@ -142,6 +142,15 @@ impl TestRunner {
         &self,
         cir_path: &Path,
     ) -> Result<Option<ReferenceOutput>, String> {
+        if let Some((path, content)) = &self.checked_in_reference_content {
+            if path != cir_path {
+                return Err("analysis reference was supplied for a different circuit path".into());
+            }
+            return Ok(Some(ReferenceOutput {
+                content: content.clone(),
+                description: format!("validated analysis reference for '{}'", cir_path.display()),
+            }));
+        }
         let Some(config) = self.live_reference_config()? else {
             let out_path = cir_path.with_extension(self.checked_in_reference_extension);
             if !out_path.exists() {

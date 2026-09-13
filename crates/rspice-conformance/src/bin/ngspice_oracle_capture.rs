@@ -9,6 +9,7 @@ fn main() -> Result<(), String> {
     let mut case = None;
     let mut timeout_ms = 900_000_u128;
     let mut update = false;
+    let mut tests_dir_override = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -26,6 +27,11 @@ fn main() -> Result<(), String> {
                 ));
             }
             "--case" => case = Some(args.next().ok_or("--case requires a path")?),
+            "--tests-dir" => {
+                tests_dir_override = Some(PathBuf::from(
+                    args.next().ok_or("--tests-dir requires a path")?,
+                ))
+            }
             "--timeout-ms" => {
                 timeout_ms = args
                     .next()
@@ -37,7 +43,7 @@ fn main() -> Result<(), String> {
             "--help" | "-h" => {
                 println!(
                     "Usage: rspice-ngspice-oracle-capture --corpus <iscas85|paranoia> \
-                     --ngspice-exe <path> [--case <relative-path>] [--timeout-ms N] [--update]"
+                     --ngspice-exe <path> [--tests-dir <path>] [--case <relative-path>] [--timeout-ms N] [--update]"
                 );
                 return Ok(());
             }
@@ -47,11 +53,13 @@ fn main() -> Result<(), String> {
 
     let corpus = corpus.ok_or("missing --corpus")?;
     let ngspice_exe = ngspice_exe.ok_or("missing --ngspice-exe")?;
-    let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|path| path.parent())
-        .ok_or("cannot resolve workspace tests directory")?
-        .join("tests");
+    let tests_dir = tests_dir_override.unwrap_or(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .ok_or("cannot resolve workspace tests directory")?
+            .join("tests"),
+    );
     let stats = capture_ngspice_oracles(
         corpus,
         &tests_dir,

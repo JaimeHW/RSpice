@@ -467,6 +467,7 @@ pub struct TestRunner {
     config: TestRunnerConfig,
     test_dir: PathBuf,
     checked_in_reference_extension: &'static str,
+    checked_in_reference_content: Option<(PathBuf, String)>,
     validation_manifest_root: PathBuf,
     validation_manifest: HashMap<String, ValidationContract>,
     live_reference_config: Result<Option<LiveNgspiceReferenceConfig>, String>,
@@ -487,6 +488,7 @@ impl TestRunner {
         Self {
             config,
             checked_in_reference_extension: "out",
+            checked_in_reference_content: None,
             validation_manifest_root,
             validation_manifest,
             test_dir,
@@ -513,6 +515,7 @@ impl TestRunner {
         Self {
             config,
             checked_in_reference_extension: "oracle.out",
+            checked_in_reference_content: None,
             validation_manifest_root,
             validation_manifest,
             test_dir,
@@ -520,6 +523,14 @@ impl TestRunner {
             live_reference_cache: Mutex::new(HashMap::new()),
             live_raw_reference_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Supply one already validated analysis section for this exact circuit.
+    /// Only checked-in comparators can use it; live-reference settings stay disabled.
+    pub(crate) fn with_checked_in_reference_content(mut self, path: &Path, content: &str) -> Self {
+        self.live_reference_config = Ok(None);
+        self.checked_in_reference_content = Some((path.to_path_buf(), content.to_string()));
+        self
     }
 
     /// Get the test runner configuration

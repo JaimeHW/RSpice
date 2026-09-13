@@ -70,7 +70,7 @@ measure/mos-meas-dc.sp	expected_refusal	.print references numeric node `1` not i
 transient-noise/noi-ring51-demo.cir	expected_refusal	.save references node `t1` not in the deck
 transient-noise/noi-ring51-demo_s.cir	expected_refusal	.save references node `t1` not in the deck
 xspice/table/combi_script.cir	expected_refusal	second DC sweep source supplied by a control script
-xspice/table/table-generator-q-2d.sp	expected_refusal	generator deck; DC sweep does not converge
+xspice/table/table-generator-q-2d.sp	executes	promoted nested and single DC sweeps match separate ngspice references; control-loop side effects are not executed
 # ngspice's electrothermal VDMOS instance form is `M... <model> thermal`,
 # where the trailing `thermal` is a keyword selecting the 5-terminal
 # self-heating device. RSpice reads it as a second model name and fails

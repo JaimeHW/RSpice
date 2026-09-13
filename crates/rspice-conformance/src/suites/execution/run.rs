@@ -1,5 +1,6 @@
 //! Single-deck execution and contract adjudication.
 
+use super::oracle_bundle::OracleReferences;
 use super::*;
 use crate::suites::ngspice::{TestRunner as NgspiceOracleRunner, TestRunnerConfig};
 use rspice_core::SimulationError;
@@ -105,15 +106,24 @@ impl ExecutionRunner {
 
         let engine = self.engine(None);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_deck_ms);
-        let oracle = path.with_extension("oracle.out").is_file().then(|| {
-            let config = TestRunnerConfig {
-                relative_tolerance: 0.05,
-                absolute_tolerance: 1.0e-6,
-                max_mismatches: 10,
-                ..TestRunnerConfig::default()
-            };
-            NgspiceOracleRunner::new_checked_in_oracle(&self.root, config)
-        });
+        let reference_path = path.with_extension("oracle.out");
+        let references = if reference_path.is_file() {
+            match std::fs::read_to_string(&reference_path)
+                .map_err(|error| format!("cannot read oracle: {error}"))
+                .and_then(|content| OracleReferences::parse(&content, &expanded, &netlist.analyses))
+            {
+                Ok(references) => Some(references),
+                Err(diagnostic) => {
+                    return (
+                        ExecutionOutcome::ReferenceMismatch { diagnostic },
+                        analyses,
+                        false,
+                    );
+                }
+            }
+        } else {
+            None
+        };
         let mut oracle_compared = false;
 
         // A measures gate is declared in two places on purpose: the manifest
@@ -139,6 +149,29 @@ impl ExecutionRunner {
         }
 
         for (analysis, label) in netlist.analyses.iter().zip(&analyses) {
+            let oracle = match references
+                .as_ref()
+                .map(|references| references.for_analysis(analysis))
+                .transpose()
+            {
+                Ok(content) => content.flatten().map(|content| {
+                    let config = TestRunnerConfig {
+                        relative_tolerance: 0.05,
+                        absolute_tolerance: 1.0e-6,
+                        max_mismatches: 10,
+                        ..TestRunnerConfig::default()
+                    };
+                    NgspiceOracleRunner::new_checked_in_oracle(&self.root, config)
+                        .with_checked_in_reference_content(&path, content)
+                }),
+                Err(diagnostic) => {
+                    return (
+                        ExecutionOutcome::ReferenceMismatch { diagnostic },
+                        analyses,
+                        false,
+                    );
+                }
+            };
             let (analysis_outcome, compared) = self.run_analysis(
                 &engine,
                 &netlist,
@@ -620,6 +653,35 @@ fn describe(analysis: &AnalysisCommand) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiple_dc_analyses_compare_their_own_references_in_any_file_order() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("paranoia");
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("independent.sp");
+        let source = "independent DC analyses\nV1 in 0 1\nV2 out 0 10\nR1 in out 1k\n.dc v1 0 1 1\n.dc v2 10 11 1\n.end\n";
+        std::fs::write(&path, source).unwrap();
+        let expanded = Netlist::preprocess_includes(source, &path).unwrap();
+        let fingerprint = blake3::hash(expanded.replace("\r\n", "\n").as_bytes());
+        let key1 = format!(".dc v1 {:.17e} {:.17e} {:.17e}", 0.0, 1.0, 1.0);
+        let key2 = format!(".dc v2 {:.17e} {:.17e} {:.17e}", 10.0, 11.0, 1.0);
+        let reference = format!(
+            "# RSPICE-NGSPICE-ORACLE 2\n# ngspice: analytic voltage sources\n# input-blake3: {fingerprint}\n\
+             # analysis: {key2}\nIndex v-sweep v(in) v(out)\n0 10 1 10\n1 11 1 11\n# end-analysis\n\
+             # analysis: {key1}\nIndex v-sweep v(in) v(out)\n0 0 0 10\n1 1 1 10\n# end-analysis\n"
+        );
+        std::fs::write(path.with_extension("oracle.out"), reference).unwrap();
+        let runner = ExecutionRunner::new(
+            ExecutionCorpus::Paranoia,
+            temporary.path(),
+            ExecutionConfig::default(),
+        );
+        let result = runner.run_deck("independent.sp");
+        assert!(result.passed, "{}", result.outcome.summary());
+        assert!(result.oracle_compared);
+        assert_eq!(result.analyses.len(), 2);
+    }
 
     #[test]
     fn executes_contract_accepts_only_completion() {

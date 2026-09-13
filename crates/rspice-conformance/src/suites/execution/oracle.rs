@@ -18,7 +18,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const FORMAT_VERSION: u32 = 1;
+mod capture;
 const MAX_REFERENCE_ROWS: usize = 1_001;
 const MAX_IMPLICIT_VARIABLES: usize = 64;
 const NGSPICE_CAPTURE_THREADS: usize = 8;
@@ -160,14 +160,9 @@ pub fn capture_ngspice_oracles(
                 }
             }
             Err(err) => {
-                if update && let Err(remove_err) = remove_oracle_if_present(&reference_path) {
-                    stats.failures.push(format!(
-                        "{key}: {err}; also failed to remove stale oracle '{}': {remove_err}",
-                        reference_path.display()
-                    ));
-                } else {
-                    stats.failures.push(format!("{key}: {err}"));
-                }
+                // Failed validation or execution supplies no replacement.
+                // Preserve the prior artifact for diagnosis and review.
+                stats.failures.push(format!("{key}: {err}"));
             }
         }
     }
@@ -264,18 +259,18 @@ fn capture_one(
         fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
     let expanded = Netlist::preprocess_includes(&source, deck_path)
         .map_err(|err| format!("failed to expand includes: {err}"))?;
-    let input_hash = blake3::hash(expanded.as_bytes()).to_hex().to_string();
     let mut requests = output_requests(&expanded);
     if requests.is_empty() {
         requests = implicit_output_requests(&expanded);
     }
-    let reference_source = reference_deck(&expanded, &requests);
-    let plots = run_ngspice_raw(ngspice_exe, deck_path, &reference_source, timeout_ms)?;
-    let tables = reference_tables(&plots, &requests);
-    if tables.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(serialize_reference(version, &input_hash, &tables)))
+    capture::capture_analyses(
+        ngspice_exe,
+        version,
+        deck_path,
+        &expanded,
+        &requests,
+        timeout_ms,
+    )
 }
 
 fn ngspice_version(ngspice_exe: &Path) -> Result<String, String> {
@@ -1100,11 +1095,8 @@ fn sample_indices(length: usize, maximum: usize) -> Vec<usize> {
     indices.into_iter().collect()
 }
 
-fn serialize_reference(version: &str, input_hash: &str, tables: &[ReferenceTable]) -> String {
+fn serialize_tables(tables: &[ReferenceTable]) -> String {
     let mut output = String::new();
-    let _ = writeln!(output, "# RSPICE-NGSPICE-ORACLE {FORMAT_VERSION}");
-    let _ = writeln!(output, "# ngspice: {version}");
-    let _ = writeln!(output, "# input-blake3: {input_hash}");
     for table in tables {
         if table.x_name == "op" {
             let _ = writeln!(output, "Node Voltage");

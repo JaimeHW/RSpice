@@ -50,6 +50,7 @@ mod corpus;
 mod discovery;
 mod manifest;
 mod oracle;
+mod oracle_bundle;
 mod run;
 
 pub use contract::ExecutionContract;
