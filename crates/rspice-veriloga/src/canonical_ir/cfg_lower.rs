@@ -16,8 +16,8 @@
 //!
 //! ## Conditional expressions become diamonds
 //!
-//! `c ? a : b` lowers to a branch, because [`CfgValueKind`] has no select and
-//! because evaluating only the taken side is the entire point. `min`/`max` are
+//! `c ? a : b` lowers to a branch to evaluate only the selected source operand.
+//! Numerical selection of already-computed values is a separate operation. `min`/`max` are
 //! the deliberate exception: they stay single operations, since a diamond per
 //! `min` in a BSIM-class model would swamp the block count for no gain.
 //!
@@ -198,6 +198,22 @@ impl CfgModel {
         mir: &MirModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::EXECUTABLE)
+    }
+
+    /// Reuse the executable equation semantics while keeping final readbacks.
+    #[cfg(feature = "native")]
+    pub(crate) fn from_hir_for_executable_observation(
+        hir: &HirModel,
+        mir: &MirModel,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode(
+            hir,
+            mir,
+            CfgLowerMode {
+                record_observations: true,
+                ..CfgLowerMode::EXECUTABLE
+            },
+        )
     }
 
     /// Retain effects, event bodies and named readbacks for equation qualification.
@@ -1468,25 +1484,44 @@ impl<'a> CfgLowerer<'a> {
         {
             // Preserve syntactic process identities and activation even when
             // the assigned primal is needed only by the gain replay. Indexed
-            // assignments of noise still require array-shadow support and
-            // retain the explicit refusal below.
+            // assignments retain their per-member definitions below so the
+            // gain replay follows the same checked selection.
             self.metadata_noise_expr(assignment.expr.id);
-            return;
-        }
-        if assignment.index.is_some() {
-            self.unsupported(
-                assignment.span,
-                format!(
-                    "assignment to '{}' at a run-time array index",
-                    assignment.target_name
-                ),
-            );
             return;
         }
         let was_assignment = self.metadata_assignment_value;
         self.metadata_assignment_value = self.noise_metadata_only;
         let value = self.expr(assignment.expr.id);
         self.metadata_assignment_value = was_assignment;
+        if let Some(index) = &assignment.index {
+            let Some(array) = self
+                .hir
+                .arrays
+                .iter()
+                .find(|array| array.base == assignment.target)
+                .cloned()
+            else {
+                self.unsupported(
+                    assignment.span,
+                    format!("unknown array '{}'", assignment.target_name),
+                );
+                return;
+            };
+            let offset = self.array_offset(&array, index.id);
+            for member in 0..array.len {
+                let variable = VariableId::from(usize::from(array.base) + member as usize);
+                let previous = self
+                    .builder
+                    .read_variable(CfgVariable::Local(variable), self.block)
+                    .expect("array members have entry definitions");
+                let member_value = self.real_constant(f64::from(member));
+                let selected = self.binary(CfgBinaryOp::Eq, offset, member_value);
+                let candidate = self.select_numeric(selected, value, previous);
+                self.builder
+                    .write_variable(CfgVariable::Local(variable), self.block, candidate);
+            }
+            return;
+        }
         self.builder
             .write_variable(CfgVariable::Local(assignment.target), self.block, value);
     }
@@ -2149,11 +2184,54 @@ impl<'a> CfgLowerer<'a> {
         self.expr_kind(&expression)
     }
 
+    fn array_offset(&mut self, array: &super::hir::HirArray, index: ExprId) -> ValueId {
+        let input = self.expr(index);
+        self.builder.push(
+            self.block,
+            CfgValueType::Real,
+            CfgValueKind::ArrayIndex {
+                input,
+                lower: array.lower,
+                len: array.len,
+            },
+        )
+    }
+
+    fn array_read(&mut self, name: &str, index: ExprId, span: SourceSpanRef) -> ValueId {
+        let Some(array) = self
+            .hir
+            .arrays
+            .iter()
+            .find(|array| array.name == name)
+            .cloned()
+        else {
+            self.unsupported(span, format!("unknown array '{name}'"));
+            return self.real_constant(0.0);
+        };
+        let offset = self.array_offset(&array, index);
+        let mut result = self.real_constant(0.0);
+        for member in 0..array.len {
+            let variable = VariableId::from(usize::from(array.base) + member as usize);
+            let value = if let Some(frozen) = self.frozen_event_states.get(&variable) {
+                *frozen
+            } else {
+                self.builder
+                    .read_variable(CfgVariable::Local(variable), self.block)
+                    .expect("array members have entry definitions")
+            };
+            let member_value = self.real_constant(f64::from(member));
+            let selected = self.binary(CfgBinaryOp::Eq, offset, member_value);
+            result = self.select_numeric(selected, value, result);
+        }
+        result
+    }
+
     fn expr_kind(&mut self, expression: &HirExpression) -> ValueId {
         let span = expression.span;
         match &expression.kind {
             HirExprKind::Number { value, .. } => self.real_constant(*value),
             HirExprKind::Identifier { name } => self.identifier(name, span),
+            HirExprKind::ArrayAccess { array, index } => self.array_read(array, *index, span),
             HirExprKind::Binary { op, left, right } => self.binary_expr(op, *left, *right, span),
             HirExprKind::Unary { op, operand } => self.unary_expr(op, *operand, span),
             HirExprKind::Conditional {

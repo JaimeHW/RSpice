@@ -202,7 +202,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::cfg_lanes::scalarize_lanes;
-use super::cfg_prelude::{CfgPrelude, LiveCurrentTaint, slot_read_program};
+use super::cfg_prelude::{CfgPrelude, LiveCurrentTaint, VariablePublications, slot_read_program};
 use super::cfg_program::{CfgRuntimeBindings, lower_cfg_function};
 use super::expr::NativeOp;
 use super::model_plan::{NativeModelPlan, NativePrelude};
@@ -1220,17 +1220,67 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         .chain(noise_published.iter().copied())
         .collect();
 
-    let prelude = if prelude_entries.is_empty() {
+    // The CFG already owns ordinary retained inputs and their current writes.
+    // Publish their candidates from this same body instead of rebuilding AD
+    // shadows in the assignment replay merely to commit those source values.
+    let mut retained_publications = Vec::new();
+    for &variable in &model.evaluation_input_variables {
+        let state_slot = model
+            .event_state_variables
+            .binary_search(&variable)
+            .map_err(|_| {
+                refuse(
+                    CfgPlanRefusal::ShippedPlan,
+                    "retained variable has no state slot".into(),
+                )
+            })?;
+        let value = cfg
+            .event_state_candidates
+            .get(state_slot)
+            .and_then(|value| scalarized.scalar(*value))
+            .ok_or_else(|| {
+                refuse(
+                    CfgPlanRefusal::NoScalar,
+                    "retained candidate has no scalar output".into(),
+                )
+            })?;
+        if !taint.publishable(value) {
+            return Err(refuse(
+                CfgPlanRefusal::PreludeLiveCurrent,
+                "retained candidate depends on a contribution current published after the prelude"
+                    .into(),
+            ));
+        }
+        retained_publications.push((value, variable));
+    }
+
+    let prelude = if prelude_entries.is_empty() && retained_publications.is_empty() {
         None
     } else {
-        match CfgPrelude::build(
-            module.as_str(),
-            &scalarized.function,
-            &prelude_entries,
-            &state,
-            &bindings,
-            &slots,
-        ) {
+        let built = if retained_publications.is_empty() {
+            CfgPrelude::build(
+                module.as_str(),
+                &scalarized.function,
+                &prelude_entries,
+                &state,
+                &bindings,
+                &slots,
+            )
+        } else {
+            CfgPrelude::build_with_variables(
+                module.as_str(),
+                &scalarized.function,
+                &prelude_entries,
+                &state,
+                &bindings,
+                &slots,
+                VariablePublications {
+                    values: &retained_publications,
+                    count: model.num_variables,
+                },
+            )
+        };
+        match built {
             Ok(prelude) => Some(prelude),
             // A prelude that will not build costs size and nothing else: every
             // entry goes back to the cone this route lowered before there was
@@ -1241,6 +1291,11 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             // reaches is in the union's (mvsg_cmc, measured). The class is
             // recorded rather than swallowed; the size census prints it.
             Err(refused) => {
+                if !retained_publications.is_empty() {
+                    // These are required candidate writes, not optional scratch
+                    // sharing. A plan that lost them must never execute.
+                    return Err(refused);
+                }
                 report.prelude_refused = Some(refused.class);
                 None
             }
@@ -1812,6 +1867,27 @@ endmodule
             .compile_canonical_ir(source)
             .expect("compile canonical IR");
         (model, artifact)
+    }
+
+    #[test]
+    fn retained_dynamic_array_candidates_use_canonical_publication() {
+        let runtime = VerilogACompiler::default()
+            .compile_runtime(
+                "module retained_array(p,q); inout p,q; electrical p,q;
+             real x,a[0:1]; integer k; parameter integer slot=1;
+             analog begin a[slot]=exp(V(p)*V(q));
+             for(k=0;k<3;k=k+1) a[slot]=ddx(a[slot],V(p));
+             x=a[slot]; I(p)<+x; end endmodule",
+                None,
+            )
+            .unwrap();
+        let plan = build_model_plan_from_canonical_cfg(&runtime.model, &runtime.canonical_ir);
+        assert!(
+            plan.is_ok(),
+            "state={:?}, inputs={:?}: {plan:?}",
+            runtime.model.event_state_variables,
+            runtime.model.evaluation_input_variables
+        );
     }
 
     #[test]

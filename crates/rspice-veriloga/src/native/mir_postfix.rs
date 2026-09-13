@@ -486,6 +486,13 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                     .get_mut(index)
                     .ok_or(PostfixRefusal::RuntimeError(name))? = value;
             }
+            NativeOp::StoreVariable(index) => {
+                let value = Self::top(stack, name)?;
+                *self
+                    .variables
+                    .get_mut(index)
+                    .ok_or(PostfixRefusal::RuntimeError(name))? = value;
+            }
             NativeOp::Add => Self::binary(stack, name, S::add)?,
             NativeOp::Sub => Self::binary(stack, name, S::sub)?,
             NativeOp::Mul => Self::binary(stack, name, S::mul)?,
@@ -604,6 +611,13 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                 );
                 stack.truncate(start);
                 stack.push(result);
+            }
+            NativeOp::CheckedArrayIndex { len, lower } => {
+                let input = Self::top(stack, name)?;
+                let offset = checked_array_slot(input.real(), 0, len, lower)
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                *stack.last_mut().ok_or(PostfixRefusal::Malformed(name))? =
+                    S::from_f64(offset as f64);
             }
             NativeOp::IntegerCast => {
                 let value = Self::top(stack, name)?;

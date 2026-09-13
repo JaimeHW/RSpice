@@ -75,19 +75,11 @@ pub(crate) enum NativeAssignmentCoverage {
     CfgPlanReads,
 }
 
-/// The assignment program that publishes a model's externally observable
-/// variables, with no entry, kernel or prelude beside it.
-///
-/// A separate type rather than a [`NativeModelPlan`] with empty vectors: every
-/// shape rule a model plan carries is a statement about entries this one does
-/// not have, and an empty `stamp_values` in a model plan is an error rather
-/// than a role. What a backend does with this is emit two functions — the pass
-/// and, when the module has one, the post-current pass — into an image of their
-/// own, which the device compiles only when a readback asks for it.
+/// A canonical function publishing final named variables after evaluation.
+/// It owns no equation entries or additional per-evaluation scratch storage.
 #[derive(Debug)]
 pub(crate) struct NativeObservationPlan {
-    pub(crate) assignments: Vec<NativeAssignment>,
-    pub(crate) post_assignments: Vec<NativeAssignment>,
+    pub(crate) program: PlanProgram,
     pub(crate) current_dependencies: JitCurrentDependencies,
 }
 

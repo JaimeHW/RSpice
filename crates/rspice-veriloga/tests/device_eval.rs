@@ -1581,10 +1581,71 @@ fn nested_ddx_transcendentals_and_report_only_values_keep_higher_orders() {
                 (matrix[&(0, 0)] - voltage.exp()).abs() < 1e-10,
                 "{body}: {matrix:?}"
             );
-            #[cfg(not(feature = "native"))]
-            {
+            fixture.observe(&mut device);
+            assert!((device.variable("x").unwrap() - voltage.exp()).abs() < 1e-10);
+            assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn indexed_array_checks_survive_dead_values_and_respect_source_guards() {
+    for (body, valid, invalid) in [
+        ("a[V(p,n)]=5; I(p,n)<+0;", -0.5, 1.5),
+        ("x=a[V(p,n)]; I(p,n)<+0;", 0.5, -1.5),
+        ("if(V(p,n)>0) x=a[10+V(p,n)]; I(p,n)<+0;", -0.5, 0.5),
+    ] {
+        let fixture = compile(&format!(
+            "module indexed(p,n); inout p,n; electrical p,n;
+            real a[-1:1],x; analog begin {body} end endmodule"
+        ));
+        let mut device = fixture.device("CHECKED", &[1, 0]);
+        device.update_voltages(&[valid]);
+        assert!(device.try_evaluate().is_ok(), "{body}");
+        device.update_voltages(&[invalid]);
+        assert!(
+            device.try_evaluate().is_err(),
+            "{body}: an executed invalid index must fail"
+        );
+        device.update_voltages(&[valid]);
+        assert!(
+            device.try_evaluate().is_ok(),
+            "{body}: a failed trial must be retryable"
+        );
+    }
+}
+
+#[test]
+fn higher_order_readback_preserves_mixed_axes_and_array_updates() {
+    for body in [
+        "x=exp(V(p)*V(q)); for(k=0;k<3;k=k+1) x=ddx(x,V(p));",
+        "a[0]=exp(V(p)*V(q)); for(k=0;k<3;k=k+1) a[0]=ddx(a[0],V(p)); x=a[0];",
+        "a[slot]=exp(V(p)*V(q)); for(k=0;k<3;k=k+1) a[slot]=ddx(a[slot],V(p)); x=a[slot];",
+    ] {
+        let fixture = compile(&format!(
+            "module mixed_readback(p,q); inout p,q; electrical p,q;
+             real x,a[0:1]; integer k; parameter integer slot=1;
+             analog begin {body} I(p)<+x; end endmodule"
+        ));
+        let mut device = fixture.device("MIXED", &[1, 2]);
+        for (p, q) in [(0.25_f64, 0.5_f64), (-0.75, 1.25), (1.25, -0.5)] {
+            let expected = q.powi(3) * (p * q).exp();
+            device.update_voltages(&[p, q]);
+            let current = device.try_evaluate().unwrap()[0];
+            assert!(
+                (current - expected).abs() < 1e-11,
+                "{body}: {current} != {expected}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[p, q]);
+            assert!((matrix[&(0, 0)] - q * expected).abs() < 1e-11, "{matrix:?}");
+            let dq = (3.0 * q * q + p * q.powi(3)) * (p * q).exp();
+            assert!((matrix[&(0, 1)] - dq).abs() < 1e-11, "{matrix:?}");
+            for _ in 0..2 {
                 fixture.observe(&mut device);
-                assert!((device.variable("reported").unwrap() - voltage.exp()).abs() < 1e-10);
+                assert!(
+                    (device.variable("x").unwrap() - expected).abs() < 1e-11,
+                    "{body}"
+                );
             }
         }
     }
@@ -2705,12 +2766,9 @@ endmodule
 }
 
 #[test]
-fn grouped_noise_without_a_runtime_plan_fails_closed_at_noise_time() {
-    // Same unlowerable shape as above, but every index the model can produce
-    // is inside the array, so nothing faults at run time. What is left is the
-    // planning failure itself, and it must surface as an error rather than as
-    // PSDs taken from the scalar path, which has neither the CFG's activation
-    // nor its reaching definitions.
+fn grouped_noise_uses_runtime_indexed_metadata() {
+    // Indexed writes and reads share canonical reaching definitions, including
+    // the analysis-dependent selection. The preceding test checks bad indices.
     let model = compile(
         r#"
 `include "disciplines.vams"
@@ -2742,16 +2800,16 @@ endmodule
     device
         .try_set_analysis_type(3)
         .expect("noise analysis configures");
-    let err = device
+    let processes = device
         .try_noise_processes_at_frequency(&[0.0], 1.0e3)
-        .expect_err("an unlowerable grouped-noise plan must fail closed at noise time");
-    let text = err.to_string();
-    assert!(
-        text.contains("canonical grouped-noise CFG lowering failed")
-            && text.contains("run-time array index")
-            && text.contains("array access expression"),
-        "diagnostic should identify every unsupported runtime-indexed metadata operation, got: {text}"
-    );
+        .expect("canonical grouped noise supports checked runtime-indexed metadata");
+    assert_eq!(processes.len(), 1);
+    assert_eq!(processes[0].psd, 1e-18);
+    assert_eq!(processes[0].injections.len(), 1);
+    let injection = &processes[0].injections[0];
+    assert_eq!((injection.node_pos, injection.node_neg), (1, 0));
+    assert_eq!(injection.gain.re, -1.0);
+    assert_eq!(injection.gain.im, 0.0);
 }
 
 #[test]

@@ -56,7 +56,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// the site-aware time-derivative helper 482 that replaced the retired ddt
 /// companion Jacobian.
 /// Version 16 adds immutable procedural evaluation inputs to the frame header.
-pub const WASM_JIT_ABI_VERSION: u32 = 16;
+/// Version 17 adds storage-independent checked array-index helper opcode 3.
+pub const WASM_JIT_ABI_VERSION: u32 = 17;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -135,9 +136,10 @@ pub const WASM_JIT_ABI_VERSION: u32 = 16;
 /// Version 44 shares exact operand-only math calls in executable SSA.
 /// 44 to 45 preserves derivative demand at each assignment: later value-only
 /// writes no longer publish every shadow allocated for an earlier definition.
-/// Version 47 lowers retained procedural entries separately from current assignments.
 /// Version 46 emits bounded reads of immutable procedural evaluation inputs.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 47;
+/// Version 47 lowers retained procedural entries separately from current assignments.
+/// Version 48 publishes canonical source candidates and checks SSA array indices.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 48;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -1698,11 +1700,11 @@ endmodule
         const PARAMETERS: u32 = 8704;
         const VOLTAGES: u32 = 8832;
         const VARIABLES: u32 = 8960;
-        const PROGRAM_ACTIVE: u32 = 9216;
-        const SEQUENTIAL_CURRENTS: u32 = 9344;
-        const PAIR_CURRENTS: u32 = 9472;
-        const JACOBIANS: u32 = 9728;
-        const EVALUATION_INPUTS: u32 = 10240;
+        const PROGRAM_ACTIVE: u32 = 16384;
+        const SEQUENTIAL_CURRENTS: u32 = 16512;
+        const PAIR_CURRENTS: u32 = 16640;
+        const JACOBIANS: u32 = 16896;
+        const EVALUATION_INPUTS: u32 = 18432;
         /// Where the assignment prelude publishes.
         ///
         /// Past every other region, because it is the only one whose length is
@@ -1710,7 +1712,7 @@ endmodule
         /// reads `WasmJitModelArtifact::prelude_slots` and allocates from it,
         /// and this harness has to do the same or the module stores through the
         /// frame at offset zero.
-        const PRELUDE_SLOTS: u32 = 12288;
+        const PRELUDE_SLOTS: u32 = 24576;
 
         fn new() -> Self {
             Self::for_source(FUSED_KERNEL_SOURCE, "wasm_kernel_pair")
@@ -2107,6 +2109,38 @@ endmodule
     }
 
     #[test]
+    fn wasm_canonical_indexed_arrays_preserve_higher_derivatives() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let source = "module indexed(p,n); inout p,n; electrical p,n;
+            parameter real slot=-0.5; real a[-1:1]; integer k;
+            analog begin a[slot]=pow(V(p,n),4);
+                for(k=0;k<3;k=k+1) a[slot]=ddx(a[slot],V(p,n));
+                I(p,n)<+a[slot]; end endmodule";
+        let mut harness = FusedKernelHarness::for_source(source, "indexed");
+        harness.reset();
+        harness.write_f64(FusedKernelHarness::PARAMETERS as usize, -0.5);
+        let value = harness.stamp_value_export(0);
+        let jacobian = harness.jacobian_export(0, 0);
+        for voltage in [-0.75_f64, 0.0, 1.25] {
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_evaluation();
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(harness.call(&value), 0);
+            assert!(
+                (harness.read_f64(FRAME_RESULT_OFFSET as usize) - 24.0 * voltage).abs() < 1e-12
+            );
+            assert_eq!(harness.call(&jacobian), 0);
+            assert!((harness.read_f64(FRAME_RESULT_OFFSET as usize) - 24.0).abs() < 1e-12);
+        }
+    }
+
+    #[test]
     fn wasm_retained_inputs_preserve_values_and_derivatives_in_both_plans() {
         use super::abi::FRAME_RESULT_OFFSET;
         let source = "module retained(p,n); inout p,n; electrical p,n; real held,seen;
@@ -2128,6 +2162,9 @@ endmodule
                     let inputs = context.variables.clone();
                     for (slot, input) in inputs.iter().copied().enumerate() {
                         harness.write_f64(FusedKernelHarness::VARIABLES as usize + slot * 8, input);
+                    }
+                    if !harness.executable.publishes_observable_variables() {
+                        harness.write_f64(FusedKernelHarness::VARIABLES as usize + 8, f64::NAN);
                     }
                     harness.write_f64(FusedKernelHarness::VOLTAGES as usize, trial);
                     harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
@@ -2153,10 +2190,21 @@ endmodule
                         harness.read_f64(FusedKernelHarness::VARIABLES as usize),
                         2.0 * trial
                     );
-                    assert_eq!(
-                        harness.read_f64(FusedKernelHarness::VARIABLES as usize + 8),
-                        accepted
-                    );
+                    if harness.executable.publishes_observable_variables() {
+                        assert_eq!(
+                            harness.read_f64(FusedKernelHarness::VARIABLES as usize + 8),
+                            accepted
+                        );
+                    } else {
+                        // The CFG publishes retained candidates in its prelude;
+                        // non-state reporting values are filled by readback.
+                        assert!(!postfix);
+                        assert!(
+                            harness
+                                .read_f64(FusedKernelHarness::VARIABLES as usize + 8)
+                                .is_nan()
+                        );
+                    }
                     let candidate = (0..inputs.len())
                         .map(|slot| {
                             harness.read_f64(FusedKernelHarness::VARIABLES as usize + slot * 8)

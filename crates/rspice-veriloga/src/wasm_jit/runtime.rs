@@ -161,6 +161,7 @@ pub(super) fn evaluate_helper_with_session(
         // Assignment kernels request an absolute variable-array index. The
         // generated caller performs the store only after this helper succeeds.
         2 => dynamic_slot(aux0, aux1, aux2, operands[0], variables.len()).map(|slot| slot as f64),
+        3 => dynamic_slot(0, aux1, aux2, operands[0], aux1 as usize).map(|slot| slot as f64),
         10..=11 => Ok(constant_extremum(
             extremum(opcode - 10)?,
             operands[0],

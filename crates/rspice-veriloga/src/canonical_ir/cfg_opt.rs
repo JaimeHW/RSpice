@@ -734,6 +734,16 @@ impl Optimizer {
             }
         };
 
+        for block in &self.blocks {
+            for instruction in &block.instructions {
+                if matches!(
+                    self.values[usize::from(instruction.result)].kind,
+                    CfgValueKind::ArrayIndex { .. }
+                ) {
+                    mark(instruction.result, &mut live, &mut worklist);
+                }
+            }
+        }
         for output in &self.outputs {
             mark(*output, &mut live, &mut worklist);
         }

@@ -32,10 +32,11 @@ use crate::native::abi::{
     integer_shift_const_descriptor, rspice_above_state_native,
     rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
-    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
-    rspice_cosh, rspice_cross_state_native, rspice_ddt_derivative_native, rspice_ddt_state_native,
-    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
-    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil,
+    rspice_checked_array_index_native, rspice_cos, rspice_cosh, rspice_cross_state_native,
+    rspice_ddt_derivative_native, rspice_ddt_state_native, rspice_default_limit_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
     rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
@@ -1177,6 +1178,20 @@ impl FunctionCompiler {
                                 byte_disp(index)?,
                             );
                         }
+                        NativeOp::StoreVariable(index) => {
+                            let source = self.register_stack[self
+                                .depth
+                                .checked_sub(1)
+                                .ok_or_else(|| JitError::Encoding {
+                                    model: MODEL.into(),
+                                    detail: "variable publication requires an operand".into(),
+                                })?];
+                            self.encoder.movsd_m64_base_disp32_xmm(
+                                self.vars_arg_reg(),
+                                byte_disp(index)?,
+                                source,
+                            );
+                        }
                         NativeOp::LoadVariableDyn { base, len, lower } => {
                             self.emit_dynamic_variable_load(base, len, lower)?;
                         }
@@ -1265,6 +1280,9 @@ impl FunctionCompiler {
                                 crate::native::abi::rspice_product_ratio_native,
                             );
                             self.drop_stack_values(3)?;
+                        }
+                        NativeOp::CheckedArrayIndex { len, lower } => {
+                            self.emit_checked_array_index(len, lower)?
                         }
                         NativeOp::IntegerCast => self.emit_integer_cast()?,
                         NativeOp::CheckedValue => self.emit_checked_binary(
@@ -3232,6 +3250,43 @@ impl FunctionCompiler {
         let left = self.register_stack[self.depth - 2];
         self.emit_operand_context_filter_helper_call(left, 2, descriptor, helper);
         self.drop_stack_values(1)?;
+        Ok(())
+    }
+
+    fn emit_checked_array_index(&mut self, len: usize, lower: i64) -> JitResult<()> {
+        let target = *self
+            .register_stack
+            .get(
+                self.depth
+                    .checked_sub(1)
+                    .ok_or_else(|| JitError::Encoding {
+                        model: MODEL.into(),
+                        detail: "array index requires an operand".into(),
+                    })?,
+            )
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: "array index operand is missing".into(),
+            })?;
+        let frame_bytes = call_frame_bytes_for_slots(call_frame_spill_slot_count(
+            &self.register_stack[..self.depth],
+            |_, register| register != target,
+        ));
+        self.encoder.sub_rsp_imm32(frame_bytes);
+        self.emit_call_frame_spills(self.depth, |_, register| register != target);
+        if target != Xmm::Xmm0 {
+            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
+        }
+        self.encoder
+            .mov_r64_r64(dynamic_variable_ptr_arg_reg(), self.ctx_arg_reg());
+        self.emit_usize_arg(dynamic_variable_len_arg_reg(), len);
+        self.emit_i64_arg(dynamic_variable_lower_arg_reg(), lower);
+        let helper: DynamicVariableErrorHelper = rspice_checked_array_index_native;
+        self.encoder
+            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
+        self.encoder.call_r64(Gpr::Rax);
+        self.emit_helper_result_to_target_and_restore(target, self.depth, |_, _| true);
+        self.encoder.add_rsp_imm32(frame_bytes);
         Ok(())
     }
 
@@ -6191,6 +6246,34 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
+    }
+
+    #[test]
+    fn canonical_source_publication_preserves_float_bits() {
+        for bits in [
+            (-0.0_f64).to_bits(),
+            0x7ff8_0000_0000_4321,
+            1.25_f64.to_bits(),
+        ] {
+            let program = NativeProgram::from_ops_for_test(
+                vec![
+                    NativeOp::Const(f64::from_bits(bits)),
+                    NativeOp::StoreVariable(1),
+                ],
+                1,
+                Vec::new(),
+                Vec::new(),
+            );
+            let bytes = compile_value_function(&program).unwrap();
+            let memory = ExecutableMemory::allocate(&bytes).unwrap();
+            let function: extern "C" fn(*const EvalContext, *mut f64) -> f64 =
+                unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+            let mut variables = [17.0, 23.0];
+            let ctx = eval_context(&[], &[], &[], &[]);
+            assert_eq!(function(&ctx, variables.as_mut_ptr()).to_bits(), bits);
+            assert_eq!(variables[1].to_bits(), bits);
+            assert_eq!(variables[0], 17.0);
+        }
     }
 
     #[test]

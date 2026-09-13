@@ -461,27 +461,18 @@ pub(crate) fn compile_observation_image(
     let mut entry_starts = Vec::new();
     let mut windows_unwind_functions = Vec::new();
 
-    let assignment = append_assignment_pass(
-        &plan.assignments,
+    let assignment = Some(append_value_entry(
         &mut image,
         &mut entry_starts,
         &mut windows_unwind_functions,
-    )?;
-    let post_assignment = if plan.post_assignments.is_empty() {
-        None
-    } else {
-        append_assignment_pass(
-            &plan.post_assignments,
-            &mut image,
-            &mut entry_starts,
-            &mut windows_unwind_functions,
-        )?
-    };
+        &mut ValueEntryCache::default(),
+        plan.program.borrow(),
+    )?);
 
     let entries = NativeEntryOffsets {
         assignment,
         prelude: None,
-        post_assignment,
+        post_assignment: None,
         evaluation_kernel: None,
         stamp_kernel: None,
         parameter_defaults: vec![None; model.parameters.len()],

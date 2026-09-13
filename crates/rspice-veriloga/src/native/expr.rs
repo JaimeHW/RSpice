@@ -169,6 +169,10 @@ pub(crate) enum NativeOp {
     /// Range-protected sum of `terms` products divided by the final operand.
     SumProductsDiv(usize),
     CheckedValue,
+    CheckedArrayIndex {
+        len: usize,
+        lower: i64,
+    },
     IntegerCast,
     IntegerBinary(IntegerBinaryOp),
     IntegerShiftConst(IntegerBinaryOp, u8),
@@ -222,6 +226,9 @@ pub(crate) enum NativeOp {
     /// instruction stream where the value is computed, which is what keeps
     /// that value’s live range from stretching to the exit.
     StorePreludeSlot(usize),
+    /// Publish a canonical readback into the validated model-variable array.
+    /// Like a prelude publication, this yields its operand unchanged.
+    StoreVariable(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8608,6 +8615,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::BinaryMath(_)
             | NativeOp::ProductRatio
             | NativeOp::SumProductsDiv(_)
+            | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::CheckedValue
             | NativeOp::IntegerBinary(_)
@@ -8677,6 +8685,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ProductRatio => "ProductRatio",
         NativeOp::SumProductsDiv(_) => "SumProductsDiv",
         NativeOp::CheckedValue => "CheckedValue",
+        NativeOp::CheckedArrayIndex { .. } => "CheckedArrayIndex",
         NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
         NativeOp::IntegerShiftConst(_, _) => "IntegerShiftConst",
@@ -8714,6 +8723,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LoadPreludeSlot(_) => "LoadPreludeSlot",
         NativeOp::LoadEvaluationState(_) => "LoadEvaluationState",
         NativeOp::StorePreludeSlot(_) => "StorePreludeSlot",
+        NativeOp::StoreVariable(_) => "StoreVariable",
     }
 }
 
@@ -9627,6 +9637,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadEvaluationState(_) => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
+        | NativeOp::CheckedArrayIndex { .. }
         | NativeOp::AddConst(_)
         | NativeOp::SubConst(_)
         | NativeOp::MulConst(_)
@@ -9654,7 +9665,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::WhiteNoise
         | NativeOp::DdtState(_)
         | NativeOp::IdtJacobian
-        | NativeOp::StorePreludeSlot(_) => (1, 1),
+        | NativeOp::StorePreludeSlot(_)
+        | NativeOp::StoreVariable(_) => (1, 1),
 
         NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) => {
             (layout.operand_count(), 1)

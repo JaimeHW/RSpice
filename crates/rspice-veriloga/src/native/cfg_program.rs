@@ -215,8 +215,12 @@ impl CfgRuntimeBindings {
 pub(crate) enum CfgOutputs<'a> {
     /// One value, returned. What every plan entry is.
     Returned(CfgValueId),
-    /// `(value, prelude slot)` pairs, each published where it is computed.
-    Published(&'a [(CfgValueId, usize)]),
+    /// Shared values and optional final model variables, published once.
+    Published {
+        prelude: &'a [(CfgValueId, usize)],
+        variables: &'a [(CfgValueId, usize)],
+        variable_count: usize,
+    },
 }
 
 /// Lower `function`, pruned to `output`, onto the block model.
@@ -250,7 +254,51 @@ pub(crate) fn lower_cfg_function_to_prelude_slots(
 ) -> JitResult<Program> {
     lower_cfg_outputs(
         function,
-        CfgOutputs::Published(publications),
+        CfgOutputs::Published {
+            prelude: publications,
+            variables: &[],
+            variable_count: 0,
+        },
+        state,
+        bindings,
+    )
+}
+
+#[cfg(any(feature = "native", test))]
+pub(crate) fn lower_cfg_function_to_variables(
+    function: &CfgFunction,
+    publications: &[(CfgValueId, usize)],
+    variable_count: usize,
+    state: &CfgStateAllocation,
+    bindings: &CfgRuntimeBindings,
+) -> JitResult<Program> {
+    lower_cfg_outputs(
+        function,
+        CfgOutputs::Published {
+            prelude: &[],
+            variables: publications,
+            variable_count,
+        },
+        state,
+        bindings,
+    )
+}
+
+pub(crate) fn lower_cfg_function_to_publications(
+    function: &CfgFunction,
+    prelude: &[(CfgValueId, usize)],
+    variables: &[(CfgValueId, usize)],
+    variable_count: usize,
+    state: &CfgStateAllocation,
+    bindings: &CfgRuntimeBindings,
+) -> JitResult<Program> {
+    lower_cfg_outputs(
+        function,
+        CfgOutputs::Published {
+            prelude,
+            variables,
+            variable_count,
+        },
         state,
         bindings,
     )
@@ -308,7 +356,35 @@ impl Lowerer<'_> {
         // whichever publication this is: the hoist is a property of the
         // function, and the prelude lowers the function once.
         let hoisted = self.hoisted_state_operators(&layout)?;
-        let publications = self.publication_slots(outputs)?;
+        let mut publications = self.publication_slots(outputs)?;
+        let mut exit_publications = Vec::new();
+        if matches!(outputs, CfgOutputs::Published { variables, .. } if !variables.is_empty()) {
+            // A loop parameter is also its final value on the exit edge.
+            // Publishing it at its definition would write once per trip.
+            // Keep only these loop-carried readbacks live until function exit;
+            // straight-line readbacks still die at their publication site.
+            for block in &self.function.blocks {
+                if !layout.in_loop[usize::from(block.id)] {
+                    continue;
+                }
+                for value in block.params.iter().copied().chain(
+                    block
+                        .instructions
+                        .iter()
+                        .map(|instruction| instruction.result),
+                ) {
+                    if let Some(ops) = publications.get_mut(usize::from(value))
+                        && !ops.is_empty()
+                    {
+                        let (variables, prelude): (Vec<_>, Vec<_>) = std::mem::take(ops)
+                            .into_iter()
+                            .partition(|op| matches!(op, NativeOp::StoreVariable(_)));
+                        *ops = prelude;
+                        exit_publications.push((value, variables));
+                    }
+                }
+            }
+        }
 
         let mut lowered: Vec<Option<BuilderValue>> = vec![None; self.function.values.len()];
         for (index, block) in order.iter().enumerate() {
@@ -349,9 +425,17 @@ impl Lowerer<'_> {
             // has exactly one `Return`. The constant is that return: it costs
             // one instruction, reads nothing, and keeps the exit terminator the
             // same shape for both publications.
+            if usize::from(*block) == layout.exit {
+                for (value, ops) in &exit_publications {
+                    let value = self.read(&lowered, *value)?;
+                    for op in ops {
+                        builder.push(*op, &[value], ValueType::F64)?;
+                    }
+                }
+            }
             let returned = match outputs {
                 CfgOutputs::Returned(_) => None,
-                CfgOutputs::Published(_)
+                CfgOutputs::Published { .. }
                     if matches!(
                         self.function.block(*block).terminator,
                         CfgTerminator::Return
@@ -359,7 +443,7 @@ impl Lowerer<'_> {
                 {
                     Some(builder.push(NativeOp::Const(0.0), &[], ValueType::F64)?)
                 }
-                CfgOutputs::Published(_) => None,
+                CfgOutputs::Published { .. } => None,
             };
             let terminator = self.terminator(*block, &position, &lowered, outputs, returned)?;
             builder.end_block(terminator)?;
@@ -374,19 +458,37 @@ impl Lowerer<'_> {
     /// value rather than one slot, because the caller is allowed to give two
     /// entries the same value; the alternative would be for it to deduplicate
     /// and for this to trust that it did.
-    fn publication_slots(&self, outputs: CfgOutputs<'_>) -> JitResult<Vec<Vec<usize>>> {
-        let CfgOutputs::Published(pairs) = outputs else {
+    fn publication_slots(&self, outputs: CfgOutputs<'_>) -> JitResult<Vec<Vec<NativeOp>>> {
+        let CfgOutputs::Published {
+            prelude,
+            variables,
+            variable_count,
+        } = outputs
+        else {
             return Ok(Vec::new());
         };
-        let mut publications: Vec<Vec<usize>> = vec![Vec::new(); self.function.values.len()];
-        for (value, slot) in pairs {
-            let Some(slots) = publications.get_mut(usize::from(*value)) else {
+        let mut publications: Vec<Vec<NativeOp>> = vec![Vec::new(); self.function.values.len()];
+        let mut variable_slots = std::collections::HashSet::new();
+        for &(value, slot) in variables {
+            if slot >= variable_count || !variable_slots.insert(slot) {
                 return Err(self.refuse(format!(
-                    "prelude slot {slot} publishes CFG value {}, which this function does not have",
-                    usize::from(*value)
+                    "variable publication slot {slot} is out of bounds or duplicated in a layout of {variable_count} variables"
                 )));
-            };
-            slots.push(*slot);
+            }
+            let ops = publications.get_mut(usize::from(value)).ok_or_else(|| {
+                self.refuse(format!(
+                    "variable publication names missing CFG value {value}"
+                ))
+            })?;
+            ops.push(NativeOp::StoreVariable(slot));
+        }
+        for &(value, slot) in prelude {
+            let ops = publications.get_mut(usize::from(value)).ok_or_else(|| {
+                self.refuse(format!(
+                    "prelude publication names missing CFG value {value}"
+                ))
+            })?;
+            ops.push(NativeOp::StorePreludeSlot(slot));
         }
         Ok(publications)
     }
@@ -396,19 +498,15 @@ impl Lowerer<'_> {
     fn publish(
         &self,
         builder: &mut ProgramBuilder,
-        publications: &[Vec<usize>],
+        publications: &[Vec<NativeOp>],
         value: CfgValueId,
         lowered: BuilderValue,
     ) -> JitResult<()> {
         let Some(slots) = publications.get(usize::from(value)) else {
             return Ok(());
         };
-        for slot in slots {
-            builder.push(
-                NativeOp::StorePreludeSlot(*slot),
-                &[lowered],
-                ValueType::F64,
-            )?;
+        for op in slots {
+            builder.push(*op, &[lowered], ValueType::F64)?;
         }
         Ok(())
     }
@@ -634,8 +732,10 @@ impl Lowerer<'_> {
         // to be materialized.
         match outputs {
             CfgOutputs::Returned(output) => mark(output, &mut read),
-            CfgOutputs::Published(pairs) => {
-                for (value, _) in pairs {
+            CfgOutputs::Published {
+                prelude, variables, ..
+            } => {
+                for (value, _) in prelude.iter().chain(variables) {
                     mark(*value, &mut read);
                 }
             }
@@ -704,7 +804,7 @@ impl Lowerer<'_> {
         Ok(match &self.function.block(block).terminator {
             CfgTerminator::Return => BuilderTerminator::Return(match outputs {
                 CfgOutputs::Returned(output) => self.read(lowered, output)?,
-                CfgOutputs::Published(_) => published_return.ok_or_else(|| {
+                CfgOutputs::Published { .. } => published_return.ok_or_else(|| {
                     self.refuse(
                         "a publishing lowering reached its return with no constant to return"
                             .to_string(),
@@ -1022,6 +1122,13 @@ impl Lowerer<'_> {
                 let else_value = operand(*else_value)?;
                 push(NativeOp::IfElse, &[condition, then_value, else_value])
             }
+            CfgValueKind::ArrayIndex { input, len, lower } => push(
+                NativeOp::CheckedArrayIndex {
+                    len: *len as usize,
+                    lower: *lower,
+                },
+                &[operand(*input)?],
+            ),
             CfgValueKind::IntegerArithmetic { op, left, right } => {
                 let left = operand(*left)?;
                 let right = operand(*right)?;
@@ -1303,6 +1410,8 @@ struct Layout {
     idom: Vec<Option<usize>>,
     /// The block that returns.
     exit: usize,
+    /// Blocks inside a natural loop, indexed by raw CFG block index.
+    in_loop: Vec<bool>,
 }
 
 /// A layout order for `function`'s blocks that satisfies the block model.
@@ -1375,6 +1484,7 @@ fn layout_order(function: &CfgFunction) -> JitResult<Layout> {
     for (index, block) in order.iter().enumerate() {
         position[*block] = index;
     }
+    let mut in_loop = vec![false; count];
     for (source, targets) in successors.iter().enumerate() {
         if position[source] == usize::MAX {
             // Unreachable from the entry: the block model only admits blocks
@@ -1393,12 +1503,18 @@ fn layout_order(function: &CfgFunction) -> JitResult<Layout> {
                     "CFG edge {source} -> {target} closes a cycle whose target does not dominate its source; the control-flow graph is irreducible"
                 )));
             }
+            if backwards {
+                for &block in &order[position[target]..=position[source]] {
+                    in_loop[block] = true;
+                }
+            }
         }
     }
     Ok(Layout {
         order: order.into_iter().map(CfgBlockId::from).collect::<Vec<_>>(),
         idom,
         exit,
+        in_loop,
     })
 }
 
@@ -1603,7 +1719,7 @@ fn speculation_hazard(kind: &CfgValueKind) -> Option<&'static str> {
         CfgValueKind::BlockParameter => {
             Some("is a merge of the arms reaching it and so has no single value to move")
         }
-        CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) => {
+        CfgValueKind::ParameterGiven(_) | CfgValueKind::PortConnected(_) | CfgValueKind::ArrayIndex { .. } => {
             Some("is a bounds-checked read that can report a runtime error")
         }
         CfgValueKind::IdtScale => {
@@ -1632,6 +1748,54 @@ mod tests {
         CfgBinaryOp, CfgStateAllocation, CfgTerminator, CfgUnaryOp, CfgValueKind, CfgValueType,
         CfgVariable, DigitalWait, ParamId, SsaBuilder, VariableId,
     };
+
+    #[test]
+    fn source_publications_validate_destinations_and_keep_value_aliases() {
+        let mut builder = SsaBuilder::new();
+        let entry = builder.create_block();
+        builder.seal_block(entry);
+        let value = builder.push_leaf(CfgValueType::Real, CfgValueKind::RealConstant(-0.0));
+        builder.set_terminator(entry, CfgTerminator::Return);
+        let (function, outputs) = builder.finish_with_outputs(entry, &[value]).unwrap();
+        let value = outputs[0];
+        let state = empty_state();
+        let bindings = bindings(0);
+        let program = super::lower_cfg_function_to_variables(
+            &function,
+            &[(value, 0), (value, 1)],
+            2,
+            &state,
+            &bindings,
+        )
+        .unwrap();
+        let stores = program
+            .instructions()
+            .iter()
+            .filter(|instruction| {
+                matches!(
+                    instruction.op(),
+                    crate::jit::expr::NativeOp::StoreVariable(_)
+                )
+            })
+            .count();
+        assert_eq!(stores, 2);
+        for publications in [
+            vec![(value, 2)],
+            vec![(value, 0), (value, 0)],
+            vec![(crate::canonical_ir::ValueId::from(999usize), 0)],
+        ] {
+            assert!(
+                super::lower_cfg_function_to_variables(
+                    &function,
+                    &publications,
+                    2,
+                    &state,
+                    &bindings
+                )
+                .is_err()
+            );
+        }
+    }
 
     /// `limexp`'s derivative lowers to the canonical level's clamp, not to the
     /// shipped native helper's.

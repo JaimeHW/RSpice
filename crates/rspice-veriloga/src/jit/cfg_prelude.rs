@@ -28,12 +28,10 @@
 //! read the same value share one slot, which is why the count is over distinct
 //! values rather than over entries.
 //!
-//! Slots deliberately do not alias the runtime's variable slots. A scalarized
-//! derivative lane has no MIR variable to alias, so aliasing would buy only the
-//! eventual retirement of the postfix assignment pass, which is gated on
-//! separate work; and sharing one array between two publications that are
-//! written by different passes is exactly the kind of coupling that turns a
-//! sizing mistake into a silently wrong read.
+//! Scratch slots and runtime variables have independent layouts. The same
+//! prelude also publishes ordinary retained source candidates directly into
+//! validated variable slots. Derivative outputs remain in scratch storage and
+//! never acquire a variable identity merely because they share an SSA value.
 //!
 //! # What a prelude may not publish
 //!
@@ -61,7 +59,9 @@ use crate::canonical_ir::{
 use crate::codegen::state_renumbering::StateSlotMapping;
 use crate::jit::JitResult;
 use crate::jit::cfg_plan_builder::{CfgPlanEntry, CfgPlanRefusal, CfgPlanRefused};
-use crate::jit::cfg_program::{CfgRuntimeBindings, lower_cfg_function_to_prelude_slots};
+use crate::jit::cfg_program::{
+    CfgRuntimeBindings, lower_cfg_function_to_prelude_slots, lower_cfg_function_to_publications,
+};
 use crate::jit::expr::NativeOp;
 use crate::jit::plan_program::{BlockProgram, PlanProgramRef};
 use crate::jit::ssa::{BlockId, BuilderTerminator, Program, ProgramBuilder, ValueType};
@@ -206,6 +206,12 @@ pub(crate) struct CfgPrelude {
     slot_count: usize,
 }
 
+#[derive(Default)]
+pub(crate) struct VariablePublications<'a> {
+    pub(crate) values: &'a [(ValueId, usize)],
+    pub(crate) count: usize,
+}
+
 impl CfgPrelude {
     /// Build the prelude for `entries`, which are `(entry, output value)` pairs
     /// taken from the *same* `function` every entry would otherwise be sliced
@@ -224,12 +230,32 @@ impl CfgPrelude {
         bindings: &CfgRuntimeBindings,
         state_slots: &StateSlotMapping,
     ) -> Result<Self, CfgPlanRefused> {
+        Self::build_with_variables(
+            module,
+            function,
+            entries,
+            state,
+            bindings,
+            state_slots,
+            VariablePublications::default(),
+        )
+    }
+
+    pub(crate) fn build_with_variables(
+        module: &str,
+        function: &CfgFunction,
+        entries: &[(CfgPlanEntry, ValueId)],
+        state: &CfgStateAllocation,
+        bindings: &CfgRuntimeBindings,
+        state_slots: &StateSlotMapping,
+        variables: VariablePublications<'_>,
+    ) -> Result<Self, CfgPlanRefused> {
         let refuse = |class: CfgPlanRefusal, detail: String| CfgPlanRefused {
             module: module.to_owned(),
             class,
             detail,
         };
-        if entries.is_empty() {
+        if entries.is_empty() && variables.values.is_empty() {
             return Err(refuse(
                 CfgPlanRefusal::Lowering,
                 "a prelude with no entry outputs would compute nothing".to_string(),
@@ -255,19 +281,38 @@ impl CfgPrelude {
             }
         }
         let slot_count = outputs.len();
+        outputs.extend(variables.values.iter().map(|(value, _)| *value));
 
         // Prune to every output at once. This is the union the census names as
         // the numerator of the fix, and taking it here is what makes the whole
         // prelude one slice rather than one slice per entry.
         let (pruned, pruned_outputs) = prune_cfg_to_outputs(function, &outputs);
         let publications: Vec<(ValueId, usize)> = pruned_outputs
-            .into_iter()
+            .iter()
+            .copied()
+            .take(slot_count)
             .enumerate()
             .map(|(slot, value)| (value, slot))
             .collect();
 
-        let program = lower_cfg_function_to_prelude_slots(&pruned, &publications, state, bindings)
-            .map_err(|error| refuse(CfgPlanRefusal::Lowering, format!("prelude: {error}")))?;
+        let variable_publications: Vec<_> = pruned_outputs[slot_count..]
+            .iter()
+            .copied()
+            .zip(variables.values.iter().map(|(_, slot)| *slot))
+            .collect();
+        let program = if variable_publications.is_empty() {
+            lower_cfg_function_to_prelude_slots(&pruned, &publications, state, bindings)
+        } else {
+            lower_cfg_function_to_publications(
+                &pruned,
+                &publications,
+                &variable_publications,
+                variables.count,
+                state,
+                bindings,
+            )
+        }
+        .map_err(|error| refuse(CfgPlanRefusal::Lowering, format!("prelude: {error}")))?;
         let program = BlockProgram::adopt(module, program, state_slots)
             .map_err(|error| refuse(CfgPlanRefusal::SlotUnclaimed, format!("prelude: {error}")))?;
 

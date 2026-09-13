@@ -3703,6 +3703,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::ProductRatio
             | NativeOp::SumProductsDiv(_)
             | NativeOp::CheckedValue
+            | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
@@ -3800,6 +3801,7 @@ fn op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::LoadVariable(_)
                 | NativeOp::LoadPreludeSlot(_)
                 | NativeOp::StorePreludeSlot(_)
+                | NativeOp::StoreVariable(_)
                 | NativeOp::Add
                 | NativeOp::Sub
                 | NativeOp::Mul
@@ -3869,6 +3871,7 @@ fn op_writes_state(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::StorePreludeSlot(_)
+            | NativeOp::StoreVariable(_)
             | NativeOp::LimiterStore(_)
             | NativeOp::LimitState(_)
             | NativeOp::LaplaceState(_)
@@ -3929,6 +3932,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::DdtDerivativeState(_)
             | NativeOp::IdtModDerivativeState(_)
             | NativeOp::CheckedValue
+            | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)

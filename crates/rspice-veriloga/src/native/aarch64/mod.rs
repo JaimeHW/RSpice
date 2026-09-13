@@ -220,16 +220,11 @@ pub(super) fn compile_observation_image(
     plan: &NativeObservationPlan,
 ) -> JitResult<NativeModel> {
     let mut image = A64ImageBuilder::new();
-    let assignment = image.append_assignment_pass(&plan.assignments, "observation")?;
-    let post_assignment = if plan.post_assignments.is_empty() {
-        None
-    } else {
-        image.append_assignment_pass(&plan.post_assignments, "post-current observation")?
-    };
+    let assignment = Some(image.append_value(plan.program.borrow(), "canonical observation")?);
     let entries = NativeEntryOffsets {
         assignment,
         prelude: None,
-        post_assignment,
+        post_assignment: None,
         evaluation_kernel: None,
         stamp_kernel: None,
         parameter_defaults: vec![None; model.parameters.len()],

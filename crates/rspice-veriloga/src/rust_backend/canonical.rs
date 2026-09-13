@@ -538,6 +538,7 @@ fn kernel_region_metrics(
                 write!(out, "lane-sum-products-div:{}", terms.len())
             }
             CfgValueKind::Select { .. } => write!(out, "select"),
+            CfgValueKind::ArrayIndex { len, lower, .. } => write!(out, "array-index:{lower}:{len}"),
             CfgValueKind::IntegerArithmetic { op, .. } => write!(out, "integer-arithmetic:{op:?}"),
             CfgValueKind::IntegerBitwise { op, .. } => write!(out, "integer-bitwise:{op:?}"),
             CfgValueKind::IntegerBitwiseNot { .. } => write!(out, "integer-bitwise-not"),
@@ -5546,6 +5547,7 @@ fn truth_output(function: &CfgFunction, value: ValueId, name: &str) -> String {
 fn bindings() -> EmitBindings {
     EmitBindings {
         integer_result: "ctx.integer_result".into(),
+        array_index: "ctx.checked_array_index".into(),
         checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
         simparam_required: "ctx.simparam_required".into(),
@@ -5565,7 +5567,8 @@ fn uses_checked_operations(function: &CfgFunction) -> bool {
             CfgValueKind::Binary {
                 op: CfgBinaryOp::CheckedValue,
                 ..
-            } | CfgValueKind::IntegerArithmetic { .. }
+            } | CfgValueKind::ArrayIndex { .. }
+                | CfgValueKind::IntegerArithmetic { .. }
                 | CfgValueKind::IntegerBitwise { .. }
                 | CfgValueKind::IntegerBitwiseNot { .. }
                 | CfgValueKind::SimParamValue(_)

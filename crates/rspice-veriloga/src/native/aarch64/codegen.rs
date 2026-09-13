@@ -17,11 +17,12 @@ use crate::native::abi::{
     integer_shift_const_descriptor, rspice_above_state_native,
     rspice_absdelay_derivative_max_native, rspice_absdelay_derivative_native,
     rspice_absdelay_state_max_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
-    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_cos, rspice_cosh,
-    rspice_cross_state_native, rspice_ddt_derivative_native, rspice_ddt_state_native,
-    rspice_default_limit_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot,
-    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
-    rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
+    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
+    rspice_checked_array_index_native, rspice_cos, rspice_cosh, rspice_cross_state_native,
+    rspice_ddt_derivative_native, rspice_ddt_state_native, rspice_default_limit_native,
+    rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot, rspice_idt_jacobian_native,
+    rspice_idt_state_native, rspice_idtmod_state_native, rspice_integer_operation_native,
+    rspice_laplace_derivative_native, rspice_laplace_step_native,
     rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
     rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
     rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
@@ -1650,6 +1651,9 @@ impl FunctionCompiler {
             NativeOp::LoadVariable(index) => {
                 self.emit_array_load(result, self.variables_register(), index)?
             }
+            NativeOp::StoreVariable(index) => {
+                self.emit_array_store(result, self.variables_register(), index)?
+            }
             NativeOp::LoadVariableDyn { base, len, lower } => {
                 self.emit_dynamic_variable_load(prepared, base, len, lower)?
             }
@@ -1720,6 +1724,23 @@ impl FunctionCompiler {
                 0,
                 crate::native::abi::rspice_product_ratio_native as *const () as usize,
             )?,
+            NativeOp::CheckedArrayIndex { len, lower } => {
+                let raw = unary_operand(prepared)?;
+                if raw != DReg::D0 {
+                    self.encoder.fmov_d(DReg::D0, raw);
+                }
+                self.encoder.mov_x(XReg::X0, self.context_register())?;
+                self.encoder.mov_u64(XReg::X1, len as u64)?;
+                self.encoder.mov_u64(XReg::X2, lower as u64)?;
+                self.encoder.mov_u64(
+                    HOST_ABI.indirect_call_scratch,
+                    rspice_checked_array_index_native as *const () as usize as u64,
+                )?;
+                self.encoder.blr(HOST_ABI.indirect_call_scratch);
+                if prepared.result != DReg::D0 {
+                    self.encoder.fmov_d(prepared.result, DReg::D0);
+                }
+            }
             NativeOp::IntegerCast => self.emit_integer_cast(prepared)?,
             NativeOp::CheckedValue => self.emit_operand_context_helper(
                 prepared,

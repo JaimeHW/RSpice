@@ -1716,15 +1716,21 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
         // Every SSA value already owns a local here, which is what lets the
         // store take its address and its value in the order WebAssembly wants
         // without a scratch local of its own.
-        NativeOp::StorePreludeSlot(index) => {
+        NativeOp::StorePreludeSlot(index) | NativeOp::StoreVariable(index) => {
+            let (pointer, length) = if matches!(op, NativeOp::StoreVariable(_)) {
+                (FRAME_VARIABLES_PTR_OFFSET, FRAME_VARIABLES_LEN_OFFSET)
+            } else {
+                (
+                    FRAME_PRELUDE_SLOTS_PTR_OFFSET,
+                    FRAME_PRELUDE_SLOTS_LEN_OFFSET,
+                )
+            };
             let operand = operands.first().copied().ok_or_else(|| {
-                WasmJitError::Encoding("prelude slot store has no operand".into())
+                WasmJitError::Encoding("output publication has no operand".into())
             })?;
-            emit_bounds_guard(body, FRAME_PRELUDE_SLOTS_LEN_OFFSET, index)?;
+            emit_bounds_guard(body, length, index)?;
             body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
-            body.instruction(&WasmInstruction::I32Load(i32_mem(
-                FRAME_PRELUDE_SLOTS_PTR_OFFSET,
-            )));
+            body.instruction(&WasmInstruction::I32Load(i32_mem(pointer)));
             body.instruction(&WasmInstruction::LocalGet(value_local(operand.index())?));
             body.instruction(&WasmInstruction::F64Store(f64_mem(element_offset(
                 index, 8,
@@ -2242,6 +2248,11 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
             descriptor.aux0 = index_i32(terms)?;
         }
         NativeOp::CheckedValue => descriptor.opcode = 340,
+        NativeOp::CheckedArrayIndex { len, lower } => {
+            descriptor.opcode = 3;
+            descriptor.aux1 = index_i32(len)?;
+            descriptor.aux2 = lower;
+        }
         NativeOp::IntegerCast => descriptor.opcode = 300,
         NativeOp::IntegerBinary(kind) => {
             // 310 and 320 are already the immediate-shift/bitwise ranges.

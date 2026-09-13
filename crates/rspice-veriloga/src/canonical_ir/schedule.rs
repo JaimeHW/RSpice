@@ -1783,6 +1783,9 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::BranchUnknownFlow(_)
         | CfgValueKind::EventState(_)
         | CfgValueKind::EvaluationInput(_)
+        // The check must report into this evaluation's error state, even if
+        // its input is constant and an earlier evaluation rejected it.
+        | CfgValueKind::ArrayIndex { .. }
         | CfgValueKind::Ddt { .. }
         // `idt` accumulates into per-instance history on every evaluation, so
         // caching it at a coarser class would integrate a step the solver did

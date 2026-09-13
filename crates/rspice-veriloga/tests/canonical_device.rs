@@ -1572,6 +1572,64 @@ for v in [-0.8,0.0,1.3] {
 }
 
 #[test]
+fn generated_index_checks_keep_dead_reads_guarded_and_retryable() {
+    let source = "module indexed(p,n); inout p,n; electrical p,n; real a[-1:1],x;
+        analog begin if(V(p,n)>0) x=a[10+V(p,n)]; I(p,n)<+0; end endmodule";
+    let (state, stamp, noise) = generated_parts(source, "guarded index checks");
+    run_generated_main(
+        "guarded index checks",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for (v,failed) in [(-0.5,false),(0.5,true),(-0.5,false),(0.5,true)] {
+    runtime::clear_evaluation_error();
+    instance.begin_stateful_evaluation();
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext{voltages:&bias,temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper{sink:Some(&mut sink)});
+    assert_eq!(ctx.evaluation_failed(),failed);
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_indexed_arrays_preserve_higher_derivatives() {
+    let source = "module indexed(p,n); inout p,n; electrical p,n;
+        parameter real slot=-0.5; real a[-1:1]; integer k;
+        analog begin a[slot]=pow(V(p,n),4);
+        for(k=0;k<3;k=k+1) a[slot]=ddx(a[slot],V(p,n));
+        I(p,n)<+a[slot]; end endmodule";
+    let (state, stamp, noise) = generated_parts(source, "indexed higher derivatives");
+    run_generated_main(
+        "indexed higher derivatives",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+for v in [-0.75_f64,0.0,1.25] {
+    instance.begin_stateful_evaluation();
+    let bias=[v,0.0];
+    let ctx=runtime::GeneratedEvalContext{voltages:&bias,temperature:300.15};
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper{sink:Some(&mut sink)});
+    assert!((sink[10]-24.0).abs()<1e-12,"Jacobian: {sink:?}");
+    assert!((sink[20]+sink[10]*v-24.0*v).abs()<1e-12,"current: {sink:?}");
+    assert!(!ctx.evaluation_failed());
+}
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
 fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
     for (index, (expression, static_real, dynamic_real, imaginary)) in [
         (
@@ -6697,7 +6755,17 @@ fn compile(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), Stri
     if output.status.success() {
         return Ok(());
     }
-    Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    Err(format!(
+        "rustc exited with {} for {}:
+stdout:
+{}
+stderr:
+{}",
+        output.status,
+        lib.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
 }
 
 fn run_shared_model_cache(name: &str, state: &str, stamp: &str, noise: &str) -> Result<(), String> {
@@ -7400,6 +7468,11 @@ pub mod runtime {
     include_str!("../../rspice-veriloga-runtime/src/integer.rs"),
     r#"
     }
+    pub mod array_index {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/array_index.rs"),
+    r#"
+    }
     pub type Value = f64;
     pub use crate::simparam::{GeneratedSimulationParameters,SimulationParameter};
     pub use crate::analog_effects::*;
@@ -8075,6 +8148,10 @@ pub mod runtime {
         pub fn report_event_control_error(&self, _operator: &'static str, _slot: usize, _source: GeneratedEventControlError) { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); }
         pub fn analog_tasks_enabled(&self) -> bool { TASKS_ENABLED.load(std::sync::atomic::Ordering::SeqCst) }
         pub fn evaluation_failed(&self) -> bool { EVALUATION_FAILED.load(std::sync::atomic::Ordering::SeqCst) }
+        pub fn checked_array_index(&self, raw: f64, len: usize, lower: i64) -> f64 {
+            array_index::checked_array_slot(raw,0,len,lower).map(|offset|offset as f64)
+                .unwrap_or_else(|_|{EVALUATION_FAILED.store(true,std::sync::atomic::Ordering::SeqCst);f64::NAN})
+        }
         pub fn integer_result(&self, result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
             result.unwrap_or_else(|_| { EVALUATION_FAILED.store(true, std::sync::atomic::Ordering::SeqCst); f64::NAN })
         }

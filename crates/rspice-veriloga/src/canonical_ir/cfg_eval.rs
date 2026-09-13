@@ -393,6 +393,8 @@ pub enum CfgEvalError {
     DigitalConstructInAnalogEvaluation {
         what: &'static str,
     },
+    /// A runtime index violates conversion, declared bounds or storage limits.
+    ArrayIndex(String),
     /// An analog bitwise or shift operand is not a representable `integer`.
     ///
     /// Reported rather than substituted. Verilog-AMS defines these operators
@@ -446,6 +448,7 @@ impl std::fmt::Display for CfgEvalError {
                 "{what} is a discrete-domain construct and cannot be evaluated \
                  as part of an analog body"
             ),
+            Self::ArrayIndex(reason) => write!(f, "runtime array index failed: {reason:?}"),
             Self::IntegerOperand { reason } => {
                 write!(f, "an analog integer operator operand is {reason}")
             }
@@ -1352,6 +1355,12 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             // operator discards, and discarding it is the answer: the result is
             // piecewise constant, so its derivative is zero, which is exactly
             // what the rule pass produces for it.
+            CfgValueKind::ArrayIndex { input, lower, len } => {
+                let raw = self.read(input)?.real();
+                let offset = crate::array_index::checked_array_slot(raw, 0, len as usize, lower)
+                    .map_err(|error| CfgEvalError::ArrayIndex(format!("{error:?}")))?;
+                S::from_f64(offset as f64)
+            }
             CfgValueKind::IntegerArithmetic { op, left, right } => {
                 let result = crate::integer_runtime::integer_arithmetic(
                     op,

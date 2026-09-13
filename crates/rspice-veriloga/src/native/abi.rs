@@ -3288,6 +3288,20 @@ pub extern "C" fn rspice_native_dynamic_variable_error(
     0.0
 }
 
+/// Check a canonical SSA array selection without reading mutable variable storage.
+#[unsafe(export_name = "rspice_checked_array_index_native")]
+pub extern "C" fn rspice_checked_array_index_native(
+    raw: f64,
+    ctx: *const EvalContext,
+    len: usize,
+    lower: i64,
+) -> f64 {
+    match checked_array_slot(raw, 0, len, lower) {
+        Ok(offset) => offset as f64,
+        Err(_) => rspice_native_dynamic_variable_error(raw, ctx, len, lower),
+    }
+}
+
 fn dynamic_variable_offset(raw_index: f64, len_i64: i64, lower: i64) -> Option<usize> {
     let len = usize::try_from(len_i64).ok()?;
     checked_array_slot(raw_index, 0, len, lower).ok()

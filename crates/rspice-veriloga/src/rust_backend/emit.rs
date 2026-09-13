@@ -138,6 +138,7 @@ pub struct EmitBindings {
     pub analog_finish: String,
     /// Checked integer result callback; the owner retains evaluation failures.
     pub integer_result: String,
+    pub array_index: String,
     /// Checked derivative callback; the owner retains operand or derivative failures.
     pub checked_value: String,
 }
@@ -157,6 +158,7 @@ impl Default for EmitBindings {
             time: "time".into(),
             analog_finish: "analog_finish".into(),
             integer_result: "integer_result".into(),
+            array_index: "checked_array_index".into(),
             checked_value: "checked_derivative_value".into(),
             ddt: "ddt".into(),
             ddt_derivative: "ddt_derivative".into(),
@@ -394,12 +396,18 @@ pub const RUNTIME_PRELUDE: &str = concat!(
     "\n}\n#[allow(unused_imports)] use arithmetic::{product_div, product_sum_div, sum_products_div, sum_products_div_lanes};\n",
     "mod integer {\n",
     include_str!("../../../rspice-veriloga-runtime/src/integer.rs"),
+    "\n}\nmod array_index {\n",
+    include_str!("../../../rspice-veriloga-runtime/src/array_index.rs"),
     "\n}\n",
     r#"
 fn checked_derivative_value(primal: f64, derivative: f64) -> f64 {
     assert!(primal.is_finite(), "ddx operand is not finite");
     assert!(derivative.is_finite(), "ddx derivative is not finite");
     derivative
+}
+fn checked_array_index(raw: f64, len: usize, lower: i64) -> f64 {
+    array_index::checked_array_slot(raw, 0, len, lower)
+        .expect("standalone generated array index must be valid") as f64
 }
 fn integer_result(result: Result<f64, integer::IntegerRuntimeError>) -> f64 {
     result.expect("standalone generated integer evaluation must be valid")
@@ -664,6 +672,18 @@ impl Emitter<'_> {
         let mut worklist = Vec::new();
         for output in outputs {
             mark_live(*output, &mut self.emitted, &mut worklist);
+        }
+        // A checked selection is observable even when its selected value is
+        // discarded. Keep both the check and its source guard executable.
+        for block in &self.function.blocks {
+            for instruction in &block.instructions {
+                if matches!(
+                    self.function.value(instruction.result).kind,
+                    CfgValueKind::ArrayIndex { .. }
+                ) {
+                    mark_live(instruction.result, &mut self.emitted, &mut worklist);
+                }
+            }
         }
         propagate_value_liveness(self.function, &incoming, &mut self.emitted, &mut worklist);
 
@@ -936,7 +956,12 @@ impl Emitter<'_> {
                 // one into another can both reorder state effects and emit
                 // an illegal nested borrow, such as ddt(outer, ddt(inner, x)).
                 // Keep their SSA bindings; ordinary arithmetic still inlines.
-                if self.function.value(result).kind.state_site().is_some() {
+                if self.function.value(result).kind.state_site().is_some()
+                    || matches!(
+                        self.function.value(result).kind,
+                        CfgValueKind::ArrayIndex { .. }
+                    )
+                {
                     continue;
                 }
                 let same_block = reader_of[usize::from(result)]
@@ -2166,6 +2191,11 @@ impl Emitter<'_> {
                     operator: "zi filter",
                 });
             }
+            CfgValueKind::ArrayIndex { input, lower, len } => format!(
+                "{}({}, {len}usize, {lower}i64)",
+                bindings.array_index,
+                self.numeric_operand(*input)
+            ),
             CfgValueKind::IntegerArithmetic { op, left, right } => {
                 let result = super::expr::integer_binary_result(
                     &format!("Int{op:?}"),

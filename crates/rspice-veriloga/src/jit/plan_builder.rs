@@ -72,7 +72,7 @@ pub(crate) enum AssignmentRootPolicy {
     /// Native-only: the browser route has no way to publish a second module on
     /// demand and serves a readback from the bytecode the `CompiledModel`
     /// already carries.
-    #[cfg(feature = "native")]
+    #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
     ObservationPass,
 }
 
@@ -114,18 +114,10 @@ pub(crate) fn build_model_plan_from_bytecode(model: &CompiledModel) -> JitResult
     build_model_plan_inner(model, None, AssignmentRootPolicy::PostfixEntries)
 }
 
-/// Lower the observation pass: the assignment program that publishes every
-/// externally observable variable, and nothing else.
-///
-/// This is the pass an evaluation used to run and no longer does. It carries no
-/// entries, no kernels and no prelude, because nothing in it is evaluated for a
-/// residual: its whole output is the variable array. It is sound to run *after*
-/// an evaluation rather than inside one because
-/// [`split_canonical_assignment_phases`] cuts the pass at the first assignment
-/// that reads a contribution current — everything before the cut is a function
-/// of parameters, voltages, branch unknowns, operator state and time, none of
-/// which an entry writes, and everything after the cut already ran after the
-/// entries on both routes.
+/// Publish final named variables through canonical control flow and AD.
+/// The caller runs this after the numerical pass, with completed contribution
+/// currents and the same immutable procedural inputs. Equation values and
+/// readback values therefore share derivative semantics at every finite order.
 #[cfg(feature = "native")]
 pub(crate) fn build_observation_plan(
     model: &CompiledModel,
@@ -133,35 +125,7 @@ pub(crate) fn build_observation_plan(
 ) -> JitResult<NativeObservationPlan> {
     validate_canonical_artifact_for_model(model, artifact)?;
     super::coverage::validate_jit_coverage(model)?;
-    let canonical_branch_unknown_map = canonical_branch_unknown_runtime_map(model, &artifact.mir)?;
-    let identifier_index = NativeIdentifierIndex::new(&artifact.mir, &model.variable_names);
-    let base_limits = NativeLoweringLimits::for_model(model)
-        .with_canonical_branch_unknown_map(&canonical_branch_unknown_map)
-        .with_identifier_index(&identifier_index)
-        .with_prevalidated_mir();
-    let prior_current_probes = assignment_prior_current_probes(model);
-    let (assignments, post_assignments, assignment_dependencies, post_assignment_dependencies) =
-        lower_assignment_phases(
-            model,
-            Some(artifact),
-            base_limits.with_prior_current_probes(&prior_current_probes),
-            AssignmentRootPolicy::ObservationPass,
-        )?;
-    Ok(NativeObservationPlan {
-        assignments,
-        post_assignments,
-        // Every entry-shaped dependency list stays empty because this plan has
-        // no entries; the shape check in `NativeModel` is what enforces that.
-        current_dependencies: NativeCurrentDependencies {
-            assignment_current_pairs: assignment_dependencies.current_pairs,
-            assignment_prior_currents: assignment_dependencies.prior_currents,
-            assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
-            post_assignment_current_pairs: post_assignment_dependencies.current_pairs,
-            post_assignment_prior_currents: post_assignment_dependencies.prior_currents,
-            post_assignment_branch_unknowns: post_assignment_dependencies.branch_unknowns,
-            ..NativeCurrentDependencies::default()
-        },
-    })
+    super::cfg_observation::build(model, artifact)
 }
 
 /// The completed contribution currents an assignment may probe, in stamp order.
@@ -597,11 +561,11 @@ fn build_model_plan_inner(
         current_dependencies,
         assignment_coverage: match policy {
             AssignmentRootPolicy::PostfixEntries => NativeAssignmentCoverage::ObservableVariables,
-            AssignmentRootPolicy::CfgPreludeSlots if !model.event_state_variables.is_empty() => {
+            AssignmentRootPolicy::CfgPreludeSlots if requires_eager_event_observations(model) => {
                 NativeAssignmentCoverage::ObservableVariables
             }
             AssignmentRootPolicy::CfgPreludeSlots => NativeAssignmentCoverage::CfgPlanReads,
-            #[cfg(feature = "native")]
+            #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
             AssignmentRootPolicy::ObservationPass => NativeAssignmentCoverage::ObservableVariables,
         },
     };
@@ -3022,6 +2986,15 @@ fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
     live
 }
 
+fn requires_eager_event_observations(model: &CompiledModel) -> bool {
+    model.event_state_variables.iter().any(|slot| {
+        model
+            .evaluation_input_variables
+            .binary_search(slot)
+            .is_err()
+    })
+}
+
 pub(crate) fn live_canonical_assignment_slots(
     model: &CompiledModel,
     mir: &MirModel,
@@ -3056,13 +3029,13 @@ pub(crate) fn live_canonical_assignment_slots(
             mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
             // Replaying a stateful body after acceptance is a new event, not an
             // observation. Retain its named values during the actual evaluation.
-            if !model.event_state_variables.is_empty() {
+            if requires_eager_event_observations(model) {
                 mark_observable_variable_roots(model, &mut live);
             }
         }
         // The observable set, and nothing beyond it: this pass exists to
         // publish those names and runs no entry that could read anything else.
-        #[cfg(feature = "native")]
+        #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
         AssignmentRootPolicy::ObservationPass => mark_observable_variable_roots(model, &mut live),
     }
     propagate_live_assignment_slots(
@@ -4439,6 +4412,13 @@ fn mark_cfg_plan_variable_roots(
         mark_native_program_variable_reads(&program, live);
     }
     for &slot in &model.event_state_variables {
+        if model
+            .evaluation_input_variables
+            .binary_search(&slot)
+            .is_ok()
+        {
+            continue;
+        }
         if let Some(root) = live.get_mut(slot) {
             *root = true;
         }

@@ -750,6 +750,13 @@ pub enum CfgValueKind {
         then_value: ValueId,
         else_value: ValueId,
     },
+    /// Checked zero-based selection offset. Index conversion is discrete and
+    /// does not carry derivative lanes; its validation remains executable.
+    ArrayIndex {
+        input: ValueId,
+        lower: i64,
+        len: u32,
+    },
     /// Checked signed 32-bit arithmetic, with a zero continuous derivative.
     IntegerArithmetic {
         op: crate::integer_runtime::IntegerArithmeticOperation,
@@ -1242,6 +1249,7 @@ impl CfgValueKind {
             | Self::SumProductsDiv { .. }
             | Self::LaneSumProductsDiv { .. }
             | Self::Select { .. }
+            | Self::ArrayIndex { .. }
             | Self::IntegerArithmetic { .. }
             | Self::IntegerBitwise { .. }
             | Self::IntegerBitwiseNot { .. }
@@ -1364,6 +1372,7 @@ impl CfgValueKind {
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
+            | Self::ArrayIndex { input, .. }
             | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..
@@ -1604,6 +1613,7 @@ impl CfgValueKind {
             | Self::Ddx { value: input, .. }
             | Self::LaneWiden { input }
             | Self::LaneExtract { input, .. }
+            | Self::ArrayIndex { input, .. }
             | Self::IntegerBitwiseNot { input }
             | Self::LimitPrevious {
                 proposed: input, ..

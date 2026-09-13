@@ -611,6 +611,7 @@ pub(super) fn grouped_noise_extension(
         last_crossing: "rspice_last_crossing!".into(),
         cross_slots: cross_slots.clone(),
         integer_result: "ctx.integer_result".into(),
+        array_index: "ctx.checked_array_index".into(),
         checked_value: "ctx.checked_derivative_value".into(),
         analysis: "ctx.analysis".into(),
         simparam_required: "ctx.simparam_required".into(),
