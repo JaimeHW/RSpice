@@ -201,15 +201,16 @@ pub const CASES: &[ClauseCase] = &[
     },
     ClauseCase {
         clause: "LRM 2.4 7.3.3",
-        name: "a_probe_of_a_net_that_is_not_a_terminal_is_refused_by_name",
+        name: "a_process_probes_the_internal_net_of_its_own_instance",
         requirement: "a process may probe *any* continuous net of its module, internal nets \
                       included",
-        derivation: "An internal analog net has no circuit node until the builder assigns one, \
-                     which happens after the module is constructed, so this route reaches only \
-                     the nets the deck attached. The refusal has to name the net, the module, \
-                     and the clause it is falling short of — a bound stated is a bound a user \
-                     can work around, and one that is not is a mystery.",
-        verdict: Verdict::BoundedByImplementation,
+        derivation: "Two equal resistors set each private midpoint to half its input. Opposing \
+                     0-to-2 V and 2-to-0 V ramps make two instances sample complementary \
+                     midpoint values on clock edges at 5.05, 25.05, 45.05 and 65.05 ns. Their \
+                     0.5 V comparisons produce 0,1,1,0 and 1,0,0,1 respectively. Reusing \
+                     the other instance's node, reading ground, or probing the terminal \
+                     instead of the divider midpoint cannot satisfy the complete traces.",
+        verdict: Verdict::Conforms,
     },
     ClauseCase {
         clause: "LRM 2.4 7.3.6.1",

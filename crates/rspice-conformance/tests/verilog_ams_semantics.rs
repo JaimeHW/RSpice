@@ -312,33 +312,51 @@ fn a_process_probes_the_continuous_net_at_the_edge_that_woke_it() {
 }
 
 #[test]
-fn a_probe_of_a_net_that_is_not_a_terminal_is_refused_by_name() {
-    let case = ams::case("a_probe_of_a_net_that_is_not_a_terminal_is_refused_by_name");
-    assert_eq!(case.verdict, Verdict::BoundedByImplementation);
+fn a_process_probes_the_internal_net_of_its_own_instance() {
+    use rspice_core::xspice::DigitalState::{One, Zero};
+
+    let case = ams::case("a_process_probes_the_internal_net_of_its_own_instance");
+    assert_eq!(case.verdict, Verdict::Conforms);
 
     let model = ams::ModelFile::new("internal_probe", ams::PROBES_AN_INTERNAL_NET);
     let deck = format!(
-        "* a process probing an internal analog net\n\
-         vin p 0 pwl(0 0 40n 2)\n\
+        "* each process probes its own private divider midpoint\n\
+         vin p 0 pwl(0 0 40n 2 80n 0)\n\
+         vin2 p2 0 pwl(0 2 40n 0 80n 2)\n\
          vclk clk 0 pulse(0 3.3 5n 0.1n 0.1n 10n 20n)\n\
          x1 p 0 clk qs probes_an_internal_net\n\
+         x2 p2 0 clk qs2 probes_an_internal_net\n\
          rq qs 0 10k\n\
+         rq2 qs2 0 10k\n\
          .va \"{}\" probes_an_internal_net\n\
-         .tran 1n 40n\n\
+         .tran 0.2n 80n\n\
          .end\n",
         model.deck_path()
     );
-    let error = expect_refusal(
-        ams::run_deck(&deck, 40.0e-9, 1.0e-9),
-        "a probe of an internal analog net",
-    );
-    // The net, the module, and the clause the refusal falls short of. A bound
-    // stated is one a user can work around.
-    assert_names(
-        &error,
-        case,
-        &["mid", "probes_an_internal_net", "7.3.3", "not a terminal"],
-    );
+    let result = ams::run_deck(&deck, 80.0e-9, 0.2e-9).expect("both internal probes run");
+    for (net, states, changes_ns) in [
+        ("qs", [Zero, One, One, Zero], &[25.05, 65.05][..]),
+        ("qs2", [One, Zero, Zero, One], &[5.05, 25.05, 65.05][..]),
+    ] {
+        let trace = result
+            .digital_trace_named(net)
+            .expect("accepted probe trace");
+        for (time_ns, expected) in [6.0, 26.0, 46.0, 66.0].into_iter().zip(states) {
+            let point = trace
+                .iter()
+                .rfind(|point| point.time <= time_ns * 1e-9)
+                .expect("a value exists after each clock edge");
+            assert_eq!(point.value.state, expected, "{net} at {time_ns} ns");
+        }
+        let changes: Vec<_> = trace.iter().filter(|point| point.time > 1e-9).collect();
+        assert_eq!(changes.len(), changes_ns.len(), "{net}: {trace:?}");
+        for (point, expected_ns) in changes.into_iter().zip(changes_ns) {
+            assert!(
+                (point.time - expected_ns * 1e-9).abs() < 0.5e-9,
+                "{net} must change on the sampling edge at {expected_ns} ns: {point:?}"
+            );
+        }
+    }
 }
 
 // ===========================================================================
