@@ -1,8 +1,8 @@
 //! Unit tests for the Xyce conformance suite.
 //!
 //! Split out of `xyce.rs`, which was a single 96,731-line file. These are
-//! the harness's own tests â€” contract classification, reference decoding,
-//! measurement parsing â€” not the vendored deck corpus, which is driven by
+//! the harness's own tests — contract classification, reference decoding,
+//! measurement parsing — not the vendored deck corpus, which is driven by
 //! `tests/xyce_regression.rs`.
 
 use super::output::XyceGeneratedVbicNoiseIssue;
