@@ -108,11 +108,6 @@ fn the_only_untyped_verilog_a_refusals_left_are_not_elaboration() {
     /// and is deliberately *not* an elaboration error, with why.
     const ALLOWED: &[(&str, &str)] = &[
         (
-            "Verilog-A nominal temperature must be finite",
-            "a `.OPTIONS TNOM` value, validated once for the deck before any \
-             instance is bound; it belongs to no instance and no master",
-        ),
-        (
             "Selecting Verilog-AMS connectrules requires the veriloga feature",
             "a build-configuration refusal raised only when the veriloga \
              feature is off, which is exactly when this seam does not exist",

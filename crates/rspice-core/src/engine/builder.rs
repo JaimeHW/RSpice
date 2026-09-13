@@ -5284,14 +5284,14 @@ impl Engine {
                 "DEVICE.PNJMAXI must be a finite scalar greater than zero".into(),
             ));
         }
+        let nominal_temperature = netlist.options.tnom.unwrap_or(27.0);
+        if !nominal_temperature.is_finite() || nominal_temperature <= -273.15 {
+            return Err(SimulationError::Circuit(
+                "TNOM (nominal temperature) must be finite and above absolute zero".into(),
+            ));
+        }
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         {
-            let nominal_temperature = netlist.options.tnom.unwrap_or(27.0);
-            if !nominal_temperature.is_finite() || nominal_temperature <= -273.15 {
-                return Err(SimulationError::Circuit(
-                    "Verilog-A nominal temperature must be finite and above absolute zero".into(),
-                ));
-            }
             circuit
                 .generated_simulation_parameters
                 .set_pnjmaxi(netlist.options.device_pnjmaxi);
@@ -10316,6 +10316,37 @@ mod tests {
     }
 
     #[test]
+    fn global_nominal_temperature_is_validated_without_device_models() {
+        let deck = "Global nominal temperature\nV1 p 0 1\n.end\n";
+        let mut netlist = Netlist::parse(deck).expect("model-free fixture parses");
+        for spice_dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect,
+                ..Default::default()
+            });
+            for tnom in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -273.15, -300.0] {
+                netlist.options.tnom = Some(tnom);
+                let error = engine
+                    .build_circuit(&netlist)
+                    .expect_err("invalid global TNOM must fail without a semiconductor model");
+                assert!(error.to_string().contains("TNOM"), "{error}");
+                assert!(error.to_string().contains("finite"), "{error}");
+                assert!(error.to_string().contains("absolute zero"), "{error}");
+            }
+            for tnom in [(-273.15_f64).next_up(), -40.0, -0.0, 0.0, 27.0, 125.0] {
+                netlist.options.tnom = Some(tnom);
+                engine
+                    .build_circuit(&netlist)
+                    .unwrap_or_else(|error| panic!("valid TNOM={tnom} failed: {error}"));
+            }
+        }
+    }
+
+    #[test]
     fn native_bjt_rejects_invalid_effective_tnom() {
         let deck = "BJT invalid nominal temperature\n\
             V1 c 0 1\n\
@@ -10334,16 +10365,22 @@ mod tests {
         let model_error = Engine::new(config.clone())
             .build_circuit(&invalid_model)
             .expect_err("absolute-zero BJT model TNOM must fail");
-        assert!(model_error.to_string().contains("TNOM"));
-        assert!(model_error.to_string().contains("absolute zero"));
+        assert!(model_error.to_string().contains("TNOM"), "{model_error}");
+        assert!(
+            model_error.to_string().contains("absolute zero"),
+            "{model_error}"
+        );
 
         let mut invalid_global = Netlist::parse(deck).expect("BJT invalid-global fixture parses");
         invalid_global.options.tnom = Some(f64::NAN);
         let global_error = Engine::new(config)
             .build_circuit(&invalid_global)
             .expect_err("non-finite global BJT TNOM must fail");
-        assert!(global_error.to_string().contains("TNOM"));
-        assert!(global_error.to_string().contains("finite"));
+        assert!(global_error.to_string().contains("TNOM"), "{global_error}");
+        assert!(
+            global_error.to_string().contains("finite"),
+            "{global_error}"
+        );
     }
 
     #[test]
