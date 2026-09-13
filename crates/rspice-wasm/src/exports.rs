@@ -1620,8 +1620,18 @@ mod wasm_tests {
             .run_ac_with_abort(&deck, &[1e3, 1e6, 1e9], &rspice_core::abort_signal::NoAbort)
             .unwrap()
         {
-            let sum = ac.currents.iter().copied().sum::<rspice_core::Complex64>();
-            let scale = ac.currents.iter().map(|i| i.norm()).sum::<f64>();
+            // Promoted device branches also appear in the result. KCL at the
+            // device boundary sums only its four external terminal probes.
+            let terminals = ["VC", "VB", "VE", "VS"].map(|name| {
+                let index = ac
+                    .branch_names
+                    .iter()
+                    .position(|branch| branch.eq_ignore_ascii_case(name))
+                    .expect("external BJT terminal probe");
+                ac.currents[index]
+            });
+            let sum = terminals.iter().copied().sum::<rspice_core::Complex64>();
+            let scale = terminals.iter().map(|i| i.norm()).sum::<f64>();
             assert!(sum.norm() < 2e-11 * scale, "terminal sum={sum:?}");
         }
     }
