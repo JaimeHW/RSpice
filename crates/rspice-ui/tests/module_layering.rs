@@ -610,13 +610,13 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // hardcopy adapters' resolved scenes to produce the sealed interchange
     // snapshot. It mutates nothing, but it reads the whole session.
     "publication_snapshot",
+    // Demonstration circuits and the shared hierarchy reference populate
+    // AppState through its APIs. They do not depend on the application root;
+    // application validation tests can use the same authored projects.
+    "examples",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",
-    // A static catalog of demonstration circuits. It sits here rather than up
-    // in the presentation group because nothing presents it except the menu
-    // that lists it, and it loads a circuit into `AppState`.
-    "examples",
     // Workflows that mutate application state.
     "workflows/file_workflow",
     "workflows/project_workflow",
