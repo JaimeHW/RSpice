@@ -312,7 +312,8 @@ use super::*;
 // two fewer `DigitalLogicalNot` values per logical negation (2026-09-12).
 // Version 93 retains ordinary procedural entry values separately from current
 // assignments and records their zero-seeded derivative lifetimes (HIR 59).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 93;
+// Version 94 uses canonical checked array selections and canonical readback (HIR 60).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 94;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
