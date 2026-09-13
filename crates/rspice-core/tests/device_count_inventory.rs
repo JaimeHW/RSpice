@@ -63,6 +63,10 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "branch residuals retained from the current Core stamp",
     ),
     (
+        "xyce_core_transient_roundoff",
+        "per-row representable-current bounds for the current Core stamp, not authored devices",
+    ),
+    (
         "scheduler",
         "the discrete-event lanes: resolved event-node values and the \
          per-output drive state behind them, the pending event queue, the HDL \
