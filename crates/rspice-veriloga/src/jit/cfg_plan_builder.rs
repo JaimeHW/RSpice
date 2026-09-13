@@ -1060,13 +1060,14 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 .position(|name| *name == variable.name)
         })
         .collect();
-    // EvaluationInput addresses the compact VM snapshot directly. Require
-    // declaration-order slots to match that exact accepted-state layout.
-    if artifact
+    // EvaluationInput reads and candidate publications address the compact
+    // state layout directly. Require declaration order to match the runtime.
+    if (artifact
         .hir
         .variables
         .iter()
         .any(|variable| variable.retains_input)
+        || !model.switch_branch_variables.is_empty())
         && (event_state_variables.len() != model.event_state_variables.len()
             || event_state_variables
                 .iter()
@@ -1075,7 +1076,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     {
         return Err(refuse(
             CfgPlanRefusal::ShippedPlan,
-            "retained input slots disagree with the runtime state layout".into(),
+            "canonical candidate slots disagree with the runtime state layout".into(),
         ));
     }
     let bindings = CfgRuntimeBindings::from_mir(
@@ -1220,18 +1221,23 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
         .chain(noise_published.iter().copied())
         .collect();
 
-    // The CFG already owns ordinary retained inputs and their current writes.
-    // Publish their candidates from this same body instead of rebuilding AD
-    // shadows in the assignment replay merely to commit those source values.
-    let mut retained_publications = Vec::new();
-    for &variable in &model.evaluation_input_variables {
+    // The CFG owns ordinary retained writes and source-ordered branch kinds.
+    // Publish their final candidates from this body; procedural event writes
+    // still belong to assignment replay. Required candidates cannot fall back
+    // to uninitialized storage if the prelude cannot publish them.
+    let mut candidate_publications = Vec::new();
+    for &variable in model
+        .evaluation_input_variables
+        .iter()
+        .chain(&model.switch_branch_variables)
+    {
         let state_slot = model
             .event_state_variables
             .binary_search(&variable)
             .map_err(|_| {
                 refuse(
                     CfgPlanRefusal::ShippedPlan,
-                    "retained variable has no state slot".into(),
+                    "canonical candidate has no state slot".into(),
                 )
             })?;
         let value = cfg
@@ -1241,23 +1247,23 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             .ok_or_else(|| {
                 refuse(
                     CfgPlanRefusal::NoScalar,
-                    "retained candidate has no scalar output".into(),
+                    "canonical candidate has no scalar output".into(),
                 )
             })?;
         if !taint.publishable(value) {
             return Err(refuse(
                 CfgPlanRefusal::PreludeLiveCurrent,
-                "retained candidate depends on a contribution current published after the prelude"
+                "canonical candidate depends on a contribution current published after the prelude"
                     .into(),
             ));
         }
-        retained_publications.push((value, variable));
+        candidate_publications.push((value, variable));
     }
 
-    let prelude = if prelude_entries.is_empty() && retained_publications.is_empty() {
+    let prelude = if prelude_entries.is_empty() && candidate_publications.is_empty() {
         None
     } else {
-        let built = if retained_publications.is_empty() {
+        let built = if candidate_publications.is_empty() {
             CfgPrelude::build(
                 module.as_str(),
                 &scalarized.function,
@@ -1275,7 +1281,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
                 &bindings,
                 &slots,
                 VariablePublications {
-                    values: &retained_publications,
+                    values: &candidate_publications,
                     count: model.num_variables,
                 },
             )
@@ -1291,7 +1297,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             // reaches is in the union's (mvsg_cmc, measured). The class is
             // recorded rather than swallowed; the size census prints it.
             Err(refused) => {
-                if !retained_publications.is_empty() {
+                if !candidate_publications.is_empty() {
                     // These are required candidate writes, not optional scratch
                     // sharing. A plan that lost them must never execute.
                     return Err(refused);
@@ -1886,6 +1892,59 @@ endmodule
             crate::jit::model_plan::NativeAssignmentCoverage::CfgPlanReads,
             "branch-kind storage is not a procedural event body"
         );
+    }
+
+    #[test]
+    fn switch_branch_candidates_use_canonical_publication() {
+        let (model, artifact) = compile(
+            "module switch_candidates(p); inout p; electrical p;
+             analog begin if (V(p)>0) V(p)<+2; else I(p)<+0.5*V(p);
+             end endmodule",
+        );
+        assert_eq!(model.switch_branch_variables.len(), 1);
+        let plan = build_model_plan_from_canonical_cfg(&model, &artifact)
+            .expect("switch candidates have a canonical plan")
+            .plan;
+        assert!(plan.prelude.is_some());
+        assert!(
+            plan.assignments.is_empty(),
+            "the equation body can publish branch-kind candidates without assignment replay"
+        );
+    }
+
+    #[test]
+    fn switch_candidate_over_a_port_current_uses_available_solver_storage() {
+        let (model, artifact) = compile(
+            "module switch_current(p,q,n); inout p,q,n; electrical p,q,n;
+             analog begin I(q,n)<+V(q,n);
+             if (I(<q>)>0) V(p,n)<+2; else I(p,n)<+0.5*V(p,n);
+             end endmodule",
+        );
+        assert_eq!(model.switch_branch_variables.len(), 1);
+        let (plan, refused) = build_default_model_plan_reported(&model, &artifact)
+            .expect("the port sensor is available before residual evaluation");
+        assert!(refused.is_none(), "{refused:?}");
+        let program = plan
+            .prelude
+            .as_ref()
+            .expect("candidate publication requires a prelude");
+        let reads = &program.program;
+        assert!(reads.current_pair_dependencies().is_empty());
+        assert!(reads.prior_current_dependencies().is_empty());
+        let crate::jit::plan_program::PlanProgram::Blocks(body) = reads else {
+            panic!("canonical candidate publication requires a block program");
+        };
+        assert!(
+            body.ssa().instructions().iter().any(|instruction| matches!(
+                instruction.op(),
+                crate::jit::expr::NativeOp::LoadVoltage {
+                    pos: crate::jit::expr::VoltageNode::Internal(1),
+                    ..
+                }
+            )),
+            "the port sensor is carried in the second internal MNA unknown"
+        );
+        plan.validate_shape(&model).unwrap();
     }
 
     #[test]

@@ -140,7 +140,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 47 lowers retained procedural entries separately from current assignments.
 /// Version 48 publishes canonical source candidates and checks SSA array indices.
 /// Version 49 separates branch-kind state from eager event observation roots.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 49;
+/// Version 50 publishes switch-branch candidates from the canonical prelude.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 50;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2312,6 +2313,14 @@ endmodule
         let export = harness.stamp_value_export(stamp);
         assert_eq!(harness.call(&export), 0);
         assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+        assert_eq!(report.model.switch_branch_variables.len(), 1);
+        let kind_offset = FusedKernelHarness::VARIABLES as usize
+            + report.model.switch_branch_variables[0] * size_of::<f64>();
+        assert_eq!(
+            harness.read_f64(kind_offset),
+            1.0,
+            "the final potential source publishes its branch kind"
+        );
         assert!(
             harness.read_f64(seen_offset).is_nan(),
             "ordinary switch branches leave named readback to canonical observation"

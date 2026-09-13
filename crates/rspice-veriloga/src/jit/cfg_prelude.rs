@@ -29,7 +29,7 @@
 //! values rather than over entries.
 //!
 //! Scratch slots and runtime variables have independent layouts. The same
-//! prelude also publishes ordinary retained source candidates directly into
+//! prelude also publishes ordinary retained and branch-kind candidates directly into
 //! validated variable slots. Derivative outputs remain in scratch storage and
 //! never acquire a variable identity merely because they share an SSA value.
 //!

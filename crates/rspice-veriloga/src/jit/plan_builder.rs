@@ -2989,7 +2989,7 @@ fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
 fn requires_eager_event_observations(model: &CompiledModel) -> bool {
     // Branch kinds are accepted discontinuity state, but their writes are
     // ordinary source evaluation. They cannot replay a procedural event when
-    // named values are observed. Keep their required assignment roots below.
+    // named values are observed. The canonical prelude publishes their candidates.
     model.event_state_variables.iter().any(|slot| {
         model
             .evaluation_input_variables
@@ -4415,7 +4415,9 @@ fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) 
 ///   `LoadVariable` on that variable's slot
 ///   ([`crate::native::cfg_program`]), because the runtime commits and restores
 ///   the accepted value through the variable array; the assignment that writes
-///   it is the one the prelude is reading back.
+///   it is the one the prelude is reading back. Ordinary retained candidates
+///   and switch-branch kinds are instead published by the canonical prelude;
+///   their assignments are needed here only for another explicit reader.
 /// * **The simulator-control task variables.** `$bound_step` and
 ///   `$discontinuity` are read back out of the array by
 ///   [`VerilogADevice::try_transient_bound_step`](crate::device::VerilogADevice::try_transient_bound_step)
@@ -4454,6 +4456,7 @@ fn mark_cfg_plan_variable_roots(
             .evaluation_input_variables
             .binary_search(&slot)
             .is_ok()
+            || model.switch_branch_variables.binary_search(&slot).is_ok()
         {
             continue;
         }

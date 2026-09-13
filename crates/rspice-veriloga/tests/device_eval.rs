@@ -27,9 +27,16 @@ fn switch_branch_observation_preserves_stamps_and_accepted_state() {
     );
     let mut device = fixture.device("SWITCH", &[1]);
     device.set_internal_node_indices(&[2]);
+    assert_eq!(fixture.switch_branch_variables.len(), 1);
+    let kind = fixture.switch_branch_variables[0];
     for voltage in [-0.75_f64, 0.5, -0.25, 1.25] {
         let solution = [voltage, 0.125];
         let before = collect_stamps(&mut device, &solution);
+        let expected_kind = f64::from(voltage > 0.0);
+        assert_eq!(
+            device.variable(&fixture.variable_names[kind]),
+            Some(expected_kind)
+        );
         let pending = device.discontinuity_pending();
         let checkpoint = device.checkpoint_state().unwrap();
         fixture.observe(&mut device);
@@ -51,6 +58,7 @@ fn switch_branch_observation_preserves_stamps_and_accepted_state() {
         assert_eq!(collect_stamps(&mut device, &solution), before);
         device.try_advance_state().unwrap();
         let accepted = device.checkpoint_state().unwrap();
+        assert_eq!(accepted.accepted.variables[kind], expected_kind);
         fixture.observe(&mut device);
         assert_eq!(device.checkpoint_state().unwrap(), accepted);
         device.update_all_voltages(&[-voltage, 0.25]);
@@ -58,6 +66,80 @@ fn switch_branch_observation_preserves_stamps_and_accepted_state() {
         device.validate_checkpoint_state(&accepted).unwrap();
         device.apply_validated_checkpoint_state(&accepted);
         assert_eq!(collect_stamps(&mut device, &solution), before);
+    }
+}
+
+#[test]
+fn switch_branch_candidate_uses_current_trial_port_sensor() {
+    let fixture = compile(
+        "module port_switch(p,q,n); inout p,q,n; electrical p,q,n;
+         analog begin I(q,n)<+V(q,n);
+         if (I(<q>)>0) V(p,n)<+2; else I(p,n)<+0.5*V(p,n);
+         end endmodule",
+    );
+    assert_eq!(fixture.internal_state_nodes.len(), 2);
+    assert_eq!(fixture.switch_branch_variables.len(), 1);
+    let kind = fixture.switch_branch_variables[0];
+    let mut device = fixture.device("PORT_SWITCH", &[1, 2, 0]);
+    device.set_internal_node_indices(&[3, 4]);
+    for current in [-0.4, 0.6, -0.2, 0.8] {
+        // The source-current sensor is oriented out of q, opposite I(<q>).
+        // Keep V(q) fixed: the current Newton candidate, rather than an
+        // already-evaluated V(q) contribution or a previous trial, selects p.
+        let solution = [0.75, 2.0, 0.125, -current];
+        collect_stamps(&mut device, &solution);
+        let expected = f64::from(current > 0.0);
+        assert_eq!(
+            device.variable(&fixture.variable_names[kind]),
+            Some(expected)
+        );
+        fixture.observe(&mut device);
+        assert_eq!(
+            device.variable(&fixture.variable_names[kind]),
+            Some(expected)
+        );
+        device.try_advance_state().unwrap();
+        assert_eq!(
+            device.checkpoint_state().unwrap().accepted.variables[kind],
+            expected
+        );
+    }
+}
+
+#[test]
+fn switch_candidate_publication_does_not_replay_procedural_events() {
+    let fixture = compile(
+        "module event_switch(p); inout p; electrical p; real count;
+         analog begin @(initial_step) count=count+1;
+         if (V(p)+count>0) V(p)<+2; else I(p)<+0.5*V(p);
+         end endmodule",
+    );
+    let kind = fixture.switch_branch_variables[0];
+    let mut device = fixture.device("EVENT_SWITCH", &[1]);
+    device.set_internal_node_indices(&[2]);
+    device.try_begin_analysis(2).unwrap();
+    for (initial, voltage) in [(true, -0.5), (false, -2.0), (false, 0.5)] {
+        device.try_set_analysis_step(initial, false).unwrap();
+        let solution = [voltage, 0.125];
+        let stamps = collect_stamps(&mut device, &solution);
+        let expected_kind = f64::from(voltage + 1.0 > 0.0);
+        assert_eq!(device.variable("count"), Some(1.0));
+        assert_eq!(
+            device.variable(&fixture.variable_names[kind]),
+            Some(expected_kind)
+        );
+        let checkpoint = device.checkpoint_state().unwrap();
+        for _ in 0..3 {
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("count"), Some(1.0));
+            assert_eq!(device.checkpoint_state().unwrap(), checkpoint);
+        }
+        assert_eq!(collect_stamps(&mut device, &solution), stamps);
+        device.try_advance_state().unwrap();
+        assert_eq!(
+            device.checkpoint_state().unwrap().accepted.variables[kind],
+            expected_kind
+        );
     }
 }
 
