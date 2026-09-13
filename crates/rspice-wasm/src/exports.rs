@@ -2369,10 +2369,17 @@ mod wasm_tests {
             ..Default::default()
         });
         for level in [1, 2, 3, 4, 5, 6, 9] {
+            // Ngspice levels 4/5 use BSIM1/2, whose oxide thickness is in
+            // micrometres. Use the same valid cards as the native current test.
+            let legacy = if matches!(level, 4 | 5) {
+                "TOX=.03 VFB=-.7 PHI=.6 VBB=-5 VDD=5"
+            } else {
+                ""
+            };
             for (kind, polarity) in [("NMOS", 1.0), ("PMOS", -1.0)] {
                 for series in ["", "RD=20 RS=10"] {
                     let netlist = rspice_core::Netlist::parse(&format!(
-                        "MOS current report in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVB b 0 {}\nM1 d g s b mm L=1u W=1u\n.model mm {kind}(LEVEL={level} VTO={} IS=1u CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
+                        "MOS current report in WASM\nVD d 0 0\nVS s 0 0\nVG g 0 DC {} PWL(0 {} 1u {} 2u {})\nVB b 0 {}\nM1 d g s b mm L=1u W=1u\n.model mm {kind}(LEVEL={level} VTO={} IS=1u CGSO=1m CGDO=2m CGBO=3m CBS=2n CBD=3n {legacy} {series})\n.options RELTOL=1e-8 ABSTOL=1e-12 VNTOL=1e-10\n.print tran ID(M1) IG(M1) IS(M1) IB(M1) I(VD) I(VG) I(VS) I(VB)\n.end\n",
                         -polarity, -polarity, -0.5 * polarity, -polarity, 0.2 * polarity, polarity,
                     )).unwrap();
                     let result = engine
