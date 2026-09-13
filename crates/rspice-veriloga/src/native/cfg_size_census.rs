@@ -629,3 +629,103 @@ fn the_cfg_route_plan_size_census() {
     println!("cfg-size models={models} lowering={lower} images={images}");
     assert!(models > 0, "the filter matched no shipped module");
 }
+
+/// Attribute the production assignment plan without repeatedly lowering every
+/// numerical entry cone. Postfix operation counts identify the source owners;
+/// executable SSA counts for the largest programs show how much sharing survives.
+#[test]
+#[ignore = "assignment measurement; run with --release --features native and RSPICE_CFG_CENSUS_FILTER"]
+fn production_assignment_plan_cost_attribution() {
+    use crate::jit::assignment::NativeAssignment;
+    use crate::jit::cfg_plan_builder::build_default_model_plan_reported;
+    use crate::jit::expr::NativeProgram;
+    use crate::jit::ssa::Program;
+
+    let filter = std::env::var("RSPICE_CFG_CENSUS_FILTER")
+        .expect("set RSPICE_CFG_CENSUS_FILTER to select the modules to measure");
+    assert!(!filter.trim().is_empty(), "the measurement filter is empty");
+    let mut models = 0;
+    for shipped in shipped_census_models_matching(Some(&filter)) {
+        models += 1;
+        let (plan, refused) =
+            build_default_model_plan_reported(&shipped.model, &shipped.canonical_ir)
+                .expect("build the production assignment plan");
+        let mut pending: Vec<_> = plan
+            .assignments
+            .iter()
+            .chain(&plan.post_assignments)
+            .collect();
+        let mut programs: Vec<(String, &NativeProgram)> = Vec::new();
+        let mut loops = 0;
+        let mut indexed = 0;
+        let mut tasks = 0;
+        while let Some(assignment) = pending.pop() {
+            match assignment {
+                NativeAssignment::Direct { var_index, program } => programs.push((
+                    format!("{var_index}:{}", shipped.model.variable_names[*var_index]),
+                    program,
+                )),
+                NativeAssignment::Indexed {
+                    base, index, value, ..
+                } => {
+                    indexed += 1;
+                    programs.push((format!("{base}:index"), index));
+                    programs.push((
+                        format!("{base}:{}[]", shipped.model.variable_names[*base]),
+                        value,
+                    ));
+                }
+                NativeAssignment::Loop { condition, body } => {
+                    loops += 1;
+                    programs.push((format!("loop-{loops}:condition"), condition));
+                    pending.extend(body);
+                }
+                NativeAssignment::Task(task) => {
+                    tasks += 1;
+                    programs.extend(
+                        task.expressions().enumerate().map(|(index, expression)| {
+                            (format!("task-{tasks}:{index}"), expression)
+                        }),
+                    );
+                }
+            }
+        }
+        programs.sort_by(|left, right| {
+            right
+                .1
+                .ops()
+                .len()
+                .cmp(&left.1.ops().len())
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        let operations: usize = programs
+            .iter()
+            .map(|(_, program)| program.ops().len())
+            .sum();
+        let guarded_operations: usize = programs
+            .iter()
+            .filter(|(_, program)| program.needs_guarded_conditionals())
+            .map(|(_, program)| program.ops().len())
+            .sum();
+        println!(
+            "assignment-cost model={} refused={refused:?} programs={} operations={operations} guarded_operations={guarded_operations} loops={loops} indexed={indexed} tasks={tasks} event_state_variables={}",
+            shipped.name,
+            programs.len(),
+            shipped.model.event_state_variables.len()
+        );
+        for (owner, program) in programs.iter().take(40) {
+            let ssa =
+                Program::lower_executable(program).expect("lower assignment to executable SSA");
+            println!(
+                "assignment-cost model={} owner={owner} operations={} instructions={} blocks={} guarded={}",
+                shipped.name,
+                program.ops().len(),
+                ssa.instructions().len(),
+                ssa.blocks().len(),
+                program.needs_guarded_conditionals()
+            );
+        }
+    }
+    assert!(models > 0, "the filter matched no shipped module");
+    println!("assignment-cost models={models}");
+}
