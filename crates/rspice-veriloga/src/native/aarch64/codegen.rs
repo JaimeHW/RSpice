@@ -4137,13 +4137,18 @@ mod tests {
     }
 
     fn execute(program: &NativeProgram, variables: &[f64]) -> f64 {
-        execute_with_context(program, std::ptr::null(), variables)
+        // Fallible helpers publish status even when their successful path only
+        // reads the variables array. Every generated entry needs a live frame.
+        let context = EvalContext::empty_for_test();
+        let result = execute_with_context(program, &context, variables);
+        assert!(context.take_runtime_error().is_none());
+        result
     }
 
     #[cfg(target_arch = "aarch64")]
     fn execute_with_context(
         program: &NativeProgram,
-        context: *const EvalContext,
+        context: &EvalContext,
         variables: &[f64],
     ) -> f64 {
         let bytes = compile_value_function(program).expect("compile AArch64 scalar function");
@@ -4157,7 +4162,7 @@ mod tests {
     fn execute_assignment(
         program: &NativeProgram,
         variable_index: usize,
-        context: *const EvalContext,
+        context: &EvalContext,
         variables: &mut [f64],
     ) {
         let bytes = compile_assignment_function(variable_index, program)
@@ -4173,7 +4178,7 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     fn execute_assignment_pass(
         assignments: &[NativeAssignment],
-        context: *const EvalContext,
+        context: &EvalContext,
         variables: &mut [f64],
     ) {
         let bytes = compile_assignment_pass_function(assignments)
@@ -4292,10 +4297,12 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn assignment_entries_store_results_and_skip_failed_stores() {
+        let context = EvalContext::empty_for_test();
         let assignment = program(vec![NativeOp::LoadVariable(0), NativeOp::MulConst(2.0)], 1);
         let mut variables = [3.0_f64, 0.0];
-        execute_assignment(&assignment, 1, std::ptr::null(), &mut variables);
+        execute_assignment(&assignment, 1, &context, &mut variables);
         assert_eq!(variables, [3.0, 6.0]);
+        assert!(context.take_runtime_error().is_none());
 
         let helper_assignment = program(
             vec![
@@ -4304,10 +4311,10 @@ mod tests {
             ],
             1,
         );
-        execute_assignment(&helper_assignment, 1, std::ptr::null(), &mut variables);
+        execute_assignment(&helper_assignment, 1, &context, &mut variables);
         assert!((variables[1] - 3.0_f64.exp()).abs() < 1.0e-14);
+        assert!(context.take_runtime_error().is_none());
 
-        let context = EvalContext::empty_for_test();
         variables[1] = 99.0;
         let failed = NativeProgram::from_ops_for_test(
             vec![NativeOp::LoadPriorCurrent(0)],
@@ -4334,8 +4341,10 @@ mod tests {
             },
         ];
         let mut variables = [100.0_f64, 200.0];
-        execute_assignment_pass(&assignments, std::ptr::null(), &mut variables);
+        let context = EvalContext::empty_for_test();
+        execute_assignment_pass(&assignments, &context, &mut variables);
         assert_eq!(variables, [1.0, 3.0]);
+        assert!(context.take_runtime_error().is_none());
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -4349,8 +4358,10 @@ mod tests {
             value: program(vec![NativeOp::Const(9.0)], 1),
         }];
         let mut variables = [1.0_f64, 2.0, 3.0];
-        execute_assignment_pass(&valid, std::ptr::null(), &mut variables);
+        let context = EvalContext::empty_for_test();
+        execute_assignment_pass(&valid, &context, &mut variables);
         assert_eq!(variables, [1.0, 9.0, 3.0]);
+        assert!(context.take_runtime_error().is_none());
 
         let invalid = [NativeAssignment::Indexed {
             base: 0,
@@ -4359,7 +4370,6 @@ mod tests {
             index: program(vec![NativeOp::Const(4.0)], 1),
             value: program(vec![NativeOp::Const(99.0)], 1),
         }];
-        let context = EvalContext::empty_for_test();
         execute_assignment_pass(&invalid, &context, &mut variables);
         assert_eq!(variables, [1.0, 9.0, 3.0]);
         assert!(context.take_runtime_error().is_some());
@@ -4383,14 +4393,15 @@ mod tests {
             body: loop_body,
         }];
         let mut variables = [3.0_f64, 0.0];
-        execute_assignment_pass(&assignments, std::ptr::null(), &mut variables);
+        let context = EvalContext::empty_for_test();
+        execute_assignment_pass(&assignments, &context, &mut variables);
         assert_eq!(variables, [0.0, 3.0]);
+        assert!(context.take_runtime_error().is_none());
 
         let unbounded = [NativeAssignment::Loop {
             condition: program(vec![NativeOp::Const(1.0)], 1),
             body: Vec::new(),
         }];
-        let context = EvalContext::empty_for_test();
         execute_assignment_pass(&unbounded, &context, &mut variables);
         assert_eq!(variables, [0.0, 3.0]);
         assert!(context.take_runtime_error().is_some());
@@ -4730,11 +4741,24 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     #[test]
     fn scalar_and_operand_context_helpers_obey_aapcs64() {
+        let context = EvalContext::empty_for_test();
         let table = program(vec![NativeOp::Const(1.0), NativeOp::TableLookup(0)], 1);
-        assert_eq!(execute(&table, &[]), 0.0);
+        assert_eq!(execute_with_context(&table, &context, &[]), 0.0);
+        assert!(
+            context
+                .take_runtime_error()
+                .unwrap()
+                .contains("missing table storage")
+        );
 
         let ddt = program(vec![NativeOp::Const(1.0), NativeOp::DdtState(0)], 1);
-        assert_eq!(execute(&ddt, &[]), 0.0);
+        assert_eq!(execute_with_context(&ddt, &context, &[]), 0.0);
+        assert!(
+            context
+                .take_runtime_error()
+                .unwrap()
+                .contains("invalid state storage")
+        );
     }
 
     #[test]
