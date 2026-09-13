@@ -1,8 +1,8 @@
 //! Unit tests for the Xyce conformance suite.
 //!
 //! Split out of `xyce.rs`, which was a single 96,731-line file. These are
-//! the harness's own tests — contract classification, reference decoding,
-//! measurement parsing — not the vendored deck corpus, which is driven by
+//! the harness's own tests â€” contract classification, reference decoding,
+//! measurement parsing â€” not the vendored deck corpus, which is driven by
 //! `tests/xyce_regression.rs`.
 
 use super::output::XyceGeneratedVbicNoiseIssue;
@@ -10974,6 +10974,38 @@ fn level2_diode_relational_admission_is_netlist_aware_and_fail_closed() {
         !admitted(&owner.replace("DTEMP=diodeDtemp", "DTEMP=diodeDtemp DTEMP=diodeDtemp")),
         "repeated DTEMP must fail closed"
     );
+    for repeated in [
+        "DTEMP=0 dtemp = {diodeDtemp}",
+        "DTEMP={diodeDtemp}\n+ dTeMp=diodeDtemp",
+        "TEMP=25 TEMP=25",
+        "TEMP=25\n+ DTEMP=0",
+    ] {
+        let source = owner.replace("DTEMP=diodeDtemp", repeated);
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("the parser supports repeated instance assignments");
+        assert!(
+            !admitted(&source),
+            "repeated temperature source: {repeated}"
+        );
+        assert!(
+            XyceTestRunner::validate_static_step_diode_contract(&netlist, "DZR").is_err(),
+            "the static-step qualification must preserve the same source constraint"
+        );
+    }
+    for single in [
+        "dtemp = {diodeDtemp}",
+        "DTEMP={diodeDtemp + 0*TEMP}",
+        "DTEMP=diodeDtemp ; DTEMP=0 is only a comment",
+        "DTEMP=diodeDtemp\n* DTEMP=0 is only a comment",
+        "\n+ DTEMP=diodeDtemp",
+    ] {
+        let source = owner.replace("DTEMP=diodeDtemp", single);
+        let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path)
+            .expect("one temperature assignment parses");
+        assert!(admitted(&source), "single temperature source: {single}");
+        XyceTestRunner::validate_static_step_diode_contract(&netlist, "DZR")
+            .unwrap_or_else(|error| panic!("single temperature source {single}: {error}"));
+    }
     assert!(
         !admitted(&owner.replace(
             ".options device temp = 27.0",

@@ -1252,6 +1252,7 @@ impl XyceTestRunner {
             }
         }
         if !Self::native_xyce_level2_diode_effective_temperature_is_valid(netlist, instance_params)
+            || !Self::level2_diode_source_temperature_is_unambiguous(netlist, element_name)
         {
             return Err(format!(
                 "native .STEP .PRINT TRAN comparison requires diode '{}' to have one non-conflicting TEMP or DTEMP whose effective temperature remains above absolute zero",

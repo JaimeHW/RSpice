@@ -3503,8 +3503,67 @@ impl XyceTestRunner {
                 netlist,
                 instance_params,
             )
+            && Self::level2_diode_source_temperature_is_unambiguous(netlist, &element.name)
             && Self::find_unique_model_in(&netlist.models, model)
                 .is_some_and(Self::model_is_native_xyce_level2_tbv_diode)
+    }
+
+    pub(super) fn level2_diode_source_temperature_is_unambiguous(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> bool {
+        use rspice_core::netlist::lexer::{TokenKind, tokenize};
+
+        // The parser intentionally retains only the final instance assignment.
+        // This qualification envelope requires at most one authored temperature
+        // assignment, so the normalized parameter vector cannot prove it.
+        let Some(source) = netlist.source_text.as_deref() else {
+            return false;
+        };
+        let Some((_, body)) = source.split_once('\n') else {
+            return false;
+        };
+        let mut found = false;
+        let mut subcircuit_depth = 0usize;
+        for line in Self::logical_netlist_lines(body) {
+            let command = line.split_whitespace().next().unwrap_or("");
+            if command.eq_ignore_ascii_case(".end") {
+                break;
+            }
+            if command.eq_ignore_ascii_case(".subckt") {
+                subcircuit_depth += 1;
+            } else if command.eq_ignore_ascii_case(".ends") {
+                subcircuit_depth = subcircuit_depth.saturating_sub(1);
+            }
+            if subcircuit_depth != 0 || !command.eq_ignore_ascii_case(element_name) {
+                continue;
+            }
+            if found {
+                return false;
+            }
+            found = true;
+            let Ok(tokens) = tokenize(line.trim()) else {
+                return false;
+            };
+            // The diode parser requires '=' on named instance assignments.
+            // Braced/quoted expressions are single tokens, so identifiers and
+            // comparisons inside a value cannot become false assignments.
+            let temperature_assignments = tokens
+                .windows(2)
+                .filter(|pair| {
+                    matches!(
+                        (&pair[0].kind, &pair[1].kind),
+                        (TokenKind::Ident(name), TokenKind::Equals)
+                            if name.eq_ignore_ascii_case("TEMP")
+                                || name.eq_ignore_ascii_case("DTEMP")
+                    )
+                })
+                .count();
+            if temperature_assignments > 1 {
+                return false;
+            }
+        }
+        found
     }
 
     pub(super) fn native_xyce_level2_diode_effective_temperature_is_valid(
