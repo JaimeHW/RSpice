@@ -132,8 +132,6 @@ const LAUNCHER_VERSION_LABEL: &str =
     concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH"));
 const LAUNCHER_NAV_WIDTH: f32 = 184.0;
 const LAUNCHER_COMPACT_NAV_HEIGHT: f32 = 42.0;
-const LAUNCHER_PAGE_HEADING_MIN_HEIGHT: f32 = 76.0;
-const LAUNCHER_PHONE_HEADING_MIN_HEIGHT: f32 = 68.0;
 const LAUNCHER_PAGE_FOOTER_MIN_HEIGHT: f32 = 51.0;
 const LAUNCHER_PHONE_MAX_WIDTH: f32 = 460.0;
 const LAUNCHER_TOUCH_MAX_WIDTH: f32 = 820.0;
@@ -930,39 +928,14 @@ fn launcher_body(
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .inner_margin(if layout.phone {
-            Margin::symmetric(11, 9)
-        } else {
-            Margin::symmetric(16, 10)
-        })
-        .show(ui, |ui| {
-            if layout.compact {
-                project_heading_copy(ui);
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| project_heading_actions(ui, action, false));
-            } else {
-                // One control-height track, so the title centres on the buttons
-                // at touch sizes as well as desktop ones.
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), t.metrics.ctl_h),
-                    egui::Layout::left_to_right(Align::Center),
-                    |ui| {
-                        project_heading_copy(ui);
-                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            // Right-to-left allocation right-aligns the button group, so
-                            // allocate in reverse to preserve the mockup's visible order.
-                            project_heading_actions(ui, action, true);
-                        });
-                    },
-                );
-            }
-        });
-    ui.painter().hline(
-        ui.max_rect().x_range(),
-        ui.cursor().top(),
-        Stroke::new(1.0, t.color.border),
+    launcher_page_heading(
+        ui,
+        "Projects",
+        None,
+        layout,
+        Some(&mut |ui: &mut Ui, reverse_allocation: bool| {
+            project_heading_actions(ui, action, reverse_allocation);
+        }),
     );
 
     launcher_toolbar(ui, app, layout);
@@ -979,20 +952,6 @@ fn launcher_body(
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
         .show(&mut list_ui, |ui| project_list(ui, app, action, layout));
-}
-
-fn project_heading_copy(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let heading = ui.label(
-        egui::RichText::new("Projects")
-            .font(theme::sans(15.0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.ctx().accesskit_node_builder(heading.id, |node| {
-        node.set_role(egui::accesskit::Role::Heading);
-        node.set_label("Projects");
-        node.set_level(3);
-    });
 }
 
 fn project_heading_actions(
@@ -2095,12 +2054,17 @@ mod tests {
         assert_eq!(compact.header_height, LAUNCHER_COMPACT_HEADER_HEIGHT);
     }
 
-    /// Every string the Projects page paints, with the rect it was painted in.
-    fn painted_projects_page(size: Vec2, safe_mode: bool) -> Vec<(String, Rect)> {
+    /// Every string one launcher page paints, with the rect it was painted in.
+    fn painted_launcher_page(
+        size: Vec2,
+        safe_mode: bool,
+        page: ProjectLauncherPage,
+    ) -> Vec<(String, Rect)> {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.open_project_launcher();
+        app.state.workbench.project_launcher_page = page;
         app.state.workbench.safe_mode.active = safe_mode;
         let mut output = None;
         for _ in 0..3 {
@@ -2132,7 +2096,7 @@ mod tests {
             let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
             let header_bottom = layout.surface.top() + layout.header_height;
             for safe_mode in [false, true] {
-                let painted = painted_projects_page(size, safe_mode);
+                let painted = painted_launcher_page(size, safe_mode, ProjectLauncherPage::Projects);
                 let context = format!("{}x{}, safe mode {safe_mode}: {painted:?}", size.x, size.y);
                 let header: Vec<&str> = painted
                     .iter()
@@ -2160,6 +2124,33 @@ mod tests {
                         "COMMERCIAL",
                         "Start RSpice",
                         "Open engineering work",
+                    ] {
+                        assert!(!text.contains(retired), "{retired:?} painted; {context}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The Safe mode page states its launch scope in one line under a plain
+    /// title, and never offers to start safe mode while it is already on.
+    #[test]
+    fn safe_mode_page_heading_is_one_title_and_its_start_is_truthful() {
+        for size in [vec2(1280.0, 800.0), vec2(390.0, 844.0)] {
+            for active in [false, true] {
+                let painted = painted_launcher_page(size, active, ProjectLauncherPage::SafeMode);
+                let context = format!("{}x{}, active {active}: {painted:?}", size.x, size.y);
+                let shows = |wanted: &str| painted.iter().any(|(text, _)| text == wanted);
+
+                assert!(shows("Changes apply to this launch only."), "{context}");
+                assert_eq!(shows("Safe mode active"), active, "{context}");
+                assert_eq!(shows("Start RSpice in safe mode"), !active, "{context}");
+                for (text, _) in &painted {
+                    for retired in [
+                        "STARTUP ISOLATION",
+                        "Start with optional subsystems disabled",
+                        "Safe mode is active for this launch",
+                        "crash isolation",
                     ] {
                         assert!(!text.contains(retired), "{retired:?} painted; {context}");
                     }

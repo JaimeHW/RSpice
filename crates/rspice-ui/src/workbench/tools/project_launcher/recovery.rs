@@ -17,10 +17,10 @@ pub(super) fn recovery_page(
     let t = Tokens::get(ui.ctx());
     launcher_page_heading(
         ui,
-        "STARTUP RECOVERY · NON-DESTRUCTIVE",
-        "Recover interrupted work",
-        "Recovery opens comparison copies. It never overwrites the saved project, immutable results, or approved evidence until you explicitly accept changes.",
+        "Recovery",
+        Some("Recovery opens a comparison copy and never overwrites the saved project."),
         layout,
+        None,
     );
     let footer_height = launcher_footer_reserve(
         ui,
@@ -479,22 +479,25 @@ pub(super) fn safe_mode_page(
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
-    let t = Tokens::get(ui.ctx());
     launcher_page_heading(
         ui,
-        "SAFE MODE · STARTUP ISOLATION",
-        "Start with optional subsystems disabled",
-        "Safe mode changes only the current launch. It is intended for crash isolation, display recovery, extension diagnosis, and project repair.",
+        "Safe mode",
+        Some("Changes apply to this launch only."),
         layout,
+        None,
     );
     let active = app.state.workbench.safe_mode.active;
+    // Starting is refused while safe mode is already on, so the disabled
+    // control says what is true rather than offering the start again.
+    let start_label = if active {
+        "Safe mode active"
+    } else {
+        "Start RSpice in safe mode"
+    };
     let footer_height = launcher_footer_reserve(
         ui,
         layout,
-        &[
-            ("Open diagnostic folder", false),
-            ("Start RSpice in safe mode", true),
-        ],
+        &[("Open diagnostic folder", false), (start_label, true)],
     );
     let regions = launcher_page_regions(ui, footer_height);
     let mut body_ui = ui.new_child(
@@ -507,25 +510,6 @@ pub(super) fn safe_mode_page(
         .auto_shrink([false, false])
         .show(&mut body_ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    if active {
-                        Frame::new()
-                            .fill(t.color.ok.gamma_multiply(0.10))
-                            .stroke(Stroke::new(1.0, t.color.ok.gamma_multiply(0.65)))
-                            .corner_radius(t.radius)
-                            .inner_margin(Margin::symmetric(12, 9))
-                            .outer_margin(Margin::symmetric(16, 10))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new("Safe mode is active for this launch")
-                                        .font(theme::sans(
-                                            tokens::FS_1,
-                                            FontWeight::SemiBold,
-                                        ))
-                                        .color(t.color.text),
-                                );
-                            });
-                    }
-
                     ui.add_enabled_ui(!active, |ui| {
                         safe_mode_option(
                             ui,
@@ -603,12 +587,12 @@ pub(super) fn safe_mode_page(
         if diagnostics.clicked() {
             *action = Some(LauncherAction::OpenDiagnosticsFolder);
         }
-        let response = Button::new("Start RSpice in safe mode")
+        let response = Button::new(start_label)
             .accent()
             .enabled(!active && options.has_effect())
             .show(ui);
         let response = if active {
-            response.on_disabled_hover_text("Safe mode is already active for this launch")
+            response.on_disabled_hover_text("Safe mode lasts until RSpice restarts")
         } else if !options.has_effect() {
             response.on_disabled_hover_text("Select at least one isolation option")
         } else {
@@ -720,12 +704,19 @@ pub(super) fn safe_mode_option_content_rect(row: Rect) -> Rect {
     row.shrink2(vec2(SAFE_MODE_OPTION_HORIZONTAL_INSET, 0.0))
 }
 
+/// A page's heading actions. The flag asks for reverse allocation, which a
+/// right-to-left track needs to keep the actions in their reading order.
+type HeadingActions<'a> = &'a mut dyn FnMut(&mut Ui, bool);
+
+/// A launcher page's heading: one title on a control-height track, the page's
+/// actions right-aligned beside it (wrapped beneath it on compact layouts),
+/// and at most one short note the page does not otherwise state.
 pub(super) fn launcher_page_heading(
     ui: &mut Ui,
-    eyebrow: &str,
     title: &str,
-    detail: &str,
+    note: Option<&str>,
     layout: LauncherLayout,
+    mut actions: Option<HeadingActions<'_>>,
 ) {
     let t = Tokens::get(ui.ctx());
     Frame::new()
@@ -735,28 +726,12 @@ pub(super) fn launcher_page_heading(
             Margin::symmetric(16, 10)
         })
         .show(ui, |ui| {
-            ui.set_height(
-                (if layout.phone {
-                    LAUNCHER_PHONE_HEADING_MIN_HEIGHT
-                } else {
-                    LAUNCHER_PAGE_HEADING_MIN_HEIGHT
-                }) - if layout.phone { 18.0 } else { 20.0 },
-            );
-            ui.with_layout(
-                egui::Layout::left_to_right(if layout.compact {
-                    Align::Min
-                } else {
-                    Align::Center
-                })
-                .with_main_wrap(true),
+            // One control-height track, so the title centres on the actions
+            // at touch sizes as well as desktop ones.
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), t.metrics.ctl_h),
+                egui::Layout::left_to_right(Align::Center),
                 |ui| {
-                    ui.spacing_mut().item_spacing = vec2(12.0, 3.0);
-                    ui.label(
-                        egui::RichText::new(eyebrow)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint)
-                            .extra_letter_spacing(0.09 * tokens::FS_0),
-                    );
                     let heading = ui.label(
                         egui::RichText::new(title)
                             .font(theme::sans(15.0, FontWeight::SemiBold))
@@ -767,16 +742,34 @@ pub(super) fn launcher_page_heading(
                         node.set_label(title);
                         node.set_level(3);
                     });
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(detail)
-                                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        )
-                        .wrap(),
-                    );
+                    if !layout.compact
+                        && let Some(actions) = actions.as_deref_mut()
+                    {
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            // Right-to-left allocation right-aligns the group, so
+                            // the actions allocate in reverse to keep their order.
+                            actions(ui, true);
+                        });
+                    }
                 },
             );
+            if let Some(note) = note {
+                ui.add_space(2.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(note)
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    )
+                    .wrap(),
+                );
+            }
+            if layout.compact
+                && let Some(actions) = actions
+            {
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| actions(ui, false));
+            }
         });
     ui.painter().hline(
         ui.max_rect().x_range(),
