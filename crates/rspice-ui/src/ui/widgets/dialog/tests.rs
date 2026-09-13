@@ -166,7 +166,7 @@ fn transaction_tablet_retains_mockup_gutters_until_the_phone_breakpoint() {
 }
 
 #[test]
-fn confirmation_is_narrow_on_desktop_and_full_viewport_at_the_phone_breakpoint() {
+fn confirmation_is_a_centred_content_height_card_on_desktop_and_phone() {
     let screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_280.0, 800.0));
     let desktop = DialogLayout::resolve(DialogSize::Confirmation, screen, Some(214.0));
 
@@ -175,11 +175,14 @@ fn confirmation_is_narrow_on_desktop_and_full_viewport_at_the_phone_breakpoint()
     assert_eq!(desktop.radius, 4.0);
     assert!(!desktop.fill_height);
 
-    let phone_breakpoint = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(560.0, 900.0));
-    let phone = DialogLayout::resolve(DialogSize::Confirmation, phone_breakpoint, Some(214.0));
-    assert_eq!(phone.surface_rect, phone_breakpoint);
-    assert_eq!(phone.radius, 0.0);
+    let phone_screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(390.0, 844.0));
+    let phone = DialogLayout::resolve(DialogSize::Confirmation, phone_screen, Some(214.0));
     assert!(phone.narrow);
+    assert_eq!(phone.surface_rect.size(), vec2(366.0, 214.0));
+    assert_eq!(phone.surface_rect.center(), phone_screen.center());
+    assert_eq!(phone.surface_rect.left() - phone_screen.left(), 12.0);
+    assert_eq!(phone.radius, 4.0);
+    assert!(!phone.fill_height);
 }
 
 #[test]

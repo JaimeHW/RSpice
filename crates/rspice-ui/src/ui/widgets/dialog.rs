@@ -37,8 +37,9 @@ mod keyboard;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogSize {
     /// Short confirmations — a few status lines over at most three verbs:
-    /// 480 pt wide, content-height, capped at 760 pt, with the full-viewport
-    /// shell applied at 560 pt like [`Self::Transaction`].
+    /// 480 pt wide, content-height, capped at 760 pt. At 560 pt and below it
+    /// stays a content-height card, centred with a 12 pt gutter on each side
+    /// as a native alert is, rather than becoming a full-viewport sheet.
     Confirmation,
     /// Transactional edits and confirmations: 760 pt wide, content-height,
     /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
@@ -109,11 +110,11 @@ impl DialogSize {
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 560.0,
-                narrow_inset: 0.0,
-                narrow_vertical_inset: 0.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
                 cap_narrow_height: false,
-                edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,
