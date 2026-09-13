@@ -1870,6 +1870,44 @@ endmodule
     }
 
     #[test]
+    fn switch_branch_kind_does_not_require_eager_observable_assignments() {
+        let (model, artifact) = compile(
+            "module switch_readback(p); inout p; electrical p; real seen;
+             analog begin seen=exp(V(p));
+             if (V(p)>0) V(p)<+seen; else I(p)<+seen;
+             end endmodule",
+        );
+        assert_eq!(model.switch_branch_variables.len(), 1);
+        assert_eq!(model.event_state_variables, model.switch_branch_variables);
+        let plan = build_model_plan_from_canonical_cfg(&model, &artifact)
+            .expect("switch branches have a canonical plan");
+        assert_eq!(
+            plan.plan.assignment_coverage,
+            crate::jit::model_plan::NativeAssignmentCoverage::CfgPlanReads,
+            "branch-kind storage is not a procedural event body"
+        );
+    }
+
+    #[test]
+    fn procedural_events_with_switch_branches_keep_eager_observations() {
+        let (model, artifact) = compile(
+            "module event_switch(p); inout p; electrical p; real count,seen;
+             analog begin @(initial_step) count=count+1;
+             seen=count+V(p);
+             if (V(p)>0) V(p)<+seen; else I(p)<+seen;
+             end endmodule",
+        );
+        assert!(!model.switch_branch_variables.is_empty());
+        assert!(model.event_state_variables.len() > model.switch_branch_variables.len());
+        let plan = build_model_plan_from_canonical_cfg(&model, &artifact)
+            .expect("event and switch branches have a canonical plan");
+        assert_eq!(
+            plan.plan.assignment_coverage,
+            crate::jit::model_plan::NativeAssignmentCoverage::ObservableVariables
+        );
+    }
+
+    #[test]
     fn retained_dynamic_array_candidates_use_canonical_publication() {
         let runtime = VerilogACompiler::default()
             .compile_runtime(

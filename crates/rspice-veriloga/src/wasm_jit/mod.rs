@@ -139,7 +139,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 17;
 /// Version 46 emits bounded reads of immutable procedural evaluation inputs.
 /// Version 47 lowers retained procedural entries separately from current assignments.
 /// Version 48 publishes canonical source candidates and checks SSA array indices.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 48;
+/// Version 49 separates branch-kind state from eager event observation roots.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 49;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2267,13 +2268,23 @@ endmodule
             FRAME_INTERNAL_VOLTAGES_LEN_OFFSET, FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
             FRAME_RESULT_OFFSET,
         };
-        let source = "module switched(p); inout p; electrical p; analog begin
+        let source = "module switched(p); inout p; electrical p; real seen; analog begin
+            seen=exp(V(p));
             V(p)<+2*I(p); I(p)<+5*V(p); V(p)<+3*I(p); V(p)<+4*I(p); end endmodule";
         let report = VerilogACompiler::default()
             .compile_runtime(source, None)
             .unwrap();
         let mut harness = FusedKernelHarness::for_source(source, "switched");
+        assert!(!harness.executable.publishes_observable_variables());
+        let seen = report
+            .model
+            .variable_names
+            .iter()
+            .position(|name| name == "seen")
+            .unwrap();
+        let seen_offset = FusedKernelHarness::VARIABLES as usize + seen * size_of::<f64>();
         harness.reset();
+        harness.write_f64(seen_offset, f64::NAN);
         harness.poke_frame_u32(
             FRAME_INTERNAL_VOLTAGES_PTR_OFFSET,
             FusedKernelHarness::VOLTAGES + 8,
@@ -2301,6 +2312,10 @@ endmodule
         let export = harness.stamp_value_export(stamp);
         assert_eq!(harness.call(&export), 0);
         assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+        assert!(
+            harness.read_f64(seen_offset).is_nan(),
+            "ordinary switch branches leave named readback to canonical observation"
+        );
     }
 
     #[test]

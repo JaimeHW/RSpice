@@ -2987,11 +2987,15 @@ fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
 }
 
 fn requires_eager_event_observations(model: &CompiledModel) -> bool {
+    // Branch kinds are accepted discontinuity state, but their writes are
+    // ordinary source evaluation. They cannot replay a procedural event when
+    // named values are observed. Keep their required assignment roots below.
     model.event_state_variables.iter().any(|slot| {
         model
             .evaluation_input_variables
             .binary_search(slot)
             .is_err()
+            && model.switch_branch_variables.binary_search(slot).is_err()
     })
 }
 

@@ -708,10 +708,12 @@ fn production_assignment_plan_cost_attribution() {
             .map(|(_, program)| program.ops().len())
             .sum();
         println!(
-            "assignment-cost model={} refused={refused:?} programs={} operations={operations} guarded_operations={guarded_operations} loops={loops} indexed={indexed} tasks={tasks} event_state_variables={}",
+            "assignment-cost model={} refused={refused:?} programs={} operations={operations} guarded_operations={guarded_operations} loops={loops} indexed={indexed} tasks={tasks} event_state_variables={} retained_inputs={} switch_branch_variables={}",
             shipped.name,
             programs.len(),
-            shipped.model.event_state_variables.len()
+            shipped.model.event_state_variables.len(),
+            shipped.model.evaluation_input_variables.len(),
+            shipped.model.switch_branch_variables.len()
         );
         for (owner, program) in programs.iter().take(40) {
             let ssa =

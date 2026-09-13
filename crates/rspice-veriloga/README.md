@@ -313,6 +313,12 @@ nodes)` and then drives it directly (no trait indirection): set parameters
 one model compile (and JIT) once. `is_using_native()` reports whether the
 JIT is active for diagnostics.
 
+On canonical runtime plans, `observe_variables` publishes ordinary named
+values when requested. Branch-kind state preserves accepted voltage/current
+source-mode changes without forcing every named value into the Newton pass.
+Models with procedural event-owned variables retain eager readback publication
+so observing a value cannot replay an event body.
+
 Native compilation coalesces requests for the same artifact and allows up to
 two independent compilations at once, bounded by available parallelism.
 Ready cache hits do not wait for unrelated compilation. Retention is limited

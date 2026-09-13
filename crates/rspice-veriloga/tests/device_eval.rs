@@ -18,6 +18,50 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn switch_branch_observation_preserves_stamps_and_accepted_state() {
+    let fixture = compile(
+        "module switch_observation(p); inout p; electrical p; real seen;
+         analog begin seen=ddx(ddx(ddx(exp(V(p)),V(p)),V(p)),V(p));
+         if (V(p)>0) V(p)<+2; else I(p)<+0.5*V(p);
+         end endmodule",
+    );
+    let mut device = fixture.device("SWITCH", &[1]);
+    device.set_internal_node_indices(&[2]);
+    for voltage in [-0.75_f64, 0.5, -0.25, 1.25] {
+        let solution = [voltage, 0.125];
+        let before = collect_stamps(&mut device, &solution);
+        let pending = device.discontinuity_pending();
+        let checkpoint = device.checkpoint_state().unwrap();
+        fixture.observe(&mut device);
+        let published = device.checkpoint_state().unwrap();
+        // Checkpoints also carry ordinary readback scratch. Its first
+        // publication changes those values, but cannot accept a branch kind.
+        for &slot in &fixture.event_state_variables {
+            assert_eq!(
+                published.accepted.variables[slot],
+                checkpoint.accepted.variables[slot]
+            );
+        }
+        for _ in 0..2 {
+            fixture.observe(&mut device);
+            assert!((device.variable("seen").unwrap() - voltage.exp()).abs() < 1e-12);
+            assert_eq!(device.checkpoint_state().unwrap(), published);
+            assert_eq!(device.discontinuity_pending(), pending);
+        }
+        assert_eq!(collect_stamps(&mut device, &solution), before);
+        device.try_advance_state().unwrap();
+        let accepted = device.checkpoint_state().unwrap();
+        fixture.observe(&mut device);
+        assert_eq!(device.checkpoint_state().unwrap(), accepted);
+        device.update_all_voltages(&[-voltage, 0.25]);
+        device.try_evaluate().unwrap();
+        device.validate_checkpoint_state(&accepted).unwrap();
+        device.apply_validated_checkpoint_state(&accepted);
+        assert_eq!(collect_stamps(&mut device, &solution), before);
+    }
+}
+
+#[test]
 fn retained_input_has_zero_trial_derivative_and_stable_readback() {
     for (declarations, held, observed, initial) in [
         ("real held, seen;", "held", "held", 0.0),
