@@ -390,7 +390,7 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn sensitivity_does_not_infer_domains_from_trial_failures_in_wasm() {
+    fn sensitivity_reports_the_discontinuous_parameter_owner_in_wasm() {
         use rspice_core::abort_signal::NoAbort;
         let netlist = rspice_core::Netlist::parse(
             "Invalid trial\n.param gain=0\nV1 in 0 DC 1 AC 1\nE1 out 0 in 0 {1+gain}\n\
@@ -401,8 +401,26 @@ mod wasm_tests {
         let dc = engine.run_sensitivity_with_abort(&netlist, 2, "gain", 0.0, None, &NoAbort);
         let ac =
             engine.run_sensitivity_ac_with_abort(&netlist, 2, "gain", 0.0, &[1.0], None, &NoAbort);
-        assert!(dc.unwrap_err().to_string().contains("last trial failure"));
-        assert!(ac.unwrap_err().to_string().contains("last trial failure"));
+        // The parameter direction identifies RFAIL's discontinuity before
+        // replaying a trial; a failed circuit is not evidence of a domain bound.
+        for error in [dc.unwrap_err(), ac.unwrap_err()] {
+            let descriptor = error.descriptor();
+            assert_eq!(
+                descriptor.code,
+                rspice_core::SimulationErrorCode::CircuitError
+            );
+            assert_eq!(
+                descriptor.category,
+                rspice_core::SimulationErrorCategory::Simulation
+            );
+            assert!(!descriptor.retryable);
+            let message = error.to_string();
+            assert!(message.contains("RFAIL"), "{message}");
+            assert!(
+                message.contains("expression boundary has no two-sided parameter derivative"),
+                "{message}"
+            );
+        }
     }
 
     #[wasm_bindgen_test]
@@ -506,8 +524,24 @@ mod wasm_tests {
                 &NoAbort,
             );
             if nominal == 0.0 {
-                assert!(dc.unwrap_err().to_string().contains("could not resolve"));
-                assert!(ac.unwrap_err().to_string().contains("could not resolve"));
+                for error in [dc.unwrap_err(), ac.unwrap_err()] {
+                    let descriptor = error.descriptor();
+                    assert_eq!(
+                        descriptor.code,
+                        rspice_core::SimulationErrorCode::NetlistError
+                    );
+                    assert_eq!(
+                        descriptor.category,
+                        rspice_core::SimulationErrorCategory::Netlist
+                    );
+                    assert!(!descriptor.retryable);
+                    let message = error.to_string();
+                    assert!(message.contains("GAIN"), "{message}");
+                    assert!(
+                        message.contains("magnitude has no two-sided derivative at zero"),
+                        "{message}"
+                    );
+                }
             } else {
                 let expected = 100.0 * 100.0_f64.exp();
                 assert!((dc.unwrap() / expected - 1.0).abs() < 1e-5);
