@@ -109,7 +109,6 @@ impl Drop for LauncherControlHeightOverride {
 
 enum LauncherAction {
     Close,
-    EmptyWorkbench,
     Browse,
     NewProject,
     OpenNetlist,
@@ -472,15 +471,6 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if let Some(action) = action {
         match action {
             LauncherAction::Close => dismiss_launcher(app),
-            LauncherAction::EmptyWorkbench => {
-                if app.state.project_lifecycle.project_open {
-                    crate::workbench::workflows::project_workflow::request_close_project(
-                        &mut app.state,
-                    );
-                } else {
-                    replace_launcher_with_workspace(app, Workspace::Project);
-                }
-            }
             LauncherAction::Browse => {
                 dismiss_launcher(app);
                 Command::OpenProject.execute(app);
@@ -548,16 +538,29 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
     {
         return;
     }
-    if app
-        .state
-        .workbench
-        .navigate_back(crate::workbench::RouteTransitionSource::User)
-        .is_some()
+    // With nothing open, every workspace but the no-project landing would
+    // present the bootstrap placeholder as the reader's work, so a dismissal
+    // never returns to one.
+    let project_open = app.state.project_lifecycle.project_open;
+    if project_open
+        && app
+            .state
+            .workbench
+            .navigate_back(crate::workbench::RouteTransitionSource::User)
+            .is_some()
     {
         return;
     }
+    // One replace transition. A back traversal followed by a push is not
+    // atomic in browsers: the delayed `popstate` would clear the push and
+    // restore the launcher's predecessor.
+    let workspace = if project_open {
+        app.state.workbench.workspace
+    } else {
+        Workspace::Project
+    };
     let fallback = crate::workbench::SurfaceRoute::surface(
-        crate::workbench::SurfaceId::from_workspace(app.state.workbench.workspace),
+        crate::workbench::SurfaceId::from_workspace(workspace),
     );
     if let Err(error) = app
         .state
@@ -566,25 +569,6 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
     {
         app.state.workbench.record_route_diagnostic(format!(
             "The Project Launcher closed, but its fallback workspace could not be restored: {error}"
-        ));
-    }
-}
-
-/// Continue into an empty/local workspace with one replace transition. A
-/// back traversal followed by a push is not atomic in browsers: the delayed
-/// `popstate` would clear the push and restore the launcher's predecessor.
-fn replace_launcher_with_workspace(app: &mut RSpiceApp, workspace: Workspace) {
-    app.state.workbench.project_launcher_open = false;
-    let destination = crate::workbench::SurfaceRoute::surface(
-        crate::workbench::SurfaceId::from_workspace(workspace),
-    );
-    if let Err(error) = app
-        .state
-        .workbench
-        .replace_route(destination, crate::workbench::RouteTransitionSource::User)
-    {
-        app.state.workbench.record_route_diagnostic(format!(
-            "The Project Launcher could not continue into the selected workspace: {error}"
         ));
     }
 }
@@ -1030,23 +1014,18 @@ fn launcher_body(
 
     launcher_toolbar(ui, app, layout);
 
-    let footer_height =
-        launcher_footer_reserve(ui, layout, &[("Continue without a project", false)]);
-    let regions = launcher_page_regions(ui, footer_height);
+    // The project list owns the rest of the page down to the surface edge.
+    let list_rect = ui.available_rect_before_wrap();
+    ui.allocate_rect(list_rect, Sense::hover());
     let mut list_ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(regions.body)
+            .max_rect(list_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
     egui::ScrollArea::vertical()
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
         .show(&mut list_ui, |ui| project_list(ui, app, action, layout));
-    launcher_page_footer(ui, layout, regions.footer, |ui| {
-        if Button::new("Continue without a project").show(ui).clicked() {
-            *action = Some(LauncherAction::EmptyWorkbench);
-        }
-    });
 }
 
 fn project_heading_copy(ui: &mut Ui) {
@@ -2010,10 +1989,10 @@ mod tests {
     }
 
     #[test]
-    fn continue_without_project_emits_one_replace_effect_without_a_pop_race() {
+    fn dismissing_with_no_project_open_replaces_the_launcher_with_the_landing() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.clear_browser_history_effects();
-        app.state.workbench.activate(Workspace::Project);
+        app.state.workbench.activate(Workspace::Results);
         assert!(matches!(
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
@@ -2023,12 +2002,14 @@ mod tests {
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
+        app.state.project_lifecycle.project_open = false;
 
-        replace_launcher_with_workspace(&mut app, Workspace::Project);
+        dismiss_launcher(&mut app);
 
         let destination =
             crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Project);
         assert_eq!(app.state.workbench.current_route(), destination);
+        assert_eq!(app.state.workbench.workspace, Workspace::Project);
         assert_eq!(
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Replace(destination))

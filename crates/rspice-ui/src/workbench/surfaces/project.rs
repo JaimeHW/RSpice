@@ -125,9 +125,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         poll_browser_technology_checkpoint(&ctx, app);
         poll_browser_recovery_completions(&ctx, app);
     }
-    // This workspace is a live route with no project behind it whenever the
-    // launcher's "Continue without a project" is taken, a recovery review
-    // declines to reopen, or a live session is waiting for the host's snapshot.
+    // This workspace is a live route with no project behind it whenever a
+    // project is closed, the launcher is dismissed with nothing open, a recovery
+    // review declines to reopen, or a live session is waiting for the host's
+    // snapshot.
     // Every section below projects an open project's state, so showing them here
     // would dress the bootstrap placeholder up as the reader's own work.
     if !app.state.project_lifecycle.project_open {
@@ -938,8 +939,8 @@ mod tests {
         painted_text(&output)
     }
 
-    /// The launcher's "Continue without a project" and a live-session mirror
-    /// both land here with nothing open. Every section projects an open
+    /// Closing a project, dismissing the launcher, and a live-session mirror
+    /// all land here with nothing open. Every section projects an open
     /// project's state, so the sections must not paint the bootstrap
     /// placeholder's zeros as if they described the reader's work.
     #[test]
