@@ -48,6 +48,20 @@ impl ProjectDocumentId {
             Self::StimulusLibrary => "stimulus/library".to_owned(),
         }
     }
+
+    /// The document as a reader names it in a save, close, or revert prompt.
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::ProjectConfiguration => "Project configuration".to_owned(),
+            Self::CellView(reference) => reference.key(),
+            Self::SimulationPlan => "Simulation plan".to_owned(),
+            Self::ResultHistory => "Result history".to_owned(),
+            Self::VerificationSpecifications => "Verification specifications".to_owned(),
+            Self::ModelCatalog => "Model catalog".to_owned(),
+            Self::NetlistSource => "Netlist source".to_owned(),
+            Self::StimulusLibrary => "Stimulus library".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

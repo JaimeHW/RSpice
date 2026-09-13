@@ -1680,18 +1680,7 @@ pub(crate) struct RevertReviewToken {
 
 impl RevertReviewToken {
     pub(crate) fn document_label(&self) -> String {
-        match &self.document {
-            ProjectDocumentId::ProjectConfiguration => "Project configuration".to_owned(),
-            ProjectDocumentId::CellView(reference) => reference.key(),
-            ProjectDocumentId::SimulationPlan => "Simulation plan".to_owned(),
-            ProjectDocumentId::ResultHistory => "Result history".to_owned(),
-            ProjectDocumentId::VerificationSpecifications => {
-                "Verification specifications".to_owned()
-            }
-            ProjectDocumentId::ModelCatalog => "Model catalog".to_owned(),
-            ProjectDocumentId::NetlistSource => "Netlist source".to_owned(),
-            ProjectDocumentId::StimulusLibrary => "Stimulus library".to_owned(),
-        }
+        self.document.label()
     }
 }
 
@@ -1863,22 +1852,32 @@ fn revert_document_in_place(
     Ok(())
 }
 
-pub(crate) fn dirty_document_count(state: &AppState) -> usize {
+/// The project documents with unsaved changes, in registry order.
+///
+/// A project with no accepted baseline, or one whose comparison fails, has
+/// nothing to diff against: its configuration stands for the whole unsaved
+/// project, as one document.
+pub(crate) fn dirty_documents(state: &AppState) -> Vec<ProjectDocumentId> {
     if state.project_lifecycle.accepted.is_none() {
         return if state.project_lifecycle.project_open {
-            1
+            vec![ProjectDocumentId::ProjectConfiguration]
         } else {
-            0
+            Vec::new()
         };
     }
     let Ok(registry) = current_registry(state) else {
-        return 1;
+        return vec![ProjectDocumentId::ProjectConfiguration];
     };
     registry
         .records()
         .iter()
         .filter(|record| record.dirty)
-        .count()
+        .map(|record| record.id.clone())
+        .collect()
+}
+
+pub(crate) fn dirty_document_count(state: &AppState) -> usize {
+    dirty_documents(state).len()
 }
 
 pub(crate) fn can_close_active_document(state: &AppState) -> bool {

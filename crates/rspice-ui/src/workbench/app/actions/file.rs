@@ -842,12 +842,6 @@ mod tests {
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             0
         );
-        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
-        assert!(matches!(
-            state.dialogs.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
-        ));
-        state.dialogs.project_review_dialog.close();
 
         state
             .schematic
@@ -880,6 +874,38 @@ mod tests {
         assert_eq!(
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
             2
+        );
+        remove_project_artifacts(&path);
+    }
+
+    /// With nothing unsaved and nothing running there is nothing to protect,
+    /// so Close Project closes at once instead of asking.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_clean_idle_close_skips_the_review_and_lands_on_the_no_project_workspace() {
+        use crate::workbench::lifecycle::project_lifecycle::{DestinationAuthority, SaveScope};
+
+        let path = unique_temp_path("rspice-clean-close", "rspiceproj");
+        let mut state = crate::workbench::app_state::AppState::default();
+        crate::workbench::lifecycle::project_lifecycle::save_native(
+            &mut state,
+            SaveScope::AllDocuments,
+            &path,
+            DestinationAuthority::UserSelected,
+        )
+        .expect("seed canonical project");
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
+
+        assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
+
+        assert!(state.dialogs.project_review_dialog.request.is_none());
+        assert!(!state.project_lifecycle.project_open);
+        assert!(!state.workbench.project_launcher_open);
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Project
         );
         remove_project_artifacts(&path);
     }

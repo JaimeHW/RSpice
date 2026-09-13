@@ -939,8 +939,10 @@ pub(crate) fn close_active_document(state: &mut AppState) -> bool {
     }
 }
 
-/// Open the data-safe close review. The validated close transaction leaves
-/// the application on the no-project landing, not in the project launcher.
+/// Close the project, asking first only when something would be lost: an
+/// unsaved document or model candidate, or a local run that has to stop. A
+/// clean, idle project closes at once. Either way the close leaves the
+/// application on the no-project landing, not in the project launcher.
 pub(crate) fn request_close_project(state: &mut AppState) -> bool {
     if !state.project_lifecycle.project_open {
         lifecycle_error(
@@ -953,6 +955,12 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
     state
         .workbench
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
+    let nothing_to_protect = !state.simulation.has_active_execution()
+        && !state.workbench.model_editor_has_unsaved_changes()
+        && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty();
+    if nothing_to_protect {
+        return close_project_discard(state);
+    }
     state.dialogs.project_review_dialog.show_close_project();
     true
 }
