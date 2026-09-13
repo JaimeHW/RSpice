@@ -1,8 +1,8 @@
-// Independent ABI 15 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 17 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 15;
-const HEADER_BYTES = 168;
-const FRAME_BYTES = 8360; // Header plus the bounded 1,024-element operand region.
+const ABI = 17;
+const HEADER_BYTES = 176; // ABI 16 adds immutable evaluation-input pointer/length.
+const FRAME_BYTES = 8368; // Header plus the bounded 1,024-element operand region.
 const STACK_BYTES = 8368; // Preserve the WASM stack's 16-byte alignment.
 const FRAME_MAGIC = 0x5253574a;
 const ERROR_OFFSET = 24;
@@ -109,6 +109,18 @@ export async function qualifyAbi(wasm) {
     ]) {
       reset();
       expect(label, invoke(opcode, operands, terms), expected);
+    }
+    // ABI 17 validates an SSA selection without reading variable storage.
+    for (const [label, raw, len, lower, expected, status] of [
+      ["negative index tie", -0.5, 3, -1n, 0, 0],
+      ["positive index tie", 0.5, 3, -1n, 2, 0],
+      ["minimum signed index", -(2 ** 63), 1, -(2n ** 63n), 0, 0],
+      ["nonfinite array index", NaN, 3, -1n, 0, -2],
+      ["out of bounds array index", 2, 3, -1n, 0, -2],
+      ["unrepresentable array index", 2 ** 63, 1, 0n, 0, -2],
+    ]) {
+      reset();
+      expect(label, instance.exports.helper(frame, 3, 0, len, lower, raw, 0, 0, 0, 0), expected, status);
     }
     const sliceTerms = [2 ** 800, 2 ** 700, -(2 ** 800), 2 ** 700, 1, 1, 2];
     reset();

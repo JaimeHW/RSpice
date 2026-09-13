@@ -26,8 +26,11 @@ EXPECTED_STAMPS = 20000
 # 2026-09-12: 2964cdc82 joined the site-aware time-derivative helper, scalar
 # opcode 482, to that same ABI 15 helper set without a note of its own, and the
 # fixture had never enumerated it. It does now, which is one more check.
-EXPECTED_WASM_JIT_ABI_VERSION = 15
-EXPECTED_ABI_CHECKS = 37
+# ABI 16 (2026-09-13) adds immutable evaluation inputs and grows the header
+# from 168 to 176 bytes. ABI 17 adds checked SSA array-index opcode 3, tested
+# with both tie directions, i64::MIN, non-finite, out-of-bounds and overflow.
+EXPECTED_WASM_JIT_ABI_VERSION = 17
+EXPECTED_ABI_CHECKS = 43
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
