@@ -187,6 +187,8 @@ fn checkpoint_operation_result<T>(
 const FORMAT_VERSION: u32 = 44;
 // Generated circular integrators retain an exact dyadic wrap origin.
 const GENERATED_IDTMOD_STATE_FORMAT_VERSION: u32 = 43;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_IDTMOD_ORIGIN_FORMAT_VERSION: u32 = 43;
 const BJT_EXTERNAL_BC_CURRENT_FORMAT_VERSION: u32 = 42;
 
 #[cfg(feature = "veriloga")]
@@ -3825,6 +3827,8 @@ fn read_runtime_veriloga_states(
             Some(8)
         } else if checkpoint_version < RUNTIME_VERILOGA_LIMITER_HISTORY_FORMAT_VERSION {
             Some(9)
+        } else if checkpoint_version < RUNTIME_VERILOGA_IDTMOD_ORIGIN_FORMAT_VERSION {
+            Some(10)
         } else {
             None
         };
@@ -3916,6 +3920,7 @@ fn read_runtime_veriloga_states(
                 7 => VerilogADeviceCheckpoint::validate_legacy_v7_words(&words),
                 8 => VerilogADeviceCheckpoint::validate_legacy_v8_words(&words),
                 9 => VerilogADeviceCheckpoint::validate_legacy_v9_words(&words),
+                10 => VerilogADeviceCheckpoint::validate_legacy_v10_words(&words),
                 _ => unreachable!("known legacy runtime Verilog-A state version"),
             }
             .map_err(|error| {
@@ -3951,7 +3956,8 @@ fn read_runtime_veriloga_states(
     // ones the compiler now numbers records with, so a record it holds cannot
     // be told which operator owns it. Version 8 does not distinguish transient
     // discontinuities from Newton convergence hints. Version 9 omitted limiter
-    // history. All remain parseable for diagnostics but cannot be promoted
+    // history. Version 10 omitted exact circular-integrator wrap origins.
+    // All remain parseable for diagnostics but cannot be promoted
     // into exact current accepted state.
     Ok((states, legacy_state_version.is_some() && count != 0))
 }
@@ -11070,12 +11076,15 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]);
+        if state_version >= 11 {
+            words.push(0); // exact idtmod origins
+        }
         words
     }
 
     #[cfg(feature = "veriloga")]
     fn runtime_veriloga_idtmod_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        vec![
+        let mut words = vec![
             u64::from(state_version),
             0, // previous discontinuity
             accepted_time.to_bits(),
@@ -11095,12 +11104,16 @@ mod tests {
             0, // Laplace filters
             0, // Zi filters
             0, // optional timer-event bound
-        ]
+        ];
+        if state_version >= 11 {
+            words.push(0); // exact idtmod origins
+        }
+        words
     }
 
     #[cfg(feature = "veriloga")]
     fn runtime_veriloga_transition_words(state_version: u32, accepted_time: Value) -> Vec<u64> {
-        vec![
+        let mut words = vec![
             u64::from(state_version),
             0, // previous discontinuity
             accepted_time.to_bits(),
@@ -11130,7 +11143,11 @@ mod tests {
             0,                                  // Laplace filters
             0,                                  // Zi filters
             0,                                  // optional timer-event bound
-        ]
+        ];
+        if state_version >= 11 {
+            words.push(0); // exact idtmod origins
+        }
+        words
     }
 
     #[cfg(feature = "veriloga")]
@@ -11165,6 +11182,9 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]);
+        if state_version >= 11 {
+            words.push(0); // exact idtmod origins
+        }
         words
     }
 
@@ -11202,6 +11222,9 @@ mod tests {
             0, // Zi filters
             0, // optional timer-event bound
         ]);
+        if state_version >= 11 {
+            words.push(0); // exact idtmod origins
+        }
         words
     }
 
@@ -12794,7 +12817,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 26] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 28] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -12821,6 +12844,8 @@ mod tests {
         (40, 9),
         (41, 10),
         (42, 10),
+        (43, 11),
+        (44, 11),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -13041,6 +13066,54 @@ mod tests {
                 fixture,
                 "current initialized={initialized} must preserve every nested payload word"
             );
+        }
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v41_v42_runtime_state_without_exact_wrap_origins_is_validated_then_discarded() {
+        let checkpoint = sample_without_generated_veriloga_state();
+        let words = runtime_veriloga_idtmod_words(10, checkpoint.time);
+        for outer_version in [41, 42] {
+            let fixture = replace_empty_runtime_veriloga_tail(
+                legacy_text(&checkpoint, outer_version),
+                10,
+                &words,
+            );
+            let restored = TransientCheckpoint::from_text(&fixture)
+                .expect("legacy wrap history remains readable for diagnostics");
+            assert!(!restored.runtime_veriloga_state_available);
+            assert!(restored.runtime_veriloga_instance_states.is_empty());
+            for malformed in 0..7 {
+                let mut invalid = words.clone();
+                match malformed {
+                    0 => invalid[5] = Value::NAN.to_bits(), // previous state value
+                    1 => invalid.push(0),                   // a v11 origin count is not a v10 field
+                    2 => {
+                        invalid.pop();
+                    } // required timer bound is missing
+                    3 => invalid[2] = Value::NAN.to_bits(),
+                    4 => invalid[2] = (-1.0_f64).to_bits(),
+                    5 => {
+                        // missing older lane with a structurally valid vector
+                        invalid[6] = 0;
+                        invalid.remove(7);
+                    }
+                    _ => {
+                        // timer bound must lie strictly after accepted time
+                        *invalid.last_mut().unwrap() = 1;
+                        invalid.push(checkpoint.time.to_bits());
+                    }
+                }
+                let fixture = replace_empty_runtime_veriloga_tail(
+                    legacy_text(&checkpoint, outer_version),
+                    10,
+                    &invalid,
+                );
+                let error = TransientCheckpoint::from_text(&fixture)
+                    .expect_err("malformed legacy state must not be discarded silently");
+                assert!(error.contains("legacy payload is invalid"), "{error}");
+            }
         }
     }
 

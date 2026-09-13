@@ -1848,6 +1848,50 @@ impl VerilogADeviceCheckpoint {
         .map(drop)
     }
 
+    /// Validate version 10 for diagnostics; exact `idtmod` wrap origins were
+    /// not saved, so this payload cannot become current accepted state.
+    pub fn validate_legacy_v10_words(words: &[u64]) -> Result<(), String> {
+        let checkpoint = Self::from_words_with_expected_version(
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            SmolStr::new_inline("legacy"),
+            words,
+            10,
+        )?;
+        // Legacy rows are discarded before a live VM can validate them. Keep
+        // the common accepted-state checks here; incomplete wrap history is
+        // not a reason to silently accept corrupt state that precedes it.
+        let state = &checkpoint.accepted;
+        if !state.time.is_finite() || state.time < 0.0 {
+            return Err("legacy checkpoint time must be finite and non-negative".into());
+        }
+        let count = state.state_values_prev.len();
+        if state.state_values_older.len() != count
+            || state.state_derivatives_prev.len() != count
+            || state.state_initialized.len() != count
+        {
+            return Err("legacy checkpoint common-state lengths disagree".into());
+        }
+        if state.variables.iter().any(|value| value.is_nan())
+            || state
+                .state_values_prev
+                .iter()
+                .chain(&state.state_values_older)
+                .chain(&state.state_derivatives_prev)
+                .any(|value| !value.is_finite())
+        {
+            return Err("legacy checkpoint VM state contains an invalid numeric value".into());
+        }
+        if state
+            .timer_event_bound
+            .is_some_and(|bound| !bound.is_finite() || bound <= state.time)
+        {
+            return Err("legacy checkpoint timer bound must be finite and strictly future".into());
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     fn to_legacy_v2_words_for_test(&self) -> Vec<u64> {
         self.to_words_with_format(2, false, false)
