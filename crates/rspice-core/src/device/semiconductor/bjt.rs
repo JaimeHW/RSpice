@@ -679,6 +679,9 @@ struct LegacyJunctionParameters {
     current_scales: Option<Box<[Option<LegacyCurrentScale>; 6]>>,
     temperature_parameters: Option<Box<LegacyTemperatureParameters>>,
     base_resistance: Option<LegacyBaseResistance>,
+    // Authored degrees and nominal TF; temperature-scaled storage TF does
+    // not change the GP excess-phase delay (ngspice bjttemp.c).
+    excess_phase: Option<(Value, Value)>,
 }
 
 /// BJT device using the Ebers-Moll model

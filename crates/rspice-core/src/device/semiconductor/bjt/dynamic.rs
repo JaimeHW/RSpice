@@ -11,6 +11,37 @@ pub(crate) struct LegacyBjtThermalNoise {
 }
 
 impl Bjt {
+    /// Forward transconductance affected by GP PTF, before private-node
+    /// elimination. ngspice bjtacld.c rotates gm+go, which is dIc/dVbe;
+    /// reverse transport, output conductance and charge are not rotated.
+    pub(crate) fn legacy_excess_phase_branch(
+        &self,
+        internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> Option<(Value, BjtCurrentBranch)> {
+        let delay = self.legacy_excess_phase_delay();
+        if delay == 0.0 {
+            return None;
+        }
+        let v = internal_voltages;
+        let (linearized, _) = self.linearize_currents_with_branches(
+            v[IDX_VBI] - v[IDX_VEI],
+            v[IDX_VBX] - v[IDX_VEI],
+            v[IDX_VBI] - v[IDX_VCI],
+        );
+        let collector = self.legacy_charge_collector_terminal();
+        let emitter = self.legacy_charge_emitter_terminal();
+        let mut branch = BjtCurrentBranch {
+            pos_internal: collector.0,
+            pos_external: collector.1,
+            neg_internal: emitter.0,
+            neg_external: emitter.1,
+            ..Default::default()
+        };
+        branch.d_internal[IDX_VBI] = linearized.dic_dvbe;
+        branch.d_internal[IDX_VEI] = -linearized.dic_dvbe;
+        Some((delay, branch))
+    }
+
     /// Convert model-oriented VBIC charge and its voltage gradients to a
     /// physical branch current. Thermal and delay states are polarity independent.
     #[inline]

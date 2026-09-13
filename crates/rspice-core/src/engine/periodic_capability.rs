@@ -455,7 +455,9 @@ pub(crate) const fn periodic_capability_descriptor(
                 "native Gummel-Poon electrical states and complete VBIC physical states; \
                  legacy GP thermal/excess-phase extensions are not represented",
             ),
-            dynamic_state: Complete,
+            dynamic_state: Restricted(
+                "legacy GP PTF delay is not a finite rational G+sC descriptor",
+            ),
             small_signal: Complete,
             noise: Complete,
             pss_state: Restricted(
@@ -1027,11 +1029,13 @@ pub(in crate::engine) fn periodic_residual_gaps(circuit: &CircuitData) -> Vec<Ca
     }
 
     for bjt in &circuit.bjts.devices {
-        if bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0) {
+        if bjt.uses_legacy_gummel_poon()
+            && (bjt.node_rth != 0 || bjt.td > 0.0 || bjt.legacy_excess_phase_delay() != 0.0)
+        {
             gaps.push(CapabilityGap::new(
                 F::Bjt,
                 format!(
-                    "BJT '{}' legacy Gummel-Poon thermal and excess-phase HB equations are not represented",
+                    "BJT '{}' legacy Gummel-Poon thermal and TD/PTF excess-phase HB equations are not represented",
                     bjt.name
                 ),
             ));
@@ -1311,11 +1315,14 @@ pub(in crate::engine) fn pss_state_gaps(circuit: &CircuitData) -> Vec<Capability
                         ));
                     }
                     if circuit.bjts.devices.iter().any(|bjt| {
-                        bjt.uses_legacy_gummel_poon() && (bjt.node_rth != 0 || bjt.td > 0.0)
+                        bjt.uses_legacy_gummel_poon()
+                            && (bjt.node_rth != 0
+                                || bjt.td > 0.0
+                                || bjt.legacy_excess_phase_delay() != 0.0)
                     }) {
                         gaps.push(CapabilityGap::new(
                             family,
-                            "legacy Gummel-Poon thermal and excess-phase model states",
+                            "legacy Gummel-Poon thermal and TD/PTF excess-phase model states",
                         ));
                     }
                 }
@@ -1457,6 +1464,16 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 format!("{}: {missing}", family.label()),
             )),
             Restricted(condition) => match family {
+                F::Bjt => {
+                    for bjt in &circuit.bjts.devices {
+                        if bjt.legacy_excess_phase_delay() != 0.0 {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!("BJT '{}': {condition}", bjt.name),
+                            ));
+                        }
+                    }
+                }
                 F::Bsim3v3 => {
                     for dev in &circuit.bsim3v3.devices {
                         if dev.core.model.acnqs_mod != 0 {
@@ -1675,7 +1692,9 @@ mod tests {
             F::VoltageSource | F::CurrentSource => [I, I, C, I, C, C],
             F::Vcvs | F::Vccs | F::Cccs | F::Ccvs => [I, I, C, I, C, A],
             F::Diode => [R, C, C, R, C, A],
-            F::Bjt => [R, C, C, C, R, A],
+            // Authored GP PTF adds an irrational delay to the formerly
+            // complete charge descriptor; VBIC's finite delay states remain.
+            F::Bjt => [R, R, C, C, R, A],
             F::Mosfet => [R, C, C, R, A, A],
             F::Bsim3v3 | F::Bsim4v8 => [A, R, I, A, A, A],
             F::B3SoiDd | F::B3SoiFd | F::B3SoiPd => [A, C, I, A, A, A],
@@ -1746,6 +1765,30 @@ mod tests {
                 .build_circuit(&netlist)
                 .unwrap();
             assert_eq!(pss_state_gaps(&circuit).is_empty(), supported, "{model}");
+        }
+    }
+
+    #[test]
+    fn gp_ptf_descriptor_and_periodic_state_admission_requires_zero_delay() {
+        for (parameters, supported) in [
+            ("TF=1n PTF=0", true),
+            ("TF=0 PTF=21", true),
+            ("TF=1n PTF=21", false),
+            ("TF=1n PTF=-21", false),
+        ] {
+            let deck = crate::Netlist::parse(&format!(
+                "GP phase admission\nV1 c 0 2\nV2 b 0 .7\nQ1 c b 0 mm\n.model mm NPN(LEVEL=1 {parameters})\n.end"
+            )).unwrap();
+            let circuit = crate::engine::Engine::default()
+                .build_circuit(&deck)
+                .unwrap();
+            for (name, gaps) in [
+                ("PZ", dynamic_state_descriptor_gaps(&circuit)),
+                ("HB", periodic_residual_gaps(&circuit)),
+                ("PSS", pss_state_gaps(&circuit)),
+            ] {
+                assert_eq!(gaps.is_empty(), supported, "{name}: {parameters}");
+            }
         }
     }
 

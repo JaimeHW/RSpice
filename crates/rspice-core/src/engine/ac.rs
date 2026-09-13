@@ -25,7 +25,8 @@ const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
 
-pub(in crate::engine) struct BjtAcChargeBlocks {
+#[derive(Default)]
+pub(in crate::engine) struct BjtAcBlocks {
     pub ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub ie: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     pub ei: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
@@ -1547,8 +1548,8 @@ impl Engine {
     pub(in crate::engine) fn bjt_ac_charge_blocks(
         snapshot: &BjtChargeSnapshot,
         include_delay_branches: bool,
-    ) -> BjtAcChargeBlocks {
-        let mut blocks = BjtAcChargeBlocks {
+    ) -> BjtAcBlocks {
+        let mut blocks = BjtAcBlocks {
             ii: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
             ie: [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
             ei: [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
@@ -1571,6 +1572,45 @@ impl Engine {
             blocks.active = true;
         }
         blocks
+    }
+
+    pub(in crate::engine) fn bjt_ac_excess_phase_blocks(
+        bjt: &crate::device::Bjt,
+        internal_voltages: &[Value; BJT_INTERNAL_STATE_DIM],
+        omega: Value,
+    ) -> Result<(Complex64, BjtAcBlocks), SimulationError> {
+        let mut blocks = BjtAcBlocks::default();
+        let Some((delay, branch)) = bjt.legacy_excess_phase_branch(internal_voltages) else {
+            return Ok((Complex64::default(), blocks));
+        };
+        let angle = omega * delay;
+        if !angle.is_finite()
+            || branch
+                .d_internal
+                .iter()
+                .chain(&branch.d_external)
+                .any(|value| !value.is_finite())
+        {
+            return Err(SimulationError::Circuit(format!(
+                "BJT '{}' PTF excess-phase response is nonfinite at {:.16e} Hz",
+                bjt.name,
+                omega / (2.0 * PI)
+            )));
+        }
+        branch.accumulate_derivatives(
+            &mut blocks.ii,
+            &mut blocks.ie,
+            &mut blocks.ei,
+            &mut blocks.ee,
+        );
+        blocks.active = true;
+        // exp(-j*angle)-1, without cancellation of the real correction
+        // at small phase. These blocks use outgoing branch incidence.
+        let half_sine = (0.5 * angle).sin();
+        Ok((
+            Complex64::new(-2.0 * half_sine * half_sine, -angle.sin()),
+            blocks,
+        ))
     }
 
     fn stamp_bjt_dynamic_ac(
@@ -1602,7 +1642,7 @@ impl Engine {
             // Promoted BJT: the internal states are matrix unknowns, so each
             // charge branch stamps jw*C directly on its own nodes alongside
             // the promoted static real part - no dense Schur reduction.
-            let (branches, _, _) = bjt.mna_charge_state_at_solution(op_voltages);
+            let (branches, internal_voltages, _) = bjt.mna_charge_state_at_solution(op_voltages);
             let external_nodes = [
                 bjt.node_collector,
                 bjt.node_base,
@@ -1680,6 +1720,43 @@ impl Engine {
                     stamp_row(row, -1.0);
                 }
             }
+            let (factor, phase) = Self::bjt_ac_excess_phase_blocks(bjt, &internal_voltages, omega)?;
+            if phase.active {
+                // All promoted rows use global outgoing KCL. Alias mappings
+                // retain the same physical branch when a series node collapses.
+                let internal_nodes = std::array::from_fn::<_, BJT_INTERNAL_STATE_DIM, _>(|index| {
+                    bjt.mna_internal_node(index)
+                });
+                let mut stamp = |rows: &[NodeId], cols: &[NodeId], block: &[&[Value]]| {
+                    for (&row, entries) in rows.iter().zip(block) {
+                        for (&col, &value) in cols.iter().zip(*entries) {
+                            if row > 0 && col > 0 && value != 0.0 {
+                                matrix.add(row - 1, col - 1, factor * value);
+                            }
+                        }
+                    }
+                };
+                stamp(
+                    &internal_nodes,
+                    &internal_nodes,
+                    &phase.ii.each_ref().map(|row| &row[..]),
+                );
+                stamp(
+                    &internal_nodes,
+                    &external_nodes,
+                    &phase.ie.each_ref().map(|row| &row[..]),
+                );
+                stamp(
+                    &external_nodes,
+                    &internal_nodes,
+                    &phase.ei.each_ref().map(|row| &row[..]),
+                );
+                stamp(
+                    &external_nodes,
+                    &external_nodes,
+                    &phase.ee.each_ref().map(|row| &row[..]),
+                );
+            }
             return Ok(());
         }
 
@@ -1690,14 +1767,16 @@ impl Engine {
             Self::ac_node_voltage(op_voltages, bjt.node_substrate),
         ];
         let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
-        let BjtAcChargeBlocks {
+        let BjtAcBlocks {
             ii: c_ii,
             ie: c_ie,
             ei: c_ei,
             ee: c_ee,
             active,
         } = Self::bjt_ac_charge_blocks(&snapshot, include_delay_branches);
-        if !active {
+        let (phase_factor, phase) =
+            Self::bjt_ac_excess_phase_blocks(bjt, &snapshot.reduction.internal_voltages, omega)?;
+        if !active && !phase.active {
             return Ok(());
         }
 
@@ -1711,7 +1790,8 @@ impl Engine {
         for row in 0..BJT_INTERNAL_STATE_DIM {
             for col in 0..BJT_INTERNAL_STATE_DIM {
                 internal[row][col] = Complex64::new(snapshot.reduction.g_ii[row][col], 0.0)
-                    + internal_s * c_ii[row][col];
+                    + internal_s * c_ii[row][col]
+                    - phase_factor * phase.ii[row][col];
             }
         }
 
@@ -1721,7 +1801,8 @@ impl Engine {
             let mut rhs = [Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM];
             for row in 0..BJT_INTERNAL_STATE_DIM {
                 rhs[row] = -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0)
-                    + internal_s * c_ie[row][col]);
+                    + internal_s * c_ie[row][col]
+                    - phase_factor * phase.ie[row][col]);
             }
 
             let solution = crate::numerics::solve_small_dense(&internal, &rhs, BJT_INTERNAL_STATE_DIM)
@@ -1731,11 +1812,13 @@ impl Engine {
                 )))?;
 
             for row in 0..BJT_EXTERNAL_STATE_DIM {
-                let mut value =
-                    Complex64::new(snapshot.reduction.g_ee[row][col], 0.0) + s * c_ee[row][col];
+                let mut value = Complex64::new(snapshot.reduction.g_ee[row][col], 0.0)
+                    + s * c_ee[row][col]
+                    + phase_factor * phase.ee[row][col];
                 for idx in 0..BJT_INTERNAL_STATE_DIM {
                     value += (Complex64::new(snapshot.reduction.g_ei[row][idx], 0.0)
-                        + s * c_ei[row][idx])
+                        + s * c_ei[row][idx]
+                        + phase_factor * phase.ei[row][idx])
                         * solution[idx];
                 }
                 if !value.re.is_finite() || !value.im.is_finite() {

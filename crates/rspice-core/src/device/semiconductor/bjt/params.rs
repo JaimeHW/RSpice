@@ -11,6 +11,28 @@ fn model_parameter_alias(
 }
 
 impl Bjt {
+    pub(crate) fn legacy_excess_phase_delay(&self) -> Value {
+        if !self.uses_legacy_gummel_poon() {
+            return 0.0;
+        }
+        self.legacy_junction_params
+            .as_ref()
+            .and_then(|parameters| parameters.excess_phase)
+            .map_or(0.0, |(degrees, nominal_tf)| {
+                degrees.to_radians() * nominal_tf
+            })
+    }
+
+    pub(crate) fn validate_legacy_excess_phase(&self) -> Result<(), String> {
+        if !self.legacy_excess_phase_delay().is_finite() {
+            return Err(format!(
+                "BJT '{}': PTF and nominal TF must define a finite excess-phase delay",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) const LEGACY_EMISSION_TEMPERATURE_PARAMS: [[&str; 2]; 5] = [
         ["TNF1", "TNF2"],
         ["TNR1", "TNR2"],
@@ -1643,6 +1665,7 @@ impl Bjt {
         }
         if let Some(junctions) = &mut self.legacy_junction_params {
             junctions.base_resistance = None;
+            junctions.excess_phase = None;
         }
         if self.charge_model == BjtChargeModel::LegacyGummelPoon
             && let Some(v) = legacy_irb
@@ -2163,6 +2186,13 @@ impl Bjt {
         }
         if let Some(&v) = params.get("TF") {
             self.tf = v;
+        }
+        if self.uses_legacy_gummel_poon()
+            && let Some(&degrees) = params.get("PTF")
+        {
+            self.legacy_junction_params
+                .get_or_insert_with(Default::default)
+                .excess_phase = Some((degrees, self.tf));
         }
         if let Some(&v) = params.get("QTF")
             && v.is_finite()

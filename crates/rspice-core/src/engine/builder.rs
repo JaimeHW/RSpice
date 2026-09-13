@@ -6675,6 +6675,8 @@ impl Engine {
                     bjt.set_temperature(self.config.temperature);
                     bjt.validate_legacy_temperature_parameters()
                         .map_err(SimulationError::Circuit)?;
+                    bjt.validate_legacy_excess_phase()
+                        .map_err(SimulationError::Circuit)?;
                     bjt.refresh_noise_temperature_offset(
                         self.config.temperature,
                         netlist.options.tnom.unwrap_or(27.0),

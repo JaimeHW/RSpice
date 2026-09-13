@@ -276,7 +276,35 @@ impl Engine {
         s: Complex64,
         adjoint: &[Complex64],
     ) -> Result<[Complex64; BJT_INTERNAL_STATE_DIM], SimulationError> {
-        let system = PrivateBjtNoiseSystem::new(bjt, solution, s);
+        let nodes = [
+            bjt.node_collector,
+            bjt.node_base,
+            bjt.node_emitter,
+            bjt.node_substrate,
+        ];
+        let [vc, vb, ve, vs] = nodes.map(|node| Self::noise_node_voltage(solution, node));
+        let snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let mut system = PrivateBjtNoiseSystem::from_snapshot(bjt, &snapshot, s);
+        if bjt.legacy_excess_phase_delay() != 0.0 {
+            if s.re != 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' PTF private noise projection requires a stationary frequency; frozen-time excess-phase history is not implemented",
+                    bjt.name,
+                )));
+            }
+            let (factor, phase) =
+                Self::bjt_ac_excess_phase_blocks(bjt, &snapshot.reduction.internal_voltages, s.im)?;
+            for (row, entries) in system.internal.iter_mut().enumerate() {
+                for (col, value) in entries.iter_mut().enumerate() {
+                    *value -= factor * phase.ii[row][col];
+                }
+            }
+            for (row, entries) in system.external.iter_mut().enumerate() {
+                for (col, value) in entries.iter_mut().enumerate() {
+                    *value += factor * phase.ei[row][col];
+                }
+            }
+        }
         let transpose =
             std::array::from_fn(|row| std::array::from_fn(|col| system.internal[col][row]));
         let rhs = std::array::from_fn(|row| {
@@ -384,6 +412,51 @@ impl BjtNoiseProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gp_private_noise_adjoint_retains_excess_phase() {
+        let vt = crate::constants::K_BOLTZMANN * 300.15 / crate::constants::Q_ELECTRON;
+        let current = 1e-16 * (0.7 / vt).exp_m1();
+        let gm = (current + 1e-16) / vt;
+        for phase in [0.0_f64, 21.0, 90.0] {
+            let deck = Netlist::parse(&format!(
+                "Private GP phase\nVC c 0 2\nVB b 0 {}\nQ1 c b 0 mm\n.model mm NPN(LEVEL=1 IS=1e-16 BF=100 TF=1n PTF={phase} CJC=2p MJC=0 XCJC=1)\n.options GMIN=0\n.end",
+                0.7 + 100.0 * current / 100.0,
+            )).unwrap();
+            let engine = Engine::new(
+                crate::SimulationConfig::default()
+                    .with_spice_dialect(crate::config::SpiceDialect::Ngspice),
+            );
+            let mut circuit = engine.build_circuit(&deck).unwrap();
+            let collector = circuit.get_node_by_name("c").unwrap();
+            let base = circuit.get_node_by_name("b").unwrap();
+            let mut solution = vec![0.0; circuit.matrix_size()];
+            solution[collector - 1] = 2.0;
+            solution[base - 1] = 0.7 + current;
+            circuit.set_semiconductor_junction_gmin(0.0);
+            // Programmatic hidden-node path; authored variable RB uses MNA.
+            let bjt = &mut circuit.bjts.devices[0];
+            bjt.rbi = 100.0;
+            assert!(!bjt.mna_promoted());
+            let private_base = bjt.legacy_noise_terminals()[1].0.unwrap();
+            let mut adjoint = vec![Complex64::default(); solution.len()];
+            adjoint[collector - 1] = Complex64::new(1.0, 0.0);
+            for frequency in [1e4, 1e7, 1e9] {
+                let omega = 2.0 * std::f64::consts::PI * frequency;
+                let s = Complex64::new(0.0, omega);
+                let ymu = s * 2e-12;
+                let y = Complex64::new(0.01 + gm / 100.0, omega * 1e-9 * gm) + ymu;
+                let forward = gm * Complex64::from_polar(1.0, -omega * 1e-9 * phase.to_radians());
+                let expected = -(forward - ymu) / y;
+                let actual =
+                    Engine::bjt_noise_adjoint(bjt, &solution, s, &adjoint).unwrap()[private_base];
+                assert!(
+                    (actual - expected).norm() < expected.norm() * 2e-6,
+                    "PTF={phase}, f={frequency}: {actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn private_base_noise_forward_and_adjoint_match_explicit_frozen_network() {
