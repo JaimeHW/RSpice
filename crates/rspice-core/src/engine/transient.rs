@@ -37,9 +37,9 @@ use crate::netlist::{
 };
 use crate::numerics::integration::{
     BranchChargeHistory, BreakpointManager, BreakpointStepPolicy, CompanionCoefficients,
-    IntegrationMethod, LteEstimator, TimestepController, TransientErrorControl, TrapGearController,
-    XyceBreakpointSpanCeiling, nonlinear_charge_companion_terms, xyce_iteration_step_accepts,
-    xyce_iteration_step_scale,
+    IntegrationMethod, LteEstimator, TimestepController, TransientErrorControl,
+    TransientLteReference, TrapGearController, XyceBreakpointSpanCeiling,
+    nonlinear_charge_companion_terms, xyce_iteration_step_accepts, xyce_iteration_step_scale,
 };
 use crate::numerics::xyce_hard_min_timestep;
 use crate::{Netlist, Value};
@@ -4778,13 +4778,35 @@ impl Engine {
         let mut warned_dynamic_tline_breakpoint_cap = false;
         let transient_lte_reltol = self.transient_lte_reltol();
         let transient_lte_abstol = self.transient_lte_abstol();
+        // The explicit RBI current is an algebraic conditioning variable;
+        // Xyce's BJT DAE eliminates it. Keep it in Newton and all histories,
+        // but not in Xyce's error weights or WRMS vector dimension.
+        let mut lte_auxiliary_indices = if self.config.spice_dialect == SpiceDialect::Xyce
+            && self.config.transient_lte_reference != Some(TransientLteReference::PredictorLocal)
+        {
+            circuit
+                .bjts
+                .devices
+                .iter()
+                .filter_map(|device| {
+                    device
+                        .mna_rbi_branch_matrix_node(num_nodes)
+                        .map(|node| node - 1)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        lte_auxiliary_indices.sort_unstable();
         let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
             transient_lte_reltol,
             transient_lte_abstol,
             self.config
                 .transient_lte_reference
                 .unwrap_or_else(|| self.config.spice_dialect.default_transient_lte_reference()),
-        );
+        )
+        .with_auxiliary_indices(lte_auxiliary_indices, size)
+        .map_err(SimulationError::Circuit)?;
         if lte_estimator.uses_accepted_solution_reference() {
             lte_estimator.seed_initial_solution(&solution[..size.min(solution.len())]);
         }
