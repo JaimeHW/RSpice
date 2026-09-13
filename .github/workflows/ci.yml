@@ -15,6 +15,8 @@ jobs:
       RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 3
       - name: Install pinned compiler
         run: rustup toolchain install 1.94.0 --profile minimal
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16
@@ -23,7 +25,7 @@ jobs:
         run: |
           mkdir -p lead-evidence
           git rev-parse HEAD > lead-evidence/source.txt
-          git diff HEAD^ HEAD > lead-evidence/diagnostic.patch
+          git diff eaefb256c5f029a9d6846cca6fa944f6b2ee5435 HEAD > lead-evidence/diagnostic.patch
           rustc +1.94.0 --version --verbose > lead-evidence/compiler.txt
           uname -a > lead-evidence/platform.txt
           sha256sum tests/xyce/Netlists/LEAD_CURRENTS/lead_min2_trap.cir > lead-evidence/deck.sha256
