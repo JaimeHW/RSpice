@@ -129,6 +129,7 @@ pub(super) struct MirPoint<'a> {
     pub(super) currents: &'a [f64],
     /// `EvalContext::branch_currents`, which `LoadCurrent` reads.
     pub(super) branch_currents: &'a [f64],
+    pub(super) evaluation_state_inputs: &'a [f64],
     pub(super) temperature: f64,
     pub(super) time: f64,
     pub(super) multiplicity: f64,
@@ -467,6 +468,10 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::LoadSimParamPresent(parameter) => stack.push(S::from_f64(f64::from(
                 self.point.simparams.get_parameter(parameter).is_some(),
             ))),
+            NativeOp::LoadEvaluationState(index) => {
+                let value = self.read(self.point.evaluation_state_inputs, index, name)?;
+                stack.push(S::from_f64(value));
+            }
             NativeOp::LoadPreludeSlot(index) => {
                 let value = *self
                     .prelude
@@ -805,6 +810,7 @@ mod tests {
             branch_unknowns: &[1.5e-3],
             currents: &[3.0e-6],
             branch_currents: &[7.0e-6],
+            evaluation_state_inputs: &[4.0, -0.0],
             temperature: 300.15,
             time: 1.0e-9,
             multiplicity: 1.0,

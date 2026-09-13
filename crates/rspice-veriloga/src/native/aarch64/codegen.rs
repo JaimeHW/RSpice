@@ -1774,7 +1774,8 @@ impl FunctionCompiler {
             NativeOp::ZiState(_)
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::LoadSimParamValue(_)
-            | NativeOp::LoadSimParamPresent(_) => {
+            | NativeOp::LoadSimParamPresent(_)
+            | NativeOp::LoadEvaluationState(_) => {
                 unreachable!("operand-array helpers are emitted before register preparation")
             }
             NativeOp::TimerState(timer_id) => self.emit_operand_context_helper(

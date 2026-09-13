@@ -500,6 +500,8 @@ fn evaluation_frame(context: &crate::vm::VmContext) -> Result<super::WasmJitEval
         slice_capability(&context.branch_current_values)?;
     let (variables_ptr, variables_len) = slice_capability(&context.variables)?;
     let (prelude_slots_ptr, prelude_slots_len) = slice_capability(&context.prelude_slots)?;
+    let (evaluation_state_inputs_ptr, evaluation_state_inputs_len) =
+        slice_capability(context.evaluation_state_inputs())?;
 
     Ok(super::WasmJitEvalFrame {
         parameters_ptr,
@@ -522,6 +524,8 @@ fn evaluation_frame(context: &crate::vm::VmContext) -> Result<super::WasmJitEval
         variables_len,
         prelude_slots_ptr,
         prelude_slots_len,
+        evaluation_state_inputs_ptr,
+        evaluation_state_inputs_len,
         analysis_mask: context.analysis_query_mask(),
         temperature: context.temperature,
         thermal_voltage: context.vt(),

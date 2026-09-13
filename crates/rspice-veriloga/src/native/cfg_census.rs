@@ -341,6 +341,7 @@ impl OperatingPoint {
             branch_unknowns: &self.runtime_branch_unknowns,
             currents,
             branch_currents,
+            evaluation_state_inputs: &[],
             temperature: self.temperature,
             time: self.time,
             multiplicity: self.multiplicity,

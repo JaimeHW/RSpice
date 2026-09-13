@@ -1689,6 +1689,22 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
         NativeOp::LoadThermalVoltage => emit_frame_f64_load(body, FRAME_THERMAL_VOLTAGE_OFFSET),
         NativeOp::LoadTime => emit_frame_f64_load(body, FRAME_TIME_OFFSET),
         NativeOp::LoadMfactor => emit_frame_f64_load(body, FRAME_M_FACTOR_OFFSET),
+        NativeOp::LoadEvaluationState(index) => {
+            body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+            body.instruction(&WasmInstruction::I32Load(i32_mem(
+                FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET,
+            )));
+            body.instruction(&WasmInstruction::I32Eqz);
+            body.instruction(&WasmInstruction::If(BlockType::Empty));
+            emit_status_return(body, WASM_JIT_STATUS_RUNTIME_ERROR);
+            body.instruction(&WasmInstruction::End);
+            emit_f64_array_load(
+                body,
+                FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET,
+                FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET,
+                index,
+            )?;
+        }
         NativeOp::LoadPreludeSlot(index) => emit_f64_array_load(
             body,
             FRAME_PRELUDE_SLOTS_PTR_OFFSET,
@@ -4097,6 +4113,70 @@ endmodule
             .validate_all(&bytes)
             .expect("branch-form module is valid WebAssembly");
         bytes
+    }
+
+    #[test]
+    fn evaluation_state_inputs_execute_in_wasm_with_bounds_and_version_guards() {
+        let engine = Engine::default();
+        let source = program(vec![NativeOp::LoadEvaluationState(1)], 1);
+        for bytes in [
+            emit_verified_value_program(&source).unwrap(),
+            branching_value_module(&source),
+        ] {
+            let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
+            let entry = instance
+                .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+                .unwrap();
+            const INPUTS: u32 = 256;
+            const VARIABLES: u32 = 320;
+            for expected in [0.0, -0.0, 1.25, f64::from_bits(0x7ff8_0000_0000_0123)] {
+                for (pointer, length, version, status) in [
+                    (INPUTS, 2, WASM_JIT_ABI_VERSION, WASM_JIT_STATUS_OK),
+                    (0, 0, WASM_JIT_ABI_VERSION, WASM_JIT_STATUS_RUNTIME_ERROR),
+                    (0, 2, WASM_JIT_ABI_VERSION, WASM_JIT_STATUS_RUNTIME_ERROR),
+                    (
+                        INPUTS,
+                        1,
+                        WASM_JIT_ABI_VERSION,
+                        WASM_JIT_STATUS_RUNTIME_ERROR,
+                    ),
+                    (INPUTS, 2, 15, WASM_JIT_STATUS_ABI_MISMATCH),
+                ] {
+                    let mut frame = vec![0_u8; WASM_JIT_EVAL_FRAME_BYTES as usize];
+                    for (offset, value) in [
+                        (FRAME_MAGIC_OFFSET, WASM_JIT_FRAME_MAGIC),
+                        (FRAME_ABI_VERSION_OFFSET, version),
+                        (FRAME_BYTE_LEN_OFFSET, WASM_JIT_EVAL_FRAME_BYTES),
+                        (FRAME_VARIABLES_PTR_OFFSET, VARIABLES),
+                        (FRAME_VARIABLES_LEN_OFFSET, 2),
+                        (FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET, pointer),
+                        (FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET, length),
+                    ] {
+                        let start = offset as usize;
+                        frame[start..start + 4].copy_from_slice(&value.to_le_bytes());
+                    }
+                    let result_start = FRAME_RESULT_OFFSET as usize;
+                    frame[result_start..result_start + 8].copy_from_slice(&91.0_f64.to_le_bytes());
+                    memory.write(&mut store, 0, &frame).unwrap();
+                    memory
+                        .write(&mut store, INPUTS as usize + 8, &expected.to_le_bytes())
+                        .unwrap();
+                    for candidate in [999.0_f64, -777.0] {
+                        memory
+                            .write(&mut store, VARIABLES as usize + 8, &candidate.to_le_bytes())
+                            .unwrap();
+                        assert_eq!(entry.call(&mut store, 0).unwrap(), status);
+                        let result = &memory.data(&store)[result_start..result_start + 8];
+                        let expected = if status == WASM_JIT_STATUS_OK {
+                            expected
+                        } else {
+                            91.0
+                        };
+                        assert_eq!(result, expected.to_le_bytes());
+                    }
+                }
+            }
+        }
     }
 
     #[test]

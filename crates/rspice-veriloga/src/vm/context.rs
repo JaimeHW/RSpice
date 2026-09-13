@@ -336,6 +336,9 @@ pub struct VmContext {
     /// [`Self::event_state_indices`]. Runtime-only: checkpoints retain the
     /// canonical full variable vector after overlaying this committed lane.
     accepted_event_variables: Vec<f64>,
+    /// Entry values for the current numerical evaluation. Acceptance may update
+    /// committed state, but observations of this evaluation retain these inputs.
+    evaluation_state_inputs: Vec<f64>,
     /// Lazily allocated task delivery state. Pure numerical models pay only
     /// for the optional pointer and allocate no effect storage.
     analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
@@ -474,6 +477,7 @@ impl Default for VmContext {
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
@@ -641,6 +645,15 @@ impl VmContext {
         &self.accepted_event_variables
     }
 
+    #[cfg(any(
+        feature = "native",
+        all(feature = "wasm-jit", target_arch = "wasm32"),
+        test
+    ))]
+    pub(crate) fn evaluation_state_inputs(&self) -> &[f64] {
+        &self.evaluation_state_inputs
+    }
+
     /// Create a new VM context with specified terminal count.
     pub fn new(num_terminals: usize) -> Self {
         Self {
@@ -660,6 +673,7 @@ impl VmContext {
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
@@ -715,6 +729,7 @@ impl VmContext {
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
@@ -770,6 +785,7 @@ impl VmContext {
             numerical_evaluation_valid: false,
             event_state_indices: Vec::new(),
             accepted_event_variables: Vec::new(),
+            evaluation_state_inputs: Vec::new(),
             analog_effects: None,
             record_task_effects: false,
             time: 0.0,
@@ -833,6 +849,8 @@ impl VmContext {
         self.accepted_event_variables.clear();
         self.accepted_event_variables
             .extend(indices.iter().map(|&index| self.variables[index]));
+        self.evaluation_state_inputs
+            .clone_from(&self.accepted_event_variables);
         Ok(())
     }
 
@@ -863,6 +881,8 @@ impl VmContext {
         {
             *accepted = self.variables[index];
         }
+        self.evaluation_state_inputs
+            .clone_from(&self.accepted_event_variables);
         self.analysis_initialized = true;
         self.numerical_evaluation_valid = false;
         Ok(())
@@ -874,7 +894,9 @@ impl VmContext {
         // accepted, so there is no iterate left to reject and a retry would
         // spend the whole convergence ladder to report the same message.
         let invalid = |message: String| VmError::InvalidRuntimeOperation(message);
-        if self.event_state_indices.len() != self.accepted_event_variables.len() {
+        if self.event_state_indices.len() != self.accepted_event_variables.len()
+            || self.event_state_indices.len() != self.evaluation_state_inputs.len()
+        {
             return Err(invalid(
                 "accepted event-variable storage shape is inconsistent".into(),
             ));
@@ -1453,6 +1475,8 @@ impl VmContext {
         {
             *accepted = checkpoint.variables[index];
         }
+        self.evaluation_state_inputs
+            .clone_from(&self.accepted_event_variables);
         self.state_values.clone_from(&checkpoint.state_values_prev);
         self.state_values_prev
             .clone_from(&checkpoint.state_values_prev);
@@ -1536,6 +1560,7 @@ impl VmContext {
         }
         self.variables.fill(0.0);
         self.accepted_event_variables.fill(0.0);
+        self.evaluation_state_inputs.fill(0.0);
         self.time = 0.0;
         self.state_values.fill(0.0);
         self.state_values_prev.fill(0.0);
@@ -1613,6 +1638,8 @@ impl VmContext {
             self.begin_stateful_observation();
             return;
         }
+        self.evaluation_state_inputs
+            .clone_from(&self.accepted_event_variables);
         for origin in self.idtmod_origins.values_mut() {
             origin.candidate = None;
         }
@@ -2779,6 +2806,50 @@ mod tests {
         );
         assert_eq!(reset.zi_filters[0].accepted_time, None);
         assert_eq!(reset.timer_event_bound, None);
+    }
+
+    #[test]
+    fn evaluation_state_inputs_remain_pinned_through_trials_acceptance_and_observation() {
+        let mut context = VmContext {
+            variables: vec![10.0, 20.0, 30.0],
+            ..VmContext::default()
+        };
+        context.configure_event_state_variables(&[0, 2]).unwrap();
+        context.begin_initialization();
+        context.variables[0] = 12.0;
+        context.commit_initialization().unwrap();
+        assert_eq!(context.evaluation_state_inputs(), &[12.0, 30.0]);
+
+        for candidate in [15.0, 99.0, 17.0] {
+            context.begin_stateful_evaluation();
+            assert_eq!(context.variables[0], 12.0);
+            assert_eq!(context.evaluation_state_inputs(), &[12.0, 30.0]);
+            context.variables[0] = candidate;
+            context.begin_stateful_observation();
+            assert_eq!(context.variables[0], candidate);
+            assert_eq!(context.evaluation_state_inputs(), &[12.0, 30.0]);
+            context.discard_trial_candidate();
+        }
+
+        context.begin_stateful_evaluation();
+        context.variables[0] = 25.0;
+        context.advance_state().unwrap();
+        assert_eq!(context.accepted_event_variables(), &[25.0, 30.0]);
+        context.begin_stateful_observation();
+        assert_eq!(context.evaluation_state_inputs(), &[12.0, 30.0]);
+        let mut cloned = context.clone();
+        cloned.begin_stateful_observation();
+        assert_eq!(cloned.evaluation_state_inputs(), &[12.0, 30.0]);
+
+        let checkpoint = context.accepted_checkpoint().unwrap();
+        context.begin_stateful_evaluation();
+        assert_eq!(context.evaluation_state_inputs(), &[25.0, 30.0]);
+        context.variables[0] = 500.0;
+        context.restore_accepted_checkpoint(&checkpoint);
+        assert_eq!(context.variables[0], 25.0);
+        assert_eq!(context.evaluation_state_inputs(), &[25.0, 30.0]);
+        context.reset_analysis_state();
+        assert_eq!(context.evaluation_state_inputs(), &[0.0, 0.0]);
     }
 
     #[test]

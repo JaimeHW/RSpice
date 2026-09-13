@@ -43,6 +43,13 @@ pub(crate) fn operand_array_call(
         model: "native".into(),
         detail: detail.into(),
     };
+    if let NativeOp::LoadEvaluationState(index) = op {
+        return Ok(Some(OperandArrayCall {
+            count: 0,
+            descriptor: index,
+            helper: rspice_evaluation_state_native,
+        }));
+    }
     if let NativeOp::LoadSimParamValue(parameter) | NativeOp::LoadSimParamPresent(parameter) = op {
         return Ok(Some(OperandArrayCall {
             count: 0,
@@ -126,6 +133,28 @@ unsafe extern "C" fn rspice_simparam_native(
         );
         0.0
     })
+}
+
+/// Read one immutable procedural input without consulting candidate variables.
+///
+/// # Safety
+/// `ctx` must be a live native dispatch frame. Its evaluation-state buffer is
+/// borrowed from the VM and must stay readable throughout synchronous dispatch.
+unsafe extern "C" fn rspice_evaluation_state_native(
+    _operands: *const f64,
+    ctx: *const EvalContext,
+    index: usize,
+) -> f64 {
+    // SAFETY: the caller supplies the live frame described above.
+    let Some(context) = (unsafe { ctx.as_ref() }) else {
+        return 0.0;
+    };
+    if context.evaluation_state_inputs.is_null() || index >= context.evaluation_state_inputs_len {
+        set_native_context_error(context, "procedural evaluation-state input is unavailable");
+        return 0.0;
+    }
+    // SAFETY: the frame's storage contract and the bounds check cover this read.
+    unsafe { *context.evaluation_state_inputs.add(index) }
 }
 
 #[cfg(test)]
@@ -507,6 +536,10 @@ pub struct EvalContext {
     /// Borrowed internal-state companion for this dispatch. Null uses the
     /// derivative fields above, preserving single-rule helper callers.
     pub state_integration: *const IntegrationCoefficients,
+    /// Procedural values pinned at numerical-evaluation entry. Assignment and
+    /// observation passes cannot change this input by publishing a candidate.
+    pub evaluation_state_inputs: *const f64,
+    pub evaluation_state_inputs_len: usize,
 }
 
 impl EvalContext {
@@ -575,6 +608,8 @@ impl EvalContext {
             state_older_candidate_len: 0,
             idtmod_origins: std::ptr::null_mut(),
             state_integration: std::ptr::null(),
+            evaluation_state_inputs: std::ptr::null(),
+            evaluation_state_inputs_len: 0,
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),
@@ -3369,7 +3404,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, static_dae_probe), 520);
         assert_eq!(offset_of!(EvalContext, idtmod_origins), 528);
         assert_eq!(offset_of!(EvalContext, state_integration), 536);
-        assert_eq!(size_of::<EvalContext>(), 544);
+        assert_eq!(offset_of!(EvalContext, evaluation_state_inputs), 544);
+        assert_eq!(offset_of!(EvalContext, evaluation_state_inputs_len), 552);
+        assert_eq!(size_of::<EvalContext>(), 560);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -3919,6 +3956,8 @@ mod tests {
             state_older_candidate_len: 0,
             idtmod_origins: std::ptr::null_mut(),
             state_integration: std::ptr::null(),
+            evaluation_state_inputs: std::ptr::null(),
+            evaluation_state_inputs_len: 0,
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

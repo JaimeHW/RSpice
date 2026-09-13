@@ -19,7 +19,7 @@ pub const WASM_JIT_STATUS_RUNTIME_ERROR: i32 = -2;
 /// Fixed start of the authenticated, frame-relative variable-arity operand
 /// region. The stable header remains independently addressable at its original
 /// offsets.
-pub const WASM_JIT_SLICE_OPERANDS_OFFSET: u32 = 168;
+pub const WASM_JIT_SLICE_OPERANDS_OFFSET: u32 = 176;
 /// Browser helper resource limit. This carries 1,020 coefficient values or 510
 /// complex-root tuples in addition to Zi's four fixed runtime operands.
 pub const WASM_JIT_MAX_SLICE_OPERANDS: usize = crate::zfilter::MAX_ZI_RUNTIME_OPERANDS;
@@ -77,6 +77,9 @@ pub(crate) struct WasmJitEvalFrame {
     /// a plan with no prelude, which is every plan the shipped route builds.
     pub prelude_slots_ptr: u32,
     pub prelude_slots_len: u32,
+    /// Read-only procedural input values pinned at numerical-evaluation entry.
+    pub evaluation_state_inputs_ptr: u32,
+    pub evaluation_state_inputs_len: u32,
 }
 
 /// Complete primary-module dispatch allocation. Generated modules receive a
@@ -140,6 +143,8 @@ impl Default for WasmJitEvalFrame {
             m_factor: 1.0,
             prelude_slots_ptr: 0,
             prelude_slots_len: 0,
+            evaluation_state_inputs_ptr: 0,
+            evaluation_state_inputs_len: 0,
         }
     }
 }
@@ -200,12 +205,17 @@ pub const FRAME_PRELUDE_SLOTS_PTR_OFFSET: u64 =
 pub const FRAME_PRELUDE_SLOTS_LEN_OFFSET: u64 =
     offset_of!(WasmJitEvalFrame, prelude_slots_len) as u64;
 
+pub const FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, evaluation_state_inputs_ptr) as u64;
+pub const FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET: u64 =
+    offset_of!(WasmJitEvalFrame, evaluation_state_inputs_len) as u64;
+
 const _: () = {
     assert!(WASM_JIT_MAX_SLICE_OPERANDS == crate::zfilter::MAX_ZI_RUNTIME_OPERANDS);
-    assert!(WASM_JIT_EVAL_FRAME_BYTES == 168);
+    assert!(WASM_JIT_EVAL_FRAME_BYTES == 176);
     assert!(WASM_JIT_SLICE_OPERANDS_OFFSET == WASM_JIT_EVAL_FRAME_BYTES);
-    assert!(offset_of!(WasmJitDispatchFrame, slice_operands) == 168);
-    assert!(WASM_JIT_MAX_EVAL_FRAME_BYTES == 8_360);
+    assert!(offset_of!(WasmJitDispatchFrame, slice_operands) == 176);
+    assert!(WASM_JIT_MAX_EVAL_FRAME_BYTES == 8_368);
     assert!(FRAME_RESULT_OFFSET == 16);
     assert!(FRAME_SESSION_TOKEN_OFFSET == 28);
     assert!(FRAME_PARAMETERS_PTR_OFFSET == 32);
@@ -217,6 +227,8 @@ const _: () = {
     assert!(FRAME_M_FACTOR_OFFSET == 152);
     assert!(FRAME_PRELUDE_SLOTS_PTR_OFFSET == 160);
     assert!(FRAME_PRELUDE_SLOTS_LEN_OFFSET == 164);
+    assert!(FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET == 168);
+    assert!(FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET == 172);
 };
 
 const ZI_LAYOUT_LENGTH_MASK: usize = (1 << 14) - 1;
@@ -281,16 +293,20 @@ mod tests {
         let frame = WasmJitEvalFrame::default();
         assert_eq!(frame.magic, WASM_JIT_FRAME_MAGIC);
         assert_eq!(frame.abi_version, WASM_JIT_ABI_VERSION);
-        assert_eq!(frame.byte_len, 168);
-        assert_eq!(size_of::<WasmJitEvalFrame>(), 168);
+        assert_eq!(frame.byte_len, 176);
+        assert_eq!(size_of::<WasmJitEvalFrame>(), 176);
         assert_eq!(FRAME_VARIABLES_PTR_OFFSET, 96);
         assert_eq!(FRAME_VARIABLES_LEN_OFFSET, 100);
         assert_eq!(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, 116);
         assert_eq!(FRAME_JACOBIANS_LEN_OFFSET, 124);
-        assert_eq!(WASM_JIT_SLICE_OPERANDS_OFFSET, 168);
-        assert_eq!(WASM_JIT_MAX_EVAL_FRAME_BYTES, 8_360);
+        assert_eq!(WASM_JIT_SLICE_OPERANDS_OFFSET, 176);
+        assert_eq!(WASM_JIT_MAX_EVAL_FRAME_BYTES, 8_368);
         assert_eq!(FRAME_PRELUDE_SLOTS_PTR_OFFSET, 160);
         assert_eq!(FRAME_PRELUDE_SLOTS_LEN_OFFSET, 164);
+        assert_eq!(FRAME_EVALUATION_STATE_INPUTS_PTR_OFFSET, 168);
+        assert_eq!(FRAME_EVALUATION_STATE_INPUTS_LEN_OFFSET, 172);
+        assert_eq!(frame.evaluation_state_inputs_ptr, 0);
+        assert_eq!(frame.evaluation_state_inputs_len, 0);
         let dispatch = WasmJitDispatchFrame::new(frame);
         assert_eq!(dispatch.frame.byte_len, WASM_JIT_MAX_EVAL_FRAME_BYTES);
         assert_eq!(dispatch.slice_operands.len(), WASM_JIT_MAX_SLICE_OPERANDS);

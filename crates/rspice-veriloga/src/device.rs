@@ -6413,6 +6413,8 @@ impl VerilogADevice {
             state_older_candidate_len: context.state_older_candidate.len(),
             idtmod_origins: &mut context.idtmod_origins,
             state_integration: context.state_integration_coefficients_ref(),
+            evaluation_state_inputs: context.evaluation_state_inputs().as_ptr(),
+            evaluation_state_inputs_len: context.evaluation_state_inputs().len(),
             prelude_slots: if context.prelude_slots.is_empty() {
                 std::ptr::null_mut()
             } else {

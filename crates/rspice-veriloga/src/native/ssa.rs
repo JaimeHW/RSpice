@@ -3699,6 +3699,7 @@ fn op_may_call(op: NativeOp) -> bool {
         NativeOp::BinaryMath(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
+            | NativeOp::LoadEvaluationState(_)
             | NativeOp::ProductRatio
             | NativeOp::SumProductsDiv(_)
             | NativeOp::CheckedValue
@@ -3894,6 +3895,7 @@ fn op_may_fail(op: NativeOp) -> bool {
         NativeOp::LoadParamGiven(_)
             | NativeOp::LoadSimParamValue(_)
             | NativeOp::LoadSimParamPresent(_)
+            | NativeOp::LoadEvaluationState(_)
             | NativeOp::LoadPortConnected(_)
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)

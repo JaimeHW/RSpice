@@ -55,7 +55,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// Version 15 adds site-aware integral derivative helpers 480 and 481, and
 /// the site-aware time-derivative helper 482 that replaced the retired ddt
 /// companion Jacobian.
-pub const WASM_JIT_ABI_VERSION: u32 = 15;
+/// Version 16 adds immutable procedural evaluation inputs to the frame header.
+pub const WASM_JIT_ABI_VERSION: u32 = 16;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
@@ -134,7 +135,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 44 shares exact operand-only math calls in executable SSA.
 /// 44 to 45 preserves derivative demand at each assignment: later value-only
 /// writes no longer publish every shadow allocated for an earlier definition.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 45;
+/// Version 46 emits bounded reads of immutable procedural evaluation inputs.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 46;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

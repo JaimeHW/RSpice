@@ -211,6 +211,9 @@ pub(crate) enum NativeOp {
     /// analog state nor a model variable — it lives exactly as long as one
     /// evaluation.
     LoadPreludeSlot(usize),
+    /// Immutable procedural state at the start of this numerical evaluation.
+    /// This buffer is distinct from the variable slots assignments publish.
+    LoadEvaluationState(usize),
     /// Publish one value into a per-evaluation prelude slot, and yield it.
     ///
     /// The only operation in this vocabulary whose point is its side effect.
@@ -8709,6 +8712,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::IdtDerivativeState(_) => "IdtDerivativeState",
         NativeOp::IdtModDerivativeState(_) => "IdtModDerivativeState",
         NativeOp::LoadPreludeSlot(_) => "LoadPreludeSlot",
+        NativeOp::LoadEvaluationState(_) => "LoadEvaluationState",
         NativeOp::StorePreludeSlot(_) => "StorePreludeSlot",
     }
 }
@@ -9619,7 +9623,8 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadMfactor
         | NativeOp::LoadSimParamValue(_)
         | NativeOp::LoadSimParamPresent(_)
-        | NativeOp::LoadPreludeSlot(_) => (0, 1),
+        | NativeOp::LoadPreludeSlot(_)
+        | NativeOp::LoadEvaluationState(_) => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
         | NativeOp::AddConst(_)

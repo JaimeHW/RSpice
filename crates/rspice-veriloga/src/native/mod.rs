@@ -29,6 +29,12 @@ mod cfg_size_census;
 mod code_identity;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod double_double;
+#[cfg(all(
+    test,
+    feature = "native",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+mod evaluation_state;
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod json_float_census;
 #[cfg(all(
