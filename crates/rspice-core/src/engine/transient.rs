@@ -7371,6 +7371,11 @@ impl Engine {
                         &transient_system_context,
                         &mut vbic_snapshot_cache,
                         !nonlinear_state_matches_new_solution,
+                        if uses_xyce_damped_solver && nonlinear_state_matches_new_solution {
+                            residual::CoreEvaluation::ReuseCandidate
+                        } else {
+                            residual::CoreEvaluation::NewCandidate
+                        },
                         0.0,
                     ));
                 }
@@ -7840,6 +7845,7 @@ impl Engine {
                                     &transient_system_context,
                                     &mut vbic_snapshot_cache,
                                     true,
+                                    residual::CoreEvaluation::NewCandidate,
                                     0.0,
                                     crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                                 ));

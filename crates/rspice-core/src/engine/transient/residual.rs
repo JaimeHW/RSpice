@@ -32,6 +32,16 @@ pub(super) const CLASSIC_MOS_COMPACT_COMPANION_THRESHOLD: usize = 512;
 // coefficient aggregation keeps its 2x acceptance margin conservative.
 const DIRECT_RESIDUAL_MAX_MOS_ROW_INCIDENCE: usize = 64;
 
+/// Magnetic intermediate-state ownership is independent of whether ordinary
+/// nonlinear devices already hold the candidate voltages. A corrected Newton
+/// endpoint advances Core carry once; its reused Jacobian and static probes do
+/// not perform another carried-state evaluation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CoreEvaluation {
+    NewCandidate,
+    ReuseCandidate,
+}
+
 /// Per-step invariants of the transient system assembly. Holds borrows of
 /// the integration coefficients and the per-device-family histories, so a
 /// context is constructed locally at each use site (the histories are
@@ -1360,7 +1370,8 @@ impl Engine {
     /// equations (voltage source/inductor branches) must not receive the
     /// shunt or transient references are biased. `refresh_nonlinear` lets
     /// the Newton loop skip the device re-evaluation when its state already
-    /// matches `solution`.
+    /// matches `solution`. `core_evaluation` independently identifies a new
+    /// magnetic Newton evaluation versus reuse of its cached endpoint.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn stamp_transient_system(
         &self,
@@ -1373,6 +1384,7 @@ impl Engine {
         ctx: &TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         refresh_nonlinear: bool,
+        core_evaluation: CoreEvaluation,
         extra_diag_gmin: Value,
     ) -> Result<(), SimulationError> {
         self.stamp_transient_system_with_generated_mode(
@@ -1385,6 +1397,7 @@ impl Engine {
             ctx,
             vbic_snapshot_cache,
             refresh_nonlinear,
+            core_evaluation,
             extra_diag_gmin,
             crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
         )
@@ -1402,6 +1415,7 @@ impl Engine {
         ctx: &TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         refresh_nonlinear: bool,
+        core_evaluation: CoreEvaluation,
         extra_diag_gmin: Value,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
     ) -> Result<(), SimulationError> {
@@ -1528,16 +1542,14 @@ impl Engine {
             XyceCoreCompanionMode {
                 one_step: ctx.xyce_one_step,
                 one_step_order2: ctx.xyce_one_step_order2,
-                // Keep the Core carry advancement coupled to a refreshed
-                // candidate. Static/cached probes must remain pure.  The
-                // transient Newton loop stamps the corrected candidate once as
-                // its RHS and then stamps that same point again to build the
-                // next Jacobian; reusing the cached endpoint for the latter is
-                // the equivalent of Xyce's loadDAEMatrices call, which does not
-                // run MutIndNonLin2::updatePrimaryState a second time.
+                // Ordinary device refresh does not evaluate the Core's
+                // magnetic companion. Each new Newton candidate advances its
+                // own carry even when that generic refresh already ran.
+                // DampedNewton's reused Jacobian consumes the cached endpoint;
+                // static probes likewise cannot advance carried history.
                 advance_magvar_update: evaluation_mode
                     == crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited
-                    && refresh_nonlinear,
+                    && core_evaluation == CoreEvaluation::NewCandidate,
             },
         );
         circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, &companion_coeff);
@@ -2520,6 +2532,7 @@ impl Engine {
                 ctx,
                 vbic_snapshot_cache,
                 refresh_nonlinear,
+                CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             )?;
@@ -2558,6 +2571,9 @@ impl Engine {
         !has_xspice_devices && size <= 64 && !crate::solver::klu_backend_enabled()
     }
 }
+
+#[cfg(test)]
+mod core_state_tests;
 
 #[cfg(test)]
 mod tests {
@@ -3004,6 +3020,7 @@ D2 in out DMOD
                 &ctx,
                 &mut vbic_snapshot_cache,
                 true,
+                CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             )
@@ -3040,6 +3057,7 @@ D2 in out DMOD
                 &ctx,
                 &mut vbic_snapshot_cache,
                 true,
+                CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             )
@@ -3145,6 +3163,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &ctx,
                 &mut vbic_snapshot_cache,
                 false,
+                CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
             )
@@ -3679,6 +3698,7 @@ Q1 C B E 0 QN
                 &ctx,
                 &mut vbic_snapshot_cache,
                 true,
+                CoreEvaluation::NewCandidate,
                 0.0,
             )
             .expect("base transient system stamps");
@@ -3710,6 +3730,7 @@ Q1 C B E 0 QN
                     &ctx,
                     &mut vbic_snapshot_cache,
                     true,
+                    CoreEvaluation::NewCandidate,
                     0.0,
                 )
                 .expect("positive transient probe stamps");
@@ -3729,6 +3750,7 @@ Q1 C B E 0 QN
                     &ctx,
                     &mut vbic_snapshot_cache,
                     true,
+                    CoreEvaluation::NewCandidate,
                     0.0,
                 )
                 .expect("negative transient probe stamps");
@@ -3858,6 +3880,7 @@ Q1 C B E 0 QN
                 ctx,
                 vbic_snapshot_cache,
                 true,
+                CoreEvaluation::NewCandidate,
                 0.0,
             )
             .expect("static companion system stamps");
@@ -3884,6 +3907,7 @@ Q1 C B E 0 QN
                 ctx,
                 vbic_snapshot_cache,
                 true,
+                CoreEvaluation::NewCandidate,
                 0.0,
             )
             .expect("dynamic companion system stamps");
@@ -3962,6 +3986,7 @@ Q1 C B E 0 QN
                 ctx,
                 vbic_snapshot_cache,
                 true,
+                CoreEvaluation::NewCandidate,
                 0.0,
             )
             .expect("static matrix-vector system stamps");
@@ -3979,6 +4004,7 @@ Q1 C B E 0 QN
                 ctx,
                 vbic_snapshot_cache,
                 true,
+                CoreEvaluation::NewCandidate,
                 0.0,
             )
             .expect("dynamic matrix-vector system stamps");
