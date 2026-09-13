@@ -131,7 +131,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 41 retires the ddt companion Jacobian opcode 441 from the emitted set.
 /// Version 42 stages ddx self-updates before publishing their values and shadows.
 /// Version 43 reuses scheduled state operators in conditional derivative cones.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 43;
+/// Version 44 shares exact operand-only math calls in executable SSA.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 44;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

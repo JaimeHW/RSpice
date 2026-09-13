@@ -211,6 +211,7 @@ impl Effects {
     const READ_ENTRY_ARGS: u16 = 1 << 5;
     const CLOBBER_CONTEXT_CACHE: u16 = 1 << 6;
     const INTERNAL_CALL_CONTINUATION: u16 = 1 << 7;
+    const PURE_MATH_CALL: u16 = 1 << 8;
 
     pub(crate) fn for_op(op: NativeOp) -> Self {
         let mut bits = 0;
@@ -225,6 +226,9 @@ impl Effects {
         }
         if op_may_call(op) {
             bits |= Self::MAY_CALL;
+        }
+        if op_is_pure_math_call(op) {
+            bits |= Self::PURE_MATH_CALL;
         }
         if op_may_fail(op) {
             bits |= Self::MAY_FAIL;
@@ -275,13 +279,15 @@ impl Effects {
     /// Whether evaluating this instruction once may replace identical repeated
     /// evaluations at the same program point.
     ///
-    /// Context reads are deliberately allowed: the shared-output planner only
-    /// coalesces adjacent Jacobian programs, and publishing the first result
-    /// cannot mutate the evaluation context.  Calls, failures, and state writes
-    /// remain barriers even when a particular helper is expected to be pure;
-    /// that keeps sharing correct as runtime helper contracts evolve.
+    /// Context reads are deliberately allowed: assignment batches split before
+    /// a published target is read, and Jacobian outputs cannot mutate context.
+    /// Audited operand-only math helpers may also share exact results. Their
+    /// machine call and register-clobber effects remain intact. Every other
+    /// call, failure, and state write is a sharing barrier; this never reassociates
+    /// arithmetic or removes a runtime finite-value check.
     fn permits_result_sharing(self) -> bool {
-        self.0 & (Self::WRITE_STATE | Self::MAY_CALL | Self::MAY_FAIL) == 0
+        self.0 & (Self::WRITE_STATE | Self::MAY_FAIL) == 0
+            && (!self.may_call() || self.contains(Self::PURE_MATH_CALL))
     }
 
     #[cfg(test)]
@@ -2797,7 +2803,7 @@ pub(crate) fn plan_shared_outputs(programs: &[Program]) -> Vec<SharedOutputGroup
         let existing = reusable.then(|| {
             groups.iter().position(|group| {
                 programs[group.representative].permits_result_sharing()
-                    && programs[group.representative] == *program
+                    && programs[group.representative].is_codegen_identical_to(program)
             })
         });
         if let Some(Some(group)) = existing {
@@ -3654,6 +3660,39 @@ pub(crate) fn dynamic_variable_inline_supported(len: usize, lower: i64) -> bool 
     supported.contains(&lower) && supported.contains(&upper)
 }
 
+/// These helpers depend only on their operands and return a scalar, including
+/// NaN/Inf for domain/range errors. None writes the context's runtime status.
+/// Keep the list explicit so a new helper requires an independent effect audit.
+fn op_is_pure_math_call(op: NativeOp) -> bool {
+    use crate::jit::expr::BinaryMathOp;
+
+    matches!(
+        op,
+        NativeOp::UnaryMath(
+            UnaryMathOp::Exp
+                | UnaryMathOp::Log
+                | UnaryMathOp::Log10
+                | UnaryMathOp::Sin
+                | UnaryMathOp::Cos
+                | UnaryMathOp::Tan
+                | UnaryMathOp::Sinh
+                | UnaryMathOp::Cosh
+                | UnaryMathOp::Tanh
+                | UnaryMathOp::Asinh
+                | UnaryMathOp::Acosh
+                | UnaryMathOp::Atanh
+                | UnaryMathOp::Limexp
+                | UnaryMathOp::LimitedExp
+                | UnaryMathOp::Asin
+                | UnaryMathOp::Acos
+                | UnaryMathOp::Atan
+        ) | NativeOp::BinaryMath(
+            BinaryMathOp::Pow | BinaryMathOp::Atan2 | BinaryMathOp::Hypot | BinaryMathOp::Mod
+        ) | NativeOp::ProductRatio
+            | NativeOp::SumProductsDiv(_)
+    )
+}
+
 fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
@@ -4024,6 +4063,82 @@ mod tests {
     }
 
     #[test]
+    fn pure_math_calls_share_results_without_erasing_machine_call_effects() {
+        use crate::jit::expr::{BinaryMathOp, UnaryMathOp};
+
+        for op in [
+            NativeOp::UnaryMath(UnaryMathOp::Exp),
+            NativeOp::UnaryMath(UnaryMathOp::Log),
+            NativeOp::UnaryMath(UnaryMathOp::Limexp),
+            NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
+            NativeOp::UnaryMath(UnaryMathOp::Sin),
+            NativeOp::BinaryMath(BinaryMathOp::Pow),
+            NativeOp::BinaryMath(BinaryMathOp::Atan2),
+            NativeOp::BinaryMath(BinaryMathOp::Hypot),
+            NativeOp::BinaryMath(BinaryMathOp::Mod),
+            NativeOp::ProductRatio,
+            NativeOp::SumProductsDiv(2),
+        ] {
+            let arity = native_op_stack_effect(&op).0;
+            let mut expression: Vec<_> = (0..arity).map(NativeOp::LoadVariable).collect();
+            expression.push(op);
+            let mut repeated = expression.clone();
+            repeated.extend(expression);
+            repeated.push(NativeOp::Mul);
+            let lowered = Program::lower(&program(repeated, arity + 1)).unwrap();
+            assert_eq!(lowered.instructions().len(), arity + 2, "{op:?}");
+            let call = &lowered.instructions()[arity];
+            assert_eq!(call.op(), op);
+            assert!(call.effects.may_call(), "{op:?} still clobbers registers");
+            assert!(call.effects.clobbers_context_pointer_cache());
+            let groups = plan_shared_outputs(&[lowered.clone(), lowered]);
+            assert_eq!(groups.len(), 1, "identical {op:?} outputs share");
+        }
+    }
+
+    #[test]
+    fn pure_math_sharing_stops_at_runtime_checks_and_state_publications() {
+        use crate::jit::expr::UnaryMathOp;
+
+        for barrier in [
+            NativeOp::CheckedValue,
+            NativeOp::IntegerCast,
+            NativeOp::LoadParamGiven(0),
+            NativeOp::TableLookup(0),
+            NativeOp::LimiterStore(0),
+            NativeOp::DdtState(0),
+        ] {
+            let exp = NativeOp::UnaryMath(UnaryMathOp::Exp);
+            let prefix = [NativeOp::LoadVariable(0), exp];
+            let arity = native_op_stack_effect(&barrier).0;
+            let mut ops = prefix.to_vec();
+            ops.extend(vec![NativeOp::Const(1.0); arity]);
+            ops.extend([barrier, NativeOp::Add]);
+            ops.extend(prefix);
+            ops.push(NativeOp::Add);
+            let lowered = Program::lower(&program(ops, (arity + 1).max(2))).unwrap();
+            assert_eq!(
+                lowered
+                    .instructions()
+                    .iter()
+                    .filter(|i| i.op() == exp)
+                    .count(),
+                2,
+                "{barrier:?} must invalidate previously shared computations"
+            );
+            assert_eq!(
+                lowered
+                    .instructions()
+                    .iter()
+                    .filter(|i| i.op() == barrier)
+                    .count(),
+                1,
+                "{barrier:?} must retain its runtime evaluation"
+            );
+        }
+    }
+
+    #[test]
     fn identical_if_else_arms_alias_exactly_and_dead_pure_conditions_disappear() {
         let pure = Program::lower(&program(
             vec![
@@ -4122,10 +4237,11 @@ mod tests {
     }
 
     #[test]
-    fn never_shares_calls_failures_or_state_writes() {
+    fn never_shares_context_calls_failures_or_state_writes() {
         for op in [
             NativeOp::LoadParamGiven(0),
-            NativeOp::UnaryMath(crate::jit::expr::UnaryMathOp::Exp),
+            NativeOp::TableLookup(0),
+            NativeOp::CheckedValue,
             NativeOp::LimitState(0),
         ] {
             let operand_count = native_op_stack_effect(&op).0;
@@ -4136,6 +4252,45 @@ mod tests {
             let groups = plan_shared_outputs(&[first.clone(), first]);
             assert_eq!(groups.len(), 2, "{op:?} must remain a sharing barrier");
         }
+    }
+
+    #[test]
+    fn shared_outputs_require_bit_identical_math_operands() {
+        use crate::jit::expr::{BinaryMathOp, UnaryMathOp};
+
+        for suffix in [
+            vec![],
+            vec![NativeOp::UnaryMath(UnaryMathOp::Sin)],
+            vec![
+                NativeOp::Const(-1.0),
+                NativeOp::BinaryMath(BinaryMathOp::Atan2),
+            ],
+        ] {
+            let mut positive = vec![NativeOp::Const(0.0)];
+            positive.extend(suffix.clone());
+            let mut negative = vec![NativeOp::Const(-0.0)];
+            negative.extend(suffix);
+            let depth = if positive.len() == 3 { 2 } else { 1 };
+            let programs = [
+                Program::lower(&program(positive, depth)).unwrap(),
+                Program::lower(&program(negative, depth)).unwrap(),
+            ];
+            assert_eq!(
+                plan_shared_outputs(&programs).len(),
+                2,
+                "opposite signed zeros must remain distinct, including atan2's branch cut"
+            );
+        }
+        let nan = Program::lower(&program(
+            vec![NativeOp::Const(f64::from_bits(0x7ff8_0000_0000_0042))],
+            1,
+        ))
+        .unwrap();
+        assert_eq!(
+            plan_shared_outputs(&[nan.clone(), nan]).len(),
+            1,
+            "bit-identical NaN operands share without changing their payload"
+        );
     }
 
     #[test]
