@@ -124,14 +124,14 @@ impl StderrLogger {
     fn install() {
         static LOGGER: StderrLogger = StderrLogger;
         if log::set_logger(&LOGGER).is_ok() {
-            log::set_max_level(log::LevelFilter::Info);
+            log::set_max_level(log::LevelFilter::Trace);
         }
     }
 }
 
 impl log::Log for StderrLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Info
+        metadata.level() <= log::Level::Trace
     }
 
     fn log(&self, record: &log::Record<'_>) {
