@@ -50,6 +50,8 @@ use crate::device::traits::{
 use crate::{NodeId, Value};
 use std::f64::consts::PI;
 
+mod ac;
+
 //=============================================================================
 // Jiles-Atherton Model Parameters
 //=============================================================================

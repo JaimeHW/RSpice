@@ -8,6 +8,8 @@
 use super::*;
 use crate::device::passive::{XyceCoreStep, XyceCoreTrial};
 
+mod ac;
+
 /// Accumulate a constant charge coefficient's endpoint difference without
 /// rounding the two endpoint products before subtracting them. The product
 /// tails also preserve small changes beside large accepted currents.

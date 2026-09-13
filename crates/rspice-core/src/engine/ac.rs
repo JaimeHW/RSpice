@@ -2469,18 +2469,26 @@ impl Engine {
                 ac_matrix.add_real(br - 1, nn - 1, -1.0);
                 ac_matrix.add_real(nn - 1, br - 1, -1.0);
             }
-            ac_matrix.add_imag(br - 1, br - 1, -omega * l);
+            if !circuit.xyce_level2_owns_inductor(i) {
+                ac_matrix.add_imag(br - 1, br - 1, -omega * l);
+            }
         }
 
         // Mutual coupling (K elements) for AC: the standalone inductors above
         // carry the self terms; each pair adds the -jwM cross terms.
         for binding in &circuit.coupled_inductor_pairs {
+            if circuit
+                .xyce_level2_owns_mutual_pair(binding.branch1_ordinal, binding.branch2_ordinal)
+            {
+                continue;
+            }
             let br1 = circuit.get_branch_matrix_index(binding.branch1_ordinal);
             let br2 = circuit.get_branch_matrix_index(binding.branch2_ordinal);
             let m = binding.device.m;
             ac_matrix.add_imag(br1 - 1, br2 - 1, -omega * m);
             ac_matrix.add_imag(br2 - 1, br1 - 1, -omega * m);
         }
+        circuit.stamp_xyce_level2_small_signal(ac_matrix, op_voltages, omega)?;
 
         // Controlled sources: VCVS
         for i in 0..circuit.vcvs.len() {

@@ -143,6 +143,25 @@ parameters at all; RSpice therefore requires the instance value and rejects
 instance `L` is present, rather than silently ignoring an authored geometry.
 Nonlinear `CORE` mutual-inductor geometry is a separate contract.
 
+For `CORE LEVEL=2`, AC, noise and pole-zero analysis use the material
+susceptibility at the DC winding bias, including all windings' ampere-turns
+and the authored gap. The small-signal winding matrix is
+`mu0 * AREA / PATH * Ni * Nj * (1 + (1 - GAP/PATH) * P)`.
+The nonlinear K-card scalar follows Xyce 7.10's unity coupling behavior;
+ordinary linear K elements retain their authored coupling coefficient.
+
+RSpice converges the provisional DC material update before linearization.
+In a fresh core this solves `M = Happ * P(Happ, M)` with the DC voltage
+direction equal to zero. Xyce 7.10 advances that provisional update once per
+device evaluation, so its biased AC results can vary with the number of DC
+iterations, including iterations caused by an electrically unrelated circuit.
+RSpice intentionally uses the converged constitutive initialization rather
+than reproducing that evaluation-count dependence. Undefined or unconverged
+material tangents and nonfinite coefficients report the owning core as an
+error. Small-signal evaluation does not advance accepted magnetic history or
+change the transient update and reset contract. This LEVEL=2 qualification
+does not establish LEVEL=1 small-signal or periodic-analysis support.
+
 **Semiconductors** (`semiconductor/`): junction diode; BJT (legacy
 Gummel-Poon with no `LEVEL` or `LEVEL=1/2`, native VBIC at
 `LEVEL=4/9/11/12/13`). Other BJT levels are rejected with a typed error
