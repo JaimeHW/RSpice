@@ -138,9 +138,12 @@ jobs:
       # if a gated target is missing from this job or from the matching pair of
       # steps in `test-linux-native`. The only permitted omissions are the two
       # optional BSIM4 oracle targets, whose Verilog-A source is not vendored.
+      # Explicit --test selectors omit the library unless --lib is also named.
+      # Keep the feature-enabled units alongside these integration suites.
       - name: Test Verilog-A-gated core suites through the bytecode interpreter
         run: >-
           cargo test --locked -p rspice-core --features veriloga --no-fail-fast
+          --lib
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
@@ -305,6 +308,7 @@ jobs:
       - name: Test Verilog-A-gated core suites through the native JIT (Linux x64)
         run: >-
           cargo test --locked -p rspice-core --features veriloga-native --no-fail-fast
+          --lib
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion

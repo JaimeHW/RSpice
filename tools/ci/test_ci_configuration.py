@@ -865,6 +865,33 @@ class CiConfigurationTests(unittest.TestCase):
             step = workflow_step_body(native_job, step_name)
             self.assertIn("-- --test-threads=1", " ".join(step.split()), step_name)
 
+    def test_veriloga_core_library_units_run_on_both_routes(self) -> None:
+        """Explicit integration selectors must not omit feature-gated units."""
+        import shlex
+
+        workflow = read_text(".github/workflows/ci.yml")
+        for job_name, feature, step_names in VERILOGA_GATED_CORE_TEST_STEPS:
+            with self.subTest(route=feature):
+                job = workflow_job_body(workflow, job_name)
+                step = workflow_step_body(job, step_names[0])
+                command = shlex.split(folded_run_command(step))
+                separator = command.index("--") if "--" in command else len(command)
+                selection = command[:separator]
+                harness = command[separator + 1 :]
+                self.assertIn(
+                    "--lib",
+                    selection,
+                    f"{job_name} names integration targets explicitly and must also "
+                    "select --lib to execute feature-enabled core unit tests",
+                )
+                self.assertNotIn("--no-run", selection)
+                self.assertEqual(selection[selection.index("--features") + 1], feature)
+                self.assertEqual(
+                    harness,
+                    ["--test-threads=1"] if feature == "veriloga-native" else [],
+                    "library qualification must not hide units with harness filters",
+                )
+
     def test_contract_gated_veriloga_suites_have_an_executing_lane(self) -> None:
         """A suite that exists only under a feature needs a step naming it.
 
