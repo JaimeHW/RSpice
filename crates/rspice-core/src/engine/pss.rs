@@ -4237,10 +4237,18 @@ impl Engine {
         }
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
-        // The stabilization estimator has one scalar absolute tolerance.
-        // Normalize current lanes into its node scale without changing the
-        // physical solution, accepted device histories or continuation trace.
-        let mut lte_solution = vec![0.0; if fixed_grid { 0 } else { solution.len() }];
+        // Control independent dynamic states, not algebraic reactions. An
+        // ideal source's companion current can ring under trapezoidal even
+        // when its prescribed voltage is exact; shrinking dt cannot damp that
+        // mode. Normalize current states into the estimator's voltage scale.
+        let mut lte_solution = vec![
+            0.0;
+            if fixed_grid {
+                0
+            } else {
+                circuit.state_dimension()
+            }
+        ];
         let mut trapgear = TrapGearController::new();
 
         let mut result = retain_waveform.then(|| TransientResult {
@@ -4441,17 +4449,12 @@ impl Engine {
             let accepted_step_scale = if fixed_grid {
                 None
             } else {
-                for (index, (scaled, &value)) in
-                    lte_solution.iter_mut().zip(&new_solution).enumerate()
-                {
-                    *scaled = value
-                        * (self.voltage_abstol()
-                            / circuit.solution_abstol(
-                                index,
-                                self.voltage_abstol(),
-                                self.current_abstol(),
-                            ));
-                }
+                circuit.stabilization_values(
+                    &new_solution,
+                    &mut lte_solution,
+                    self.voltage_abstol(),
+                    self.current_abstol(),
+                );
                 let (lte, _) = lte_estimator.estimate(&lte_solution, dt);
                 lte_estimator.record(&lte_solution, dt);
                 Some(lte_estimator.recommend_scale(lte))

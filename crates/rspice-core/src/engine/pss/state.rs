@@ -606,6 +606,31 @@ impl PssCircuit {
         }
     }
 
+    /// Candidate values in the independent shooting-state basis, normalized
+    /// for the stabilization estimator's voltage-unit absolute tolerance.
+    /// Algebraic reactions (including voltage-source currents) are not states:
+    /// their companion-method ringing must not drive the next timestep.
+    pub(super) fn stabilization_values(
+        &self,
+        solution: &[Value],
+        values: &mut [Value],
+        node_abstol: Value,
+        current_abstol: Value,
+    ) {
+        debug_assert_eq!(values.len(), self.state_dimension());
+        for (index, (value, raw)) in values
+            .iter_mut()
+            .zip(self.project_perturbation(solution))
+            .enumerate()
+        {
+            *value = if self.is_current_coordinate(index) {
+                raw * (node_abstol / current_abstol)
+            } else {
+                raw
+            };
+        }
+    }
+
     pub(super) fn extract_state(&self) -> Vec<Value> {
         self.basis
             .charge_branches

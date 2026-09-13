@@ -1933,7 +1933,11 @@ fn pss_sources_use_the_configured_dialect_and_one_period_for_time_defaults() {
                                 .with_points_per_period(256)
                                 .with_tstab_periods(stabilization),
                         )
-                        .unwrap();
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "{dialect:?}, current={current}, {source}, stabilization={stabilization}: {error}"
+                            )
+                        });
                     let result = &analysis.result;
                     let out = result
                         .node_names
@@ -2950,7 +2954,7 @@ fn adaptive_stabilization_with_nonzero_tstab_completes_for_linear_rc_and_rl() {
         ),
     ];
 
-    for deck in decks {
+    for (kind, deck) in decks.into_iter().enumerate() {
         let netlist = Netlist::parse(&deck).expect("linear stabilization deck parses");
         let result = Engine::new(SimulationConfig::default())
             .run_pss(
@@ -2971,6 +2975,30 @@ fn adaptive_stabilization_with_nonzero_tstab_completes_for_linear_rc_and_rl() {
             "linear periodic orbit closes after stabilization: {}",
             result.final_residual
         );
+        assert_eq!(result.monodromy.len(), 1);
+        let out = result
+            .result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        // At wRC = wL/R = 1, H_RC = (1-j)/2 and H_RL = (1+j)/2.
+        // Check the complete voltage orbit, including its phase, after both
+        // a charge-state and a current-state stabilization traversal.
+        for (&time, &actual) in result
+            .result
+            .time
+            .iter()
+            .zip(&result.result.waveforms[out].values)
+        {
+            let phase = std::f64::consts::TAU * F0 * time;
+            let sign = if kind == 0 { -1.0 } else { 1.0 };
+            let expected = 0.5 * (phase.sin() + sign * phase.cos());
+            assert!(
+                (actual - expected).abs() < 2.0e-4,
+                "kind={kind}, t={time:e}: {actual:e} vs {expected:e}"
+            );
+        }
     }
 }
 
