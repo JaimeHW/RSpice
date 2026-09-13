@@ -353,7 +353,39 @@ fn pin_fixture(key: &str, result: &TransientResult) {
         .iter()
         .find(|(_, entry, _)| *entry == key)
         .unwrap_or_else(|| panic!("no fingerprint table entry for {key}"));
-    pin_fingerprint(key, fingerprint(result), *expected);
+    let observed = fingerprint(result);
+    if observed != *expected || determinism_fingerprint::emitting() {
+        // A hash cannot locate a changed sample. Preserve binary64 words and
+        // event histories so failures on another target can be compared with
+        // a local emission before deciding whether a baseline may move.
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| format!("{:016x}", value.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        let events = result
+            .digital_traces
+            .iter()
+            .map(|trace| {
+                serde_json::json!({
+                    "node": trace.node_name,
+                    "points": trace.points.iter().map(|point| {
+                        (format!("{:016x}", point.time.to_bits()), format!("{:?}", point.value))
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let trace = serde_json::json!({
+            "node_names": result.node_names,
+            "time_bits": bits(&result.time),
+            "step_bits": bits(&result.step_sizes),
+            "voltage_bits": result.voltages.iter().map(|values| bits(values)).collect::<Vec<_>>(),
+            "digital_events": events,
+        });
+        println!("TRIFAMILY_TRACE {key}={trace}");
+    }
+    pin_fingerprint(key, observed, *expected);
 }
 
 /// Every hashed fixture, re-run in fresh processes.
@@ -3156,7 +3188,6 @@ endmodule
         model.deck_path()
     );
     let result = run(&deck, 1.0e-9, 75.0e-12);
-    pin_fixture("hardening_two_crossings", &result);
 
     let rising = |net: &str| -> f64 {
         let points = digital_points(&result, net);
@@ -3196,6 +3227,7 @@ endmodule
              not an accepted timepoint"
         );
     }
+    pin_fixture("hardening_two_crossings", &result);
 }
 
 /// A five-nanosecond HDL clock, declared in nanoseconds.
