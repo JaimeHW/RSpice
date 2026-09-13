@@ -4,6 +4,12 @@
 //! Both backends compile from the same canonical plan, but they encode,
 //! allocate, and verify independently, so a census that runs on only one of
 //! them qualifies only that one.
+//!
+//! `NATIVE_SHIPPED_CENSUS=` JSON records declare the corpus and selection,
+//! bracket every model attempt, and summarize all results. A model failure
+//! keeps the gate failing while allowing later rows to execute; a missing
+//! summary means an incomplete census. The optional comma-separated
+//! `RSPICE_NATIVE_SHIPPED_MODEL_FILTER` must resolve every requested name.
 #![cfg(all(
     feature = "native",
     any(target_arch = "aarch64", target_arch = "x86_64"),
@@ -144,13 +150,62 @@ fn shipped_models_compile_and_execute_through_the_public_native_jit() {
     let names = cases.iter().map(|(name, _, _)| *name).collect::<Vec<_>>();
     let selected = selected_shipped_indices(&names, filter.as_deref())
         .unwrap_or_else(|error| panic!("invalid RSPICE_NATIVE_SHIPPED_MODEL_FILTER: {error}"));
+    census_record(serde_json::json!({
+        "event": "inventory",
+        "schema": "rspice-native-shipped-census",
+        "schema_version": 1,
+        "test": "shipped_models_compile_and_execute_through_the_public_native_jit",
+        "architecture": std::env::consts::ARCH,
+        "os": std::env::consts::OS,
+        "required_feature": "native",
+        "debug_assertions": cfg!(debug_assertions),
+        "declared": names,
+        "selected": selected.iter().map(|&index| names[index]).collect::<Vec<_>>(),
+    }));
+    let attempted = selected.len();
+    let mut failures = Vec::new();
     for index in selected {
         let (name, path, module) = &cases[index];
-        qualify_shipped_model(name, path, *module);
+        census_record(serde_json::json!({
+            "event": "started", "model": name, "source": path, "module": module,
+        }));
+        // A failed row must not prevent the next model's qualification. Each
+        // closure owns its compiler/device, so unwinding drops that row's state.
+        // A process abort remains a failed, incomplete census (no summary).
+        match std::panic::catch_unwind(|| qualify_shipped_model(name, path, *module)) {
+            Ok(report) => census_record(serde_json::json!({
+                "event": "finished", "model": name, "status": "passed", "report": report,
+            })),
+            Err(payload) => {
+                let error = payload
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| payload.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string qualification panic");
+                census_record(serde_json::json!({
+                    "event": "finished", "model": name, "status": "failed", "error": error,
+                }));
+                failures.push(*name);
+            }
+        }
     }
+    census_record(serde_json::json!({
+        "event": "summary", "attempted": attempted,
+        "passed": attempted - failures.len(), "failed": failures.len(),
+        "failed_models": failures,
+    }));
+    assert!(
+        failures.is_empty(),
+        "shipped models failed qualification: {}",
+        failures.join(", ")
+    );
 }
 
-fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
+fn census_record(record: serde_json::Value) {
+    eprintln!("NATIVE_SHIPPED_CENSUS={record}");
+}
+
+fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) -> serde_json::Value {
     let frontend_started = Instant::now();
     let runtime = VerilogACompiler::new(CompilerOptions::default())
         .compile_file_runtime_with_metadata(path, module)
@@ -243,6 +298,11 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
     assert_eq!(currents.len(), model.stamp_programs.len());
     let finite_currents = currents.iter().filter(|value| value.is_finite()).count();
     assert!(finite_currents > 0, "{name}: no finite native currents");
+    assert_eq!(
+        finite_currents,
+        currents.len(),
+        "{name}: non-finite native currents"
+    );
 
     let mut matrix_entries = 0_usize;
     let mut rhs_entries = 0_usize;
@@ -285,6 +345,16 @@ fn qualify_shipped_model(name: &str, path: &Path, module: Option<&str>) {
         device.native_chunk_count(),
         finite_currents,
     );
+    serde_json::json!({
+        "frontend_ms": frontend_elapsed.as_secs_f64() * 1_000.0,
+        "native_ms": native_elapsed.as_secs_f64() * 1_000.0,
+        "code_bytes": device.native_code_size_bytes(),
+        "code_chunks": device.native_chunk_count(),
+        "currents": finite_currents,
+        "matrix_entries": matrix_entries,
+        "rhs_entries": rhs_entries,
+        "reactive_entries": reactive_entries,
+    })
 }
 
 /// Resolve the complete requested census before running a model. A misspelled
