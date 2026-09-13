@@ -109,3 +109,71 @@ fn oversized_public_checkpoint_is_refused_before_it_replaces_state() {
     assert!(error.contains("exceeds"), "{error}");
     assert_eq!(delay.checkpoint(), before);
 }
+
+#[test]
+fn dense_delay_history_preserves_kinks_after_pruning_and_restoration() {
+    // A triangular signal with unit-spaced knots has an exact piecewise
+    // linear value and alternating right-hand slope. Several full retention
+    // windows force the deque to wrap before nonmonotonic history queries.
+    let triangle = |time: f64| 1.0 - (time.rem_euclid(2.0) - 1.0).abs();
+    let mut history = DelayBuffer::new(521);
+    for step in 0..4096 {
+        history
+            .eval(step as f64, triangle(step as f64), 0.5, Some(512.0))
+            .unwrap();
+        history.commit().unwrap();
+    }
+    let accepted = history.checkpoint();
+    assert_eq!(accepted.samples.first().unwrap().0, 3582.0);
+    assert_eq!(accepted.samples.last().unwrap().0, 4095.0);
+    assert_eq!(accepted.samples.len(), 514);
+    let mut restored = DelayBuffer::new(0);
+    restored.restore_checkpoint(&accepted).unwrap();
+
+    for query in 0..2052 {
+        // Include exact samples, all three interior quarter points, the
+        // candidate interval, and both sides of maximum-delay saturation.
+        let delay = 0.25 * (1 + (query * 257) % 2052) as f64;
+        let target = 4096.0 - delay.min(512.0);
+        let slope = if target.rem_euclid(2.0) < 1.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let expected_delay_coefficient = if delay < 512.0 { -slope } else { 0.0 };
+        let expected_input_coefficient = (1.0 - delay).max(0.0);
+        let evaluation = history
+            .eval_with_coefficients(4096.0, 0.0, delay, Some(999.0))
+            .unwrap();
+        assert_eq!(evaluation.output, triangle(target), "delay={delay}");
+        assert_eq!(evaluation.input_coefficient, expected_input_coefficient);
+        assert_eq!(evaluation.delay_coefficient, expected_delay_coefficient);
+        assert_eq!(
+            restored
+                .eval_with_coefficients(4096.0, 0.0, delay, Some(512.0))
+                .unwrap(),
+            evaluation
+        );
+        let observed = history
+            .static_dae_with_coefficients(4096.0, 99.0, delay, Some(512.0))
+            .unwrap();
+        assert_eq!(observed.output, evaluation.output);
+        assert_eq!(observed.delay_coefficient, evaluation.delay_coefficient);
+        assert_eq!(observed.input_coefficient, 0.0);
+    }
+    assert_eq!(history.checkpoint(), accepted);
+    history.begin_evaluation();
+    restored.begin_evaluation();
+    assert_eq!(restored.checkpoint(), accepted);
+
+    // A step longer than the entire retained window still keeps the last
+    // accepted predecessor needed to interpolate the new candidate.
+    for buffer in [&mut history, &mut restored] {
+        buffer.eval(8192.0, 0.0, 0.5, Some(512.0)).unwrap();
+        buffer.commit().unwrap();
+        assert_eq!(
+            buffer.checkpoint().samples,
+            vec![(4095.0, 1.0), (8192.0, 0.0)]
+        );
+    }
+}

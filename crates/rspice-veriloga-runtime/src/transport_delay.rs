@@ -379,16 +379,19 @@ impl DelayBuffer {
         candidate: (f64, f64),
         target_delay_derivative: f64,
     ) -> Result<DelayEvaluation, String> {
-        let mut left = None;
-        let mut right = None;
-        for &(sample_time, sample_value) in &self.samples {
-            if sample_time <= target {
-                left = Some((sample_time, sample_value, 0.0));
-            } else {
-                right = Some((sample_time, sample_value, 0.0));
-                break;
-            }
-        }
+        // Accepted times are strictly increasing, including across the
+        // deque's wrap. Find the first strictly later sample in logarithmic
+        // time without copying or rotating the retained history. Equality
+        // stays on the left so exact knots retain their right-hand slope.
+        let right_index = self.samples.partition_point(|sample| sample.0 <= target);
+        let mut left = right_index
+            .checked_sub(1)
+            .and_then(|index| self.samples.get(index))
+            .map(|&(time, value)| (time, value, 0.0));
+        let mut right = self
+            .samples
+            .get(right_index)
+            .map(|&(time, value)| (time, value, 0.0));
         if candidate.0 <= target {
             left = Some((candidate.0, candidate.1, 1.0));
         } else if right.is_none() {
