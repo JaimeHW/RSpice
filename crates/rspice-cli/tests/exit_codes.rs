@@ -1436,18 +1436,37 @@ fn a_dc_sweep_keeps_the_engine_category_of_what_refused_it() {
 #[test]
 fn an_advanced_analysis_keeps_the_engine_category_of_what_refused_it() {
     let dir = test_dir("hb_capability");
-    let diagnostic = run_json(
-        &dir,
-        "hb_bjt.sp",
-        "* HB has no stamp for the complete Gummel-Poon equations\n\
+    let supported_deck = "* HB supports ordinary Gummel-Poon electrical equations\n\
          V1 in 0 SIN(0 0.5 1e6)\n\
          Vcc vcc 0 5\n\
          R1 in b 1k\n\
          Rc vcc c 1k\n\
          Q1 c b 0 npnmod\n\
-         .model npnmod NPN IS=1e-16 BF=100\n\
+         .model npnmod NPN LEVEL=1 IS=1e-16 BF=100\n\
          .hb 1e6\n\
-         .end\n",
+         .end\n";
+    let supported_path = dir.join("hb_bjt.sp");
+    std::fs::write(&supported_path, supported_deck).expect("write supported HB deck");
+    let supported = run_rspice(&[
+        "--error-format",
+        "json",
+        "--quiet",
+        "run",
+        supported_path.to_str().expect("UTF-8 deck path"),
+    ]);
+    assert!(
+        supported.status.success(),
+        "ordinary Gummel-Poon HB must run: {}",
+        String::from_utf8_lossy(&supported.stderr)
+    );
+
+    // LEVEL=1 keeps this on Gummel-Poon when TD is added; an unspecified
+    // family with VBIC parameters may select the supported VBIC model.
+    // Legacy Gummel-Poon excess phase is still an explicit engine boundary.
+    let diagnostic = run_json(
+        &dir,
+        "hb_bjt_excess_phase.sp",
+        &supported_deck.replace("BF=100", "BF=100 TD=1n"),
         &[],
     );
 
@@ -1465,7 +1484,9 @@ fn an_advanced_analysis_keeps_the_engine_category_of_what_refused_it() {
     assert!(
         diagnostic["error"]["message"]
             .as_str()
-            .is_some_and(|message| message.contains("HB runtime does not yet support")),
+            .is_some_and(|message| message.contains(
+                "legacy Gummel-Poon thermal and excess-phase HB equations are not represented"
+            )),
         "the engine's detail must survive to the diagnostic: {diagnostic}"
     );
 
