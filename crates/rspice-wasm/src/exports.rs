@@ -1753,7 +1753,10 @@ mod wasm_tests {
         config.convergence_config.residual_reltol = 1e-9;
         config.transient_nonlinear_abstol = Some(1e-12);
         config.transient_nonlinear_reltol = Some(1e-9);
-        config.transient_nonlinear_rhstol = Some(1e-220);
+        // The promoted RBI constitutive equation has voltage units; its
+        // residual cannot be required to cancel below floating-point roundoff.
+        // The current scaling assertion below independently checks accuracy.
+        config.transient_nonlinear_rhstol = Some(1e-12);
         let engine = rspice_core::Engine::new(config);
         let run = |m, private| {
             let base = if private { "b" } else { "bi" };
@@ -1763,7 +1766,9 @@ mod wasm_tests {
                 format!("RB b bi {}\n", 5e3 / m)
             };
             let model = if private { "RB=5k RBM=1k" } else { "" };
-            let deck = rspice_core::Netlist::parse(&format!("Private BJT nonlinear scaling\nVC c 0 1\nVB b 0 PWL(0 .5 50n .7)\n{resistance}Q1 c {base} 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 {model} CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap();
+            // Match the native transient oracle's zero-bias start, isolating
+            // integration from Xyce's coarser nonzero-bias DC stopping policy.
+            let deck = rspice_core::Netlist::parse(&format!("Private BJT nonlinear scaling\nVC c 0 1\nVB b 0 PWL(0 0 50n .7)\n{resistance}Q1 c {base} 0 mm M={m}\n.model mm NPN(IS=1e-14 BF=100 {model} CJE=1p CJC=2p TF=1n)\n.end\n")).unwrap();
             engine
                 .run_tran_with_abort(&deck, 100e-9, 0.05e-9, &rspice_core::abort_signal::NoAbort)
                 .unwrap()
