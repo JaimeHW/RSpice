@@ -160,6 +160,9 @@ pub(crate) fn compile_segmented_program(program: &NativeProgram) -> JitResult<A6
                         compiler.stack_store_d(DReg::D23, index * WORD_BYTES)
                     },
                 )?;
+                if instruction.effects().needs_runtime_status_check() {
+                    compiler.emit_helper_abort_if_failed()?;
+                }
                 compiler.emit_array_store(DReg::D0, scratch, instruction.result().index())?;
                 continue;
             }
@@ -1144,6 +1147,9 @@ impl FunctionCompiler {
                     compiler.stack_store_d(operand, index * WORD_BYTES)
                 },
             )?;
+            if instruction.effects().needs_runtime_status_check() {
+                self.emit_helper_abort_if_failed()?;
+            }
             return match allocated.result() {
                 ValueLocation::Register(register) => {
                     self.encoder.fmov_d(logical_register(register)?, DReg::D0);
@@ -1466,6 +1472,18 @@ impl FunctionCompiler {
         let abort = self.encoder.cbnz_placeholder(XReg::X9)?;
         self.early_returns.push(abort);
         Ok(())
+    }
+
+    fn emit_helper_abort_if_failed(&mut self) -> JitResult<()> {
+        debug_assert!(self.saves_entry_args);
+        let failed_offset = std::mem::offset_of!(EvalContext, runtime_status)
+            + NativeRuntimeStatus::failed_offset();
+        self.encoder
+            .ldrb_w_unsigned(XReg::X9, self.context_register(), failed_offset)?;
+        let success = self.encoder.cbz_placeholder(XReg::X9)?;
+        self.emit_literal(DReg::D0, 0.0)?;
+        self.early_returns.push(self.encoder.b_placeholder());
+        self.encoder.patch_branch(success, self.encoder.position())
     }
 
     fn emit_kernel_skip_if_inactive(&mut self, stamp_index: usize) -> JitResult<BranchPatch> {
@@ -1874,6 +1892,9 @@ impl FunctionCompiler {
                 rspice_idtmod_derivative_state_native as *const () as usize,
             )?,
             NativeOp::WhiteNoise | NativeOp::FlickerNoise => self.emit_literal(result, 0.0)?,
+        }
+        if crate::jit::ssa::Effects::for_op(op).needs_runtime_status_check() {
+            self.emit_helper_abort_if_failed()?;
         }
         Ok(())
     }

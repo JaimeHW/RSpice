@@ -1376,6 +1376,9 @@ impl FunctionCompiler {
                         );
                     }
                 }
+                if instruction.effects().needs_runtime_status_check() {
+                    self.emit_helper_abort_if_failed()?;
+                }
                 self.reset_expression_state();
                 if instruction.effects().clobbers_context_pointer_cache() {
                     context_pointer_cache = None;
@@ -1835,6 +1838,23 @@ impl FunctionCompiler {
         let abort = self.encoder.jcc_rel32_placeholder(ConditionCode::NotEqual);
         self.early_return_jumps.push(abort);
         Ok(())
+    }
+
+    fn emit_helper_abort_if_failed(&mut self) -> JitResult<()> {
+        debug_assert!(self.saves_entry_args());
+        let failed_offset = std::mem::offset_of!(EvalContext, runtime_status)
+            + NativeRuntimeStatus::failed_offset();
+        self.encoder.movzx_r32_m8_base_disp32(
+            Gpr::Rax,
+            self.ctx_arg_reg(),
+            byte_disp_u8(failed_offset)?,
+        );
+        self.encoder.test_r8_r8(Gpr::Rax, Gpr::Rax);
+        let success = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
+        self.encoder.xorpd_xmm_xmm(Xmm::Xmm0, Xmm::Xmm0);
+        self.early_return_jumps
+            .push(self.encoder.jmp_rel32_placeholder());
+        self.patch_rel32_to_current(success)
     }
 
     fn emit_kernel_skip_if_inactive(&mut self, stamp_index: usize) -> JitResult<Rel32Patch> {
@@ -6469,31 +6489,31 @@ mod tests {
                 NativeOp::BinaryMath(BinaryMathOp::Pow),
                 false,
             ),
-            ("table-lookup", NativeOp::TableLookup(0), false),
-            ("table-derivative", NativeOp::TableDerivative(0), false),
-            ("laplace", NativeOp::LaplaceState(0), false),
+            ("table-lookup", NativeOp::TableLookup(0), true),
+            ("table-derivative", NativeOp::TableDerivative(0), true),
+            ("laplace", NativeOp::LaplaceState(0), true),
             (
                 "laplace-derivative",
                 NativeOp::LaplaceStateDerivative(0),
-                false,
+                true,
             ),
             (
                 "zi",
                 NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
-                false,
+                true,
             ),
-            ("timer", NativeOp::TimerState(0), false),
-            ("transition", NativeOp::TransitionState(0), false),
+            ("timer", NativeOp::TimerState(0), true),
+            ("transition", NativeOp::TransitionState(0), true),
             (
                 "transition-derivative",
                 NativeOp::TransitionStateDerivative(0),
-                false,
+                true,
             ),
-            ("slew", NativeOp::SlewState(0), false),
-            ("absdelay", NativeOp::AbsDelayState(0), false),
-            ("cross", NativeOp::CrossState(0), false),
-            ("above", NativeOp::AboveState(0), false),
-            ("last-crossing", NativeOp::LastCrossingState(0), false),
+            ("slew", NativeOp::SlewState(0), true),
+            ("absdelay", NativeOp::AbsDelayState(0), true),
+            ("cross", NativeOp::CrossState(0), true),
+            ("above", NativeOp::AboveState(0), true),
+            ("last-crossing", NativeOp::LastCrossingState(0), true),
             ("idtmod", NativeOp::IdtModState(0), true),
             (
                 "dynamic-variable-slow-path",
@@ -6502,7 +6522,7 @@ mod tests {
                     len: 1,
                     lower: super::INLINE_DYNAMIC_LOWER_ABS_LIMIT + 1,
                 },
-                false,
+                true,
             ),
         ];
 
@@ -10847,12 +10867,20 @@ mod tests {
         ctx.cross_detectors_len = detectors.len();
 
         ctx.time = -0.5;
+        assert_eq!(f(&ctx, std::ptr::null()), 0.0);
+        assert!(
+            ctx.take_runtime_error()
+                .unwrap()
+                .contains("cross evaluation failed")
+        );
+        ctx.time = 0.0;
         assert_eq!(
             f(&ctx, std::ptr::null()).to_bits(),
             310.0_f64.to_bits(),
             "non-transient cross evaluation reports zero while preserving the stack"
         );
-        detectors[0].commit();
+        assert!(ctx.take_runtime_error().is_none());
+        detectors[0] = CrossDetector::default();
 
         ctx.analysis_type = 2;
 

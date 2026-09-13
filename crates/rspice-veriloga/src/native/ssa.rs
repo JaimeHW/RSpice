@@ -262,7 +262,14 @@ impl Effects {
     }
 
     pub(crate) fn needs_saved_entry_args_for_internal_continuation(self) -> bool {
-        self.contains(Self::INTERNAL_CALL_CONTINUATION)
+        self.contains(Self::INTERNAL_CALL_CONTINUATION) || self.needs_runtime_status_check()
+    }
+
+    /// A continuing helper can report failure through EvalContext. Its caller
+    /// must read that status before publishing or evaluating another operation,
+    /// including when this helper is the last instruction in a scalar entry.
+    pub(crate) fn needs_runtime_status_check(self) -> bool {
+        self.may_call() && self.may_fail()
     }
 
     /// Whether evaluating this instruction once may replace identical repeated
