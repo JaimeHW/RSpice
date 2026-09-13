@@ -130,7 +130,8 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 40 retains the initialization rule of each DDT derivative site.
 /// Version 41 retires the ddt companion Jacobian opcode 441 from the emitted set.
 /// Version 42 stages ddx self-updates before publishing their values and shadows.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 42;
+/// Version 43 reuses scheduled state operators in conditional derivative cones.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 43;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -2621,6 +2622,90 @@ endmodule
                     .context_mut()
                     .advance_state()
                     .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_guarded_ddt_preserves_charge_and_trial_history_in_both_plans() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        use crate::vm::IntegrationCoefficients;
+
+        let source = "module guarded(p,n); inout p,n; electrical p,n;
+            parameter integer outer=1, enabled=1;
+            analog if(outer) if(enabled) I(p,n)<+ddt(2.0*V(p,n)*V(p,n)); endmodule";
+        for postfix in [false, true] {
+            let mut harness = FusedKernelHarness::for_source_with_plan(source, "guarded", postfix);
+            harness.reset();
+            let value = harness.stamp_value_export(0);
+            let jacobian = harness.jacobian_export(0, 0);
+            harness.write_f64(FusedKernelHarness::VOLTAGES as usize, 0.5);
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .begin_stateful_evaluation();
+            harness.call_assignments();
+            harness.call_prelude();
+            assert_eq!(harness.call(&value), 0);
+            assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 0.0);
+            harness
+                .store
+                .data_mut()
+                .context_mut()
+                .advance_state()
+                .unwrap();
+            harness.store.data_mut().context_mut().analysis_type = 2;
+            let mut accepted_voltage = 0.5_f64;
+            let mut time = 0.0;
+            for (voltage, step) in [(0.75_f64, 0.125), (-0.25, 0.25), (1.25, 0.0625)] {
+                time += step;
+                let checkpoint = harness
+                    .store
+                    .data()
+                    .context()
+                    .accepted_checkpoint()
+                    .unwrap();
+                for (trial, restore) in [(1.5_f64, false), (voltage, false), (voltage, true)] {
+                    let context = harness.store.data_mut().context_mut();
+                    if restore {
+                        context.restore_accepted_checkpoint(&checkpoint);
+                    }
+                    context.time = time;
+                    context.set_timestep(step);
+                    context.set_integration_coefficients(IntegrationCoefficients {
+                        active: true,
+                        derivative_scale: 1.0 / step,
+                        previous_value_scale: 1.0 / step,
+                        older_value_scale: 0.0,
+                        previous_derivative_scale: 0.0,
+                    });
+                    context.begin_stateful_evaluation();
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, trial);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    // Ask for the derivative first: it must read the same
+                    // candidate that the following value entry publishes.
+                    assert_eq!(harness.call(&jacobian), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        4.0 * trial / step,
+                        "postfix={postfix}"
+                    );
+                    assert_eq!(harness.call(&value), 0);
+                    assert_eq!(
+                        harness.read_f64(FRAME_RESULT_OFFSET as usize),
+                        2.0 * (trial * trial - accepted_voltage * accepted_voltage) / step,
+                        "postfix={postfix}"
+                    );
+                }
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .advance_state()
+                    .unwrap();
+                accepted_voltage = voltage;
             }
         }
     }

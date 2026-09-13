@@ -1797,6 +1797,56 @@ endmodule
     }
 
     #[test]
+    fn guarded_ddt_jacobians_reuse_the_hoisted_primal() {
+        use crate::jit::expr::NativeOp;
+        use crate::jit::plan_program::PlanProgram;
+
+        for statement in [
+            "if (enabled) I(p,n) <+ ddt(2.0*V(p,n)*V(p,n));",
+            "if (enabled) begin if (nested) I(p,n) <+ ddt(2.0*V(p,n)*V(p,n)); end",
+            "if (enabled) begin I(p,n) <+ ddt(2.0*V(p,n)*V(p,n)); I(p,n) <+ ddt(3.0*V(p,n)); end",
+        ] {
+            let source = format!(
+                "module guarded(p,n); inout p,n; electrical p,n;
+                 parameter integer enabled=1, nested=1;
+                 analog begin {statement} end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            let (plan, refusal) =
+                build_default_model_plan_reported(&report.model, &report.canonical_ir).unwrap();
+            assert!(refusal.is_none(), "{statement}: {refusal:?}");
+            assert!(plan.prelude_slot_count() > 0, "{statement}");
+            plan.validate_shape(&report.model).unwrap();
+            let PlanProgram::Blocks(program) = &plan.prelude.as_ref().unwrap().program else {
+                panic!("guarded operators require a CFG prelude");
+            };
+            let instructions = program.ssa().instructions();
+            let primals: Vec<_> = instructions
+                .iter()
+                .filter(|instruction| matches!(instruction.op(), NativeOp::DdtState(_)))
+                .collect();
+            assert_eq!(primals.len(), statement.matches("ddt(").count());
+            let tangents: Vec<_> = instructions
+                .iter()
+                .filter(|instruction| matches!(instruction.op(), NativeOp::DdtDerivativeState(_)))
+                .collect();
+            assert!(!tangents.is_empty());
+            for tangent in tangents {
+                let NativeOp::DdtDerivativeState(slot) = tangent.op() else {
+                    unreachable!()
+                };
+                let primal = primals
+                    .iter()
+                    .find(|instruction| instruction.op() == NativeOp::DdtState(slot))
+                    .expect("each tangent shares its primal's state record");
+                assert_eq!(tangent.operands()[0], primal.result());
+            }
+        }
+    }
+
+    #[test]
     fn nested_mathematical_derivatives_take_the_cfg_plan() {
         for expression in [
             "max(V(p,n),sqrt(V(q,n)))",

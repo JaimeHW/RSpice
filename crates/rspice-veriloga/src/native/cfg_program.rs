@@ -437,7 +437,7 @@ impl Lowerer<'_> {
     /// [`Self::speculation_cone`] for exactly how far that reaches and what it
     /// refuses.
     fn hoisted_state_operators(&self, layout: &Layout) -> JitResult<Vec<Vec<CfgValueId>>> {
-        let definition = self.definition_blocks();
+        let mut definition = self.definition_blocks();
         let mut hoisted: Vec<Vec<CfgValueId>> = vec![Vec::new(); self.function.blocks.len()];
         for block in &layout.order {
             let index = usize::from(*block);
@@ -467,6 +467,17 @@ impl Lowerer<'_> {
                 }
                 let cone =
                     self.speculation_cone(layout, &definition, instruction.result, target)?;
+                // Later operators must see the schedule we have already
+                // proved, rather than the original conditional locations.
+                // In particular, a tangent reads its primal's state record;
+                // reusing the primal at its planned dominator does not run it
+                // again. Publish locations only after the whole cone passes
+                // the speculation checks, in the same dependency order in
+                // which run() will emit these values exactly once.
+                for value in &cone {
+                    definition[usize::from(*value)] = Some(target);
+                }
+                definition[usize::from(instruction.result)] = Some(target);
                 hoisted[target].extend(cone);
                 hoisted[target].push(instruction.result);
             }
@@ -514,7 +525,8 @@ impl Lowerer<'_> {
     /// * **Values that own a state record.** Advancing a second operator's
     ///   history because a first one had to move would corrupt it. Such an
     ///   operator is hoisted in its own right by the loop above, which is where
-    ///   the decision about its record belongs.
+    ///   the decision about its record belongs. A previously scheduled operator
+    ///   that dominates the destination is already available and is reused.
     /// * **Values that can raise a runtime error** — `$param_given` and
     ///   `$port_connected`, whose native loads are bounds-checked, and the
     ///   integration-scale readbacks. A guard exists to keep exactly these off

@@ -18,6 +18,79 @@ fn compile(source: &str) -> DeviceFixture {
 }
 
 #[test]
+fn guarded_ddt_preserves_charge_jacobians_and_rejected_trial_history() {
+    use rspice_veriloga::vm::IntegrationCoefficients;
+
+    for nested in [false, true] {
+        let guard = if nested {
+            "if (outer) if (enabled)"
+        } else {
+            "if (enabled)"
+        };
+        let fixture = compile(&format!(
+            "module guarded(p); inout p; electrical p;
+             parameter integer outer=1, enabled=1;
+             analog {guard} I(p)<+ddt(2.0*V(p)*V(p)); endmodule"
+        ));
+        for enabled in [false, true] {
+            let mut device = fixture.device("CHARGE", &[1]);
+            assert!(device.set_parameter("enabled", f64::from(enabled)));
+            device.update_voltages(&[0.5]);
+            assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+            device.advance_state();
+            device.try_set_analysis_type(2).unwrap();
+            let mut accepted_voltage = 0.5_f64;
+            let mut time = 0.0;
+            for (voltage, step) in [(0.75_f64, 0.125), (-0.25, 0.25), (1.25, 0.0625)] {
+                let checkpoint = device.checkpoint_state().unwrap();
+                time += step;
+                // Each trial, including one restored from a checkpoint, must
+                // integrate from the last accepted charge, never a Newton probe.
+                for (trial, restore) in [(1.5_f64, false), (voltage, false), (voltage, true)] {
+                    if restore {
+                        device.validate_checkpoint_state(&checkpoint).unwrap();
+                        device.apply_validated_checkpoint_state(&checkpoint);
+                    }
+                    device.set_time(time);
+                    device.set_timestep(step);
+                    device.set_integration_coefficients(IntegrationCoefficients {
+                        active: true,
+                        derivative_scale: 1.0 / step,
+                        previous_value_scale: 1.0 / step,
+                        older_value_scale: 0.0,
+                        previous_derivative_scale: 0.0,
+                    });
+                    device.update_voltages(&[trial]);
+                    let current = device.try_evaluate().unwrap()[0];
+                    let (matrix, rhs) = collect_stamps(&mut device, &[trial]);
+                    let expected = if enabled {
+                        2.0 * (trial * trial - accepted_voltage * accepted_voltage) / step
+                    } else {
+                        0.0
+                    };
+                    let slope = if enabled { 4.0 * trial / step } else { 0.0 };
+                    assert!(
+                        (current - expected).abs() < 1e-12,
+                        "nested={nested}, enabled={enabled}, trial={trial}: {current} != {expected}"
+                    );
+                    assert!(
+                        (matrix.get(&(0, 0)).copied().unwrap_or(0.0) - slope).abs() < 1e-12,
+                        "{matrix:?}"
+                    );
+                    assert!(
+                        (rhs.get(&0).copied().unwrap_or(0.0) - (slope * trial - expected)).abs()
+                            < 1e-12,
+                        "{rhs:?}"
+                    );
+                }
+                device.advance_state();
+                accepted_voltage = voltage;
+            }
+        }
+    }
+}
+
+#[test]
 fn thermal_voltage_spellings_preserve_precision_and_subnormal_range() {
     // Oracles round the exact SI rational 1380649/16021766340 times each
     // binary64 input. Multiplication by the rounded scale may differ by one ULP.
