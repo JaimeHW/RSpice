@@ -807,7 +807,7 @@ jobs:
             package: rspice-conformance
             features: --no-default-features
             target: ""
-            targets: --lib
+            targets: --all-targets
           - label: matrix, single-threaded faer
             package: rspice-matrix
             features: --no-default-features

@@ -117,6 +117,39 @@ veriloga-builtins = [
 [lib]
 doctest = false
 
+# These integration targets use the deck runners, whose modules are compiled
+# only by circuit-suites. Keep them in the default census and exclude them
+# explicitly from the oracle-only tooling build.
+[[test]]
+name = "execution_corpora"
+path = "tests/execution_corpora.rs"
+required-features = ["circuit-suites"]
+
+[[test]]
+name = "gf180mcu_devices"
+path = "tests/gf180mcu_devices.rs"
+required-features = ["circuit-suites"]
+
+[[test]]
+name = "ngspice_regression"
+path = "tests/ngspice_regression.rs"
+required-features = ["circuit-suites"]
+
+[[test]]
+name = "panic_gate"
+path = "tests/panic_gate.rs"
+required-features = ["circuit-suites"]
+
+[[test]]
+name = "xyce_regression"
+path = "tests/xyce_regression.rs"
+required-features = ["circuit-suites"]
+
+[[test]]
+name = "y_device_policy"
+path = "tests/y_device_policy.rs"
+required-features = ["circuit-suites"]
+
 [dependencies]
 rspice-core = { path = "../rspice-core", version = "0.1.0" }
 blake3 = "1.5"

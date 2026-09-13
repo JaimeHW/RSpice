@@ -5,7 +5,7 @@
 //! must fail explicitly instead of parsing as shifted-node transmission lines.
 //!
 //! Uses the Xyce harness for deck fixtures, so it is gated behind
-//! `conformance` alongside it.
+//! `circuit-suites` alongside it.
 
 use rspice_conformance::suites::xyce::{XyceRunnerConfig, XyceTestRunner};
 use rspice_core::SpiceDialect;
