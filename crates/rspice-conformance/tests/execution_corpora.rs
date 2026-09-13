@@ -80,7 +80,7 @@ fn analysis_oracle_capture_matches_independent_linear_circuits() {
         ),
         (
             "linear.sp",
-            "linear circuit analyses\nVIN in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.op\n.ac lin 3 1k 3k\n.ac dec 2 10k 100k\n.tran 1u 10u\n.end\n",
+            "linear circuit analyses\nVIN in 0 DC 1 AC 1\nR1 in out 1k\nC1 out 0 1n\n.op\n.ac lin 3 1k 3k\n.ac dec 2 10k 100k\n.tran 1u 10u\n.print ac im(VIN) idb(VIN) ip(VIN) vp(out)\n.print tran v(out)\n.end\n",
             4,
         ),
         (

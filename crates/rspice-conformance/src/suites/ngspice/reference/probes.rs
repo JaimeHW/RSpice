@@ -34,14 +34,14 @@ impl TestRunner {
         abs_tol: f64,
     ) -> f64 {
         match func {
-            "mag" | "vm" | "v" | "i" => value.norm(),
+            "mag" | "vm" | "im" | "v" | "i" => value.norm(),
             "vr" | "ir" => value.re,
             "vi" | "ii" => value.im,
             // ngspice prints all phase outputs in radians unless the
             // interactive `units` variable is set to degrees, which batch
             // reference runs cannot do.
-            "ph" | "vp" | "ip" => value.arg(),
-            "db" | "vdb" => {
+            "ph" | "vp" | "ip" | "vph" | "iph" => value.arg(),
+            "db" | "vdb" | "idb" => {
                 let mag = value.norm().max(abs_tol);
                 20.0 * mag.log10()
             }
@@ -120,7 +120,8 @@ impl TestRunner {
     pub(in crate::suites::ngspice) fn parse_ac_probe(var: &str) -> Option<AcProbe> {
         let normalized = Self::normalize_variable_name(var);
         for func in [
-            "vdb", "db", "vm", "mag", "vr", "ir", "vi", "ii", "vp", "ip", "ph",
+            "vdb", "idb", "db", "vm", "im", "mag", "vr", "ir", "vi", "ii", "vp", "ip", "vph",
+            "iph", "ph",
         ] {
             let prefix = format!("{func}(");
             if normalized.starts_with(&prefix) && normalized.ends_with(')') {
@@ -222,6 +223,42 @@ impl TestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ac_reference_current_and_phase_aliases_preserve_complex_projections() {
+        let value = num_complex::Complex64::new(-3.0, 4.0);
+        for (function, expected) in [
+            ("im", 5.0),
+            ("idb", 13.979_400_086_720_377),
+            ("iph", 2.214_297_435_588_181),
+        ] {
+            for probe in [format!("{function}(VIN)"), format!("{function}(i(VIN))")] {
+                match TestRunner::parse_ac_probe(&probe) {
+                    Some(AcProbe::Current { func, branch }) => {
+                        assert_eq!(branch, "vin");
+                        let actual = TestRunner::evaluate_ac_complex_value(func, value, 1e-12);
+                        assert!((actual - expected).abs() < 1e-13, "{probe}: {actual}");
+                    }
+                    other => panic!("{probe} parsed as {other:?}"),
+                }
+            }
+        }
+        for probe in ["vph(a,b)", "vph(v(a,b))"] {
+            match TestRunner::parse_ac_probe(probe) {
+                Some(AcProbe::Voltage {
+                    func,
+                    node_pos,
+                    node_neg,
+                }) => {
+                    assert_eq!(node_pos, "a");
+                    assert_eq!(node_neg.as_deref(), Some("b"));
+                    let actual = TestRunner::evaluate_ac_complex_value(func, value, 1e-12);
+                    assert!((actual - 2.214_297_435_588_181).abs() < 1e-13);
+                }
+                other => panic!("{probe} parsed as {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn ac_probe_accepts_bare_arguments_like_ngspice_table_headers() {
