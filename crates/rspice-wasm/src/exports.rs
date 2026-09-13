@@ -1803,18 +1803,34 @@ mod wasm_tests {
         let abort = rspice_core::abort_signal::NoAbort;
         for resistance in ["", "RB=5k RBM=1k"] {
             for (kind, p) in [("NPN", 1.0), ("PNP", -1.0)] {
-                let make = |parameter, scale| {
+                let make = |parameter: &str, scale: f64, multiplicity: &str| {
                     rspice_core::Netlist::parse(&format!(
-                "Small BJT\nVC c 0 {p}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale}\n.model mm {kind}(IS=1e-14 BF=100 {resistance} IKF=1m IKR=2m CJE=2p CJC=1p TF=1n)\n.options GMIN=0\n.end\n",p*0.7)).unwrap()
+                "Small BJT\nVC c 0 {p}\nVB b 0 DC {} AC 1\nQ1 c b 0 mm {parameter}={scale} {multiplicity}\n.model mm {kind}(IS=1e-14 BF=100 {resistance} IKF=1m IKR=2m CJE=2p CJC=1p TF=1n)\n.options GMIN=0\n.end\n",p*0.7)).unwrap()
                 };
-                let unit = make("M", 1.0);
+                let unit = make("M", 1.0, "");
                 let dc = engine.run_dc_op_with_abort(&unit, &abort).unwrap();
                 let ac = engine.run_ac_with_abort(&unit, &[1e6], &abort).unwrap();
                 for parameter in ["M", "AREA"] {
                     for scale in [1e-20, 1e-200] {
-                        let deck = make(parameter, scale);
+                        let deck = make(parameter, scale, "");
+                        // AREA can also change the default BC geometry. Hold
+                        // that geometry fixed and normalize by multiplicity,
+                        // instead of comparing two different junction layouts.
+                        let (dc, ac) = if parameter == "AREA" {
+                            let normalized = make("AREA", scale, &format!("M={}", 1.0 / scale));
+                            (
+                                engine.run_dc_op_with_abort(&normalized, &abort).unwrap(),
+                                engine
+                                    .run_ac_with_abort(&normalized, &[1e6], &abort)
+                                    .unwrap(),
+                            )
+                        } else {
+                            (dc.clone(), ac.clone())
+                        };
                         let actual_dc = engine.run_dc_op_with_abort(&deck, &abort).unwrap();
                         let actual_ac = engine.run_ac_with_abort(&deck, &[1e6], &abort).unwrap();
+                        assert_eq!(actual_dc.branch_names, dc.branch_names);
+                        assert_eq!(actual_ac[0].branch_names, ac[0].branch_names);
                         for (&actual, &expected) in
                             actual_dc.branch_currents.iter().zip(&dc.branch_currents)
                         {
