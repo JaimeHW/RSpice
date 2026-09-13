@@ -5021,13 +5021,42 @@ mod tests {
             ],
             2,
         );
+        assert_eq!(execute_with_context(&limited, &context, &[]), 0.0);
+        assert!(
+            context
+                .take_runtime_error()
+                .expect("a limiter needs iteration history storage")
+                .contains("missing iteration history storage")
+        );
+        assert_eq!(state_values[0], 10.0);
+
+        let mut history = [0.0_f64];
+        let mut status = [0_u8];
+        context.state_older_candidate = history.as_mut_ptr();
+        context.state_older_candidate_len = history.len();
+        context.state_candidate_valid = status.as_mut_ptr();
+        context.state_candidate_valid_len = status.len();
         assert_eq!(execute_with_context(&limited, &context, &[]), 13.0);
         assert_eq!(state_values[0], 13.0);
+        assert!(context.take_runtime_error().is_none());
+        assert_eq!(limiter_active, 1);
+        assert_eq!(
+            execute_with_context(&limited, &context, &[]),
+            13.0,
+            "repeated evaluations share this Newton iteration's history"
+        );
+        assert_eq!(state_values[0], 13.0);
+        assert!(context.take_runtime_error().is_none());
 
+        // Begin a fresh evaluation with an uninitialized limiter.
         initialized[0] = 0;
+        status.fill(0);
+        limiter_active = 0;
         assert_eq!(execute_with_context(&limited, &context, &[]), 20.0);
         assert_eq!(state_values[0], 20.0);
         assert_eq!(initialized[0], 1);
+        assert_eq!(limiter_active, 0);
+        assert!(context.take_runtime_error().is_none());
     }
 
     // ------------------------------------------ the runtime loop guard, executed
