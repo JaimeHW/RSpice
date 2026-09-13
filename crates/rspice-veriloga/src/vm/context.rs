@@ -1189,7 +1189,9 @@ impl VmContext {
             self.state_older_candidate[index] = 0.0;
         }
         for buffer in &mut self.delay_buffers {
-            buffer.apply_validated_commit();
+            buffer
+                .commit()
+                .expect("delay candidate was validated before the VM accepted-state transaction");
         }
         for filter in &mut self.transition_filters {
             filter.commit();
@@ -1566,7 +1568,9 @@ impl VmContext {
         self.state_candidate_valid.fill(0);
         self.state_older_candidate.fill(0.0);
         for (target, state) in self.delay_buffers.iter_mut().zip(&checkpoint.delay_buffers) {
-            target.restore_checkpoint(state);
+            target
+                .restore_checkpoint(state)
+                .expect("delay checkpoint was validated before the VM restoration transaction");
         }
         for (target, state) in self
             .transition_filters

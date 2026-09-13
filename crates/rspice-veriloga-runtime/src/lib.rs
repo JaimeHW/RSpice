@@ -30,6 +30,7 @@ mod integration_state;
 mod noise_frequency;
 pub mod polynomial;
 mod simparam;
+pub mod transport_delay;
 
 pub use simparam::{GeneratedSimulationParameters, SimulationParameter};
 
