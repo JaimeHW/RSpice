@@ -5,8 +5,8 @@
 //!
 //! - **Scrim** — full-viewport canvas-black wash that blocks interaction
 //!   with everything underneath. Clicking it does not dismiss; `Esc` does.
-//! - **Surface** — each callsite declares a mockup-owned purpose: transaction,
-//!   manager, wide workflow, or capability review. Purpose controls exact
+//! - **Surface** — each callsite declares a mockup-owned purpose: confirmation,
+//!   transaction, manager, wide workflow, or capability review. Purpose controls exact
 //!   geometry, fill, corner radius, viewport gutter, and narrow behavior; no
 //!   retired generic small/medium/large shell remains.
 //! - **Header / footer** — mono uppercase kicker + semibold title + close
@@ -36,6 +36,10 @@ mod keyboard;
 /// Mockup-owned dialog surface purpose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogSize {
+    /// Short confirmations — a few status lines over at most three verbs:
+    /// 480 pt wide, content-height, capped at 760 pt, with the full-viewport
+    /// shell applied at 560 pt like [`Self::Transaction`].
+    Confirmation,
     /// Transactional edits and confirmations: 760 pt wide, content-height,
     /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
     Transaction,
@@ -99,6 +103,22 @@ struct DialogSurfaceSpec {
 impl DialogSize {
     const fn spec(self) -> DialogSurfaceSpec {
         match self {
+            Self::Confirmation => DialogSurfaceSpec {
+                width: 480.0,
+                max_height: 760.0,
+                horizontal_inset: 24.0,
+                vertical_inset: 24.0,
+                narrow_max_width: 560.0,
+                narrow_inset: 0.0,
+                narrow_vertical_inset: 0.0,
+                cap_narrow_height: false,
+                edge_to_edge_narrow: true,
+                fill_narrow_viewport: true,
+                fill_height: false,
+                app_background: true,
+                radius: 4.0,
+                top_anchored: false,
+            },
             Self::Transaction => DialogSurfaceSpec {
                 width: 760.0,
                 max_height: 760.0,

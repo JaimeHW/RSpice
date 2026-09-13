@@ -180,7 +180,7 @@ impl RSpiceApp {
                     .description(
                         "Review unsaved documents and active local simulation state before closing this project.",
                     )
-                    .size(DialogSize::Transaction)
+                    .size(DialogSize::Confirmation)
                     .ghost("Cancel")
                     .primary_enabled(!running);
                 if dirty > 0 && !running {
@@ -236,6 +236,65 @@ impl RSpiceApp {
                     DialogChoice::None => {}
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Close Project is three status lines over three verbs. Every one of
+    /// them lands inside the centred 480 pt confirmation surface, and the
+    /// verbs share one footer row at desktop width.
+    #[test]
+    fn close_project_review_renders_on_the_narrow_confirmation_surface() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.dialogs.project_review_dialog.show_close_project();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1_280.0, 800.0));
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| app.render_confirmation_dialog(ui.ctx()),
+            ));
+        }
+        let painted: Vec<(String, egui::Rect)> = output
+            .expect("three passes ran")
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect();
+        let find = |label: &str| {
+            painted
+                .iter()
+                .find(|(text, _)| text == label)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{label:?} was not painted: {painted:?}"))
+        };
+
+        let surface =
+            egui::Rect::from_center_size(screen.center(), egui::vec2(480.0, screen.height()));
+        let verbs = ["Cancel", "Close without saving", "Save all and close"].map(find);
+        for rect in [find("Close project"), find("Unsaved: 1 document")]
+            .into_iter()
+            .chain(verbs)
+        {
+            assert!(surface.contains_rect(rect), "{rect:?} escapes {surface:?}");
+        }
+        for rect in &verbs[1..] {
+            assert!((rect.center().y - verbs[0].center().y).abs() < 1.0);
         }
     }
 }

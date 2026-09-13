@@ -166,6 +166,23 @@ fn transaction_tablet_retains_mockup_gutters_until_the_phone_breakpoint() {
 }
 
 #[test]
+fn confirmation_is_narrow_on_desktop_and_full_viewport_at_the_phone_breakpoint() {
+    let screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_280.0, 800.0));
+    let desktop = DialogLayout::resolve(DialogSize::Confirmation, screen, Some(214.0));
+
+    assert_eq!(desktop.surface_rect.size(), vec2(480.0, 214.0));
+    assert_eq!(desktop.surface_rect.center(), screen.center());
+    assert_eq!(desktop.radius, 4.0);
+    assert!(!desktop.fill_height);
+
+    let phone_breakpoint = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(560.0, 900.0));
+    let phone = DialogLayout::resolve(DialogSize::Confirmation, phone_breakpoint, Some(214.0));
+    assert_eq!(phone.surface_rect, phone_breakpoint);
+    assert_eq!(phone.radius, 0.0);
+    assert!(phone.narrow);
+}
+
+#[test]
 fn manager_phone_layout_uses_the_mockup_four_point_gutter() {
     let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0));
     let layout = DialogLayout::resolve(DialogSize::Manager, screen, None);
