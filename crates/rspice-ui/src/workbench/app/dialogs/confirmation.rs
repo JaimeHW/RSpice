@@ -10,9 +10,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
-use crate::workbench::app::{
-    ConfirmationAction, ConfirmationResponse, ProjectReviewRequest, RSpiceApp,
-};
+use crate::workbench::app::{ConfirmationResponse, ProjectReviewRequest, RSpiceApp};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId;
 
@@ -74,42 +72,23 @@ impl RSpiceApp {
     }
 
     fn render_save_confirmation_dialog(&mut self, ctx: &Context) {
-        let pending_action = self.state.dialogs.confirmation_dialog.pending_action;
-        let title = pending_action
-            .as_ref()
-            .map(ConfirmationAction::dialog_title)
-            .unwrap_or("Save changes?");
-        let prompt = pending_action
-            .as_ref()
-            .map(ConfirmationAction::prompt_message)
-            .unwrap_or(
-                "The current schematic has unsaved changes.\nDo you want to save before continuing?",
-            );
-
-        let exiting = pending_action == Some(ConfirmationAction::Exit);
-        let choice = Dialog::new(
-            if exiting { "RSPICE - SAFE EXIT" } else { "Schematic" },
-            title,
-            if exiting { "Save / retain" } else { "Save" },
-        )
-            .description(if exiting {
-                "Choose whether to save project changes and retain recoverable Models & PDK authoring drafts before exiting."
-            } else {
-                "Choose whether to save the current schematic's unsaved changes before continuing."
-            })
-            .size(DialogSize::Transaction)
+        let (title, consequence) = match self.state.dialogs.confirmation_dialog.pending_action {
+            Some(action) => (
+                action.prompt_title(self.state.workspace.project.name().trim()),
+                action.prompt_consequence(),
+            ),
+            None => (
+                "Save changes?".to_owned(),
+                "Your changes will be lost if you don't save them.",
+            ),
+        };
+        let choice = Dialog::prompt(&title, "Save")
+            .description(consequence)
+            .size(DialogSize::Confirmation)
             .secondary("Don't save")
+            .secondary_leading()
             .ghost("Cancel")
-            .show(ctx, |ui| {
-                let t = Tokens::get(ui.ctx());
-                for line in prompt.lines() {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                }
-            });
+            .show(ctx, |ui| prompt_sentence(ui, None, consequence));
 
         let response = match choice {
             DialogChoice::Primary => Some(ConfirmationResponse::Yes),
@@ -178,37 +157,49 @@ impl RSpiceApp {
     /// clean and idle while it is open, because its run ended with nothing
     /// unsaved, closes without asking again.
     fn render_close_project_review(&mut self, ctx: &Context) {
-        let mut unsaved: Vec<(WorkbenchIcon, String)> =
-            crate::workbench::lifecycle::project_lifecycle::dirty_documents(&self.state)
+        let documents =
+            crate::workbench::lifecycle::project_lifecycle::dirty_documents(&self.state);
+        // A never-saved project has no baseline to compare against, so all of
+        // it is unsaved: the summary says that once, rather than listing the
+        // configuration record that stands in for the whole project.
+        let never_saved = self.state.project_lifecycle.accepted().is_none();
+        let mut unsaved: Vec<(WorkbenchIcon, String)> = if never_saved {
+            Vec::new()
+        } else {
+            documents
                 .iter()
                 .map(|document| (document_icon(document), document.label()))
-                .collect();
+                .collect()
+        };
         if self.state.workbench.model_editor_has_unsaved_changes() {
-            unsaved.push((
-                WorkbenchIcon::Models,
-                "Device model editor · unsaved candidate".to_owned(),
-            ));
+            unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
         }
         if self.state.simulation.has_active_execution() {
             self.render_close_blocked_by_run(ctx, &unsaved);
-        } else if unsaved.is_empty() {
+        } else if documents.is_empty() && unsaved.is_empty() {
             self.state.dialogs.project_review_dialog.close();
             crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
         } else {
-            self.render_close_save_prompt(ctx, &unsaved);
+            self.render_close_save_prompt(ctx, never_saved, &unsaved);
         }
     }
 
-    fn render_close_save_prompt(&mut self, ctx: &Context, unsaved: &[(WorkbenchIcon, String)]) {
+    fn render_close_save_prompt(
+        &mut self,
+        ctx: &Context,
+        never_saved: bool,
+        unsaved: &[(WorkbenchIcon, String)],
+    ) {
         let project = self.state.workspace.project.name().trim();
         let title = if project.is_empty() {
             "Save changes before closing?".to_owned()
         } else {
             format!("Save changes to \u{201c}{project}\u{201d}?")
         };
-        let summary = match unsaved.len() {
-            1 => "1 document has unsaved changes.".to_owned(),
-            count => format!("{count} documents have unsaved changes."),
+        let summary = match (never_saved, unsaved.len()) {
+            (true, _) => "This project has never been saved.".to_owned(),
+            (false, 1) => "1 document has unsaved changes.".to_owned(),
+            (false, count) => format!("{count} documents have unsaved changes."),
         };
         let choice = Dialog::prompt(
             &title,
@@ -224,7 +215,7 @@ impl RSpiceApp {
         .secondary_leading()
         .ghost("Cancel")
         .show(ctx, |ui| {
-            close_review_sentence(ui, None, &summary);
+            prompt_sentence(ui, None, &summary);
             unsaved_list(ui, unsaved);
         });
         match choice {
@@ -262,7 +253,7 @@ impl RSpiceApp {
             dialog = dialog.ghost("Cancel");
         }
         let choice = dialog.show(ctx, |ui| {
-            close_review_sentence(
+            prompt_sentence(
                 ui,
                 Some(WorkbenchIcon::Warning),
                 "A local simulation is running. Stop it and wait for it to finish before closing.",
@@ -298,7 +289,7 @@ fn document_icon(document: &ProjectDocumentId) -> WorkbenchIcon {
 }
 
 /// The prompt's one sentence in body text, with an optional mark beside it.
-fn close_review_sentence(ui: &mut Ui, mark: Option<WorkbenchIcon>, sentence: &str) {
+fn prompt_sentence(ui: &mut Ui, mark: Option<WorkbenchIcon>, sentence: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
@@ -444,24 +435,18 @@ mod tests {
         app
     }
 
-    /// Unsaved work asks the standard save-changes question on the narrow
-    /// confirmation surface: the project in the title, the unsaved work in
-    /// the body, and "Don't save" set apart from Cancel and Save.
-    #[test]
-    fn close_project_review_renders_on_the_narrow_confirmation_surface() {
+    /// A save prompt sits on the narrow confirmation surface with its
+    /// question, one sentence, and "Don't save" set apart from Cancel and the
+    /// primary on a single footer row.
+    fn assert_narrow_save_prompt(painted: &[(String, egui::Rect)], title: &str, sentence: &str) {
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1_280.0, 800.0));
-        let painted = painted_text(&render_close_review(
-            &mut unsaved_project_closing(),
-            screen.size(),
-        ));
         let surface =
             egui::Rect::from_center_size(screen.center(), egui::vec2(480.0, screen.height()));
         let [dont_save, cancel, save] =
-            ["Don't save", "Cancel", "Save"].map(|verb| find(&painted, verb));
+            ["Don't save", "Cancel", "Save"].map(|verb| find(painted, verb));
         for rect in [
-            find(&painted, "Save changes to \u{201c}lna-frontend\u{201d}?"),
-            find(&painted, "1 document has unsaved changes."),
-            find(&painted, "Project configuration"),
+            find(painted, title),
+            find(painted, sentence),
             dont_save,
             cancel,
             save,
@@ -479,7 +464,62 @@ mod tests {
             surface.center().x < cancel.left() && cancel.right() < save.left(),
             "Cancel, then the primary, trail"
         );
-        for retired in ["SAFE SHUTDOWN", "Local simulation", "Unsaved:"] {
+    }
+
+    /// Closing a never-saved project asks the standard save-changes question
+    /// and says the whole project is unsaved, rather than naming the
+    /// configuration record that stands in for it.
+    #[test]
+    fn close_project_review_renders_on_the_narrow_confirmation_surface() {
+        let painted = painted_text(&render_close_review(
+            &mut unsaved_project_closing(),
+            egui::vec2(1_280.0, 800.0),
+        ));
+        assert_narrow_save_prompt(
+            &painted,
+            "Save changes to \u{201c}lna-frontend\u{201d}?",
+            "This project has never been saved.",
+        );
+        for retired in [
+            "SAFE SHUTDOWN",
+            "Local simulation",
+            "Unsaved:",
+            "Project configuration",
+        ] {
+            assert!(
+                !painted.iter().any(|(text, _)| text.contains(retired)),
+                "{retired:?} painted"
+            );
+        }
+    }
+
+    /// The save prompt in front of a destructive action is the same narrow
+    /// question: no kicker, one sentence, and "Don't save" set apart.
+    #[test]
+    fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .workspace
+            .project
+            .rename("lna-frontend")
+            .expect("valid project name");
+        app.state.dialogs.confirmation_dialog.visible = true;
+        app.state.dialogs.confirmation_dialog.pending_action =
+            Some(crate::workbench::app::ConfirmationAction::ProjectOpen);
+
+        let painted = painted_text(&render_close_review(&mut app, egui::vec2(1_280.0, 800.0)));
+
+        assert_narrow_save_prompt(
+            &painted,
+            "Save changes to \u{201c}lna-frontend\u{201d}?",
+            "Your changes will be lost if you don't save them.",
+        );
+        for retired in [
+            "SCHEMATIC",
+            "SAFE EXIT",
+            "Save / retain",
+            "Do you want to save",
+        ] {
             assert!(
                 !painted.iter().any(|(text, _)| text.contains(retired)),
                 "{retired:?} painted"
@@ -516,11 +556,10 @@ mod tests {
         let output =
             render_close_review(&mut unsaved_project_closing(), egui::vec2(1_280.0, 800.0));
         let painted = painted_text(&output);
-        let summary = find(&painted, "1 document has unsaved changes.");
-        let last_row = find(&painted, "Project configuration");
+        let summary = find(&painted, "This project has never been saved.");
         let body = egui::Rect::from_min_max(
             egui::pos2(0.0, summary.top() - 20.0),
-            egui::pos2(1_280.0, last_row.bottom() + 20.0),
+            egui::pos2(1_280.0, summary.bottom() + 20.0),
         );
         let mut bands = Vec::new();
         for clipped in &output.shapes {
@@ -559,7 +598,6 @@ mod tests {
             "Stop the simulation to close this project",
             "Stop simulation",
             "Cancel",
-            "Project configuration",
         ] {
             assert!(shows(expected), "{expected:?} missing: {painted:?}");
         }

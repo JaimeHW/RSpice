@@ -29,38 +29,45 @@ pub enum ConfirmationAction {
 }
 
 impl ConfirmationAction {
-    /// Get the dialog title for this action
-    pub fn dialog_title(&self) -> &'static str {
-        match self {
-            ConfirmationAction::ProjectNew => "Create New Project",
-            ConfirmationAction::ProjectOpen => "Open Project",
-            ConfirmationAction::OpenNetlistProject => "Open Netlist Project",
-            ConfirmationAction::CloseProject => "Close Project",
-            ConfirmationAction::FileOpen => "Open Schematic",
-            ConfirmationAction::OpenRecent => "Open Recent File",
-            ConfirmationAction::ImportNetlist => "Import SPICE Deck",
-            ConfirmationAction::Exit => "Exit RSpice",
-        }
-    }
-
-    /// Get the prompt message for this action
-    pub fn prompt_message(&self) -> &'static str {
+    /// The save prompt's question. `project` is the open project's name, or
+    /// empty when it has none.
+    pub fn prompt_title(&self, project: &str) -> String {
         match self {
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
             | ConfirmationAction::OpenNetlistProject
             | ConfirmationAction::CloseProject => {
-                "The current project has unsaved changes.\nDo you want to save before continuing?"
+                if project.is_empty() {
+                    "Save changes to this project?".to_owned()
+                } else {
+                    format!("Save changes to \u{201c}{project}\u{201d}?")
+                }
             }
             ConfirmationAction::FileOpen | ConfirmationAction::OpenRecent => {
-                "The current design has unsaved changes.\nDo you want to save before continuing?"
+                "Save changes to the current design?".to_owned()
             }
-            ConfirmationAction::Exit => {
-                "RSpice has unsaved project or Models & PDK authoring changes.\nSave or retain recoverable drafts before exiting?"
-            }
+            ConfirmationAction::ImportNetlist => "Save the current SPICE source?".to_owned(),
+            ConfirmationAction::Exit => "Save changes before exiting?".to_owned(),
+        }
+    }
+
+    /// The one sentence under the question: what "Don't save" gives up.
+    pub fn prompt_consequence(&self) -> &'static str {
+        match self {
             ConfirmationAction::ImportNetlist => {
-                "The current SPICE source has unsaved changes and will be replaced.\nDo you want to save it before importing another deck?"
+                "Importing another deck replaces it, and your edits will be lost if you don't save them."
             }
+            // "Don't save" on exit also drops the Models & PDK drafts that a
+            // save retains for recovery.
+            ConfirmationAction::Exit => {
+                "Project changes and Models & PDK drafts will be lost if you don't save."
+            }
+            ConfirmationAction::ProjectNew
+            | ConfirmationAction::ProjectOpen
+            | ConfirmationAction::OpenNetlistProject
+            | ConfirmationAction::CloseProject
+            | ConfirmationAction::FileOpen
+            | ConfirmationAction::OpenRecent => "Your changes will be lost if you don't save them.",
         }
     }
 }

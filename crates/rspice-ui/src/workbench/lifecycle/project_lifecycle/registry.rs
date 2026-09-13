@@ -53,7 +53,9 @@ impl ProjectDocumentId {
     pub(crate) fn label(&self) -> String {
         match self {
             Self::ProjectConfiguration => "Project configuration".to_owned(),
-            Self::CellView(reference) => reference.key(),
+            // Cell and view as the reader knows them, not the persisted
+            // library/cell/view key.
+            Self::CellView(reference) => format!("{} \u{b7} {}", reference.cell, reference.view),
             Self::SimulationPlan => "Simulation plan".to_owned(),
             Self::ResultHistory => "Result history".to_owned(),
             Self::VerificationSpecifications => "Verification specifications".to_owned(),
