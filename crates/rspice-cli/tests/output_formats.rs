@@ -864,22 +864,35 @@ fn transient_save_selects_xspice_digital_trace_by_raw_node() {
 }
 
 #[test]
-fn transient_voltage_save_does_not_select_xspice_digital_trace() {
+fn transient_voltage_save_refuses_an_xspice_event_only_net() {
     let dir = test_dir("tran_xspice_digital_voltage_save");
-    let path = run_export(
-        &dir,
-        "tran_xspice_digital_voltage_save",
-        XSPICE_DIGITAL_VOLTAGE_SAVE_TRAN_DECK,
-        "csv",
-    );
-    let text = std::fs::read_to_string(&path).expect("read csv");
-    let header = text.lines().next().expect("csv header");
+    let deck_path = dir.join("voltage_save.sp");
+    let out_path = dir.join("voltage_save.csv");
+    std::fs::write(&deck_path, XSPICE_DIGITAL_VOLTAGE_SAVE_TRAN_DECK).expect("write deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--error-format", "json", "--quiet", "run"])
+        .arg(&deck_path)
+        .arg("-o")
+        .arg(&out_path)
+        .args(["-f", "csv"])
+        .output()
+        .expect("run rspice");
 
+    assert_eq!(output.status.code(), Some(65));
+    let diagnostic: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("one JSON diagnostic");
+    assert_eq!(diagnostic["error"]["category"], "netlist");
+    assert_eq!(diagnostic["error"]["code"], "netlist_error");
+    assert_eq!(diagnostic["error"]["analysis"], "Transient");
     assert!(
-        !header
-            .split(',')
-            .any(|column| column.eq_ignore_ascii_case("D(d)")),
-        "typed voltage save v(d) must not export digital trace D(d): {header:?}"
+        diagnostic["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("V(d)") && message.contains("event-only net")),
+        "the unavailable voltage must be identified: {diagnostic}"
+    );
+    assert!(
+        !out_path.exists(),
+        "a refused output must not publish a file"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
