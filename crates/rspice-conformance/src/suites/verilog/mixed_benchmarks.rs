@@ -47,6 +47,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use rspice_core::analysis::measurements::Waveform;
 use rspice_core::constants::{RELTOL, VNTOL};
 use rspice_core::engine::TransientResult;
 use rspice_core::netlist::Netlist;
@@ -298,10 +299,10 @@ fn run(label: &str, deck: &str, tstop: f64, max_step: f64) -> Result<Timed, Stri
 
 /// The last accepted sample at or before `time`.
 ///
-/// Held rather than interpolated, because every quantity these benchmarks read
-/// is a held level — a converter's output between conversions, a bitstream
-/// between clock edges — and interpolating one would blur an edge the design
-/// deliberately puts nowhere near the sampling instant.
+/// Converter outputs and bitstreams hold their levels between decisions.
+/// Interpolating those samples would blur an edge the design deliberately puts
+/// away from the sampling instant. Continuous control voltages use the separate
+/// time-weighted measurement below.
 fn held(result: &TransientResult, node: &str, time: f64) -> Result<f64, String> {
     let wave = result.try_voltage_waveform_named(node).ok_or_else(|| {
         format!(
@@ -317,30 +318,69 @@ fn held(result: &TransientResult, node: &str, time: f64) -> Result<f64, String> 
     Ok(wave[index])
 }
 
-/// Mean of a node over `[start, start + window)`, over the accepted grid.
+/// Time mean of a continuous analog voltage over the complete window.
+/// Accepted grids concentrate samples near transitions; weighting each sample
+/// equally measures the solver's sampling density instead of the waveform.
+/// Clip both endpoints and integrate the piecewise-linear voltage in time.
 fn windowed_mean(
     result: &TransientResult,
     node: &str,
     start: f64,
     window: f64,
 ) -> Result<f64, String> {
-    let wave = result
-        .try_voltage_waveform_named(node)
-        .ok_or_else(|| format!("node `{node}` is not in the result"))?;
-    let mut sum = 0.0;
-    let mut count = 0usize;
-    for (index, &time) in result.time.iter().enumerate() {
-        if time >= start && time < start + window {
-            sum += wave[index];
-            count += 1;
-        }
-    }
-    if count == 0 {
+    let end = start + window;
+    if !start.is_finite()
+        || !window.is_finite()
+        || window <= 0.0
+        || !end.is_finite()
+        || end <= start
+    {
         return Err(format!(
-            "no accepted timepoints in [{start:e}, +{window:e})"
+            "invalid analog measurement window ({start}, {window})"
         ));
     }
-    Ok(sum / count as f64)
+    let values = result
+        .try_voltage_waveform_named(node)
+        .ok_or_else(|| format!("node `{node}` is not in the result"))?;
+    // Validate the full grid before indexing either endpoint. The generic
+    // threshold interpolator requires a voltage strictly between its samples;
+    // a time integral must also allow an endpoint-rounded interpolated voltage.
+    Waveform::new(&result.time, values).map_err(|error| error.to_string())?;
+    let endpoint = |time: f64| -> Result<f64, String> {
+        let upper = result.time.partition_point(|candidate| *candidate < time);
+        if upper == result.time.len() {
+            return Err(format!("node `{node}` does not cover [{start:e}, {end:e}]"));
+        }
+        if result.time[upper] == time {
+            return Ok(values[upper]);
+        }
+        if upper == 0 {
+            return Err(format!("node `{node}` does not cover [{start:e}, {end:e}]"));
+        }
+        let span = result.time[upper] - result.time[upper - 1];
+        let fraction = (time - result.time[upper - 1]) / span;
+        let value = (1.0 - fraction) * values[upper - 1] + fraction * values[upper];
+        if !span.is_finite() || !fraction.is_finite() || !value.is_finite() {
+            return Err(format!(
+                "node `{node}` has an unrepresentable window endpoint"
+            ));
+        }
+        Ok(value)
+    };
+    let (first, last) = (endpoint(start)?, endpoint(end)?);
+    let mut times = vec![start];
+    let mut clipped = vec![first];
+    for (&time, &value) in result.time.iter().zip(values) {
+        if time > start && time < end {
+            times.push(time);
+            clipped.push(value);
+        }
+    }
+    times.push(end);
+    clipped.push(last);
+    Waveform::new(&times, &clipped)
+        .and_then(|waveform| waveform.average())
+        .map_err(|error| error.to_string())
 }
 
 /// Times at which a node crosses `VTHRESHOLD` going up, inside a window.
@@ -675,7 +715,7 @@ endmodule
 
 fn pll_mixed_deck(model: &ModelFile) -> String {
     format!(
-        "* type-2 pll: analog VCO and loop filter, discrete exclusive-or phase detector\n\
+        "* type-1 pll: analog VCO and loop filter, discrete exclusive-or phase detector\n\
          {plant}\
          x1 p 0 refin vcoin pderr xor_pd\n\
          rp p 0 1meg\n\
@@ -699,7 +739,7 @@ fn pll_reference_deck() -> String {
     };
     let (a, b) = (sign("refin"), sign("vcoin"));
     format!(
-        "* type-2 pll, all analog: a smooth exclusive-or phase detector\n\
+        "* type-1 pll, all analog: a smooth exclusive-or phase detector\n\
          {plant}\
          bpd pderr 0 V={{{VSUP:?}*({a} + {b} - 2.0*{a}*{b})}}\n\
          .end\n",
@@ -850,7 +890,7 @@ pub fn pll() -> Result<BenchmarkOutcome, String> {
 
     Ok(BenchmarkOutcome {
         name: "pll",
-        models: "a type-2 phase-locked loop acquiring a 1 MHz reference from a 0.9 MHz \
+        models: "a type-1 phase-locked loop acquiring a 1 MHz reference from a 0.9 MHz \
                  free-running VCO",
         mixed_is: "the exclusive-or phase detector is a process woken by two A/D boundaries and \
                    driving the loop filter through a D/A one",
@@ -1155,3 +1195,88 @@ pub fn all() -> Vec<fn() -> Result<BenchmarkOutcome, String>> {
 /// The names every benchmark run must produce, so one going missing fails on
 /// its own name rather than on a count.
 pub const REQUIRED_BENCHMARKS: [&str; 3] = ["sar_adc", "pll", "sigma_delta"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn waveform(time: &[f64], voltage: &[f64]) -> TransientResult {
+        TransientResult {
+            time: time.to_vec(),
+            step_sizes: std::iter::once(0.0)
+                .chain(time.windows(2).map(|pair| pair[1] - pair[0]))
+                .collect(),
+            voltages: vec![voltage.to_vec()],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["vctrl".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            digital_buses: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+            fft_results: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pll_window_mean_accepts_correctly_rounded_endpoint_values() {
+        // An interior time one ULP after a sample can legitimately interpolate
+        // to the same representable voltage. It still has positive duration.
+        let result = waveform(&[0.0, 1.0, 2.0], &[0.1099, 0.11, 0.1101]);
+        let start = 1.0_f64.next_up();
+        let mean = windowed_mean(&result, "vctrl", start, 0.5).unwrap();
+        assert!((mean - 0.110025).abs() < 1e-16, "{mean}");
+    }
+
+    #[test]
+    fn pll_window_mean_is_time_weighted_and_clips_endpoints() {
+        // Integral of 1 + 2t on [0.15, 0.8], divided by its duration: 1.95.
+        // Neither endpoint must coincide with an accepted solver sample.
+        for time in [&[0.0, 1.0][..], &[0.0, 0.1, 0.2, 0.3, 1.0][..]] {
+            let voltage: Vec<_> = time.iter().map(|t| 1.0 + 2.0 * t).collect();
+            let result = waveform(time, &voltage);
+            let mean = windowed_mean(&result, "vctrl", 0.15, 0.65).unwrap();
+            assert!((mean - 1.95).abs() < 1e-14, "{time:?}: {mean}");
+        }
+    }
+
+    #[test]
+    fn pll_window_mean_is_invariant_under_linear_segment_refinement() {
+        // A height-2 triangle over [0, 2], followed by zero to t=3.
+        // Its exact area is 2, independent of samples inserted on its sides.
+        for (time, voltage) in [
+            (&[0.0, 1.0, 2.0, 3.0][..], &[0.0, 2.0, 0.0, 0.0][..]),
+            (
+                &[0.0, 0.1, 0.2, 0.3, 1.0, 1.5, 1.75, 2.0, 3.0][..],
+                &[0.0, 0.2, 0.4, 0.6, 2.0, 1.0, 0.5, 0.0, 0.0][..],
+            ),
+        ] {
+            let result = waveform(time, voltage);
+            let mean = windowed_mean(&result, "vctrl", 0.0, 3.0).unwrap();
+            assert!((mean - 2.0 / 3.0).abs() < 1e-14, "{time:?}: {mean}");
+            let clipped = windowed_mean(&result, "vctrl", 0.25, 1.5).unwrap();
+            assert!((clipped - 1.25).abs() < 1e-14, "{time:?}: {clipped}");
+        }
+    }
+
+    #[test]
+    fn pll_window_mean_rejects_invalid_or_incompletely_covered_windows() {
+        let result = waveform(&[0.0, 1.0, 2.0], &[0.0, 1.0, 2.0]);
+        for (start, duration) in [
+            (0.0, 0.0),
+            (0.0, -1.0),
+            (0.0, f64::INFINITY),
+            (f64::NAN, 1.0),
+            (-0.1, 1.0),
+            (1.5, 1.0),
+        ] {
+            assert!(
+                windowed_mean(&result, "vctrl", start, duration).is_err(),
+                "accepted invalid window ({start}, {duration})"
+            );
+        }
+        assert!(windowed_mean(&result, "missing", 0.0, 1.0).is_err());
+    }
+}
