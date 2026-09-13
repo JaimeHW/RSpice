@@ -305,7 +305,18 @@ q1 c b 0 qmod
 .model qmod npn (level=1 is=1e-16 bf=100 ikf=1m td=1n)
 .end
 ",
-            "legacy Gummel-Poon thermal and excess-phase HB equations are not represented",
+            "legacy Gummel-Poon thermal and TD/PTF excess-phase HB equations are not represented",
+        ),
+        (
+            "\
+* authored TF/PTF phase must not be silently omitted
+vcc c 0 dc 5
+vb b 0 dc 0.7
+q1 c b 0 qmod
+.model qmod npn (level=1 is=1e-16 bf=100 ikf=1m tf=1n ptf=21)
+.end
+",
+            "legacy Gummel-Poon thermal and TD/PTF excess-phase HB equations are not represented",
         ),
         (
             "\

@@ -1460,35 +1460,37 @@ fn an_advanced_analysis_keeps_the_engine_category_of_what_refused_it() {
         String::from_utf8_lossy(&supported.stderr)
     );
 
-    // LEVEL=1 keeps this on Gummel-Poon when TD is added; an unspecified
+    // LEVEL=1 keeps this on Gummel-Poon when phase is added; an unspecified
     // family with VBIC parameters may select the supported VBIC model.
     // Legacy Gummel-Poon excess phase is still an explicit engine boundary.
-    let diagnostic = run_json(
-        &dir,
-        "hb_bjt_excess_phase.sp",
-        &supported_deck.replace("BF=100", "BF=100 TD=1n"),
-        &[],
-    );
+    for (name, parameters) in [("td", "TD=1n"), ("ptf", "TF=1n PTF=21")] {
+        let diagnostic = run_json(
+            &dir,
+            &format!("hb_bjt_excess_phase_{name}.sp"),
+            &supported_deck.replace("BF=100", &format!("BF=100 {parameters}")),
+            &[],
+        );
 
-    assert_eq!(
-        diagnostic["observed_exit_code"], 69,
-        "a device HB declines to stamp is a capability refusal: {diagnostic}"
-    );
-    assert_eq!(diagnostic["error"]["category"], "capability");
-    assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
-    assert_eq!(diagnostic["error"]["capability"], "analysis.hb.device");
-    assert_eq!(
-        diagnostic["error"]["analysis"], "HB",
-        "the refusal must still name the analysis that raised it: {diagnostic}"
-    );
-    assert!(
+        assert_eq!(
+            diagnostic["observed_exit_code"], 69,
+            "a device HB declines to stamp is a capability refusal: {diagnostic}"
+        );
+        assert_eq!(diagnostic["error"]["category"], "capability");
+        assert_eq!(diagnostic["error"]["code"], "unsupported_capability");
+        assert_eq!(diagnostic["error"]["capability"], "analysis.hb.device");
+        assert_eq!(
+            diagnostic["error"]["analysis"], "HB",
+            "the refusal must still name the analysis that raised it: {diagnostic}"
+        );
+        assert!(
         diagnostic["error"]["message"]
             .as_str()
             .is_some_and(|message| message.contains(
-                "legacy Gummel-Poon thermal and excess-phase HB equations are not represented"
+                "legacy Gummel-Poon thermal and TD/PTF excess-phase HB equations are not represented"
             )),
         "the engine's detail must survive to the diagnostic: {diagnostic}"
     );
+    }
 
     let _ = std::fs::remove_dir_all(&dir);
 }
