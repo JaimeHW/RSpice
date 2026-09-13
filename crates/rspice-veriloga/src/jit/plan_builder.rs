@@ -34,6 +34,7 @@ use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
+mod shadow_writes;
 mod staged_assignments;
 
 /// What keeps a lowered assignment alive in the plan a model will execute.
@@ -3099,6 +3100,7 @@ struct AssignmentProgramCursor<'a> {
 struct ScalarAssignmentSite<'a> {
     program: &'a BytecodeProgram,
     staging: Option<&'a [AssignmentStep]>,
+    shadows: &'a [AssignmentStep],
 }
 
 #[derive(Clone, Copy)]
@@ -3106,6 +3108,7 @@ struct IndexedAssignmentSite<'a> {
     index: &'a BytecodeProgram,
     value: &'a BytecodeProgram,
     staging: Option<&'a [AssignmentStep]>,
+    shadows: &'a [AssignmentStep],
 }
 
 impl<'a> AssignmentProgramCursor<'a> {
@@ -3151,6 +3154,7 @@ impl<'a> AssignmentProgramCursor<'a> {
                         ScalarAssignmentSite {
                             program: &assignment.program,
                             staging,
+                            shadows: shadow_writes::preceding(model, steps, position),
                         },
                     );
                     if self.staging_slots.contains(&assignment.var_index) {
@@ -3183,6 +3187,7 @@ impl<'a> AssignmentProgramCursor<'a> {
                             index,
                             value,
                             staging: start.map(|start| &steps[start..=position]),
+                            shadows: shadow_writes::preceding(model, steps, position),
                         },
                     );
                 }
@@ -3706,6 +3711,7 @@ fn lower_canonical_assignment(
         assignment.target_name.as_str(),
         assignment.expr.id,
         bytecode_program,
+        site.map_or(&[], |site| site.shadows),
         live,
         shadow_index,
         limits,
@@ -3769,6 +3775,7 @@ fn lower_canonical_indexed_assignment(
         index_expr,
         assignment.expr.id,
         bytecode_programs,
+        site.map_or(&[], |site| site.shadows),
         live,
         shadow_index,
         limits,
@@ -3857,6 +3864,7 @@ fn canonical_scalar_shadow_assignments(
     target_name: &str,
     expr_id: ExprId,
     bytecode_program: Option<&BytecodeProgram>,
+    shadow_writes: &[AssignmentStep],
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
     limits: NativeLoweringLimits<'_>,
@@ -3866,7 +3874,9 @@ fn canonical_scalar_shadow_assignments(
                       name: &str,
                       axes: &[CanonicalDerivativeAxis]|
      -> JitResult<()> {
-        if !live.get(var_index).copied().unwrap_or(false) {
+        if !live.get(var_index).copied().unwrap_or(false)
+            || !shadow_writes::contains_scalar(shadow_writes, var_index)
+        {
             return Ok(());
         }
         validate_assignment_target(model, var_index)?;
@@ -3911,6 +3921,7 @@ fn canonical_array_shadow_assignments(
     index_expr: ExprId,
     value_expr: ExprId,
     bytecode_programs: Option<(&BytecodeProgram, &BytecodeProgram)>,
+    shadow_writes: &[AssignmentStep],
     live: &[bool],
     shadow_index: &AssignmentShadowIndex,
     limits: NativeLoweringLimits<'_>,
@@ -3965,7 +3976,14 @@ fn canonical_array_shadow_assignments(
                 .into(),
             });
         }
-        if !assignment_range_live(shadow.base, shadow.len, live) {
+        if !assignment_range_live(shadow.base, shadow.len, live)
+            || !shadow_writes::contains_indexed(
+                shadow_writes,
+                shadow.base,
+                shadow.len,
+                shadow.lower,
+            )
+        {
             continue;
         }
 

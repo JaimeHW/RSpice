@@ -1240,6 +1240,56 @@ fn nested_ddx_observation_preserves_loop_carried_derivatives() {
 }
 
 #[test]
+fn derivative_demand_follows_each_assignment_through_readback() {
+    // Only the cubic's reaching definition needs three derivative orders.
+    // The later exponential is a value readback, including inside a loop and
+    // behind a guard; requesting its unused third derivative rejects valid code.
+    for (declarations, body, readback) in [
+        (
+            "real x;",
+            "x=V(p)*V(p)*V(p); reported=ddx(ddx(x,V(p)),V(p)); x=exp(V(p));",
+            "x",
+        ),
+        (
+            "real x;",
+            "x=V(p)*V(p)*V(p); reported=ddx(ddx(x,V(p)),V(p)); if(V(p)>0) x=exp(V(p)); else x=1;",
+            "x",
+        ),
+        (
+            "real q[2:3]; integer idx;",
+            "idx=2; q[2]=0; q[3]=0; q[idx]=V(p)*V(p)*V(p); reported=ddx(ddx(q[idx],V(p)),V(p)); q[idx]=exp(V(p));",
+            "q[2]",
+        ),
+        (
+            "real x; integer k;",
+            "for(k=0;k<2;k=k+1) begin x=V(p)*V(p)*V(p); reported=ddx(ddx(x,V(p)),V(p)); x=exp(V(p)); end",
+            "x",
+        ),
+    ] {
+        let fixture = compile(&format!(
+            "module demanded(p); inout p; electrical p; real reported; {declarations} analog begin {body} I(p)<+reported; end endmodule"
+        ));
+        let mut device = fixture.device("X", &[1]);
+        #[cfg(feature = "native")]
+        assert!(device.is_using_native());
+        for voltage in [-0.75_f64, 0.0, 1.25, -0.75] {
+            device.update_voltages(&[voltage]);
+            assert_eq!(device.try_evaluate().unwrap(), vec![6.0 * voltage]);
+            fixture.observe(&mut device);
+            assert_eq!(device.variable("reported").unwrap(), 6.0 * voltage);
+            let expected = if body.contains("if(V(p)>0)") && voltage <= 0.0 {
+                1.0
+            } else {
+                voltage.exp()
+            };
+            assert!((device.variable(readback).unwrap() - expected).abs() < 1e-12);
+            let (matrix, _) = collect_stamps(&mut device, &[voltage]);
+            assert_eq!(matrix[&(0, 0)], 6.0);
+        }
+    }
+}
+
+#[test]
 fn ddx_self_update_readback_preserves_the_value_and_its_derivatives() {
     for (tail, derivative_output) in [
         ("reported=ddx(x,V(p,n)); I(p,n)<+reported;", true),

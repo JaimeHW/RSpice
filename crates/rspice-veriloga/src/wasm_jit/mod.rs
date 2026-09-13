@@ -132,7 +132,9 @@ pub const WASM_JIT_ABI_VERSION: u32 = 15;
 /// Version 42 stages ddx self-updates before publishing their values and shadows.
 /// Version 43 reuses scheduled state operators in conditional derivative cones.
 /// Version 44 shares exact operand-only math calls in executable SSA.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 44;
+/// 44 to 45 preserves derivative demand at each assignment: later value-only
+/// writes no longer publish every shadow allocated for an earlier definition.
+pub const WASM_JIT_EMITTER_VERSION: u32 = 45;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
@@ -4146,6 +4148,41 @@ endmodule
                 assert_eq!(harness.call(&jacobian_export), 0);
                 let value = harness.read_f64(FRAME_RESULT_OFFSET as usize);
                 assert!((value - 6.0).abs() < 1e-10, "{body}: {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn wasm_derivative_demand_follows_each_assignment() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        for body in [
+            "real x,reported; analog begin x=V(p)*V(p)*V(p); reported=ddx(ddx(x,V(p)),V(p)); x=exp(V(p)); I(p)<+reported+x; end",
+            "real q[2:3],reported; integer idx; analog begin idx=2; q[2]=0; q[3]=0; q[idx]=V(p)*V(p)*V(p); reported=ddx(ddx(q[idx],V(p)),V(p)); q[idx]=exp(V(p)); I(p)<+reported+q[idx]; end",
+            "real x,reported; integer k; analog begin for(k=0;k<2;k=k+1) begin x=V(p)*V(p)*V(p); reported=ddx(ddx(x,V(p)),V(p)); x=exp(V(p)); end I(p)<+reported+x; end",
+        ] {
+            let source = format!("module demanded(p); inout p; electrical p; {body} endmodule");
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "demanded", postfix);
+                let value_export = harness.stamp_value_export(0);
+                let jacobian_export = harness.jacobian_export(0, 0);
+                harness.reset();
+                for voltage in [-0.75_f64, 0.0, 1.25, -0.75] {
+                    harness.write_f64(FusedKernelHarness::VOLTAGES as usize, voltage);
+                    harness.call_assignments();
+                    harness.call_prelude();
+                    for (export, expected) in [
+                        (&value_export, 6.0 * voltage + voltage.exp()),
+                        (&jacobian_export, 6.0 + voltage.exp()),
+                    ] {
+                        assert_eq!(harness.call(export), 0);
+                        let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                        assert!(
+                            (actual - expected).abs() < 1e-12,
+                            "postfix={postfix}: {body}: {actual} != {expected}"
+                        );
+                    }
+                }
             }
         }
     }
