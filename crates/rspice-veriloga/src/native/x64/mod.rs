@@ -1312,6 +1312,7 @@ mod tests {
         StampIndex, StampProgram,
     };
     use crate::device::VerilogADevice;
+    use crate::jit::cfg_plan_builder::build_default_model_plan_reported;
     use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
     use crate::native::census_models::shipped_model_filter_allows;
@@ -4534,6 +4535,91 @@ endmodule
     }
 
     #[test]
+    fn finite_oracle_uses_canonical_observation_outputs_without_postfix_scratch() {
+        let name = "canonical_observation_oracle";
+        let runtime = VerilogACompiler::default()
+            .compile_runtime(
+                "module canonical_observation_oracle(p,n); inout p,n; electrical p,n;
+             real x,y; analog begin x=V(p,n)*V(p,n); y=ddx(x,V(p,n));
+             I(p,n)<+V(p,n); end endmodule",
+                Some(name),
+            )
+            .unwrap();
+        assert!(runtime.model.event_state_variables.is_empty());
+        assert!(
+            runtime
+                .model
+                .variable_names
+                .iter()
+                .any(|name| name.contains("@d"))
+        );
+        let native =
+            compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir).unwrap();
+        assert!(!native.publishes_observable_variables());
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        context.voltages[0] = 1.25;
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("ordinary readbacks and all terminal values agree");
+        assert!(stats.variables >= 2 && stats.stamps > 0 && stats.jacobians > 0);
+        assert!(stats.unpublished_observation_scratch > 0);
+        assert_eq!(stats.skipped_nonfinite, 0);
+    }
+
+    #[test]
+    fn finite_oracle_keeps_postfix_fallback_derivative_storage() {
+        let name = "fallback_observation_oracle";
+        let runtime = VerilogACompiler::default()
+            .compile_runtime(
+                "module fallback_observation_oracle(p,n); inout p,n; electrical p,n;
+                 real x,y; analog begin x=V(p,n)*V(p,n); y=ddx(x,V(p,n));
+                 case (ddt(V(p,n))>0.0)
+                   1: I(p,n)<+y; default: I(p,n)<+2.0*y;
+                 endcase end endmodule",
+                Some(name),
+            )
+            .unwrap();
+        let (_, refused) =
+            build_default_model_plan_reported(&runtime.model, &runtime.canonical_ir).unwrap();
+        assert!(
+            refused.is_some(),
+            "fixture must exercise the production fallback"
+        );
+        let (live, unpublished) =
+            finite_oracle_variable_coverage(&runtime.model, &runtime.canonical_ir).unwrap();
+        let derivative = runtime
+            .model
+            .variable_names
+            .iter()
+            .position(|name| name == "x@d0")
+            .expect("first-order derivative storage");
+        assert!(
+            live[derivative],
+            "fallback still publishes live first-order scratch"
+        );
+        assert_eq!(unpublished, 0);
+        let native =
+            compile_model_with_canonical_ir(&runtime.model, &runtime.canonical_ir).unwrap();
+        let mut context = native_model_benchmark_context(&runtime.model, name);
+        context.voltages[0] = 1.25;
+        let stats = assert_native_matches_bytecode_finite_entries(
+            &runtime.model,
+            &runtime.canonical_ir,
+            &native,
+            context,
+            name,
+        )
+        .expect("fallback values and derivatives agree");
+        assert!(stats.variables >= 3 && stats.stamps > 0 && stats.jacobians > 0);
+        assert_eq!(stats.skipped_nonfinite, 0);
+    }
+
+    #[test]
     fn retained_inputs_match_bytecode_finite_oracle() {
         let name = "retained_finite_oracle";
         let runtime = VerilogACompiler::new(CompilerOptions::default())
@@ -4602,7 +4688,7 @@ endmodule
         )
         .map_err(|error| format!("{name}: finite native oracle failed: {error}"))?;
         eprintln!(
-            "native-x64-shipped-oracle model={name} variables={} higher_order_shadows={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={} skipped_snapshots={}",
+            "native-x64-shipped-oracle model={name} variables={} higher_order_shadows={} stamps={} jacobians={} reactive_jacobians={} skipped_nonfinite={} skipped_snapshots={} unpublished_observation_scratch={}",
             stats.variables,
             stats.higher_order_shadows,
             stats.stamps,
@@ -4610,6 +4696,7 @@ endmodule
             stats.reactive_jacobians,
             stats.skipped_nonfinite,
             stats.skipped_snapshots,
+            stats.unpublished_observation_scratch,
         );
         Ok(())
     }
@@ -5518,6 +5605,7 @@ endmodule
         variables: usize,
         higher_order_shadows: usize,
         skipped_snapshots: usize,
+        unpublished_observation_scratch: usize,
         stamps: usize,
         jacobians: usize,
         reactive_jacobians: usize,
@@ -5534,6 +5622,60 @@ endmodule
         Ok(())
     }
 
+    fn finite_oracle_variable_coverage(
+        model: &CompiledModel,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<(Vec<bool>, usize), String> {
+        let canonical_branch_unknown_map =
+            canonical_branch_unknown_runtime_map(model, &artifact.mir)
+                .map_err(|error| error.to_string())?;
+        let limits = NativeLoweringLimits::for_model(model)
+            .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
+        // Reconstruct the selected production route, including whole-model
+        // postfix fallback. Preserve every live assignment slot for that route.
+        let (_, refused) = build_default_model_plan_reported(model, artifact)
+            .map_err(|error| error.to_string())?;
+        let policy = if refused.is_some() {
+            AssignmentRootPolicy::PostfixEntries
+        } else {
+            AssignmentRootPolicy::CfgPreludeSlots
+        };
+        let mut live_variables =
+            live_canonical_assignment_slots(model, &artifact.mir, limits, policy)
+                .map_err(|error| error.to_string())?;
+        // Canonical observation publishes named values directly. Its AD does
+        // not publish the transitive derivative scratch of the retired postfix
+        // observation pass. Those slots remain compared whenever the actual
+        // evaluation route needs them; no derivative order is excluded here.
+        for (live, name) in live_variables.iter_mut().zip(&model.variable_names) {
+            *live |= !name.contains('@') && !variable_is_condition_snapshot(name);
+        }
+        // Keep the old observation dependency set only as explicit accounting,
+        // so a coverage change is visible alongside the physical entry counts.
+        let legacy_observation_variables = live_canonical_assignment_slots(
+            model,
+            &artifact.mir,
+            limits,
+            AssignmentRootPolicy::ObservationPass,
+        )
+        .map_err(|error| error.to_string())?;
+        // Preserve the existing, separately justified snapshot accounting.
+        // The comparison loop still skips these condition temporaries.
+        for ((live, legacy), name) in live_variables
+            .iter_mut()
+            .zip(&legacy_observation_variables)
+            .zip(&model.variable_names)
+        {
+            *live |= *legacy && variable_is_condition_snapshot(name);
+        }
+        let unpublished_observation_scratch = legacy_observation_variables
+            .iter()
+            .zip(&live_variables)
+            .filter(|(legacy, live)| **legacy && !**live)
+            .count();
+        Ok((live_variables, unpublished_observation_scratch))
+    }
+
     fn assert_native_matches_bytecode_finite_entries(
         model: &CompiledModel,
         artifact: &CanonicalIrArtifact,
@@ -5541,39 +5683,8 @@ endmodule
         base_context: VmContext,
         name: &str,
     ) -> Result<FiniteOracleStats, String> {
-        let canonical_branch_unknown_map =
-            canonical_branch_unknown_runtime_map(model, &artifact.mir)
-                .map_err(|error| error.to_string())?;
-        let limits = NativeLoweringLimits::for_model(model)
-            .with_canonical_branch_unknown_map(&canonical_branch_unknown_map);
-        // `native` came out of the production route, whose plan is the CFG
-        // one wherever it builds, so the variables its image publishes are the
-        // ones that plan roots on. Reading the postfix set here would compare
-        // the interpreter against slots the image no longer writes.
-        //
-        // A named variable outside that set is not out of scope, though — it is
-        // what the observation image publishes, and it is compared here too,
-        // after that image has run. Comparing only the evaluation's own set
-        // would let this oracle's coverage fall to whatever the CFG plan
-        // happened to keep alive, which on a dense fixture is a handful of
-        // slots out of dozens.
-        let mut live_variables = live_canonical_assignment_slots(
-            model,
-            &artifact.mir,
-            limits,
-            AssignmentRootPolicy::CfgPreludeSlots,
-        )
-        .map_err(|error| error.to_string())?;
-        let observable_variables = live_canonical_assignment_slots(
-            model,
-            &artifact.mir,
-            limits,
-            AssignmentRootPolicy::ObservationPass,
-        )
-        .map_err(|error| error.to_string())?;
-        for (live, observable) in live_variables.iter_mut().zip(&observable_variables) {
-            *live |= *observable;
-        }
+        let (live_variables, unpublished_observation_scratch) =
+            finite_oracle_variable_coverage(model, artifact)?;
         let mut bytecode_context = base_context.clone();
         bytecode_context.clear_currents();
         bytecode_context
@@ -5636,7 +5747,10 @@ endmodule
             require_clean_native_context(&ctx, "observation")?;
         }
 
-        let mut stats = FiniteOracleStats::default();
+        let mut stats = FiniteOracleStats {
+            unpublished_observation_scratch,
+            ..FiniteOracleStats::default()
+        };
         for (index, is_live) in live_variables.iter().copied().enumerate() {
             if !is_live || post_current_targets.get(index).copied().unwrap_or(false) {
                 continue;
@@ -5932,6 +6046,20 @@ endmodule
             )
             .is_err(),
             "first-order state remains subject to strict numerical agreement"
+        );
+        assert!(
+            assert_internal_variable_compatible(
+                "fixture",
+                "variable q",
+                "q",
+                1.0,
+                2.0,
+                &mut matched,
+                &mut higher_order,
+                &mut skipped,
+            )
+            .is_err(),
+            "named outputs remain subject to strict numerical agreement"
         );
     }
 
