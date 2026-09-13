@@ -3628,6 +3628,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        Self::ensure_bjt_transient_phase_support(circuit, abort)?;
 
         let mut blockers = Vec::new();
         let mut push = |source, message| {
@@ -4018,6 +4019,7 @@ impl Engine {
             modified_trapezoidal_coefficients,
             resume_continuation,
         } = prepared;
+        Self::ensure_bjt_transient_phase_support(&circuit, abort)?;
         let TransientRunWindow {
             tstop,
             max_step,

@@ -3,6 +3,34 @@
 use super::*;
 use crate::device::BjtType;
 
+impl Engine {
+    /// GP PTF currently has an AC/noise operator but no transient history.
+    /// Refuse before startup effects, integration, or checkpoint publication.
+    /// Remove this admission boundary only with delay residuals, accepted
+    /// history, error control, and restoration implemented together.
+    pub(in crate::engine) fn ensure_bjt_transient_phase_support(
+        circuit: &crate::circuit::CircuitData,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let delay = bjt.legacy_excess_phase_delay();
+            if delay != 0.0 {
+                return Err(SimulationError::unsupported_capability(
+                    "analysis.tran.bjt_excess_phase",
+                    format!(
+                        "BJT '{}': transient GP PTF excess phase (nominal delay {delay:.17e} s) is not implemented; forward-transport delay history, timestep error control, and restart state are unavailable",
+                        bjt.name
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The integration state a BJT charge solve steps from: the companion
 /// coefficients and the step they were derived for, plus the two accepted
 /// charge samples and the companion current that the integrator differences
