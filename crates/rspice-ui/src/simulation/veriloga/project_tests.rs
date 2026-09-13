@@ -1,3 +1,6 @@
+//! Project and signed-PDK compilation preserve digital control through sealed
+//! source closures, build profiles, backend selection and worker transport.
+
 use super::*;
 use crate::state::{
     ProjectSourceBundle, ProjectSourceDependency, ProjectSourceFile, ProjectSourceLanguage,
