@@ -448,6 +448,9 @@ struct Tally {
     /// Comparisons neither route could make: one of the two reported a runtime
     /// error at the drawn bias, so there is no pair of numbers to subtract.
     runtime_errors: usize,
+    /// A failed assignment pass or prelude cannot supply numerical inputs.
+    /// These fail the model row before any entry reads partly written storage.
+    preparation_errors: usize,
     /// Entries the CFG route's liveness found structurally absent, where the
     /// shipped plan still carries a program. Checked against zero rather than
     /// against a rounding bound — see [`check_structural_zero`].
@@ -1171,11 +1174,22 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
         let mut variables = vec![0.0_f64; model.num_variables + 64];
         context.clear_runtime_error();
         mir_native.run_assignments(&context, variables.as_mut_ptr());
+        if let Some(error) = context.take_runtime_error() {
+            tally.preparation_errors += 1;
+            return Some(format!(
+                "{module}: point={index} native assignments failed: {error}"
+            ));
+        }
         // The CFG plan's own assignment pass, in the position the device runs
         // it: after the variables are filled and before any entry is read. The
         // shipped plan has none, and its entries do not read a slot.
         cfg_native.run_prelude(&context, variables.as_ptr());
-        let _ = context.take_runtime_error();
+        if let Some(error) = context.take_runtime_error() {
+            tally.preparation_errors += 1;
+            return Some(format!(
+                "{module}: point={index} CFG prelude failed: {error}"
+            ));
+        }
 
         // Read every entry on both plans first, then compare. Two passes
         // because a matrix entry's significance is a property of the row it
@@ -1242,6 +1256,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
 
         for (entry, mir, cfg) in readings {
             compared += 1;
+            tally.comparisons += 1;
             let operations = entry_operations(&mir_plan, &cfg_plan.plan, entry);
             let cfg_dd = cfg_here.get(&entry).copied();
             let comparison = Comparison {
@@ -1256,6 +1271,7 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             };
             if comparison.deviation == 0.0 {
                 exact += 1;
+                tally.exact += 1;
             }
             if guarded_noise.contains(&entry) {
                 tally.guarded_noise_entries += 1;
@@ -1369,8 +1385,6 @@ fn census_model(shipped: &CensusModel, tally: &mut Tally) -> Option<String> {
             }
         }
     }
-    tally.comparisons += compared;
-    tally.exact += exact;
 
     // The AArch64 ceiling, measured on the entry that would meet it first.
     let largest = cfg_plan.report.largest_entry.map(|(entry, instructions)| {
@@ -1515,6 +1529,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         let started = std::time::Instant::now();
         tally.models += 1;
         if let Some(failure) = census_model(&shipped, &mut tally) {
+            println!("cfg-mir model={} failed={failure}", shipped.name);
             failures.push(failure);
         }
         let census_seconds = started.elapsed().as_secs_f64();
@@ -1530,7 +1545,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
     );
     println!(
         "cfg-mir models={} built={} refused={} codegen_failed={} entries={} comparisons={} exact={} \
-         runtime_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
+         runtime_errors={} preparation_errors={} structural_zeros={} over_bound={} nonzero_structural_zeros={} \
          structural_zeros_not_evaluable={} \
          guarded_noise_entries={} guarded_noise_agreed={} guarded_noise_third_value={} \
          below_significance={} referenced={} reference_missing={} \
@@ -1544,6 +1559,7 @@ fn the_cfg_built_plan_agrees_with_the_shipped_plan_within_the_reassociation_boun
         tally.comparisons,
         tally.exact,
         tally.runtime_errors,
+        tally.preparation_errors,
         tally.structural_zeros,
         tally.over_bound,
         tally.nonzero_structural_zeros,
@@ -1644,6 +1660,66 @@ module cfg_initial_step_temperature(p, n);
   end
 endmodule
 "#;
+
+#[test]
+fn failed_preparation_cannot_produce_a_numerical_comparison() {
+    for (body, stage) in [
+        (
+            "y=ddx(log(-abs(V(p,n))-1.0),V(p,n)); I(p,n)<+y;",
+            Some("assignments"),
+        ),
+        (
+            "I(p,n)<+ddx(log(-abs(V(p,n))-1.0),V(p,n));",
+            Some("prelude"),
+        ),
+        ("I(p,n)<+2.0*V(p,n)+ddt(3.0*V(p,n));", None),
+        (
+            "y=ddx(log(analysis(\"tran\") ? -1.0 : (1.0+V(p,n)*V(p,n))),V(p,n)); I(p,n)<+y;",
+            Some("point=1 native assignments"),
+        ),
+    ] {
+        let source = format!(
+            "module preparation(p,n); inout p,n; electrical p,n;
+            real y; analog begin {body} end endmodule"
+        );
+        let runtime = crate::VerilogACompiler::default()
+            .compile_runtime(&source, None)
+            .unwrap();
+        let shipped = CensusModel {
+            name: "preparation".into(),
+            path: "preparation.va".into(),
+            model: runtime.model,
+            canonical_ir: runtime.canonical_ir,
+            compile_seconds: 0.0,
+            from_cache: false,
+        };
+        let mut tally = Tally::default();
+        let refusal = census_model(&shipped, &mut tally);
+        if let Some(stage) = stage {
+            let refusal = refusal.expect("a failed preparation is a failed row");
+            assert!(refusal.contains(stage), "{refusal}");
+            assert_eq!(tally.preparation_errors, 1);
+            if stage.starts_with("point=1") {
+                assert_eq!(
+                    tally.comparisons, tally.entries,
+                    "retain the completed first point's comparisons before the second point fails"
+                );
+            } else {
+                assert_eq!(
+                    tally.comparisons, 0,
+                    "no entry may read partly written storage"
+                );
+            }
+        } else {
+            assert!(refusal.is_none(), "{refusal:?}");
+            assert_eq!(tally.preparation_errors, 0);
+            assert!(
+                tally.comparisons > 0,
+                "valid preparation must execute its entries"
+            );
+        }
+    }
+}
 
 /// The census's operating point has to run the model's initial step.
 ///
