@@ -240,8 +240,9 @@ impl LiveSessionEngine {
         self.settle_mirror_discard(state);
         if matches!(self.role, Role::Idle) {
             if state.workbench.take_live_mirror_entry() {
-                // The close-to-mirror transaction outlived its session.
-                state.workbench.open_project_launcher();
+                // The close-to-mirror transaction outlived its session. Its
+                // close already left the no-project landing in place, and a
+                // closed project never raises the project launcher.
                 state.push_user_message(ConsoleMessage::warning(
                     "The live session ended before the host's project arrived.",
                 ));
@@ -1777,6 +1778,29 @@ mod tests {
             dead: false,
         });
         inbound_tx
+    }
+
+    /// A close-to-mirror transaction that outlives its session leaves the
+    /// reader where every project close does: on the no-project landing.
+    #[test]
+    fn a_mirror_entry_that_outlives_its_session_stays_on_the_no_project_landing() {
+        let mut state = AppState::default();
+        state
+            .workbench
+            .begin_project_close(crate::workbench::state::ProjectCloseDestination::LiveMirror);
+        assert!(crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
+
+        LiveSessionEngine::default().pump(&mut state, &mut CloudAccountService::unconfigured());
+
+        assert!(!state.workbench.project_launcher_open);
+        assert_eq!(
+            state.workbench.workspace,
+            crate::workbench::state::Workspace::Project
+        );
+        assert!(
+            !state.workbench.take_live_mirror_entry(),
+            "the pump consumes the stale entry"
+        );
     }
 
     #[test]
