@@ -10913,6 +10913,12 @@ impl Engine {
                         .map_or(0, TransientCheckpoint::retained_value_count),
                 ),
         )?;
+        if has_shared_xyce_core_level2 {
+            log::trace!(
+                "LEAD_WAVE time={:?} node_names={:?} voltages={:?} branch_names={:?} currents={:?}",
+                result.time, result.node_names, result.voltages, result.branch_names, result.branch_currents,
+            );
+        }
         Ok((result, final_checkpoint, scheduled_checkpoints))
     }
 

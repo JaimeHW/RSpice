@@ -8,6 +8,26 @@
 use super::*;
 use crate::device::passive::{XyceCoreStep, XyceCoreTrial};
 
+/// Accumulate a constant charge coefficient's endpoint difference without
+/// rounding the two endpoint products before subtracting them. The product
+/// tails also preserve small changes beside large accepted currents.
+#[inline]
+fn accumulate_charge_difference(
+    sum: &mut Value,
+    correction: &mut Value,
+    coefficient: Value,
+    current: Value,
+    previous: Value,
+) {
+    let current_hi = coefficient * current;
+    let previous_hi = coefficient * previous;
+    let current_lo = coefficient.mul_add(current, -current_hi);
+    let previous_lo = coefficient.mul_add(previous, -previous_hi);
+    for term in [current_hi, -previous_hi, current_lo, -previous_lo] {
+        crate::numerics::compensated_add(sum, correction, term);
+    }
+}
+
 #[inline]
 fn node_voltage(solution: &[Value], node_pos: NodeId, node_neg: NodeId) -> Value {
     let pos = if node_pos == 0 {
@@ -929,6 +949,10 @@ impl CircuitData {
                 let mut q_current = 0.0;
                 let mut q_previous_reconstructed = 0.0;
                 let mut q_previous_previous = 0.0;
+                let mut q_delta = 0.0;
+                let mut q_delta_correction = 0.0;
+                let mut q_previous_delta = 0.0;
+                let mut q_previous_delta_correction = 0.0;
                 for j in 0..group.windings.len() {
                     let winding_j = &group.windings[j];
                     let l0 = group.device.xyce_core_vacuum_mutual_inductance(
@@ -936,23 +960,50 @@ impl CircuitData {
                         winding_j.turns,
                         1.0,
                     );
-                    // Xyce stores each winding's dense LO current sum as Q
-                    // history.  Accumulate Q at each accepted endpoint before
-                    // differencing; summing `LO*(I-I_prev)` instead loses the
-                    // source operation order at sharp reversals.
+                    // Retain the stored dense-Q route for LEVEL=1. Shared
+                    // LEVEL=2 closure also needs the low product terms:
+                    // subtracting rounded Q endpoints creates a residual
+                    // quantum proportional to ulp(Q)/dt at small timesteps.
                     q_current += l0 * currents[j];
                     q_previous_reconstructed += l0 * previous[j];
                     q_previous_previous += l0 * previous_previous[j];
+                    if group.device.is_xyce_core_level2() {
+                        accumulate_charge_difference(
+                            &mut q_delta,
+                            &mut q_delta_correction,
+                            l0,
+                            currents[j],
+                            previous[j],
+                        );
+                        if !one_step_order2 && coeff.needs_two_history {
+                            accumulate_charge_difference(
+                                &mut q_previous_delta,
+                                &mut q_previous_delta_correction,
+                                l0,
+                                previous[j],
+                                previous_previous[j],
+                            );
+                        }
+                    }
                 }
                 let q_previous = group
                     .xyce_q_history
                     .get(i)
                     .copied()
                     .unwrap_or(q_previous_reconstructed);
-                let mut charge_difference = charge_coeff * (q_current - q_previous);
+                let mut charge_difference = charge_coeff
+                    * if group.device.is_xyce_core_level2() {
+                        q_delta + q_delta_correction
+                    } else {
+                        q_current - q_previous
+                    };
                 if !one_step_order2 && coeff.needs_two_history {
-                    charge_difference +=
-                        coeff.coeff_v_n_minus_1 * (q_previous - q_previous_previous);
+                    charge_difference += coeff.coeff_v_n_minus_1
+                        * if group.device.is_xyce_core_level2() {
+                            q_previous_delta + q_previous_delta_correction
+                        } else {
+                            q_previous - q_previous_previous
+                        };
                 }
                 let charge_derivative = if one_step {
                     (1.0 / dt) * charge_difference
@@ -1846,5 +1897,44 @@ impl CircuitData {
         for binding in &mut self.multi_winding_transformers {
             binding.device.update_state_from_solution(solution);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accumulate_charge_difference;
+
+    #[test]
+    fn charge_difference_retains_the_endpoint_product_tail() {
+        let coefficient = 1.0 + f64::EPSILON;
+        let previous = 2.0_f64.powi(52);
+        let current = previous + 1.0;
+        assert_eq!(coefficient * current - coefficient * previous, 1.0);
+        let (mut sum, mut correction) = (0.0, 0.0);
+        accumulate_charge_difference(&mut sum, &mut correction, coefficient, current, previous);
+        assert_eq!(sum + correction, coefficient);
+    }
+
+    #[test]
+    fn charge_difference_preserves_cancellation_between_windings() {
+        let previous = 2.0_f64.powi(52);
+        let (mut sum, mut correction) = (0.0, 0.0);
+        accumulate_charge_difference(
+            &mut sum,
+            &mut correction,
+            1.0 + f64::EPSILON,
+            previous + 1.0,
+            previous,
+        );
+        accumulate_charge_difference(&mut sum, &mut correction, 1.0, 0.0, 1.0);
+        assert_eq!(sum + correction, f64::EPSILON);
+    }
+
+    #[test]
+    fn charge_difference_handles_a_reversal_without_overflowing_current_delta() {
+        let (mut sum, mut correction) = (0.0, 0.0);
+        assert!((f64::MAX - -f64::MAX).is_infinite());
+        accumulate_charge_difference(&mut sum, &mut correction, 0.25, f64::MAX, -f64::MAX);
+        assert_eq!(sum + correction, f64::MAX * 0.5);
     }
 }
