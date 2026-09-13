@@ -8260,6 +8260,23 @@ impl Engine {
                         }
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
+                        if has_shared_xyce_core_level2 && step_time >= 2.6e-4 {
+                            let rows: Vec<_> = circuit.xyce_core_transient_residuals.iter()
+                                .map(|&(row, _)| row).collect();
+                            let raw_norms = matrix.raw_residual_norms(&new_solution, &rhs);
+                            let residual = matrix.residual_vector(&new_solution, &rhs);
+                            let backward = matrix.componentwise_backward_error_by_rows(
+                                &new_solution, &rhs, &rows);
+                            log::trace!(
+                                "LEAD_SHARED attempt={} t={:.17e} endpoint={:.17e} dt={:.17e} newton={} update_ok={} update={:?} device={} behavioral={} residual_ok={} norms={:?} residual={:?} backward={:?} branch_tolerance={:.17e} core_rows={:?} accepted={:?} candidate={:?}",
+                                total_step_attempts, t, step_time, dt, _iter + 1,
+                                update_converged_for_acceptance, raw_weighted_update_norm,
+                                device_converged, behavioral_converged, residual_converged_for_acceptance,
+                                raw_norms, residual, backward,
+                                circuit.xyce_core_branch_residual_tolerance(),
+                                circuit.xyce_core_transient_residuals, solution, new_solution,
+                            );
+                        }
                         if update_converged_for_acceptance
                             && device_converged
                             && behavioral_converged
