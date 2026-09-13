@@ -1586,8 +1586,6 @@ impl<'a> Dialog<'a> {
             surface_width,
             self.footer_height(hide_close_only_footer, large_targets, surface_width),
         );
-        ui.painter()
-            .hline(footer_rect.x_range(), line_y, Stroke::new(1.0, c.border));
         let mut footer_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(footer_rect)
@@ -1745,6 +1743,11 @@ impl<'a> Dialog<'a> {
                     });
                 });
             });
+        // The rule goes on after the footer's fill. Painted first, the fill
+        // covered its lower half, so it showed or vanished depending on where
+        // the surface's height left it against the pixel grid.
+        ui.painter()
+            .hline(footer_rect.x_range(), line_y, Stroke::new(1.0, c.border));
         ui.allocate_rect(footer_rect, Sense::hover());
         DialogFooterOutput {
             choice,
