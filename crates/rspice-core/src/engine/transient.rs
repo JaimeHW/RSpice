@@ -4551,6 +4551,8 @@ impl Engine {
         let uses_direct_xyce_dae = self.config.spice_dialect == SpiceDialect::Xyce
             && uses_xyce_damped_solver
             && circuit.supports_direct_xyce_level2_core_dae();
+        log::trace!("LEAD_DIAG mode damped={} direct={} shared_level2={}",
+            uses_xyce_damped_solver, uses_direct_xyce_dae, has_shared_xyce_core_level2);
         // MutIndNonLin's hidden M/R equations are part of the physical DAE,
         // not an optional convergence hint.  A failed constitutive trial must
         // reject the Newton candidate even when Xyce's general device
@@ -7918,6 +7920,13 @@ impl Engine {
                                     self.transient_nonlinear_deltaxtol(),
                                     self.transient_nonlinear_rhstol(),
                                 );
+                            log::trace!(
+                                "LEAD_DIAG candidate attempt={} t={:.17e} endpoint={:.17e} dt={:.17e} newton={} direct={} residual_inf={:.17e} residual_l2={:.17e} update={:?} device={} behavioral={} decision={:?} accepted={:?} candidate={:?}",
+                                total_step_attempts, t, step_time, dt, _iter + 1,
+                                uses_direct_xyce_dae, residual_inf_norm, residual_l2_norm,
+                                raw_weighted_update_norm, device_converged, behavioral_converged,
+                                decision, solution, new_solution,
+                            );
                             match decision {
                                 damped_status::XyceDampedDecision::Accepted { .. }
                                     if behavioral_converged =>
