@@ -6716,7 +6716,6 @@ impl XyceTestRunner {
                 .collect::<Vec<_>>();
             params.sort();
             let mut expected_params = vec![
-                ("r".to_string(), 50.0f64.to_bits()),
                 ("tc1".to_string(), 0.0f64.to_bits()),
                 ("tc2".to_string(), 0.0f64.to_bits()),
             ];

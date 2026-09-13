@@ -9189,6 +9189,16 @@ fn bug662_header_pair_rejects_header_and_executable_mutations() {
             "owner transmission-line value",
         ),
         (
+            owner_source.replace("R=50", "R=50 R=50"),
+            reference_source.clone(),
+            "repeated resistor primary assignment",
+        ),
+        (
+            owner_source.clone(),
+            reference_source.replace("TC=0,0", "TC=0,0 TC1=0"),
+            "repeated resistor temperature coefficient",
+        ),
+        (
             owner_source.clone(),
             reference_source.replace("V(N14950) V(N15037)", "V(N15037) V(N14950)"),
             "reference probe order",
@@ -13453,6 +13463,33 @@ VMON 1 2 0V\n\
     XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &positional_snapshot)
         .expect("named -> positional resistance is the qualified representation pair");
 
+    let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+    for netlist in [&named, &positional] {
+        let result = runner
+            .create_xyce_engine()
+            .run_dc_op(netlist)
+            .expect("both qualified resistor forms have an operating point");
+        let voltage = result.try_voltage_named("2").expect("resistor voltage");
+        let current = result
+            .branch_current_named("VMON")
+            .expect("monitor current");
+        assert!((voltage - 5.0).abs() < 1e-12, "{voltage}");
+        assert!((current - 0.005).abs() < 1e-12, "{current}");
+    }
+
+    for source in [
+        source_for(true).replace("R=1k", "R=1k R=1k"),
+        source_for(true).replace("R=1k", "R=2k R=1k"),
+        source_for(false).replace("RMOD 1k", "RMOD 1k R=1k"),
+    ] {
+        let repeated = XyceTestRunner::parse_xyce_netlist(&source, Path::new("res-repeated.cir"))
+            .expect("the parser resolves repeated primary assignments");
+        assert!(
+            XyceTestRunner::passive_res_primary_snapshot(&repeated, &print, "VIN").is_err(),
+            "source qualification must retain duplicates hidden by primary-value normalization"
+        );
+    }
+
     let mut extra_instance_parameter = named.clone();
     let resistor = extra_instance_parameter
         .elements
@@ -13469,7 +13506,7 @@ VMON 1 2 0V\n\
     assert!(
         XyceTestRunner::passive_res_primary_snapshot(&extra_instance_parameter, &print, "VIN",)
             .is_err(),
-        "only the redundant named R assignment may be normalized"
+        "the qualified source forms admit no auxiliary instance parameter"
     );
 
     let zero_rsh_source = source_for(false).replace("RSH=1", "RSH=0");

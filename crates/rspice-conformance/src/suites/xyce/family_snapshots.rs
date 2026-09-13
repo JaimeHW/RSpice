@@ -6316,19 +6316,11 @@ impl XyceTestRunner {
         })?;
         let (representation, literal_bits, active_source_fingerprint) =
             Self::passive_primary_source_contract(source, &resistor_name, &resistor_model, kind)?;
-        let instance_form_matches = match representation {
-            XycePassivePrimaryRepresentation::Named => {
-                matches!(
-                    instance_params.as_slice(),
-                    [(name, value)]
-                        if name.eq_ignore_ascii_case("R")
-                            && value.to_bits() == resistor_value.to_bits()
-                )
-            }
-            XycePassivePrimaryRepresentation::Positional => instance_params.is_empty(),
-        };
-        if !instance_form_matches || literal_bits != resistor_value.to_bits() {
-            return Err("resistor source representation, parsed primary value, or normalized R instance parameter differs".to_string());
+        // Both source forms store the primary resistance in `value` alone.
+        // The source contract above still proves exactly one authored primary
+        // assignment; normalized storage cannot establish that on its own.
+        if !instance_params.is_empty() || literal_bits != resistor_value.to_bits() {
+            return Err("resistor source representation, parsed primary value, or normalized instance parameters differ".to_string());
         }
         let effective = Self::effective_resistor_value(netlist, &resistor_name)?
             .filter(|value| value.is_finite() && *value > 0.0)
