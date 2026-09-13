@@ -29,7 +29,9 @@
 //! a list of literals. A table of literals would say what the answer is; a
 //! model says why, and a change to a vector row changes both sides at once.
 
-use rspice_conformance::suites::verilog::{AmsCorpus, AmsPortValue, AmsStimulus, ams_corpus_dir};
+#[cfg(feature = "verilog-digital")]
+use rspice_conformance::suites::verilog::AmsStimulus;
+use rspice_conformance::suites::verilog::{AmsCorpus, AmsPortValue, ams_corpus_dir};
 
 /// Cases the corpus must contain, by name and by what they cover.
 ///
@@ -127,12 +129,14 @@ fn a_zero_width_port_is_refused_rather_than_read_as_a_real() {
 // ===========================================================================
 
 /// One row of an expected trace: the output values in stimulus order.
+#[cfg(feature = "verilog-digital")]
 type Row = Vec<String>;
 
 /// Render a real the way the engine's trace does.
 ///
 /// Shared with the engine only in the sense that both use Rust's shortest
 /// round-tripping form; the model does not call the engine to find out.
+#[cfg(feature = "verilog-digital")]
 fn real(value: f64) -> String {
     format!("{value:?}")
 }
@@ -143,6 +147,7 @@ fn real(value: f64) -> String {
 /// combinational-in-real by construction: there is no state to integrate and
 /// no time constant, so a disagreement is a semantic one rather than a
 /// numerical one.
+#[cfg(feature = "verilog-digital")]
 fn model_wreal_forms(stimulus: &AmsStimulus) -> Vec<Row> {
     let mut rows = Vec::with_capacity(stimulus.vectors.len());
     let mut moves: u8 = 0;
@@ -188,6 +193,7 @@ fn model_wreal_forms(stimulus: &AmsStimulus) -> Vec<Row> {
 }
 
 /// `wreal_resolution`, computed from each keyword's own arithmetic.
+#[cfg(feature = "verilog-digital")]
 fn model_wreal_resolution(stimulus: &AmsStimulus) -> Vec<Row> {
     stimulus
         .vectors
@@ -239,6 +245,7 @@ fn model_wreal_resolution(stimulus: &AmsStimulus) -> Vec<Row> {
 ///   trails `vout` by exactly one sample.
 /// * `acc = acc + vin` is the process-local accumulation, which crosses the
 ///   suspension and therefore sums every edge rather than the last one.
+#[cfg(feature = "verilog-digital")]
 fn model_real_state(stimulus: &AmsStimulus) -> Vec<Row> {
     // The declared default of the design's `parameter real K`. Written here as
     // the same literal, because section 12.2 fixes it at elaboration and the
@@ -277,6 +284,7 @@ fn model_real_state(stimulus: &AmsStimulus) -> Vec<Row> {
     rows
 }
 
+#[cfg(feature = "verilog-digital")]
 fn model(case: &str, stimulus: &AmsStimulus) -> Vec<Row> {
     match case {
         "wreal_forms" => model_wreal_forms(stimulus),
