@@ -485,6 +485,14 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::Sub => Self::binary(stack, name, S::sub)?,
             NativeOp::Mul => Self::binary(stack, name, S::mul)?,
             NativeOp::Div => Self::binary(stack, name, S::div)?,
+            NativeOp::CheckedValue => {
+                let (primal, derivative) = Self::two(stack, name)?;
+                rspice_veriloga_runtime::checked_derivative_value(primal.real(), derivative.real())
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                // Validation uses the runtime's real operating point while
+                // the reference retains all of the derivative's precision.
+                stack.push(derivative);
+            }
             NativeOp::AddConst(value) => {
                 Self::unary(stack, name, |x| x.add(S::from_f64(value)))?;
             }
@@ -1136,6 +1144,53 @@ mod tests {
             )),
             Ok(-8.0)
         );
+    }
+
+    #[test]
+    fn checked_derivatives_validate_both_operands_and_retain_reference_precision() {
+        let point = point();
+        for (primal, derivative) in [
+            (f64::NAN, 0.0),
+            (f64::INFINITY, 0.0),
+            (f64::NEG_INFINITY, 0.0),
+            (0.0, f64::NAN),
+            (0.0, f64::INFINITY),
+            (0.0, f64::NEG_INFINITY),
+        ] {
+            let ops = program(
+                vec![
+                    NativeOp::Const(primal),
+                    NativeOp::Const(derivative),
+                    NativeOp::CheckedValue,
+                ],
+                2,
+            );
+            let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+            let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
+            assert_eq!(
+                narrow.run(&ops),
+                Err(PostfixRefusal::RuntimeError("CheckedValue"))
+            );
+            assert!(matches!(
+                wide.run(&ops),
+                Err(PostfixRefusal::RuntimeError("CheckedValue"))
+            ));
+        }
+        let ops = program(
+            vec![
+                NativeOp::Const(2.0),
+                NativeOp::Const(1.0),
+                NativeOp::Const(1e-20),
+                NativeOp::Add,
+                NativeOp::CheckedValue,
+            ],
+            3,
+        );
+        let mut narrow: PlanWalk<'_, f64> = PlanWalk::new(&point, 0, 0);
+        let mut wide: PlanWalk<'_, DoubleDouble> = PlanWalk::new(&point, 0, 0);
+        assert_eq!(narrow.run(&ops), Ok(1.0));
+        let derivative = wide.run(&ops).unwrap();
+        assert!((derivative.relative_distance_to(1.0) / 1e-20 - 1.0).abs() < 1e-10);
     }
 
     #[test]
